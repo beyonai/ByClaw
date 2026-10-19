@@ -6,6 +6,15 @@ import VoiceMessage from './index';
 jest.mock('@/service/voice', () => ({ loadVoiceAudio: jest.fn(), transcribeVoice: jest.fn() }));
 const voice = { fileId: '123', fileName: 'voice.mp3', durationMs: 3200, mimeType: 'audio/mpeg' };
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+});
+
 describe('VoiceMessage', () => {
   let play: jest.SpyInstance;
   let pause: jest.SpyInstance;
@@ -203,5 +212,30 @@ describe('VoiceMessage', () => {
     fireEvent.ended(view.container.querySelector('audio')!);
     await act(async () => {});
     expect(play).toHaveBeenCalledTimes(1);
+  });
+  it('switches playback and transcript controls to English without translating transcript content', async () => {
+    const view = render(<VoiceMessage voice={{ ...voice, transcript: '原始转写内容' }} />);
+    expect(screen.getByRole('button', { name: '播放语音，4秒' })).toBeInTheDocument();
+    mockLocale = 'en-US';
+    view.rerender(<VoiceMessage voice={{ ...voice, transcript: '原始转写内容' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Play voice message, 4 seconds' }));
+    await screen.findByRole('button', { name: 'Pause voice message, 4 seconds' });
+    fireEvent.click(screen.getByRole('button', { name: 'Voice message menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Hide transcript' })).toBeInTheDocument();
+    expect(screen.getByText('原始转写内容')).toBeInTheDocument();
+  });
+
+  it('reports playback failures in English', async () => {
+    mockLocale = 'en-US';
+    play.mockRejectedValueOnce(new Error('decoder failed'));
+    const { message } = require('antd');
+    const error = jest.spyOn(message, 'error').mockImplementation(() => () => {});
+    try {
+      render(<VoiceMessage voice={voice} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Play voice message, 4 seconds' }));
+      await waitFor(() => expect(error).toHaveBeenCalledWith('Voice playback failed. Please try again.'));
+    } finally {
+      error.mockRestore();
+    }
   });
 });

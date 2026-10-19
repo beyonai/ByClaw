@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.project;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -38,7 +40,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 
 @ExtendWith(MockitoExtension.class)
-class ProjectInitServicePublicPathTest {
+class ProjectInitServicePublicPathTest extends I18nTestSupport {
 
     @TempDir
     Path tempDir;

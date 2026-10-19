@@ -39,12 +39,12 @@ public class TenantAdminMemberService {
         requirePlatformAdmin();
         long enterpriseId = parseEnterpriseId(enterpriseIdText);
         if (userCode == null || !userCode.matches("[a-zA-Z0-9_]{3,50}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid user code");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.userCode.invalid");
         }
 
         String packageSnapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
         if (packageSnapshot == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant package snapshot unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.package.snapshot.unavailable");
         }
         int memberLimit = memberLimit(packageSnapshot);
         // Members can be prepared while the tenant sandbox is provisioning;
@@ -52,18 +52,18 @@ public class TenantAdminMemberService {
 
         TenantMemberRow user = memberMapper.selectActiveUserByCode(userCode);
         if (user == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "user code not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.userCode.notFound");
         }
         TenantMemberRow existing = memberMapper.selectMember(enterpriseId, user.getUserId());
         if (existing != null) {
             if (!"ACTIVE".equals(existing.getStatus())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "disabled membership requires explicit re-enable");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.disabled");
             }
             return toView(existing);
         }
 
         if (memberMapper.countActiveMembers(enterpriseId) >= memberLimit) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant member limit reached");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.limit.reached");
         }
         memberMapper.insertMember(sequenceService.nextVal(), enterpriseId, user.getUserId(),
             CurrentUserHolder.getCurrentUserId());
@@ -75,7 +75,7 @@ public class TenantAdminMemberService {
     public void joinByInvitation(long enterpriseId, long inviterId) {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0)
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
         String snapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
         int limit = memberLimit(snapshot);
         try {
@@ -84,21 +84,21 @@ public class TenantAdminMemberService {
                 throw new IllegalArgumentException();
         }
         catch (Exception error) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.not.ready");
         }
         TenantMemberRow inviter = memberMapper.selectMember(enterpriseId, inviterId);
         if (inviter == null || !"ACTIVE".equals(inviter.getStatus()))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "inviter membership required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.inviter.membership.required");
         TenantMemberRow existing = memberMapper.selectMember(enterpriseId, userId);
         if (existing != null) {
             if (!"ACTIVE".equals(existing.getStatus()))
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "disabled membership requires explicit re-enable");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.disabled");
             return;
         }
         if (memberMapper.countActiveMembers(enterpriseId) >= limit)
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant member limit reached");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.limit.reached");
         if (memberMapper.insertMember(sequenceService.nextVal(), enterpriseId, userId, inviterId) != 1)
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant membership could not be confirmed");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.membership.unconfirmed");
     }
 
     private TenantMemberView toView(TenantMemberRow row) {
@@ -114,24 +114,24 @@ public class TenantAdminMemberService {
         catch (Exception ignored) {
             // Invalid package snapshots cannot authorize a member write.
         }
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid tenant package snapshot");
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.package.snapshot.invalid");
     }
 
     private void requirePlatformAdmin() {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.admin.required");
         }
     }
 
     private long parseEnterpriseId(String text) {
         if (text == null || !text.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
         try {
             return Long.parseLong(text);
         }
         catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
     }
 

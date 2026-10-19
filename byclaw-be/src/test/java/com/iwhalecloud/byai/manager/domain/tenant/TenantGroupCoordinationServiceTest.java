@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +43,7 @@ import com.alibaba.fastjson.JSONArray;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantGroupCoordinationServiceTest {
+class TenantGroupCoordinationServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final GroupWorkAssistantService assistants = mock(GroupWorkAssistantService.class);
     private final SsResourceService resources = mock(SsResourceService.class);

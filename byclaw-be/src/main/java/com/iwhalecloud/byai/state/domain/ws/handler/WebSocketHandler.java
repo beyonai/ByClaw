@@ -169,8 +169,8 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 String detail = e instanceof ResponseStatusException status
                     && status.getReason() != null
                     && status.getReason().contains("TENANT_GROUP_AGENT_NOT_READY")
-                        ? "租户工作组暂不支持 @数字员工"
-                        : "租户聊天失败，请稍后重试";
+                        ? I18nUtil.get("tenant.ws.agentNotReady")
+                        : I18nUtil.get("tenant.ws.chatFailed");
                 sendTenantError(ctx, chatMessage, detail);
             }
             else {
@@ -192,7 +192,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 tenantContextService.validate(enterpriseId);
             }
             catch (Exception e) {
-                sendTenantError(ctx, chatMessage, "tenant membership unavailable");
+                sendTenantError(ctx, chatMessage, I18nUtil.get("tenant.ws.membershipUnavailable"));
                 return;
             }
         }
@@ -215,13 +215,13 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         String selected = ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get();
         if (selected == null) {
             if (chatMessage.getEnterpriseId() != null && !chatMessage.getEnterpriseId().isBlank()) {
-                sendTenantError(ctx, chatMessage, "switch tenant before sending messages");
+                sendTenantError(ctx, chatMessage, I18nUtil.get("tenant.ws.switchRequired"));
                 return false;
             }
             return true;
         }
         if (!selected.equals(chatMessage.getEnterpriseId())) {
-            sendTenantError(ctx, chatMessage, "enterprise ID does not match selected tenant");
+            sendTenantError(ctx, chatMessage, I18nUtil.get("tenant.ws.enterpriseMismatch"));
             return false;
         }
         TenantRequestContext tenant;
@@ -229,7 +229,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             tenant = tenantContextService.validate(selected);
         }
         catch (Exception e) {
-            sendTenantError(ctx, chatMessage, "tenant membership unavailable");
+            sendTenantError(ctx, chatMessage, I18nUtil.get("tenant.ws.membershipUnavailable"));
             return false;
         }
         if (chatMessage.getType() != MessageType.HEARTBEAT
@@ -237,7 +237,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             && chatMessage.getType() != MessageType.STOP_CHAT
             && chatMessage.getType() != MessageType.TASK_PLAN_GET
             && chatMessage.getType() != MessageType.GROUP_CHAT_SEND) {
-            sendTenantError(ctx, chatMessage, "tenant WebSocket operation is not ready");
+            sendTenantError(ctx, chatMessage, I18nUtil.get("tenant.ws.operationNotReady"));
             return false;
         }
         if (chatMessage.getScopedSessionId() != null && !chatMessage.getScopedSessionId().isBlank()) {

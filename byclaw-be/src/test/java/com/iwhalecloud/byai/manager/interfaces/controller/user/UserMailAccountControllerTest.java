@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -37,7 +39,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 @DisabledOnOs(OS.WINDOWS)
-class UserMailAccountControllerTest {
+class UserMailAccountControllerTest extends I18nTestSupport {
 
     private static MockMvc mockMvc(UserMailAccountApplicationService service) {
         MailConnectionCheckController controller = new MailConnectionCheckController();
@@ -130,7 +132,7 @@ class UserMailAccountControllerTest {
         assertThatThrownBy(() -> mapper.readValue(
             "{\"accountId\":7001,\"userId\":1001,\"provider\":\"qq\",\"command\":\"send\"}",
             MailConnectionCheckRequestDTO.class))
-            .hasMessageContaining("Unsupported mail connection check field")
+            .hasMessageContaining("不支持的邮箱连接检查字段")
             .hasMessageNotContaining("qq")
             .hasMessageNotContaining("send");
     }

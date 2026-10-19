@@ -22,7 +22,7 @@ import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
-class TransactionAdviceConfigTest {
+class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void commonFileFallbackCannotMarkTheCallingChatRollbackOnly() throws Exception {

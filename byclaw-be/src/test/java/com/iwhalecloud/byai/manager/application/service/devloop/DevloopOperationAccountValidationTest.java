@@ -14,7 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.dto.devloop.OperationAccountDTO;
 
-class DevloopOperationAccountValidationTest {
+class DevloopOperationAccountValidationTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static MessageSource originalMessageSource;
 

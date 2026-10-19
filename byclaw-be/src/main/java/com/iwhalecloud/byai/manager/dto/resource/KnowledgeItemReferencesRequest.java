@@ -16,12 +16,12 @@ import lombok.Setter;
 @Setter
 public class KnowledgeItemReferencesRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
-    @NotBlank(message = "知识库文件路径不能为空")
+    @NotBlank(message = "{knowledge.filePath.required}")
     private String filePath;
 
-    @Pattern(regexp = "inbound|outbound|all", message = "引用查询方向必须是 inbound、outbound 或 all")
+    @Pattern(regexp = "inbound|outbound|all", message = "{knowledge.references.directionInvalid}")
     private String direction;
 }

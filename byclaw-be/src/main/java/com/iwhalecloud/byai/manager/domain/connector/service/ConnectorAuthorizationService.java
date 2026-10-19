@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.Date;
@@ -178,7 +180,7 @@ public class ConnectorAuthorizationService {
         validateRequest(request);
         ConnectorInfo connector = connectorInfoService.findById(request.getConnectorId());
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
-            return failed(null, request.getConnectorId(), CONNECTOR_NOT_FOUND, "连接器不存在或已失效", null);
+            return failed(null, request.getConnectorId(), CONNECTOR_NOT_FOUND, I18nUtil.get("connector.unavailable"), null);
         }
         if (!"AK_SK".equals(connector.getAuthMode())) {
             validateRedirectUrl(request.getRedirectUrl());
@@ -202,7 +204,7 @@ public class ConnectorAuthorizationService {
                 null,
                 connector.getConnectorId(),
                 PROVIDER_NOT_CONFIGURED,
-                "连接器授权Provider未配置",
+                I18nUtil.get("connector.authorization.providerMissing"),
                 null
             );
         }
@@ -217,7 +219,7 @@ public class ConnectorAuthorizationService {
                 null,
                 connector.getConnectorId(),
                 AUTHORIZATION_START_IN_PROGRESS,
-                "连接器授权正在启动，请稍后重试",
+                I18nUtil.get("connector.authorization.starting"),
                 null
             );
         }
@@ -239,18 +241,18 @@ public class ConnectorAuthorizationService {
             String userId,
             ConnectorInfo connector) {
         if (credentialFormProviderRegistry == null || connectionStateService == null) {
-            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, "连接器授权Provider未配置", null);
+            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, I18nUtil.get("connector.authorization.providerMissing"), null);
         }
         ConnectorCredentialFormProvider provider;
         try {
             provider = credentialFormProviderRegistry.get(connector.getProviderCode());
         } catch (IllegalArgumentException e) {
-            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, "连接器授权Provider未配置", null);
+            return failed(null, connector.getConnectorId(), PROVIDER_NOT_CONFIGURED, I18nUtil.get("connector.authorization.providerMissing"), null);
         }
         Optional<String> lockToken = sessionRepository.tryAcquireStartLock(
             userId, connector.getConnectorId(), AUTHORIZATION_START_LOCK_TTL);
         if (lockToken.isEmpty()) {
-            return failed(null, connector.getConnectorId(), SESSION_ALREADY_ACTIVE, "当前连接器已有进行中的授权任务", null);
+            return failed(null, connector.getConnectorId(), SESSION_ALREADY_ACTIVE, I18nUtil.get("connector.authorization.active"), null);
         }
         try {
             CredentialFormVerification verification;
@@ -261,14 +263,14 @@ public class ConnectorAuthorizationService {
                 return failed(null, connector.getConnectorId(), ConnectorCredentialVerificationBusyException.ERROR_CODE,
                     ConnectorCredentialVerificationBusyException.PUBLIC_MESSAGE, null);
             } catch (RuntimeException e) {
-                return failed(null, connector.getConnectorId(), "CONNECTOR_CREDENTIAL_INVALID", "连接器凭据无效", null);
+                return failed(null, connector.getConnectorId(), "CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.invalid"), null);
             }
             if (verification == null || verification.status() == null
                     || verification.status().status() != AuthorizationStatus.CONNECTED) {
                 AuthorizationStatusResult status = verification == null ? null : verification.status();
                 return failed(null, connector.getConnectorId(),
                     status == null || !StringUtils.hasText(status.errorCode()) ? "CONNECTOR_CREDENTIAL_INVALID" : status.errorCode(),
-                    "连接器凭据校验未通过", null);
+                    I18nUtil.get("connector.credential.checkFailed"), null);
             }
             String authorizationId = UUID.randomUUID().toString();
             try {
@@ -304,7 +306,7 @@ public class ConnectorAuthorizationService {
                 null,
                 connector.getConnectorId(),
                 CONNECTOR_MANIFEST_INVALID,
-                "连接器运行时配置无效",
+                I18nUtil.get("connector.runtime.invalid"),
                 null
             );
         }
@@ -357,7 +359,7 @@ public class ConnectorAuthorizationService {
                 authorizationId,
                 connector.getConnectorId(),
                 SESSION_ALREADY_ACTIVE,
-                "当前连接器已有进行中的授权任务",
+                I18nUtil.get("connector.authorization.active"),
                 expiresAt
             );
         }
@@ -446,14 +448,14 @@ public class ConnectorAuthorizationService {
             if (session.expiresAt() != null && session.expiresAt().getTime() <= System.currentTimeMillis()) {
                 return transitionProviderTerminal(session, new AuthorizationStatusResult(
                     AuthorizationStatus.EXPIRED, null, null, null, null,
-                    OAUTH_CALLBACK_EXPIRED, "OAuth2授权回调已过期"
+                    OAUTH_CALLBACK_EXPIRED, I18nUtil.get("connector.authorization.callbackExpired")
                 ));
             }
             ConnectorAuthorizationProvider provider = findProvider(providerCode);
             if (provider == null) {
                 return transitionProviderTerminal(session, new AuthorizationStatusResult(
                     AuthorizationStatus.FAILED, null, null, null, null,
-                    PROVIDER_NOT_CONFIGURED, "连接器授权Provider未配置"
+                    PROVIDER_NOT_CONFIGURED, I18nUtil.get("connector.authorization.providerMissing")
                 ));
             }
             AuthorizationStatusResult result;
@@ -464,13 +466,13 @@ public class ConnectorAuthorizationService {
             } catch (RuntimeException e) {
                 result = new AuthorizationStatusResult(
                     AuthorizationStatus.FAILED, null, null, null, null,
-                    PROVIDER_PROTOCOL_ERROR, "授权Provider回调处理失败"
+                    PROVIDER_PROTOCOL_ERROR, I18nUtil.get("connector.authorization.callbackFailed")
                 );
             }
             if (result == null || result.status() == null) {
                 return transitionProviderTerminal(session, new AuthorizationStatusResult(
                     AuthorizationStatus.FAILED, null, null, null, null,
-                    PROVIDER_PROTOCOL_ERROR, "授权Provider返回无效结果"
+                    PROVIDER_PROTOCOL_ERROR, I18nUtil.get("connector.authorization.resultInvalid")
                 ));
             }
             return result.status() == AuthorizationStatus.CONNECTED
@@ -483,7 +485,7 @@ public class ConnectorAuthorizationService {
 
     public boolean cancel(String authorizationId, String userId) {
         RedisAuthorizationSession session = sessionRepository.findOwned(authorizationId, userId)
-            .orElseThrow(() -> new IllegalArgumentException("授权任务不存在"));
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("connector.authorization.notFound")));
         if (session.status() != AuthorizationStatus.PENDING) {
             return cancellationSucceeded(session.status());
         }
@@ -495,7 +497,7 @@ public class ConnectorAuthorizationService {
             null,
             null,
             AUTH_CANCELLED,
-            "授权任务已取消"
+            I18nUtil.get("connector.authorization.cancelled")
         );
         if (!sessionRepository.compareAndSetStatus(
                 authorizationId,
@@ -531,7 +533,7 @@ public class ConnectorAuthorizationService {
                     null,
                     null,
                     PROVIDER_PROTOCOL_ERROR,
-                    "授权会话数据无效"
+                    I18nUtil.get("connector.authorization.sessionInvalid")
                 )
             );
         }
@@ -547,7 +549,7 @@ public class ConnectorAuthorizationService {
                     null,
                     null,
                     PROVIDER_NOT_CONFIGURED,
-                    "连接器授权Provider未配置"
+                    I18nUtil.get("connector.authorization.providerMissing")
                 )
             );
         }
@@ -569,7 +571,7 @@ public class ConnectorAuthorizationService {
                     null,
                     null,
                     CONNECTOR_MANIFEST_INVALID,
-                    "连接器运行时配置无效"
+                    I18nUtil.get("connector.runtime.invalid")
                 )
             );
         } catch (RuntimeException e) {
@@ -585,7 +587,7 @@ public class ConnectorAuthorizationService {
                     null,
                     null,
                     PROVIDER_PROTOCOL_ERROR,
-                    "授权Provider返回无效结果"
+                    I18nUtil.get("connector.authorization.resultInvalid")
                 )
             );
         }
@@ -604,7 +606,7 @@ public class ConnectorAuthorizationService {
                         null,
                         null,
                         "CONNECTOR_CREDENTIAL_INVALID",
-                        "连接器凭证需要重新授权"
+                        I18nUtil.get("connector.authorization.reauthorize")
                     )
                 )
                 : finalizeConnected(session, result);
@@ -629,7 +631,7 @@ public class ConnectorAuthorizationService {
                     null,
                     null,
                     PROVIDER_PROTOCOL_ERROR,
-                    "授权Provider返回无效进度"
+                    I18nUtil.get("connector.authorization.progressInvalid")
                 )
             );
         }
@@ -864,7 +866,7 @@ public class ConnectorAuthorizationService {
             null,
             null,
             PROVIDER_PROTOCOL_ERROR,
-            "授权Provider返回无效结果"
+            I18nUtil.get("connector.authorization.resultInvalid")
         );
     }
 
@@ -1173,18 +1175,18 @@ public class ConnectorAuthorizationService {
 
     private void validateRequest(StartConnectorAuthorizationRequest request) {
         if (request == null || request.getConnectorId() == null) {
-            throw new IllegalArgumentException("connectorId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.id.required"));
         }
     }
 
     private void validateRedirectUrl(String redirectUrl) {
         if (!StringUtils.hasText(redirectUrl)) {
-            throw new IllegalArgumentException("redirectUrl不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.redirectUrl.required"));
         }
         URI redirectUri = URI.create(redirectUrl);
         if (!"http".equalsIgnoreCase(redirectUri.getScheme())
                 && !"https".equalsIgnoreCase(redirectUri.getScheme())) {
-            throw new IllegalArgumentException("redirectUrl必须使用HTTP或HTTPS");
+            throw new IllegalArgumentException(I18nUtil.get("connector.redirectUrl.invalid"));
         }
     }
 
@@ -1209,7 +1211,7 @@ public class ConnectorAuthorizationService {
         result.setStatus("failed");
         result.setExpiresAt(expiresAt);
         result.setErrorCode(errorCode);
-        result.setErrorMessage(errorMessage);
+        result.setErrorMessage(ConnectorMessages.localize(errorMessage));
         return result;
     }
 
@@ -1235,12 +1237,12 @@ public class ConnectorAuthorizationService {
 
     private String bindingErrorMessage(RuntimeException error) {
         return error instanceof InvalidConnectorManifestException
-            ? "连接器运行时配置无效"
-            : "授权绑定保存失败";
+            ? I18nUtil.get("connector.runtime.invalid")
+            : I18nUtil.get("connector.authorization.bindingFailed");
     }
 
     private ConnectorAuthorizationDto authorizationNotFound(String authorizationId) {
-        return failed(authorizationId, null, AUTHORIZATION_NOT_FOUND, "授权任务不存在", null);
+        return failed(authorizationId, null, AUTHORIZATION_NOT_FOUND, I18nUtil.get("connector.authorization.notFound"), null);
     }
 
     private ConnectorAuthorizationDto toDto(RedisAuthorizationSession session, String authorizationUrl) {
@@ -1253,7 +1255,7 @@ public class ConnectorAuthorizationService {
         result.setQrCodeUrl(qrCodeEncoder.encode(authorizationUrl));
         result.setExpiresAt(session.expiresAt());
         result.setErrorCode(session.errorCode());
-        result.setErrorMessage(session.errorMessage());
+        result.setErrorMessage(ConnectorMessages.localize(session.errorMessage()));
         return result;
     }
 

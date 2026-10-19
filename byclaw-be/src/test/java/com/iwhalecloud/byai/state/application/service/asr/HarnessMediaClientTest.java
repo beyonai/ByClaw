@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.asr;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -23,7 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class HarnessMediaClientTest {
+class HarnessMediaClientTest extends I18nTestSupport {
     private HttpServer server;
     private HarnessMediaClient client;
     private SandboxIngressEndpointResolver endpoints;
@@ -197,4 +199,20 @@ class HarnessMediaClientTest {
     private VoiceAudioService.VoiceAudio audio() {
         return new VoiceAudioService.VoiceAudio(1L, 100L, "voice.mp3", new byte[] { 'I', 'D', '3' });
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|未识别到语音，请靠近麦克风后重试",
+        "en-US|No speech was detected. Move closer to the microphone and try again."
+    }, delimiter = '|')
+    void silenceErrorsUseTheRequestLanguage(String language, String expected) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        status = 422;
+        response = "{\"code\":\"ASR_SPEECH_NOT_DETECTED\",\"message\":\"provider secret\"}";
+        assertThatThrownBy(() -> client.transcribe(audio(), null))
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class, error -> {
+                assertThat(error.getStatusCode().value()).isEqualTo(422);
+                assertThat(error.getReason()).isEqualTo(expected);
+            }).hasMessageNotContaining("provider secret");
+    }
+
 }

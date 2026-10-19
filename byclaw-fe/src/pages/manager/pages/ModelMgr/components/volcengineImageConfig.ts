@@ -12,16 +12,16 @@ export function isVolcengineImage(values: any) {
   return values?.modelType === 'IMAGE_GENERATION' && values?.modelProtocol === VOLCENGINE_IMAGE_PROTOCOL;
 }
 
+/** Pro/Flash 只支持单图，不能带入旧版的组图开关和 SSE 参数。 */
+export function isSeedreamSingleImageModel(modelCode?: string) {
+  return modelCode === 'doubao-seedream-5-0-pro-260628' || modelCode === 'doubao-seedream-5-0-flash-260915';
+}
+
 export function getSeedreamSizeSuggestions(modelCode?: string) {
   if (isSeedreamSingleImageModel(modelCode)) return ['1K', '1.5K', '2K'];
   if (modelCode?.startsWith('doubao-seedream-4-0-')) return ['1K', '2K', '4K'];
   // 自定义 ep ID 无法推断能力，允许手工填写尺寸，不擅自切换型号或套用其他版本能力。
   return ['2K'];
-}
-
-/** Pro/Flash 只支持单图，不能带入旧版的组图开关和 SSE 参数。 */
-export function isSeedreamSingleImageModel(modelCode?: string) {
-  return modelCode === 'doubao-seedream-5-0-pro-260628' || modelCode === 'doubao-seedream-5-0-flash-260915';
 }
 
 export function buildVolcengineImageParam(values: any) {
@@ -39,10 +39,11 @@ export function buildVolcengineImageParam(values: any) {
 }
 
 export function getImageConfigFormValues(detail: any) {
+  const imageConfig = detail?.imageGenerationConfig;
   return {
     // 显式清掉上次打开记录的字段，避免切换弹窗记录时串用图片配置。
     extendParam: detail?.extendParam ?? undefined,
-    imageGenerationConfig: detail?.imageGenerationConfig != null ? { ...detail.imageGenerationConfig } : undefined,
+    imageGenerationConfig: imageConfig === null || imageConfig === undefined ? undefined : { ...imageConfig },
   };
 }
 

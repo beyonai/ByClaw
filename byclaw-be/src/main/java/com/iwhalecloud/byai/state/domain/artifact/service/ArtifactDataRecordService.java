@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -105,7 +107,7 @@ public class ArtifactDataRecordService {
         record.setCreateTime(now);
         record.setUpdateTime(now);
         if (dataRecordMapper.insert(record) != 1) {
-            throw new IllegalStateException("Artifact数据保存失败");
+            throw new IllegalStateException(I18nUtil.get("artifact.data.saveFailed"));
         }
         return toDto(record);
     }
@@ -113,13 +115,13 @@ public class ArtifactDataRecordService {
     private ArtifactDataRecordDto update(String artifactId, String recordKey, ArtifactDataUpdateRequest request) {
         ArtifactDataRecord stored = requireRecord(artifactId, recordKey);
         if (!stored.getVersion().equals(request.getVersion())) {
-            throw new IllegalArgumentException("记录已被更新，请使用最新version重试");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.data.versionConflict"));
         }
         LocalDateTime now = LocalDateTime.now();
         String dataJson = serializeData(request.getData());
         int updated = dataRecordMapper.updateData(artifactId, recordKey, dataJson, request.getVersion(), now);
         if (updated != 1) {
-            throw new IllegalArgumentException("记录已被更新，请使用最新version重试");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.data.versionConflict"));
         }
         return ArtifactDataRecordDto.builder()
             .recordKey(recordKey)
@@ -134,17 +136,17 @@ public class ArtifactDataRecordService {
     private ArtifactDataRecord requireRecord(String artifactId, String recordKey) {
         ArtifactDataRecord record = dataRecordMapper.selectByRecordKey(artifactId, recordKey);
         if (record == null) {
-            throw new IllegalArgumentException("Artifact数据记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.data.notFound"));
         }
         return record;
     }
 
     private void validatePage(int pageNum, int pageSize) {
         if (pageNum < 1) {
-            throw new IllegalArgumentException("pageNum必须大于等于1");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.pageNumInvalid"));
         }
         if (pageSize < 1 || pageSize > 100) {
-            throw new IllegalArgumentException("pageSize必须在1到100之间");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.pageSizeInvalid"));
         }
     }
 
@@ -152,7 +154,7 @@ public class ArtifactDataRecordService {
         String normalized = StringUtils.trimToNull(collectionName);
         if (normalized != null && !COLLECTION_NAME_PATTERN.matcher(normalized).matches()) {
             throw new IllegalArgumentException(
-                "collectionName必须以字母开头，且只能包含字母、数字、下划线或连字符");
+                I18nUtil.get("artifact.collectionNameInvalid"));
         }
         return normalized;
     }
@@ -161,12 +163,12 @@ public class ArtifactDataRecordService {
         try {
             String json = objectMapper.writeValueAsString(data);
             if (json.getBytes(StandardCharsets.UTF_8).length > maxRecordBytes) {
-                throw new IllegalArgumentException("Artifact数据超过单条大小限制");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.data.tooLarge"));
             }
             return json;
         }
         catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Artifact数据不是有效JSON", e);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.data.invalidJson"), e);
         }
     }
 
@@ -175,7 +177,7 @@ public class ArtifactDataRecordService {
             return objectMapper.readValue(dataJson, DATA_TYPE);
         }
         catch (JsonProcessingException e) {
-            throw new IllegalStateException("Artifact存储的数据不是有效JSON对象", e);
+            throw new IllegalStateException(I18nUtil.get("artifact.data.storedInvalidJson"), e);
         }
     }
 

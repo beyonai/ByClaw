@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URI;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +20,7 @@ public class OpenAiImageConfigurationVerifier implements MediaConnectorProtocolV
         URI endpoint = URI.create(config.apiEndpoint());
         String path = endpoint.getPath();
         if (path == null || !path.endsWith("/images/generations") || config.apiToken().isBlank()) {
-            throw new IllegalArgumentException("Invalid OpenAI-compatible image configuration");
+            throw new IllegalArgumentException(I18nUtil.get("connector.media.imageInvalid"));
         }
     }
 }

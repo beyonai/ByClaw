@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
 import { Drawer } from 'antd';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
@@ -33,6 +34,7 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
   sessionName,
   onClose,
 }) => {
+  const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const [files, setFiles] = useState<FileBrowserItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,7 +137,7 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
 
   return (
     <Drawer
-      title="任务成果"
+      title={intl.formatMessage({ id: 'ui.task.results' })}
       open={open}
       onClose={handleClose}
       width={480}
@@ -144,11 +146,13 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
       styles={{ body: { padding: '0 16px', overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}
     >
       <FileSpaceBlock
-        title={sessionName || '当前会话'}
+        title={sessionName || intl.formatMessage({ id: 'projectSpace.detail.resource.currentSession' })}
         loading={loading}
         items={files}
         currentPath={getSessionFilePath(sessionId)}
-        emptyText={resourceId ? '当前会话暂无成果文件' : '未关联文件空间'}
+        emptyText={
+          resourceId ? intl.formatMessage({ id: 'ui.task.noFiles' }) : intl.formatMessage({ id: 'ui.task.noFileSpace' })
+        }
         fillContainer
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}

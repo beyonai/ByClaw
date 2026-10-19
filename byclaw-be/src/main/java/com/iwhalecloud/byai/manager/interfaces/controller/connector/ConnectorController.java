@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.connector;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.connector.ConnectorApplicationService;
@@ -113,7 +115,7 @@ public class ConnectorController {
     @PostMapping("/authorization/cancel")
     public ResponseUtil<Boolean> cancelAuthorization(@RequestBody CancelConnectorAuthorizationRequest request) {
         if (request == null || request.getAuthorizationId() == null || request.getAuthorizationId().trim().isEmpty()) {
-            throw new IllegalArgumentException("authorizationId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorizationId.required"));
         }
         return ResponseUtil.successResponse(connectorAuthorizationService.cancel(request.getAuthorizationId(), currentUserId()));
     }
@@ -121,7 +123,7 @@ public class ConnectorController {
     @PostMapping("/authorization/revoke")
     public ResponseUtil<Boolean> revokeAuthorization(@RequestBody RevokeConnectorAuthorizationRequest request) {
         if (request == null || request.getConnectorId() == null) {
-            throw new IllegalArgumentException("connectorId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.id.required"));
         }
         connectorAuthorizationRevocationService.revoke(request.getConnectorId(), currentUserId());
         return ResponseUtil.successResponse(true);
@@ -150,7 +152,7 @@ public class ConnectorController {
     @PostMapping("/enable")
     public ResponseUtil<Boolean> updateEnable(@RequestBody UpdateConnectorEnableRequest request) {
         if (request == null || request.getConnectorId() == null || request.getEnabled() == null) {
-            throw new IllegalArgumentException("connectorId和enabled不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.toggle.required"));
         }
         connectorAuthService.updateEnableFlag(request.getConnectorId(), request.getEnabled());
         return ResponseUtil.successResponse(true);

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.oauth2;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.UUID;
@@ -24,32 +26,32 @@ public final class OAuth2State {
 
     public static String authorizationId(String state) {
         if (!StringUtils.hasText(state)) {
-            throw new IllegalArgumentException("OAuth2 state不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.stateRequired"));
         }
         int separator = state.indexOf('.');
         if (separator <= 0 || separator != state.lastIndexOf('.') || separator == state.length() - 1) {
-            throw new IllegalArgumentException("OAuth2 state格式无效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.stateFormatInvalid"));
         }
         String authorizationId = validateAuthorizationId(state.substring(0, separator));
         try {
             byte[] random = Base64.getUrlDecoder().decode(state.substring(separator + 1));
             if (random.length != RANDOM_BYTES) {
-                throw new IllegalArgumentException("OAuth2 state随机值无效");
+                throw new IllegalArgumentException(I18nUtil.get("connector.oauth.stateRandomInvalid"));
             }
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("OAuth2 state随机值无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.stateRandomInvalid"), e);
         }
         return authorizationId;
     }
 
     private static String validateAuthorizationId(String authorizationId) {
         if (!StringUtils.hasText(authorizationId)) {
-            throw new IllegalArgumentException("authorizationId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorizationId.required"));
         }
         try {
             return UUID.fromString(authorizationId).toString();
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("authorizationId格式无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorizationId.invalid"), e);
         }
     }
 }

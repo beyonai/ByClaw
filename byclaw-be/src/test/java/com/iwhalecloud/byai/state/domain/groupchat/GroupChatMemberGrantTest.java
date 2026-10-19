@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,7 +63,12 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 通过真实 Spring 事务代理验证入群与授权边界，外部数据库连接和缓存使用测试替身。 */
-class GroupChatMemberGrantTest {
+class GroupChatMemberGrantTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final SessionService sessions = mock(SessionService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final ProjectMemberService projectMembers = mock(ProjectMemberService.class);

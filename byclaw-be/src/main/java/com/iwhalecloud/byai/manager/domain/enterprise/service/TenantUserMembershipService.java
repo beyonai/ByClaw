@@ -182,7 +182,7 @@ public class TenantUserMembershipService {
      */
     public void removeById(Long membershipId) {
         if (membershipId == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membershipId is required");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membership.id.required");
         }
         tenantUserMembershipMapper.deleteById(membershipId);
     }
@@ -194,7 +194,7 @@ public class TenantUserMembershipService {
      */
     public void removeByIds(List<Long> membershipIds) {
         if (CollectionUtils.isEmpty(membershipIds)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membershipIds is required");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membership.ids.required");
         }
         tenantUserMembershipMapper.deleteBatchIds(membershipIds);
     }
@@ -207,7 +207,7 @@ public class TenantUserMembershipService {
      */
     public int removeByEnterpriseId(Long enterpriseId) {
         if (enterpriseId == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "enterpriseId is required");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "membership.enterpriseId.required");
         }
         return tenantUserMembershipMapper.delete(new LambdaQueryWrapper<TenantUserMembership>()
             .eq(TenantUserMembership::getEnterpriseId, enterpriseId));

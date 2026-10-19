@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -91,16 +93,16 @@ public class UserMailAccountApplicationService {
     /** Runs the external probe without holding a database transaction. */
     public MailConnectionCheckResultVO check(Long accountId) {
         if (accountId == null || accountId <= 0) {
-            throw new IllegalArgumentException("邮箱账号ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.idRequired"));
         }
         Long userId = currentUserId();
         UserMailAccount account = getOwnedAccount(userId, accountId);
         if (DELETED.equals(account.getStatus())) {
-            throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.accessDenied"));
         }
         String observedStatus = account.getStatus();
         if (!isReadyForConnectionCheck(observedStatus)) {
-            throw new IllegalStateException("邮箱账号尚未准备好连接检查");
+            throw new IllegalStateException(I18nUtil.get("mail.account.notReady"));
         }
         Date observedUpdateTime = account.getUpdateTime();
         try (MailConnectionCheckAdmissionService.Admission admission =
@@ -112,7 +114,7 @@ public class UserMailAccountApplicationService {
                 try {
                     probeResult = mailRuntimeProbe.check(userId, accountId);
                 } catch (RuntimeException e) {
-                    throw new IllegalStateException("邮箱服务暂时不可用，请稍后重试");
+                    throw new IllegalStateException(I18nUtil.get("mail.account.unavailable"));
                 }
                 admission.assertOwnedAndRenew();
                 mailConnectionCheckLeaseService.assertOwnedAndRenew(lease);
@@ -123,7 +125,7 @@ public class UserMailAccountApplicationService {
                 account.setUpdateBy(userId);
                 account.setUpdateTime(checkedAt);
                 if (!mailPrivateParamStore.updateCheck(account, observedStatus, observedUpdateTime)) {
-                    throw new IllegalStateException("邮箱账号已发生变化，请重试");
+                    throw new IllegalStateException(I18nUtil.get("mail.account.changed"));
                 }
                 scheduleStateRefresh(userId, accountId);
                 MailConnectionCheckResultVO result = new MailConnectionCheckResultVO();
@@ -160,7 +162,7 @@ public class UserMailAccountApplicationService {
         boolean resetProbeFailure = !create && isFreshApplicableSecret(selectedAuthType, authCode, entity)
             && Set.of(AUTH_REQUIRED, UNAVAILABLE).contains(entity.getStatus());
         if (requiresSecret(selectedAuthType) && authContextChanged && StringUtils.isBlank(authCode)) {
-            throw new IllegalArgumentException("新增或切换邮箱服务商时授权码不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.authCodeRequired"));
         }
         if (create) {
             entity.setUserId(userId);
@@ -170,7 +172,7 @@ public class UserMailAccountApplicationService {
         }
 
         if (!create && !oldProvider.getCode().equals(provider.getCode())) {
-            throw new IllegalArgumentException("每种邮箱连接器独立管理账号，请删除原账号后新增目标服务商账号");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.providerChange"));
         }
         entity.setAccountName(StringUtils.trim(request.getName()));
         entity.setEmail(StringUtils.trim(request.getEmail()));
@@ -214,7 +216,7 @@ public class UserMailAccountApplicationService {
     public Boolean delete(UserMailAccountDTO request) {
         Long accountId = request == null ? null : request.getAccountId();
         if (accountId == null) {
-            throw new IllegalArgumentException("邮箱账号ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.idRequired"));
         }
         Long userId = currentUserId();
         UserMailAccount account = getOwnedAccount(userId, accountId);
@@ -241,20 +243,20 @@ public class UserMailAccountApplicationService {
     private UserMailAccount getOwnedAccount(Long userId, Long accountId) {
         UserMailAccount account = mailPrivateParamStore.find(userId, accountId);
         if (account == null) {
-            throw new IllegalArgumentException("邮箱账号不存在或无权限访问");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.accessDenied"));
         }
         return account;
     }
 
     private void validateBaseSaveRequest(UserMailAccountDTO request) {
         if (request == null) {
-            throw new IllegalArgumentException("邮箱账号配置不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.configurationRequired"));
         }
         if (StringUtils.isBlank(request.getName())) {
-            throw new IllegalArgumentException("邮箱账号名称不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.nameRequired"));
         }
         if (StringUtils.isBlank(request.getEmail()) || !request.getEmail().contains("@")) {
-            throw new IllegalArgumentException("邮箱地址格式不正确");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.addressInvalid"));
         }
     }
 
@@ -270,7 +272,7 @@ public class UserMailAccountApplicationService {
         String requestedAuthType = StringUtils.trim(request.getAuthType());
         if (StringUtils.isNotBlank(requestedAuthType)
             && !provider.getAuthType().equals(requestedAuthType)) {
-            throw new IllegalArgumentException("authType与邮箱服务商不一致");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.authTypeMismatch"));
         }
         if (provider.getAdvancedServerEditable()) {
             validateServerConfig(request.getImap(), "IMAP");
@@ -278,7 +280,7 @@ public class UserMailAccountApplicationService {
         }
         if (requiresExternalAuthorization(resolveSelectedAuthType(request, provider))
             && StringUtils.isNotBlank(resolveAuthCode(request))) {
-            throw new IllegalArgumentException("当前邮箱服务商不接受authCode，请完成外部授权");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.externalAuthRequired"));
         }
     }
 
@@ -320,17 +322,17 @@ public class UserMailAccountApplicationService {
 
     private void validateServerConfig(MailServerConfigDTO config, String label) {
         if (config == null || StringUtils.isBlank(config.getHost()) || config.getPort() == null) {
-            throw new IllegalArgumentException(label + "服务器配置不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.server.required", label));
         }
         if (config.getPort() <= 0 || config.getPort() > 65535) {
-            throw new IllegalArgumentException(label + "端口范围不正确");
+            throw new IllegalArgumentException(I18nUtil.get("mail.server.portInvalid", label));
         }
         if (StringUtils.isBlank(config.getEncryption())) {
-            throw new IllegalArgumentException(label + "加密方式不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.encryptionRequired", label));
         }
         String encryption = config.getEncryption().trim().toLowerCase(Locale.ROOT);
         if (!SUPPORTED_ENCRYPTIONS.contains(encryption)) {
-            throw new IllegalArgumentException(label + "加密方式不支持");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.encryptionUnsupported", label));
         }
     }
 
@@ -372,7 +374,7 @@ public class UserMailAccountApplicationService {
     private Long currentUserId() {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
-            throw new IllegalStateException("当前用户未登录");
+            throw new IllegalStateException(I18nUtil.get("user.loginRequired"));
         }
         return userId;
     }

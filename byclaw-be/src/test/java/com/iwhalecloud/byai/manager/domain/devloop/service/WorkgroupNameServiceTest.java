@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -20,7 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-class WorkgroupNameServiceTest {
+class WorkgroupNameServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiSessionMapper sessions = mock(ByaiSessionMapper.class);
     private final WorkgroupNameService service = new WorkgroupNameService(node, sessions);
@@ -106,5 +107,17 @@ class WorkgroupNameServiceTest {
         ArgumentCaptor<LambdaQueryWrapper<ByaiSession>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(sessions).selectCount(query.capture());
         return query.getValue();
+    }
+
+    @Test
+    void scopeMismatchIsLocalizedBeforeCallingTheTenantNode() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 10L, "OWNER"));
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.exists("Team", 99L, 10L))
+            .hasMessage("Workgroup name scope does not match tenant context");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> service.exists("Team", 99L, 10L))
+            .hasMessage("工作组名称查询范围与租户上下文不匹配");
+        verifyNoInteractions(node, sessions);
     }
 }

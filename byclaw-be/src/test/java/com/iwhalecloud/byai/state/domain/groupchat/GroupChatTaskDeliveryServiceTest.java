@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
@@ -34,7 +36,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskServ
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTaskController;
 
-class GroupChatTaskDeliveryServiceTest {
+class GroupChatTaskDeliveryServiceTest extends I18nTestSupport {
     private static final String PATH = "/.sessions/60/.byclaw/task-delivery.json";
     private static final String DIRECTORY = "/.sessions/60/.byclaw";
     private static final String VALID = "{\"schemaVersion\":\"1\",\"taskSessionId\":\"60\",\"delivered\":true}";

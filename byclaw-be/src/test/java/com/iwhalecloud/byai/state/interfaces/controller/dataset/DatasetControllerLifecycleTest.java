@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import static org.mockito.Mockito.*;
 
-class DatasetControllerLifecycleTest {
+class DatasetControllerLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     @Test
     void legacyDeletionUsesTheSharedLifecycle() {
         DatasetController controller = new DatasetController();

@@ -12,7 +12,7 @@ import lombok.Setter;
 @Setter
 public class ArtifactExpiryRenewRequest {
 
-    @NotNull(message = "expiresInSeconds不能为空")
-    @Min(value = 1, message = "expiresInSeconds必须大于0")
+    @NotNull(message = "{artifact.expiryRequired}")
+    @Min(value = 1, message = "{artifact.expiryInvalid}")
     private Long expiresInSeconds;
 }

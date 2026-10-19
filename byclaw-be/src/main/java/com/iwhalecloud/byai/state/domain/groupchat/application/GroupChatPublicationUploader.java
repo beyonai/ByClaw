@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,7 +52,7 @@ public class GroupChatPublicationUploader {
     public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId,
         java.util.function.BiConsumer<Long, String> checkpoint) {
         if (pending.getCloudResourceId() != null && !pending.getCloudResourceId().equals(cloudResourceId)) {
-            throw new IllegalArgumentException("Project cloud drive changed; prepare publication again");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.driveChanged"));
         }
         List<String> sources = JSON.parseArray(pending.getSourceFilesJson(), String.class);
         JSONObject uploaded = JSON.parseObject(pending.getUploadedFilesJson());
@@ -80,7 +82,7 @@ public class GroupChatPublicationUploader {
         if (StringUtils.isBlank(source) || !source.startsWith("/by/") || source.endsWith("/")
             || source.contains("\\") || source.contains("\u0000")
             || List.of(source.split("/", -1)).stream().anyMatch(part -> ".".equals(part) || "..".equals(part))) {
-            throw new IllegalArgumentException("File must be an absolute /by/ path in the current user's workspace");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.pathInvalid"));
         }
         String normalized = source.replaceAll("/+", "/");
         FileBrowserPathPolicy.assertBrowsable(normalized);
@@ -91,7 +93,7 @@ public class GroupChatPublicationUploader {
         Path temporary = null;
         try (InputStream input = userFS.read(source)) {
             if (input == null) {
-                throw new IllegalArgumentException("Publication file is unavailable: " + source);
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.fileUnavailable", source));
             }
             temporary = Files.createTempFile("group-publication-", ".upload");
             // 路径转存没有经过 multipart 解析器，因此显式沿用平台单文件大小限制。
@@ -103,7 +105,7 @@ public class GroupChatPublicationUploader {
                 while ((count = input.read(buffer)) != -1) {
                     size += count;
                     if (limit >= 0 && size > limit) {
-                        throw new IllegalArgumentException("Publication file exceeds the upload size limit");
+                        throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.fileTooLarge"));
                     }
                     output.write(buffer, 0, count);
                 }
@@ -115,14 +117,14 @@ public class GroupChatPublicationUploader {
                 name, false, false, false, Map.of());
             if (uploaded == null || uploaded.getUploadItems() == null || uploaded.getUploadItems().isEmpty()
                 || (uploaded.getFailedItems() != null && !uploaded.getFailedItems().isEmpty())) {
-                throw new IllegalStateException("Publication file upload failed: " + source);
+                throw new IllegalStateException(I18nUtil.get("groupchat.publication.uploadFailed", source));
             }
             List<GroupChatTaskFile> result = new ArrayList<>();
             for (UploadItem item : uploaded.getUploadItems()) {
                 if (Boolean.FALSE.equals(item.getSuccess()) || StringUtils.isBlank(item.getFilePath())
                     || StringUtils.isBlank(item.getFileName()) || !item.getFilePath().startsWith(directory + "/")
                     || item.getFilePath().contains("..")) {
-                    throw new IllegalStateException("Upload returned an invalid project cloud file reference");
+                    throw new IllegalStateException(I18nUtil.get("groupchat.publication.uploadReferenceInvalid"));
                 }
                 GroupChatTaskFile reference = new GroupChatTaskFile();
                 reference.setFileId(item.getFileId());
@@ -132,7 +134,7 @@ public class GroupChatPublicationUploader {
             }
             return result;
         } catch (IOException e) {
-            throw new IllegalStateException("Publication file upload failed: " + source, e);
+            throw new IllegalStateException(I18nUtil.get("groupchat.publication.uploadFailed", source), e);
         } finally {
             if (temporary != null) {
                 try {

@@ -529,10 +529,10 @@ const ProjectResources: React.FC<Props> = ({
         );
       } catch (error: any) {
         setFilePreviewContent(null);
-        message.error(error?.message || '文件内容加载失败');
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.file.loadFailed' }));
       }
     },
-    [detailRepo, selectedBranch]
+    [detailRepo, selectedBranch, intl]
   );
 
   const changeBranch = useCallback(
@@ -587,7 +587,11 @@ const ProjectResources: React.FC<Props> = ({
           size="small"
           className={styles.resourceCardExpandButton}
           icon={expandedCard === cardKey ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-          aria-label={expandedCard === cardKey ? '收起' : '展开'}
+          aria-label={
+            expandedCard === cardKey
+              ? intl.formatMessage({ id: 'fileChanges.collapse' })
+              : intl.formatMessage({ id: 'common.expand' })
+          }
           onClick={() => setExpandedCard((current) => (current === cardKey ? null : cardKey))}
         />
       </div>
@@ -707,9 +711,13 @@ const ProjectResources: React.FC<Props> = ({
           trigger={['click']}
           menu={{
             items: [
-              { key: 'reference', label: '引用' },
-              { key: 'rename', label: '重命名' },
-              { key: 'delete', label: '删除', danger: true },
+              { key: 'reference', label: intl.formatMessage({ id: 'common.quote' }) },
+              { key: 'rename', label: intl.formatMessage({ id: 'projectSpace.detail.codeChanges.status.renamed' }) },
+              {
+                key: 'delete',
+                label: intl.formatMessage({ id: 'projectSpace.detail.manualRequirement.action.delete' }),
+                danger: true,
+              },
             ],
             onClick: async ({ key, domEvent }) => {
               domEvent.stopPropagation();
@@ -727,7 +735,7 @@ const ProjectResources: React.FC<Props> = ({
                 else await removeFile({ resourceId: String(cloudResourceId), directoryPath: path });
                 await loadFiles();
               }
-              if (key === 'rename') message.info('请使用知识库目录管理中的重命名功能');
+              if (key === 'rename') message.info(intl.formatMessage({ id: 'projectSpace.file.renameHint' }));
             },
           }}
         >
@@ -882,9 +890,13 @@ const ProjectResources: React.FC<Props> = ({
                       trigger={['hover']}
                       menu={{
                         items: [
-                          { key: 'run', label: '立即执行' },
-                          { key: 'edit', label: '编辑' },
-                          { key: 'delete', label: '删除', danger: true },
+                          { key: 'run', label: intl.formatMessage({ id: 'common.runNow' }) },
+                          { key: 'edit', label: intl.formatMessage({ id: 'markdownField.edit' }) },
+                          {
+                            key: 'delete',
+                            label: intl.formatMessage({ id: 'projectSpace.detail.manualRequirement.action.delete' }),
+                            danger: true,
+                          },
                         ],
                         onClick: async ({ key }) => {
                           if (key === 'run') {

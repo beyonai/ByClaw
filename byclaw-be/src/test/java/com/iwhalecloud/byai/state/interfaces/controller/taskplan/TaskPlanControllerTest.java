@@ -19,7 +19,7 @@ import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanUpdateRequest;
 import com.iwhalecloud.byai.state.domain.taskplan.exception.TaskPlanCommandException;
 import com.iwhalecloud.byai.state.domain.ws.service.TaskPlanWebSocketPublisher;
 
-class TaskPlanControllerTest {
+class TaskPlanControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private TaskPlanApplicationService service;
 

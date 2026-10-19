@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.aimodel;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,7 +20,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
-class ModelDebugSpeechApplicationServiceTest {
+class ModelDebugSpeechApplicationServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     @Mock private VoiceAudioService audio;
     @Mock private HarnessMediaClient asr;
     @Mock private ModelManagementApplicationService management;
@@ -85,4 +92,17 @@ class ModelDebugSpeechApplicationServiceTest {
             .hasMessageContaining("400");
         verifyNoInteractions(audio, asr);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|你好，这是语音合成模型调试。",
+        "en-US|Hello, this is a speech synthesis model test."
+    }, delimiter = '|')
+    void defaultSpeechSampleUsesTheRequestLanguage(String language, String expected) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        Map<String, Object> config = Map.of("provider", "TEST", "protocol", "TEST_TTS", "model", "test",
+            "endpoint", "https://example.com/tts", "apiKey", "test-token");
+        service.debugTts(new ModelDebugSpeechApplicationService.TtsDebugRequest(null, null, config));
+        org.mockito.Mockito.verify(asr).debugTts(eq(expected), any());
+    }
+
 }

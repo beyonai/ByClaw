@@ -42,7 +42,7 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessServic
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 @ExtendWith(MockitoExtension.class)
-class DatasetApplicationServiceProjectCloudDownloadTest {
+class DatasetApplicationServiceProjectCloudDownloadTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private SsResourceService ssResourceService;

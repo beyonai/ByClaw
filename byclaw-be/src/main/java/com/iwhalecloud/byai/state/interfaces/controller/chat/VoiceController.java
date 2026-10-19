@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.asr.HarnessMediaClient;
 import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
@@ -31,7 +33,7 @@ public class VoiceController {
     public ResponseUtil<Map<String, Object>> transcribe(@RequestBody TranscribeRequest request) {
         if (request == null || (request.fileId() != null && request.path() != null)
             || (request.fileId() == null && (request.sessionId() == null || request.path() == null))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provide either fileId or sessionId and path");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.source.invalid"));
         }
         VoiceAudioService.validateDuration(request.durationMs());
         var source = request.fileId() != null ? audio.load(request.fileId(), request.sessionId())

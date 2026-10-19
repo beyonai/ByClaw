@@ -33,7 +33,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class DingtalkUserServiceTest {
+class DingtalkUserServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final UserService userService = mock(UserService.class);
     private final UserExternalSystemService externalSystemService = mock(UserExternalSystemService.class);

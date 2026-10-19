@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -33,7 +35,7 @@ public class GroupChatContextTokenService {
     public Map<String, Object> verify(String token) {
         Map<String, Object> claims = jwtService.verifyJwt(token, Map.class);
         if (claims == null || !"GROUP_CHAT_CONTEXT".equals(claims.get("scene"))) {
-            throw new IllegalArgumentException("Invalid group chat context token");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.context.tokenInvalid"));
         }
         return claims;
     }

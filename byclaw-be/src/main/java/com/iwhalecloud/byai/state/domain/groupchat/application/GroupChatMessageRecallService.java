@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Date;
@@ -48,16 +50,16 @@ public class GroupChatMessageRecallService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         ByaiMessage message = messages.selectForRecall(sessionId, messageId);
         if (message == null || !Objects.equals(sessionId, message.getSessionId()) || message.getArchivedAt() != null) {
-            throw new IllegalArgumentException("Group message not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.message.notFound"));
         }
         if (!Integer.valueOf(1).equals(message.getUsage()) && !Integer.valueOf(2).equals(message.getUsage())) {
-            throw new IllegalArgumentException("System messages cannot be recalled");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.recall.systemDenied"));
         }
         boolean administrator = UserRole.OWNER.name().equals(member.getUserRole())
             || UserRole.ADMIN.name().equals(member.getUserRole());
         boolean author = Integer.valueOf(1).equals(message.getUsage()) && Objects.equals(userId, message.getCreatorId());
         if (userId == null || (!administrator && !author)) {
-            throw new IllegalArgumentException("Only the author or group administrator can recall this message");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.recall.permissionDenied"));
         }
         if (message.isRecalled()) {
             cancellations.cancel(sessionId, messageId);
@@ -65,7 +67,7 @@ public class GroupChatMessageRecallService {
         }
         Date now = new Date();
         if (messages.recallGroupMessage(sessionId, messageId, userId, now) != 1) {
-            throw new IllegalStateException("Group message recall was not persisted");
+            throw new IllegalStateException(I18nUtil.get("groupchat.recall.saveFailed"));
         }
         message.setRecalledAt(now);
         message.setRecalledBy(userId);

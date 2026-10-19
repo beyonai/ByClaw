@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,7 +41,7 @@ public class SandboxHealthWatermarkModelService {
             SandboxHealthWatermarkModelEntity peer =
                 mapper.selectEnabledPeer(entity.getServiceType(), entity.getProfileKey(), entity.getId());
             if (peer != null) {
-                throw new BdpRuntimeException("同一服务类型和规格只能启用一个水位模型");
+                throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.duplicate"));
             }
         }
         if (entity.getId() == null) {
@@ -67,13 +68,13 @@ public class SandboxHealthWatermarkModelService {
     public void enable(Long id, boolean enabled) {
         SandboxHealthWatermarkModelEntity entity = mapper.selectById(id);
         if (entity == null) {
-            throw new BdpRuntimeException("水位模型不存在");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.notFound"));
         }
         if (enabled) {
             SandboxHealthWatermarkModelEntity peer =
                 mapper.selectEnabledPeer(entity.getServiceType(), entity.getProfileKey(), id);
             if (peer != null) {
-                throw new BdpRuntimeException("同一服务类型和规格只能启用一个水位模型");
+                throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.duplicate"));
             }
         }
         mapper.updateEnabled(id, enabled ? 1 : 0);
@@ -147,7 +148,7 @@ public class SandboxHealthWatermarkModelService {
 
     private void validate(SandboxHealthWatermarkModelEntity entity) {
         if (StringUtils.isBlank(entity.getServiceType())) {
-            throw new BdpRuntimeException("serviceType is required");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.serviceTypeRequired"));
         }
         requireRatio(entity.getIdleMemoryLimitRatio(), "idleMemoryLimitRatio");
         requireRatio(entity.getBusyMemoryLimitRatio(), "busyMemoryLimitRatio");
@@ -156,10 +157,10 @@ public class SandboxHealthWatermarkModelService {
         requireRatio(entity.getCriticalCpuRequestRatio(), "criticalCpuRequestRatio");
         if (!(entity.getIdleMemoryLimitRatio() < entity.getBusyMemoryLimitRatio()
             && entity.getBusyMemoryLimitRatio() < entity.getCriticalMemoryLimitRatio())) {
-            throw new BdpRuntimeException("内存阈值必须满足 idle < busy < critical");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.memoryOrder"));
         }
         if (!(entity.getBusyCpuRequestRatio() < entity.getCriticalCpuRequestRatio())) {
-            throw new BdpRuntimeException("CPU 阈值必须满足 busy < critical");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.cpuOrder"));
         }
         requirePositive(entity.getConsecutiveBusySamples(), "consecutiveBusySamples");
         requirePositive(entity.getRecoverSamples(), "recoverSamples");
@@ -170,13 +171,13 @@ public class SandboxHealthWatermarkModelService {
 
     private void requireRatio(Double value, String fieldName) {
         if (value == null || value < 0D || value > 3D) {
-            throw new BdpRuntimeException(fieldName + " must be between 0 and 3");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.range", fieldName));
         }
     }
 
     private void requirePositive(Integer value, String fieldName) {
         if (value == null || value < 1) {
-            throw new BdpRuntimeException(fieldName + " must be greater than 0");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.watermark.positive", fieldName));
         }
     }
 

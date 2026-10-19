@@ -35,7 +35,9 @@ class DigitalEmployeeGovernanceServiceTest {
     @BeforeEach void setup() {
         originalMessageSource = (MessageSource) ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
         MessageSource messages = mock(MessageSource.class);
-        when(messages.getMessage(anyString(), any(), any(Locale.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(messages.getMessage(anyString(), any(), any(Locale.class))).thenAnswer(invocation ->
+            new com.iwhalecloud.byai.state.common.config.I18nConfig().messageSource()
+                .getMessage(invocation.getArgument(0), invocation.getArgument(1), Locale.SIMPLIFIED_CHINESE));
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messages);
         ReflectionTestUtils.setField(auth, "employeeGovernance", governance);
         ReflectionTestUtils.setField(auth, "privilegeGrantService", grants);

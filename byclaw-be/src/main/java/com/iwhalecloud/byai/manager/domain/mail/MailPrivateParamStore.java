@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -45,7 +47,7 @@ public class MailPrivateParamStore {
                 result.accountAttributes().values().stream())
             .filter(value -> value != null && value.trim().matches("[^\\s@]+@[^\\s@]+"))
             .map(String::trim).findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("OAuth 授权未返回邮箱身份"));
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("connector.oauth.identityMissing")));
         UserMailAccount account = find(userId, connector.getConnectorId());
         if (account == null) {
             account = new UserMailAccount();
@@ -70,7 +72,7 @@ public class MailPrivateParamStore {
     }
 
     public static String key(Long connectorId) {
-        if (connectorId == null || connectorId <= 0) throw new IllegalArgumentException("Invalid mail connector id");
+        if (connectorId == null || connectorId <= 0) throw new IllegalArgumentException(I18nUtil.get("mail.connector.idInvalid"));
         return KEY_PREFIX + connectorId;
     }
 
@@ -145,7 +147,7 @@ public class MailPrivateParamStore {
         String code = MailProviderCatalog.require(account.getProviderCode()).getConnectorCode();
         ConnectorInfo connector = connectors.selectOne(new LambdaQueryWrapper<ConnectorInfo>()
             .eq(ConnectorInfo::getConnectorCode, code).eq(ConnectorInfo::getStatusCd, "00A").last("LIMIT 1"));
-        if (connector == null) throw new IllegalArgumentException("邮箱连接器未配置");
+        if (connector == null) throw new IllegalArgumentException(I18nUtil.get("mail.account.connectorMissing"));
         account.setConnectorId(connector.getConnectorId());
         account.setAccountId(connector.getConnectorId());
     }
@@ -170,7 +172,7 @@ public class MailPrivateParamStore {
             row.setCreateBy(account.getUserId());
             row.setCreateTime(new Date());
         } else if (!isPrivateMailParam(row) || !source.equals(row.getSourceRef())) {
-            throw new IllegalArgumentException("邮箱参数名称已被其他配置占用");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.paramNameConflict"));
         }
         row.setStatus("0".equals(account.getDeleteFlag()) ? "NORMAL" : "DISABLED");
         row.setParamValueCipher("0".equals(account.getDeleteFlag()) ? Sm4Util.encrypt(encode(account)) : "");
@@ -180,10 +182,10 @@ public class MailPrivateParamStore {
         row.setUpdateTime(new Date());
         if (create) {
             if (mapper.insertConnectorParamIgnoreConflict(row) != 1) {
-                throw new IllegalStateException("邮箱配置已并发创建，请重试");
+                throw new IllegalStateException(I18nUtil.get("mail.account.concurrentCreate"));
             }
         } else if (mapper.updateById(row) != 1) {
-            throw new IllegalStateException("邮箱配置保存失败");
+            throw new IllegalStateException(I18nUtil.get("mail.account.saveFailed"));
         }
     }
 

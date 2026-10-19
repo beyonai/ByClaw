@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -87,7 +89,7 @@ public class GroupChatRecallCancellationService {
             ByaiGroupChatExecution anchor = executions.selectForUpdateByCandidateSessionId(selected.getCandidateSessionId());
             ByaiGroupChatExecution current = selected instanceof ByaiGroupChatTurn
                 ? turns.selectForUpdateById(selected.getExecutionId()) : anchor;
-            if (current == null) throw new IllegalStateException("Recall execution disappeared");
+            if (current == null) throw new IllegalStateException(I18nUtil.get("groupchat.recall.executionMissing"));
             ByaiGroupChatTask task = tasks.cancelForRecall(current.getCandidateSessionId(), current.getExecutionId());
             ByaiGroupChatRecallStop stop = new ByaiGroupChatRecallStop();
             stop.setExecutionId(current.getExecutionId());

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class EmployeePublicationApplicationServiceTest {
+class EmployeePublicationApplicationServiceTest extends I18nTestSupport {
     DigitalEmployeePublicationMapper publications = mock(DigitalEmployeePublicationMapper.class);
     SsResourceMapper resources = mock(SsResourceMapper.class);
     UserService users = mock(UserService.class);

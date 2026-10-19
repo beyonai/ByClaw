@@ -53,11 +53,11 @@ import org.springframework.util.StringUtils;
 public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<String, Object>, Map<String, Object>> {
 
     private static final Logger logger = LoggerFactory.getLogger(DingtalkBotListener.class);
-    private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
+    private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
     private static final String MESSAGE_DEDUP_KEY_PREFIX = "dingtalk:stream:msg:";
     private static final long MESSAGE_DEDUP_TTL_SECONDS = 30 * 60L;
 
-    private static final String UNSUPPORTED_MESSAGE_REPLY = "暂不支持该类型消息";
+    private static final String UNSUPPORTED_MESSAGE_REPLY_KEY = "channel.message.unsupported";
     private static final String GROUP_UNSUPPORTED_AUDIO_REPLY = "群聊暂不支持该类型消息";
 
     private final ObjectMapper objectMapper;
@@ -128,7 +128,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
         if (!isSupportedMessageType(msgtype)) {
             try {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, UNSUPPORTED_MESSAGE_REPLY);
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get(UNSUPPORTED_MESSAGE_REPLY_KEY));
             } catch (IOException e) {
                 logger.error("Failed to reply unsupported DingTalk message type. msgId={}, msgtype={}", msgId, msgtype, e);
             }
@@ -163,7 +163,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         try {
             LoginInfo userInfo = dingtalkUserService.resolveLoginInfo(DDMessage);
             if (userInfo == null) {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "找不到对应用户，请联系管理员");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.notFound"));
                 return;
             }
 
@@ -197,7 +197,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             logger.error("Failed to reply DingTalk bot message. msgId={}, senderStaffId={}, robotCode={}",
                     msgId, senderStaffId, robotCode, e);
             try {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "消息异常：" + e.getMessage());
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.message.failed", e.getMessage()));
             } catch (IOException ex) {
                 logger.error("Failed to send error message to DingTalk. msgId={}", msgId, ex);
             }
@@ -324,7 +324,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             // appStreamResponse (or an idle timeout) owns finalization.
             boolean finalOk = awaitStreamCompletion(outputStream);
             if (!finalOk || outputStream.hasStreamingFailed()) {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, DEFAULT_FALLBACK_REPLY);
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY));
             }
             return true;
         } catch (Exception e) {

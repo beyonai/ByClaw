@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -365,7 +366,7 @@ public class ScriptService extends AbstractChatProcess {
             return;
         }
         if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
-            throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
+            throw new BdpRuntimeException(I18nUtil.get("chat.session.running"));
         }
 
         ctx.sendByFrameworkMsgOnly = true;

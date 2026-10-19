@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Button, Tooltip } from 'antd';
 import { DownOutlined, RightOutlined, CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { copyTextToClipboard } from '@/utils/copy';
-import { useIntl } from '@umijs/max';
+import { getIntl, useIntl } from '@umijs/max';
 import styles from './index.module.less';
 import classNames from 'classnames';
 
@@ -64,10 +64,10 @@ const ExpandableStringValue: React.FC<ExpandableStringValueProps> = React.memo((
         <button
           type="button"
           className={styles.stringToggleButton}
-          aria-label="收起字符串"
+          aria-label={getIntl().formatMessage({ id: 'ui.json.collapseString' })}
           onClick={() => setExpanded(false)}
         >
-          收起
+          {getIntl().formatMessage({ id: 'employeePublication.collapse' })}
         </button>
       </span>
     );
@@ -79,10 +79,10 @@ const ExpandableStringValue: React.FC<ExpandableStringValueProps> = React.memo((
       <button
         type="button"
         className={styles.stringToggleButton}
-        aria-label="展开完整字符串"
+        aria-label={getIntl().formatMessage({ id: 'ui.json.expandString' })}
         onClick={() => setExpanded(true)}
       >
-        ...(点击查看更多)
+        {getIntl().formatMessage({ id: 'ui.json.moreSuffix' })}
       </button>
       &quot;
     </span>

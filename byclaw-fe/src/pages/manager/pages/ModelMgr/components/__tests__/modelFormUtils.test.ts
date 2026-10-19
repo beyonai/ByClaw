@@ -20,6 +20,15 @@ import {
   normalizeModelType,
 } from '../modelFormUtils';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+});
+
 describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
   describe('normalizeModelType', () => {
     it('normalizes numeric and string enum values', () => {
@@ -829,4 +838,29 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(extractModelId({})).toBeUndefined();
     });
   });
+});
+
+it.each([
+  ['zh-CN', '你好，欢迎使用 ByClaw。'],
+  ['en-US', 'Hello, welcome to ByClaw.'],
+] as const)('localizes new TTS samples in %s and preserves edited samples', (locale, text) => {
+  mockLocale = locale;
+  expect(JSON.parse(buildAutoDebugRequestText({ formValues: { modelType: 'TTS' } }))).toEqual({ text });
+  expect(
+    JSON.parse(
+      buildAutoDebugRequestText({
+        formValues: { modelType: 'TTS' },
+        prevText: JSON.stringify({ text: '自定义内容' }),
+      })
+    )
+  ).toEqual({ text: '自定义内容' });
+  expect(
+    JSON.parse(
+      buildAutoDebugRequestText({
+        formValues: { modelType: 'TTS' },
+        prevText: JSON.stringify({ text: '旧内容' }),
+        changedKeys: ['modelType'],
+      })
+    )
+  ).toEqual({ text });
 });

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,7 +56,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatQueuedGatewayTest {
+class GroupChatQueuedGatewayTest extends I18nTestSupport {
     private static final String CURRENT_MESSAGE = "已整理资料，请分析。";
 
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);

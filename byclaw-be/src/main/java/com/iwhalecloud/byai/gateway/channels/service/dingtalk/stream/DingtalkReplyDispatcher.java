@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
@@ -23,7 +24,7 @@ public class DingtalkReplyDispatcher {
 
     private static final Logger logger = LoggerFactory.getLogger(DingtalkReplyDispatcher.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
-    private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
+    private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
 
     private final OkHttpClient okHttpClient = new OkHttpClient();
     private final ObjectMapper objectMapper;
@@ -52,7 +53,7 @@ public class DingtalkReplyDispatcher {
     }
 
     private String normalizeReplyContent(String replyContent) {
-        return replyContent == null || replyContent.isBlank() ? DEFAULT_FALLBACK_REPLY : replyContent;
+        return replyContent == null || replyContent.isBlank() ? I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY) : replyContent;
     }
 
     private String toJson(Map<String, Object> data) {

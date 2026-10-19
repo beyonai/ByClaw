@@ -24,11 +24,14 @@ const savedDetail = {
   apiToken: 'test-token-not-a-secret',
 };
 
+// 完整弹窗包含多轮表单校验和异步回填，仅为这些交互用例预留 CI 并发运行的时间。
+const modelFormTimeout = 15000;
+
 async function renderEdit(fields: Record<string, any>) {
   const saveModelRequest = jest.fn().mockResolvedValue({ data: { id: '42' } });
   await act(async () => {
     render(
-      <ConfigProvider theme={{ token: { motion: false } }}>
+      <ConfigProvider virtual={false} theme={{ token: { motion: false } }}>
         <SharedModelFormModal
           open
           type="edit"
@@ -55,8 +58,23 @@ async function saveEdit(saveModelRequest: jest.Mock) {
   return saveModelRequest.mock.calls[0][0];
 }
 
+async function selectImageProtocol(label: string) {
+  await act(async () => {
+    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
+  });
+  // 关闭测试虚拟滚动后，列表末尾的 Ark 也会挂载；查找放在 act 外，避免阻塞下拉更新。
+  const option = await screen.findByRole('option', { name: label });
+  await act(async () => {
+    fireEvent.click(option);
+  });
+}
+
 describe('optional model provider compatibility', () => {
-  afterEach(() => message.destroy());
+  afterEach(async () => {
+    await act(async () => {
+      message.destroy();
+    });
+  });
 
   it('requires a provider only for image protocols that cannot identify one', async () => {
     let form: FormInstance;
@@ -146,40 +164,43 @@ describe('optional model provider compatibility', () => {
         modelCode: savedDetail.modelCode,
         apiEndpoint: savedDetail.apiEndpoint,
       });
-    }
+    },
+    modelFormTimeout
   );
 
-  it('does not overwrite an explicit provider or connection fields when changing the image protocol', async () => {
-    const save = await renderEdit({
-      modelType: 'IMAGE_GENERATION',
-      modelProtocol: 'MINIMAX_IMAGE',
-      providerName: 'MINIMAX',
-    });
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
-    await act(async () => {
-      fireEvent.click(await screen.findByText('Volcengine Ark'));
-    });
-    const payload = await saveEdit(save);
-    expect(payload).toMatchObject({
-      providerName: 'MINIMAX',
-      modelProtocol: 'VOLCENGINE_IMAGE',
-      modelCode: savedDetail.modelCode,
-      apiEndpoint: savedDetail.apiEndpoint,
-    });
-  });
+  it(
+    'does not overwrite an explicit provider or connection fields when changing the image protocol',
+    async () => {
+      const save = await renderEdit({
+        modelType: 'IMAGE_GENERATION',
+        modelProtocol: 'MINIMAX_IMAGE',
+        providerName: 'MINIMAX',
+      });
+      await selectImageProtocol('Volcengine Ark');
+      const payload = await saveEdit(save);
+      expect(payload).toMatchObject({
+        providerName: 'MINIMAX',
+        modelProtocol: 'VOLCENGINE_IMAGE',
+        modelCode: savedDetail.modelCode,
+        apiEndpoint: savedDetail.apiEndpoint,
+      });
+    },
+    modelFormTimeout
+  );
 
-  it('fills an empty provider when a known image protocol is selected without changing custom connection fields', async () => {
-    const save = await renderEdit({ modelType: 'IMAGE_GENERATION', modelProtocol: 'Qwen', providerName: undefined });
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelProtocol'));
-    await act(async () => {
-      fireEvent.click(await screen.findByText('Volcengine Ark'));
-    });
-    const payload = await saveEdit(save);
-    expect(payload).toMatchObject({
-      providerName: 'VOLCENGINE',
-      modelProtocol: 'VOLCENGINE_IMAGE',
-      modelCode: savedDetail.modelCode,
-      apiEndpoint: savedDetail.apiEndpoint,
-    });
-  });
+  it(
+    'fills an empty provider when a known image protocol is selected without changing custom connection fields',
+    async () => {
+      const save = await renderEdit({ modelType: 'IMAGE_GENERATION', modelProtocol: 'Qwen', providerName: undefined });
+      await selectImageProtocol('Volcengine Ark');
+      const payload = await saveEdit(save);
+      expect(payload).toMatchObject({
+        providerName: 'VOLCENGINE',
+        modelProtocol: 'VOLCENGINE_IMAGE',
+        modelCode: savedDetail.modelCode,
+        apiEndpoint: savedDetail.apiEndpoint,
+      });
+    },
+    modelFormTimeout
+  );
 });

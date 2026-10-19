@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 
 import org.apache.commons.lang3.StringUtils;
@@ -45,7 +47,7 @@ public class GroupChatCandidateSessionService {
         ByaiSession group = sessionService.findById(groupSessionId);
         ByaiMessage source = messageMapper.selectByMessageId(sourceMessageId);
         if (group == null || source == null) {
-            throw new IllegalArgumentException("Group message is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.message.unavailable"));
         }
         Date now = new Date();
         Long sessionId = sequenceService.nextVal();
@@ -100,7 +102,7 @@ public class GroupChatCandidateSessionService {
     public void promote(Long sessionId, String taskName) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null) {
-            throw new IllegalArgumentException("Candidate session not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.candidateSession.notFound"));
         }
         session.setState("GROUP_TASK");
         session.setSessionName(taskName);

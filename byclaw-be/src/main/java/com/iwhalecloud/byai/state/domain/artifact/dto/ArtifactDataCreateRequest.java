@@ -15,12 +15,12 @@ import lombok.Setter;
 @Setter
 public class ArtifactDataCreateRequest {
 
-    @NotBlank(message = "collectionName不能为空")
+    @NotBlank(message = "{artifact.collectionName.required}")
     @Pattern(regexp = "[A-Za-z][A-Za-z0-9_-]{0,63}",
-        message = "collectionName必须以字母开头，且只能包含字母、数字、下划线或连字符")
+        message = "{artifact.collectionNameInvalid}")
     private String collectionName;
 
-    @NotEmpty(message = "data不能为空")
-    @Size(max = 100, message = "data顶层字段数不能超过100")
+    @NotEmpty(message = "{artifact.data.required}")
+    @Size(max = 100, message = "{artifact.data.tooManyFields}")
     private Map<String, Object> data;
 }

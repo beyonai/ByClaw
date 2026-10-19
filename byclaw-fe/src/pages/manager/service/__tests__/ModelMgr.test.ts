@@ -1,5 +1,7 @@
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
 jest.mock('@umijs/max', () => ({
-  getLocale: jest.fn(() => 'zh-CN'),
+  getLocale: jest.fn(() => mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
 }));
 
 jest.mock('@/pages/manager/utils/auth', () => ({
@@ -388,4 +390,19 @@ describe('speech model debugging', () => {
       expect.objectContaining({ timeout: 185000, cancelToken: { signal } })
     );
   });
+});
+
+it.each([
+  ['zh-CN', '请输入包含 fileId 的 JSON 对象', '请输入包含 text 的 JSON 对象'],
+  ['en-US', 'Enter a JSON object containing fileId', 'Enter a JSON object containing text'],
+] as const)('localizes speech debug JSON errors in %s without making requests', async (locale, asr, tts) => {
+  mockLocale = locale;
+  (POST as jest.Mock).mockClear();
+  try {
+    await expect(debugModelAsr({ input: '{' })).rejects.toThrow(asr);
+    await expect(debugModelTts({ input: '{' })).rejects.toThrow(tts);
+    expect(POST).not.toHaveBeenCalled();
+  } finally {
+    mockLocale = 'zh-CN';
+  }
 });

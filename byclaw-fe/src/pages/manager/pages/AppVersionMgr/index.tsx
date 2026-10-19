@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import {
   Alert,
   Button,
@@ -38,23 +38,6 @@ const PLATFORMS = [
   { value: 'macos', label: 'macOS', archs: ['x64', 'arm64', 'universal'] },
 ];
 
-const CHANNELS = [
-  { value: 'stable', label: 'stable 正式' },
-  { value: 'beta', label: 'beta 公测' },
-  { value: 'dev', label: 'dev 开发' },
-];
-
-const UPDATE_TYPES = [
-  { value: 'full', label: 'full 全量包' },
-  { value: 'incremental', label: 'incremental 增量包' },
-];
-
-const RELEASE_STATUS: Record<string, { text: string; color: string }> = {
-  draft: { text: '草稿', color: 'default' },
-  published: { text: '已发布', color: 'green' },
-  offline: { text: '已下线', color: 'red' },
-};
-
 const archOptions = (platform?: string) =>
   (PLATFORMS.find((item) => item.value === platform)?.archs || []).map((arch) => ({ value: arch, label: arch }));
 
@@ -90,6 +73,25 @@ const toPayload = (values: Record<string, any>): AppVersionPayload => ({
 });
 
 export default function AppVersionMgr() {
+  const intl = useIntl();
+  // 展示标签随语言重新计算，接口枚举值保持稳定。
+  const CHANNELS = [
+    { value: 'stable', label: intl.formatMessage({ id: 'appVersion.channel.stable' }) },
+    { value: 'beta', label: intl.formatMessage({ id: 'appVersion.channel.beta' }) },
+    { value: 'dev', label: intl.formatMessage({ id: 'appVersion.channel.dev' }) },
+  ];
+
+  const UPDATE_TYPES = [
+    { value: 'full', label: intl.formatMessage({ id: 'appVersion.updateType.full' }) },
+    { value: 'incremental', label: intl.formatMessage({ id: 'appVersion.updateType.incremental' }) },
+  ];
+
+  const RELEASE_STATUS: Record<string, { text: string; color: string }> = {
+    draft: { text: intl.formatMessage({ id: 'appVersion.status.draft' }), color: 'default' },
+    published: { text: intl.formatMessage({ id: 'appVersion.status.published' }), color: 'green' },
+    offline: { text: intl.formatMessage({ id: 'appVersion.status.offline' }), color: 'red' },
+  };
+
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [allowed, setAllowed] = useState<boolean>();
   const [loading, setLoading] = useState(false);
@@ -134,7 +136,7 @@ export default function AppVersionMgr() {
 
   if (userInfo?.userCode?.toLowerCase() === 'adminvip' && allowed === undefined) return <Spin fullscreen />;
   if (userInfo?.userCode?.toLowerCase() !== 'adminvip' || !allowed) {
-    return <Alert type="warning" message="仅开源版 adminvip 可访问 App 版本管理。" />;
+    return <Alert type="warning" message={intl.formatMessage({ id: 'appVersion.adminOnly' })} />;
   }
 
   const edit = (item?: AppVersion) => {
@@ -176,9 +178,9 @@ export default function AppVersionMgr() {
         fileSize: result.fileSize,
         sha256: result.sha256,
       });
-      message.success('安装包上传成功');
+      message.success(intl.formatMessage({ id: 'appVersion.uploadSuccess' }));
     } catch {
-      message.error('安装包上传失败');
+      message.error(intl.formatMessage({ id: 'appVersion.uploadFailed' }));
     } finally {
       setUploading(false);
     }
@@ -189,14 +191,18 @@ export default function AppVersionMgr() {
     try {
       if (action === 'publish') {
         await publishAppVersion(item.versionId);
-        message.success('版本已发布');
+        message.success(intl.formatMessage({ id: 'appVersion.published' }));
       } else {
         await offlineAppVersion(item.versionId);
-        message.success('版本已下线');
+        message.success(intl.formatMessage({ id: 'appVersion.offline' }));
       }
       await reload();
     } catch {
-      message.error(action === 'publish' ? '发布失败' : '下线失败');
+      message.error(
+        action === 'publish'
+          ? intl.formatMessage({ id: 'appVersion.publishFailed' })
+          : intl.formatMessage({ id: 'appVersion.offlineFailed' })
+      );
     } finally {
       setBusyId(undefined);
     }
@@ -206,11 +212,11 @@ export default function AppVersionMgr() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1>App 版本管理</h1>
-          <p>按平台 × 架构 × 渠道维护桌面端安装包；deviceType 固定 electron，桌面端只读取已发布的最新版本。</p>
+          <h1>{intl.formatMessage({ id: 'appVersion.title' })}</h1>
+          <p>{intl.formatMessage({ id: 'appVersion.description' })}</p>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>
-          新建版本
+          {intl.formatMessage({ id: 'appVersion.create' })}
         </Button>
       </div>
 
@@ -223,30 +229,49 @@ export default function AppVersionMgr() {
           void reload(1, size, nextFilters);
         }}
       >
-        <Form.Item name="platform" label="平台">
-          <Select allowClear placeholder="全部" style={{ width: 130 }} options={PLATFORMS} />
-        </Form.Item>
-        <Form.Item name="arch" label="架构">
-          <Select allowClear placeholder="全部" style={{ width: 120 }} options={archOptions(platform)} />
-        </Form.Item>
-        <Form.Item name="channel" label="渠道">
-          <Select allowClear placeholder="全部" style={{ width: 150 }} options={CHANNELS} />
-        </Form.Item>
-        <Form.Item name="releaseStatus" label="状态">
+        <Form.Item name="platform" label={intl.formatMessage({ id: 'appVersion.platform' })}>
           <Select
             allowClear
-            placeholder="全部"
+            placeholder={intl.formatMessage({ id: 'appVersion.all' })}
+            style={{ width: 130 }}
+            options={PLATFORMS}
+          />
+        </Form.Item>
+        <Form.Item name="arch" label={intl.formatMessage({ id: 'appVersion.arch' })}>
+          <Select
+            allowClear
+            placeholder={intl.formatMessage({ id: 'appVersion.all' })}
+            style={{ width: 120 }}
+            options={archOptions(platform)}
+          />
+        </Form.Item>
+        <Form.Item name="channel" label={intl.formatMessage({ id: 'appVersion.channel' })}>
+          <Select
+            allowClear
+            placeholder={intl.formatMessage({ id: 'appVersion.all' })}
+            style={{ width: 150 }}
+            options={CHANNELS}
+          />
+        </Form.Item>
+        <Form.Item name="releaseStatus" label={intl.formatMessage({ id: 'appVersion.status' })}>
+          <Select
+            allowClear
+            placeholder={intl.formatMessage({ id: 'appVersion.all' })}
             style={{ width: 120 }}
             options={Object.entries(RELEASE_STATUS).map(([value, meta]) => ({ value, label: meta.text }))}
           />
         </Form.Item>
-        <Form.Item name="keyword" label="关键字">
-          <Input allowClear placeholder="版本号 / 文件名" style={{ width: 200 }} />
+        <Form.Item name="keyword" label={intl.formatMessage({ id: 'appVersion.keyword' })}>
+          <Input
+            allowClear
+            placeholder={intl.formatMessage({ id: 'appVersion.searchPlaceholder' })}
+            style={{ width: 200 }}
+          />
         </Form.Item>
         <Form.Item>
           <Space>
             <Button type="primary" htmlType="submit">
-              查询
+              {intl.formatMessage({ id: 'appVersion.search' })}
             </Button>
             <Button
               onClick={() => {
@@ -254,7 +279,7 @@ export default function AppVersionMgr() {
                 void reload(1, size, {});
               }}
             >
-              重置
+              {intl.formatMessage({ id: 'appVersion.reset' })}
             </Button>
           </Space>
         </Form.Item>
@@ -273,7 +298,7 @@ export default function AppVersionMgr() {
         }}
         columns={[
           {
-            title: '平台 / 架构',
+            title: intl.formatMessage({ id: 'appVersion.platformArch' }),
             width: 160,
             render: (_, item) => (
               <div className={styles.versionCell}>
@@ -285,17 +310,19 @@ export default function AppVersionMgr() {
             ),
           },
           {
-            title: '版本号',
+            title: intl.formatMessage({ id: 'appVersion.version' }),
             width: 170,
             render: (_, item) => (
               <Space size={4} wrap>
                 <span>{item.appVersion}</span>
-                {item.updateStatus === '1' && <Tag color="red">强制更新</Tag>}
+                {item.updateStatus === '1' && (
+                  <Tag color="red">{intl.formatMessage({ id: 'appVersion.forceUpdate' })}</Tag>
+                )}
               </Space>
             ),
           },
           {
-            title: '安装包',
+            title: intl.formatMessage({ id: 'appVersion.package' }),
             render: (_, item) => (
               <div className={styles.packageCell}>
                 <span>{item.fileName || '-'}</span>
@@ -307,21 +334,21 @@ export default function AppVersionMgr() {
             ),
           },
           {
-            title: '状态',
+            title: intl.formatMessage({ id: 'appVersion.status' }),
             width: 100,
             render: (_, item) => {
               const meta = RELEASE_STATUS[item.releaseStatus || 'draft'] || RELEASE_STATUS.draft;
               return <Tag color={meta.color}>{meta.text}</Tag>;
             },
           },
-          { title: '发布时间', dataIndex: 'publishTime', width: 180 },
+          { title: intl.formatMessage({ id: 'appVersion.publishTime' }), dataIndex: 'publishTime', width: 180 },
           {
-            title: '操作',
+            title: intl.formatMessage({ id: 'common.operation' }),
             width: 240,
             render: (_, item) => (
               <Space size={0} wrap>
                 <Button type="link" onClick={() => edit(item)}>
-                  编辑
+                  {intl.formatMessage({ id: 'common.edit' })}
                 </Button>
                 {item.releaseStatus === 'draft' && (
                   <Button
@@ -329,7 +356,7 @@ export default function AppVersionMgr() {
                     loading={busyId === item.versionId}
                     onClick={() => void changeStatus(item, 'publish')}
                   >
-                    发布
+                    {intl.formatMessage({ id: 'appVersion.publish' })}
                   </Button>
                 )}
                 {item.releaseStatus === 'published' && (
@@ -338,35 +365,35 @@ export default function AppVersionMgr() {
                     loading={busyId === item.versionId}
                     onClick={() => void changeStatus(item, 'offline')}
                   >
-                    下线
+                    {intl.formatMessage({ id: 'appVersion.takeOffline' })}
                   </Button>
                 )}
                 {item.url && (
                   <Button type="link" href={buildPackageDownloadUrl(item.versionId)} target="_blank">
-                    下载
+                    {intl.formatMessage({ id: 'appVersion.download' })}
                   </Button>
                 )}
                 <Popconfirm
-                  title="确定删除这个版本吗？"
-                  description="删除后桌面端将不再收到该版本的更新。"
-                  okText="删除"
-                  cancelText="取消"
+                  title={intl.formatMessage({ id: 'appVersion.deleteConfirm' })}
+                  description={intl.formatMessage({ id: 'appVersion.deleteDescription' })}
+                  okText={intl.formatMessage({ id: 'common.delete' })}
+                  cancelText={intl.formatMessage({ id: 'common.cancel' })}
                   okButtonProps={{ danger: true }}
                   onConfirm={async () => {
                     setBusyId(item.versionId);
                     try {
                       await deleteAppVersion(item.versionId);
-                      message.success('版本已删除');
+                      message.success(intl.formatMessage({ id: 'appVersion.deleted' }));
                       await reload();
                     } catch {
-                      message.error('删除失败');
+                      message.error(intl.formatMessage({ id: 'appVersion.deleteFailed' }));
                     } finally {
                       setBusyId(undefined);
                     }
                   }}
                 >
                   <Button type="link" danger icon={<DeleteOutlined />}>
-                    删除
+                    {intl.formatMessage({ id: 'common.delete' })}
                   </Button>
                 </Popconfirm>
               </Space>
@@ -377,13 +404,19 @@ export default function AppVersionMgr() {
 
       <Modal
         className={styles.editorModal}
-        title={editing ? '编辑版本' : '新建版本'}
+        title={
+          editing ? intl.formatMessage({ id: 'appVersion.editTitle' }) : intl.formatMessage({ id: 'appVersion.create' })
+        }
         open={open}
         onCancel={close}
         onOk={() => form.submit()}
         confirmLoading={saving}
         width={880}
-        okText={editing ? '保存版本' : '创建版本'}
+        okText={
+          editing
+            ? intl.formatMessage({ id: 'appVersion.save' })
+            : intl.formatMessage({ id: 'appVersion.createAction' })
+        }
         destroyOnClose
       >
         <Form
@@ -394,7 +427,7 @@ export default function AppVersionMgr() {
             if (savingRef.current) return;
             const payload = toPayload(values);
             if (!payload.url) {
-              message.warning('请先上传安装包或填写下载地址');
+              message.warning(intl.formatMessage({ id: 'appVersion.packageRequired' }));
               return;
             }
             savingRef.current = true;
@@ -402,28 +435,32 @@ export default function AppVersionMgr() {
             try {
               if (editing) await updateAppVersion(editing.versionId, payload);
               else await createAppVersion(payload);
-              message.success('版本保存成功');
+              message.success(intl.formatMessage({ id: 'appVersion.saved' }));
               close();
               await reload(1, size, filters);
             } catch {
-              message.error('版本保存失败');
+              message.error(intl.formatMessage({ id: 'appVersion.saveFailed' }));
             } finally {
               savingRef.current = false;
               setSaving(false);
             }
           }}
         >
-          <div className={styles.sectionTitle}>归属</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'appVersion.target' })}</div>
           <div className={styles.twoColumns}>
             <Form.Item
               name="deviceType"
-              label="设备类型"
+              label={intl.formatMessage({ id: 'appVersion.deviceType' })}
               initialValue="electron"
-              extra="桌面端固定发送 electron，不可修改；平台与架构请用下面两列"
+              extra={intl.formatMessage({ id: 'appVersion.deviceHint' })}
             >
               <Input disabled />
             </Form.Item>
-            <Form.Item name="platform" label="平台" rules={[{ required: true, message: '请选择平台' }]}>
+            <Form.Item
+              name="platform"
+              label={intl.formatMessage({ id: 'appVersion.platform' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'appVersion.platformRequired' }) }]}
+            >
               <Select
                 options={PLATFORMS}
                 onChange={(value) => {
@@ -436,50 +473,83 @@ export default function AppVersionMgr() {
             </Form.Item>
           </div>
           <div className={styles.twoColumns}>
-            <Form.Item name="arch" label="架构" rules={[{ required: true, message: '请选择架构' }]}>
-              <Select options={archOptions(platform)} disabled={!platform} placeholder="先选择平台" />
+            <Form.Item
+              name="arch"
+              label={intl.formatMessage({ id: 'appVersion.arch' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'appVersion.archRequired' }) }]}
+            >
+              <Select
+                options={archOptions(platform)}
+                disabled={!platform}
+                placeholder={intl.formatMessage({ id: 'appVersion.platformFirst' })}
+              />
             </Form.Item>
-            <Form.Item name="channel" label="渠道" rules={[{ required: true, message: '请选择渠道' }]}>
+            <Form.Item
+              name="channel"
+              label={intl.formatMessage({ id: 'appVersion.channel' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'appVersion.channelRequired' }) }]}
+            >
               <Select options={CHANNELS} />
             </Form.Item>
           </div>
 
-          <div className={styles.sectionTitle}>版本信息</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'appVersion.versionInfo' })}</div>
           <div className={styles.twoColumns}>
             <Form.Item
               name="appVersion"
-              label="版本号"
+              label={intl.formatMessage({ id: 'appVersion.version' })}
               rules={[
-                { required: true, message: '请输入版本号' },
-                { pattern: /^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/, message: '版本号需形如 0.1.0 或 0.1.1-beta.2' },
+                { required: true, message: intl.formatMessage({ id: 'appVersion.versionRequired' }) },
+                {
+                  pattern: /^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/,
+                  message: intl.formatMessage({ id: 'appVersion.versionInvalid' }),
+                },
               ]}
             >
-              <Input maxLength={32} placeholder="例如 0.1.0" />
+              <Input maxLength={32} placeholder={intl.formatMessage({ id: 'appVersion.versionPlaceholder' })} />
             </Form.Item>
-            <Form.Item name="updateType" label="更新类型" initialValue="full">
+            <Form.Item
+              name="updateType"
+              label={intl.formatMessage({ id: 'appVersion.updateType' })}
+              initialValue="full"
+            >
               <Select options={UPDATE_TYPES} />
             </Form.Item>
           </div>
-          <Form.Item name="updateMsg" label="更新说明">
-            <Input.TextArea maxLength={2000} showCount rows={3} placeholder="一行一条，会原样展示在更新日志里" />
+          <Form.Item name="updateMsg" label={intl.formatMessage({ id: 'appVersion.releaseNotes' })}>
+            <Input.TextArea
+              maxLength={2000}
+              showCount
+              rows={3}
+              placeholder={intl.formatMessage({ id: 'appVersion.releaseNotesPlaceholder' })}
+            />
           </Form.Item>
 
-          <div className={styles.sectionTitle}>发布策略</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'appVersion.releasePolicy' })}</div>
           <div className={styles.twoColumns}>
-            <Form.Item name="forceUpdate" label="强制更新" valuePropName="checked" initialValue={false}>
+            <Form.Item
+              name="forceUpdate"
+              label={intl.formatMessage({ id: 'appVersion.forceUpdate' })}
+              valuePropName="checked"
+              initialValue={false}
+            >
               <Switch />
             </Form.Item>
-            <Form.Item name="releaseStatus" label="保存状态" initialValue="draft">
+            <Form.Item
+              name="releaseStatus"
+              label={intl.formatMessage({ id: 'appVersion.saveStatus' })}
+              initialValue="draft"
+            >
               <Select
                 options={[
-                  { value: 'draft', label: '保存为草稿（桌面端不可见）' },
-                  { value: 'published', label: '直接发布' },
+                  { value: 'draft', label: intl.formatMessage({ id: 'appVersion.saveDraft' }) },
+                  { value: 'published', label: intl.formatMessage({ id: 'appVersion.publishDirectly' }) },
                 ]}
               />
             </Form.Item>
           </div>
 
-          <div className={styles.sectionTitle}>安装包</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'appVersion.package' })}</div>
           <Space align="center" className={styles.uploadRow}>
             <Upload
               showUploadList={false}
@@ -489,7 +559,7 @@ export default function AppVersionMgr() {
               }}
             >
               <Button icon={<UploadOutlined />} loading={uploading}>
-                上传安装包
+                {intl.formatMessage({ id: 'appVersion.upload' })}
               </Button>
             </Upload>
             {uploaded && (
@@ -500,14 +570,14 @@ export default function AppVersionMgr() {
           </Space>
           <Form.Item
             name="url"
-            label="下载地址"
-            rules={[{ required: true, message: '请上传安装包或填写下载地址' }]}
-            extra="上传后自动填入对象存储地址；也可以粘贴 CDN 上的外部地址"
+            label={intl.formatMessage({ id: 'appVersion.downloadUrl' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'appVersion.downloadRequired' }) }]}
+            extra={intl.formatMessage({ id: 'appVersion.downloadHint' })}
           >
-            <Input maxLength={1000} placeholder="https://… 或上传后自动生成" />
+            <Input maxLength={1000} placeholder={intl.formatMessage({ id: 'appVersion.downloadPlaceholder' })} />
           </Form.Item>
           <div className={styles.twoColumns}>
-            <Form.Item name="fileName" label="文件名">
+            <Form.Item name="fileName" label={intl.formatMessage({ id: 'appVersion.fileName' })}>
               <Input maxLength={255} readOnly />
             </Form.Item>
             <Form.Item name="sha256" label="SHA256">

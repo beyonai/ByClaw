@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.dto.resource;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import java.math.BigDecimal;
@@ -12,12 +14,13 @@ public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthor
     public static final Set<String> TYPES = Set.of("TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA",
         "KG_TERM", "SKILL");
 
+    // Import endpoints return validation messages directly, so resolve them in the request locale.
     public static EnterpriseResourceSyncRequest parse(JSONObject json) {
         if (!TYPES.contains(json.getString("resourceBizType"))) {
-            throw new IllegalArgumentException("不支持的同步资源类型");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.type.unsupported"));
         }
         if (json.containsKey("ownerType") && !"enterprise".equals(json.get("ownerType"))) {
-            throw new IllegalArgumentException("同步资源必须归属企业");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.owner.invalid"));
         }
         json.put("ownerType", "enterprise");
         Boolean view = flag(json, "viewAuth");
@@ -25,18 +28,18 @@ public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthor
         Scope scope = null;
         if (json.containsKey("authScope")) {
             if (!(json.get("authScope") instanceof JSONObject object)) {
-                throw new IllegalArgumentException("authScope 必须是对象且不能为 null");
+                throw new IllegalArgumentException(I18nUtil.get("resource.sync.scope.object.required"));
             }
             if (!Set.of("userIds", "orgIds", "postIds").containsAll(object.keySet())) {
-                throw new IllegalArgumentException("authScope 含未知字段");
+                throw new IllegalArgumentException(I18nUtil.get("resource.sync.scope.fields.invalid"));
             }
             scope = new Scope(ids(object, "userIds"), ids(object, "orgIds"), ids(object, "postIds"));
         }
         if ((Boolean.TRUE.equals(view) || Boolean.TRUE.equals(auto)) && scope == null) {
-            throw new IllegalArgumentException("开启查看或自动授权必须提供 authScope");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.scope.required"));
         }
         if (scope != null && view == null && auto == null) {
-            throw new IllegalArgumentException("authScope 必须与授权开关一起传入");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.scope.flags.required"));
         }
         return new EnterpriseResourceSyncRequest(view, auto, scope);
     }
@@ -44,7 +47,7 @@ public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthor
     private static Boolean flag(JSONObject json, String field) {
         if (!json.containsKey(field)) return null;
         if (!(json.get(field) instanceof Boolean value)) {
-            throw new IllegalArgumentException(field + " 必须是 boolean 且不能为 null");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.flag.invalid", field));
         }
         return value;
     }
@@ -52,20 +55,20 @@ public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthor
     private static List<Long> ids(JSONObject json, String field) {
         if (!json.containsKey(field)) return List.of();
         if (!(json.get(field) instanceof JSONArray values)) {
-            throw new IllegalArgumentException(field + " 必须是数组且不能为 null");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.ids.array.required", field));
         }
         LinkedHashSet<Long> ids = new LinkedHashSet<>();
         for (Object value : values) {
             String text = value == null ? "" : value.toString();
             if (!(value instanceof String || value instanceof Number) || !text.matches("[0-9]+")) {
-                throw new IllegalArgumentException(field + " 含非法 ID");
+                throw new IllegalArgumentException(I18nUtil.get("resource.sync.id.invalid", field));
             }
             try {
                 long id = new BigDecimal(text).longValueExact();
                 if (id <= 0) throw new ArithmeticException();
                 ids.add(id);
             } catch (ArithmeticException exception) {
-                throw new IllegalArgumentException(field + " 含超出范围的 ID");
+                throw new IllegalArgumentException(I18nUtil.get("resource.sync.id.out.of.range", field));
             }
         }
         return List.copyOf(ids);

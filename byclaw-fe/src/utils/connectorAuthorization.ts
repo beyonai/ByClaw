@@ -1,16 +1,20 @@
+import { getIntl } from '@umijs/max';
+
 export const CONNECTOR_AUTHORIZATION_REQUEST_EVENT = 'byclaw-open-connector-authorization';
 
 const MEDIA_CONNECTOR_ACTIONS = {
-  'image-generation-model': '配置文生图模型连接器',
-  'speech-generation-model': '配置语音模型连接器',
+  'image-generation-model': 'connector.configureImage',
+  'speech-generation-model': 'connector.configureSpeech',
 } as const;
 
 export type MediaConnectorCode = keyof typeof MEDIA_CONNECTOR_ACTIONS;
 
-export const parseConnectorAction = (output: string) => {
+export const parseConnectorAction = (output: string, intl?: ReturnType<typeof getIntl>) => {
   if (!output.includes('MEDIA_CONNECTOR_CONFIGURATION_REQUIRED')) return undefined;
   const connectorCode = /(?:^|\s)connectorCode=([a-z0-9-]+);/u.exec(output)?.[1] as MediaConnectorCode | undefined;
-  const label = connectorCode ? MEDIA_CONNECTOR_ACTIONS[connectorCode] : undefined;
+  // Resolve the label when the action is parsed so language changes do not freeze it at module load.
+  const messageId = connectorCode ? MEDIA_CONNECTOR_ACTIONS[connectorCode] : undefined;
+  const label = messageId ? (intl || getIntl()).formatMessage({ id: messageId }) : undefined;
   return connectorCode && label ? { connectorCode, label } : undefined;
 };
 
@@ -32,10 +36,10 @@ const getToolOutput = (substance: unknown): string => {
   }
 };
 
-export const collectConnectorActions = (items: ConnectorActionItem[] = []) => {
+export const collectConnectorActions = (items: ConnectorActionItem[] = [], intl?: ReturnType<typeof getIntl>) => {
   const actions = new Map<MediaConnectorCode, ReturnType<typeof parseConnectorAction>>();
   items.forEach((item) => {
-    const action = parseConnectorAction(getToolOutput(item.content?.substance));
+    const action = parseConnectorAction(getToolOutput(item.content?.substance), intl);
     if (action && !actions.has(action.connectorCode)) actions.set(action.connectorCode, action);
   });
   return Array.from(actions.values()).filter((action): action is NonNullable<typeof action> => Boolean(action));

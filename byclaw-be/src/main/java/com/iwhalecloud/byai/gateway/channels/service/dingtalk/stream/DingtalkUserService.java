@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -110,12 +112,12 @@ public class DingtalkUserService {
             boolean bindingMatches = saveUserExternalSystem(unionId, userInfo.getUserId(), userDetail);
             if (!bindingMatches) {
                 CurrentUserHolder.clearLoginInfo();
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定发生冲突，请重新发送消息。");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.bindingConflict"));
                 return null;
             }
             if (extractSelectedUserCode(textContent) != null) {
                 CurrentUserHolder.clearLoginInfo();
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定成功，请重新发送您的问题。");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.bound"));
                 return null;
             }
         }
@@ -177,7 +179,7 @@ public class DingtalkUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable DingTalk bound user. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);
@@ -211,7 +213,7 @@ public class DingtalkUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable DingTalk user before binding. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);

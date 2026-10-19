@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -49,7 +50,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatTurnCoordinatorTest {
+class GroupChatTurnCoordinatorTest extends I18nTestSupport {
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper anchors = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
@@ -108,8 +109,10 @@ class GroupChatTurnCoordinatorTest {
         verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
     }
 
-    @Test
-    void coordinatedTaskIsCreatedBeforeFirstModelTurnAndCanOwnItsInitialDispatch() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {"zh-CN|协作任务", "en-US|Collaborative task"}, delimiter = '|')
+    void coordinatedTaskIsCreatedBeforeFirstModelTurnAndCanOwnItsInitialDispatch(String language, String title) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
         var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
         var taskService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class);
         ReflectionTestUtils.setField(coordinator, "coordination", coordination);
@@ -117,7 +120,7 @@ class GroupChatTurnCoordinatorTest {
         when(coordination.findScope(anyLong())).thenReturn(null);
         ByaiGroupChatTurn turn = coordinator.enqueueCoordinatedUser(10L, 20L, null, 1L, 9L, List.of(2L, 3L));
         verify(coordination).resolveForExecution(10L, turn.getCandidateSessionId(), List.of(2L, 3L), 9L, "COORDINATED");
-        verify(taskService).promote(turn, "协作任务", null);
+        verify(taskService).promote(turn, title, null);
         assertEquals(1, turnRows.size());
         assertEquals(9L, turn.getTargetAgentId());
         var session = new com.iwhalecloud.byai.manager.entity.session.ByaiSession();

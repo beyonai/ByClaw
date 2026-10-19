@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -13,7 +15,7 @@ import org.springframework.integration.support.locks.RenewableLockRegistry;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-class ResourceFavoriteLockServiceTest {
+class ResourceFavoriteLockServiceTest extends I18nTestSupport {
     private final RenewableLockRegistry registry = mock(RenewableLockRegistry.class);
     private final Lock lock = mock(Lock.class);
     private final ResourceFavoriteLockService service = new ResourceFavoriteLockService(registry);
@@ -73,4 +75,17 @@ class ResourceFavoriteLockServiceTest {
         assertThat(Thread.currentThread().isInterrupted()).isTrue();
         verify(lock, never()).unlock();
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|等待资源收藏锁超时: 22:33", "en-US|Timed out waiting for resource favorite lock: 22:33"
+    }, delimiter = '|')
+    void timeoutMessageUsesTheRequestLocale(String language, String expected) throws Exception {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        when(lock.tryLock(30, TimeUnit.SECONDS)).thenReturn(false);
+        assertThatThrownBy(() -> service.acquire(22L, 33L))
+            .isInstanceOf(CannotAcquireLockException.class).hasMessage(expected);
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+        verify(lock, never()).unlock();
+    }
+
 }

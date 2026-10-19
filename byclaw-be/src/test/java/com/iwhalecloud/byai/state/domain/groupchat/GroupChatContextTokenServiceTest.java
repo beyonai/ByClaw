@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -16,7 +18,7 @@ import org.mockito.ArgumentCaptor;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatContextTokenService;
 
-class GroupChatContextTokenServiceTest {
+class GroupChatContextTokenServiceTest extends I18nTestSupport {
 
     @Test
     void issueBindsParentGroupChildSessionAndHistoryBoundary() {

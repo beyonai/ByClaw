@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -11,7 +13,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 
-class ChatStreamRuntimeCoordinatorBackpressureTest {
+class ChatStreamRuntimeCoordinatorBackpressureTest extends I18nTestSupport {
 
     @Test
     void createsBoundedHttpEventQueueFromConfiguredCapacity() {

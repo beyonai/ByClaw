@@ -43,5 +43,14 @@ public class SandboxCleanupJob {
         catch (Exception e) {
             LOGGER.error("沙箱清理任务执行异常", e);
         }
+        try {
+            SandboxLifecycleJobReport report = sandboxService.releaseSilentDshSandboxes();
+            LOGGER.debug("DSH 静默释放检查完成，候选 {} 个，释放 {} 个，跳过 {} 个，失败 {} 个，释放记录：{}，失败记录：{}",
+                report.getTotalCandidates(), report.getAffectedCount(), report.getSkippedCount(),
+                report.getFailedCount(), report.getAffectedSandboxes(), report.getFailedSandboxes());
+        }
+        catch (Exception e) {
+            LOGGER.error("DSH 静默释放检查执行异常", e);
+        }
     }
 }

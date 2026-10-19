@@ -1,3 +1,4 @@
+import { useIntl, getIntl } from '@umijs/max';
 import { useEffect, useRef, useState } from 'react';
 
 import type { UserInfo } from '@/models/common/user';
@@ -8,9 +9,11 @@ interface Props {
   userInfo: UserInfo | null | undefined;
 }
 
-const getDisplayName = (userInfo: UserInfo) => userInfo.userName || userInfo.userCode || '用户';
+const getDisplayName = (userInfo: UserInfo) =>
+  userInfo.userName || userInfo.userCode || getIntl().formatMessage({ id: 'common.user' });
 
 export default function UserIdentityBar({ userInfo }: Props) {
+  const intl = useIntl();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -26,7 +29,7 @@ export default function UserIdentityBar({ userInfo }: Props) {
 
   const displayName = getDisplayName(userInfo);
   const organization = userInfo.usersOrganizations?.[0];
-  const initial = Array.from(displayName)[0] || '用';
+  const initial = Array.from(displayName)[0] || intl.formatMessage({ id: 'adapterRecorder.user.initial' });
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -38,24 +41,29 @@ export default function UserIdentityBar({ userInfo }: Props) {
   return (
     <div className={styles.identity} data-testid="recorder-user-identity" onKeyDown={handleKeyDown}>
       {open && (
-        <div className={styles.details} id="recorder-user-details" role="region" aria-label="当前用户信息">
-          <div className={styles.detailsHeading}>账户信息</div>
+        <div
+          className={styles.details}
+          id="recorder-user-details"
+          role="region"
+          aria-label={intl.formatMessage({ id: 'adapterRecorder.user.currentInfo' })}
+        >
+          <div className={styles.detailsHeading}>{intl.formatMessage({ id: 'adapterRecorder.user.accountInfo' })}</div>
           <dl className={styles.detailsList}>
             {userInfo.userCode && (
               <div className={styles.detailItem}>
-                <dt>账号</dt>
+                <dt>{intl.formatMessage({ id: 'settings.email.account' })}</dt>
                 <dd>{userInfo.userCode}</dd>
               </div>
             )}
             {organization?.orgName && (
               <div className={styles.detailItem}>
-                <dt>组织</dt>
+                <dt>{intl.formatMessage({ id: 'orgMgr.personalSelect.org' })}</dt>
                 <dd>{organization.orgName}</dd>
               </div>
             )}
             {organization?.positionName && (
               <div className={styles.detailItem}>
-                <dt>职位</dt>
+                <dt>{intl.formatMessage({ id: 'adapterRecorder.user.position' })}</dt>
                 <dd>{organization.positionName}</dd>
               </div>
             )}
@@ -67,7 +75,7 @@ export default function UserIdentityBar({ userInfo }: Props) {
         ref={triggerRef}
         className={styles.trigger}
         type="button"
-        aria-label={`当前用户：${displayName}`}
+        aria-label={intl.formatMessage({ id: 'adapterRecorder.user.current' }, { v0: displayName })}
         aria-expanded={open}
         aria-controls="recorder-user-details"
         onClick={() => setOpen((visible) => !visible)}

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,7 +55,7 @@ import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatGatewayExecutorTest {
+class GroupChatGatewayExecutorTest extends I18nTestSupport {
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private ScriptService script;
     private ByaiMessageMapper messages;
@@ -458,7 +459,7 @@ class GroupChatGatewayExecutorTest {
         context.traceId = execution.getTraceId();
         context.assistantChatDto.setAgentId(41L);
         assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
-            .hasMessageContaining("identity does not match");
+            .hasMessageContaining("运行身份与派发任务不匹配");
         verifyNoInteractions(historyFiles);
     }
 

@@ -53,7 +53,7 @@ public class UserProfileApplicationService {
         }
         Users user = usersMapper.selectById(loginInfo.getUserId());
         if (user == null || !UserState.ACTIVE.equals(user.getState())) {
-            throw new BaseException("用户不存在或已禁用");
+            throw new BaseException("user.profile.accountUnavailable");
         }
         return user;
     }
@@ -77,7 +77,7 @@ public class UserProfileApplicationService {
         ByaiCustomerLeads existing = readLead(user);
         if (existing == null && request.getCompanyName() == null) {
             if (request.getProfileRole() != null || request.getProfileInterests() != null) {
-                throw new BaseException("请先填写公司 / 组织名称");
+                throw new BaseException("profile.company.required");
             }
             return null; // 兼容只修改姓名或头像的旧调用，不新增空白留资记录。
         }
@@ -97,7 +97,7 @@ public class UserProfileApplicationService {
             lead.setProfileInterests(JSON.toJSONString(UserProfileOptions.interests(request.getProfileInterests())));
         }
         int rows = insert ? leadsMapper.insertProfile(lead) : leadsMapper.updateProfileLead(lead);
-        if (rows != 1) throw new BaseException("个人资料保存失败");
+        if (rows != 1) throw new BaseException("profile.save.failed");
         return lead;
     }
 
@@ -124,7 +124,7 @@ public class UserProfileApplicationService {
             update.set(Users::getAvatar, avatar);
         }
         if (usersMapper.update(null, update) != 1) {
-            throw new BaseException("个人信息保存失败");
+            throw new BaseException("user.profile.saveFailed");
         }
 
         ByaiCustomerLeads lead = saveLead(user, request);

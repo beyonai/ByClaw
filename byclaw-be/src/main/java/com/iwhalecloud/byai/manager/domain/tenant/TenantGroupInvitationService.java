@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -38,22 +40,22 @@ public class TenantGroupInvitationService {
         if ("createInvitation".equals(method)) return fallback;
         String token = ((GroupChatInvitationTokenRequest) args[0]).getToken();
         if (token == null || !token.matches("[A-Za-z0-9]{8}"))
-            throw new IllegalArgumentException("Invitation is invalid or expired");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.invitation.invalid"));
         var link = links.selectInvitationByToken(token);
         String hint = ((GroupChatInvitationTokenRequest) args[0]).getEnterpriseId();
         if (hint != null && (link == null || !hint.equals(String.valueOf(link.getComAcctId()))))
             throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
-                "Invitation tenant mismatch");
+                I18nUtil.get("tenant.invitation.mismatch"));
         if (link == null) return fallback;
         if (link.getComAcctId() == null || link.getComAcctId() <= 1) return null;
         if (!"ACTIVE".equals(link.getStatus()) || link.getCreatorId() == null
             || link.getExpireTime() == null || !link.getExpireTime().isAfter(java.time.LocalDateTime.now()))
-            throw new IllegalArgumentException("Invitation is invalid or expired");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.invitation.invalid"));
         if ("joinInvitation".equals(method)) {
             Long caller = CurrentUserHolder.getCurrentUserId();
             if (caller == null || caller <= 0)
                 throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED,
-                    "Login required");
+                    I18nUtil.get("tenant.login.required"));
             return new TenantRequestContext(caller, link.getComAcctId(), "MEMBER");
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
@@ -64,7 +66,7 @@ public class TenantGroupInvitationService {
     private void index(TenantRequestContext tenant, long groupId, JsonNode invitation) {
         var existing = links.selectInvitationBySessionId(groupId);
         if (existing != null && !java.util.Objects.equals(existing.getComAcctId(), tenant.enterpriseId()))
-            throw new IllegalStateException("Invitation identity conflict");
+            throw new IllegalStateException(I18nUtil.get("tenant.invitation.identity.conflict"));
         var link = new com.iwhalecloud.byai.manager.entity.message.MessageShareLink();
         link.setLinkType("GROUP_INVITATION");
         link.setLinkId(groupId);
@@ -80,7 +82,7 @@ public class TenantGroupInvitationService {
         link.setExpireTime(java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(
             invitation.path("expiresAt").asLong()), java.time.ZoneId.systemDefault()));
         if ((existing == null ? links.insert(link) : links.updateInvitation(link)) != 1)
-            throw new IllegalStateException("Unable to save invitation routing");
+            throw new IllegalStateException(I18nUtil.get("tenant.invitation.save.failed"));
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -98,7 +100,7 @@ public class TenantGroupInvitationService {
         var inviter = users.findById(preview.path("inviterId").asLong());
         if (inviter == null || !"A".equals(inviter.getState()) || "Y".equals(inviter.getIsLocked())
             || inviter.getUserExpDate() != null && inviter.getUserExpDate().getTime() <= System.currentTimeMillis())
-            throw new IllegalArgumentException("Invitation is invalid or expired");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.invitation.invalid"));
         if ("validateInvitation".equals(method)) {
             ((jakarta.servlet.http.HttpServletResponse) args[1]).setHeader("Cache-Control", "no-store");
             ((com.fasterxml.jackson.databind.node.ObjectNode) preview).remove("inviterId");
@@ -110,7 +112,7 @@ public class TenantGroupInvitationService {
         var user = users.findById(tenant.userId());
         if (user == null || !"A".equals(user.getState()) || "Y".equals(user.getIsLocked())
             || user.getUserExpDate() != null && user.getUserExpDate().getTime() <= System.currentTimeMillis())
-            throw new IllegalArgumentException("Login required");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.login.required"));
         memberships.joinByInvitation(tenant.enterpriseId(), preview.path("inviterId").asLong());
         // The package row lock remains held by this transaction: re-read after admission so
         // concurrent retries observe the first join and do not repeat writes or member events.
@@ -128,7 +130,7 @@ public class TenantGroupInvitationService {
             if ("AGENT".equals(member.path("memObjType").asText())) agentIds.add(member.path("memObjId").asLong());
             if ("USER".equals(member.path("memObjType").asText()) && member.path("memObjId").asLong() == tenant.userId()) result = member;
         }
-        if (result == null) throw new IllegalStateException("Tenant group join could not be confirmed");
+        if (result == null) throw new IllegalStateException(I18nUtil.get("tenant.invitation.join.unconfirmed"));
         if (!agentIds.isEmpty()) grants.grantDigitalEmployeesToUser(agentIds, tenant.userId());
         if (!alreadyMember) TenantGroupMembershipEvents.publish(events, tenant, Long.valueOf(id), joined);
         ((com.fasterxml.jackson.databind.node.ObjectNode) result).put("enterpriseId", Long.toString(tenant.enterpriseId()));

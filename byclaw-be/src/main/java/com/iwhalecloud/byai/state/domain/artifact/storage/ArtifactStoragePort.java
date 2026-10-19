@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.storage;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,7 +35,7 @@ public interface ArtifactStoragePort {
             catch (IOException ignored) {
                 // Preserve the range positioning failure as the primary exception.
             }
-            throw new UncheckedIOException("无法定位Artifact读取区间", e);
+            throw new UncheckedIOException(I18nUtil.get("artifact.range.seekFailed"), e);
         }
     }
 

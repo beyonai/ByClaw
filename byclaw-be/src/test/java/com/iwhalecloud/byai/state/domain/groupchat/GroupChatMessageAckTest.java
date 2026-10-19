@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,7 +46,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthor
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 
 /** “收到”只写确认记录，并在事务提交后复用群事件广播。 */
-class GroupChatMessageAckTest {
+class GroupChatMessageAckTest extends I18nTestSupport {
     private final ByaiGroupChatMessageAckMapper acknowledgements = mock(ByaiGroupChatMessageAckMapper.class);
     private final ByaiGroupChatMentionMapper mentions = mock(ByaiGroupChatMentionMapper.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);

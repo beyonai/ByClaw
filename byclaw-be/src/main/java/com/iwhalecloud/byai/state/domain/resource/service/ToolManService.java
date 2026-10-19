@@ -427,7 +427,7 @@ public class ToolManService {
             String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
             String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
             if (StringUtils.isAnyBlank(systemCode, resourceCode)) {
-                throw new IllegalArgumentException("systemCode、resourceCode 不能为空");
+                throw new IllegalArgumentException(I18nUtil.get("resource.sync.codes.required"));
             }
             ssResourceService.lockSkillImport("THIRD_SYNC:" + CurrentUserHolder.getEnterpriseId() + ":"
                 + systemCode + ":" + resourceBizType + ":" + resourceCode);

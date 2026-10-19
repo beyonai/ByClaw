@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.aimodel;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,7 +29,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
-class ModelSpeechDebugStatusTest {
+class ModelSpeechDebugStatusTest extends I18nTestSupport {
     @Mock private ModelManagementApplicationService management;
     @Mock private ModelDebugSpeechApplicationService speech;
     private ModelManagementController controller;

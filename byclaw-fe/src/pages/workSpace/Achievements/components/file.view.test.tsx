@@ -38,7 +38,7 @@ describe('achievement file tree preview actions', () => {
     (getCatalogsByTaskId as jest.Mock).mockResolvedValue([]);
   });
 
-  it.each(['SVG', 'jpeg', 'avif', 'csv', 'xls', 'webm', 'mp3', 'pdf', 'docx', 'pptx'])(
+  it.each(['SVG', 'jpeg', 'avif', 'csv', 'xls', 'webm', 'mp3', 'pdf', 'docx', 'pptx', 'zip', 'tar'])(
     'opens %s from the file tree',
     async (type) => {
       const fileName = `report.${type}`;
@@ -46,17 +46,21 @@ describe('achievement file tree preview actions', () => {
         files: [{ fileId: '1', fileName, fileUrl: `/files/${fileName}` }],
       });
       render(<FileView />);
-      fireEvent.click((await screen.findByRole('img', { name: 'eye' })).closest('span')!);
+      const preview = await screen.findByRole('img', { name: 'eye' });
+      // 下载入口属于文件树，应在打开预览、隐藏文件树之前检查。
+      expect(screen.getByRole('img', { name: 'download' })).toBeInTheDocument();
+      fireEvent.click(preview.closest('span')!);
       expect(screen.getByTestId('selected-preview')).toHaveTextContent(fileName);
     }
   );
 
   it('keeps downloads for binary formats without an online decoder', async () => {
+    // ZIP/TAR 已支持预览，使用仍无在线解码器的 PSD 验证下载兜底。
     (getWorkSpaceFile as jest.Mock).mockResolvedValue({
-      files: [{ fileId: '1', fileName: 'archive.zip', fileUrl: '/files/archive.zip' }],
+      files: [{ fileId: '1', fileName: 'design.psd', fileUrl: '/files/design.psd' }],
     });
     render(<FileView />);
-    await waitFor(() => expect(screen.getByText('archive.zip')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('design.psd')).toBeInTheDocument());
     expect(screen.queryByRole('img', { name: 'eye' })).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'download' })).toBeInTheDocument();
   });

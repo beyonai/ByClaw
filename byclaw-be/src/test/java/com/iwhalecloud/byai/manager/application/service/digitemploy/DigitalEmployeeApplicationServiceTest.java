@@ -96,7 +96,7 @@ import static org.mockito.Mockito.spy;
 
 import org.mockito.InOrder;
 
-class DigitalEmployeeApplicationServiceTest {
+class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void editorRejectsNewControlledResourceWithoutUsePermissionButRetainsExistingBinding() {

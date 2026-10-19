@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -24,7 +26,7 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-class TenantChatRoutingAspectTest {
+class TenantChatRoutingAspectTest extends I18nTestSupport {
 
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final TenantChatRoutingAspect aspect = new TenantChatRoutingAspect(node);

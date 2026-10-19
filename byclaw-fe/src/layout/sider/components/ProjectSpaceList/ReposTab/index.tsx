@@ -242,10 +242,10 @@ const ReposTab: React.FC<ReposTabProps> = ({ projectId, resourceId, onOpenDetail
           title: node.name,
         });
       } catch (error: any) {
-        message.error(error?.message || '文件内容加载失败');
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.file.loadFailed' }));
       }
     },
-    [branchMap, onOpenDetail, projectId]
+    [branchMap, onOpenDetail, projectId, intl]
   );
 
   const quoteFile = useCallback(

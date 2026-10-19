@@ -4,7 +4,10 @@ import TenantDatasource from './index';
 import { listTenants } from '../../service/TenantMgr';
 import { browseTenantTable, executeTenantSql, listTenantTables } from '../../service/TenantDatasource';
 
+let mockLocale = 'zh-CN';
+
 jest.mock('@umijs/max', () => ({
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
   useSelector: (selector: (state: unknown) => unknown) =>
     selector({ user: { userInfo: { usersOrganizations: [{ userType: 'PLAT_MAN' }] } } }),
 }));
@@ -70,12 +73,30 @@ describe('tenant datasource workbench', () => {
   jest.setTimeout(15000);
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLocale = 'zh-CN';
     (listTenants as jest.Mock).mockResolvedValue([
       { enterpriseId: '123', enterpriseName: '测试租户', provisionState: 'READY' },
     ]);
     (listTenantTables as jest.Mock).mockResolvedValue([{ schema: 'byai', name: 'sample', type: 'BASE TABLE' }]);
     (browseTenantTable as jest.Mock).mockResolvedValue(result());
     (executeTenantSql as jest.Mock).mockResolvedValue(result(1, true));
+  });
+
+  it('switches the existing workspace to English without changing the selected tenant or SQL', async () => {
+    const { rerender } = render(<TenantDatasource />);
+    await screen.findByRole('option', { name: '测试租户 · 123' });
+    fireEvent.change(screen.getByRole('combobox', { name: '选择租户' }), { target: { value: '123' } });
+    await screen.findByRole('treeitem', { name: /sample/ });
+    fireEvent.change(screen.getByPlaceholderText('输入一条 SQL 语句…'), { target: { value: 'SELECT 1' } });
+    mockLocale = 'en-US';
+    rerender(<TenantDatasource />);
+    expect(screen.getByPlaceholderText('Enter one SQL statement…')).toHaveValue('SELECT 1');
+    expect(screen.getByRole('tree', { name: 'Tenant database objects' })).toBeInTheDocument();
+    // Ant Design 图标的名称也会进入按钮的可访问名称，与中文用例采用相同匹配方式。
+    fireEvent.click(screen.getByRole('button', { name: /Run SQL/ }));
+    await waitFor(() => expect(executeTenantSql).toHaveBeenCalledWith('123', 'SELECT 1', 1, false));
+    expect(await screen.findByText('Page 1 · 1 rows')).toBeInTheDocument();
+    expect(screen.getByText('Up to 500 rows per page')).toBeInTheDocument();
   });
 
   it('selects a table on single click and opens a closable data tab on double click', async () => {

@@ -48,7 +48,7 @@ public class UserAvatarApplicationService {
         validateFile(file);
         Users user = usersMapper.selectById(loginInfo.getUserId());
         if (user == null || !UserState.ACTIVE.equals(user.getState())) {
-            throw new BaseException("用户不存在或已禁用");
+            throw new BaseException("user.profile.accountUnavailable");
         }
 
         String url = storeValidatedAvatar(file);
@@ -59,7 +59,7 @@ public class UserAvatarApplicationService {
             .set(Users::getAvatar, url)
             .set(Users::getUpdateDate, new Date()));
         if (updated != 1) {
-            throw new BaseException("用户头像保存失败");
+            throw new BaseException("user.avatar.saveFailed");
         }
         return url;
     }
@@ -82,15 +82,15 @@ public class UserAvatarApplicationService {
 
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BaseException("头像文件不能为空");
+            throw new BaseException("user.avatar.fileRequired");
         }
         if (file.getSize() > MAX_AVATAR_SIZE) {
-            throw new BaseException("头像文件不能超过 5 MB");
+            throw new BaseException("user.avatar.tooLarge");
         }
         String contentType = file.getContentType();
         String extension = contentType == null ? null : IMAGE_EXTENSIONS.get(contentType);
         if (extension == null) {
-            throw new BaseException("仅支持 PNG、JPEG、GIF 或 WebP 图片");
+            throw new BaseException("user.avatar.formatUnsupported");
         }
     }
 
@@ -102,7 +102,7 @@ public class UserAvatarApplicationService {
             file.getBytes());
         String url = filesApplicationService.uploadIcon(avatar).getFileUrl();
         if (StringUtils.isBlank(url) || url.length() > 400) {
-            throw new BaseException("头像存储未返回有效地址");
+            throw new BaseException("user.avatar.storageFailed");
         }
         return url;
     }

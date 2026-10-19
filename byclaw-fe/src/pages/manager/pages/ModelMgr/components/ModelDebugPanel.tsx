@@ -105,7 +105,8 @@ const ModelDebugPanel: React.FC<Props> = ({
                       data.append('sessionType', 'AGENT');
                       const result = await uploadFiles(data);
                       const audio = (result.rebuildFileList || result.uploadItems || [])[0];
-                      if (!audio?.fileId) throw new Error('上传未返回音频文件');
+                      if (!audio?.fileId)
+                        throw new Error(intl.formatMessage({ id: 'modelMgr.modal.audioUploadMissing' }));
                       let previous = {};
                       try {
                         previous = JSON.parse(debugInput || '{}');
@@ -117,7 +118,11 @@ const ModelDebugPanel: React.FC<Props> = ({
                       );
                       setAudioFileName(file.name);
                     } catch (error) {
-                      message.error(typeof error === 'string' ? error : '音频上传失败');
+                      message.error(
+                        typeof error === 'string'
+                          ? error
+                          : intl.formatMessage({ id: 'modelMgr.modal.audioUploadFailed' })
+                      );
                     } finally {
                       setUploading(false);
                     }
@@ -125,7 +130,7 @@ const ModelDebugPanel: React.FC<Props> = ({
                   }}
                 >
                   <Button size="small" loading={uploading} title={audioFileName}>
-                    上传 MP3
+                    {intl.formatMessage({ id: 'modelMgr.modal.uploadMp3' })}
                   </Button>
                 </Upload>
               )}

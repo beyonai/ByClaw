@@ -121,7 +121,7 @@ public class SkillGroupApplicationService {
         group.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         group.setUpdateTime(new Date());
         if (skillGroupMapper.updateGroupFields(group, group.getComAcctId()) == 0) {
-            throw new BaseException("技能组已被并发修改或删除，请刷新后重试");
+            throw new BaseException(I18nUtil.get("skillgroup.concurrentChange"));
         }
         return toVo(group);
     }
@@ -158,7 +158,7 @@ public class SkillGroupApplicationService {
         SkillGroupVo group = skillGroupMapper.selectDetail(
                 groupId, tenantId, CurrentUserHolder.getCurrentUserId());
         if (group == null) {
-            throw new BaseException("技能组不存在或当前用户不可访问");
+            throw new BaseException(I18nUtil.get("skillgroup.inaccessible"));
         }
         if (digitalEmployeeId != null) {
             SsResource digitalEmployee = resourceService.findById(digitalEmployeeId);
@@ -236,7 +236,7 @@ public class SkillGroupApplicationService {
             SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
                     digitalEmployee, group.getResourceId(), new ArrayList<>(snapshotIds));
             if (delegated == null) {
-                throw new BaseException("技能组安装结果异常");
+                throw new BaseException(I18nUtil.get("skillgroup.install.invalidResult"));
             }
             copySnapshotResult(delegated, result);
             List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
@@ -270,7 +270,7 @@ public class SkillGroupApplicationService {
             SkillGroupInstallResultVo delegated = digitalEmployeeApplicationService.installSkillGroupSnapshot(
                     digitalEmployee, group.getResourceId(), new ArrayList<>(snapshotIds));
             if (delegated == null) {
-                throw new BaseException("技能组安装结果异常");
+                throw new BaseException(I18nUtil.get("skillgroup.install.invalidResult"));
             }
             copySnapshotResult(delegated, result);
         }
@@ -321,7 +321,7 @@ public class SkillGroupApplicationService {
         SkillGroupInstallResultVo result = digitalEmployeeApplicationService.uninstallSkillGroupSnapshot(
                 digitalEmployee, group.getResourceId(), qo.getMode(), qo.getPreviewToken());
         if (result == null) {
-            throw new BaseException("技能组卸载结果异常");
+            throw new BaseException(I18nUtil.get("skillgroup.uninstall.invalidResult"));
         }
         if (!Boolean.TRUE.equals(result.getConfirmationRequired())) {
             List<SkillGroupMemberVo> finalMembers = skillGroupMapper.selectActiveMembers(group.getResourceId());
@@ -342,7 +342,7 @@ public class SkillGroupApplicationService {
         SkillGroupInstallResultVo result = digitalEmployeeApplicationService.uninstallSkillGroupSnapshot(
             digitalEmployee, group.getResourceId());
         if (result == null) {
-            throw new BaseException("技能组卸载结果异常");
+            throw new BaseException(I18nUtil.get("skillgroup.uninstall.invalidResult"));
         }
         return result;
     }
@@ -378,7 +378,7 @@ public class SkillGroupApplicationService {
                 inactive.setUpdateBy(userId);
                 inactive.setUpdateTime(now);
                 if (!relationService.updateById(inactive) && !isMemberActive(group.getResourceId(), skillId)) {
-                    throw new BaseException("技能组成员已被并发修改，请刷新后重试");
+                    throw new BaseException(I18nUtil.get("skillgroup.members.concurrentChange"));
                 }
                 continue;
             }
@@ -408,7 +408,7 @@ public class SkillGroupApplicationService {
             relation.setUpdateTime(now);
             if (!relationService.updateById(relation)
                     && isMemberActive(group.getResourceId(), relation.getRelResourceId())) {
-                throw new BaseException("技能组成员已被并发修改，请刷新后重试");
+                throw new BaseException(I18nUtil.get("skillgroup.members.concurrentChange"));
             }
         }
     }
@@ -444,7 +444,7 @@ public class SkillGroupApplicationService {
                 .map(SkillRelationSource::parse)
                 .anyMatch(source -> source.hasGroup(groupId));
         if (installed) {
-            throw new BaseException("技能组仍被数字员工引用，请先卸载后再删除");
+            throw new BaseException(I18nUtil.get("skillgroup.delete.referenced"));
         }
         relationService.remove(new LambdaQueryWrapper<SsResourceRelDetail>()
                 .eq(SsResourceRelDetail::getResourceId, groupId)
@@ -474,13 +474,13 @@ public class SkillGroupApplicationService {
 
     private void validateInstallRequest(SkillGroupInstallQo qo) {
         if (qo == null || qo.getGroupId() == null || qo.getDigitalEmployeeId() == null) {
-            throw new BaseException("数字员工和技能组标识不能为空");
+            throw new BaseException(I18nUtil.get("skillgroup.install.idsRequired"));
         }
     }
 
     private void validateUninstallRequest(SkillGroupUninstallQo qo) {
         if (qo == null || qo.getGroupId() == null || qo.getDigitalEmployeeId() == null) {
-            throw new BaseException("数字员工和技能组标识不能为空");
+            throw new BaseException(I18nUtil.get("skillgroup.install.idsRequired"));
         }
     }
 
@@ -498,13 +498,13 @@ public class SkillGroupApplicationService {
 
     private void validateAccessibleGroup(SsResource group, Long tenantId) {
         if (group == null) {
-            throw new BaseException("技能组不存在");
+            throw new BaseException(I18nUtil.get("skillgroup.notFound"));
         }
         if (!SKILL_GROUP.equals(group.getResourceBizType())) {
-            throw new BaseException("资源类型不是技能组");
+            throw new BaseException(I18nUtil.get("skillgroup.typeInvalid"));
         }
         if (!Objects.equals(tenantId, group.getComAcctId())) {
-            throw new BaseException("技能组不属于当前企业");
+            throw new BaseException(I18nUtil.get("skillgroup.tenantMismatch"));
         }
         if (!OwnerType.PERSONAL.equals(group.getOwnerType())) {
             return;
@@ -512,13 +512,13 @@ public class SkillGroupApplicationService {
         boolean accessible = authApplicationService.hasResourceManagePermission(group)
                 || authApplicationService.hasResourceUsePermission(group);
         if (!accessible) {
-            throw new BaseException("当前用户没有技能组访问权限");
+            throw new BaseException(I18nUtil.get("skillgroup.accessDenied"));
         }
     }
 
     private void validateActiveGroup(SsResource group) {
         if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), group.getResourceStatus())) {
-            throw new BaseException("技能组未上架");
+            throw new BaseException(I18nUtil.get("skillgroup.notPublished"));
         }
     }
 
@@ -531,23 +531,23 @@ public class SkillGroupApplicationService {
 
     private void validateManagedDigitalEmployee(SsResource digitalEmployee, Long tenantId, SsResource group) {
         if (digitalEmployee == null) {
-            throw new BaseException("数字员工不存在或不属于当前企业");
+            throw new BaseException(I18nUtil.get("skillgroup.employee.notFound"));
         }
         if (!ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(digitalEmployee.getResourceBizType())) {
-            throw new BaseException("安装目标不是数字员工");
+            throw new BaseException(I18nUtil.get("skillgroup.employee.typeInvalid"));
         }
         if (!Objects.equals(tenantId, digitalEmployee.getComAcctId())
                 || (group != null && !Objects.equals(group.getComAcctId(), digitalEmployee.getComAcctId()))) {
-            throw new BaseException("数字员工与技能组不属于同一企业");
+            throw new BaseException(I18nUtil.get("skillgroup.employee.tenantMismatch"));
         }
         if (!authApplicationService.hasResourceInstallTargetManagePermission(digitalEmployee)) {
-            throw new BaseException("当前用户没有数字员工管理权限");
+            throw new BaseException(I18nUtil.get("skillgroup.employee.manageDenied"));
         }
     }
 
     private void validateActiveDigitalEmployee(SsResource digitalEmployee) {
         if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), digitalEmployee.getResourceStatus())) {
-            throw new BaseException("数字员工未上架");
+            throw new BaseException(I18nUtil.get("skillgroup.employee.notPublished"));
         }
     }
 
@@ -555,7 +555,7 @@ public class SkillGroupApplicationService {
         List<SkillGroupMemberVo> members = skillGroupMapper.selectActiveMembers(group.getResourceId());
         List<Long> skillIds = memberIds(members);
         if (skillIds.isEmpty()) {
-            throw new BaseException("技能组没有可安装的活跃成员");
+            throw new BaseException(I18nUtil.get("skillgroup.noActiveMembers"));
         }
         if (lockSkills) {
             List<Long> sortedSkillIds = skillIds.stream().sorted().toList();
@@ -616,7 +616,7 @@ public class SkillGroupApplicationService {
         // 与前端名单匹配保持一致，默认账号和配置账号均忽略大小写。
         String currentUserCode = CurrentUserHolder.getCurrentUserCode();
         if (adminVipUserCodes.stream().noneMatch(code -> code.equalsIgnoreCase(currentUserCode))) {
-            throw new BaseException("当前用户不是 AdminVip，没有企业技能组创建权限");
+            throw new BaseException(I18nUtil.get("skillgroup.create.adminRequired"));
         }
     }
 
@@ -673,33 +673,33 @@ public class SkillGroupApplicationService {
 
     private void validateManagedGroup(SsResource group, Long tenantId) {
         if (group == null) {
-            throw new BaseException("技能组不存在");
+            throw new BaseException(I18nUtil.get("skillgroup.notFound"));
         }
         if (Objects.equals(ResourceStatus.DELETE.getNum(), group.getResourceStatus())) {
             throw new BaseException(I18nUtil.get("resource.lifecycle.status.invalid"));
         }
         if (!SKILL_GROUP.equals(group.getResourceBizType())) {
-            throw new BaseException("资源类型不是技能组");
+            throw new BaseException(I18nUtil.get("skillgroup.typeInvalid"));
         }
         if (group.getComAcctId() == null || !group.getComAcctId().equals(tenantId)) {
-            throw new BaseException("技能组不属于当前企业");
+            throw new BaseException(I18nUtil.get("skillgroup.tenantMismatch"));
         }
         if (!authApplicationService.hasResourceManagePermission(group)) {
-            throw new BaseException("当前用户没有技能组管理权限");
+            throw new BaseException(I18nUtil.get("skillgroup.manageDenied"));
         }
     }
 
     private Long requireCurrentTenant() {
         Long tenantId = CurrentUserHolder.getEnterpriseId();
         if (tenantId == null) {
-            throw new BaseException("当前用户企业信息缺失");
+            throw new BaseException(I18nUtil.get("user.enterprise.required"));
         }
         return tenantId;
     }
 
     private List<Long> normalizeRequiredIds(List<Long> ids) {
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
-            throw new BaseException("组内技能列表不能为空");
+            throw new BaseException(I18nUtil.get("skillgroup.members.required"));
         }
         return new ArrayList<>(new LinkedHashSet<>(ids));
     }
@@ -710,7 +710,7 @@ public class SkillGroupApplicationService {
 
     private void validateMemberSkills(SsResource group, List<Long> skillIds, List<SsResource> resources) {
         if (skillIds.contains(group.getResourceId())) {
-            throw new BaseException("技能组不能将自身添加为成员");
+            throw new BaseException(I18nUtil.get("skillgroup.members.selfReference"));
         }
         Map<Long, SsResource> byId = new LinkedHashMap<>();
         for (SsResource resource : resources == null ? List.<SsResource>of() : resources) {
@@ -723,16 +723,16 @@ public class SkillGroupApplicationService {
         for (Long skillId : skillIds) {
             SsResource skill = byId.get(skillId);
             if (skill == null) {
-                throw new BaseException("组内技能不存在：" + skillId);
+                throw new BaseException(I18nUtil.get("skillgroup.member.notFound", String.valueOf(skillId)));
             }
             if (!SKILL.equals(skill.getResourceBizType())) {
-                throw new BaseException("成员资源不是普通技能：" + skillId);
+                throw new BaseException(I18nUtil.get("skillgroup.member.typeInvalid", String.valueOf(skillId)));
             }
             if (!Objects.equals(group.getComAcctId(), skill.getComAcctId())) {
-                throw new BaseException("组内技能不属于当前企业：" + skillId);
+                throw new BaseException(I18nUtil.get("skillgroup.member.tenantMismatch", String.valueOf(skillId)));
             }
             if (!Objects.equals(ResourceStatus.ON_SHELF.getNum(), skill.getResourceStatus())) {
-                throw new BaseException("组内技能未上架：" + skillId);
+                throw new BaseException(I18nUtil.get("skillgroup.member.notPublished", String.valueOf(skillId)));
             }
             SsResExtSkill extSkill = extById.get(skillId);
             boolean innerSkill = extSkill != null
@@ -742,7 +742,7 @@ public class SkillGroupApplicationService {
             boolean enterpriseSkill = "enterprise".equals(skill.getOwnerType());
             boolean supportedCreatorOwner = enterpriseSkill || "personal".equals(skill.getOwnerType());
             if (!(enterpriseSkill && innerSkill) && !(supportedCreatorOwner && creatorOwned)) {
-                throw new BaseException("技能组成员只能选择系统内置技能或原创建人创建的企业/个人技能：" + skillId);
+                throw new BaseException(I18nUtil.get("skillgroup.member.ownerInvalid", String.valueOf(skillId)));
             }
         }
     }
@@ -761,7 +761,7 @@ public class SkillGroupApplicationService {
         relation.setComAcctId(group.getComAcctId());
         if (skillGroupMapper.insertActiveMemberIfAbsent(relation) == 0
                 && !isMemberActive(group.getResourceId(), skillId)) {
-            throw new BaseException("技能组成员已被并发修改，请刷新后重试");
+            throw new BaseException(I18nUtil.get("skillgroup.members.concurrentChange"));
         }
     }
 

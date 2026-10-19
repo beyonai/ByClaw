@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -111,7 +113,7 @@ public class GroupChatReadService {
         ByaiSessionMember member = authorizationService.requireCurrentUserMember(sessionId);
         ByaiMessage message = messageMapper.selectByMessageId(messageId);
         if (message == null || !sessionId.equals(message.getSessionId())) {
-            throw new IllegalArgumentException("Read cursor message is not in this group");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.read.cursorMismatch"));
         }
         memberMapper.advanceReadCursor(member.getByaiSessionMemberId(), messageId, new Date());
         GroupChatListItemResponse state = mentionMapper.selectMentionState(sessionId, currentUserId);

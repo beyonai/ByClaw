@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -127,7 +128,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
                 ensureFtpAbsolutePathExists(ftpClient, targetDir);
             }
             if (!ftpClient.changeWorkingDirectory(targetDir)) {
-                throw new BaseException("FTP 进入目录失败: " + targetDir);
+                throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", targetDir));
             }
             ftpClient.enterLocalPassiveMode();
             String originalFilename = multipartFile.getOriginalFilename();
@@ -181,7 +182,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
 
         // Check for path traversal patterns
         if (normalized.contains("../") || normalized.contains("/..") || normalized.equals("..")) {
-            throw new BaseException("FTP 路径安全校验失败: 不允许包含 '..' 路径遍历");
+            throw new BaseException(I18nUtil.get("storage.ftp.traversal"));
         }
 
         // Check for absolute path outside allowed scope (starting with /)
@@ -209,7 +210,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
                     throw new BaseException("FTP 创建目录失败: " + path);
                 }
                 if (!ftp.changeWorkingDirectory(path)) {
-                    throw new BaseException("FTP 进入目录失败: " + path);
+                    throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", path));
                 }
             }
         }
@@ -238,17 +239,17 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
             String fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
 
             if (StringUtils.isBlank(fileName)) {
-                throw new BaseException("FTP 下载文件失败: 文件名为空");
+                throw new BaseException(I18nUtil.get("storage.ftp.downloadNameRequired"));
             }
 
             if (StringUtils.isNotBlank(targetDir) && !ftpClient.changeWorkingDirectory(targetDir)) {
-                throw new BaseException("FTP 进入目录失败: " + targetDir);
+                throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", targetDir));
             }
 
             // Retrieve file stream from FTP
             InputStream inputStream = ftpClient.retrieveFileStream(fileName);
             if (inputStream == null) {
-                throw new BaseException("FTP 下载文件失败: " + normalizedPath);
+                throw new BaseException(I18nUtil.get("storage.ftp.downloadFailed", normalizedPath));
             }
 
             return inputStream;
@@ -283,7 +284,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
                 throw new BaseException("FTP 删除文件失败: 文件名为空");
             }
             if (StringUtils.isNotBlank(targetDir) && !ftpClient.changeWorkingDirectory(targetDir)) {
-                throw new BaseException("FTP 进入目录失败: " + targetDir);
+                throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", targetDir));
             }
             if (!ftpClient.deleteFile(fileName)) {
                 throw new BaseException("FTP 删除文件失败: " + normalizedPath);
@@ -318,17 +319,17 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
             String fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
 
             if (StringUtils.isBlank(fileName)) {
-                throw new BaseException("FTP 获取元数据失败: 文件名为空");
+                throw new BaseException(I18nUtil.get("storage.ftp.metadataNameRequired"));
             }
 
             if (StringUtils.isNotBlank(targetDir) && !ftpClient.changeWorkingDirectory(targetDir)) {
-                throw new BaseException("FTP 进入目录失败: " + targetDir);
+                throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", targetDir));
             }
 
             // List files to get metadata
             FTPFile[] files = ftpClient.listFiles(fileName);
             if (files == null || files.length == 0) {
-                throw new BaseException("FTP 文件不存在: " + normalizedPath);
+                throw new BaseException(I18nUtil.get("storage.ftp.notFound", normalizedPath));
             }
 
             FTPFile ftpFile = files[0];
@@ -388,7 +389,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
             String fileName = lastSlashIndex >= 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
 
             if (StringUtils.isBlank(fileName)) {
-                throw new BaseException("FTP 上传文件失败: 文件名为空");
+                throw new BaseException(I18nUtil.get("storage.ftp.uploadNameRequired"));
             }
 
             // Ensure directory exists
@@ -397,13 +398,13 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
             }
 
             if (StringUtils.isNotBlank(targetDir) && !ftpClient.changeWorkingDirectory(targetDir)) {
-                throw new BaseException("FTP 进入目录失败: " + targetDir);
+                throw new BaseException(I18nUtil.get("storage.ftp.directoryFailed", targetDir));
             }
 
             ftpClient.enterLocalPassiveMode();
             boolean success = ftpClient.storeFile(fileName, inputStream);
             if (!success) {
-                throw new BaseException("FTP 上传文件失败: " + path);
+                throw new BaseException(I18nUtil.get("storage.ftp.uploadFailed", path));
             }
 
             // Build metadata
@@ -625,7 +626,7 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
             // Download from source
             sourceStream = get(source);
             if (sourceStream == null) {
-                throw new BaseException("FTP 复制文件失败: 源文件不存在 " + source.getPath());
+                throw new BaseException(I18nUtil.get("storage.ftp.copySourceMissing", source.getPath()));
             }
 
             // Get source metadata for size and content type

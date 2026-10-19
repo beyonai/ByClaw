@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -18,7 +20,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 
-class WechatPhoneAuthenticationTest {
+class WechatPhoneAuthenticationTest extends I18nTestSupport {
 
     private final WechatMiniappPhoneClient wechat = mock(WechatMiniappPhoneClient.class);
     private final PhoneAccountRegistrationService accounts = mock(PhoneAccountRegistrationService.class);

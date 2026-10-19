@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.infrastructure.wechat;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -64,7 +66,7 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
     @Override
     public String exchangePhoneCode(String phoneCode) {
         if (phoneCode == null || phoneCode.isBlank() || phoneCode.length() > 512) {
-            throw new BadCredentialsException("微信手机号授权无效");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.invalid"));
         }
         requireConfiguration();
         String token = accessToken();
@@ -73,7 +75,7 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
         try {
             payload = mapper.writeValueAsString(Collections.singletonMap("code", phoneCode));
         } catch (IOException e) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
         HttpRequest request = HttpRequest.newBuilder(uri).timeout(TIMEOUT)
             .header("Content-Type", "application/json")
@@ -85,13 +87,13 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
                 && isInvalidAccessToken(root.path("errcode").intValue())) {
                 evictRejectedToken(token);
             }
-            throw new BadCredentialsException("微信手机号授权失败");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.failed"));
         }
         JsonNode info = root.path("phone_info");
         String phone = info.path("phoneNumber").asText("");
         String appId = info.path("watermark").path("appid").asText("");
         if (!phone.matches("\\+?[0-9]{6,20}") || !properties.getAppId().equals(appId)) {
-            throw new BadCredentialsException("微信手机号授权失败");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.failed"));
         }
         return phone;
     }
@@ -116,7 +118,7 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
                     Long stored = redis.execute(STORE_TOKEN, java.util.List.of(lock, key), owner,
                         token.value(), Long.toString(token.ttlSeconds()));
                     if (!Long.valueOf(1).equals(stored)) {
-                        throw new AuthenticationServiceException("微信手机号授权暂不可用");
+                        throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
                     }
                     return token.value();
                 } finally {
@@ -132,11 +134,11 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         } catch (RuntimeException e) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
-        throw new AuthenticationServiceException("微信手机号授权暂不可用");
+        throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
     }
 
     private Token fetchToken() {
@@ -148,7 +150,7 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
         if (root.has("errcode") || !value.isTextual() || value.textValue().isBlank()
             || !expiry.canConvertToInt()
             || expiry.intValue() <= 120) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
         return new Token(value.textValue(), expiry.intValue() - 120L);
     }
@@ -162,7 +164,7 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
             // 只删除被微信拒绝的旧值，不能误删另一实例刚刷新的有效 token。
             redis.execute(EVICT_TOKEN, Collections.singletonList(TOKEN_KEY + properties.getAppId()), token);
         } catch (RuntimeException e) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
     }
 
@@ -171,30 +173,30 @@ public class JdkWechatMiniappPhoneClient implements WechatMiniappPhoneClient {
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream body = response.body()) {
                 if (response.statusCode() < 200 || response.statusCode() >= 300 || body == null) {
-                    throw new AuthenticationServiceException("微信手机号授权暂不可用");
+                    throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
                 }
                 byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
                 if (bytes.length > MAX_RESPONSE_BYTES) {
-                    throw new AuthenticationServiceException("微信手机号授权暂不可用");
+                    throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
                 }
                 JsonNode root = mapper.readTree(bytes);
                 if (root == null || !root.isObject()) {
-                    throw new AuthenticationServiceException("微信手机号授权暂不可用");
+                    throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
                 }
                 return root;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         } catch (IOException | RuntimeException e) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
     }
 
     private void requireConfiguration() {
         if (properties.getAppId() == null || properties.getAppId().isBlank()
             || properties.getAppSecret() == null || properties.getAppSecret().isBlank()) {
-            throw new AuthenticationServiceException("微信手机号授权暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.unavailable"));
         }
     }
 

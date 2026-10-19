@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,7 +35,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 /** 合并回归：租户路由和统一回执边界必须同时保留。 */
-class GroupChatWebSocketMergeTest {
+class GroupChatWebSocketMergeTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final GroupChatApplicationService legacy = mock(GroupChatApplicationService.class);
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiGroupChatMentionMapper memberships = mock(ByaiGroupChatMentionMapper.class);

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.stereotype.Service;
 import org.apache.commons.lang3.StringUtils;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
@@ -37,13 +39,13 @@ public class GroupChatTaskChatGuard {
             RunningChatInfo running = runningRegistry.getRunning(sessionId);
             if (running == null || !Boolean.TRUE.equals(running.getRunning())
                 || !requestTraceId.equals(running.getTraceId())) {
-                throw new IllegalArgumentException("Group task trace is no longer running");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.task.traceInactive"));
             }
             return null;
         }
         Long turnId = "ACTIVE".equals(task.getStatus()) ? taskService.startTurn(sessionId) : null;
         if (turnId == null) {
-            throw new IllegalArgumentException("Group task does not accept a new turn");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.newTurnDenied"));
         }
         return turnId;
     }

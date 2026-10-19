@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.channels.service.feishu;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -34,7 +35,7 @@ public class FeishuReplyDispatcher {
 
     private static final Logger logger = LoggerFactory.getLogger(FeishuReplyDispatcher.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
-    private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
+    private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
     private static final String MESSAGE_REPLY_URL_PREFIX = "https://open.feishu.cn/open-apis/im/v1/messages/";
     private static final String MESSAGE_REPLY_URL_SUFFIX = "/reply";
     private static final String MESSAGE_SEND_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
@@ -192,7 +193,7 @@ public class FeishuReplyDispatcher {
     }
 
     private String normalizeReplyContent(String replyContent) {
-        return replyContent == null || replyContent.isBlank() ? DEFAULT_FALLBACK_REPLY : replyContent;
+        return replyContent == null || replyContent.isBlank() ? I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY) : replyContent;
     }
 
     private String encodePath(String value) {

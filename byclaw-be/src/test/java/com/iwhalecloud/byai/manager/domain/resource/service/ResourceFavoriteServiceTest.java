@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,7 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-class ResourceFavoriteServiceTest {
+class ResourceFavoriteServiceTest extends I18nTestSupport {
     private final ResourceFavoriteMapper mapper = mock(ResourceFavoriteMapper.class);
     private final ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
     private final AuthApplicationService auth = mock(AuthApplicationService.class);
@@ -203,4 +205,24 @@ class ResourceFavoriteServiceTest {
         request.setFavorited(favorited);
         return request;
     }
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|资源收藏计数初始化失败|资源收藏计数更新失败",
+        "en-US|Resource favorite count initialization failed|Resource favorite count update failed"
+    }, delimiter = '|')
+    void countWriteFailuresUseTheRequestLocale(String language, String initialize, String update) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        commercial();
+        resource("SKILL", "enterprise", 2);
+        when(mapper.selectCount(33L, 22L)).thenReturn(null);
+        assertThatThrownBy(() -> service.setFavorite(request(true)))
+            .isInstanceOf(IllegalStateException.class).hasMessage(initialize);
+        verify(mapper, never()).insertFavorite(any(), any(), any());
+        when(mapper.selectCount(33L, 22L)).thenReturn(0L);
+        when(mapper.insertFavorite(33L, 22L, 11L)).thenReturn(1);
+        when(mapper.updateCount(33L, 22L, 1)).thenReturn(0);
+        assertThatThrownBy(() -> service.setFavorite(request(true)))
+            .isInstanceOf(IllegalStateException.class).hasMessage(update);
+    }
+
 }

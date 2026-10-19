@@ -92,7 +92,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 @DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
-class DatasetApplicationServiceTest {
+class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Locale TEST_LOCALE = new Locale("zh", "CN");
 
@@ -110,6 +110,11 @@ class DatasetApplicationServiceTest {
     @BeforeAll
     static void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
+        var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
+        bundle.setBasename("i18n/messages");
+        bundle.setDefaultEncoding("UTF-8");
+        bundle.setFallbackToSystemLocale(false);
+        messageSource.setParentMessageSource(bundle);
         messageSource.addMessage("dataset.default.personal.delete.not.allowed", TEST_LOCALE,
             "dataset.default.personal.delete.not.allowed");
         messageSource.addMessage("dataset.metadata.search.resource.id.list.notempty", TEST_LOCALE,

@@ -302,20 +302,23 @@ const RefineModal = ({
 
     let parsedCoreAbilities = [];
     const abilityIcons = [
-      { type: 'icon-a-List-topliebiao3', label: '列表' },
-      { type: 'icon-a-Application-oneyingyong3', label: '立方体' },
-      { type: 'icon-a-Asteriskxinghao3', label: '星星' },
-      { type: 'icon-a-Circles-sevenyuanquan', label: '圆点' },
-      { type: 'icon-a-Circle-threeyuanquan', label: '人物' },
-      { type: 'icon-a-Circle-fouryuanquan', label: '工具' },
+      { type: 'icon-a-List-topliebiao3', label: intl.formatMessage({ id: 'employeesDrawer.abilityIcon.list' }) },
+      {
+        type: 'icon-a-Application-oneyingyong3',
+        label: intl.formatMessage({ id: 'employeesDrawer.abilityIcon.cube' }),
+      },
+      { type: 'icon-a-Asteriskxinghao3', label: intl.formatMessage({ id: 'employeesDrawer.abilityIcon.star' }) },
+      { type: 'icon-a-Circles-sevenyuanquan', label: intl.formatMessage({ id: 'employeesDrawer.abilityIcon.dot' }) },
+      { type: 'icon-a-Circle-threeyuanquan', label: intl.formatMessage({ id: 'employeesDrawer.abilityIcon.person' }) },
+      { type: 'icon-a-Circle-fouryuanquan', label: intl.formatMessage({ id: 'common.tool' }) },
     ];
     const abilityColors = [
-      { value: '#EF7BE3', label: '粉色' },
-      { value: '#725CFA', label: '紫色' },
-      { value: '#165DFF', label: '蓝色' },
-      { value: '#58D764', label: '绿色' },
-      { value: '#FF903E', label: '橙色' },
-      { value: '#FF5A5A', label: '红色' },
+      { value: '#EF7BE3', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.pink' }) },
+      { value: '#725CFA', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.purple' }) },
+      { value: '#165DFF', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.blue' }) },
+      { value: '#58D764', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.green' }) },
+      { value: '#FF903E', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.orange' }) },
+      { value: '#FF5A5A', label: intl.formatMessage({ id: 'employeesDrawer.abilityColor.red' }) },
     ];
     const competencyList = parseListLike(coreCompetencies);
     const abilitySource = competencyList;

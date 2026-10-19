@@ -37,19 +37,18 @@ const normalizeProjectType = (projectType?: ProjectType): Exclude<ProjectType, '
   return 'normal';
 };
 
-const PROJECT_TYPE_TITLE: Record<Exclude<ProjectType, 'default'>, string> = {
-  // 三类项目统一采用运营项目弹窗的“项目类型 · 选择任务模板”标题格式。
-  normal: '普通项目 · 选择任务模板',
-  develop: '研发项目 · 选择任务模板',
-  operation: '运营项目 · 选择任务模板',
-};
-
 const getSavedProjectId = (response: any) =>
   `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
 const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
   const intl = useIntl();
+  const PROJECT_TYPE_TITLE: Record<Exclude<ProjectType, 'default'>, string> = {
+    // 三类项目统一采用运营项目弹窗的“项目类型 · 选择任务模板”标题格式。
+    normal: intl.formatMessage({ id: 'taskTemplate.normalTitle' }),
+    develop: intl.formatMessage({ id: 'taskTemplate.developTitle' }),
+    operation: intl.formatMessage({ id: 'taskTemplate.operationTitle' }),
+  };
   const { EventEmitter } = useGlobal();
   const [visible, setVisible] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -170,7 +169,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
               (isEnglish ? item.paramEnName : item.paramName) ||
               item.paramName ||
               item.paramValue ||
-              `推荐问题 ${index + 1}`;
+              intl.formatMessage({ id: 'taskTemplate.recommendedQuestion' }, { v0: index + 1 });
             const prompt = (isEnglish ? item.paramDesc : item.paramValue) || item.paramValue || title;
             return {
               id: `${item.paramId ?? index}`,
@@ -190,7 +189,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     return () => {
       active = false;
     };
-  }, [projectType, visible]);
+  }, [intl, projectType, visible]);
 
   const projectKnowledgeOptions = useMemo(
     () =>
@@ -216,7 +215,11 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const applyPrompt = (prompt: string) => {
     onApply(prompt);
     setVisible(false);
-    message.success(projectType === 'normal' ? '推荐问题已填入对话框' : '模板内容已生成到对话框，可继续修改后发送');
+    message.success(
+      projectType === 'normal'
+        ? intl.formatMessage({ id: 'taskTemplate.questionApplied' })
+        : intl.formatMessage({ id: 'taskTemplate.promptApplied' })
+    );
   };
 
   const handleCreateProject = async (values: ProjectFormValues) => {
@@ -301,7 +304,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
       destroyOnClose
       footer={null}
       className={styles.modal}
-      title="选择任务模板"
+      title={intl.formatMessage({ id: 'taskTemplate.select' })}
       onCancel={() => setVisible(false)}
     >
       <div className={styles.projectLoading}>
@@ -376,7 +379,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           agentOptionsOnly
           knowledgeOptions={projectKnowledgeOptions}
           knowledgeOptionsOnly
-          categoryLabel="运营项目"
+          categoryLabel={intl.formatMessage({ id: 'projectSpace.projectForm.type.operation' })}
           onCancel={() => setVisible(false)}
           onApply={(result) => applyPrompt(result.prompt)}
         />
@@ -413,7 +416,11 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
             ) : !recommendedLoading ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={projectType === 'develop' ? '暂无可用研发项目任务模板' : '暂无推荐问题'}
+                description={
+                  projectType === 'develop'
+                    ? intl.formatMessage({ id: 'taskTemplate.noDevelopmentTemplates' })
+                    : intl.formatMessage({ id: 'taskTemplate.noQuestions' })
+                }
               />
             ) : null}
           </Spin>

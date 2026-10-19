@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.adminconsole;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +25,7 @@ public class AdminConsoleController {
 
     private void guard() {
         if (!ADMIN.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())) {
-            throw new SecurityException("无权限，仅 adminvip 可访问");
+            throw new SecurityException(I18nUtil.get("admin.console.adminvipOnly"));
         }
     }
 
@@ -33,8 +35,8 @@ public class AdminConsoleController {
             guard();
             String command = Objects.toString(body == null ? null : body.get("command"), "").trim();
             List<String> parts = split(command);
-            if (parts.isEmpty() || !SAFE_REDIS.contains(parts.get(0).toUpperCase(Locale.ROOT))) return ResponseUtil.fail("危险或不允许的 Redis 命令，系统拒绝执行");
-            if (parts.size() > 100) return ResponseUtil.fail("命令参数过多");
+            if (parts.isEmpty() || !SAFE_REDIS.contains(parts.get(0).toUpperCase(Locale.ROOT))) return ResponseUtil.fail(I18nUtil.get("admin.redis.commandDenied"));
+            if (parts.size() > 100) return ResponseUtil.fail(I18nUtil.get("admin.redis.tooManyArguments"));
             byte[][] args = parts.subList(1, parts.size()).stream().map(v -> v.getBytes(StandardCharsets.UTF_8)).toArray(byte[][]::new);
             RedisConnection connection = redisConnectionFactory.getConnection();
             try {
@@ -52,7 +54,7 @@ public class AdminConsoleController {
             }
             finally { connection.close(); }
         } catch (SecurityException e) { return ResponseUtil.fail(e.getMessage()); }
-        catch (Exception e) { return ResponseUtil.fail("Redis 查询失败：" + e.getMessage()); }
+        catch (Exception e) { return ResponseUtil.fail(I18nUtil.get("admin.redis.queryFailed", e.getMessage())); }
     }
 
     private static List<String> split(String value) { return Arrays.asList(value.split("\\s+")); }

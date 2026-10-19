@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import getDisplayAnswer from '@/components/QueryInput/getDisplayAnswer';
 import getDisplayQuestion from '@/components/QueryInput/getDisplayQuestion';
 import type { ConversationOutlineItem } from '@/service/message';
@@ -59,7 +60,10 @@ export const normalizeConversationSummary = (content?: string) => {
   }
 
   text = text
-    .replace(new RegExp(DIGITAL_EMPLOYEE_PLACEHOLDER.source, 'g'), '@数字员工 ')
+    .replace(
+      new RegExp(DIGITAL_EMPLOYEE_PLACEHOLDER.source, 'g'),
+      `${getIntl().formatMessage({ id: 'chat.employeeMention' })} `
+    )
     .replace(/<[^>]+>/g, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')

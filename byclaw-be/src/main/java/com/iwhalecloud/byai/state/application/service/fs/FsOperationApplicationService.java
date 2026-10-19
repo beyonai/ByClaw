@@ -309,7 +309,7 @@ public class FsOperationApplicationService {
                 return;
             }
             if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)) {
-                throw new BaseException("请通过发布流程修改官方数字员工配置");
+                throw new BaseException("employee.publication.editThroughWorkflow");
             }
             if (!authApplicationService.hasResourceManagePermission(resource)) {
                 throw new BaseException("byclaw.fs.resource.manage.denied");

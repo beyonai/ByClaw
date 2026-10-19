@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URI;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +18,7 @@ public class VolcengineTtsV3ConfigurationVerifier implements MediaConnectorProto
     public void verify(MediaModelConfig config) {
         URI endpoint = URI.create(config.apiEndpoint());
         if (!endpoint.getPath().endsWith("/api/v3/tts/unidirectional") || config.apiToken().isBlank()) {
-            throw new IllegalArgumentException("Invalid Volcengine TTS v3 configuration");
+            throw new IllegalArgumentException(I18nUtil.get("connector.media.ttsInvalid"));
         }
     }
 }

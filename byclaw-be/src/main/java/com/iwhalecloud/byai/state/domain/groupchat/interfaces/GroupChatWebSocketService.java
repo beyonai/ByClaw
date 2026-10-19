@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
@@ -101,8 +103,8 @@ public class GroupChatWebSocketService {
                 message.getSessionId(), message.getClientRequestId(), error);
             boolean storageFailure = error instanceof DataAccessException;
             return failure(message, "ERROR", storageFailure ? "GROUP_CHAT_STORAGE_ERROR" : "GROUP_CHAT_INTERNAL_ERROR",
-                storageFailure ? "数据库处理失败，消息发送结果暂未确认，请稍后重试"
-                    : "服务处理异常，消息发送结果暂未确认，请稍后重试");
+                storageFailure ? I18nUtil.get("groupchat.storageFailure")
+                    : I18nUtil.get("groupchat.serviceFailure"));
         }
     }
 
@@ -192,7 +194,7 @@ public class GroupChatWebSocketService {
     private JSONObject failure(ChatMessage message, String type, String code, String reason) {
         JSONObject response = event(message, type);
         response.put("code", code);
-        response.put("message", reason == null || reason.isBlank() ? "消息发送被拒绝" : reason);
+        response.put("message", reason == null || reason.isBlank() ? I18nUtil.get("groupchat.sendRejected") : reason);
         return response;
     }
 }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,7 +20,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 
-class ConcurrentChatTurnsTest {
+class ConcurrentChatTurnsTest extends I18nTestSupport {
     private final OutputStreamManager outputs = new OutputStreamManager();
     private final ChatRuntimeStateService states = mock(ChatRuntimeStateService.class);
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);

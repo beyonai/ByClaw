@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -58,7 +60,7 @@ public final class MailProviderCatalog {
         return PROVIDERS.stream()
             .filter(provider -> provider.getCode().equals(providerCode))
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("未知邮箱服务商: " + providerCode));
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("mail.provider.unknown", providerCode)));
     }
 
     public static Optional<MailProviderVO> findByConnectorCode(String connectorCode) {

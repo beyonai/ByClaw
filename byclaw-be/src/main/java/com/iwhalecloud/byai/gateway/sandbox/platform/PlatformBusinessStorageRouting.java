@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.storage.*;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.*;
@@ -50,7 +52,7 @@ public class PlatformBusinessStorageRouting {
                             file.getSize(),
                             file.getContentType());
                 } catch (IOException failure) {
-                    throw new IllegalStateException("Local file upload failed: " + target, failure);
+                    throw new IllegalStateException(I18nUtil.get("platform.file.upload.failed", target), failure);
                 }
             }
 

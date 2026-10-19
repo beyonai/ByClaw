@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatcher;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomMessageParser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -63,11 +64,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class WecomMessageListener {
 
     private static final Logger logger = LoggerFactory.getLogger(WecomMessageListener.class);
-    private static final String NO_ACCOUNT_REPLY = "未找到匹配的系统用户，请联系管理员绑定企业微信账号后再试。";
-    private static final String NO_AUTH_REPLY = "对不起，您可能没有该数字员工的权限。";
-    private static final String UNSUPPORTED_REPLY = "暂不支持该类型消息";
-    private static final String FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试。";
-    private static final String BUSY_REPLY = "当前咨询人数较多，请稍后再试。";
+    private static final String NO_ACCOUNT_REPLY_KEY = "channel.wecom.userMissing";
+    private static final String NO_AUTH_REPLY_KEY = "channel.employee.permissionDenied";
+    private static final String UNSUPPORTED_REPLY_KEY = "channel.message.unsupported";
+    private static final String FALLBACK_REPLY_KEY = "channel.error.retryLater";
+    private static final String BUSY_REPLY_KEY = "channel.error.busy";
 
     private final ObjectMapper objectMapper;
     private final WecomMessageParser messageParser;
@@ -117,7 +118,7 @@ public class WecomMessageListener {
             return;
         }
         if (!isSupported(message.getMsgType())) {
-            dispatcher.replyText(message.getReqId(), UNSUPPORTED_REPLY);
+            dispatcher.replyText(message.getReqId(), I18nUtil.get(UNSUPPORTED_REPLY_KEY));
             return;
         }
         try {
@@ -128,7 +129,7 @@ public class WecomMessageListener {
             // heartbeat processing). Tell the user we are busy instead of
             // silently dropping the message.
             logger.warn("WeCom message executor saturated, sending busy reply. msgId={}", message.getMsgId());
-            dispatcher.replyText(message.getReqId(), BUSY_REPLY);
+            dispatcher.replyText(message.getReqId(), I18nUtil.get(BUSY_REPLY_KEY));
         }
     }
 
@@ -143,13 +144,13 @@ public class WecomMessageListener {
         try {
             LoginInfo loginInfo = userService.resolveLoginInfo(message.getFromUserId(), message.getAibotId());
             if (loginInfo == null) {
-                dispatcher.replyText(reqId, NO_ACCOUNT_REPLY);
+                dispatcher.replyText(reqId, I18nUtil.get(NO_ACCOUNT_REPLY_KEY));
                 return;
             }
 
             AuthDigitEmployVo digitEmploy = findAuthorizedDigitEmploy(loginInfo.getUserId(), message.getAibotId());
             if (digitEmploy == null) {
-                dispatcher.replyText(reqId, NO_AUTH_REPLY);
+                dispatcher.replyText(reqId, I18nUtil.get(NO_AUTH_REPLY_KEY));
                 return;
             }
 
@@ -165,7 +166,7 @@ public class WecomMessageListener {
 
             ChannelService channelService = ChannelServiceFactory.getService(ChannelType.WECOM.getCode());
             if (!channelService.validateRequest(dto)) {
-                dispatcher.replyText(reqId, FALLBACK_REPLY);
+                dispatcher.replyText(reqId, I18nUtil.get(FALLBACK_REPLY_KEY));
                 return;
             }
 
@@ -183,7 +184,7 @@ public class WecomMessageListener {
                 boolean finalOk = awaitStreamCompletion(out);
 
                 if (!finalOk || out.hasStreamingFailed()) {
-                    dispatcher.replyText(reqId, FALLBACK_REPLY);
+                    dispatcher.replyText(reqId, I18nUtil.get(FALLBACK_REPLY_KEY));
                 }
             } catch (Exception e) {
                 logger.error("WeCom chat failed. msgId={}", message.getMsgId(), e);
@@ -191,7 +192,7 @@ public class WecomMessageListener {
             }
         } catch (Exception e) {
             logger.error("WeCom message handling failed. msgId={}", message.getMsgId(), e);
-            dispatcher.replyText(reqId, FALLBACK_REPLY);
+            dispatcher.replyText(reqId, I18nUtil.get(FALLBACK_REPLY_KEY));
         } finally {
             // Always clear the ThreadLocal login so the pooled thread does not
             // leak this user's context into the next message.
@@ -231,7 +232,7 @@ public class WecomMessageListener {
     static String chatFailureReply(Exception e) {
         String detail = deepestNonBlankMessage(e);
         if (detail == null) {
-            detail = FALLBACK_REPLY;
+            detail = I18nUtil.get(FALLBACK_REPLY_KEY);
         }
 
         return detail;

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
-class ConnectorConnectionStateServiceTest {
+class ConnectorConnectionStateServiceTest extends I18nTestSupport {
 
     private static final String USER_ID = "1001";
     private static final Long CONNECTOR_ID = 15L;

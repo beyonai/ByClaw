@@ -105,22 +105,22 @@ public class ConversationSearchSkillService {
     }
 
     private ResponseStatusException denied() {
-        return new ResponseStatusException(HttpStatus.FORBIDDEN, "当前用户无权使用对话记录搜索技能");
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, "conversation.search.forbidden");
     }
 
     private void validate(ConversationSearchQo query) {
         if (query == null || query.getPageNum() == null || query.getPageNum() < 1
             || query.getPageSize() == null || query.getPageSize() < 1 || query.getPageSize() > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageNum必须大于0，pageSize必须在1到100之间");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "conversation.search.pagination.invalid");
         }
         if ((query.getUserCode() != null && (StringUtils.isBlank(query.getUserCode()) || query.getUserCode().length() > 128))
             || (query.getDigitalEmployeeId() != null && query.getDigitalEmployeeId() <= 0)
             || (query.getKeyword() != null && (StringUtils.isBlank(query.getKeyword()) || query.getKeyword().length() > 1000))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "用户编码、数字员工ID或关键字无效");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "conversation.search.filter.invalid");
         }
         if (query.getStartTime() != null && query.getEndTime() != null
             && query.getStartTime().isAfter(query.getEndTime())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "开始时间不能晚于结束时间");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "conversation.search.timeRange.invalid");
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,7 +36,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
-class MailAccountProjectionStateServiceTest {
+class MailAccountProjectionStateServiceTest extends I18nTestSupport {
     @BeforeAll
     static void initializeTableMetadata() {
         if (TableInfoHelper.getTableInfo(UserMailAccount.class) == null) {

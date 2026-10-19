@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Collections;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -171,7 +173,7 @@ public class ResourceApplicationService {
         boolean controlled = Boolean.TRUE.equals(ssResource.getViewAuthControlled())
             || Boolean.TRUE.equals(ssResource.getUseAuthControlled());
         if (controlled && !authApplicationService.hasResourceViewPermission(ssResource)) {
-            throw new IllegalArgumentException("无权查看资源基础信息");
+            throw new IllegalArgumentException(I18nUtil.get("resource.basic.info.denied"));
         }
         ResourceDetailVo resourceDetailVo = new ResourceDetailVo();
         if (controlled && !authApplicationService.hasResourceAccessPermission(ssResource)) {
@@ -355,7 +357,7 @@ public class ResourceApplicationService {
 
             ByaiSession session = sessionService.findById(Long.valueOf(sessionId));
             if (Objects.isNull(session)) {
-                return ResponseUtil.fail("会话不存在");
+                return ResponseUtil.fail(I18nUtil.get("groupchat.context.notFound"));
             }
 
             List<String> tagList = buildSearchTags(session, sessionId, taskId);

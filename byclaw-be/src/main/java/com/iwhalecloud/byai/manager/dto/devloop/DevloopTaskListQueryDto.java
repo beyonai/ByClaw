@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.devloop;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.Date;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
@@ -43,7 +44,7 @@ public class DevloopTaskListQueryDto {
         pageSize = pageSize == null || pageSize < 1 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
         if (createTimeStart != null && createTimeEnd != null && createTimeStart.after(createTimeEnd)) {
             // DTO 校验保持稳定的异常文本，避免脱离 Spring 上下文的单元测试拿不到国际化资源。
-            throw new IllegalArgumentException("创建时间开始值不能晚于结束值");
+            throw new IllegalArgumentException(I18nUtil.get("devloop.task.date.range.invalid"));
         }
     }
 }

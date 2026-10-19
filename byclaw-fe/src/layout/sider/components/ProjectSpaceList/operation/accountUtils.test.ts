@@ -1,3 +1,8 @@
+let mockLocale = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+
 import { buildGlobalOperationAccountPayload, normalizeOperationAccounts } from './accountUtils';
 
 describe('operation account utilities', () => {
@@ -43,4 +48,14 @@ describe('operation account utilities', () => {
       customUrl: 'https://ima.qq.com/wikis/',
     });
   });
+});
+
+it('translates only missing custom-link labels and preserves account IDs and names', () => {
+  mockLocale = 'en-US';
+  const account = { accountId: '9223372036854775807', platformCode: 'CustomLink', accountCode: 'custom' };
+  const [normalized] = normalizeOperationAccounts([account]);
+  expect(normalized.accountName).toBe('Custom URL');
+  expect(normalized.id).toBe(account.accountId);
+  expect(normalizeOperationAccounts([{ ...account, accountName: '业务账号' }])[0].accountName).toBe('业务账号');
+  mockLocale = 'zh-CN';
 });

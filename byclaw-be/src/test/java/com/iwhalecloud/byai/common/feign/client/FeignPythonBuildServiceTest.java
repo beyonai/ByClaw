@@ -11,7 +11,24 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class FeignPythonBuildServiceTest {
+class FeignPythonBuildServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void downloadFailuresUseTheRequestLanguageAndPreserveProviderDetails() {
+        FeignPythonBuildService service = new FeignPythonBuildService();
+        String path = "/文件/9007199254740993";
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "validateDownloadResponse", null, path))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("调用 Python 构建服务下载接口失败，响应体为空: " + path);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "validateDownloadResponse", null, path))
+            .isInstanceOf(BaseException.class)
+            .hasMessage("Empty response from the file download service: " + path);
+        byte[] response = "{\"resultCode\":\"-1\",\"resultMsg\":\"第三方原始错误\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "validateDownloadResponse",
+            new ByteArrayInputStream(response), path)).hasMessage("第三方原始错误");
+    }
 
     @Test
     void updateKnowledgeItem_usesCanonicalOperationAndPath() {

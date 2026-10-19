@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageRecallService;
 
@@ -106,7 +108,7 @@ public class GroupChatController {
     @PostMapping("/{sessionId}/messages/{messageId}/ack")
     public ResponseUtil<com.alibaba.fastjson.JSONObject> acknowledge(
         @PathVariable Long sessionId, @PathVariable Long messageId) {
-        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        if (ackService == null) throw new IllegalStateException(I18nUtil.get("groupchat.ack.unavailable"));
         return ResponseUtil.successResponse(ackService.acknowledge(sessionId, messageId));
     }
 
@@ -114,7 +116,7 @@ public class GroupChatController {
     @DeleteMapping("/{sessionId}/messages/{messageId}/ack")
     public ResponseUtil<com.alibaba.fastjson.JSONObject> unacknowledge(
         @PathVariable Long sessionId, @PathVariable Long messageId) {
-        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        if (ackService == null) throw new IllegalStateException(I18nUtil.get("groupchat.ack.unavailable"));
         return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 

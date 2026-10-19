@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.oauth2;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -227,7 +229,7 @@ public class JdkMailOAuth2Client implements MailOAuth2Client {
     private Endpoints endpoint(Provider provider) {
         Endpoints value = endpoints.get(provider);
         if (value == null) {
-            throw new IllegalArgumentException("Unsupported mail OAuth2 provider");
+            throw new IllegalArgumentException(I18nUtil.get("mail.oauth.providerUnsupported"));
         }
         return value;
     }

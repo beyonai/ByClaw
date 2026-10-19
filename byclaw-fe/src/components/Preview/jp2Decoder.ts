@@ -150,6 +150,12 @@ export function inspectJp2(buffer: ArrayBuffer) {
 export async function openJp2Document(buffer: ArrayBuffer): Promise<ImageDocument> {
   const info = inspectJp2(buffer);
   const { JpxImage } = await import('jpeg2000');
+  // jpeg2000 1.1.1 内部使用 Buffer 的大端读取接口；Worker 中用 DataView 适配，保留码流偏移和原始字节。
+  const view = new DataView(info.source.buffer, info.source.byteOffset, info.source.byteLength);
+  const source = Object.assign(info.source, {
+    readUInt16BE: (offset: number) => view.getUint16(offset),
+    readUInt32BE: (offset: number) => view.getUint32(offset),
+  });
   let disposed = false;
   return {
     count: 1,
@@ -158,7 +164,7 @@ export async function openJp2Document(buffer: ArrayBuffer): Promise<ImageDocumen
       if (page !== 0) throw invalid();
       const image = new JpxImage() as InstanceType<typeof JpxImage> & { failOnCorruptedImage: boolean };
       image.failOnCorruptedImage = true;
-      image.parse(info.source);
+      image.parse(source);
       if (
         image.width !== info.width ||
         image.height !== info.height ||

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -139,12 +140,12 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
     public void execute(ByaiGroupChatExecution execution, String workspace) {
         Users initiator = userService.findById(execution.getInitiatorUserId());
         if (initiator == null || resourceService.findById(execution.getTargetAgentId()) == null) {
-            throw new IllegalArgumentException("Group execution resources are unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.execution.resourcesUnavailable"));
         }
         // The candidate already owns the original message, including its complete resourceList.
         ByaiMessage child = messageMapper.selectBySessionId(execution.getCandidateSessionId()).stream()
             .filter(message -> Integer.valueOf(1).equals(message.getUsage()))
-            .findFirst().orElseThrow(() -> new IllegalStateException("Candidate user message is unavailable"));
+            .findFirst().orElseThrow(() -> new IllegalStateException(I18nUtil.get("groupchat.execution.messageUnavailable")));
         ByaiMessageHotDtoDto existing = new ByaiMessageHotDtoDto();
         BeanUtils.copyProperties(child, existing);
         AssistantChatDto dto = new AssistantChatDto();
@@ -163,7 +164,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         // Bind before registering the listener or sending, so immediate events and recovery use the same trace.
         String traceId = ScriptService.getTraceId(child.getMessageId(), dto.getLlmMessageId());
         if (executionMapper.bindRuntime(execution.getExecutionId(), traceId) != 1) {
-            throw new IllegalStateException("Group execution is no longer running");
+            throw new IllegalStateException(I18nUtil.get("groupchat.execution.stopped"));
         }
         execution.setTraceId(traceId);
         observeStarted(execution);
@@ -172,7 +173,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 scriptService.startExistingMessageTurn(dto, existing);
             }
             catch (Exception error) {
-                throw new IllegalStateException("Unable to start group candidate turn", error);
+                throw new IllegalStateException(I18nUtil.get("groupchat.turn.candidateFailed"), error);
             }
         });
     }
@@ -193,12 +194,12 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                     scriptService.startExistingMessageTurn(prepared.request(), prepared.message());
                 }
                 catch (Exception error) {
-                    throw new IllegalStateException("Unable to start queued group turn", error);
+                    throw new IllegalStateException(I18nUtil.get("groupchat.turn.startFailed"), error);
                 }
             });
         }
         catch (RuntimeException error) {
-            if (!enteredScript.get()) throw new ChatTurnPreparationException("身份上下文准备失败，请重试", error);
+            if (!enteredScript.get()) throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.identityFailed"), error);
             throw error;
         }
     }
@@ -217,7 +218,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         if ((task != null && "ACTIVE".equals(task.getStatus()) && !coordinatedInitial)
             || memberService.findSessionMember(turn.getGroupSessionId(), "USER", turn.getInitiatorUserId()) == null
             || memberService.findSessionMember(turn.getGroupSessionId(), "AGENT", turn.getTargetAgentId()) == null) {
-            throw new IllegalArgumentException("Queued group turn is no longer authorized to continue");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.authorizationRevoked"));
         }
         Long runtimeSessionId = Long.valueOf(turn.getGatewaySessionId());
         Users initiator = userService.findById(turn.getInitiatorUserId());
@@ -226,17 +227,17 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             || !Objects.equals(session.getCreatorId(), turn.getInitiatorUserId())
             || !Objects.equals(session.getObjectId(), turn.getTargetAgentId())
             || resourceService.findById(turn.getTargetAgentId()) == null) {
-            throw new IllegalArgumentException("Queued group turn requires an owned target session and input");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.inputRequired"));
         }
         JSONObject input = JSON.parseObject(turn.getInputContent());
         if (input == null || !(input.get("本次消息") instanceof String messageContent)) {
-            throw new IllegalArgumentException("Queued group turn requires textual current message content");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.textRequired"));
         }
         ByaiMessage child = messageMapper.selectByMessageId(turn.getInputMessageId());
         ByaiMessage source = "USER".equals(turn.getSenderType())
             ? messageMapper.selectByMessageId(turn.getTriggerMessageId()) : null;
         if (source != null && !Objects.equals(source.getSessionId(), turn.getGroupSessionId())) {
-            throw new IllegalArgumentException("Group turn source does not belong to its group");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.sourceMismatch"));
         }
         if (child == null) {
             child = new ByaiMessage();
@@ -263,7 +264,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             || !Objects.equals(child.getCreatorId(), turn.getInitiatorUserId())
             || !Integer.valueOf(1).equals(child.getUsage())
             || !Objects.equals(child.getMessageContent(), messageContent)) {
-            throw new IllegalArgumentException("Queued input does not match its persisted message");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.inputMismatch"));
         }
         ByaiMessageHotDtoDto existing = new ByaiMessageHotDtoDto();
         BeanUtils.copyProperties(child, existing);
@@ -282,10 +283,10 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         }
         String traceId = ScriptService.getTraceId(child.getMessageId(), dto.getLlmMessageId());
         if (turnMapper.bindRuntime(turn.getExecutionId(), traceId) != 1) {
-            throw new IllegalStateException("Queued turn no longer owns its runtime slot");
+            throw new IllegalStateException(I18nUtil.get("groupchat.turn.slotLost"));
         }
         if (coordinatedInitial && taskMapper.bindTurn(task.getTaskSessionId(), turn.getExecutionId(), traceId, new Date()) != 1) {
-            throw new IllegalStateException("Coordinated task no longer owns its initial turn");
+            throw new IllegalStateException(I18nUtil.get("groupchat.turn.ownershipChanged"));
         }
         return new PreparedTurn(dto, existing, initiator.getUserCode());
     }
@@ -324,17 +325,17 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         ByaiGroupChatTask task = !dispatchedTurn && taskMapper != null
             ? taskMapper.selectById(context.sessionId) : null;
         if (!Objects.equals(context.userId, execution.getInitiatorUserId()) || context.assistantChatDto == null) {
-            throw new IllegalArgumentException("Group candidate runtime identity does not match its dispatch");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.identityMismatch"));
         }
         if (task != null) {
             // 私有任务续聊校验实际执行者，最初派发身份保持不变。
             taskAuthorizationService.requireActiveAgent(context.sessionId, context.assistantChatDto.getAgentId());
         }
         else if (!Objects.equals(context.assistantChatDto.getAgentId(), execution.getTargetAgentId())) {
-            throw new IllegalArgumentException("Group candidate runtime identity does not match its dispatch");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.identityMismatch"));
         }
         if (turn != null && !Objects.equals(String.valueOf(context.sessionId), turn.getGatewaySessionId())) {
-            throw new IllegalArgumentException("Group turn trace does not belong to this runtime session");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.traceMismatch"));
         }
         Long boundary = turn != null ? turn.getPublicBoundaryMessageId()
             : "CONVERSATION".equals(execution.getStatus()) && execution.getReplyToMessageId() != null
@@ -343,7 +344,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         // 续聊可看到此轮之前的新群消息，同一输入重试不会纳入后续消息。
         if (task != null) {
             if (context.userMessageId == null || context.userMessageId <= 0) {
-                throw new ChatTurnPreparationException("历史上下文准备失败，请重试",
+                throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.historyFailed"),
                     new IllegalArgumentException("Missing task input boundary"));
             }
             boundary = context.userMessageId;
@@ -367,7 +368,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 context.assistantChatDto, scope, gatewayParams);
             String coordinatorId = scope.get("coordinatorAgentId").toString();
             SsResource coordinator = resourceService.findById(Long.valueOf(coordinatorId));
-            if (coordinator == null) throw new IllegalArgumentException("Group work assistant is unavailable");
+            if (coordinator == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.assistantUnavailable"));
             Map<String, Object> coordinatorMetadata = new HashMap<>();
             coordinatorMetadata.put("id", coordinatorId);
             coordinatorMetadata.put("name", coordinator.getResourceName());
@@ -389,7 +390,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         boolean agentChanged = task != null && hasAgentChanged(context, execution.getTargetAgentId());
         Users initiator = userService.findById(execution.getInitiatorUserId());
         if (initiator == null) {
-            throw new IllegalArgumentException("Group execution initiator is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.initiatorUnavailable"));
         }
         GroupChatSessionContextFileService.ContextFile groupHistory;
         if (agentChanged) {
@@ -447,7 +448,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                     context.sessionId, before, AGENT_HISTORY_PAGE_SIZE), "Missing task answer history");
                 for (ByaiMessage answer : answers) {
                     if (answer.getMessageId() == null || answer.getMessageId() >= before) {
-                        throw new IllegalStateException("Invalid task answer history order");
+                        throw new IllegalStateException(I18nUtil.get("groupchat.turn.historyInvalid"));
                     }
                     before = answer.getMessageId();
                     Long previousAgentId = previousAgentId(answer);
@@ -461,7 +462,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             }
         }
         catch (RuntimeException error) {
-            throw new ChatTurnPreparationException("历史上下文准备失败，请重试", error);
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.historyFailed"), error);
         }
     }
 
@@ -505,7 +506,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                 }
             }
         }
-        throw new IllegalArgumentException("Group dispatch requires textual message content");
+        throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.dispatchTextRequired"));
     }
 
     private List<GroupMember> buildMemberRoster(ByaiGroupChatExecution execution) {

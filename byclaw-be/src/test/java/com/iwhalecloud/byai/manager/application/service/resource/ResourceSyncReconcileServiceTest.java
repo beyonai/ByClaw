@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.any;
 
-class ResourceSyncReconcileServiceTest {
+class ResourceSyncReconcileServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private ResourceSyncReconcileService service;
     private SsResourceRelDetailService relations;
     private ResourceSyncScopeMapper defaults;

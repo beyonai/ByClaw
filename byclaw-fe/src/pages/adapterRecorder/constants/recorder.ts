@@ -1,6 +1,8 @@
+import { getIntl } from '@umijs/max';
 // 状态机常量、step 顺序、颜色映射 —— 对齐 05 State Machine + MASTER.md 图表语义
 import type { SessionState, Confidence, ErrorCode } from '../types/recorder';
 
+// 文案使用 getter 延迟解析，避免模块加载时固化语言；状态键和顺序保持稳定。
 /** 8 步主流程(capture→rank→init→verify 链),用于 Steps 进度与 FlowGraph */
 export const FLOW_STEPS: Array<{
   key: string;
@@ -12,15 +14,57 @@ export const FLOW_STEPS: Array<{
   /** 完成后应到达的状态 */
   doneState: SessionState;
 }> = [
-  { key: 'health', title: '健康检查', enterState: 'idle', doneState: 'health_checked' },
-  { key: 'bind', title: '绑定会话', enterState: 'health_checked', doneState: 'session_bound' },
+  {
+    key: 'health',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.health' });
+    },
+    enterState: 'idle',
+    doneState: 'health_checked',
+  },
+  {
+    key: 'bind',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.bind' });
+    },
+    enterState: 'health_checked',
+    doneState: 'session_bound',
+  },
   // 采集拆成 A、B 两个独立向导步骤(用户要求):先走完 A 录制(session_bound→capture_a),
   // 再进 B 录制(capture_a→capture_b)。点「开始录制」才新建标签页导航。
-  { key: 'captureA', title: '录制 A', enterState: 'session_bound', doneState: 'capture_a' },
-  { key: 'captureB', title: '录制 B', enterState: 'capture_a', doneState: 'capture_b' },
-  { key: 'rank', title: '排序候选', enterState: 'capture_b', doneState: 'ranked' },
+  {
+    key: 'captureA',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.captureA' });
+    },
+    enterState: 'session_bound',
+    doneState: 'capture_a',
+  },
+  {
+    key: 'captureB',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.captureB' });
+    },
+    enterState: 'capture_a',
+    doneState: 'capture_b',
+  },
+  {
+    key: 'rank',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.rank' });
+    },
+    enterState: 'capture_b',
+    doneState: 'ranked',
+  },
   // N5 verify-then-save:ranked 起 LLM 评分→多脚本→verify→保存(原 init/verify 两步合一)。
-  { key: 'generate', title: '生成并保存', enterState: 'ranked', doneState: 'done' },
+  {
+    key: 'generate',
+    get title() {
+      return getIntl().formatMessage({ id: 'adapterRecorder.step.generateSave' });
+    },
+    enterState: 'ranked',
+    doneState: 'done',
+  },
 ];
 
 /**
@@ -33,9 +77,24 @@ export function flowStepsFor(llmSynthesis: boolean | undefined): typeof FLOW_STE
   const head = FLOW_STEPS.filter((s) => s.key !== 'rank' && s.key !== 'generate');
   // 三子步:enterState/doneState 都停在 ranked(仅用于 StepRail 展示,不驱动真实状态机)。
   const subSteps: typeof FLOW_STEPS = [
-    { key: 'score', title: '评分候选', enterState: 'capture_b', doneState: 'ranked' },
-    { key: 'genScripts', title: '生成脚本', enterState: 'ranked', doneState: 'ranked' },
-    { key: 'testSave', title: '测试保存', enterState: 'ranked', doneState: 'done' },
+    {
+      key: 'score',
+      title: getIntl().formatMessage({ id: 'adapterRecorder.step.score' }),
+      enterState: 'capture_b',
+      doneState: 'ranked',
+    },
+    {
+      key: 'genScripts',
+      title: getIntl().formatMessage({ id: 'adapterRecorder.step.generate' }),
+      enterState: 'ranked',
+      doneState: 'ranked',
+    },
+    {
+      key: 'testSave',
+      title: getIntl().formatMessage({ id: 'adapterRecorder.step.testSave' }),
+      enterState: 'ranked',
+      doneState: 'done',
+    },
   ];
   return [...head, ...subSteps];
 }
@@ -85,11 +144,19 @@ export const isTerminalError = (code: string): boolean => (TERMINAL_ERROR_CODES 
 
 // confidence → 主题 token 配色已下放到 CandidateCard(theme.useToken),不再在此硬编码 hex。
 export const CONFIDENCE_LABEL: Record<Confidence, string> = {
-  high: '高',
-  medium: '中',
-  low: '低',
-  rejected: '已拒绝',
+  get high() {
+    return getIntl().formatMessage({ id: 'systemNotification.priority.high' });
+  },
+  get medium() {
+    return getIntl().formatMessage({ id: 'systemNotification.priority.medium' });
+  },
+  get low() {
+    return getIntl().formatMessage({ id: 'projectSpace.detail.source.todoPriority.low' });
+  },
+  get rejected() {
+    return getIntl().formatMessage({ id: 'adapterRecorder.confidence.rejected' });
+  },
 };
 
 /** 状态机非法转移时的统一文案 */
-export const INVALID_STATE_HINT = '当前会话状态不允许此操作,请按流程顺序推进。';
+export const getInvalidStateHint = () => getIntl().formatMessage({ id: 'adapterRecorder.state.invalidHint' });

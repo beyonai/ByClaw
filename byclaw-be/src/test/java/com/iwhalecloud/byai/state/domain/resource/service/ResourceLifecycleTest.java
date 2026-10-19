@@ -27,7 +27,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** 验证真实服务入口的状态转换、权限拒绝和运行产物处理，不执行外部存储操作。 */
-class ResourceLifecycleTest {
+class ResourceLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private final ToolManService service = new ToolManService();
     private final SsResourceService resources = mock(SsResourceService.class);
     private final AuthApplicationService auth = mock(AuthApplicationService.class);

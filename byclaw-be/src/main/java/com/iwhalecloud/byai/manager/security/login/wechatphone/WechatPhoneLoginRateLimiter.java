@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -34,19 +36,19 @@ public class WechatPhoneLoginRateLimiter {
 
     public void check(String clientAddress) {
         if (maxPerMinute <= 0) {
-            throw new AuthenticationServiceException("微信手机号登录暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.loginUnavailable"));
         }
         Long count;
         try {
             count = redis.execute(INCREMENT, Collections.singletonList(key(clientAddress)));
         } catch (RuntimeException e) {
-            throw new AuthenticationServiceException("微信手机号登录暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.loginUnavailable"));
         }
         if (count == null || count <= 0) {
-            throw new AuthenticationServiceException("微信手机号登录暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.loginUnavailable"));
         }
         if (count > maxPerMinute) {
-            throw new BadCredentialsException("微信手机号登录请求过于频繁");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.rateLimited"));
         }
     }
 
@@ -56,7 +58,7 @@ public class WechatPhoneLoginRateLimiter {
                 .digest(String.valueOf(address).getBytes(StandardCharsets.UTF_8));
             return KEY_PREFIX + HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
-            throw new AuthenticationServiceException("微信手机号登录暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.loginUnavailable"));
         }
     }
 }

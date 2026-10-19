@@ -69,7 +69,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 @DisabledOnOs(OS.WINDOWS)
-class RouteServiceTest {
+class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @TempDir
     Path tempDir;
@@ -111,6 +111,11 @@ class RouteServiceTest {
         projectResourceService = mock(ProjectResourceService.class);
         userBucketNamingService = mock(UserBucketNamingService.class);
         messageSource = new StaticMessageSource();
+        var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
+        bundle.setBasename("i18n/messages");
+        bundle.setDefaultEncoding("UTF-8");
+        bundle.setFallbackToSystemLocale(false);
+        messageSource.setParentMessageSource(bundle);
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
         messageSource.addMessage("sandbox.launch.progress.ready", Locale.SIMPLIFIED_CHINESE, "个人助理已启动，正在处理请求");

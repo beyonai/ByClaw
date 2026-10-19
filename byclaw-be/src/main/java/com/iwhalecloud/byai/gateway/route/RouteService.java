@@ -200,7 +200,7 @@ public class RouteService {
             && "COORDINATED".equals(scope.get("mode"))
             && String.valueOf(ctx.getAssistantChatDto().getAgentId()).equals(scope.get("coordinatorAgentId"))) {
             throw new com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException(
-                "群组工作助手的当前执行渠道不支持团队调度，请配置支持团队协作的执行渠道", null);
+                I18nUtil.get("groupchat.team.channelUnsupported"), null);
         }
         if (interfaceIntegration) {
             interfaceRouteService.route(ctx);
@@ -864,7 +864,7 @@ public class RouteService {
      */
     private String resolveSandboxWorkspace(String sessionId) {
         if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException("会话工作目录解析失败：缺少会话 ID");
+            throw new BdpRuntimeException(I18nUtil.get("chat.workspace.missingSession"));
         }
         ensureConversationWorkspaceExists(sessionId);
         return SESSION_WORKSPACE_ROOT + "/" + sessionId;
@@ -878,13 +878,13 @@ public class RouteService {
         try {
             if (Files.exists(conversationWorkspace)) {
                 if (!Files.isDirectory(conversationWorkspace)) {
-                    throw new BdpRuntimeException("会话工作目录初始化失败：目标路径不是目录 " + conversationWorkspace);
+                    throw new BdpRuntimeException(I18nUtil.get("chat.workspace.notDirectory", String.valueOf(conversationWorkspace)));
                 }
                 return;
             }
             Files.createDirectories(conversationWorkspace);
         } catch (IOException | SecurityException e) {
-            throw new BdpRuntimeException("会话工作目录初始化失败：" + conversationWorkspace, e);
+            throw new BdpRuntimeException(I18nUtil.get("chat.workspace.initFailed", String.valueOf(conversationWorkspace)), e);
         }
     }
 

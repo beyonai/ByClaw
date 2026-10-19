@@ -21,14 +21,14 @@ import lombok.Setter;
 @Setter
 public class KnowledgeSearchRequest {
 
-    @NotEmpty(message = "知识库资源标识列表不能为空")
-    private List<@NotNull(message = "知识库资源标识不能为空") Long> resourceIdList = new ArrayList<>();
+    @NotEmpty(message = "{knowledge.resourceIds.required}")
+    private List<@NotNull(message = "{knowledge.resourceId.required}") Long> resourceIdList = new ArrayList<>();
 
-    @NotBlank(message = "检索文本不能为空")
+    @NotBlank(message = "{knowledge.search.textRequired}")
     private String query;
 
-    @NotNull(message = "返回条数不能为空")
-    @Positive(message = "返回条数必须大于0")
+    @NotNull(message = "{knowledge.search.limitRequired}")
+    @Positive(message = "{knowledge.search.limitPositive}")
     private Integer topK;
 
     private Map<String, Object> where;
@@ -37,6 +37,6 @@ public class KnowledgeSearchRequest {
 
     private List<String> fileTypeList = new ArrayList<>();
 
-    @NotBlank(message = "检索模式不能为空")
+    @NotBlank(message = "{knowledge.search.modeRequired}")
     private String searchMode;
 }

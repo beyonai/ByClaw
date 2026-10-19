@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.resource;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -50,13 +52,14 @@ public class EnterpriseResourceSyncService {
         Scope scope = request.scope();
         if (scope == null) return;
         if (!activeTenantUsers(scope.userIds(), CurrentUserHolder.getEnterpriseId()).containsAll(scope.userIds())) {
-            throw new IllegalArgumentException("授权用户不存在、已停用或不属于当前企业");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.users.invalid"));
         }
+        // IDs are identifiers: pass strings so MessageFormat never adds numeric grouping.
         for (Long id : scope.orgIds()) {
-            if (scopeMapper.organization(id) != 1 || scopeMapper.tenantOrganization(id, CurrentUserHolder.getEnterpriseId()) != 1) throw new IllegalArgumentException("授权组织不存在: " + id);
+            if (scopeMapper.organization(id) != 1 || scopeMapper.tenantOrganization(id, CurrentUserHolder.getEnterpriseId()) != 1) throw new IllegalArgumentException(I18nUtil.get("resource.sync.organization.invalid", String.valueOf(id)));
         }
         for (Long id : scope.postIds()) {
-            if (scopeMapper.ordinaryPost(id) != 1) throw new IllegalArgumentException("授权岗位不存在或属于数字岗位: " + id);
+            if (scopeMapper.ordinaryPost(id) != 1) throw new IllegalArgumentException(I18nUtil.get("resource.sync.post.invalid", String.valueOf(id)));
         }
     }
 
@@ -65,7 +68,7 @@ public class EnterpriseResourceSyncService {
         Long tenantId = CurrentUserHolder.getEnterpriseId();
         if (userId == null || userId <= 0 || tenantId == null || tenantId <= 0
             || !auth.isCurrentUserGlobalResourceManager()) {
-            throw new IllegalArgumentException("资源授权同步需要当前企业资源管理员的有效登录身份");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.principal.required"));
         }
     }
 
@@ -73,10 +76,10 @@ public class EnterpriseResourceSyncService {
         if (resource == null) return;
         if (!"enterprise".equals(resource.getOwnerType())
             || !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
-            throw new IllegalArgumentException("同编码资源的企业或归属与本次同步不一致");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.owner.mismatch"));
         }
         if (Objects.equals(resource.getResourceStatus(), -1)) {
-            throw new IllegalArgumentException("已注销资源不能通过同步恢复");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.resource.deleted"));
         }
     }
 

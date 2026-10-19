@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
 import com.iwhalecloud.byai.manager.dto.orchestrator.OrchestratorRuntimeDTO;
 import com.iwhalecloud.byai.manager.dto.orchestrator.OrchestratorRuntimeRequestDTO;
@@ -48,7 +50,7 @@ public class OrchestratorRuntimeController {
             logger.error("数字员工组运行时解析服务不可用, orchestratorId={}",
                 request == null ? null : request.getOrchestratorId(), e);
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(ResponseUtil.fail("数字员工组权限或配置服务不可用"));
+                .body(ResponseUtil.fail(I18nUtil.get("employee.group.permissionServiceUnavailable")));
         }
     }
 }

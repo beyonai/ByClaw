@@ -28,7 +28,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class ScriptServiceTest {
+class ScriptServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ConnectorAuthService connectorAuthService;
     private ScriptService service;

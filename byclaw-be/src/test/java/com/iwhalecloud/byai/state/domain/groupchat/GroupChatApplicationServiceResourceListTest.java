@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -71,7 +73,12 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
-class GroupChatApplicationServiceResourceListTest {
+class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private static final Long GROUP_ID = 100L;
     private static final Long MESSAGE_ID = 200L;
     private static final Long USER_ID = 300L;
@@ -517,7 +524,7 @@ class GroupChatApplicationServiceResourceListTest {
         JSONObject response = sendThroughWebSocket(service, command(List.of()));
         assertThat(response.getString("type")).isEqualTo("ERROR");
         assertThat(response.getString("code")).isEqualTo("GROUP_CHAT_STORAGE_ERROR");
-        assertThat(response.getString("message")).contains("数据库").doesNotContain("internal database diagnostic");
+        assertThat(response.getString("message")).contains("Database").doesNotContain("internal database diagnostic");
         verify(eventPublisher, never()).publish(any(), any(), any());
     }
 

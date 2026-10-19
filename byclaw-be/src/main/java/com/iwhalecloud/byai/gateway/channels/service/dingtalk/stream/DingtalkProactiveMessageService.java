@@ -394,13 +394,13 @@ public class DingtalkProactiveMessageService {
         // 1. 校验发送人是否已授权钉钉连接器
         ConnectorInfo dingtalkConnector = connectorInfoService.findByCode("dingtalk");
         if (dingtalkConnector == null) {
-            throw new IllegalStateException("钉钉连接器未配置");
+            throw new IllegalStateException(I18nUtil.get("dingtalk.connector.notConfigured"));
         }
 
         AuthorizationStatusResult authStatus = dwsAuthorizationProvider.verify(senderUserId, dingtalkConnector);
         if (authStatus.status() != AuthorizationStatus.CONNECTED) {
             throw new IllegalStateException(
-                "发送人未授权钉钉连接器，请先完成 dws auth login。userId=" + senderUserId);
+                I18nUtil.get("dingtalk.message.authorizationRequired", String.valueOf(senderUserId)));
         }
 
         // 2. 映射接收人: ByClaw userId → 钉钉 staffId (用发送人的 dws 环境查询)
@@ -417,13 +417,13 @@ public class DingtalkProactiveMessageService {
     private String resolveStaffIdViaDws(Long senderUserId, Long receiverUserId) {
         Users receiver = userService.findById(receiverUserId);
         if (receiver == null) {
-            throw new IllegalStateException("接收人不存在: userId=" + receiverUserId);
+            throw new IllegalStateException(I18nUtil.get("dingtalk.message.recipientMissing", String.valueOf(receiverUserId)));
         }
 
         // 准备 dws 环境 (用发送人的授权)
         Map<String, String> dwsEnv = new HashMap<>();
         if (!dwsAuthService.applyUserDwsEnv(dwsEnv, senderUserId)) {
-            throw new IllegalStateException("无法初始化 dws 环境: senderUserId=" + senderUserId);
+            throw new IllegalStateException(I18nUtil.get("dingtalk.message.environmentFailed", String.valueOf(senderUserId)));
         }
 
         // 方式1: 通过手机号查询 (首选)
@@ -466,7 +466,7 @@ public class DingtalkProactiveMessageService {
         }
 
         throw new IllegalStateException(
-            "无法将接收人映射为钉钉用户，手机号和工号查询均失败: userId=" + receiverUserId);
+            I18nUtil.get("dingtalk.message.recipientUnresolved", String.valueOf(receiverUserId)));
     }
 
     /**
@@ -580,7 +580,7 @@ public class DingtalkProactiveMessageService {
 
         Map<String, String> dwsEnv = new HashMap<>();
         if (!dwsAuthService.applyUserDwsEnv(dwsEnv, senderUserId)) {
-            throw new IllegalStateException("无法初始化 dws 环境: senderUserId=" + senderUserId);
+            throw new IllegalStateException(I18nUtil.get("dingtalk.message.environmentFailed", String.valueOf(senderUserId)));
         }
 
         try {
@@ -601,7 +601,7 @@ public class DingtalkProactiveMessageService {
         }
         catch (Exception e) {
             logger.error("dws chat message send 执行异常", e);
-            throw new IllegalStateException("钉钉消息发送异常: " + e.getMessage(), e);
+            throw new IllegalStateException(I18nUtil.get("dingtalk.message.exception", e.getMessage()), e);
         }
     }
 }

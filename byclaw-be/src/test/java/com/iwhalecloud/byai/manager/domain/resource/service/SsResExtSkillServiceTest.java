@@ -12,7 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class SsResExtSkillServiceTest {
+class SsResExtSkillServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final SsResExtSkillService service = new SsResExtSkillService();
 
