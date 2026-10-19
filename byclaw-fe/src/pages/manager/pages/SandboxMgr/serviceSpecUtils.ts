@@ -12,6 +12,15 @@ export const isServiceSpecAutoStartEnabled = (value: ServiceSpecConfig['enabled'
   return value !== '0' && value.toLowerCase() !== 'false';
 };
 
+export const formatJsonIfValid = (value?: string | null): string => {
+  if (!value) return value || '';
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+};
+
 export const buildServiceSpecPayload = (spec: ServiceSpecConfig, enabled: boolean) => ({
   serviceKey: spec.serviceKey,
   specJson: spec.specJson,

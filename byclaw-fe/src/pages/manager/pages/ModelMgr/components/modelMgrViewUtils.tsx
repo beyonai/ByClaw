@@ -9,6 +9,19 @@ type IntlShape = {
 
 export type ModelStatus = 'ENABLED' | 'DISABLED' | 'TESTING';
 
+const MODEL_TYPE_CODES = new Set(['LLM', 'RERANK', 'EMBEDDING', 'TTS', 'ASR', 'IMAGE_GENERATION']);
+
+export const getModelTypeName = (intl: IntlShape, value?: string | null, labels: Record<string, string> = {}) => {
+  const code = value?.trim().toUpperCase() || '';
+  if (!code) return '-';
+  // 卡片使用不带编码的名称；字典扩展类型沿用配置名称，缺失名称时不直接展示编码。
+  if (MODEL_TYPE_CODES.has(code)) {
+    return intl.formatMessage({ id: `modelMgr.typeName.${code}` });
+  }
+  const label = labels[code]?.trim();
+  return label && label.toUpperCase() !== code ? label : intl.formatMessage({ id: 'modelMgr.typeName.unknown' });
+};
+
 export const systemNameMap: Record<string, string> = {
   super_assistant: 'modelMgr.system.superAssistant',
   chatbi: 'chatbi',

@@ -81,7 +81,7 @@ public class WorkerRouteReadinessService {
 
     private void launchAndWait(String userCode, Long resourceId, String targetAgentType,
             Consumer<ReadinessPhase> progress) {
-        SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
+        SandboxLaunchData launchData = sandboxService.restartSandboxForTargetWithoutWait(
             userCode, resourceId, targetAgentType);
         if (launchData == null) {
             throw readinessFailure();

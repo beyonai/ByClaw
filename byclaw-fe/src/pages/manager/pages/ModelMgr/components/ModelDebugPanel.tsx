@@ -1,13 +1,15 @@
 import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Button, Image, Input, Segmented, Space, Spin, Table } from 'antd';
+import { Button, Image, Input, message, Segmented, Space, Spin, Table, Upload } from 'antd';
 import React, { useState, useMemo } from 'react';
 import { debounce } from 'lodash';
 import { useIntl } from '@umijs/max';
+import { uploadFiles } from '@/service/file';
 import type { DebugInputMode } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
 import { getVolcengineImagePreviews } from './volcengineImageConfig';
 
 type Props = {
+  currentModelType?: string;
   debugInputMode: DebugInputMode;
   debugInput: string;
   setDebugInput: (value: string) => void;
@@ -24,6 +26,7 @@ type Props = {
 };
 
 const ModelDebugPanel: React.FC<Props> = ({
+  currentModelType,
   debugInputMode,
   debugInput,
   setDebugInput,
@@ -44,6 +47,8 @@ const ModelDebugPanel: React.FC<Props> = ({
     () => (showImagePreview ? getVolcengineImagePreviews(debugOutput) : []),
     [debugOutput, showImagePreview]
   );
+  const [uploading, setUploading] = useState(false);
+  const [audioFileName, setAudioFileName] = useState('');
 
   const debouncedRunDebug = useMemo(
     () =>
@@ -88,6 +93,42 @@ const ModelDebugPanel: React.FC<Props> = ({
           <div className={styles.codePanelHeader}>
             <span>{intl.formatMessage({ id: 'modelMgr.modal.input' })}</span>
             <Space size={8}>
+              {currentModelType === 'ASR' && (
+                <Upload
+                  accept=".mp3,audio/mpeg"
+                  showUploadList={false}
+                  beforeUpload={async (file) => {
+                    setUploading(true);
+                    try {
+                      const data = new FormData();
+                      data.append('files', file);
+                      data.append('sessionType', 'AGENT');
+                      const result = await uploadFiles(data);
+                      const audio = (result.rebuildFileList || result.uploadItems || [])[0];
+                      if (!audio?.fileId) throw new Error('上传未返回音频文件');
+                      let previous = {};
+                      try {
+                        previous = JSON.parse(debugInput || '{}');
+                      } catch {
+                        previous = {};
+                      }
+                      setDebugInput(
+                        JSON.stringify({ ...previous, fileId: audio.fileId, sessionId: result.sessionId }, null, 2)
+                      );
+                      setAudioFileName(file.name);
+                    } catch (error) {
+                      message.error(typeof error === 'string' ? error : '音频上传失败');
+                    } finally {
+                      setUploading(false);
+                    }
+                    return Upload.LIST_IGNORE;
+                  }}
+                >
+                  <Button size="small" loading={uploading} title={audioFileName}>
+                    上传 MP3
+                  </Button>
+                </Upload>
+              )}
               <Button
                 size="small"
                 icon={<CopyOutlined />}
@@ -99,7 +140,7 @@ const ModelDebugPanel: React.FC<Props> = ({
                 size="small"
                 type="primary"
                 onClick={debouncedRunDebug}
-                disabled={isRunning || debugOutputLoading}
+                disabled={uploading || isRunning || debugOutputLoading}
               >
                 {intl.formatMessage({ id: 'modelMgr.modal.run' })}
               </Button>

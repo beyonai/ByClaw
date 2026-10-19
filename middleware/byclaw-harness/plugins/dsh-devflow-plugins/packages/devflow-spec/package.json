@@ -1,0 +1,47 @@
+{
+  "name": "@zhchxiao123/dsh-devflow-spec",
+  "description": "Service Definition of the devflow spec seam: architecture documents whose claims are tied to code by evaluable anchors",
+  "version": "0.4.0-dev.8",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhchxiao123/dsh-devflow-plugins.git",
+    "directory": "packages/devflow-spec"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"for (const f of require('./package.json').files.filter(f=>!f.includes('*'))) if (!require('node:fs').existsSync(f)) { console.error('prepublishOnly: '+f+' is missing; run pnpm run build at the repo root'); process.exit(1) }\""
+  }
+}

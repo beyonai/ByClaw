@@ -1,0 +1,34 @@
+# Disable the base-profile registration. The integration also installs a
+# monotonic runtime guard because Web agent presets can mount a scoped copy.
+- id: tool-web
+  config:
+    search: false
+
+- insert:
+    # Cordis keeps ctx.logger records in memory unless an exporter is mounted.
+    # Emit only ByClaw INFO/WARN/ERROR records to process stdout so Kubernetes
+    # can collect resource synchronization and Redis watch diagnostics.
+    - id: logger-console
+      name: '@deepseek-ai/cordis-plugin-logger-console'
+      config:
+        colors: false
+        showTime: 'yyyy-MM-dd hh:mm:ss.SSS '
+        levels:
+          default: -1
+          byclaw-dsh: 2
+          byclaw-idle-reporter: 2
+
+    - id: byclaw-dsh
+      name: '@byclaw/dsh-integration'
+      config:
+        enabled: true
+        userCode: !!js process.env.USER_CODE
+        stateDir: '.agent-teams'
+        provider: 'deepseek-official'
+        model: 'deepseek-v4-flash'
+        subagentProvider: 'spawn'
+        projectionConcurrency: 8
+        allowSkillSyncFailure: true
+        skillSyncTimeoutMs: 15000
+        skillSyncAttempts: 1
+        skillSyncRetryDelayMs: 0

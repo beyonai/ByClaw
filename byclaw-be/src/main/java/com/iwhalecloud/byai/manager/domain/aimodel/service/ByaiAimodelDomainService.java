@@ -60,6 +60,10 @@ public class ByaiAimodelDomainService {
      * @param modelId 模型
      * @return ByaiAimodel
      */
+    public void lockDefaultModels() {
+        byaiAimodelMapper.lockDefaultModels();
+    }
+
     public ByaiAimodel findById(Long modelId) {
         return byaiAimodelMapper.selectById(modelId);
     }

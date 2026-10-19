@@ -99,6 +99,18 @@ export default defineConfig({
     // 关键修复：强制设置模块解析条件顺序
     config.resolve.conditionNames = ['import', 'node', 'default'];
 
+    // LibRaw 的通用加载器同时包含 Node 分支；仅在该模块中忽略浏览器不会使用的 Node 导入。
+    config.module
+      .rule('camera-raw-browser')
+      .test(/@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs$/)
+      .set('resolve', { alias: { module: false, fs: false, path: false, url: false } });
+
+    // libarchive 的同一发布包包含 Node 分支，浏览器 Worker 仅通过同源 fetch 加载 WASM。
+    config.module
+      .rule('archive-wasm-browser')
+      .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
+      .set('resolve', { alias: { fs: false, path: false, crypto: false } });
+
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({
       cacheGroups: umiConfig.cacheGroups,
@@ -167,7 +179,9 @@ export default defineConfig({
     safari: 12,
   },
   // legacy: {},
-  esbuildMinifyIIFE: true,
+  // 文件预览依赖含 BigInt 字面量；Terser 可保留该语法，避免 esbuild 的旧目标压缩报错。
+  // 此配置不提供 BigInt polyfill，相关解码能力仍要求浏览器原生支持。
+  jsMinifier: 'terser',
   metas: [
     { 'http-equiv': 'Pragma', content: 'no-cache' },
     {

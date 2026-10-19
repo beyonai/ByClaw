@@ -15,4 +15,12 @@ public class ConnectorCredentialFieldDto {
     private String inputType;
 
     private Integer maxLength;
+
+    private String defaultValue;
+
+    private String placeholder;
+
+    private String description;
+
+    private Boolean advanced = false;
 }

@@ -47,7 +47,12 @@ import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } f
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { hasAnyUserRole } from '@/utils/userRole';
-import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
+import {
+  buildServiceSpecPayload,
+  formatJsonIfValid,
+  isServiceSpecAutoStartEnabled,
+  type ServiceSpecConfig,
+} from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
 import styles from './index.module.less';
@@ -832,7 +837,7 @@ const SandboxMgr = () => {
       setEditingSpec(record);
       specForm.setFieldsValue({
         serviceKey: record.serviceKey,
-        specJson: record.specJson,
+        specJson: formatJsonIfValid(record.specJson),
         templateJson: record.templateJson || '',
         enabled: isServiceSpecAutoStartEnabled(record.enabled),
       });
@@ -2655,11 +2660,7 @@ const SandboxMgr = () => {
                     onClick={() => {
                       const val = specForm.getFieldValue('specJson');
                       if (!val) return;
-                      try {
-                        specForm.setFieldsValue({ specJson: JSON.stringify(JSON.parse(val), null, 2) });
-                      } catch {
-                        return;
-                      }
+                      specForm.setFieldsValue({ specJson: formatJsonIfValid(val) });
                     }}
                   />
                 </Tooltip>

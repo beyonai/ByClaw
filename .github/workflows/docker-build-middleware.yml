@@ -6,12 +6,14 @@ on:
     tags: ["v*"]
     paths:
       - "middleware/**"
+      - "byclaw-be/src/main/resources/tenant/opengauss-entrypoint.py"
       - "byclaw-exe/extensions/**"
       - ".github/workflows/docker-build-middleware.yml"
   pull_request:
     branches: [main, master]
     paths:
       - "middleware/**"
+      - "byclaw-be/src/main/resources/tenant/opengauss-entrypoint.py"
       - "byclaw-exe/extensions/**"
       - ".github/workflows/docker-build-middleware.yml"
   workflow_dispatch:
@@ -31,6 +33,7 @@ jobs:
       pull-requests: read
     outputs:
       opengauss: ${{ steps.filter.outputs.opengauss }}
+      tenant_opengauss: ${{ steps.filter.outputs.tenant_opengauss }}
       minio: ${{ steps.filter.outputs.minio }}
       redis: ${{ steps.filter.outputs.redis }}
       openclaw: ${{ steps.filter.outputs.openclaw }}
@@ -43,6 +46,10 @@ jobs:
             opengauss:
               - "middleware/opengauss/**"
               - ".github/workflows/docker-build-middleware.yml"
+            tenant_opengauss:
+              - "middleware/tenant/opengauss/**"
+              - "byclaw-be/src/main/resources/tenant/opengauss-entrypoint.py"
+              - ".github/workflows/docker-build-middleware.yml"
             minio:
               - "middleware/minio/**"
               - ".github/workflows/docker-build-middleware.yml"
@@ -50,6 +57,7 @@ jobs:
               - "middleware/redis/**"
               - ".github/workflows/docker-build-middleware.yml"
             openclaw:
+              - "middleware/builtin/**"
               - "middleware/openclaw/**"
               - "byclaw-exe/extensions/**"
               - ".github/workflows/docker-build-middleware.yml"
@@ -70,6 +78,11 @@ jobs:
             context: middleware/opengauss
             changed: opengauss
             platforms: linux/amd64,linux/arm64
+          - service: byclaw-tenant-opengauss
+            context: .
+            dockerfile: middleware/tenant/opengauss/Dockerfile
+            changed: tenant_opengauss
+            platforms: linux/amd64,linux/arm64
           - service: byclaw-minio
             context: middleware/minio
             changed: minio
@@ -87,6 +100,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       needs.changes.outputs.opengauss == 'true' ||
+      needs.changes.outputs.tenant_opengauss == 'true' ||
       needs.changes.outputs.minio == 'true' ||
       needs.changes.outputs.redis == 'true' ||
       needs.changes.outputs.openclaw == 'true'

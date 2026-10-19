@@ -211,11 +211,11 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     super.componentDidMount();
   }
 
-  getSendPayload = () => {
+  getSendPayload = (textOverride?: string) => {
     const { userInfo, myAgentType } = this.props;
     const currentInputPayload = this.getCurrentInputPayload();
     const { fileList, chatSettings, connectNetAgentId } = this.state;
-    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const inputValue = textOverride ?? currentInputPayload?.text ?? this.state.inputValue;
     const sendVal = trim(inputValue);
 
     const { agentId } = this.props.globalContext;
@@ -498,7 +498,6 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
           />
-          {this.STTRender()}
         </Space>
       </>
     );

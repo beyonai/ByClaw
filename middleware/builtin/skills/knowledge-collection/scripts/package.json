@@ -1,0 +1,19 @@
+{
+  "name": "@byclaw/knowledge-collection-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs online-search/*.test.mjs",
+    "build:screenshot-deps": "node build-screenshot-deps.mjs"
+  },
+  "optionalDependencies": {
+    "tencentcloud-sdk-nodejs": "4.1.304"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}

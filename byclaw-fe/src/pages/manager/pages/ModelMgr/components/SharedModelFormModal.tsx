@@ -2,6 +2,7 @@ import { getTitle, type ModalStore } from '@/pages/manager/hooks/useShowModal';
 import { Button, Form, message, Modal } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from '@umijs/max';
+import { getCatalogProviderValues } from './mediaProviderCatalog';
 import ModelDebugPanel from './ModelDebugPanel';
 import ModelFormFields from './ModelFormFields';
 import {
@@ -187,22 +188,25 @@ const SharedModelFormModal: React.FC<Props> = ({
           const modelType = normalizeModelType(detail.modelType);
           const imageDefaults: Record<string, any> =
             modelType === 'IMAGE_GENERATION' ? getImageGenerationDefaultFormValues() : {};
+          let providerName = detail.providerName;
+          if (modelType === 'IMAGE_GENERATION') {
+            providerName = resolveImageGenerationProviderName(
+              detail.providerName,
+              detail.modelProtocol || imageDefaults.modelProtocol
+            );
+          }
           const nextFormValues = {
             ...imageDefaults,
             ...getImageConfigFormValues(detail),
             displayName: detail.displayName,
-            providerName:
-              modelType === 'IMAGE_GENERATION'
-                ? resolveImageGenerationProviderName(
-                    detail.providerName,
-                    detail.modelProtocol || imageDefaults.modelProtocol
-                  )
-                : detail.providerName,
+            providerName,
             modelProtocol: detail.modelProtocol || imageDefaults.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode || imageDefaults.modelCode,
             modelType,
             apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || '',
             apiToken: detail.apiToken || '',
+            extendParam:
+              typeof detail.extendParam === 'object' ? JSON.stringify(detail.extendParam, null, 2) : detail.extendParam,
             headers: Array.isArray(detail.headers) && detail.headers.length ? detail.headers : [{ key: '', value: '' }],
             connectTimeoutSec: detail.connectTimeoutSec ?? 32,
             readTimeoutSec: detail.readTimeoutSec ?? 60,
@@ -327,12 +331,10 @@ const SharedModelFormModal: React.FC<Props> = ({
       const res = await saveModelRequest(payload);
 
       const extractedModelId = extractModelIdFromSave?.(res);
-      const resolvedModelId =
-        extractedModelId !== null && extractedModelId !== undefined
-          ? extractedModelId
-          : querySavedModelId
-          ? await querySavedModelId(values, res)
-          : undefined;
+      let resolvedModelId = extractedModelId;
+      if ((resolvedModelId === null || resolvedModelId === undefined) && querySavedModelId) {
+        resolvedModelId = await querySavedModelId(values, res);
+      }
 
       if (mode === 'save_continue') {
         if (resolvedModelId !== null && resolvedModelId !== undefined) {
@@ -374,13 +376,11 @@ const SharedModelFormModal: React.FC<Props> = ({
     if (type === 'add' && typeof changedValues?.reasoningConfig?.enabled === 'boolean') {
       const config = allValues.reasoningConfig || {};
       const capability = config.capability === 'unsupported' ? 'effort' : config.capability;
-      const defaultLevel = !config.enabled
-        ? 'off'
-        : config.defaultLevel && config.defaultLevel !== 'off'
-        ? config.defaultLevel
-        : capability === 'adaptive'
-        ? 'adaptive'
-        : 'high';
+      let defaultLevel = 'off';
+      if (config.enabled) {
+        if (config.defaultLevel && config.defaultLevel !== 'off') defaultLevel = config.defaultLevel;
+        else defaultLevel = capability === 'adaptive' ? 'adaptive' : 'high';
+      }
       const reasoningConfig = { ...config, capability, defaultLevel };
       form.setFieldValue('reasoningConfig', reasoningConfig);
       syncedValues = { ...allValues, reasoningConfig };
@@ -402,7 +402,11 @@ const SharedModelFormModal: React.FC<Props> = ({
         Object.entries(capabilities).forEach(([key, value]) => form.setFieldValue(key, value));
         syncedValues = { ...syncedValues, ...capabilities };
       }
-      if (changedKeys.includes('providerName') && syncedValues.modelType === 'IMAGE_GENERATION') {
+      if (
+        changedKeys.includes('providerName') &&
+        syncedValues.modelType === 'IMAGE_GENERATION' &&
+        !getCatalogProviderValues('IMAGE_GENERATION', changedValues.providerName)
+      ) {
         const provider = getImageGenerationProvider(changedValues.providerName);
         if (provider) {
           const connection = applyAutofillFields(autofillRef.current, syncedValues, {
@@ -441,14 +445,17 @@ const SharedModelFormModal: React.FC<Props> = ({
       lastModelTypeForSyncRef.current = targetModelType;
     }
 
-    if (
-      !canAutofill &&
-      changedKeys.includes('providerName') &&
-      normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION'
-    ) {
-      const providerDefaults = getImageProviderTransitionFormValues(changedValues?.providerName, syncedValues);
-      form.setFieldsValue(providerDefaults);
-      syncedValues = { ...syncedValues, ...providerDefaults };
+    if (changedKeys.includes('providerName')) {
+      const providerDefaults =
+        getCatalogProviderValues(normalizeModelType(syncedValues?.modelType), changedValues?.providerName) ||
+        (!canAutofill && normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION'
+          ? getImageProviderTransitionFormValues(changedValues?.providerName, syncedValues)
+          : {});
+      const providerPatch = canAutofill
+        ? applyAutofillFields(autofillRef.current, syncedValues, providerDefaults)
+        : providerDefaults;
+      Object.entries(providerPatch).forEach(([key, value]) => form.setFieldValue(key, value));
+      syncedValues = { ...syncedValues, ...providerPatch };
     }
 
     if (normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION' && !syncedValues?.providerName?.trim()) {
@@ -568,6 +575,7 @@ const SharedModelFormModal: React.FC<Props> = ({
         <div className={styles.right}>
           <ModelDebugPanel
             showImagePreview={isVolcengineImage({ modelType: currentModelType, modelProtocol: currentModelProtocol })}
+            currentModelType={normalizeModelType(currentModelType)}
             debugInputMode={debugInputMode}
             debugInput={debugInput}
             setDebugInput={setDebugInput}

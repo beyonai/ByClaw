@@ -78,6 +78,19 @@ describe('Markdown ATag file actions', () => {
     });
   });
 
+  it('hides the managed summary caption because the message footer renders its voice bubble', () => {
+    const { container } = render(
+      <ATag
+        domNode={{
+          name: 'a',
+          attribs: { href: '/by/.sessions/101/tts/summary.mp3' },
+          children: [{ type: 'text', data: '🔊 播放语音摘要' }],
+        }}
+      />
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('leaves managed session file links to the message artifact renderer', () => {
     render(
       <ATag

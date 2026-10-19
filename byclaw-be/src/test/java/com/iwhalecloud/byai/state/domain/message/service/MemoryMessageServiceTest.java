@@ -39,6 +39,22 @@ class MemoryMessageServiceTest {
     }
 
     @Test
+    void voiceMetadataSurvivesUserPersistenceWithoutMarkingAssistantRepliesAsVoice() {
+        AssistantChatDto chat = new AssistantChatDto();
+        chat.setMetadata("{\"mode\":\"smart\"}");
+        chat.setExtParams(java.util.Map.of("voice", java.util.Map.of("fileId", "55", "durationMs", 1200),
+            "messageType", "VOICE"));
+        MessageContext context = new MessageContext();
+        context.setMessageId(21L);
+        context.setTaskId(22L);
+        context.getAnswerText().append("[语音消息]");
+        var user = memoryMessageService.generateMessage(3L, ChatUseageEnum.USER_INPUT.getCode(), context, chat);
+        assertThat(user.getMetadata()).contains("VOICE", "55", "smart");
+        var answer = memoryMessageService.generateMessage(3L, ChatUseageEnum.SYSTEM_RESPONSE.getCode(), context, chat);
+        assertThat(answer.getMetadata()).doesNotContain("VOICE", "voice");
+    }
+
+    @Test
     void explicitFinalBodyIsPersistedAndRegenerationClearsItWhenAbsent() {
         MessageContext context = new MessageContext();
         context.setMessageId(21L);

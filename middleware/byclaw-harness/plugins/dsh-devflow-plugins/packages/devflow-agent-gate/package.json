@@ -1,0 +1,66 @@
+{
+  "name": "@zhchxiao123/dsh-devflow-agent-gate",
+  "description": "Devflow LLM admission policy: configured edges dispatch an independent one-shot checker subagent whose structured verdict admits or vetoes the move, failing closed on any checker fault",
+  "version": "0.4.0-dev.8",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhchxiao123/dsh-devflow-plugins.git",
+    "directory": "packages/devflow-agent-gate"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@zhchxiao123/dsh-devflow": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@zhchxiao123/dsh-devflow": "workspace:^",
+    "@zhchxiao123/dsh-devflow-artifact-gate": "workspace:^",
+    "@zhchxiao123/dsh-devflow-filesystem": "workspace:^"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"for (const f of require('./package.json').files.filter(f=>!f.includes('*'))) if (!require('node:fs').existsSync(f)) { console.error('prepublishOnly: '+f+' is missing; run pnpm run build at the repo root'); process.exit(1) }\""
+  }
+}

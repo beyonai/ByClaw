@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-langfuse-probe
+      name: '@byclaw/dsh-langfuse-probe'

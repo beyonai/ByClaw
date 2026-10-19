@@ -80,6 +80,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
+ENV BYCLAW_DATA_ROOT=/by
+
 USER root
 
 ARG OPENCLAW_VERSION
@@ -246,7 +248,7 @@ RUN set -eux; \
 RUN ln -s /app /app/node_modules/openclaw
 
 
-COPY middleware/openclaw/skills/ /app/skills/
+COPY middleware/builtin/skills/ /app/skills/
 RUN python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null \
     && python3 -m compileall -q /app/skills/mail/scripts
 

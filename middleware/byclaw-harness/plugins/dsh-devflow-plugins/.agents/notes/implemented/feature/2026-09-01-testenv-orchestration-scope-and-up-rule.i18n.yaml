@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-01-testenv-orchestration-scope-and-up-rule.md: fdcf9e2c7673479f2ab5b05fc492d3161819445e
+2026-09-01-testenv-orchestration-scope-and-up-rule.zh.md: 128a231ca6454dfd7d287be78e367231e389971b

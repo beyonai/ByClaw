@@ -3,20 +3,13 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import React from 'react';
 import styles from '../index.module.less';
-import { renderAbilityTags, renderStatusTag, type ModelStatus } from './modelMgrViewUtils';
-
-const DEFAULT_MODEL_TYPES = new Set(['LLM', 'EMBEDDING']);
-const DEFAULT_DIALOG_MODEL_ABILITY_CODE = '1';
-const DEFAULT_DIALOG_MODEL_ABILITY_LABELS = new Set([
-  '默认对话模型',
-  'Default Conversation Model',
-  'Default Dialog Model',
-]);
+import { getModelTypeName, renderAbilityTags, renderStatusTag, type ModelStatus } from './modelMgrViewUtils';
 
 type Props = {
   intl: any;
   record: any;
   abilityLabelMap: Record<string, string>;
+  modelTypeLabelMap?: Record<string, string>;
   onSetStatus: (record: any, nextStatus: ModelStatus) => void;
   onSetDefault: (record: any) => void;
   onEdit: (record: any) => void;
@@ -28,6 +21,7 @@ const ModelCardItem: React.FC<Props> = ({
   intl,
   record,
   abilityLabelMap,
+  modelTypeLabelMap,
   onSetStatus,
   onSetDefault,
   onEdit,
@@ -45,23 +39,9 @@ const ModelCardItem: React.FC<Props> = ({
     updatedAt,
     isDefault,
   } = record || {};
-  const isBackendDefaultModel = isDefault === 1 || isDefault === true;
-  const hasDefaultDialogAbility =
-    Array.isArray(abilitiesArr) &&
-    abilitiesArr.some((item) => {
-      const abilityValue = `${item ?? ''}`.trim();
-      const abilityLabel = `${abilityLabelMap?.[abilityValue] ?? abilityValue}`.trim();
-      // 右上角“默认”标签只跟“默认对话模型”能力联动，避免 embedding 默认模型误显示。
-      return (
-        abilityValue === DEFAULT_DIALOG_MODEL_ABILITY_CODE || DEFAULT_DIALOG_MODEL_ABILITY_LABELS.has(abilityLabel)
-      );
-    });
-  const normalizedModelType = `${modelType || 'LLM'}`.toUpperCase();
-  const canSetDefault =
-    recordStatus === 'ENABLED' &&
-    !isBackendDefaultModel &&
-    !hasDefaultDialogAbility &&
-    DEFAULT_MODEL_TYPES.has(normalizedModelType);
+  const isBackendDefaultModel = isDefault === 1 || isDefault === true || isDefault === '1';
+  // 所有类型均可设置默认，以后端默认标记为准，不依赖对话能力标签。
+  const canSetDefault = recordStatus === 'ENABLED' && !isBackendDefaultModel;
 
   let statusActions: Array<{
     status: Extract<ModelStatus, 'ENABLED' | 'DISABLED'>;
@@ -102,15 +82,15 @@ const ModelCardItem: React.FC<Props> = ({
             {displayName || '-'}
           </div>
           <div className={styles.subtitleRow}>
-            <span className={styles.modelPill}>{modelType || 'LLM'}</span>
+            <span className={styles.modelPill}>{getModelTypeName(intl, modelType, modelTypeLabelMap)}</span>
             <span className={classNames(styles.provider, 'ellipsis')} title={providerName}>
               {providerName || '-'}
             </span>
           </div>
         </div>
         <div className={styles.cardStatusGroup}>
-          {/* 仅能力中存在“默认对话模型”时展示右上角默认标签。 */}
-          {hasDefaultDialogAbility ? (
+          {/* 展示当前类型的默认模型，涵盖语音、重排、图片等非对话类型。 */}
+          {isBackendDefaultModel ? (
             <Tag className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</Tag>
           ) : null}
           {recordStatus ? renderStatusTag(intl, recordStatus) : null}

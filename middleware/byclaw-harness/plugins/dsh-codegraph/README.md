@@ -1,0 +1,32 @@
+# @byclaw/dsh-codegraph
+
+English | [中文](README.zh.md)
+
+This private DSH workspace plugin owns the CodeGraph runtime capability. Its bundle mounts `@deepseek-ai/dsh-mcp-client` as `codegraph-mcp` and registers a global CodeGraph system-prompt section inherited by root and delegated Agents. The supported CodeGraph version and MCP tool surface are declared in `package.json` under `dsh.codegraph`; CodeGraph 1.6.0 exposes `codegraph_explore` by default.
+
+## Installation
+
+Copy this directory to `<deepseek-harness>/plugins/dsh-codegraph`, then run:
+
+```sh
+cd /path/to/deepseek-harness
+pnpm install
+pnpm --filter @byclaw/dsh-codegraph run verify
+dsh plugin --profile web add /path/to/deepseek-harness/plugins/dsh-codegraph
+dsh --profile web --dump-config
+```
+
+The effective tree must contain `codegraph-mcp` and `dsh-codegraph`. The default MCP command is `codegraph serve --mcp`; set `CODEGRAPH_COMMAND` when the executable is not on `PATH`, or override the complete `codegraph-mcp.config` in the profile patch. The bundle explicitly passes `CODEGRAPH_MCP_TOOLS=explore`, so an ambient environment override cannot make the registered tool surface drift from the plugin contract.
+
+The policy requires every CodeGraph call to pass the Agent's authoritative current-runtime cwd as `projectPath`. The MCP process cwd is not a project selection mechanism. Set `CODEGRAPH_MCP_CWD` to a neutral directory such as `/` in a container to avoid scanning the DSH installation directory for a default project; per-call `projectPath` selection continues to work normally. If the MCP process cannot start or synchronize tools, plugin loading fails rather than leaving a misleading prompt without tools.
+
+`Dockerfile.base` declares and validates its installed version through `ARG CODEGRAPH_VERSION`. During the extension-image build, `verify:runtime` compares the inherited `codegraph --version` with the plugin manifest, performs a real MCP initialization, and requires `tools/list` to match the declared tool surface exactly. A mismatch therefore stops the image build. Upgrade CodeGraph only by updating the Docker argument, plugin contract, policy, and expected MCP surface together.
+
+## Verification
+
+```sh
+pnpm --filter @byclaw/dsh-codegraph run verify
+pnpm --filter @byclaw/dsh-codegraph run verify:runtime
+```
+
+`verify` builds the plugin, checks its manifest contract, patch configuration, and generated policy, and runs isolated runtime-verifier fixtures. `verify:contract` performs only the contract checks against existing build output, which lets image builds avoid compiling the plugin twice. `verify:runtime` requires the declared CodeGraph binary on `PATH` (or in `CODEGRAPH_COMMAND`) and checks its version and live MCP tool list using the environment declared by the patch. An end-to-end capability prompt should contain only the business request. Inspect DSH session events afterward to confirm the Agent selected `mcp__codegraph__codegraph_explore` autonomously.

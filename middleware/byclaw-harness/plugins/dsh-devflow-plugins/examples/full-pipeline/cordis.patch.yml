@@ -1,0 +1,102 @@
+# A complete devflow pipeline, as a profile patch. Copy this file to your
+# harness profile's own `cordis.patch.yml` — it applies after every bundle
+# layer, so each entry below addresses a row `@zhchxiao123/dsh-devflow-bundle`
+# already mounted rather than adding one.
+#
+# Every pipeline edge carries a contract here, and the three rows the bundle
+# ships disabled are enabled because this deployment answers the questions
+# their defaults could not: which artifact kinds a project produces, which
+# edges are worth a checker's model budget, and which command proves the work.
+#
+# Read `docs/devflow.md` for why the layers are ordered the way they are.
+# `tests/artifact-contract-composition.spec.ts` drives one card draft→done
+# through this shape, and `tests/worktree-dispatch-composition.spec.ts` drives
+# one through the worktree half.
+
+# Layer 1 — mechanical artifact contract. `kinds` is the single definition of
+# every kind's structure; `edges` says which kinds each edge requires. Nothing
+# else restates a kind's shape: the agent gate's `inputs` and the model tools'
+# preflight both read this one vocabulary.
+- devflow-artifact-gate:
+    disabled: false
+    config:
+      kinds:
+        prd:
+          frontmatter: [card]
+          sections: [Requirements, 'Acceptance Criteria']
+        design:
+          frontmatter: [card]
+          sections: [Approach, Compatibility]
+        implement:
+          sections: [Changes, Verification]
+        review:
+          sections: [Findings, Verdict]
+        test-report:
+          sections: [Coverage, Results]
+        # The dispatch record `dsh-devflow-worktree` reads. It is defined here
+        # so the structure check rejects a half-written dispatch before the
+        # fence has to, and it is deliberately absent from every `edges` entry
+        # below: requiring it would make a worktree mandatory for every card.
+        worktree:
+          frontmatter: [branch, base, worktree]
+      edges:
+        'draft->designing': [prd]
+        'designing->ready': [prd, design]
+        'ready->developing': [prd, design]   # still on disk when work begins
+        'developing->reviewing': [implement]
+        'reviewing->testing': [review]
+        'testing->done': [test-report]
+
+# Layer 2 — agent admission. Inputs name kinds; the checker reads their newest
+# registrations. Requiring their presence stays layer 1's job, which is why
+# only two edges appear: these are the two judgments a structure check cannot
+# make, and every other edge would be paying a model to say yes.
+- devflow-agent-gate:
+    disabled: false
+    config:
+      edges:
+        'designing->ready':
+          provider: claude
+          inputs: [prd, design]
+          prompt: Verify the design covers every acceptance criterion of the PRD.
+        'reviewing->testing':
+          provider: claude
+          inputs: [implement, review]
+          prompt: Verify the implementation answers every review finding.
+
+# Layer 3 — command gates. This row also takes an `approvals` list, and none is
+# configured; `docs/devflow.md` states the argument for leaving it empty.
+- devflow-gates:
+    disabled: false
+    config:
+      edges:
+        'developing->reviewing': ['pnpm run verify']
+      policies:
+        'developing->reviewing':
+          # The executor's default sizes a check, not a suite. An edge running
+          # tests without this kills them and reports the kill as red code.
+          timeoutMs: 600000
+
+# Layer 4 — completion: a decomposed requirement reaches done only after every
+# child card does. The bundle already enables it and it takes no config; the
+# rule is the parent/child relation, not a setting. Listed here only so the
+# waterfall reads in full.
+
+# Worktree-per-card development. The bundle mounts and enables this row, so
+# this entry exists to pin one thing: the kind the fence parses a dispatch from
+# must be the kind layer 1 shaped above. Naming a kind the artifact gate never
+# defined leaves the fence reading records nothing checked.
+#
+# Two preconditions this repository must satisfy before the first dispatch, and
+# the fence vetoes a dispatched card's first transition when either fails:
+# `.devflow/tasks/` is committed, and process-transient card state is ignored
+# by the canonical snippet under "Commit semantics of `.devflow`" in
+# docs/devflow.md — the one place those patterns are written.
+- devflow-worktree:
+    config:
+      artifactKind: worktree
+
+# Not enabled here: `devflow-review-gate`, which needs the external `ocr`
+# binary this line neither ships nor installs. If you install it, give its edge
+# a `baseRef` — a dispatched card's deliverable is a committed branch, and
+# workspace mode reviews only uncommitted changes.

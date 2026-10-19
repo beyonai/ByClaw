@@ -41,6 +41,12 @@ import jakarta.servlet.http.HttpSession;
  */
 @Component
 public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
+    @org.springframework.beans.factory.annotation.Value("${byclaw.platform.execution-mode:legacy}")
+    private String platformExecutionMode;
+
+
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBridgeTokens> platformBridgeTokens;
 
     private static final Logger logger = LoggerFactory.getLogger(AccessTokenVerifyInterceptor.class);
 
@@ -148,6 +154,20 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
                 return false;
             }
 
+            // 平台桥接固定使用 BYAI_PLATFORM JWT，不能被 Cookie 或匿名规则覆盖。
+            if (com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBridgePaths.remoteAlert(request.getServletPath(), platformExecutionMode)) {
+                CurrentUserHolder.clearLoginInfo();
+                com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBridgeTokens verifier = platformBridgeTokens.getIfAvailable();
+                try {
+                    if (verifier == null) throw new IllegalStateException("Platform bridge is disabled");
+                    verifier.verify(request.getHeader("beyond-token"));
+                    return true;
+                } catch (RuntimeException invalid) {
+                    response.setStatus(401);response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"code\":-1,\"msg\":\"Invalid beyond-token\",\"data\":null,\"success\":false}");
+                    return false;
+                }
+            }
             // Check if the requested URL matches any of the ignore patterns
             if (response.isCommitted()) {
                 logger.warn("Response already committed, skip session check.");

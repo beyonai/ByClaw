@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-28-runbook-reset-deleted-what-it-did-not-create.md: 597ebd3cc7ca1b2967c39c1d0871409a0b61b5d1
+2026-09-28-runbook-reset-deleted-what-it-did-not-create.zh.md: 6679e2da78441cf7d13c210ec615e113192695c7

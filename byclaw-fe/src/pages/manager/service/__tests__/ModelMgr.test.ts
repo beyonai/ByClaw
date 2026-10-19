@@ -22,6 +22,9 @@ jest.mock('@/service/common/request', () => ({
 
 import {
   debugModelImageGeneration,
+  debugModelAsr,
+  debugModelTts,
+  debugPersonalModelStream,
   debugModelStream,
   deleteModel,
   getModelDetail,
@@ -193,6 +196,43 @@ describe('manager/service/ModelMgr', () => {
     expect(onDelta).toHaveBeenNthCalledWith(2, ' World');
   });
 
+  it('debugPersonalModelStream parses SSE and emits only assistant text', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode('data:{"choices":[{"delta":{"role":"assistant","content":null}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"天气"}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"很好"}}]}\n\n'),
+      encoder.encode('data:[DONE]\n\n'),
+    ];
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: jest.fn(() => 'text/event-stream') },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: chunks[0], done: false })
+            .mockResolvedValueOnce({ value: chunks[1], done: false })
+            .mockResolvedValueOnce({ value: chunks[2], done: false })
+            .mockResolvedValueOnce({ value: chunks[3], done: false })
+            .mockResolvedValueOnce({ value: undefined, done: true }),
+        }),
+      },
+    });
+
+    await expect(debugPersonalModelStream({ id: '42', input: '{}', onDelta })).resolves.toEqual({
+      code: 0,
+      data: { output: '天气很好', success: true },
+    });
+    expect(onDelta.mock.calls).toEqual([['天气'], ['很好']]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/byaiService/personal/model/debug',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
   it('renders Responses text deltas once and ignores completion snapshots', async () => {
     const onDelta = jest.fn();
     const encoder = new TextEncoder();
@@ -331,5 +371,21 @@ describe('manager/service/ModelMgr', () => {
         success: true,
       },
     });
+  });
+});
+
+describe('speech model debugging', () => {
+  it.each([
+    [debugModelAsr, 'debugModelAsr', { fileId: '123', sessionId: '88' }],
+    [debugModelTts, 'debugModelTts', { text: '你好' }],
+  ])('sends speech input to its own backend endpoint', async (service, endpoint, input) => {
+    mockPOST.mockClear();
+    const signal = new AbortController().signal;
+    await service({ id: '42', input: JSON.stringify(input), signal });
+    expect(mockPOST).toHaveBeenCalledWith(
+      `/byaiService/new/model/${endpoint}`,
+      { ...input, id: '42' },
+      expect.objectContaining({ timeout: 185000, cancelToken: { signal } })
+    );
   });
 });

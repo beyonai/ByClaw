@@ -3,7 +3,7 @@ import React from 'react';
 import { getIntl } from '@umijs/max';
 import { Button, ConfigProvider, message, Popover, Progress, Space, Tooltip } from 'antd';
 import type { PopoverProps } from 'antd';
-import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
+import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, omit } from 'lodash';
 import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
 import { IMessageState } from '@/constants/message';
@@ -17,7 +17,9 @@ import AntdIcon from '../AntdIcon';
 import OperatePopup from './components/OperatePopup';
 import styles from './index.module.less';
 import RichInput, { RichInputRef, RichInputResourceList } from './RichInput';
-import STTComp, { STTCompRef, RecordingStatus } from '@/components/QueryInput/components/STTComp';
+import VoiceRecorder from './components/VoiceRecorder';
+import { uploadFiles } from '@/service/file';
+import { buildVoiceSendProps, type VoiceMessage } from '@/utils/voice';
 import type { IGlobalContext } from '@/layout/components/provider/global';
 import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
@@ -82,6 +84,7 @@ export type IProps = {
 
 export type IState = {
   inputValue?: string;
+  voiceRecording?: boolean;
   showAssitant: boolean;
   fileList: IFile[];
   singleChatTargetRealHumanFlag: boolean;
@@ -96,21 +99,17 @@ export type IState = {
   visitedToolTabs?: string[];
 };
 
-const AUTOSEND_TIMEOUT = 5000;
-
 class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends React.Component<
   P & IProps,
   Partial<IState> & S
 > {
   isComposing = false;
 
-  sttCompRef = React.createRef<STTCompRef>();
+  voiceInputMounted = false;
 
   richInputRef = React.createRef<RichInputRef>();
 
   displayQuestion = '';
-
-  autoSendRunner: NodeJS.Timeout | null = null;
 
   uploadFileRef = React.createRef<UploadFileRef>();
 
@@ -168,6 +167,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   }
 
   componentDidMount() {
+    this.voiceInputMounted = true;
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.on('queryInput-push-fileList', this.pushFileList);
     EventEmitter.on('queryInput-set-value', this.setInputValue);
@@ -187,6 +187,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   }
 
   componentWillUnmount() {
+    this.voiceInputMounted = false;
     const { EventEmitter } = this.props.globalContext;
     EventEmitter.off('queryInput-push-fileList', this.pushFileList);
     EventEmitter.off('queryInput-set-value', this.setInputValue);
@@ -264,13 +265,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   bottomLeftRender = (): null | React.ReactNode => null;
 
-  bottomRightRender = (): null | React.ReactNode => {
-    const comps = compact([this.STTRender()]);
-
-    if (isEmpty(comps)) return null;
-
-    return <>{comps}</>;
-  };
+  bottomRightRender = (): null | React.ReactNode => null;
 
   extendRender = (): null | React.ReactNode => null;
 
@@ -318,50 +313,45 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     return agentIds.length === 1 ? agentIds[0] : undefined;
   };
 
-  autoSend = () => {
-    if (this.autoSendRunner) {
-      clearTimeout(this.autoSendRunner);
-    }
+  sendVoice = async (file: File, durationMs: number) => {
+    if (this.props.cannotSend || !this.checkIsSending()) return;
+    const targetSessionId = this.props.sessionId;
+    const sendPayload = this.getSendPayload('[语音消息]');
+    if (!sendPayload) throw new Error('无法发送语音');
+    const formData = new FormData();
+    formData.append('files', file);
+    formData.append('sessionType', 'AGENT');
+    if (this.props.sessionId) formData.append('sessionId', this.props.sessionId);
+    const { agentId } = this.props.globalContext;
+    if (agentId) formData.append('agentId', `${agentId}`);
+    const projectId = this.props.selectedProject?.projectId ?? this.props.projectId;
+    if (projectId !== undefined) formData.append('projectId', `${projectId}`);
+    const uploaded = await uploadFiles(formData);
+    if (!this.voiceInputMounted || targetSessionId !== this.props.sessionId) return;
+    const audio = (uploaded.rebuildFileList || uploaded.uploadItems || [])[0];
+    if (!audio?.fileId) throw new Error('语音上传未返回文件');
+    const voice: VoiceMessage = {
+      fileId: audio.fileId,
+      fileUrl: audio.fileUrl || audio.filePath,
+      fileName: audio.fileName || file.name,
+      durationMs: Math.round(durationMs),
+      mimeType: 'audio/mpeg',
+    };
+    this.finallySendQuery(buildVoiceSendProps(sendPayload as ISendProps, voice, file.size, uploaded.sessionId));
+  };
 
-    this.autoSendRunner = setTimeout(() => {
-      if (!trim(this.state.inputValue)) {
-        this.autoSend();
-        return;
-      }
-
-      this.onSendQuery();
-
-      this.richInputRef.current?.clearAfterSend();
-      this.sttCompRef.current?.stop();
-
-      if (this.autoSendRunner) {
-        clearTimeout(this.autoSendRunner);
-      }
-    }, AUTOSEND_TIMEOUT);
+  onVoiceRecordingChange = (active: boolean) => {
+    this.setState((prevState) => ({ ...prevState, voiceRecording: active }));
   };
 
   STTRender = () => {
-    const { userInfo, cannotSTT } = this.props;
-    if (!userInfo || cannotSTT) {
-      return null;
-    }
+    const { userInfo, cannotSTT, cannotSend } = this.props;
+    if (!userInfo || cannotSTT) return null;
     return (
-      <STTComp
-        ref={this.sttCompRef}
-        onRecognized={(val) => {
-          this.setInputValue({
-            inputTxt: val,
-            isInsert: true,
-          });
-          this.autoSend();
-        }}
-        onStatus={(recordingStatus: RecordingStatus) => {
-          if (recordingStatus === 'recording') {
-            this.autoSend();
-          } else if (this.autoSendRunner) {
-            clearTimeout(this.autoSendRunner);
-          }
-        }}
+      <VoiceRecorder
+        disabled={cannotSend || !this.checkIsSending()}
+        onRecorded={this.sendVoice}
+        onActiveChange={this.onVoiceRecordingChange}
       />
     );
   };
@@ -431,9 +421,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     });
   };
 
-  getSendPayload = () => {
+  getSendPayload = (textOverride?: string) => {
     const currentInputPayload = this.getCurrentInputPayload();
-    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const inputValue = textOverride ?? currentInputPayload?.text ?? this.state.inputValue;
     const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { myAgentType } = this.props;
     const sendVal = trim(inputValue);
@@ -454,7 +444,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
     const selectedProject = this.props.selectedProject || this.selectedProject;
     const currentInputPayload = this.getCurrentInputPayload();
-    if (currentInputPayload?.displayText) {
+    if (currentInputPayload?.displayText && !data.displayText) {
       // 发送给后端的 text 需要保留 {{DIG_EMPLOYEE_xxx}}，临时会话标题使用用户可见的员工名称。
       set(data, 'displayText', currentInputPayload.displayText);
     }
@@ -550,7 +540,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           <div className={classNames(styles.outsideTools, hasTools && styles.outsideToolsWithTools)}>{bottomRight}</div>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
-          {!cannotSend && (
+          {this.STTRender()}
+          {!cannotSend && !this.state.voiceRecording && (
             <>
               {!this.checkIsSending() ? (
                 <Button

@@ -1,0 +1,391 @@
+/* DiffViewer: the visual diff surface. Geometry mirrors the code-block /
+   terminal-card family (12px radius, markdown code-block surface + font), and
+   the deliberate divergence shared with DiffBlock: rows never wrap — a diff is
+   read by its indentation, so long lines scroll horizontally inside the content
+   column while the line-number gutter stays fixed. All colors resolve through
+   --dsw-* tokens; the fixed 22px row height is the DIFF_LINE_HEIGHT constant
+   the windowing arithmetic shares. */
+
+.block {
+  position: relative;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: 12px;
+}
+
+/* The copy control floats in the top-right corner over the first file header,
+   so the card has no empty banner row (the TUI diff card has none either). */
+.copyButton {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 1;
+  background-color: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: var(--dsw-font-xs-13);
+}
+
+/* The change summary, dim under the body: `└ +A -R · N file(s)`, the same
+   footer the TUI transcript's diff card draws. */
+.footer {
+  padding: 0 14px 12px;
+  font: var(--dsw-font-markdown-code-block);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* One changed file: the path header sits above its own scrollable body, so a
+   multi-file diff reads file by file and a huge file never buries the next. */
+.file + .file {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.fileHeader {
+  padding: 10px 14px 4px;
+  color: var(--dsw-alias-label-primary);
+  /* The font shorthand resets weight, so the 600 sits AFTER it. */
+  font: var(--dsw-font-markdown-code-block);
+  font-weight: 600;
+}
+
+/* The windowed body: vertical scroll on the viewport, horizontal scroll on the
+   content columns only (the gutter stays put). */
+.body {
+  font: var(--dsw-font-markdown-code-block);
+  line-height: 22px;
+}
+
+.viewport {
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* The separator bars sit on an elevated rung (--dsw-alias-bg-layer-2), so
+     this scroll container rebinds the thumb to the l2 pair like any other
+     elevated surface (scrollbar.css contract). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+/* The sticky horizontal scrollbar: the content column's native scrollbar sits
+   at the bottom of the windowed rows, which a tall diff scrolls out of view,
+   so this bar hugs the viewport's bottom edge and mirrors the column's
+   scrollLeft (both directions). Only rendered when a column actually overflows. */
+.hbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  height: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--dsw-alias-markdown-code-block);
+}
+
+/* Overlay scrollbars: the thumbs stay invisible until the surface is hovered
+   or focused, so a settled diff shows no scroll chrome. The theme's scrollbar
+   sheet paints every element by default; these rules (later in the cascade,
+   component-scoped) take over for the diff's own scroll surfaces, and the
+   viewport's vertical bar follows the same pattern through the same selectors
+   (it is the hover/focus host for both axes). */
+.content,
+.hbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.content:hover,
+.content:focus-within,
+.hbar:hover,
+.hbar:focus-within {
+  scrollbar-color: var(--dsh-scrollbar-thumb) transparent;
+}
+
+.content::-webkit-scrollbar-thumb,
+.hbar::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.content:hover::-webkit-scrollbar-thumb,
+.content:focus-within::-webkit-scrollbar-thumb,
+.hbar:hover::-webkit-scrollbar-thumb,
+.hbar:focus-within::-webkit-scrollbar-thumb {
+  background: var(--dsh-scrollbar-thumb);
+}
+
+.spacer {
+  position: relative;
+}
+
+.window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Split body: two panels side by side, a hairline between them. */
+.splitRow {
+  display: flex;
+}
+
+.panel {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.panel + .panel {
+  border-left: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Unified body: one gutter column then the content column. */
+.unifiedRow {
+  display: flex;
+}
+
+/* The gutter column never scrolls horizontally: its fixed width is set by the
+   line-number cell count, and overflow stays visible so the collapsed-label
+   overlay may span past the panel. */
+.gutter {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* The content column scrolls horizontally on its own; rows inside it are the
+   source lines, which must not wrap. */
+.content {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* The rows container: a block stretched (by width: max-content plus the
+   caller's min-width in `ch`) to the widest line in the WHOLE diff, not just
+   the windowed viewport, so every row's background spans the same right edge —
+   a short changed line keeps its tint to the longest line's edge. A block (not
+   inline-block) so max-content is not capped by the column's available width. */
+.rows {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* One diff row: the change bar, then the line numbers, all fixed 22px. */
+.gutterRow {
+  display: flex;
+  align-items: stretch;
+  height: 22px;
+  white-space: pre;
+}
+
+/* The row fills the rows container (whose width is the whole diff's widest
+   line), so the add/delete background travels with the text under horizontal
+   scroll instead of stopping at the column edge. */
+.contentRow {
+  width: 100%;
+  box-sizing: border-box;
+  height: 22px;
+  white-space: pre;
+  padding-right: 12px;
+}
+
+/* The line-number cell: right-aligned, padded, non-selectable. Width is set
+   inline from the widest line number so the gutter columns align. The width
+   must be box-sizing: border-box (the theme sets no global box-sizing, so the
+   padding would otherwise inflate the cell past the gutter and spill onto the
+   content column); the per-digit allowance in lineNumberColumnWidth leaves the
+   digits a margin inside that box. */
+.lineNumber {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 12px 0 16px;
+  text-align: right;
+  user-select: none;
+  line-height: 22px;
+}
+
+.lineNumberChanged {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.lineNumberContext {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The 3px change bars: solid success for additions, a striped error pattern
+   for deletions (each row carries its own background-position so the stripes
+   tile continuously down the bar even under windowing). */
+.barAdd {
+  flex: none;
+  width: 4px;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.barDelete {
+  flex: none;
+  width: 4px;
+  background-image: linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent) 50%,
+    var(--dsw-alias-state-error-primary) 50%
+  );
+  background-size: 2px 2px;
+  /* Repeat in BOTH axes: the 2px tile must also fill the bar's width, or the
+     striped delete bar renders half the width of the solid add bar. */
+  background-repeat: repeat;
+}
+
+.barNone {
+  flex: none;
+  width: 4px;
+}
+
+/* Row background tints: changed rows carry a low-opacity success/error wash
+   (the word marks below sit one step stronger). */
+.rowAdd {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent);
+}
+
+.rowDelete {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+}
+
+.rowContext {
+  background: transparent;
+}
+
+/* The empty side of an add/delete-only pair: a diagonal stripe wash, offset
+   per row so the pattern stays continuous down the column. */
+.rowEmpty {
+  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 18%, transparent);
+  background-size: 8px 8px;
+  background-origin: border-box;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent calc(3px * 1.414),
+    color-mix(in srgb, var(--dsw-alias-border-l2) 48%, transparent) calc(3px * 1.414),
+    color-mix(in srgb, var(--dsw-alias-border-l2) 48%, transparent) calc(4px * 1.414)
+  );
+}
+
+/* Intra-line word marks: the segment background over the syntax-colored runs. */
+.wordAdd {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 28%, transparent);
+}
+
+.wordDelete {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent);
+}
+
+/* Empty state: a centered dim line when the diff has no renderable rows. */
+.noChanges {
+  padding: 12px 14px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Collapsed-context separator: the full row is one tinted surface with
+   hairline borders; the gutter cell hosts the expand buttons and the label
+   overlays the row from there. */
+.separatorSurface {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-block: 1px solid color-mix(in srgb, var(--dsw-alias-border-l2) 50%, transparent);
+  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 45%, transparent);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.separatorRelative {
+  position: relative;
+  overflow: visible;
+}
+
+.separatorButtonGroup {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  flex: 0 0 auto;
+  user-select: none;
+  fill: currentColor;
+}
+
+.separatorButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-right: 2px solid var(--dsw-alias-markdown-code-block);
+  background-color: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 0;
+  cursor: pointer;
+  /* border-box keeps the 2px border inside the 32px button so a full-width
+     button row never spills past the gutter (no global box-sizing). */
+  box-sizing: border-box;
+}
+
+.separatorButton:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.expandIcon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  transform-origin: center;
+}
+
+.expandIconUp {
+  transform: scaleY(-1);
+}
+
+/* The "N 行未变更" label: absolutely positioned to start after the gutter
+   (left is set inline) and stretch far right over the content column. */
+.separatorLabelOverlay {
+  position: absolute;
+  top: 0;
+  right: -100vw;
+  z-index: 2;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.separatorLabel {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 1ch;
+}
+
+.separatorTextButton {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  line-height: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.separatorTextButton:hover {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+}

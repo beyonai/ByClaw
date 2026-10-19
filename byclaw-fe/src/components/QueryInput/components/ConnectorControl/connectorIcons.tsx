@@ -12,6 +12,35 @@ import Icon, {
   WindowsFilled,
 } from '@ant-design/icons';
 import AntdIcon from '@/components/AntdIcon';
+import { getRuntimeActualUrl } from '@/utils';
+
+// 复用模型管理中的品牌资源，并兼容部署在子路径下的静态资源地址。
+const DeepSeekSvg = () => (
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" data-icon="deepseek">
+    <image href={getRuntimeActualUrl('model-providers/deepseek.svg')} width="24" height="24" />
+  </svg>
+);
+
+// 能力图标采用彩色实心造型，与品牌标识保持一致；无需渐变 ID，支持列表和工具栏同时渲染。
+const ImageGenerationSvg = () => (
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" data-icon="image-generation">
+    <rect x="2" y="4" width="20" height="17" rx="4" fill="#4285f4" />
+    <circle cx="8" cy="9" r="2" fill="#fbbc04" />
+    <path d="m3 18 5-6 5 6H3Z" fill="#8ce0c1" />
+    <path d="m9 18 7-9 5 7v1a3 3 0 0 1-3 3H6l3-2Z" fill="#34a853" />
+    <path d="m19 1 1.2 3.3L23.5 5.5l-3.3 1.2L19 10l-1.2-3.3-3.3-1.2 3.3-1.2L19 1Z" fill="#a568e8" />
+  </svg>
+);
+
+const SpeechGenerationSvg = () => (
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" data-icon="speech-generation">
+    <rect x="1" y="9" width="3" height="6" rx="1.5" fill="#34a853" />
+    <rect x="5.75" y="5" width="3" height="14" rx="1.5" fill="#26b6cf" />
+    <rect x="10.5" y="2" width="3" height="20" rx="1.5" fill="#4285f4" />
+    <rect x="15.25" y="6" width="3" height="12" rx="1.5" fill="#a568e8" />
+    <rect x="20" y="9" width="3" height="6" rx="1.5" fill="#fbbc04" />
+  </svg>
+);
 
 // 本地矢量标识随图标字号缩放，避免外部图片加载失败后再次显示相同的通用图标。
 const GmailSvg = () => (
@@ -58,6 +87,9 @@ const connectorIconMap: Record<string, ReactNode> = {
   'fastmail-mail': <ThunderboltOutlined />,
   'aliyun-mail': <CloudOutlined />,
   'custom-imap-mail': <MailOutlined />,
+  'deepseek-web-search': <Icon component={DeepSeekSvg} aria-hidden />,
+  'image-generation-model': <Icon component={ImageGenerationSvg} aria-hidden />,
+  'speech-generation-model': <Icon component={SpeechGenerationSvg} aria-hidden />,
 };
 
 export const getConnectorIcon = (connectorCode: string, connectorName?: string): ReactNode => {

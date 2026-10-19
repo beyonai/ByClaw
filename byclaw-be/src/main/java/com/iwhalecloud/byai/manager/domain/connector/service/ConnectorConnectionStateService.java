@@ -29,6 +29,9 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 @Service
 public class ConnectorConnectionStateService {
 
+    private static final java.util.Set<String> MEDIA_MODEL_CONNECTOR_CODES = java.util.Set.of(
+        "image-generation-model", "speech-generation-model");
+
     private final ConnectorAuthMapper connectorAuthMapper;
     private final ConnectorInfoMapper connectorInfoMapper;
     private final SequenceService sequenceService;
@@ -395,6 +398,7 @@ public class ConnectorConnectionStateService {
         }
         try {
             if (com.iwhalecloud.byai.manager.domain.mail.MailPrivateParamStore.supports(connector)
+                    || MEDIA_MODEL_CONNECTOR_CODES.contains(connector.getConnectorCode())
                     || manifestService.credentialProjection(connector).isPresent()) {
                 eventPublisher.publishEvent(new ConnectorCredentialProjectionEvent(
                     userId, connector.getConnectorId(), action));

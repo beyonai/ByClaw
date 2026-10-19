@@ -32,8 +32,17 @@ describe('shared model type options', () => {
     expect(result.current).toEqual([
       { value: 'CUSTOM', label: locale === 'en-US' ? 'Custom' : '自定义' },
       { value: 'IMAGE_GENERATION', label: locale === 'en-US' ? 'Image' : '图片' },
+      { value: 'ASR', label: 'modelMgr.modal.modelTypeASR' },
     ]);
     expect(mockLoad).toHaveBeenCalledWith({ paramGroupCode: 'SYSTEM_MODEL_TYPE' });
+  });
+
+  it('retains a configured ASR label without adding a duplicate', async () => {
+    mockLoad.mockResolvedValue({ data: { byaiSystemConfigLists: [{ paramValue: 'ASR', paramName: '全局语音识别' }] } });
+    const { result } = renderHook(() => useModelTypeOptions());
+    await waitFor(() => expect(result.current[0].label).toBe('全局语音识别'));
+    expect(result.current.filter((item) => item.value === 'ASR')).toEqual([{ value: 'ASR', label: '全局语音识别' }]);
+    expect(result.current.some((item) => item.value === 'IMAGE_GENERATION')).toBe(true);
   });
 
   it('loads on opening and retains fallback options if the request fails', async () => {
@@ -45,7 +54,12 @@ describe('shared model type options', () => {
     rerender({ open: true });
     await waitFor(() => expect(mockLoad).toHaveBeenCalledTimes(1));
     expect(result.current.map((item) => item.value)).toEqual([
-      'LLM', 'RERANK', 'EMBEDDING', 'TTS', 'IMAGE_GENERATION',
+      'LLM',
+      'RERANK',
+      'EMBEDDING',
+      'TTS',
+      'ASR',
+      'IMAGE_GENERATION',
     ]);
   });
 });

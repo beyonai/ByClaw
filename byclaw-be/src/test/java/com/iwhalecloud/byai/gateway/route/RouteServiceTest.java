@@ -41,6 +41,8 @@ import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEve
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -193,7 +195,7 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sendGuardProvider", provider);
         doNothing().doThrow(new IllegalStateException("recalled")).when(guard).beforeSend(ctx);
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -226,7 +228,7 @@ class RouteServiceTest {
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -242,12 +244,12 @@ class RouteServiceTest {
         InOrder inOrder = inOrder(gatewayClient, sandboxService);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        inOrder.verify(sandboxService).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        inOrder.verify(sandboxService).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         inOrder.verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
@@ -267,7 +269,7 @@ class RouteServiceTest {
     void route_throwsAfterSingleRetry_whenGatewaySendStillFails() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -279,7 +281,7 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("Gateway SDK 消息发送失败: agent unavailable");
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted(ctx, true);
@@ -289,7 +291,7 @@ class RouteServiceTest {
     void route_emitsFailureThought_whenSandboxNeverBecomesReady() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L, 101L, 102L, 103L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(false, false, false);
 
@@ -315,7 +317,7 @@ class RouteServiceTest {
     void route_emitsModelConfigMessage_whenSandboxRestartFailsWithBusinessException() {
         ChatProcessContext ctx = buildContext();
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenThrow(new BdpRuntimeException(I18nUtil.get("sandbox.launch.model.config.required")));
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
@@ -340,7 +342,7 @@ class RouteServiceTest {
     void route_retriesByclawCodeSandboxWithUserScopedTargetAgentType() throws Exception {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
         when(sequenceService.nextVal()).thenReturn(100L);
-        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
                 .thenReturn(new SandboxLaunchData());
         when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
@@ -359,11 +361,37 @@ class RouteServiceTest {
 
         assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
+        verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
+    }
+
+    @ParameterizedTest
+    @CsvSource({",", "1001,", "1001,BY_SUPER"})
+    void route_sendsSuperRequestsToDshAndChecksWorkerReadiness(Long agentId, String sourceAgentType) throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), agentId);
+        ctx.getAssistantChatDto().setSourceAgentType(sourceAgentType);
+        ctx.getParams().put("orchestrator", Map.of("kind", "EXPERT_TEAM", "id", "1001"));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        InOrder ordered = inOrder(workerRouteReadinessService, gatewayClient);
+        ordered.verify(workerRouteReadinessService).ensureReady(eq("u1"), eq(agentId), eq("BYCLAW_DSH_u1"), any());
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ordered.verify(gatewayClient).sendMessage(eq("BYCLAW_DSH_u1"), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
+                paramsCaptor.capture(), any());
+        assertThat(paramsCaptor.getValue()).containsEntry("orchestrator",
+                Map.of("kind", "EXPERT_TEAM", "id", "1001"));
     }
 
     @Test
     void route_sendsDefaultSuperAssistantToBySuperWithoutUserSuffix() throws Exception {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", true);
         ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
@@ -415,9 +443,10 @@ class RouteServiceTest {
     }
 
     @Test
-    void route_sendsActualProjectWorkspaceRelativeToCurrentUserBucket() throws Exception {
+    void route_usesConversationCwdAndPreservesProjectResourceWorkspace() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
+        ctx.getParams().put("cwd", "/by/projects/123");
         Project project = mock(Project.class);
         when(project.getProjectId()).thenReturn(123L);
         when(project.getProjectName()).thenReturn("test-project");
@@ -438,12 +467,37 @@ class RouteServiceTest {
         verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
         assertThat(paramsCaptor.getValue())
-            .containsEntry("cwd", "/by/projects/123");
+            .containsEntry("cwd", "/by/.sessions/3");
+        assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/3"))).isTrue();
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
             .containsEntry("project_id", 123L)
             .containsEntry("workspace", "/by/projects/123");
         verify(projectApplicationService).getProjectWorkspacePath(123L);
+    }
+
+    @Test
+    void route_isolatesConversationOutputsWithinTheSameProject() throws Exception {
+        when(projectApplicationService.getProjectWorkspacePath(123L))
+            .thenReturn(tempDir.resolve("byclaw-u1/by/projects/123"));
+        for (long sessionId : List.of(3L, 4L)) {
+            ChatProcessContext ctx = buildContext();
+            ctx.setSessionId(sessionId);
+            ctx.getAssistantChatDto().setProjectId(123L);
+            when(gatewayClient.sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
+                    anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+            routeService.route(ctx);
+
+            verify(gatewayClient).sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(),
+                argThat(params -> ("/by/.sessions/" + sessionId).equals(params.get("cwd"))), any());
+            assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId))).isTrue();
+        }
     }
 
     @Test
@@ -495,12 +549,14 @@ class RouteServiceTest {
             argThat(params -> "/by/.sessions/3".equals(params.get("cwd"))), any());
     }
 
-    @Test
-    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated() throws Exception {
+    @ParameterizedTest
+    @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
+    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated(Long projectId) throws Exception {
         Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
         Files.createDirectories(conversationWorkspace.getParent());
         Files.createFile(conversationWorkspace);
         ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(projectId);
 
         assertThatThrownBy(() -> routeService.route(ctx))
             .isInstanceOf(BdpRuntimeException.class)
@@ -509,9 +565,11 @@ class RouteServiceTest {
         verifyNoInteractions(gatewayClient);
     }
 
-    @Test
-    void route_rejectsMissingSessionIdWhenProjectIsMissing() {
+    @ParameterizedTest
+    @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
+    void route_rejectsMissingSessionIdWithOrWithoutProject(Long projectId) {
         ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setProjectId(projectId);
         ctx.setSessionId(null);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))

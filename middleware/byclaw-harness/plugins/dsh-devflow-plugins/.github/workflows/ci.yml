@@ -1,0 +1,61 @@
+# Every gate the repository has, on every push and pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A branch's newer push makes its older run irrelevant; main is exempt because
+# its runs are the record of what was on main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The full gate, once. Typecheck, lint, and the tarball checks answer the
+  # same on every platform, so they run where the runners are cheapest.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @zhchxiao123/dsh-devflow-midscene exec playwright install --with-deps chromium
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run test:coverage
+      # A manifest can point at a file only the build produces, and preflight
+      # is the only thing that reads the tarballs rather than the working tree.
+      - run: pnpm run build
+      # Blocking: every tarball check answers the same before a release as
+      # during one. Only "is this version already published" does not, and
+      # `--no-registry` leaves it out while missing manifest targets and client
+      # bundles still block; a `dsh.client` without its bundle makes the harness
+      # refuse to boot.
+      - run: pnpm run preflight:tarballs
+
+  # `devflow-filesystem` is where this line meets the platform: O_EXCL lock and
+  # claim creation, rename, injected filesystem failures, and card directory
+  # names whose uniqueness assumes a case-sensitive filesystem. None of that
+  # is settled by passing on Linux alone, so both platform jobs block.
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @zhchxiao123/dsh-devflow-midscene exec playwright install chromium
+      - run: pnpm run test

@@ -1,6 +1,11 @@
 import { GET, POST } from '@/service/common/request';
 
 export type ChatFileArtifact = {
+  imageId?: string;
+  parentImageId?: string;
+  title?: string;
+  width?: number;
+  height?: number;
   sourcePath: string;
   path: string;
   fileName: string;

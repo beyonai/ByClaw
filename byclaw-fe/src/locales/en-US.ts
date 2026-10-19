@@ -1,3 +1,4 @@
+import imageCanvas from './en-US/imageCanvas';
 import employeePublication from './en-US/employeePublication';
 import dataSource from './en-US/dataSource';
 import secondEdition from './en-US/secondEdition';
@@ -5,6 +6,7 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...imageCanvas,
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': 'Tool call',
@@ -1016,6 +1018,91 @@ export default {
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',
 
+  'fileRender.epubNotice':
+    'Displays EPUB chapters and bundled images. Complex layouts, embedded media and external links are omitted.',
+  'fileRender.epubLimit':
+    'This EPUB exceeds preview limits (20 MiB, 500 chapters, 2 MiB of text per chapter). Download it to read.',
+  'fileRender.epubFailed':
+    'Unable to preview this ebook. Use a complete, unencrypted EPUB file, or download it to read.',
+  'fileRender.openDocumentNotice':
+    'Shows text, headings, lists, basic tables and embedded PNG/JPEG images. Presentations can be read slide by slide; original layout, fonts, shapes and animations are not reproduced.',
+  'fileRender.openDocumentOmitted':
+    'Some images, objects, annotations or complex table structures are omitted. Download the file for full content.',
+  'fileRender.openDocumentLimit':
+    'Document exceeds preview limits (20 MiB, 200 slides or expanded content too large). Download to view.',
+  'fileRender.openDocumentFailed':
+    'Unable to preview this document. Use a complete, unencrypted ODT/ODP file or download to view.',
+  'fileRender.openDocumentTitle': 'OpenDocument preview',
+  'fileRender.openDocumentPage': 'Slide',
+  'fileRender.notebookNotice':
+    'Read-only Markdown, code and saved text/PNG/JPEG outputs. Code is never run. HTML, interactive charts and Markdown images are not displayed.',
+  'fileRender.notebookOmitted':
+    'Long text was truncated or unsupported outputs/attachments were omitted. Download for full content.',
+  'fileRender.notebookLimit':
+    'Notebook exceeds preview limits (20 MiB, 1,000 cells/outputs or content too large). Download to view.',
+  'fileRender.notebookFailed':
+    'Unable to preview this notebook. Use a valid nbformat 4 IPYNB file or download to view.',
+  'fileRender.notebookCell.markdown': 'Markdown',
+  'fileRender.notebookCell.code': 'Code',
+  'fileRender.notebookCell.raw': 'Raw text',
+  'fileRender.notebookImageOmitted': 'Image omitted',
+  'fileRender.notebookOutput': 'Saved output image',
+  'fileRender.officeVariantNotice':
+    'Shows saved static content without macros, external resources or embedded objects. Complex layouts may differ. Downloads keep the original file.',
+  'fileRender.officeVariantLimit':
+    'Office file exceeds preview limits (20 MiB, 1,000 internal entries or expanded content too large). Download to view.',
+  'fileRender.officeVariantFailed':
+    'Preview failed. The file may be encrypted, damaged or inconsistent with its extension. Download to view.',
+  'fileRender.emlNotice':
+    'Shows the email body and attachments, including embedded bitmap images. External images, links, scripts and forms are disabled. Complex layouts may differ.',
+  'fileRender.emlLimit':
+    'Email exceeds preview limits (20 MiB, 2 MiB body, 100 attachments or excessive message complexity). Download to view.',
+  'fileRender.emlFailed': 'Unable to preview this email. Use a valid, unencrypted EML file or download to view.',
+  'fileRender.msgFailed': 'Unable to preview this MSG. Use a valid, unencrypted email or download to view in Outlook.',
+  'fileRender.msgRtfBody':
+    'The RTF body is damaged, unsupported or exceeds preview limits. Message details and attachments remain available; download to read in Outlook.',
+  'fileRender.msgLinkedAttachment': 'Linked attachment; content not included',
+  'fileRender.archiveUnsupportedFile':
+    'Your browser may not support this archive format, or it contains encrypted, multi-volume or unsupported content. Download to view.',
+  'fileRender.emlSubject': 'Subject',
+  'fileRender.emlNoSubject': 'No subject',
+  'fileRender.emlFrom': 'From',
+  'fileRender.emlTo': 'To',
+  'fileRender.emlCc': 'Cc',
+  'fileRender.emlDate': 'Message date',
+  'fileRender.emlHtml': 'Formatted body',
+  'fileRender.emlText': 'Plain text',
+  'fileRender.emlBody': 'Email body',
+  'fileRender.emlEmptyBody': 'This message has no displayable body',
+  'fileRender.emlAttachments': 'Attachments',
+  'fileRender.emlSize': 'Size',
+  'fileRender.emlUnnamedAttachment': 'Attachment {number}',
+  'fileRender.epubChapter': 'Chapter',
+  'fileRender.epubChapterNumber': 'Chapter {number}',
+  'fileRender.epubReader': 'Ebook reader',
+  'fileRender.previous': 'Previous',
+  'fileRender.next': 'Next',
+  'fileRender.databaseNotice':
+    'Read-only SQLite preview: up to 1,000 rows and 100 columns per table. Long text is truncated; binary fields show size only. Use a complete database copy with all writes finalized.',
+  'fileRender.databaseLimit': 'This database exceeds preview limits (50 MiB, 200 tables). Download it to view.',
+  'fileRender.databaseFailed':
+    'Unable to read this database. Use a complete, unencrypted SQLite file with no pending WAL data, or download it to view.',
+  'fileRender.databaseTable': 'Table',
+  'fileRender.databaseRows': 'Data',
+  'fileRender.databaseSchema': 'Schema',
+  'fileRender.databaseColumn': 'Column',
+  'fileRender.databaseType': 'Type',
+  'fileRender.databasePrimaryKey': 'Primary key',
+  'fileRender.databaseNotNull': 'Not null',
+  'fileRender.databaseSkipped':
+    'Only ordinary tables and their first 100 stored columns are shown. Views, virtual tables, hidden and generated columns are omitted.',
+  'fileRender.databaseBlob': 'Binary ({bytes} bytes)',
+  'fileRender.databasePage': 'Page {number}',
+  'fileRender.databaseRowsLimit': 'Preview limited to 1,000 rows. Download to view all data.',
+  'fileRender.rawNotice':
+    'RAW previews apply white balance and color processing and may differ from camera software. Camera model and compression support depend on the decoder.',
+  'fileRender.rawLimit':
+    'This RAW file exceeds preview limits (50 MiB, 100 million sensor pixels). Download it to view.',
   'fileRender.previewUnavailable': 'File preview is temporarily unavailable',
   'fileRender.mediaUnsupported': 'This browser cannot decode the media or the file is damaged. Download it to play.',
   'fileRender.formatUnsupported': 'Online preview is unavailable for this format. Download it to view.',
@@ -1024,6 +1111,52 @@ export default {
   'fileRender.legacyFailed':
     'Conversion failed. The file may be damaged, encrypted, or exceed preview limits. Download it to view.',
   'fileRender.legacyTooLarge': 'This legacy Office file exceeds 20 MiB. Download it to view.',
+  'fileRender.imageLimit':
+    'Image preview limits exceeded: 20 MiB, 100 pages, or 50 million pixels per page. Download to view.',
+  'fileRender.jp2Notice':
+    'JPEG 2000 is shown as a static image. Common 8-bit RGB/grayscale images are supported; special color spaces, alpha channels and complex encodings may be unsupported.',
+  'fileRender.jp2Limit':
+    'JPEG 2000 preview limits: 20 MiB, 8 million pixels and bounded tile complexity. Download larger files to view.',
+  'fileRender.imageDecodeFailed':
+    'Unable to decode this image. It may be damaged or use an unsupported encoding. Download to view.',
+  'fileRender.binaryTimeout': 'Preview processing timed out. Reopen the file or download it to view.',
+  'fileRender.decodedImage': 'Image preview',
+  'fileRender.rtfDocument': 'RTF document preview',
+  'fileRender.rtfNotice':
+    'Shows text and basic formatting. Images use placeholders and embedded objects are not displayed; complex tables, headers, footers and pagination may differ from the original.',
+  'fileRender.rtfPictureOmitted': '[Image omitted. Download the original to view.]',
+  'fileRender.rtfLimit':
+    'The RTF exceeds the preview limit (2 MiB or excessive document complexity). Download to view.',
+  'fileRender.rtfFailed':
+    'Unable to preview this RTF. It may be damaged or contain unsupported content. Download to view.',
+  'fileRender.odsNotice':
+    'Shows saved cell values without recalculating formulas; formulas with no saved value appear as text. Merged cells use a plain grid. Charts, images and complex layouts are not displayed.',
+  'fileRender.odsWorksheet': 'Worksheet',
+  'fileRender.odsUnnamedSheet': 'Sheet {number}',
+  'fileRender.odsTable': 'ODS spreadsheet preview',
+  'fileRender.odsTruncated':
+    'Preview is limited to the first {rows} rows and {columns} columns per sheet, with a cell text length limit. Download to view the complete content.',
+  'fileRender.odsLimit':
+    'The ODS exceeds the preview limit (20 MiB, 50 worksheets or too much expanded content). Download to view.',
+  'fileRender.odsFailed':
+    'Unable to preview this ODS. It may be encrypted, damaged or use an unsupported format. Download to view.',
+  'fileRender.staticPhotoNotice':
+    'Shown as a still photo. Animation and HDR effects may not be fully reproduced; download to keep the original file.',
+  'fileRender.zoomOut': 'Zoom out',
+  'fileRender.zoomIn': 'Zoom in',
+  'fileRender.rotate': 'Rotate',
+  'fileRender.resetImage': 'Reset',
+  'fileRender.archiveLimit':
+    'Archive preview limits: 20 MiB, 1000 entries; 20 MiB per extracted file, or 2 MiB for text; 50 MiB total declared size for RAR/7z/TAR and actual decompressed size for TGZ.',
+  'fileRender.archiveFailed':
+    'Unable to open the archive or file. It may be encrypted, damaged, missing volumes, or contain invalid paths. Download to view.',
+  'fileRender.archiveNotice':
+    'Click supported files to preview. Nested archives and symbolic links are unsupported. HTML is displayed as static content.',
+  'fileRender.archiveBack': 'Back to file list',
+  'fileRender.archivePath': 'File path',
+  'fileRender.archiveAction': 'Preview',
+  'fileRender.archiveFolder': 'Folder',
+  'fileRender.archiveUnsupported': 'Unsupported',
   'fileRender.delimitedTable': 'Table data preview',
   'fileRender.delimitedColumn': 'Column {number}',
   'fileRender.delimitedMalformed': 'Invalid delimiter or quote syntax. Switch to source to view the original content.',
@@ -1418,6 +1551,7 @@ export default {
   'sider.automation': 'Scheduled Tasks',
   'sider.projectSpace': 'Project',
   'workspaceSider.primaryNavigation': 'Primary navigation',
+  'workspaceSider.voiceMessage': 'Voice message',
   'workspaceSider.newSession': 'New Session',
   'workspaceSider.newTask': 'New',
   'workspaceSider.scheduledTasks': 'Schedule',
@@ -1870,6 +2004,7 @@ export default {
 
   // IndicatorDrawer Component
   'thinkingProcess.done': 'Completed',
+  'message.taskEnded': 'Task ended',
   'thinkingProcess.thinking': 'Thinking...',
   'thinkingProcess.foundReferences': 'Found {count} references',
 

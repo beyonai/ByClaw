@@ -76,6 +76,10 @@ const ModelMgr: React.FC = () => {
   const [formState, formAction] = useShowModal();
 
   const modelTypeOptions = useModelTypeOptions();
+  const modelTypeLabelMap = useMemo<Record<string, string>>(
+    () => Object.fromEntries(modelTypeOptions.map(({ label, value }) => [value.trim().toUpperCase(), label])),
+    [modelTypeOptions]
+  );
   const modelTypeTreeData = useMemo<ITreeData[]>(
     () => modelTypeOptions.map(({ label, value }) => ({ label, key: value, keypath: value })),
     [modelTypeOptions]
@@ -322,7 +326,8 @@ const ModelMgr: React.FC = () => {
         type: 'modelMgr/setDefaultModel',
         payload: {
           modelId: record.id,
-          modelType: record.modelType || 'LLM',
+          // 空类型独立设置默认，不能与 LLM 共用默认名额。
+          modelType: record.modelType?.trim() || '',
           tagId: '1',
         },
         success: () => {
@@ -465,6 +470,7 @@ const ModelMgr: React.FC = () => {
           intl={intl}
           record={record}
           abilityLabelMap={abilityLabelMap}
+          modelTypeLabelMap={modelTypeLabelMap}
           onSetStatus={setStatusAction}
           onSetDefault={setDefaultAction}
           onEdit={(item) => formAction.handleShow('edit', item)}
@@ -473,7 +479,7 @@ const ModelMgr: React.FC = () => {
         />
       );
     },
-    [abilityLabelMap, formAction, intl, setDefaultAction]
+    [abilityLabelMap, modelTypeLabelMap, formAction, intl, setDefaultAction]
   );
 
   const loadNextPage = useCallback(() => {

@@ -1,0 +1,119 @@
+.voiceMessage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.voiceRow {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 8px;
+}
+
+.bubble {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 112px;
+  max-width: 100%;
+  height: 44px;
+  padding: 0 14px 0 18px;
+  color: var(--beyond-color-primary, #6266ed);
+  font-size: 15px;
+  border: 1px solid var(--beyond-color-primary-border, #e3e1fa);
+  border-radius: 14px 4px 14px 14px;
+  background: var(--beyond-color-primary-bg, #f0efff);
+  cursor: pointer;
+  transition: background 0.18s ease;
+
+  &:hover {
+    background: var(--beyond-color-primary-bg-hover, #e8e6ff);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #6266ed);
+    outline-offset: 3px;
+  }
+}
+
+.duration {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.soundIcon {
+  width: 24px;
+  height: 24px;
+
+  path {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 2;
+  }
+}
+
+.playing {
+  .waveNear {
+    animation: soundWave 1s ease-in-out infinite;
+  }
+
+  .waveFar {
+    animation: soundWave 1s ease-in-out 0.2s infinite;
+  }
+}
+
+.menuButton {
+  color: var(--beyond-color-text-secondary, #8b8d98);
+  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+}
+
+.transcript {
+  max-width: 420px;
+  padding: 10px 14px;
+  color: var(--beyond-color-text);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--beyond-color-border-secondary, #ececf2);
+  border-radius: 10px;
+  background: var(--beyond-color-bg-container, #fff);
+}
+
+@keyframes soundWave {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playing path {
+    animation: none;
+  }
+}
+
+.assistantMessage {
+  align-items: flex-start;
+
+  .voiceRow {
+    flex-direction: row;
+  }
+
+  .bubble {
+    color: var(--beyond-color-text-secondary, #586a84);
+    background: var(--beyond-color-fill-quaternary, #f3f6fb);
+    border-color: var(--beyond-color-border-secondary, #e3e9f2);
+    border-radius: 4px 14px 14px 14px;
+  }
+}

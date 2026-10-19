@@ -1584,8 +1584,9 @@ class ByClawSkillResourceApplicationServiceTest {
     @Test
     void enterpriseSyncUsesStableCodeAndDefersAssociationAndPublication() {
         String url = "https://example.invalid/skill.zip";
+        byte[] bytes = skillZipBytes("zip-inner-name");
         var syncing = spy(service);
-        doReturn(skillZipBytes("zip-inner-name")).when(syncing).downloadThirdPartySkillPackage(url);
+        doReturn(bytes).when(syncing).downloadThirdPartySkillPackage(url);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(call -> {
             SsResource created = call.getArgument(0); created.setResourceId(7301L); return created;
         });
@@ -1596,6 +1597,10 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceService).saveResource(capture.capture());
         assertThat(capture.getValue().getResourceCode()).isEqualTo("stable-business-code");
         assertThat(capture.getValue().getOwnerType()).isEqualTo("enterprise");
+        // 第三方同步包必须按资源和内容隔离，事务回滚时不能覆盖已发布的技能包。
+        verify(resourceArtifactStorageService).uploadToSubdirectory(eq(bytes),
+            eq("skill/org-hub/directory-sync/7301/" + DigestUtils.sha256Hex(bytes)),
+            eq("skill.zip"), eq("application/zip"));
         verify(ssResourceRelDetailService, never()).save(any());
         verify(resourceArtifactStorageService, never()).syncResourceJsonByBizType(any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());

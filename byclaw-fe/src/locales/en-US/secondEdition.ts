@@ -137,6 +137,11 @@ export default {
   'settings.userAgreement': 'User Agreement',
   'settings.privacyPolicy': 'Privacy Policy',
   'settings.changePassword': 'Change Password',
+  'settings.voiceAutoPlay': 'Automatically play voice replies',
+  'settings.voiceAutoPlayHint': 'Play voice segments in new replies in order. History stays silent.',
+  'settings.voiceAutoTranscribe': 'Automatically transcribe voice messages',
+  'settings.voiceAutoTranscribeHint':
+    'Show text for newly sent voice messages. Manual transcription remains available.',
   'settings.general': 'General',
   'settings.personalParams': 'Personal Parameters',
   'settings.params.descriptionText': 'Manage your private runtime parameters for tool, MCP, and exec injection.',

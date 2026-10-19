@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-03-devflow-iron-rules-port.md
+2026-09-03-devflow-iron-rules-port.md: 4fecfd9b6a6e700696b5d86a68bfb64d689e76c5
+2026-09-03-devflow-iron-rules-port.zh.md: 923dee08552b2963aee5ada3a77edb30c1e2fedb

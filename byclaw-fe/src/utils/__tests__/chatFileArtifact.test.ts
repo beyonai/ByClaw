@@ -1,4 +1,4 @@
-import { extractChatFileArtifactPaths } from '../chatFileArtifact';
+import { extractChatFileArtifactPaths, normalizeChatFileArtifactPath } from '../chatFileArtifact';
 
 describe('extractChatFileArtifactPaths', () => {
   it('extracts labelled, markdown, inline-code and bare paths', () => {
@@ -14,6 +14,17 @@ describe('extractChatFileArtifactPaths', () => {
       '/by/.sessions/101/output/使用说明.pdf',
       '/.sessions/101/output/data.xlsx',
       '/by/.openclaw/workspace-baiying-agent-8/output/result.docx',
+    ]);
+  });
+
+  it('recognizes the generated speech summary caption together with an image', () => {
+    const content = [
+      '![生成图片](/by/.sessions/101/image/result.jpg)',
+      '[🔊 播放语音摘要](/by/.sessions/101/tts/summary.mp3)',
+    ].join('\n');
+    expect(extractChatFileArtifactPaths(content)).toEqual([
+      '/by/.sessions/101/image/result.jpg',
+      '/by/.sessions/101/tts/summary.mp3',
     ]);
   });
 
@@ -42,5 +53,25 @@ describe('extractChatFileArtifactPaths', () => {
   it('deduplicates paths', () => {
     const path = '/by/.sessions/101/output/a.txt';
     expect(extractChatFileArtifactPaths(`文件路径：${path}\n再次：\`${path}\``)).toEqual([path]);
+  });
+});
+
+describe('current session artifact normalization', () => {
+  it('uses the virtual session path for executor output without depending on its storage root', () => {
+    expect(
+      normalizeChatFileArtifactPath('/tmp/test/storage/byclaw-user/by/.sessions/101/image/result.jpg', '101')
+    ).toBe('/by/.sessions/101/image/result.jpg');
+    expect(normalizeChatFileArtifactPath('/mnt/shared/users/user/by/.sessions/101/tts/summary.mp3', '101')).toBe(
+      '/by/.sessions/101/tts/summary.mp3'
+    );
+  });
+  it('preserves paths outside the current session for backend authorization', () => {
+    expect(normalizeChatFileArtifactPath('/tmp/output/file.pdf', '101')).toBe('/tmp/output/file.pdf');
+    expect(normalizeChatFileArtifactPath('/tmp/by/.sessions/102/image/result.jpg', '101')).toBe(
+      '/tmp/by/.sessions/102/image/result.jpg'
+    );
+    expect(normalizeChatFileArtifactPath('/by/.sessions/101/tts/summary.mp3', '101')).toBe(
+      '/by/.sessions/101/tts/summary.mp3'
+    );
   });
 });

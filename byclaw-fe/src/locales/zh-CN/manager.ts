@@ -377,6 +377,12 @@ export default {
   'modelMgr.default': '默认',
   'modelMgr.setDefault': '设为默认',
   'modelMgr.defaultModel': '默认',
+  'modelMgr.typeName.LLM': '大语言模型',
+  'modelMgr.typeName.RERANK': '重排模型',
+  'modelMgr.typeName.EMBEDDING': '向量模型',
+  'modelMgr.typeName.TTS': '语音模型',
+  'modelMgr.typeName.IMAGE_GENERATION': '文生图',
+  'modelMgr.typeName.unknown': '未知类型',
   'modelMgr.operationSuccess': '操作成功',
   'modelMgr.debug': '调试',
   'modelMgr.heroDesc': '统一查看模型状态、能力标签与系统归属，支持快速筛选、调试和启停。',
@@ -539,6 +545,12 @@ export default {
   'modelMgr.modal.presetContextUnspecifiedHint':
     '官方接口未明确统一输入上限，上下文长度默认填入 202752，可按实际服务限制调整。',
   'modelMgr.modal.presetChannel.bailian': '阿里云百炼',
+  'modelMgr.modal.presetChannel.bailianSiliconflow': '阿里云百炼 / 硅基流动',
+  'modelMgr.modal.presetChannel.bailianVanchin': '阿里云百炼 / 快手万擎',
+  'modelMgr.modal.deepseekBailianPresetHint':
+    '请先在百炼开通此渠道模型，使用北京地域的百炼 API Key，并将接入地址中的 WorkspaceId 占位符 替换为真实业务空间 ID。容量以该渠道控制台为准，请核对上下文长度与 Max Tokens；模板未登记官方容量上限。',
+  'modelMgr.modal.deepseekBailianOcrPresetHint':
+    '请先在百炼开通万擎 OCR，使用北京地域的百炼 API Key，并将接入地址中的 WorkspaceId 占位符 替换为真实业务空间 ID。容量请以渠道控制台为准。此模型用于图片文字提取，调试请求需在 messages 的 content 中提供 image_url 和文本指令；纯文本默认示例不能验证 OCR。',
   'modelMgr.modal.presetChannel.kimiCode': 'Kimi Code',
   'modelMgr.modal.presetChannel.volcengine': '火山方舟',
   'modelMgr.modal.presetThinkingRequiredHint': '该渠道的此型号仅支持思考模式，请保持 Thinking 开启。',
@@ -637,4 +649,8 @@ export default {
   'modelMgr.modal.imageWatermark': '添加水印',
   'modelMgr.modal.seedreamModelPlaceholder': '选择 Seedream 型号或填写模型 / 接入点 ID',
   'modelMgr.modal.generatedImage': '生成图片 {index}',
+  'modelMgr.modal.modelTypeASR': '语音识别（ASR）',
+  'modelMgr.typeName.ASR': '语音识别',
+  'employeeDetail.imageModelGlobalDefault': '使用全局默认模型',
+  'employeeDetail.ttsModelGlobalDefault': '使用全局默认模型',
 };

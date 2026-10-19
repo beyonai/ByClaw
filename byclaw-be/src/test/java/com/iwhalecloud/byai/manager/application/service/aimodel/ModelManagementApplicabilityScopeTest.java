@@ -52,7 +52,13 @@ class ModelManagementApplicabilityScopeTest {
         when(byaiAimodelDomainService.upsert(any(ByaiAimodel.class))).thenAnswer(invocation -> {
             ByaiAimodel saved = invocation.getArgument(0);
             saved.setModelId(901L);
-            assertThat(JSONObject.parseObject(saved.getInParams()).getString("applicabilityScope")).isEqualTo(scope);
+            JSONObject params = JSONObject.parseObject(saved.getInParams());
+            // With no optional metadata, in_params itself may be null. A null scope stays absent
+            // on both creation and edit; empty strings and multiline text must still round-trip.
+            assertThat(params == null ? null : params.getString("applicabilityScope")).isEqualTo(scope);
+            if (scope == null && params != null) {
+                assertThat(params).doesNotContainKey("applicabilityScope");
+            }
             when(byaiAimodelDomainService.getById(901L)).thenReturn(saved);
             return 901L;
         });

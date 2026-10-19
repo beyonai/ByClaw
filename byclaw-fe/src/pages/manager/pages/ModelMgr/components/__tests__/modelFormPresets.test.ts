@@ -13,6 +13,68 @@ import { buildAutoDebugRequestText, buildModelUpsertPayload } from '../modelForm
 import { getImageGenerationProvider } from '../imageGenerationProviders';
 
 describe('deterministic model form presets', () => {
+  it('registers each model version once across channels and retains official Kimi access', () => {
+    // 显示名中的 API 别名后缀不构成新版本；厂商、类型和版本后缀仍参与区分。
+    const versionKeys = MODEL_FORM_PRESETS.map((preset) => {
+      const version = preset.label
+        .replace(/ \([^)]*\)$/, '')
+        .toLowerCase()
+        .replace(/[\s_-]+/g, '');
+      return `${preset.developer}:${preset.values.modelType}:${version}`;
+    });
+    expect(new Set(versionKeys).size).toBe(versionKeys.length);
+    expect(MODEL_FORM_PRESETS.some((preset) => preset.id === 'tokenhub:kimi-k2.8-preview')).toBe(false);
+    expect(findModelFormPreset('kimi-for-coding')).toMatchObject({
+      id: 'kimi-code:kimi-for-coding',
+      values: { providerName: 'Moonshot', apiEndpoint: 'https://api.kimi.com/coding/v1' },
+    });
+    // 高速版、Flash/FlashX 和 Pro 属于独立规格，不能因共同前缀被合并。
+    [
+      'kimi-k2.7-code',
+      'kimi-k2.7-code-highspeed',
+      'MiniMax-M2.7',
+      'MiniMax-M2.7-highspeed',
+      'ZHIPU/GLM-5.3-Flash',
+      'glm-5.3-flashx',
+      'qwen-image-3.0',
+      'qwen-image-3.0-pro',
+      'deepseek-v4-pro',
+    ].forEach((modelCode) => expect(findModelFormPreset(modelCode)).toBeDefined());
+  });
+
+  it('omits replaceable snapshots while retaining date-only model variants and saved model codes', () => {
+    expect(findModelFormPreset('deepseek-v4-pro-0813')).toBeUndefined();
+    expect(findModelFormPreset('deepseek-v4-pro')?.id).toBe('deepseek:deepseek-v4-pro');
+    // 不按日期正则批量删除；这些系列/规格在目录中没有等价的非日期入口。
+    [
+      'deepseek-v4-flash-0731',
+      'siliconflow/deepseek-v3-0324',
+      'doubao-seed-2-1-pro-260915',
+      'doubao-seed-2-1-lite-260915',
+      'doubao-seed-2-1-turbo-260628',
+      'tongyi-embedding-vision-plus-2026-03-06',
+      'tongyi-embedding-vision-flash-2026-03-06',
+      'doubao-embedding-vision-251215',
+      'doubao-seedream-4-0-250828',
+      'doubao-seedream-5-0-260128',
+      'doubao-seedream-5-0-pro-260628',
+      'doubao-seedream-5-0-flash-260915',
+    ].forEach((modelCode) => expect(findModelFormPreset(modelCode)?.values.modelCode).toBe(modelCode));
+    const savedValues = {
+      ...getNewModelFormValues(),
+      id: 'saved-snapshot',
+      modelCode: 'deepseek-v4-pro-0813',
+      providerName: 'Bailian',
+      modelProtocol: 'OpenAI',
+      apiEndpoint: 'https://workspace-fixture.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    };
+    expect(buildModelUpsertPayload({ values: savedValues })).toMatchObject({
+      id: 'saved-snapshot',
+      modelCode: 'deepseek-v4-pro-0813',
+      apiEndpoint: savedValues.apiEndpoint,
+    });
+  });
+
   // 独立列出核实过的规格，覆盖模板 -> 表单 -> 保存/调试，防止再统一回落为示例输出预算。
   it.each<[string, number, number]>([
     ['MiniMax-M3', 1000000, 524288],
@@ -44,9 +106,10 @@ describe('deterministic model form presets', () => {
   ])('fills and submits official context/output ceilings for %s', (modelCode, contextTokens, maxTokens) => {
     const state = createModelAutofillState();
     const initial = { ...getNewModelFormValues(), modelCode };
-    const values = { ...initial, ...applyModelAutofill(state, { modelCode }, initial) };
+    const presetId = modelCode === 'deepseek-v4-pro' ? 'deepseek:deepseek-v4-pro' : undefined;
+    const values = { ...initial, ...applyModelAutofill(state, { modelCode }, initial, presetId) };
     expect(values).toMatchObject({ contextTokens, maxTokens });
-    expect(getModelPresetLimits(values)).toEqual({ contextTokens, maxTokens });
+    expect(getModelPresetLimits(values, presetId)).toEqual({ contextTokens, maxTokens });
     expect(buildModelUpsertPayload({ values })).toMatchObject({ contextTokens, maxTokens });
     const debug = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
     expect(debug.max_tokens).toBe(maxTokens);
@@ -516,7 +579,7 @@ describe('deterministic model form presets', () => {
       temperature: undefined,
       reasoningConfig: { enabled: false, capability: 'binary' },
     };
-    values = { ...values, ...changed, modelCode: 'deepseek-v4-pro' };
+    values = { ...values, ...changed, modelCode: 'deepseek-flash' };
     const patch = applyModelAutofill(state, changed, values);
     expect(patch).toMatchObject({ contextTokens: 1048576, providerName: 'DeepSeek' });
     Object.keys(changed).forEach((key) => expect(patch).not.toHaveProperty(key));
@@ -525,7 +588,7 @@ describe('deterministic model form presets', () => {
 
   it('drops stale automatic capabilities for unknown aliases and keeps manually entered capacity', () => {
     const state = createModelAutofillState();
-    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'deepseek-v4-pro' };
+    let values: Record<string, any> = { ...getNewModelFormValues(), modelCode: 'deepseek-flash' };
     values = { ...values, ...applyModelAutofill(state, { modelCode: values.modelCode }, values) };
     values.modelCode = 'deepseek-v4-pro-custom';
     let patch = applyModelAutofill(state, { modelCode: values.modelCode }, values);
@@ -561,7 +624,7 @@ describe('deterministic model form presets', () => {
   });
 
   it('limits known official configurations without imposing those limits on proxies or other protocols', () => {
-    const values = findModelFormPreset('deepseek-v4-pro')!.values;
+    const values = findModelFormPreset('deepseek-flash')!.values;
     expect(getModelPresetLimits({ ...values, apiEndpoint: `${values.apiEndpoint}/` })).toEqual({
       contextTokens: 1048576,
       maxTokens: 393216,
@@ -635,7 +698,7 @@ describe('deterministic model form presets', () => {
   });
 
   it('uses explicit thinking flags for known OpenAI-compatible model templates', () => {
-    const values = findModelFormPreset('deepseek-v4-pro')!.values;
+    const values = findModelFormPreset('deepseek-flash')!.values;
     const disabled = JSON.parse(buildAutoDebugRequestText({ formValues: values, syncFormParameters: true }));
     expect(disabled.thinking).toEqual({ type: 'disabled' });
     const enabled = JSON.parse(

@@ -3,12 +3,20 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ReplyFileArtifacts from './index';
 import { downloadChatFileArtifact, resolveChatFileArtifacts } from '@/service/chatFileArtifact';
+import { transcribeVoice } from '@/service/voice';
 import { IMessageState } from '@/constants/message';
 import type { IMessage } from '@/typescript/message';
 
 jest.mock('@/service/chatFileArtifact', () => ({
   downloadChatFileArtifact: jest.fn(),
   resolveChatFileArtifacts: jest.fn(),
+}));
+
+jest.mock('../ImageArtifactGallery', () => ({
+  __esModule: true,
+  default: ({ artifacts }: any) => (
+    <div data-testid="image-artifact-gallery">{artifacts.map((item: any) => item.fileName).join(',')}</div>
+  ),
 }));
 
 jest.mock('@/components/MessageList/components/FileRender', () => ({
@@ -18,6 +26,21 @@ jest.mock('@/components/MessageList/components/FileRender', () => ({
       {fileItem.queryFile?.fileName}
     </button>
   ),
+}));
+
+const mockVoiceProps = jest.fn();
+jest.mock('@/service/voice', () => ({ transcribeVoice: jest.fn().mockResolvedValue({ text: '摘要文字' }) }));
+
+jest.mock('../VoiceMessage', () => ({
+  __esModule: true,
+  default: (props: any) => {
+    mockVoiceProps(props);
+    return (
+      <button type="button" onClick={() => props.loadAudio?.()}>
+        播放{props.label}
+      </button>
+    );
+  },
 }));
 
 const mockResolve = resolveChatFileArtifacts as jest.MockedFunction<typeof resolveChatFileArtifacts>;
@@ -67,6 +90,103 @@ describe('ReplyFileArtifacts', () => {
     });
   });
 
+  it('renders a generated MP3 from finalContent as an authenticated speech summary', async () => {
+    mockResolve.mockResolvedValueOnce([
+      {
+        sourcePath: '/by/.sessions/101/tts/summary.mp3',
+        path: '/.sessions/101/tts/summary.mp3',
+        fileName: 'summary.mp3',
+        fileSize: 1024,
+        contentType: 'audio/mpeg',
+      },
+    ]);
+    render(
+      <ReplyFileArtifacts
+        message={message({
+          msgId: 'm-speech',
+          messageId: 'm-speech',
+          text: '',
+          finalContent: '[播放语音摘要](/by/.sessions/101/tts/summary.mp3)',
+        })}
+      />
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '播放语音摘要' }));
+    expect(mockResolve).toHaveBeenCalledWith({
+      sessionId: '101',
+      messageId: 'm-speech',
+      paths: ['/by/.sessions/101/tts/summary.mp3'],
+    });
+    expect(mockDownload).toHaveBeenCalledWith({ sessionId: '101', path: '/.sessions/101/tts/summary.mp3' });
+  });
+
+  it('normalizes executor image paths alongside summary audio before resolving the batch', async () => {
+    mockResolve.mockResolvedValueOnce([
+      {
+        sourcePath: '/by/.sessions/101/tts/summary.mp3',
+        path: '/.sessions/101/tts/summary.mp3',
+        fileName: 'summary.mp3',
+        fileSize: 1024,
+        contentType: 'audio/mpeg',
+      },
+    ]);
+    render(
+      <ReplyFileArtifacts
+        message={message({
+          msgId: 'm-host-output',
+          messageId: 'm-host-output',
+          text: '',
+          finalContent:
+            '`/temporary/storage/byclaw-user/by/.sessions/101/image/result.jpg`\n[🔊 播放语音摘要](/by/.sessions/101/tts/summary.mp3)',
+        })}
+      />
+    );
+    expect(await screen.findByRole('button', { name: '播放语音摘要' })).toBeInTheDocument();
+    expect(mockResolve).toHaveBeenCalledWith({
+      sessionId: '101',
+      messageId: 'm-host-output',
+      paths: ['/by/.sessions/101/image/result.jpg', '/by/.sessions/101/tts/summary.mp3'],
+    });
+  });
+
+  it('puts speech after file cards and transcribes its owned artifact path', async () => {
+    mockResolve.mockResolvedValueOnce([
+      {
+        sourcePath: '/by/.sessions/101/image/result.jpg',
+        path: '/.sessions/101/image/result.jpg',
+        fileName: 'result.jpg',
+        fileSize: 100,
+        contentType: 'image/jpeg',
+      },
+      {
+        sourcePath: '/by/.sessions/101/tts/summary.mp3',
+        path: '/.sessions/101/tts/summary.mp3',
+        fileName: 'summary.mp3',
+        fileSize: 1024,
+        contentType: 'audio/mpeg',
+      },
+    ]);
+    render(
+      <ReplyFileArtifacts
+        message={message({
+          msgId: 'm-footer',
+          messageId: 'm-footer',
+          text: '',
+          finalContent:
+            '[图片](/by/.sessions/101/image/result.jpg)\n[🔊 播放语音摘要](/by/.sessions/101/tts/summary.mp3)',
+        })}
+      />
+    );
+    await screen.findByRole('button', { name: '播放语音摘要' });
+    const files = screen.getByTestId('reply-artifact-files');
+    const footer = screen.getByTestId('speech-summary-footer');
+    expect(files.nextSibling).toBe(footer);
+    expect(files).not.toContainElement(screen.getByRole('button', { name: '播放语音摘要' }));
+    const props = mockVoiceProps.mock.calls[mockVoiceProps.mock.calls.length - 1][0];
+    expect(props.voice).not.toHaveProperty('fileId');
+    await props.transcribeAudio();
+    expect(transcribeVoice).toHaveBeenCalledWith({ sessionId: '101', path: '/.sessions/101/tts/summary.mp3' });
+  });
+
   it('does not resolve while the answer is still streaming', async () => {
     render(
       <ReplyFileArtifacts message={message({ msgId: 'm2', messageId: 'm2', messageState: IMessageState.Answer })} />
@@ -97,4 +217,37 @@ describe('ReplyFileArtifacts', () => {
     await waitFor(() => expect(mockResolve).toHaveBeenCalled());
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+});
+
+test('renders a structured image result when final prose has no path', async () => {
+  mockResolve.mockResolvedValueOnce([
+    {
+      sourcePath: '/by/.sessions/101/image/structured.png',
+      path: '/.sessions/101/image/structured.png',
+      fileName: 'structured.png',
+      contentType: 'image/png',
+    },
+  ]);
+  render(
+    <ReplyFileArtifacts
+      message={message({
+        messageId: 'structured-result',
+        text: '完成',
+        messageList: [
+          {
+            content: {
+              substance: JSON.stringify({
+                output: JSON.stringify({
+                  imageArtifacts: [
+                    { schemaVersion: 1, id: 'structured.png', path: '/by/.sessions/101/image/structured.png' },
+                  ],
+                }),
+              }),
+            },
+          },
+        ] as any,
+      })}
+    />
+  );
+  expect(await screen.findByTestId('image-artifact-gallery')).toHaveTextContent('structured.png');
 });

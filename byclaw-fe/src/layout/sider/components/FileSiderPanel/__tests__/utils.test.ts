@@ -43,17 +43,34 @@ describe('FileSiderPanel project space paths', () => {
     expect(
       canPreviewFile({ name: '.gitignore', path: '/.gitignore', isDir: false, size: MAX_TEXT_PREVIEW_SIZE + 1 })
     ).toBe(false);
-    expect(canPreviewFile({ name: 'archive.zip', path: '/archive.zip', isDir: false })).toBe(false);
+    expect(canPreviewFile({ name: 'archive.jar', path: '/archive.jar', isDir: false })).toBe(false);
   });
 
-  it.each(['svg', 'jpeg', 'ico', 'avif', 'csv', 'tsv', 'xls', 'webm', 'mp3', 'm4a', 'flac', 'htm'])(
-    'opens %s through the shared preview type',
-    (type) => {
-      expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(true);
-      const aliases: Record<string, string> = { jpeg: 'jpg', htm: 'html' };
-      expect(getPreviewFileType(`file.${type}`)).toBe(aliases[type] || type);
-    }
-  );
+  it.each([
+    'svg',
+    'jpeg',
+    'ico',
+    'avif',
+    'csv',
+    'tsv',
+    'xls',
+    'webm',
+    'mp3',
+    'm4a',
+    'flac',
+    'htm',
+    'heic',
+    'heif',
+    'tif',
+    'tiff',
+    'zip',
+    'rtf',
+    'ods',
+  ])('opens %s through the shared preview type', (type) => {
+    expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(true);
+    const aliases: Record<string, string> = { jpeg: 'jpg', htm: 'html' };
+    expect(getPreviewFileType(`file.${type}`)).toBe(aliases[type] || type);
+  });
 
   it.each(['doc', 'ppt'])('routes legacy %s to conversion instead of text', (type) => {
     expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(true);
@@ -61,19 +78,67 @@ describe('FileSiderPanel project space paths', () => {
   });
 
   it.each([
-    'tiff',
-    'tif',
-    'heic',
-    'heif',
+    ['JFIF', 'jpg'],
+    ['jpe', 'jpg'],
+    ['jif', 'jpg'],
+    ['pjp', 'jpg'],
+    ['pjpeg', 'jpg'],
+    ['HIF', 'heif'],
+    ['JXL', 'jxl'],
+    ['JP2', 'jp2'],
+    ['PPM', 'ppm'],
+    ['TGA', 'tga'],
+    ['PNG.ALPHA', 'png'],
+    ['RTF', 'rtf'],
+    ['ODS', 'ods'],
+    ['ODT', 'odt'],
+    ['ODP', 'odp'],
+    ['IPYNB', 'ipynb'],
+    ['DOCM', 'docm'],
+    ['DOTX', 'dotx'],
+    ['XLSM', 'xlsm'],
+    ['XLTX', 'xltx'],
+    ['PPTM', 'pptm'],
+    ['PPSX', 'ppsx'],
+    ['POTX', 'potx'],
+    ['EML', 'eml'],
+    ['MSG', 'msg'],
+    ['RAR', 'rar'],
+    ['7Z', '7z'],
+    ['TAR', 'tar'],
+    ['GZ', 'gz'],
+    ['TGZ', 'tgz'],
+    ['TAR.GZ', 'tgz'],
+    ['EPUB', 'epub'],
+    ['DB', 'db'],
+    ['SQLITE', 'sqlite'],
+    ['SQLITE3', 'sqlite3'],
+    ['RAW', 'raw'],
+    ['DNG', 'dng'],
+    ['CR2', 'cr2'],
+    ['CR3', 'cr3'],
+    ['NEF', 'nef'],
+    ['NRW', 'nrw'],
+    ['ARW', 'arw'],
+    ['SRF', 'srf'],
+    ['SR2', 'sr2'],
+    ['RAF', 'raf'],
+    ['RW2', 'rw2'],
+    ['ORF', 'orf'],
+    ['PEF', 'pef'],
+    ['SRW', 'srw'],
+  ])('opens %s without reading its content as plain text', (extension, type) => {
+    for (const name of [`照片.${extension}`, `.${extension}`]) {
+      expect(canPreviewFile({ name, path: `/${name}`, isDir: false, size: MAX_TEXT_PREVIEW_SIZE + 1 })).toBe(true);
+      expect(getPreviewFileType(name)).toBe(type);
+    }
+  });
+
+  it.each([
     'psd',
     'ai',
     'sketch',
     'parquet',
-    'sqlite',
-    'db',
-    'odt',
-    'ods',
-    'odp',
     'wps',
     'et',
     'dps',
@@ -83,7 +148,14 @@ describe('FileSiderPanel project space paths', () => {
     'amr',
     'flv',
     '3gp',
-    'tgz',
+    'jar',
+    'jpx',
+    'j2k',
+    'jpf',
+    'jpm',
+    'mj2',
+    'heics',
+    'heifs',
   ])('does not read unsupported %s binary files as source text', (type) => {
     expect(canPreviewFile({ name: `file.${type}`, path: `/file.${type}`, isDir: false })).toBe(false);
     expect(getPreviewFileType(`file.${type}`)).toBe(type);

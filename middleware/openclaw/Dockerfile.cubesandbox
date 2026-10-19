@@ -43,6 +43,8 @@ FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cubesandbox-base
 ## ── stage 2: final image ─────────────────────────────────────────
 FROM ghcr.io/openclaw/openclaw:2026.4.21
 
+ENV BYCLAW_DATA_ROOT=/by
+
 USER root
 
 RUN chown root:root /app
@@ -96,8 +98,8 @@ RUN set -eux; \
 COPY --from=ext-builder /build/out/ /app/extensions/
 
 # add openclaw skills (overwrite same-name files with project content)
-COPY middleware/openclaw/skills/ /app/skills/
-COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
+COPY middleware/builtin/skills/ /app/skills/
+COPY middleware/builtin/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 RUN cd /app/skills/knowledge-collection/scripts \
     && npm ci --omit=dev --prefer-offline
 
@@ -109,7 +111,7 @@ COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-u
 RUN chmod 0755 /usr/local/bin/openclaw-filebrowser-ui-proxy
 
 # add DingTalk workspace cli dws from the repository instead of downloading at build time
-COPY middleware/openclaw/cli/dws /usr/local/bin/dws
+COPY middleware/builtin/cli/dws /usr/local/bin/dws
 RUN chmod 0755 /usr/local/bin/dws
 
 # CubeSandbox runtime commands. cube-entrypoint.sh owns envd; these scripts

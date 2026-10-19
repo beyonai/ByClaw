@@ -83,4 +83,27 @@ describe('ConnectorSelection localization', () => {
     expect(screen.getByLabelText('QQ 邮箱').querySelector('svg[data-icon="qq"]')).toBeInTheDocument();
     expect(screen.getByLabelText('网易 163 邮箱').querySelector('svg[data-icon="netease-mail"]')).toBeInTheDocument();
   });
+
+  it('distinguishes search, image generation and speech synthesis in the connected toolbar', () => {
+    setMessages(zhCN);
+    const capabilityConnectors: Connector[] = [
+      ['deepseek-web-search', 'DeepSeek 联网检索'],
+      ['image-generation-model', '文生图模型'],
+      ['speech-generation-model', '语音模型'],
+    ].map<Connector>(([code, name]) => ({
+      id: code,
+      code,
+      name,
+      description: '',
+      authType: 'oauth',
+      icon: getConnectorIcon(code, name),
+      enableFlag: 'Y',
+    }));
+    const { container } = render(<ConnectorSelection value={capabilityConnectors} />);
+
+    expect(screen.getByLabelText('DeepSeek 联网检索').querySelector('svg[data-icon="deepseek"]')).toBeInTheDocument();
+    expect(screen.getByLabelText('文生图模型').querySelector('svg[data-icon="image-generation"]')).toBeInTheDocument();
+    expect(screen.getByLabelText('语音模型').querySelector('svg[data-icon="speech-generation"]')).toBeInTheDocument();
+    expect(container.querySelector('svg[data-icon="api"]')).not.toBeInTheDocument();
+  });
 });

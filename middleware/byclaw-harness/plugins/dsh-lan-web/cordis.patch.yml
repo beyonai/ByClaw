@@ -1,0 +1,10 @@
+# Replace only the Web command-line provider. The shipped WebServer, LAN
+# address discovery, trusted-host fence, browser sessions, and API/WebSocket
+# authentication remain authoritative.
+- id: web-startup
+  disabled: true
+
+- insert:
+    - id: byclaw-lan-web-startup
+      name: '@byclaw/dsh-lan-web/startup'
+      inject: [cmdlineArgs]

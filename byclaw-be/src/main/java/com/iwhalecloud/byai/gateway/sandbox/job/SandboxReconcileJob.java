@@ -17,6 +17,9 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 @ConditionalOnProperty(prefix = "sandbox.reconcile", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SandboxReconcileJob {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxReconcileJob.class);
 
     private final SandboxService sandboxService;
@@ -29,6 +32,7 @@ public class SandboxReconcileJob {
         initialDelayString = "${sandbox.reconcile.initial-delay:50000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void reconcileSandboxes() {
+        if (!platformExecution.isLegacyExecutor()) return;
         try {
             SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
             LOGGER.debug("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",

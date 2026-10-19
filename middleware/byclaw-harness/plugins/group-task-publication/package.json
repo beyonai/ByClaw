@@ -1,0 +1,60 @@
+{
+  "name": "@byclaw/dsh-group-task-publication",
+  "version": "0.1.0",
+  "description": "Session-scoped preparation of user-confirmed ByClaw group task publication cards",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "pnpm build && node scripts/verify.mjs && node scripts/session-verify.mjs"
+  },
+  "dependencies": {
+    "zod": "4.4.3",
+    "@byclaw/dsh-integration": "workspace:*",
+    "@deepseek-ai/schemastery": "3.18.1-rc.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-agent": "^0.1.2-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-system-prompt": "workspace:^",
+    "@deepseek-ai/dsh-scope": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "js-yaml": "4.2.0",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

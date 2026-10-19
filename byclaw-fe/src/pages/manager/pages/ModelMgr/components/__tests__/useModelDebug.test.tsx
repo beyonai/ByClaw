@@ -170,3 +170,25 @@ describe('useModelDebug image generation validation', () => {
     expect(message.warning).toHaveBeenCalledWith('modelMgr.modal.imageProviderRequired');
   });
 });
+
+describe('speech debug output', () => {
+  it.each(['ASR', 'TTS'])('shows %s JSON results immediately', async (currentModelType) => {
+    const output = JSON.stringify({ format: 'mp3', text: '调试成功' }, null, 2);
+    const runDebugRequest = jest.fn().mockResolvedValue({ output });
+    const { result } = renderHook(() =>
+      useModelDebug({
+        intl: { formatMessage: ({ id }) => id },
+        open: true,
+        currentModelType,
+        getCurrentModelId: () => '42',
+        runDebugRequest,
+      })
+    );
+    act(() => result.current.setDebugInput('{"text":"你好","fileId":"123"}'));
+    await act(async () => {
+      result.current.runDebug();
+    });
+    expect(result.current.debugOutput).toBe(output);
+    expect(result.current.debugOutputLoading).toBe(false);
+  });
+});

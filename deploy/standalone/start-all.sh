@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
@@ -23,10 +24,9 @@ else
 fi
 
 echo ""
-echo "==================== 部署完成 ===================="
+echo "==================== 容器启动命令完成，等待环境检查 ===================="
 echo "前端: http://localhost:${NGINX_PORT:-8080}"
 echo "后端: http://localhost:${BE_SERVER_PORT:-8086}"
-echo "Super: http://localhost:${BYCLAW_SUPER_PORT:-3000}"
 echo "QA:   http://localhost:${BYCLAW_QA_PORT:-8090}"
 echo ""
 $COMPOSE ps

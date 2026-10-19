@@ -2,6 +2,7 @@ import { get, isEmpty, pick, set } from 'lodash';
 
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import webSocketManager from '@/utils/websocket';
+import { getFinalContent } from '@/utils/finalAnswer';
 
 import { answerDeltaHandler, reasoningLogHandler } from './util';
 
@@ -94,6 +95,15 @@ export function formatStreamPayload(eventName: string, res: any) {
         set(payload, 'resComIds', res);
       }
       break;
+    case 'finalAnswer':
+    case 'final_answer': {
+      const finalContent = getFinalContent(res?.final_content ?? res?.finalContent);
+      if (finalContent !== undefined) {
+        Object.assign(payload, pick(res, ['sessionId', 'messageId', 'queryMessageId', 'metadata', 'traceId']));
+        Object.assign(payload, streamContextFields, { finalContent });
+      }
+      break;
+    }
     case 'appStreamResponse': {
       const { messageId, relatedResources, queryMessageId, relatedQuestions, traceId } = res;
       set(payload, 'messageId', messageId);

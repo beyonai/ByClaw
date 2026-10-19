@@ -232,6 +232,9 @@ public class ChatProcessContext {
     /** Explicit tenant identity copied from the ingress thread for asynchronous stream completion. */
     public TenantRequestContext tenantContext;
 
+    /** Request language copied from the ingress thread for asynchronous stream events. */
+    public String language;
+
     /**
      * 当前用户ID，用于多端广播时查找用户的所有 WebSocket Channel
      */

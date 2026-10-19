@@ -1,0 +1,24 @@
+{
+  "name": "@byclaw/dsh-employee-selector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./binding": "./src/binding.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent-presets": "*"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

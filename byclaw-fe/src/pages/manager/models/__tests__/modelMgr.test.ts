@@ -17,6 +17,8 @@ jest.mock('@umijs/max', () => ({
 
 jest.mock('@/pages/manager/service/ModelMgr', () => ({
   debugModelImageGeneration: jest.fn(),
+  debugModelAsr: jest.fn(),
+  debugModelTts: jest.fn(),
   debugModelStream: jest.fn(),
   deleteModel: jest.fn(),
   getModelDetail: jest.fn(),
@@ -26,7 +28,7 @@ jest.mock('@/pages/manager/service/ModelMgr', () => ({
   upsertModel: jest.fn(),
 }));
 
-import { debugModelImageGeneration } from '@/pages/manager/service/ModelMgr';
+import { debugModelImageGeneration, debugModelAsr, debugModelTts } from '@/pages/manager/service/ModelMgr';
 import { message } from 'antd';
 import modelMgrModel, { getErrorText, unwrapResponse } from '../modelMgr';
 
@@ -38,6 +40,18 @@ describe('manager/models/modelMgr', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it.each([
+    ['debugModelAsr', debugModelAsr, { text: '识别结果' }],
+    ['debugModelTts', debugModelTts, { format: 'mp3', byteLength: 2048 }],
+  ])('%s exposes structured speech debug results', (effect, service, data) => {
+    const success = jest.fn();
+    const payload = { id: '42', input: '{}' };
+    const iterator = effects[effect]({ payload, success }, sagaHelpers);
+    expect(iterator.next().value).toEqual({ type: 'call', fn: service, args: [payload] });
+    iterator.next({ code: 0, data });
+    expect(success).toHaveBeenCalledWith({ output: JSON.stringify(data, null, 2) });
   });
 
   describe('unwrapResponse', () => {

@@ -10,6 +10,7 @@ import { useSelector, Outlet } from '@umijs/max';
 import { getHistoryState } from '@/utils/browser';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import useSessionIdState from '@/hooks/useSessionIdState';
 import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
 
 import AntdProvider from '@/layout/components/provider/antd';
@@ -27,7 +28,7 @@ const MobileAgentId = 'mobileAgentId';
 const myEventEmitter = new EventEmitter$Cls();
 
 function MobileLayout() {
-  const [sessionId, setSessionId] = useState<string>(getHistoryState(MobileSessionId, ''));
+  const [sessionId, setSessionId] = useSessionIdState(getHistoryState(MobileSessionId, ''));
   const [agentId, setAgentId] = useState<string>(getHistoryState(MobileAgentId, ''));
   const { agentList, employeesList } = useSelector(({ employees }) => ({
     agentList: employees.agentList || [],

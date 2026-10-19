@@ -71,6 +71,16 @@ class ChatRuntimeStateServiceTest {
     }
 
     @Test
+    void buildRecoveryContextRestoresRequestLanguage() {
+        ChatRuntimeState state = runtimeState(null);
+        state.setLanguage("en-US");
+
+        ChatProcessContext ctx = service.buildRecoveryContext(state, snapshotService);
+
+        assertEquals("en-US", ctx.language);
+    }
+
+    @Test
     void recoveryRetainsTenantIdentityThroughRedisSerialization() {
         var serialized = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(runtimeState(null)));
         serialized.put("tenantContext", java.util.Map.of("userId", 200L, "enterpriseId", 123L, "role", "MEMBER"));

@@ -138,7 +138,7 @@ export async function debugModelImageGeneration(params: any) {
   );
 }
 
-export async function debugModelStream(params: any) {
+async function requestModelDebugStream(endpoint: string, params: any) {
   const { signal, onDelta, ...payload } = params || {};
   const finalPayload = {
     ...payload,
@@ -154,7 +154,7 @@ export async function debugModelStream(params: any) {
     ...generateSignature('POST', finalPayload),
   };
 
-  const response = await fetch('/byaiService/new/model/debugModelStream', {
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers,
     body: JSON.stringify(finalPayload),
@@ -252,4 +252,50 @@ export async function debugModelStream(params: any) {
       success: true,
     },
   };
+}
+
+export async function debugModelAsr(params: any) {
+  const { signal, input, id } = params || {};
+  let audio: any;
+  try {
+    audio = JSON.parse(input || '{}');
+  } catch {
+    throw new Error('请输入包含 fileId 的 JSON 对象');
+  }
+  return POST(
+    '/byaiService/new/model/debugModelAsr',
+    { ...audio, id },
+    {
+      ...withCustomHandle,
+      cancelToken: signal ? ({ signal } as AbortController) : undefined,
+      timeout: 185000,
+    }
+  );
+}
+
+export async function debugModelTts(params: any) {
+  const { signal, input, id } = params || {};
+  let speech: any;
+  try {
+    speech = JSON.parse(input || '{}');
+  } catch {
+    throw new Error('请输入包含 text 的 JSON 对象');
+  }
+  return POST(
+    '/byaiService/new/model/debugModelTts',
+    { ...speech, id },
+    {
+      ...withCustomHandle,
+      cancelToken: signal ? ({ signal } as AbortController) : undefined,
+      timeout: 185000,
+    }
+  );
+}
+
+export async function debugModelStream(params: any) {
+  return requestModelDebugStream('/byaiService/new/model/debugModelStream', params);
+}
+
+export async function debugPersonalModelStream(params: any) {
+  return requestModelDebugStream('/byaiService/personal/model/debug', params);
 }

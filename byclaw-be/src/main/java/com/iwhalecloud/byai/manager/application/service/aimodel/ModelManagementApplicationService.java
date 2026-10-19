@@ -74,9 +74,6 @@ public class ModelManagementApplicationService {
 
     private static final String DEFAULT_MODEL_TYPE_IMAGE_GENERATION = "IMAGE_GENERATION";
 
-    private static final Set<String> REQUIRED_DEFAULT_MODEL_TYPES =
-        Set.of(DEFAULT_MODEL_TYPE_LLM, "EMBEDDING", DEFAULT_MODEL_TYPE_IMAGE_GENERATION);
-
     private static final int MASK_PREFIX_LEN = 3;
 
     private static final int MASK_SUFFIX_LEN = 4;
@@ -149,6 +146,7 @@ public class ModelManagementApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, String> upsertModel(ModelUpsertRequest request, Long currentUserId) {
+        byaiAimodelDomainService.lockDefaultModels();
 
         //校验参数是否合法
         this.validateUpsertRequest(request);
@@ -168,6 +166,14 @@ public class ModelManagementApplicationService {
             entity.setModelId(modelId);
             entity.setCreateBy(existing.getCreateBy());
             entity.setCreateTime(existing.getCreateTime());
+            if (isDefaultModel(modelId)) {
+                if (!normalizeModelType(existing.getModelType(), "").equals(entity.getModelType())) {
+                    throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
+                }
+                if (!ModelStatusEnum.isEnabledDb(entity.getStatus())) {
+                    validateModelNotCurrentRequiredDefault(existing, "aimodel.default_model.disable.forbidden");
+                }
+            }
             entity.setSourceType(existing.getSourceType());
             entity.setOwnerType(existing.getOwnerType());
 
@@ -318,6 +324,7 @@ public class ModelManagementApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public Boolean deleteModel(String id) {
+        byaiAimodelDomainService.lockDefaultModels();
         Long modelId = parseModelId(id);
         ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
         if (entity == null) {
@@ -358,6 +365,7 @@ public class ModelManagementApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public Boolean setModelStatus(String id, String status) {
+        byaiAimodelDomainService.lockDefaultModels();
         Long modelId = parseModelId(id);
         ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
         if (entity == null) {
@@ -429,13 +437,18 @@ public class ModelManagementApplicationService {
      * @param modelId 模型主键，为 null 时不更新
      * @param success 调试是否成功
      */
+    @Transactional(rollbackFor = Exception.class)
     public void updateModelStatusAfterDebug(Long modelId, boolean success) {
         if (modelId == null) {
             return;
         }
         try {
+            byaiAimodelDomainService.lockDefaultModels();
             String apiStatus = success ? ModelStatusEnum.ENABLED.name() : ModelStatusEnum.TESTING.name();
             byaiAimodelDomainService.setStatus(modelId, apiStatus);
+            if (success) {
+                ensureDefaultModelForTypeIfMissing(modelId);
+            }
         } catch (Exception e) {
             log.warn("aimodel debug status update fail, modelId={}, success={}", modelId, success, e);
         }
@@ -471,7 +484,8 @@ public class ModelManagementApplicationService {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.upsert.required");
         }
         String modelType = normalizeModelType(request.getModelType(), DEFAULT_MODEL_TYPE_LLM);
-        if (!DEFAULT_MODEL_TYPE_IMAGE_GENERATION.equals(modelType)
+        validateDefaultModelType(modelType);
+        if (Set.of("LLM", "EMBEDDING", "RERANK").contains(modelType)
             && (request.getContextTokens() == null || request.getContextTokens() < 1)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.contextTokens.required");
         }
@@ -666,7 +680,7 @@ public class ModelManagementApplicationService {
      */
     private boolean isDefaultDialogModel(ModelVO vo) {
         return vo != null && vo.getIsDefault() != null && vo.getIsDefault() == 1
-            && DEFAULT_MODEL_TYPE_LLM.equals(normalizeModelType(vo.getModelType(), DEFAULT_MODEL_TYPE_LLM));
+            && DEFAULT_MODEL_TYPE_LLM.equals(normalizeModelType(vo.getModelType(), ""));
     }
 
     /**
@@ -859,7 +873,8 @@ public class ModelManagementApplicationService {
         entity.setModelId(modelId);
         entity.setModelName(request.getDisplayName());
         entity.setModelNo(request.getModelCode());
-        entity.setModelType(request.getModelType() != null ? request.getModelType() : "LLM");
+        entity.setModelType(normalizeModelType(request.getModelType(),
+            request.getModelType() == null ? DEFAULT_MODEL_TYPE_LLM : ""));
         entity.setModelProtocol(request.getModelProtocol());
         entity.setStatus(ModelStatusEnum
             .toDbCode(request.getStatus() != null ? request.getStatus() : ModelStatusEnum.DISABLED.name()));
@@ -1019,21 +1034,27 @@ public class ModelManagementApplicationService {
     /**
      * 获取指定类型的默认模型 ID。
      *
-     * @param modelType 模型类型，空则按 LLM
+     * @param modelType 模型类型，空值查询独立的空类型分组
      * @return 默认模型 ID
      */
     public String getDefaultModelId(String modelType) {
-        String normalizedModelType = normalizeModelType(modelType, DEFAULT_MODEL_TYPE_LLM);
+        String normalizedModelType = normalizeModelType(modelType, "");
         ModelRequest request = new ModelRequest();
         request.setStatus(Constants.STATUS_ENABLED);
         request.setTagId(DEFAULT_MODEL_TAG_ID);
         request.setModelType(normalizedModelType);
         List<ByaiAimodel> byaiAimodels = listModel(request);
+        if (!CollectionUtils.isEmpty(byaiAimodels)) {
+            // 通用列表查询中空类型表示不筛选；此处必须明确隔离空类型与其他类型的默认模型。
+            byaiAimodels = byaiAimodels.stream()
+                .filter(model -> normalizedModelType.equals(normalizeModelType(model.getModelType(), "")))
+                .toList();
+        }
         if (CollectionUtils.isEmpty(byaiAimodels)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.chat_model.not.configured");
         }
         for (ByaiAimodel byaiAimodel : byaiAimodels) {
-            if (byaiAimodel.getIsDefault() == 1) {
+            if (Integer.valueOf(1).equals(byaiAimodel.getIsDefault())) {
                 return byaiAimodel.getModelId().toString();
             }
         }
@@ -1051,21 +1072,25 @@ public class ModelManagementApplicationService {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.modelId.required");
         }
 
+        byaiAimodelDomainService.lockDefaultModels();
         Long modelId = modelDefault.getModelId();
         ByaiAimodel target = byaiAimodelDomainService.findById(modelId);
         if (target == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
 
-        String targetModelType = normalizeModelType(target.getModelType(), DEFAULT_MODEL_TYPE_LLM);
-        String modelType = normalizeModelType(modelDefault.getModelType(), targetModelType);
+        // null、空字符串和纯空白均归入空类型；只有省略类型参数时才使用目标的实际类型。
+        String targetModelType = normalizeModelType(target.getModelType(), "");
+        String modelType = modelDefault.getModelType() == null ? targetModelType
+            : normalizeModelType(modelDefault.getModelType(), "");
         if (!modelType.equals(targetModelType)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
         }
-        validateDefaultModelType(modelType);
-        if (!ModelStatusEnum.isEnabledDb(target.getStatus())) {
+        if (ModelOwnerType.PERSONAL.equalsIgnoreCase(target.getOwnerType())
+            || !ModelStatusEnum.isEnabledDb(target.getStatus())) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.enabled.required");
         }
+        // 手动设置支持所有已保存的模型类型；默认模型必需性策略不限制此入口。
         assignDefaultModelForType(target, modelType);
     }
 
@@ -1076,11 +1101,12 @@ public class ModelManagementApplicationService {
      */
     private void ensureDefaultModelForTypeIfMissing(Long modelId) {
         ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
-        if (entity == null || !ModelStatusEnum.isEnabledDb(entity.getStatus())) {
+        if (entity == null || ModelOwnerType.PERSONAL.equalsIgnoreCase(entity.getOwnerType())
+            || !ModelStatusEnum.isEnabledDb(entity.getStatus())) {
             return;
         }
-        String modelType = normalizeModelType(entity.getModelType(), DEFAULT_MODEL_TYPE_LLM);
-        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType) || hasEnabledDefaultModelForType(modelType)) {
+        String modelType = normalizeModelType(entity.getModelType(), "");
+        if (modelType.isEmpty() || hasEnabledDefaultModelForType(modelType)) {
             return;
         }
         assignDefaultModelForType(entity, modelType);
@@ -1104,7 +1130,7 @@ public class ModelManagementApplicationService {
                 continue;
             }
             boolean sameTypeRelation = modelType
-                .equals(normalizeModelType(relationModel.getModelType(), DEFAULT_MODEL_TYPE_LLM));
+                .equals(normalizeModelType(relationModel.getModelType(), ""));
             if (!sameTypeRelation) {
                 continue;
             }
@@ -1149,8 +1175,8 @@ public class ModelManagementApplicationService {
      * @param messageKey 冲突时的 i18n 文案 key
      */
     private void validateModelNotCurrentRequiredDefault(ByaiAimodel entity, String messageKey) {
-        String modelType = normalizeModelType(entity.getModelType(), DEFAULT_MODEL_TYPE_LLM);
-        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType) || !isDefaultModel(entity.getModelId())) {
+        String modelType = normalizeModelType(entity.getModelType(), "");
+        if (modelType.isEmpty() || !isDefaultModel(entity.getModelId())) {
             return;
         }
         throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, I18nUtil.get(messageKey, modelType));
@@ -1166,7 +1192,7 @@ public class ModelManagementApplicationService {
         return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID).stream()
             .map(ByaiTagRelation::getObjId).distinct().map(byaiAimodelDomainService::getById)
             .anyMatch(model -> model != null
-                && modelType.equals(normalizeModelType(model.getModelType(), DEFAULT_MODEL_TYPE_LLM))
+                && modelType.equals(normalizeModelType(model.getModelType(), ""))
                 && ModelStatusEnum.isEnabledDb(model.getStatus()));
     }
 
@@ -1190,7 +1216,7 @@ public class ModelManagementApplicationService {
      * @param modelType 模型类型
      */
     private void validateDefaultModelType(String modelType) {
-        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType)) {
+        if (modelType == null || !modelType.matches("[A-Z][A-Z0-9_]{0,63}")) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
         }
     }

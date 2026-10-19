@@ -25,6 +25,8 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -175,6 +177,50 @@ class ModelManagementImageGenerationTest {
         verify(byaiAimodelDomainService).upsert(entityCaptor.capture());
         assertThat(entityCaptor.getValue().getModelType()).isEqualTo("IMAGE_GENERATION");
         assertThat(entityCaptor.getValue().getMaxContentToken()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ASR", "TTS", "RERANK", "FUTURE_MODALITY"})
+    void anyModelTypeCanReplaceItsDefaultIndependently(String type) {
+        ByaiAimodel old = model(700L, type, "OOA", 1);
+        ByaiAimodel replacement = model(701L, type, "OOA", 0);
+        ByaiAimodel llm = model(101L, "LLM", "OOA", 1);
+        when(byaiAimodelDomainService.findById(701L)).thenReturn(replacement);
+        when(byaiAimodelDomainService.getById(anyLong())).thenAnswer(invocation ->
+            Map.of(700L, old, 701L, replacement, 101L, llm).get(invocation.getArgument(0)));
+        when(byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, 1L)).thenReturn(List.of(
+            relation(1700L, 700L), relation(1101L, 101L)));
+        service.setDefaultModel(modelDefault(701L, type));
+        InOrder ordered = inOrder(byaiAimodelDomainService, byaiTagRelationService);
+        ordered.verify(byaiAimodelDomainService).lockDefaultModels();
+        ordered.verify(byaiAimodelDomainService).findById(701L);
+        verify(byaiTagRelationService).removeById(1700L);
+        verify(byaiTagRelationService, never()).removeById(1101L);
+        verify(byaiTagRelationService).save(Constants.OBJ_TYPE_AIMODEL, 701L, 1L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ASR", "TTS", "FUTURE_MODALITY"})
+    void mediaModelsDoNotRequireChatContextWindow(String type) {
+        ModelUpsertRequest request = new ModelUpsertRequest();
+        request.setDisplayName(type + " model");
+        request.setModelCode("sample");
+        request.setModelType(" " + type.toLowerCase(Locale.ROOT) + " ");
+        request.setApiEndpoint("https://asr.invalid/v1");
+        request.setApiToken("test-token");
+        request.setStatus("DISABLED");
+        when(byaiAimodelDomainService.upsert(org.mockito.ArgumentMatchers.any(ByaiAimodel.class))).thenReturn(901L);
+        service.upsertModel(request, 42L);
+        var captor = ArgumentCaptor.forClass(ByaiAimodel.class);
+        verify(byaiAimodelDomainService).upsert(captor.capture());
+        assertThat(captor.getValue().getModelType()).isEqualTo(type);
+    }
+
+    @Test
+    void requestedTypeMustMatchTargetType() {
+        when(byaiAimodelDomainService.findById(701L)).thenReturn(model(701L, "ASR", "OOA", 0));
+        assertThatThrownBy(() -> service.setDefaultModel(modelDefault(701L, "TTS"))).isInstanceOf(BaseException.class);
+        verifyNoInteractions(byaiTagRelationService);
     }
 
     private static ByaiAimodel model(Long modelId, String modelType, String status, int isDefault) {

@@ -1,0 +1,4 @@
+[project]
+name = "bare-root"
+
+[tool.uv.workspace]

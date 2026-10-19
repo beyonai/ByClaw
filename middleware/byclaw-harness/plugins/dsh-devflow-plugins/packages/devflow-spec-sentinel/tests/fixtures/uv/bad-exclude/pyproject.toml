@@ -1,0 +1,3 @@
+[tool.uv.workspace]
+members = ["backend"]
+exclude = 5

@@ -1511,7 +1511,7 @@ public class ByClawSkillResourceApplicationService {
         SsResExtSkill existing = ssResExtSkillService.findById(skillResource.getResourceId());
         String packageFileName = metadata.originalFilename();
         String skillHubDirectory = buildSkillHubDirectory(skillResource.getOwnerType(), userCode);
-        // 目录及第三方同步写独立、不可变包，数据库回滚时不会覆盖旧技能包或其他同名资源。
+        // 目录同步和第三方同步均按资源、内容隔离，数据库回滚时不会覆盖旧包或其他同名资源。
         if (SOURCE_TYPE_WORKSPACE_CENTER_SYNC.equals(sourceType) || "THIRD_PARTY_SYNC".equals(sourceType)) {
             skillHubDirectory += "/directory-sync/" + skillResource.getResourceId() + "/"
                 + DigestUtils.sha256Hex(packageBytes);

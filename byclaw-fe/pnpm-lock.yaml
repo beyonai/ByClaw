@@ -31,6 +31,9 @@ importers:
       '@ant-design/icons':
         specifier: 5.6.1
         version: 5.6.1(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
+      '@colorhythm/libraw-wasm':
+        specifier: 1.1.1
+        version: 1.1.1
       '@fortaine/fetch-event-source':
         specifier: 3.0.6
         version: 3.0.6
@@ -43,6 +46,12 @@ importers:
       '@js-preview/pdf':
         specifier: 2.0.10
         version: 2.0.10
+      '@jsquash/jxl':
+        specifier: 1.3.0
+        version: 1.3.0
+      '@kenjiuno/msgreader':
+        specifier: 1.29.0
+        version: 1.29.0
       '@tanstack/react-query':
         specifier: 4.43.0
         version: 4.43.0(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -109,6 +118,9 @@ importers:
       jest-environment-jsdom:
         specifier: '29'
         version: 29.7.0(canvas@2.11.2(encoding@0.1.13))
+      jpeg2000:
+        specifier: 1.1.1
+        version: 1.1.1
       js-cookie:
         specifier: 3.0.7
         version: 3.0.7
@@ -121,6 +133,12 @@ importers:
       katex:
         specifier: 0.16.44
         version: 0.16.44
+      libarchive-wasm:
+        specifier: 1.2.0
+        version: 1.2.0
+      libheif-js:
+        specifier: 1.23.5
+        version: 1.23.5
       loadjs:
         specifier: 4.3.0
         version: 4.3.0
@@ -139,6 +157,9 @@ importers:
       pinyin:
         specifier: 4.0.0
         version: 4.0.0
+      postal-mime:
+        specifier: 3.0.1
+        version: 3.0.1
       postcss-less:
         specifier: 6.0.0
         version: 6.0.0(postcss@8.5.8)
@@ -184,6 +205,12 @@ importers:
       remark-gfm:
         specifier: 4.0.1
         version: 4.0.1
+      rtf.js:
+        specifier: 3.0.9
+        version: 3.0.9
+      saxes:
+        specifier: 6.0.0
+        version: 6.0.0
       slate:
         specifier: 0.117.2
         version: 0.117.2
@@ -199,6 +226,12 @@ importers:
       sql-formatter:
         specifier: 15.7.3
         version: 15.7.3
+      sql.js:
+        specifier: 1.15.0
+        version: 1.15.0
+      utif:
+        specifier: 3.1.0
+        version: 3.1.0
       uuid:
         specifier: 13.0.0
         version: 13.0.0
@@ -1199,6 +1232,9 @@ packages:
     peerDependencies:
       react: '>=16.12.0'
 
+  '@colorhythm/libraw-wasm@1.1.1':
+    resolution: {integrity: sha512-OxqXLhDurX/sM4KL/rR71zjuH0VHBUWCOJ71tLiIxy3ATbIS2KM/8RixT0Gc3RygcsS1T8SXnzdipPqWYSjt9A==}
+
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
@@ -1876,8 +1912,18 @@ packages:
   '@js-preview/pdf@2.0.10':
     resolution: {integrity: sha512-S1PYUIfHQGPqEwgGk8TQ8wf5rec2ubE7nixSd0iQGO7ecm+B7BNkAAPkotnUCNAaDo16NL+fw07mblhU3t9eZw==}
 
+  '@jsquash/jxl@1.3.0':
+    resolution: {integrity: sha512-IVOPTneyOd9eBAuow+FnCYIP6wkIc7CjrCDnZGiqAPyJ63vMVxv3zoWiucGiZVh6u9vi/l40AkcS9QwkoVSAqA==}
+
   '@juggle/resize-observer@3.4.0':
     resolution: {integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==}
+
+  '@kenjiuno/decompressrtf@0.1.4':
+    resolution: {integrity: sha512-v9c/iFz17jRWyd2cRnrvJg4VOg/4I/VCk+bG8JnoX2gJ9sAesPzo3uTqcmlVXdpasTI8hChpBVw00pghKe3qTQ==}
+
+  '@kenjiuno/msgreader@1.29.0':
+    resolution: {integrity: sha512-03kBR44FIO965Z2s/KpY7y6daBu+GOpK10/AmVEZ4e/iZqSdOfSTI8cfk+DJnO/iTVncUF2Y8j2l1pwJ7ZvEFA==}
+    engines: {node: '>= 10'}
 
   '@keyv/bigmap@1.3.1':
     resolution: {integrity: sha512-WbzE9sdmQtKy8vrNPa9BRnwZh5UF4s1KTmSK0KUVLo3eff5BlQNNWDnFOouNpKfPKDnms9xynJjsMYjMaT/aFQ==}
@@ -3540,6 +3586,10 @@ packages:
   co@4.6.0:
     resolution: {integrity: sha512-QVb0dM5HvG+uaxitm8wONl7jltx8dqhfU33DcqtOZcLSVIKSDDLDi7+0LbAKiyI8hD9u42m2YxXSkMGWThaecQ==}
     engines: {iojs: '>= 1.0.0', node: '>= 0.12.0'}
+
+  codepage@1.15.0:
+    resolution: {integrity: sha512-3g6NUTPd/YtuuGrhMnOMRjFc+LJw/bnMp3+0r/Wcz3IXUuCosKRJvMphm5+Q+bvTVGcJJuRvVLuYba+WojaFaA==}
+    engines: {node: '>=0.8'}
 
   collect-v8-coverage@1.0.3:
     resolution: {integrity: sha512-1L5aqIkwPfiodaMgQunkF1zRhNqifHBmtbbbxcr6yVxxBnliw4TDOW6NxpO8DJLgJ16OT+Y4ztZqP6p/FtXnAw==}
@@ -5642,6 +5692,9 @@ packages:
       node-notifier:
         optional: true
 
+  jpeg2000@1.1.1:
+    resolution: {integrity: sha512-keyTI3PY83W4AoeAw8aNJp7LUaU+OcZAga7QiUZPF+LtSY721kuIMNBkJmEXem6v7+lR8I85tcJTGEz8dHNIyQ==}
+
   js-cookie@3.0.7:
     resolution: {integrity: sha512-z/wZZgDrkNV1eA0ULjM/F9/50Ya8fbzgKneSpoPsXSGd0KnpdtHfOZWK+GcwLk+EZbS4F9RBhU+K2RgzuDaItw==}
     engines: {node: '>=20'}
@@ -5791,6 +5844,13 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libarchive-wasm@1.2.0:
+    resolution: {integrity: sha512-aunFn8oL9VwGRj+brRvdOv8BRUD4Ea1WxJW45IdiuXE2Vp/m/X+M1UxSU+yPzXfc1mPPC8AARaflg/CtF11u8g==}
+
+  libheif-js@1.23.5:
+    resolution: {integrity: sha512-umXZPthnWZtF3iG/5mQG+AZ2V6i0UeYpo3z2CkggTEgL8dKmIIwJT6TDuAMuabXa1yTW8uJ1ZAgR+CxNTklYYw==}
+    engines: {node: '>=8.0.0'}
 
   lie@3.3.0:
     resolution: {integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==}
@@ -6698,6 +6758,9 @@ packages:
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
+
+  postal-mime@3.0.1:
+    resolution: {integrity: sha512-N86EnYOxZjW1uHQIgSXnnRdnJz+wxmtDsnk3C4R/9rQ1utj8A2znauXZ3Q3+stCHxG5ckY4/NrO09WiPU6rcdQ==}
 
   postcss-attribute-case-insensitive@5.0.2:
     resolution: {integrity: sha512-XIidXV8fDr0kKt28vqki84fRK8VW8eTuIa4PChv2MqKuT6C9UjmSKzen6KaWhWEoYvwxFCa7n/tC1SZ3tyq4SQ==}
@@ -8033,6 +8096,9 @@ packages:
     engines: {node: '>=14.18.0', npm: '>=8.0.0'}
     hasBin: true
 
+  rtf.js@3.0.9:
+    resolution: {integrity: sha512-I1GpDat4i548WzmeZXv27f/743984fvEeeBS8BC01/Sop17pMlUl3M7DYcdcB3PUvOZTrFIMxGZx8qw7cSMAKQ==}
+
   run-applescript@5.0.0:
     resolution: {integrity: sha512-XcT5rBksx1QdIhlFOCtgZkB99ZEouFZ1E2Kc2LHqNW13U3/74YGdkQRmThTwxy4QIyookibDKYZOPqX//6BlAg==}
     engines: {node: '>=12'}
@@ -8331,6 +8397,9 @@ packages:
   sql-formatter@15.7.3:
     resolution: {integrity: sha512-5+zl9Nqg5aNjss0tb1G+StpC4dJKbjv3+g8CL/+V+00PfZop+2RKGyi53ScFl0dr+Dkx1LjmUO54Q3N7K3EtMw==}
     hasBin: true
+
+  sql.js@1.15.0:
+    resolution: {integrity: sha512-54VT5h9/VGlLaQan5pX/Zx8k6Vbykwl5hRUtl4h4+VYnaZCTraUs4P1i2WLz21O6oPVp6Gvg+d1OyPo01ZG5ig==}
 
   stable-hash@0.0.5:
     resolution: {integrity: sha512-+L3ccpzibovGXFK+Ap/f8LOS0ahMrHTf3xu7mMLSpEGU0EO9ucaysSylKo9eRDFNhWve/y275iPmIZ4z39a9iA==}
@@ -8828,6 +8897,9 @@ packages:
     resolution: {integrity: sha512-3KS2b+kL7fsuk/eJZ7EQdnEmQoaho/r6KUef7hxvltNA5DR8NAUM+8wJMbJyZ4G9/7i3v5zPBIMN5aybAh2/Jg==}
     engines: {node: '>= 0.4'}
 
+  typed-cstruct@0.10.2:
+    resolution: {integrity: sha512-LRCAO+7CdAczqOW6TW0nxP5lEDUWFp2ORz09A22JN7pIqQyFyyItx/56VfhUV1xO5omzuC/JYqAhqL8Uth6rag==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -8944,6 +9016,9 @@ packages:
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
+  utif@3.1.0:
+    resolution: {integrity: sha512-WEo4D/xOvFW53K5f5QTaTbbiORcm2/pCL9P6qmJnup+17eYfKaEhDeX9PeQkuyEoIxlbGklDuGl8xwuXYMrrXQ==}
+
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
@@ -9058,6 +9133,9 @@ packages:
 
   warning@4.0.3:
     resolution: {integrity: sha512-rpJyN222KWIvHJ/F53XSZv0Zl/accqHR8et1kpaMTD/fLCRxtV8iX8czMzY7sVZupTI3zcUTg8eycS2kNF9l6w==}
+
+  wasm-feature-detect@1.9.0:
+    resolution: {integrity: sha512-zonE+xlIIYtxPy++L24ow0hAD8CICb4+FgPyROd3buyXIqsJvUEDkBgfCCoXOd1Hu3DUr0GOfnPIdcGV+YpNaA==}
 
   watchpack@2.5.1:
     resolution: {integrity: sha512-Zn5uXdcFNIA1+1Ei5McRd+iRzfhENPCe7LeABkJtNulSxjma+l7ltNx55BWZkRlwRnpOgHqxnjyaDgJnNXnqzg==}
@@ -10489,6 +10567,10 @@ snapshots:
       reactcss: 1.2.3(react@18.2.0)
       tinycolor2: 1.6.0
 
+  '@colorhythm/libraw-wasm@1.1.1':
+    dependencies:
+      typed-cstruct: 0.10.2
+
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
@@ -11148,7 +11230,18 @@ snapshots:
 
   '@js-preview/pdf@2.0.10': {}
 
+  '@jsquash/jxl@1.3.0':
+    dependencies:
+      wasm-feature-detect: 1.9.0
+
   '@juggle/resize-observer@3.4.0': {}
+
+  '@kenjiuno/decompressrtf@0.1.4': {}
+
+  '@kenjiuno/msgreader@1.29.0':
+    dependencies:
+      '@kenjiuno/decompressrtf': 0.1.4
+      iconv-lite: 0.6.3
 
   '@keyv/bigmap@1.3.1(keyv@5.6.0)':
     dependencies:
@@ -13438,6 +13531,8 @@ snapshots:
   clsx@2.1.1: {}
 
   co@4.6.0: {}
+
+  codepage@1.15.0: {}
 
   collect-v8-coverage@1.0.3: {}
 
@@ -16187,6 +16282,8 @@ snapshots:
       - supports-color
       - ts-node
 
+  jpeg2000@1.1.1: {}
+
   js-cookie@3.0.7: {}
 
   js-sdsl@4.4.2: {}
@@ -16363,6 +16460,10 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libarchive-wasm@1.2.0: {}
+
+  libheif-js@1.23.5: {}
 
   lie@3.3.0:
     dependencies:
@@ -17508,6 +17609,8 @@ snapshots:
   popper.js@1.16.1: {}
 
   possible-typed-array-names@1.1.0: {}
+
+  postal-mime@3.0.1: {}
 
   postcss-attribute-case-insensitive@5.0.2(postcss@8.5.8):
     dependencies:
@@ -19144,6 +19247,10 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
+  rtf.js@3.0.9:
+    dependencies:
+      codepage: 1.15.0
+
   run-applescript@5.0.0:
     dependencies:
       execa: 5.1.1
@@ -19506,6 +19613,8 @@ snapshots:
     dependencies:
       argparse: 2.0.1
       nearley: 2.20.1
+
+  sql.js@1.15.0: {}
 
   stable-hash@0.0.5: {}
 
@@ -20163,6 +20272,8 @@ snapshots:
       possible-typed-array-names: 1.1.0
       reflect.getprototypeof: 1.0.10
 
+  typed-cstruct@0.10.2: {}
+
   typescript@5.9.3: {}
 
   umi-plugin-keep-alive@0.0.1-beta.35(prop-types@15.8.1)(react@18.2.0)(umi@4.4.2(@babel/core@7.29.0)(@types/node@20.19.37)(@types/react@19.2.14)(encoding@0.1.13)(eslint@8.57.1)(jest@29.7.0(@types/node@20.19.37)(ts-node@10.9.2(@types/node@20.19.37)(typescript@5.9.3)))(lightningcss@1.22.1)(postcss-less@6.0.0(postcss@8.5.8))(prettier@2.8.8)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(rollup@3.30.0)(stylelint@16.26.1(typescript@5.9.3))(terser@5.46.1)(type-fest@4.41.0)(typescript@5.9.3)(webpack@5.105.4)):
@@ -20395,6 +20506,10 @@ snapshots:
     dependencies:
       react: 18.2.0
 
+  utif@3.1.0:
+    dependencies:
+      pako: 1.0.11
+
   util-deprecate@1.0.2: {}
 
   util-okam@0.11.1:
@@ -20491,6 +20606,8 @@ snapshots:
   warning@4.0.3:
     dependencies:
       loose-envify: 1.4.0
+
+  wasm-feature-detect@1.9.0: {}
 
   watchpack@2.5.1:
     dependencies:

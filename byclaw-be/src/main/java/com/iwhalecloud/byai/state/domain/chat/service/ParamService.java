@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -84,6 +85,9 @@ public class ParamService {
     private AiModelService aiModelService;
 
     @Autowired
+    private VoiceAudioService voiceAudioService;
+
+    @Autowired
     private CommonHandler commonHandler;
 
     @Autowired
@@ -158,7 +162,12 @@ public class ParamService {
             params.put("resource_list", resourceList);
         }
         params.put("agent_id", assistantChatDto.getAgentId());
-        params.put("ext_params", assistantChatDto.getExtParams());
+        Map<String, Object> outboundExt = assistantChatDto.getExtParams() == null
+            ? new HashMap<>() : new HashMap<>(assistantChatDto.getExtParams());
+        if (outboundExt.get("voice") instanceof Map<?, ?> voice) {
+            outboundExt.put("voice", voiceAudioService.outbound(voice, assistantChatDto.getSessionId()));
+        }
+        params.put("ext_params", outboundExt);
         params.put("worker_agent_type", resolveWorkerAgentType(assistantChatDto.getAgentId()));
         // 会话级模型选择：透传给 Agent 运行时（BY_SUPER 走 by-framework extraPayload）并便于日志排查。
         putSessionRuntimeParams(params, assistantChatDto);
@@ -175,7 +184,7 @@ public class ParamService {
             orchestrator.put("kind", "EXPERT_TEAM");
             orchestrator.put("id", String.valueOf(group.getResourceId()));
             params.put("orchestrator", orchestrator);
-            params.put("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+            params.put("worker_agent_type", group.getWorkerAgentType());
             params.put("agent_code", group.getResourceCode());
             params.put("agent_name", group.getResourceName());
             params.put("agent_type", DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE);
@@ -269,7 +278,8 @@ public class ParamService {
     }
 
     /**
-     * 未指定数字员工时直接路由到公共超级助手；非空 ID 仍按资源配置路由，资源不存在时兼容旧 OpenClaw。
+     * 未指定数字员工时使用公共超级助手逻辑类型，最终目标由 Super 兼容开关决定；
+     * 非空 ID 仍按资源配置解析，资源不存在时兼容旧 OpenClaw。
      */
     String resolveWorkerAgentType(Long agentId) {
         if (agentId == null) {

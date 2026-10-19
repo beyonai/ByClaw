@@ -24,10 +24,15 @@ import MsgRenderer from './components/MsgRenderer';
 import UsedModelBadge from './components/UsedModelBadge';
 import MsgRendererV2 from './components/MsgRendererV2';
 import { isV2Message } from './components/MsgRendererV2/ordered';
+import VoiceMessage from './components/VoiceMessage';
+import { getVoiceMessage } from '@/utils/voice';
+import FinalAnswerLayout from './components/MsgRendererV2/FinalAnswerLayout';
+import ConnectorAuthorizationActions from './components/MsgRendererV2/ConnectorAuthorizationActions';
 import UserInfoModal from '@/components/OrgUserSelector/components/UserInfoModal';
 // import Memory from './components/Memory';
 
 import useModal from '@/hooks/useModal';
+import useVoicePreferences from '@/hooks/useVoicePreferences';
 import useGlobal from '@/hooks/useGlobal';
 import useCanRefrence from '@/components/ChatLayoutComp/components/MultiChoices/hooks/useCanRefrence';
 
@@ -85,6 +90,7 @@ export default function useRender({
   const { canRefrence } = useCanRefrence();
 
   const { userId } = userInfo || {};
+  const voicePreferences = useVoicePreferences(userId || userInfo?.userCode);
 
   const insertAgentMention = useCallback(
     (agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
@@ -174,7 +180,7 @@ export default function useRender({
         <div className="full-width ub ub-ver" style={{ position: 'relative' }}>
           <div className={classnames('ub ub-ac ub-wrap', styles.beyondAnswerActions)} style={{ gap: '6px 0' }}>
             <Space size={2}>
-              <CopyComp text={getDisplayAnswer(messageList)} showText />
+              <CopyComp text={getDisplayAnswer(messageList, msg.finalContent)} showText />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <>
                   {canRefrence && (
@@ -405,6 +411,7 @@ export default function useRender({
       const { showRelatedQuestions = false, hideAction } = param || {};
       const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
+      const voice = !fromBeyond ? getVoiceMessage(msg) : undefined;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
       const isEmployeeGroup =
         `${messageAgentType || ''}` === agentTypeMap.employeeGroup ||
@@ -541,10 +548,31 @@ export default function useRender({
                 [styles.pureText]: fromOtherUser && usage !== '4',
               })}
             >
-              {isV2Message(msg) ? (
+              {voice ? (
+                <VoiceMessage
+                  key={`${msgId}_voice`}
+                  voice={voice}
+                  autoTranscribe={voicePreferences.autoTranscribe && !msg.isHistoryMsg}
+                  sessionId={msg.sessionId || sessionId}
+                  onTranscript={(transcript) => updateMessage({ ...msg, voice: { ...voice, transcript } })}
+                />
+              ) : isV2Message(msg) ? (
                 <MsgRendererV2 msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
               ) : (
-                <MsgRenderer msg={msg} updateMessage={updateMessage} hideThinking={param?.hideThinking} />
+                <>
+                  <FinalAnswerLayout msg={msg}>
+                    {({ hiddenAnswerItems, hideText }) => (
+                      <MsgRenderer
+                        msg={msg}
+                        updateMessage={updateMessage}
+                        hideThinking={param?.hideThinking}
+                        hiddenAnswerItems={hiddenAnswerItems}
+                        hideText={hideText}
+                      />
+                    )}
+                  </FinalAnswerLayout>
+                  <ConnectorAuthorizationActions msg={msg} />
+                </>
               )}
               {messageState === IMessageState.Query && <DualBallLoading style={{ width: 32, height: 32 }} />}
             </div>
@@ -585,8 +613,14 @@ export default function useRender({
               <WaveBallLoading style={{ width: 20, height: 20, opacity: 0.6 }} />
             </div>
           )}
-          <ReplyFileArtifacts message={msg} sessionId={sessionId} previewInDetailPanel={previewInDetailPanel} />
           {attachmentListRender(msg, !hideAction)}
+          <ReplyFileArtifacts
+            message={msg}
+            sessionId={sessionId}
+            previewInDetailPanel={previewInDetailPanel}
+            userId={userId}
+            autoPlay={voicePreferences.autoPlay}
+          />
           {!hideAction && [IMessageState.Done, IMessageState.Cancel, IMessageState.Error].includes(messageState) && (
             <div className={styles.actionsBar}>
               {isLeftSide && beyondAnswerActions(msg)}
@@ -600,6 +634,8 @@ export default function useRender({
     [
       agentList,
       userId,
+      voicePreferences.autoPlay,
+      voicePreferences.autoTranscribe,
       employeesList,
       intl,
       attachmentListRender,

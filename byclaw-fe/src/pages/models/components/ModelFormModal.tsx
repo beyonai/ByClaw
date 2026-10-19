@@ -5,6 +5,7 @@ import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import SharedModelFormModal from '@/pages/manager/pages/ModelMgr/components/SharedModelFormModal';
 import { SYSTEM_SOURCE_TYPES } from '@/pages/manager/pages/ModelMgr/components/modelFormUtils';
+import { debugPersonalModelStream } from '@/pages/manager/service/ModelMgr';
 import { getMyModelDetail, upsertMyModel } from '../service';
 
 type Props = ModalStore<any> & {
@@ -79,33 +80,8 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, onSaved, ...props }) => {
         }
         return { output: JSON.stringify(result.data, null, 2) };
       }
-      const response = await fetch('/byaiService/personal/model/debug', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: `${modelId}`, input }),
-        signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No reader');
-      }
-
-      const decoder = new TextDecoder();
-      let content = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        content += chunk;
-        onDelta?.(chunk);
-      }
-
-      return { output: content };
+      const result = await debugPersonalModelStream({ id: `${modelId}`, input, signal, onDelta });
+      return { output: result?.data?.output ?? result?.output ?? '' };
     },
     [intl]
   );

@@ -266,6 +266,13 @@ public class ScriptService extends AbstractChatProcess {
             saveTroubleshootSessionExt(ctx);
         }
 
+        if (!ctx.continueRunningTrace && ctx.assistantChatDto.getExtParams() != null
+            && ctx.assistantChatDto.getExtParams().get("voice") instanceof Map<?, ?> voice) {
+            JSONObject metadata = new JSONObject();
+            metadata.put("voice", voice);
+            metadata.put("messageType", "VOICE");
+            ctx.askMsg.setMetadata(metadata.toJSONString());
+        }
         // 多端广播：将用户发送的消息推送到用户的其他设备
         if (!ctx.continueRunningTrace) {
             broadcastUserMessage(ctx);

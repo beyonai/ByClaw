@@ -1,0 +1,115 @@
+{
+  "name": "@byclaw/dsh-integration",
+  "version": "0.1.0",
+  "description": "ByClaw resource, Skill, protocol, and BYCLAW_DSH Worker integration for DeepSeek Harness",
+  "homepage": "https://github.com/korvo873/byclaw-dsh/tree/main/byclaw-integration#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/korvo873/byclaw-dsh.git",
+    "directory": "byclaw-integration"
+  },
+  "bugs": {
+    "url": "https://github.com/korvo873/byclaw-dsh/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "byclaw-repair-legacy-session": "scripts/repair-legacy-session.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./session-extensions": {
+      "types": "./lib/session-extensions.d.ts",
+      "default": "./lib/session-extensions.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "scripts/repair-legacy-session.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
+  ],
+  "private": true,
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "pnpm build && node --import tsx/esm scripts/voice-runtime-verify.mjs && node --import tsx/esm scripts/tts-debug-verify.mjs && node scripts/default-web-search-policy-verify.mjs && node --import tsx/esm scripts/todo-execution-setup-verify.mjs && node --import tsx/esm scripts/super-assistant-policy-verify.mjs && node --import tsx/esm scripts/todo-execution-native-verify.mjs && node scripts/cancellation-verify.mjs && node scripts/group-coordination-verify.mjs && node scripts/group-storage-verify.mjs && node scripts/group-assistance-summary-verify.mjs && node --import tsx/esm scripts/inbound-routing-verify.mjs && node --import tsx/esm scripts/template-runtime-hotpath-verify.mjs && node --import tsx/esm scripts/live-options-verify.mjs && node --import tsx/esm scripts/web-auth-verify.mjs && node --import tsx/esm scripts/web-auth-apply-verify.mjs && node --import tsx/esm scripts/startup-resource-resilience-verify.mjs && node scripts/bundle-patch-verify.mjs && node scripts/session-metadata-verify.mjs && node scripts/session-cwd-verify.mjs && node scripts/session-context-verify.mjs && node scripts/repair-legacy-session-verify.mjs && node scripts/resources-verify.mjs && node scripts/model-runtime-verify.mjs && node scripts/model-routing-verify.mjs && node scripts/model-fetch-verify.mjs && node --import tsx/esm scripts/media-generation-verify.mjs && node --import tsx/esm scripts/media-plugin-model-verify.mjs && node scripts/catalog-skill-verify.mjs && node scripts/resource-watch-verify.mjs && node scripts/worker-health-verify.mjs && node scripts/worker-verify.mjs && node scripts/sandbox-busy-verify.mjs && node scripts/presentation-verify.mjs && node scripts/runtime-status-verify.mjs && node scripts/emitter-metadata-verify.mjs && node scripts/answer-chunk-batching-verify.mjs && node scripts/assistant-stream-verify.mjs && node scripts/async-turn-completion-verify.mjs && node scripts/team-recovery-verify.mjs && node scripts/background-followup-verify.mjs && node scripts/background-steer-verify.mjs",
+    "verify:e2e": "node scripts/current-dsh-e2e.mjs",
+    "verify:skills": "node scripts/skill-runtime-verify.mjs",
+    "verify:browser-text": "node scripts/browser-text-verify.mjs"
+  },
+  "dependencies": {
+    "@byclaw/media-runtime": "workspace:*",
+    "@byclaw/dsh-todo-execution": "workspace:*",
+    "@byclaw/byclaw-agent-router": "workspace:*",
+    "@byclaw/byclaw-model-router": "workspace:*",
+    "@byclaw/by-framework": "1.6.0",
+    "@byclaw/dsh-agent-teams": "workspace:*",
+    "@byclaw/dsh-diff-viewer": "workspace:*",
+    "@deepseek-ai/cordis-plugin-logger-console": "1.0.2",
+    "zod": "4.4.3",
+    "js-yaml": "4.2.0",
+    "undici": "7.28.0",
+    "@byclaw/dsh-browser-use": "workspace:*",
+    "@byclaw/byclaw-asr": "workspace:*",
+    "@byclaw/byclaw-tts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-presets": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-shell-env": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.1-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-scope": "workspace:^",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "@deepseek-ai/dsh-api-session-controller": "workspace:^",
+    "@deepseek-ai/dsh-client-connection": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-llm-pi-ai": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "@deepseek-ai/dsh-shell-env": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "@deepseek-ai/dsh-system-prompt": "workspace:^",
+    "@deepseek-ai/dsh-tool-todo": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "tsx": "4.22.4",
+    "@types/js-yaml": "4.0.9"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

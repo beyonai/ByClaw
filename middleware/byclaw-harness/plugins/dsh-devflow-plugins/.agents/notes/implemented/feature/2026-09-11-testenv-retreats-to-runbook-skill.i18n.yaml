@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-11-testenv-retreats-to-runbook-skill.md: 58c0208f7c1ba000997754b1af036995a0d1b3d3
+2026-09-11-testenv-retreats-to-runbook-skill.zh.md: 704e263120a5bb94f16a1727e8a46165498b0294

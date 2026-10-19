@@ -1,0 +1,224 @@
+# syntax=docker/dockerfile:1
+
+# 通用基础镜像：开发工具链 + 已完成依赖安装和构建的上游 DSH。
+# 该镜像不包含本仓库的 plugins、builtin 或 entrypoint。
+# 构建示例：docker build -f Dockerfile.base -t byclaw/dsh-base:latest .
+FROM python:3.12-slim-trixie AS dsh-base
+
+ARG NVM_VERSION=0.40.3
+ARG NODE_VERSION=22.19.0
+ARG PNPM_VERSION=11.7.0
+ARG PLAYWRIGHT_VERSION=1.62.1
+ARG CODEGRAPH_VERSION=1.6.0
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+ARG UV_VERSION=0.12.7
+ARG ALIBABACLOUD_MCP_PROXY_VERSION=0.2.17
+ARG ALIYUN_CLI_VERSION=3.4.11
+ARG ALIYUN_CLI_AMD64_SHA256=a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c
+ARG ALIYUN_CLI_ARM64_SHA256=b0b6f6f7545f9472b697fc27915c8956e5a3320a6160729dcc5b4eff21435ae8
+ARG RTK_VERSION=0.47.0
+ARG RTK_AMD64_SHA256=7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7
+ARG RTK_ARM64_SHA256=960ceb5f1f5f0b0939b32b5b1d41dec6d9a7113137b0703c68dca0d169a260fc
+ARG RTK_DOWNLOAD_BASE=https://github.com/rtk-ai/rtk/releases/download
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    NVM_DIR=/opt/nvm \
+    NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DSH_HOME=/by/byclaw/.dsh \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST} \
+    CODEGRAPH_MCP_CWD=/ \
+    PATH=/opt/nvm/current/bin:/usr/local/bin:$PATH
+
+RUN groupadd --gid 1001 byclaw \
+    && useradd --uid 1001 --gid byclaw --create-home --shell /bin/bash byclaw
+
+RUN set -eux; \
+    printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::http::Timeout "30";' \
+        'Acquire::https::Timeout "30";' \
+        > /etc/apt/apt.conf.d/80-retries; \
+    sed -i -E \
+        -e "s|https?://deb.debian.org|${APT_MIRROR}|g" \
+        -e "s|https?://security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        curl \
+        fd-find \
+        ffmpeg \
+        fontconfig \
+        fonts-liberation \
+        fonts-noto-cjk \
+        fonts-wqy-microhei \
+        fonts-wqy-zenhei \
+        git \
+        jq \
+        less \
+        libreoffice \
+        make \
+        maven \
+        netcat-openbsd \
+        novnc \
+        openssh-client \
+        openjdk-21-jdk-headless \
+        pkg-config \
+        procps \
+        psmisc \
+        ripgrep \
+        rsync \
+        sqlite3 \
+        tar \
+        tree \
+        unzip \
+        websockify \
+        xauth \
+        x11vnc \
+        xvfb \
+        zip \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+    && command -v Xvfb >/dev/null \
+    && command -v x11vnc >/dev/null \
+    && command -v websockify >/dev/null \
+    && command -v ffmpeg >/dev/null \
+    && command -v ffprobe >/dev/null \
+    && command -v fc-match >/dev/null \
+    && command -v libreoffice >/dev/null \
+    && { test -d /usr/share/novnc || test -d /usr/share/noVNC; } \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir \
+        "uv==${UV_VERSION}" \
+        "alibabacloud.mcp-proxy==${ALIBABACLOUD_MCP_PROXY_VERSION}" \
+    && uv --version \
+    && alibabacloud.mcp-proxy --help >/dev/null
+
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) cli_arch=amd64; cli_sha256="${ALIYUN_CLI_AMD64_SHA256}" ;; \
+        arm64) cli_arch=arm64; cli_sha256="${ALIYUN_CLI_ARM64_SHA256}" ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    cli_archive="aliyun-cli-linux-${ALIYUN_CLI_VERSION}-${cli_arch}.tgz"; \
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --max-time 120 \
+        "https://aliyuncli.alicdn.com/${cli_archive}" \
+        -o "/tmp/${cli_archive}"; \
+    echo "${cli_sha256}  /tmp/${cli_archive}" | sha256sum -c -; \
+    tar -xzf "/tmp/${cli_archive}" -C /usr/local/bin; \
+    chmod 0755 /usr/local/bin/aliyun; \
+    rm -f "/tmp/${cli_archive}"; \
+    aliyun version
+
+# rtk (Rust Token Killer, https://github.com/rtk-ai/rtk): a single static
+# binary, so the pre-built release tarball is fetched directly rather than
+# building from source or using cargo. @byclaw/dsh-bash-provider probes for
+# this binary on PATH at startup and silently no-ops the command-compression
+# half of its executor when it is absent, so this step is required for that
+# feature (not just recommended) but never blocks a boot without it.
+# RTK_DOWNLOAD_BASE is overridable at build time the same way DSH_REPOSITORY
+# is, if a mirror is needed for hosts where github.com release assets are
+# slow or unreachable.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) rtk_asset="rtk-x86_64-unknown-linux-musl.tar.gz"; rtk_sha256="${RTK_AMD64_SHA256}" ;; \
+        arm64) rtk_asset="rtk-aarch64-unknown-linux-gnu.tar.gz"; rtk_sha256="${RTK_ARM64_SHA256}" ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --max-time 1200 \
+        "${RTK_DOWNLOAD_BASE}/v${RTK_VERSION}/${rtk_asset}" \
+        -o "/tmp/${rtk_asset}"; \
+    echo "${rtk_sha256}  /tmp/${rtk_asset}" | sha256sum -c -; \
+    tar -xzf "/tmp/${rtk_asset}" -C /usr/local/bin; \
+    chmod 0755 /usr/local/bin/rtk; \
+    rm -f "/tmp/${rtk_asset}"; \
+    rtk --version
+
+RUN printf '%s\n' \
+        "registry=${NPM_CONFIG_REGISTRY}" \
+        > /etc/npmrc \
+    && printf '%s\n' \
+        '[global]' \
+        "index-url = ${PIP_INDEX_URL}" \
+        'timeout = 120' \
+        > /etc/pip.conf
+
+ARG NVM_SOURCE_BASE=https://cdn.jsdelivr.net/gh/nvm-sh/nvm
+ARG NVM_SH_SHA256=390260ab9eb1da20e8bc0ebea2ee90f528d53e5e9f6e13b16717db4af454df9d
+ARG NVM_EXEC_SHA256=e6b7a2bafac6994e1ba14282cff82c75476fba0788f68a9ecf558dfdf3331621
+ARG NVM_BASH_COMPLETION_SHA256=b7eb3bf03d59b61e451957b020640aa55fe8bf47fb39d85d244e259f445d2fbe
+
+RUN set -eux; \
+    mkdir -p "${NVM_DIR}"; \
+    for file_spec in \
+        "nvm.sh:${NVM_SH_SHA256}" \
+        "nvm-exec:${NVM_EXEC_SHA256}" \
+        "bash_completion:${NVM_BASH_COMPLETION_SHA256}"; do \
+        file_name="${file_spec%%:*}"; \
+        file_sha256="${file_spec#*:}"; \
+        curl -fL \
+            --retry 5 \
+            --retry-delay 2 \
+            --connect-timeout 10 \
+            --max-time 120 \
+            "${NVM_SOURCE_BASE}@v${NVM_VERSION}/${file_name}" \
+            -o "${NVM_DIR}/${file_name}"; \
+        echo "${file_sha256}  ${NVM_DIR}/${file_name}" | sha256sum -c -; \
+    done; \
+    chmod 0755 "${NVM_DIR}/nvm-exec"
+
+RUN . "${NVM_DIR}/nvm.sh" \
+    && nvm install "${NODE_VERSION}" \
+    && nvm alias default "${NODE_VERSION}" \
+    && ln -s "${NVM_DIR}/versions/node/v${NODE_VERSION}" "${NVM_DIR}/current"
+
+ENV npm_config_nodedir=/opt/nvm/current
+
+RUN npm install --global \
+        "pnpm@${PNPM_VERSION}" \
+        "playwright@${PLAYWRIGHT_VERSION}" \
+    && npm install --global \
+        "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" \
+        --registry=https://registry.npmjs.org \
+    && test "$(codegraph --version)" = "${CODEGRAPH_VERSION}" \
+    && playwright install --with-deps chromium \
+    && test "$(playwright --version)" = "Version ${PLAYWRIGHT_VERSION}" \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* \
+    && chown -R byclaw:byclaw "${NVM_DIR}" "${PLAYWRIGHT_BROWSERS_PATH}"
+
+RUN printf '%s\n' \
+        'export NVM_DIR="/opt/nvm"' \
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' \
+        '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"' \
+        > /etc/profile.d/nvm.sh \
+    && chmod 0644 /etc/profile.d/nvm.sh
+
+ARG DSH_REPOSITORY=https://githubfast.com/deepseek-ai/deepseek-harness.git
+ARG DSH_REF=dsh-v0.1.5-rc.2
+
+RUN git clone --depth 1 --branch "${DSH_REF}" "${DSH_REPOSITORY}" /workspace
+
+WORKDIR /workspace
+
+RUN pnpm config set registry "${NPM_CONFIG_REGISTRY}" \
+    && pnpm install --no-frozen-lockfile \
+    && pnpm run build \
+    && mkdir -p /by/byclaw/.dsh \
+    && chown -R byclaw:byclaw /workspace /by/byclaw/.dsh
+
+LABEL io.byclaw.dsh.base="true" \
+      io.byclaw.dsh.ref="${DSH_REF}"

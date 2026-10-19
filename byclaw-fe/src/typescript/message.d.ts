@@ -123,6 +123,7 @@ export type ICollectInfo = {
 }
 
 export type IMessage = {
+  voice?: import('@/utils/voice').VoiceMessage;
   traceId?: string;
   streamId?: string;
   snapshotStreamId?: string;
@@ -133,6 +134,8 @@ export type IMessage = {
   metadata?: string;
 
   text?: string; // markdown文本
+  /** 独立于流式过程片段保存的最终答复正文。 */
+  finalContent?: string;
   /** 输入框展示文本，仅用于前端显示；发送给后端的 text 仍使用资源占位符。 */
   displayText?: string;
   suggest?: string[]; // 推荐问题

@@ -14,6 +14,7 @@ import classnames from 'classnames';
 import { get, isNil } from 'lodash';
 import { SSEEventStatus } from '@/constants/message';
 import { copyTextToClipboard } from '@/utils/copy';
+import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT, parseConnectorAction } from '@/utils/connectorAuthorization';
 
 import AgentTeamsActivity, { isAgentTeamsSnapshot, type AgentTeamsSnapshot } from './AgentTeamsActivity';
 import styles from './index.module.less';
@@ -21,6 +22,8 @@ import type {
   ThinkingPreviewGetter,
   ThinkingPreviewProps,
 } from '@/components/MessageList/components/MsgRendererV2/thinkingPreviewHandler';
+
+export { CONNECTOR_AUTHORIZATION_REQUEST_EVENT, parseConnectorAction };
 
 /** 工具调用状态。'_ERROR_' 由算法侧在调用失败时下发，与其他 think 类组件的口径一致 */
 export type IToolCallStatus = '_START_' | '_QUERY_' | '_DONE_' | '_ERROR_';

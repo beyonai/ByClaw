@@ -114,6 +114,8 @@ function Editor({ employee, canConfigureResources, agentType = '001', scrollWith
       managementAddresses={[]}
       memoryRules={[]}
       modelList={[]}
+      imageModelSelect={<span>Image model selector</span>}
+      ttsModelSelect={<span>TTS model selector</span>}
       resultDataRef={{ current: { resourceId: 'employee-1' } }}
       prologueRef={{ current: {} }}
       setQuestionList={noop}
@@ -135,6 +137,25 @@ describe('employee editor resource configuration entries', () => {
   beforeEach(() => {
     mockShowBaseList.mockClear();
     mockUpdateResource.mockReset();
+  });
+
+  it('hides extra model selectors and their toggle while preserving saved model values', async () => {
+    const employee = { ownerType: 'personal', resourceCode: 'alice_helper' };
+    const { rerender } = render(<Editor employee={employee} />);
+    await waitFor(() => expect(screen.getByText('employeeDetail.basicSettings')).toBeVisible());
+
+    // 隐藏配置入口不应清空详情回填的模型，后续保存仍需保留原值。
+    const savedModels = { imageModelId: '112219541234567890', ttsModelId: '112219541234567891' };
+    act(() => editorForm.setFieldsValue(savedModels));
+    rerender(<Editor employee={employee} />);
+
+    expect(screen.getByText('employeeDetail.qaModel')).toBeVisible();
+    expect(screen.queryByText('Image model selector')).not.toBeInTheDocument();
+    expect(screen.queryByText('TTS model selector')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'employeeDetail.moreModels' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'employeeDetail.collapseMoreModels' })).not.toBeInTheDocument();
+    expect(editorForm.getFieldValue('imageModelId')).toBe(savedModels.imageModelId);
+    expect(editorForm.getFieldValue('ttsModelId')).toBe(savedModels.ttsModelId);
   });
 
   it('allows page scrolling only when requested and retains the ordinary editor height constraints', async () => {

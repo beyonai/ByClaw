@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
+import java.sql.Connection;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
@@ -19,6 +20,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatcher;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import javax.sql.DataSource;
+import com.iwhalecloud.byai.common.config.TransactionAdviceConfig;
+import com.iwhalecloud.byai.common.storage.ObjectStorage;
 
 import com.iwhalecloud.byai.common.storage.impl.WhaleAgentStorageService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
@@ -51,6 +58,38 @@ class FilesApplicationServiceTest {
         ReflectionTestUtils.setField(filesApplicationService, "filesService", filesService);
         ReflectionTestUtils.setField(filesApplicationService, "commonFileStorage", commonFileStorage);
         ReflectionTestUtils.setField(filesApplicationService, "commonFilePathResolver", new CommonFilePathResolver());
+    }
+
+    @Test
+    void recoveredUserFsMissDoesNotRollbackTheOuterChatTransaction() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection outer = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(outer, mock(Connection.class), mock(Connection.class));
+        DataSourceTransactionManager manager = new DataSourceTransactionManager(dataSource);
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", manager);
+        var advice = config.getAdvisor();
+        ObjectStorage objects = mock(ObjectStorage.class);
+        when(objects.get(any())).thenThrow(new IllegalStateException("raw path missing"))
+            .thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
+        ProxyFactory storageProxy = new ProxyFactory(new CommonFileStorage(objects));
+        storageProxy.addAdvice(advice);
+        ReflectionTestUtils.setField(filesApplicationService, "commonFileStorage", storageProxy.getProxy());
+        ProxyFactory filesProxy = new ProxyFactory(filesApplicationService);
+        filesProxy.addAdvice(advice);
+        FilesApplicationService service = (FilesApplicationService) filesProxy.getProxy();
+
+        byte[] result = new TransactionTemplate(manager).execute(status -> {
+            try (var stream = service.openCommonFileInputStream(BUCKET_NAME, SESSION_FILE_PATH)) {
+                return stream.readAllBytes();
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertThat(result).containsExactly(1, 2, 3);
+        verify(outer).commit();
+        verify(outer, org.mockito.Mockito.never()).rollback();
     }
 
     @Test

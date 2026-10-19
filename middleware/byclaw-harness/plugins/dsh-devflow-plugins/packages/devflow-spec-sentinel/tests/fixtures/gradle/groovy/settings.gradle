@@ -1,0 +1,3 @@
+rootProject.name = 'demo-root'
+include ':app', ':libs:core'
+include ':single'

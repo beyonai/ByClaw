@@ -12,6 +12,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -99,14 +102,53 @@ class TargetAgentResolverTest {
         assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_user001");
     }
 
-    @Test
-    void resolveAgentType_canRouteBySuperToCurrentUsersLocalOpenClawWorker() {
-        ReflectionTestUtils.setField(targetAgentResolver, "routeBySuperToUserSandbox", true);
-
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {11001912L})
+    void resolveAgentType_routesPublicAndResourceSuperToDshByDefault(Long agentId) {
         String targetAgentType = targetAgentResolver.resolveAgentType(
-            WorkerAgentType.BY_SUPER.getCode(), 11001912L, null, "0027024710");
+            WorkerAgentType.BY_SUPER.getCode(), agentId, null, "0027024710");
 
-        assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_0027024710");
+        assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_0027024710");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {11001912L})
+    void resolveAgentType_allowsSuperOnlyWhenCompatibilityIsEnabled(Long agentId) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", true);
+
+        assertThat(targetAgentResolver.resolveAgentType("BY_SUPER", agentId, null, "user001"))
+            .isEqualTo("BY_SUPER");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolveAgentType_appliesCompatibilitySwitchToHistoricalSuperResume(boolean enabled) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", enabled);
+
+        assertThat(targetAgentResolver.resolveAgentType("BYCLAW_EXE", 100L, "BY_SUPER", "user001"))
+            .isEqualTo(enabled ? "BY_SUPER" : "BYCLAW_DSH_user001");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolveAgentType_keepsSystemDshPolicyWhenSuperCompatibilityChanges(boolean enabled) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", enabled);
+        when(systemParamTargetAgentResolver.resolve("BY_SUPER", 100L, "user001"))
+            .thenReturn("HARNESS_user001");
+
+        assertThat(targetAgentResolver.resolveAgentType("BY_SUPER", 100L, null, "user001"))
+            .isEqualTo("BYCLAW_DSH_user001");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"BYCLAW_EXE", "BYCLAW_CODE", "BYCLAW_QA"})
+    void resolveAgentType_doesNotRerouteOtherWorkersWhenSuperIsDisabled(String workerAgentType) {
+        String expected = "BYCLAW_QA".equals(workerAgentType) ? workerAgentType : workerAgentType + "_user001";
+
+        assertThat(targetAgentResolver.resolveAgentType(workerAgentType, 100L, null, "user001"))
+            .isEqualTo(expected);
     }
 
     @Test

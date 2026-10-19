@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
 
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -101,6 +102,9 @@ public class AssistantChatService {
 
     @Autowired
     private ScriptService scriptService;
+
+    @Autowired
+    private VoiceAudioService voiceAudioService;
 
     @Autowired
     private TenantNodeClient tenantNodeClient;
@@ -212,6 +216,9 @@ public class AssistantChatService {
 
             // 处理sessionId相关逻辑,校验消息发送权限
             handleSessionLogic(outputStream, assistantChatDto);
+            if (assistantChatDto.getExtParams() != null && assistantChatDto.getExtParams().containsKey("voice")) {
+                voiceAudioService.prepareChat(assistantChatDto);
+            }
 
             // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
             if (TenantRequestContextHolder.get() == null) {

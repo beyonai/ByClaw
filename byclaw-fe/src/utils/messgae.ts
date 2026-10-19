@@ -4,6 +4,8 @@ import { getModelState } from '@/utils';
 import { answerDeltaHandler, reasoningLogHandler } from '@/hooks/useSseSender/util';
 import { substanceHandler } from '@/hooks/useChat/util';
 import { supportsInPlaceUpdate, updateExistingMessage } from '@/utils/messageItemUpdate';
+import { getVoiceMessage } from '@/utils/voice';
+import { getFinalContent } from '@/utils/finalAnswer';
 
 import { IMessage, IMessageListItem } from '@/typescript/message';
 import { IMessageState, SSEMessageType, SSEEventStatus } from '@/constants/message';
@@ -44,6 +46,7 @@ export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
   }
   return (
     hasSubstance(message.text) ||
+    Boolean(getFinalContent(message.finalContent)) ||
     Boolean(message.messageList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
@@ -72,7 +75,7 @@ export const initQueryMessage = (param: Partial<IMessage>): IMessage => {
     text: get(param, 'text', ''),
     fromBeyond: false,
     messageState: IMessageState.Done,
-    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime']),
+    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime', 'voice', 'metadata']),
   });
 };
 
@@ -102,6 +105,7 @@ export const initAnswerMessage = (param: Partial<IMessage>): IMessage => {
       'queryMsgId',
       'createTime',
       'answerMsgId',
+      'finalContent',
       // initMessage 时须保留流式已写入的 metadata（如 LangGraph checkpoint），否则会落回默认空串
       'metadata',
     ]),
@@ -144,6 +148,7 @@ export const fetchMessageHandler = (item: any) => {
   const {
     usage,
     messageContent,
+    finalContent,
     messageId = '',
     inferLog,
     metadata,
@@ -180,6 +185,7 @@ export const fetchMessageHandler = (item: any) => {
     fromOtherUser,
     usage,
     text: '',
+    finalContent: fromBeyond ? getFinalContent(finalContent) : undefined,
     messageId: `${messageId}`,
     msgId: `${messageId}`,
     sessionId: sessionId ? `${sessionId}` : undefined,
@@ -370,6 +376,8 @@ export const fetchMessageHandler = (item: any) => {
       text: messageContent,
     });
   }
+
+  myMessage.voice = getVoiceMessage(myMessage);
 
   return myMessage;
 };

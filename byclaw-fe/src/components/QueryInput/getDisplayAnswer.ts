@@ -1,6 +1,7 @@
 import { IMessageListItem } from '@/typescript/message';
 import { SSEMessageType } from '@/constants/message';
 import { get } from 'lodash';
+import { getFinalContent } from '@/utils/finalAnswer';
 
 export function getSubstanceText(substance: unknown): string {
   if (substance === null || substance === undefined) return '';
@@ -22,7 +23,10 @@ export function getSubstanceText(substance: unknown): string {
   return '';
 }
 
-export default function getDisplayAnswer(messageList?: IMessageListItem[]) {
+export default function getDisplayAnswer(messageList?: IMessageListItem[], finalContent?: string) {
+  // 复制内容与当前展示的最终答复一致；没有最终正文时保留原有片段拼接格式。
+  const finalText = getFinalContent(finalContent);
+  if (finalText !== undefined) return finalText;
   if (!messageList || !messageList.length) return '';
 
   let text = '';

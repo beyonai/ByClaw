@@ -13,11 +13,7 @@
 - `TASK_PLAN_GET`、停止流程和历史消息中的 `taskPlan` 字段保持不变；
 - 前端不调用内部写入接口。
 
-完整前端协议见：
-
-```text
-byclaw-super/docs/task-plan-frontend-protocol.md
-```
+历史实现说明见 [Super 存档中的任务计划机制总结](https://github.com/beyonai/byclaw-super/blob/b50b6e9b48c92dbd0f6e64b75d300785ea7f0d3c/docs/update-task-plan-mechanism-summary.md)，当前协议以本文为准。
 
 ## 2. 内部写入协议
 

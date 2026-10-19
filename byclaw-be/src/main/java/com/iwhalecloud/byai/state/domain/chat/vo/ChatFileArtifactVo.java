@@ -13,6 +13,16 @@ import lombok.Getter;
 @Builder
 public class ChatFileArtifactVo {
 
+    private String imageId;
+
+    private String parentImageId;
+
+    private String title;
+
+    private Integer width;
+
+    private Integer height;
+
     private String sourcePath;
 
     private String path;

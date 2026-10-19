@@ -1,5 +1,10 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.aimodel;
 
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugSpeechApplicationService;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugSpeechApplicationService.DebugRequest;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugSpeechApplicationService.TtsDebugRequest;
+import com.iwhalecloud.byai.state.application.service.asr.HarnessMediaClient.ModelFailureException;
+import org.springframework.web.bind.annotation.RequestParam;
 import com.iwhalecloud.byai.manager.application.service.aimodel.GptProxyChatCompletionsStreamApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelConfigCompleteApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugImageGenerationApplicationService;
@@ -57,6 +62,9 @@ public class ModelManagementController {
 
     @Autowired
     private ModelConfigCompleteApplicationService modelConfigCompleteApplicationService;
+
+    @Autowired
+    private ModelDebugSpeechApplicationService modelDebugSpeechApplicationService;
 
     /**
      * 模型列表（分页+过滤）
@@ -193,6 +201,34 @@ public class ModelManagementController {
         }
     }
 
+    @PostMapping(value = "/debugModelAsr", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<Object> debugModelAsr(
+        @RequestBody DebugRequest request) {
+        Long modelId = modelManagementApplicationService.parseModelIdFromBody(Map.of("id", request.id() == null ? "" : request.id()));
+        try {
+            Object result = modelDebugSpeechApplicationService.debugAsr(request);
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, true);
+            return ResponseUtil.successResponse(result);
+        } catch (ModelFailureException e) {
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
+            throw e;
+        }
+    }
+
+    @PostMapping(value = "/debugModelTts", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<Object> debugModelTts(
+        @RequestBody TtsDebugRequest request) {
+        Long modelId = modelManagementApplicationService.parseModelIdFromBody(Map.of("id", request.id() == null ? "" : request.id()));
+        try {
+            Object result = modelDebugSpeechApplicationService.debugTts(request);
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, true);
+            return ResponseUtil.successResponse(result);
+        } catch (ModelFailureException e) {
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
+            throw e;
+        }
+    }
+
     @ManageLogAnnotation(name = "模型管理", description = "按条件查询模型列表")
     @ApiOperation("模型接口查询")
     @PostMapping(value = "/listModel", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -203,6 +239,12 @@ public class ModelManagementController {
     @ManageLogAnnotation(name = "模型管理", description = "查询默认模型ID")
     @ApiOperation("查询默认模型")
     @GetMapping(value = "/getDefaultModelId", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<String> getDefaultModelId(
+        @RequestParam(value = "modelType", required = false) String modelType) {
+        return modelType == null ? getDefaultModelId()
+            : ResponseUtil.successResponse(modelManagementApplicationService.getDefaultModelId(modelType));
+    }
+
     public ResponseUtil<String> getDefaultModelId() {
         return ResponseUtil.successResponse(modelManagementApplicationService.getDefaultModelId());
     }
@@ -213,7 +255,7 @@ public class ModelManagementController {
      * @param modelDefault 默认模型
      * @return ResponseUtil
      */
-    @ManageLogAnnotation(name = "模型管理", description = "设置默认对话模型")
+    @ManageLogAnnotation(name = "模型管理", description = "设置类型默认模型")
     @PostMapping(value = "/setDefaultModel", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseUtil<String> setDefaultModel(@RequestBody @Valid ModelDefault modelDefault) {
         modelManagementApplicationService.setDefaultModel(modelDefault);

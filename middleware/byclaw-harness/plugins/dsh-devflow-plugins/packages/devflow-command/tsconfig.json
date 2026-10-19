@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../devflow"
+    },
+    {
+      "path": "../devflow-filesystem"
+    },
+    {
+      "path": "../devflow-spec"
+    },
+    {
+      "path": "../devflow-spec-sentinel"
+    },
+    {
+      "path": "../devflow-worktree"
+    }
+  ]
+}

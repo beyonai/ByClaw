@@ -112,6 +112,8 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
       if (currentType === 'RERANK') effectType = 'modelMgr/debugModelRerank';
       if (currentType === 'EMBEDDING') effectType = 'modelMgr/debugModelEmbedding';
       if (currentType === 'IMAGE_GENERATION') effectType = 'modelMgr/debugModelImageGeneration';
+      if (currentType === 'ASR') effectType = 'modelMgr/debugModelAsr';
+      if (currentType === 'TTS') effectType = 'modelMgr/debugModelTts';
 
       return dispatchWithResult(
         effectType,
@@ -127,6 +129,11 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
     [dispatchWithResult]
   );
 
+  const formatDebugError = useCallback((error: any) => {
+    if (error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') return undefined;
+    return `[Error] ${typeof error === 'string' ? error : error?.msg || error?.message || 'Request failed'}`;
+  }, []);
+
   return (
     <SharedModelFormModal
       {...props}
@@ -135,6 +142,7 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
       loadDetail={loadDetail}
       saveModelRequest={saveModelRequest}
       runDebugRequest={runDebugRequest}
+      formatDebugError={formatDebugError}
       statusOptions={statusOptions}
       showTags
       loadAbilityOptions={loadAbilityOptions}

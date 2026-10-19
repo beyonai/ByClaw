@@ -21,6 +21,9 @@ This is the canonical contract for automated agents working in this repository:
 | `byclaw-be/` | Java backend (Maven) |
 | `byclaw-exe/` | Python CLIs and tooling (`pyproject.toml` when initialized) |
 | `byclaw-qa/` | Cross-cutting QA, e2e, performance |
+| `middleware/builtin/` | Shared skills, scripts, Python CLIs, runtime tools, and skill registry for OpenClaw and Harness |
+| `middleware/openclaw/` | OpenClaw image definitions and runtime-specific integration |
+| `middleware/byclaw-harness/` | Harness image definitions, plugins, and runtime-specific integration |
 | `docs/` | Top-level docs: `architecture/`, `api/`, `quick-start/` |
 | `examples/` | Standalone examples, decoupled from production config |
 | `tests/` | Repo-wide test layout: `unit/`, `integration/`, `auto-gen/` (reviewed only) |
@@ -29,6 +32,23 @@ This is the canonical contract for automated agents working in this repository:
 
 Human-oriented workflow and governance: [CONTRIBUTING.md](CONTRIBUTING.md).
 Claude-specific notes: [CLAUDE.md](CLAUDE.md).
+
+## OpenClaw and Harness shared resources
+
+- **Maintain shared resources only in [`middleware/builtin/`](middleware/builtin/).** This is the canonical location for `skills/`, `python-clis/`, `runtime-tools/`, `cli/`, and `skills-registry.json`, used by both OpenClaw and Harness. The shared baseline comes from Harness; preserve OpenClaw-only skills and scripts when synchronizing upstream changes.
+- `middleware/byclaw-harness/builtin` and the corresponding legacy resource paths under `middleware/openclaw/` are compatibility symlinks. Preserve these links; do not replace them with copied directories or maintain separate resource versions. Keep runtime-specific plugins, startup scripts, and image configuration in their respective modules.
+- Resolve shared script resources relative to the script file (`import.meta.url` or `__file__`), not the caller's working directory. Do not hardcode resource locations such as `/app/skills`, `/opt/byclaw/builtin`, or developer-machine paths. Use runtime environment configuration for data, credentials, sessions, and workspace directories; retain existing access boundaries when changing path handling.
+- Build the business images from the **ByClaw repository root**. Dockerfiles must COPY shared resources directly from `middleware/builtin/`, rather than relying on compatibility symlinks. Check both Harness Dockerfiles (`Dockerfile` and `Dockerfile.extensions`), all affected OpenClaw variants, Docker ignore rules, and CI path filters when moving shared resources. Preserve each image's container destinations, ownership, installation steps, and startup behavior unless the task explicitly changes them.
+- Changes to shared resources affect both runtimes. Check that neither runtime loses required skills or scripts, and run the relevant resource tests plus the following checks from the repository root:
+
+  ```bash
+  python3 -m unittest discover -s middleware/tests -p 'test_shared_builtin.py'
+  node --test middleware/tests/shared-builtin-portability.test.mjs
+  ```
+
+  For Harness Dockerfile changes, also run `bash middleware/byclaw-harness/scripts/docker-browser-layout-verify.sh --dockerfile Dockerfile` and the same command with `--dockerfile Dockerfile.extensions`. Static checks do not establish that an image builds or starts; report any unverified container build or runtime behavior.
+
+See [shared resource conventions](middleware/builtin/README.md) and [Harness build instructions](middleware/byclaw-harness/INTEGRATION.md).
 
 ## Frontend lint conventions
 

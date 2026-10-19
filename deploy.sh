@@ -16,7 +16,7 @@ DEPLOY_SCRIPT_DIR="$ROOT_DIR/deploy"
 ACTION="${1:-}"
 
 usage() {
-    echo "Usage: sh deploy.sh init|nfs-init|update|stop"
+    echo "Usage: sh deploy.sh init|nfs-init|update|stop|check [--deep]"
 }
 
 if [ -z "$ACTION" ]; then
@@ -51,9 +51,29 @@ pull_images() {
     (cd "$DEPLOY_SCRIPT_DIR/standalone" && sh pull.sh)
 }
 
+check_environment() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "[失败] 部署检查需要 Python 3，请安装后运行 sh deploy.sh check。" >&2
+        return 1
+    fi
+    python3 "$DEPLOY_SCRIPT_DIR/check.py" "$@"
+}
+
+# Even if pull/start fails, report what is available before exiting.
+finish_deployment() {
+    _deploy_status=$?
+    trap - EXIT
+    if check_environment; then
+        exit "$_deploy_status"
+    else
+        exit 1
+    fi
+}
+
 case "$ACTION" in
     init)
         load_env
+        trap finish_deployment EXIT
         if [ "${BYCLAW_DEPLOY_INIT_NFS:-false}" = "true" ]; then
             echo "========== Initializing NFS =========="
             (cd "$DEPLOY_SCRIPT_DIR" && sh init-nfs.sh)
@@ -69,8 +89,14 @@ case "$ACTION" in
         ;;
     update)
         load_env
+        trap finish_deployment EXIT
         pull_images
         start_services
+        ;;
+    check)
+        load_env
+        shift
+        check_environment "$@"
         ;;
     stop)
         echo "========== Stopping Standalone =========="

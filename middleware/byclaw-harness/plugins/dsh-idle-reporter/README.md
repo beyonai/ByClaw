@@ -1,0 +1,91 @@
+# @byclaw/dsh-idle-reporter
+
+[中文](README.zh.md) | English
+
+This DSH profile bundle reports whether its sandbox is doing work. It appends snapshots to one Redis Stream shared by every sandbox; a platform consumer reads the stream and releases sandboxes that report `releasable`. Releasing the sandbox is the platform's job; DSH sessions under `DSH_HOME` survive it.
+
+## What counts as busy
+
+The sandbox is **busy** while any of these holds:
+
+- a live Agent of any session, root or subagent, is running a turn and is not blocked on the user;
+- a background job is `running` or `stopping`. A resident dev server started as a job therefore keeps the sandbox alive.
+
+An Agent waiting for an approval or an ask-user answer is not busy, and neither is a parent Agent whose subagent is waiting. Waiting Agents are reported as a count instead. A turn left waiting on the user becomes releasable after the idle timeout; on resume the turn is recorded as interrupted and the pending question is lost, while the session itself survives.
+
+The sandbox is **releasable** when it has not been busy for `idleTimeoutMs`. Idle time starts at process start. Before it reports `releasable`, the plugin briefly checks that no Agent is running idle-status maintenance work such as compaction; if one is, it stays `busy` until the next heartbeat.
+
+## Known limitations
+
+The judgement covers the whole sandbox, not one session: any working Agent or running job in any session keeps it busy. Each case below can only cause a wrong `releasable` when it is the only thing happening in the sandbox for the whole idle timeout.
+
+| Case | Counted as | When it matters |
+|---|---|---|
+| A parent Agent runs another tool in parallel while its subagent waits for approval | Idle: the parent is treated as blocked on the waiting child | Only if that parallel tool itself runs longer than the idle timeout while the approval stays unanswered. Foreground Bash is capped well below 30 minutes in stock DSH; a long MCP call is the realistic case. |
+| A process started outside DSH jobs, e.g. `nohup npm run dev &` from Bash | Idle: DSH cannot see it | Realistic. Once the turn that started it ends and nothing else runs for the idle timeout, the sandbox is reported releasable and the process dies with it. Commands DSH runs in the background itself are jobs and do count as busy. |
+| A subagent run by an external provider (Claude Code, Codex, ACP) | Foreground delegation: busy, because the parent waits for its result. Background delegation: idle, because the child is neither in the Agent registry nor a job | Not reachable with the ByClaw image, which configures no external provider; in-process subagents are always visible (background one-shot children are jobs, continuable children are Agents). |
+
+Scheduled work: the ByClaw image loads no in-sandbox scheduler (`@deepseek-ai/dsh-schedule` is not in the `web` profile). ByClaw chat schedules (`byclaw-cron-schedule`) run on the ByClaw server, so releasing a sandbox does not stop them.
+
+## Install
+
+The ByClaw Docker image loads this bundle automatically. Elsewhere, build it and add it to the `web` profile:
+
+```sh
+pnpm --dir plugins/dsh-idle-reporter run build
+dsh plugin --profile web add /path/to/deepseek-harness/plugins/dsh-idle-reporter
+```
+
+Redis is reached with the same `REDIS_*` environment as `@byclaw/dsh-integration` (standalone or cluster, through `@byclaw/by-framework`). The plugin owns its own connection.
+
+## Configuration
+
+The patch inserts the host row `byclaw-idle-reporter`. Disable it with `disabled: true` on that row.
+
+| Key | Default | Environment in the patch | Meaning |
+|---|---|---|---|
+| `sandboxId` | `os.hostname()` | — | Sandbox identity written to every entry |
+| `streamKey` | `byclaw:dsh:sandbox:activity` | `BYCLAW_DSH_ACTIVITY_STREAM` | Stream shared by all sandboxes |
+| `maxLen` | `10000` | — | Approximate stream cap (`MAXLEN ~`) |
+| `idleTimeoutMs` | `1800000` (30 min) | `BYCLAW_DSH_IDLE_TIMEOUT_MS` | Idle time before `releasable` |
+| `heartbeatMs` | `30000` | — | Interval between snapshot entries |
+
+Every numeric value must be a positive integer and every string non-empty. An invalid value, or a Redis client that cannot be constructed (for example an invalid `REDIS_MODE`), logs one error and leaves the plugin inert; DSH still starts.
+
+## Stream entries
+
+```text
+XADD <streamKey> MAXLEN ~ <maxLen> * \
+  sandboxId     <id>
+  state         busy | releasable
+  lastActiveAt  RFC 3339 time the sandbox was last busy
+  waitingUser   integer: Agents blocked on approval or ask-user
+  agents        integer: Agents doing work (diagnostic)
+  jobs          integer: running or stopping jobs (diagnostic)
+  pid           integer: DSH process id
+  at            RFC 3339 time this entry was produced
+```
+
+Every entry is a full snapshot. An entry is appended:
+
+- at startup;
+- on every state change, including `busy` the moment work starts again after `releasable`;
+- every `heartbeatMs`, whatever the state.
+
+At most one append is in flight; while it is pending only the newest snapshot waits behind it. A failed append is logged once per outage and retried by the next heartbeat. Redis being unreachable never stops DSH. On shutdown the plugin stops its timers and appends nothing more.
+
+## Consumer contract
+
+The platform's consumer (a consumer group is recommended for at-least-once delivery) is expected to:
+
+- keep only the latest entry per `sandboxId`, and act only after reading to the end of the stream;
+- release the sandbox (then SIGTERM) when that latest entry is `releasable`. A window remains between the read and the SIGTERM in which new work may start; this is accepted because the sandbox has been idle for `idleTimeoutMs` and its sessions survive;
+- treat a sandbox with no entry within `3 × heartbeatMs` (90 s by default), after a boot grace period, as dead and release it. Silence is the only shutdown signal, so a supervisor restart inside that window is not mistaken for death.
+
+## Verification
+
+```sh
+pnpm --dir plugins/dsh-idle-reporter run verify
+```
+
+Watch a live stream with `redis-cli XREAD BLOCK 0 STREAMS byclaw:dsh:sandbox:activity '$'`.

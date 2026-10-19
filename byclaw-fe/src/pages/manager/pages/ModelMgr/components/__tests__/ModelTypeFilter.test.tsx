@@ -30,12 +30,14 @@ jest.mock('@/pages/manager/hooks/useShowModal', () => ({
   default: () => [{}, { handleShow: jest.fn(), onCancel: jest.fn() }],
 }));
 jest.mock('../ModelFormModal', () => () => null);
-jest.mock('../ModelCardItem', () => () => null);
+jest.mock('../ModelCardItem', () => ({ record, onSetDefault }: any) => (
+  <button onClick={() => onSetDefault(record)}>Set default {record.id}</button>
+));
 // 保留真实列表容器，验证滚动监听与 ref 确实绑定到列表区域。
-jest.mock('@/pages/manager/components/CardList', () => ({ dataSource }: any) => (
+jest.mock('@/pages/manager/components/CardList', () => ({ dataSource, cardItemFn }: any) => (
   <div data-testid="model-cards">
     {dataSource.map((item: { id: string }) => (
-      <div key={item.id}>{item.id}</div>
+      <div key={item.id}>{cardItemFn(item)}</div>
     ))}
   </div>
 ));
@@ -57,6 +59,29 @@ describe('model list queries and scrolling', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it.each([null, undefined, '', '   ', 'LLM'])('preserves the default-model type group for %s', async (modelType) => {
+    render(<ModelMgr />);
+    await act(async () => {});
+    const firstRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 12)![0];
+    act(() =>
+      firstRequest.success({
+        rows: [{ id: 'model-1', modelType }],
+        total: 1,
+        pageIndex: 1,
+        pageSize: 12,
+      })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set default model-1' }));
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'modelMgr/setDefaultModel',
+        payload: { modelId: 'model-1', modelType: modelType === 'LLM' ? 'LLM' : '', tagId: '1' },
+      })
+    );
+  });
 
   it.each(['百应', 'ByAI'])('uses the configured system name %s in previews, dropdowns and selections', async (label) => {
     mockLoadSystems.mockResolvedValue({

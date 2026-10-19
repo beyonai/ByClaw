@@ -51,6 +51,25 @@ jest.mock('@/components/Preview/Delimited', () => ({ content }: { content: strin
   <div data-testid="table-preview">{content}</div>
 ));
 
+jest.mock('@/components/Preview/DecodedImage', () => ({ type }: { type: string }) => (
+  <div data-testid="decoded-image-preview">{type}</div>
+));
+jest.mock('@/components/Preview/Archive', () => ({ type, fileName }: { type: string; fileName: string }) => (
+  <div data-testid="archive-preview" data-type={type} data-name={fileName} />
+));
+jest.mock('@/components/Preview/Rtf', () => () => <div data-testid="rtf-preview" />);
+jest.mock('@/components/Preview/Epub', () => () => <div data-testid="epub-preview" />);
+jest.mock('@/components/Preview/Sqlite', () => () => <div data-testid="sqlite-preview" />);
+jest.mock('@/components/Preview/Ods', () => () => <div data-testid="ods-preview" />);
+jest.mock('@/components/Preview/OpenDocument', () => ({ type }: { type: string }) => (
+  <div data-testid={`${type}-preview`} />
+));
+jest.mock('@/components/Preview/Notebook', () => () => <div data-testid="ipynb-preview" />);
+jest.mock('@/components/Preview/OfficeVariant', () => ({ type }: { type: string }) => (
+  <div data-testid={`${type}-preview`} />
+));
+jest.mock('@/components/Preview/Eml', () => ({ type }: { type: string }) => <div data-testid={`${type}-preview`} />);
+
 describe('PreViewFile binary and relative resource handling', () => {
   let createObjectURL: jest.Mock;
   let revokeObjectURL: jest.Mock;
@@ -176,6 +195,140 @@ describe('PreViewFile binary and relative resource handling', () => {
     }
   );
 
+  it.each([
+    'heic',
+    'heif',
+    'HIF',
+    'tif',
+    'tiff',
+    'jxl',
+    'jp2',
+    'ppm',
+    'tga',
+    'zip',
+    'rar',
+    '7z',
+    'tar',
+    'gz',
+    'tgz',
+    'tar.gz',
+    'raw',
+    'dng',
+    'cr2',
+    'cr3',
+    'nef',
+    'nrw',
+    'arw',
+    'srf',
+    'sr2',
+    'raf',
+    'rw2',
+    'orf',
+    'pef',
+    'srw',
+  ])('routes %s to its decoder and downloads the original', async (type) => {
+    const data = new Blob(['original binary']);
+    render(<PreViewFile data={data} title={`原文件.${type}`} />);
+    expect(
+      await screen.findByTestId(
+        ['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'tar.gz'].includes(type) ? 'archive-preview' : 'decoded-image-preview'
+      )
+    ).toBeVisible();
+    expect(screen.queryByTestId('image-preview')).not.toBeInTheDocument();
+    expect(mockHtmlRender).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));
+    expect(createObjectURL.mock.calls[0][0].size).toBe(data.size);
+    expect(createObjectURL.mock.calls[0][0].name).toBe(`原文件.${type}`);
+  });
+
+  it.each(['tar', 'gz', 'tgz', 'tar.gz'])(
+    'passes %s type and original filename to the archive viewer',
+    async (type) => {
+      render(<PreViewFile data={new Blob(['archive'])} title={`原文件.${type}`} />);
+      const preview = await screen.findByTestId('archive-preview');
+      expect(preview).toHaveAttribute('data-name', `原文件.${type}`);
+      expect(preview).toHaveAttribute('data-type', type === 'tar.gz' ? 'tgz' : type);
+    }
+  );
+
+  it('previews .png.alpha as a native PNG and preserves its download name', async () => {
+    const data = new Blob(['PNG bytes']);
+    const readText = jest.fn();
+    Object.defineProperty(data, 'text', { value: readText });
+    render(<PreViewFile data={data} type="alpha" title="sample.png.alpha" />);
+    expect(await screen.findByTestId('image-preview')).toBeVisible();
+    expect(createObjectURL.mock.calls[0][0].type).toBe('image/png');
+    expect(readText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));
+    expect(createObjectURL.mock.calls[0][0].name).toBe('sample.png.alpha');
+  });
+
+  it.each(['JFIF', 'jpe', 'jif', 'pjp', 'pjpeg'])(
+    'keeps %s on native JPEG preview and downloads with its original name',
+    async (extension) => {
+      const data = new Blob(['jpeg content'], { type: 'application/octet-stream' });
+      const text = jest.fn();
+      Object.defineProperty(data, 'text', { value: text });
+      const title = `照片.${extension}`;
+      render(<PreViewFile data={data} type="image" title={title} />);
+      expect(await screen.findByTestId('image-preview')).toBeVisible();
+      expect(screen.queryByTestId('decoded-image-preview')).not.toBeInTheDocument();
+      expect(text).not.toHaveBeenCalled();
+      expect(createObjectURL.mock.calls[0][0].type).toBe('image/jpeg');
+      fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));
+      const anchors = (document.createElement as jest.Mock).mock.results
+        .map(({ value }) => value)
+        .filter((element) => element?.tagName === 'A');
+      expect(anchors[anchors.length - 1].download).toBe(title);
+    }
+  );
+
+  it.each([
+    'RTF',
+    'ODS',
+    'EPUB',
+    'SQLITE',
+    'SQLITE3',
+    'DB',
+    'ODT',
+    'ODP',
+    'IPYNB',
+    'DOCM',
+    'DOTX',
+    'XLSM',
+    'XLTX',
+    'PPTM',
+    'PPSX',
+    'POTX',
+    'EML',
+    'MSG',
+  ])('opens %s through its own renderer and retains the original download', async (extension) => {
+    const data = new Blob(['original bytes']);
+    const text = jest.fn();
+    Object.defineProperty(data, 'text', { value: text });
+    const title = `原件.${extension}`;
+    const { unmount } = render(<PreViewFile data={data} title={title} />);
+    expect(
+      await screen.findByTestId(`${['DB', 'SQLITE3'].includes(extension) ? 'sqlite' : extension.toLowerCase()}-preview`)
+    ).toBeVisible();
+    expect(mockOfficeRender).not.toHaveBeenCalled();
+    expect(mockHtmlRender).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));
+    const downloaded = createObjectURL.mock.calls[0][0] as File;
+    expect(downloaded.name).toBe(title);
+    expect(downloaded.size).toBe(data.size);
+    const content = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsText(downloaded);
+    });
+    expect(content).toBe('original bytes');
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:office-preview');
+  });
+
   it('repairs SVG MIME without a filename and supports SVG source strings', async () => {
     const { rerender } = render(<PreViewFile data="<svg />" type="svg" />);
     await waitFor(() => expect(screen.getByTestId('image-preview')).toBeVisible());
@@ -249,7 +402,7 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(screen.getByTestId('source-preview')).not.toHaveTextContent('old content');
   });
 
-  it.each(['tiff', 'heic', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
+  it.each(['tar', 'heics', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
     render(<PreViewFile data={new Blob(['binary content'])} type={type} title={`file.${type}`} />);
     expect(screen.getByText('fileRender.formatUnsupported')).toBeVisible();
     fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));

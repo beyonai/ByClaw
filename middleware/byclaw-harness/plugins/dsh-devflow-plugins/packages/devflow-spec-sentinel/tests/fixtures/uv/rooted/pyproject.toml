@@ -1,0 +1,5 @@
+[project]
+name = "rooted-app"
+
+[tool.uv.workspace]
+members = ["pkg"]
