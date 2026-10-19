@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.request.ResourceFavoriteQo;
@@ -82,7 +84,7 @@ public class ResourceFavoriteService {
             // 历史计数行缺失时按已有收藏关系初始化，取消旧收藏也不会产生负数。
             count = mapper.countFavorites(qo.getResourceId(), tenantId);
             if (mapper.insertCount(qo.getResourceId(), tenantId, count) != 1) {
-                throw new IllegalStateException("Resource favorite count initialization failed");
+                throw new IllegalStateException(I18nUtil.get("resource.favorite.count.init.failed"));
             }
         }
         int changed = 0;
@@ -95,7 +97,7 @@ public class ResourceFavoriteService {
         }
         int delta = changed == 0 ? 0 : Boolean.TRUE.equals(qo.getFavorited()) ? 1 : -1;
         if (delta != 0 && mapper.updateCount(qo.getResourceId(), tenantId, delta) != 1) {
-            throw new IllegalStateException("Resource favorite count update failed");
+            throw new IllegalStateException(I18nUtil.get("resource.favorite.count.update.failed"));
         }
         return new ResourceFavoriteVo(Boolean.TRUE.equals(qo.getFavorited()), count + delta);
     }

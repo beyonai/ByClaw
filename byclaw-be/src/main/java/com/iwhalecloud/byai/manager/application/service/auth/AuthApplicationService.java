@@ -625,7 +625,7 @@ public class AuthApplicationService {
         result.setResourceBizType(ssResource.getResourceBizType());
         if ((Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !hasResourceAccessPermission(ssResource)) {
-            throw new BaseException("无权查看资源内容及成员配置");
+            throw new BaseException("auth.resource.content.view.denied");
         }
         result.setExtInfo(buildResourceExtInfo(ssResource));
 

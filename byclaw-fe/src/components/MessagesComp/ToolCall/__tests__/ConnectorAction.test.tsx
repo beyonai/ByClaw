@@ -4,6 +4,7 @@ import * as connectorAuthorization from '@/utils/connectorAuthorization';
 import ToolCall, { parseConnectorAction } from '..';
 
 jest.mock('@umijs/max', () => ({
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),

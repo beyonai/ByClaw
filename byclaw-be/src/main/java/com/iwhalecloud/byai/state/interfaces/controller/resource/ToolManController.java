@@ -1875,7 +1875,7 @@ public class ToolManController {
     @PostMapping("/checkResourceUse")
     public ResponseUtil<Map<String, Object>> checkResourceUse(@RequestBody Map<String, String> request) {
         String identity = request.get("resourceId");
-        if (StringUtils.isBlank(identity)) return ResponseUtil.fail("resourceId 不能为空");
+        if (StringUtils.isBlank(identity)) return ResponseUtil.fail(I18nUtil.get("resource.sync.resource.id.required"));
         SsResource resource = identity.matches("[0-9]+") ? ssResourceService.findById(Long.valueOf(identity))
             : ssResourceService.findByIdOrCode(null, identity);
         if (resource == null && identity.matches("[0-9]+")) resource = ssResourceService.findByIdOrCode(null, identity);
@@ -1893,7 +1893,7 @@ public class ToolManController {
             Long id = Long.valueOf(request.get("jobId"));
             var job = resourceSyncJobMapper.selectById(id);
             if (job == null || !Objects.equals(job.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
-                return ResponseUtil.fail("同步任务不存在");
+                return ResponseUtil.fail(I18nUtil.get("resource.sync.job.not.found"));
             }
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("jobId", String.valueOf(id));
@@ -1903,14 +1903,14 @@ public class ToolManController {
             data.put("retryCount", job.getRetryCount());
             data.put("result", job.getResultSummary() == null ? Collections.emptyMap() : JSON.parseObject(job.getResultSummary()));
             return ResponseUtil.success(data);
-        } catch (Exception exception) { return ResponseUtil.fail("无法查询资源同步任务"); }
+        } catch (Exception exception) { return ResponseUtil.fail(I18nUtil.get("resource.sync.job.query.failed")); }
     }
 
     private void validateControlledResourceContent(Long resourceId) {
         SsResource resource = ssResourceService.findById(resourceId);
         if (resource != null && (Boolean.TRUE.equals(resource.getViewAuthControlled())
             || Boolean.TRUE.equals(resource.getUseAuthControlled())) && !authApplicationService.hasResourceAccessPermission(resource)) {
-            throw new IllegalArgumentException("无权读取、下载或执行资源内容");
+            throw new IllegalArgumentException(I18nUtil.get("resource.content.use.denied"));
         }
     }
 

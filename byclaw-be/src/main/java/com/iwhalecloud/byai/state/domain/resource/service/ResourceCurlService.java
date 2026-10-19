@@ -304,7 +304,7 @@ public class ResourceCurlService {
         }
         if ((Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled()))
             && !authApplicationService.hasResourceAccessPermission(resource)) {
-            throw new IllegalArgumentException("无权读取或调试资源内容");
+            throw new IllegalArgumentException(I18nUtil.get("resource.content.debug.denied"));
         }
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
 

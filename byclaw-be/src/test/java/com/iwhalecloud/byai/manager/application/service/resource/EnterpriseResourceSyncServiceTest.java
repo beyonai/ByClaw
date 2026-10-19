@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.resource;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -25,7 +27,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class EnterpriseResourceSyncServiceTest {
+class EnterpriseResourceSyncServiceTest extends I18nTestSupport {
     private EnterpriseResourceSyncService service;
     private PrivilegeGrantMapper grants;
     private PrivilegeGrantService writes;
@@ -122,4 +124,33 @@ class EnterpriseResourceSyncServiceTest {
         grant.setGrantToObjType("USER"); grant.setGrantToObjId(9L); grant.setStatusCd("A");
         return grant;
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|授权组织不存在: 8|授权岗位不存在或属于数字岗位: 9",
+        "en-US|Authorized organization does not exist: 8|Authorized position does not exist or is a digital position: 9"
+    }, delimiter = '|')
+    void invalidSubjectsAreLocalizedBeforeAuthorizationChanges(String language, String organization, String post) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(8L), List.of()))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage(organization);
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(), List.of(9L)))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage(post);
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test
+    void subjectIdsRemainExactWithoutLocaleNumberFormatting() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        long id = 9007199254740993L;
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(id), List.of()))))
+            .hasMessage("Authorized organization does not exist: 9007199254740993");
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(), List.of(id)))))
+            .hasMessage("Authorized position does not exist or is a digital position: 9007199254740993");
+        verifyNoInteractions(grants, writes);
+    }
+
 }

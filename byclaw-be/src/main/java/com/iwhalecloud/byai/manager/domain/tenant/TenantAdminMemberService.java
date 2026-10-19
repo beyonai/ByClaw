@@ -57,13 +57,13 @@ public class TenantAdminMemberService {
         TenantMemberRow existing = memberMapper.selectMember(enterpriseId, user.getUserId());
         if (existing != null) {
             if (!"ACTIVE".equals(existing.getStatus())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "disabled membership requires explicit re-enable");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.disabled");
             }
             return toView(existing);
         }
 
         if (memberMapper.countActiveMembers(enterpriseId) >= memberLimit) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant member limit reached");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.limit.reached");
         }
         memberMapper.insertMember(sequenceService.nextVal(), enterpriseId, user.getUserId(),
             CurrentUserHolder.getCurrentUserId());
@@ -75,7 +75,7 @@ public class TenantAdminMemberService {
     public void joinByInvitation(long enterpriseId, long inviterId) {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0)
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
         String snapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
         int limit = memberLimit(snapshot);
         try {
@@ -84,21 +84,21 @@ public class TenantAdminMemberService {
                 throw new IllegalArgumentException();
         }
         catch (Exception error) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.not.ready");
         }
         TenantMemberRow inviter = memberMapper.selectMember(enterpriseId, inviterId);
         if (inviter == null || !"ACTIVE".equals(inviter.getStatus()))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "inviter membership required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.inviter.membership.required");
         TenantMemberRow existing = memberMapper.selectMember(enterpriseId, userId);
         if (existing != null) {
             if (!"ACTIVE".equals(existing.getStatus()))
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "disabled membership requires explicit re-enable");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.disabled");
             return;
         }
         if (memberMapper.countActiveMembers(enterpriseId) >= limit)
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant member limit reached");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.member.limit.reached");
         if (memberMapper.insertMember(sequenceService.nextVal(), enterpriseId, userId, inviterId) != 1)
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant membership could not be confirmed");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.membership.unconfirmed");
     }
 
     private TenantMemberView toView(TenantMemberRow row) {

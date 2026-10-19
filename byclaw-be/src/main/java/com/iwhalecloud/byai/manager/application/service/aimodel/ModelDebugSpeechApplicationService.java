@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.aimodel;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.application.service.asr.HarnessMediaClient;
 import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import java.net.URI;
@@ -30,7 +32,7 @@ public class ModelDebugSpeechApplicationService {
 
     public Map<String, Object> debugTts(TtsDebugRequest request) {
         if (request == null) throw invalid();
-        String text = request.text() == null || request.text().isBlank() ? "你好，这是语音合成模型调试。" : request.text();
+        String text = request.text() == null || request.text().isBlank() ? I18nUtil.get("aimodel.debug.speech.default.text") : request.text();
         if (text.length() > 1000) throw invalid();
         return media.debugTts(text, connectionModel(request.model(), request.id(), "TTS"));
     }
@@ -87,7 +89,7 @@ public class ModelDebugSpeechApplicationService {
     }
 
     private ResponseStatusException invalid() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "Speech model connection settings and valid input are required");
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("aimodel.debug.speech.input.invalid"));
     }
 
     public record TtsDebugRequest(String id, String text, Map<String, Object> model) {

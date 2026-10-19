@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import java.lang.reflect.*;
 import java.util.*;
@@ -64,7 +66,7 @@ public final class PlatformInterfaceRouting {
                                 Map<String, Object> envelope =
                                         gateway.envelope("sandbox", operation, request);
                                 if (envelope == null || !(envelope.get("code") instanceof Number))
-                                    throw new IllegalStateException("Invalid platform response");
+                                    throw new IllegalStateException(I18nUtil.get("platform.response.invalid"));
                                 Object data = envelope.get("data");
                                 Type type =
                                         ((ParameterizedType) method.getGenericReturnType())
@@ -76,7 +78,7 @@ public final class PlatformInterfaceRouting {
                                                 : SandboxResponse.error(
                                                         Objects.toString(
                                                                 envelope.get("msg"),
-                                                                "Platform operation failed"));
+                                                                I18nUtil.get("platform.operation.failed")));
                                 result.setData(converted);
                                 return result;
                             }

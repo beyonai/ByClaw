@@ -317,7 +317,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     if (this.props.cannotSend || !this.checkIsSending()) return;
     const targetSessionId = this.props.sessionId;
     const sendPayload = this.getSendPayload('[语音消息]');
-    if (!sendPayload) throw new Error('无法发送语音');
+    if (!sendPayload) throw new Error(getIntl().formatMessage({ id: 'voice.cannotSend' }));
     const formData = new FormData();
     formData.append('files', file);
     formData.append('sessionType', 'AGENT');
@@ -329,7 +329,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const uploaded = await uploadFiles(formData);
     if (!this.voiceInputMounted || targetSessionId !== this.props.sessionId) return;
     const audio = (uploaded.rebuildFileList || uploaded.uploadItems || [])[0];
-    if (!audio?.fileId) throw new Error('语音上传未返回文件');
+    if (!audio?.fileId) throw new Error(getIntl().formatMessage({ id: 'voice.uploadMissing' }));
     const voice: VoiceMessage = {
       fileId: audio.fileId,
       fileUrl: audio.fileUrl || audio.filePath,

@@ -48,7 +48,7 @@ public class TenantGroupTaskRoutingAspect {
             if (registered != null) {
                 var user = com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getLoginInfo();
                 if (user == null || !Long.valueOf(registered.userId()).equals(user.getUserId())) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant task owner required");
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.task.owner.required");
                 }
                 context = contexts.validate(Long.toString(registered.enterpriseId()));
             }

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { getLocale } from '@umijs/max';
+import { getIntl, getLocale } from '@umijs/max';
 import { GET, POST } from '@/service/common/request';
 import { getSessionKey, getssoToken, getToken, ssotokenKey, tokenKey } from '@/pages/manager/utils/auth';
 import { generateSignature } from '@/pages/manager/utils/signature';
@@ -260,7 +260,7 @@ export async function debugModelAsr(params: any) {
   try {
     audio = JSON.parse(input || '{}');
   } catch {
-    throw new Error('请输入包含 fileId 的 JSON 对象');
+    throw new Error(getIntl().formatMessage({ id: 'modelMgr.modal.asrInputInvalid' }));
   }
   return POST(
     '/byaiService/new/model/debugModelAsr',
@@ -279,7 +279,7 @@ export async function debugModelTts(params: any) {
   try {
     speech = JSON.parse(input || '{}');
   } catch {
-    throw new Error('请输入包含 text 的 JSON 对象');
+    throw new Error(getIntl().formatMessage({ id: 'modelMgr.modal.ttsInputInvalid' }));
   }
   return POST(
     '/byaiService/new/model/debugModelTts',

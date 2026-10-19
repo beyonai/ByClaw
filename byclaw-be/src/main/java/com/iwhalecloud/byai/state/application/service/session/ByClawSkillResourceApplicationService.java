@@ -350,11 +350,11 @@ public class ByClawSkillResourceApplicationService {
         String name = StringUtils.trimToEmpty(root.getString("resourceName"));
         String url = StringUtils.trimToEmpty(root.getString("downloadUrl"));
         if (!SystemCode.isValid(systemCode) || StringUtils.isAnyBlank(code, name, url)) {
-            throw new IllegalArgumentException("技能同步需要有效 systemCode、resourceCode、resourceName 和 downloadUrl");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.skill.fields.required"));
         }
         if (code.length() > 250 || code.contains("/") || code.contains("\\") || ".".equals(code) || "..".equals(code)
             || code.chars().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("技能 resourceCode 不能包含路径分隔符、控制字符或超过 250 个字符");
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.skill.code.invalid"));
         }
         byte[] bytes = downloadThirdPartySkillPackage(url);
         SkillPackageMetadata inspected = inspectSkillPackage(new ByteArrayMultipartFile(
@@ -390,7 +390,7 @@ public class ByClawSkillResourceApplicationService {
     public void publishEnterpriseSyncArtifacts(Long resourceId) {
         SsResource resource = ssResourceService.findById(resourceId);
         SsResExtSkill ext = ssResExtSkillService.findById(resourceId);
-        if (resource == null || ext == null) throw new IllegalStateException("技能同步资源不存在");
+        if (resource == null || ext == null) throw new IllegalStateException(I18nUtil.get("resource.sync.skill.not.found"));
         syncSkillTargetContent(CurrentUserHolder.getCurrentUserCode(), resource, ext, false);
         resourceArtifactStorageService.syncResourceJsonByBizType(ext.getTargetContent(), "SKILL", resourceId);
     }

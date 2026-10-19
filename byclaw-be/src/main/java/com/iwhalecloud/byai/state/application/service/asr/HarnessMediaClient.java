@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.asr;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -81,7 +83,7 @@ public class HarnessMediaClient {
     private JsonNode invoke(String path, Map<String, Object> body, int maxResponseBytes) {
         var login = CurrentUserHolder.getLoginInfo();
         if (login == null || login.getUserCode() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, I18nUtil.get("voice.authentication.required"));
         }
         String token = authorization.currentToken();
         try {
@@ -107,7 +109,7 @@ public class HarnessMediaClient {
                         JsonNode failure = mapper.readTree(bytes);
                         if (failure != null && "ASR_SPEECH_NOT_DETECTED".equals(failure.path("code").asText())) {
                             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                                "未识别到语音，请靠近麦克风后重试");
+                                I18nUtil.get("voice.speech.not.detected"));
                         }
                         if (failure != null && java.util.Set.of("ASR_MODEL_CONNECTION_FAILED",
                             "ASR_PROVIDER_UNSUPPORTED", "ASR_PROTOCOL_MISMATCH", "ASR_AUTH_REQUIRED",
@@ -148,14 +150,14 @@ public class HarnessMediaClient {
 
     private ResponseStatusException unavailable() {
         return new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-            "Speech service is unavailable; check the selected model and Harness media plugin");
+            I18nUtil.get("voice.service.unavailable"));
     }
 
     /** Only confirmed model/provider failures may disable a saved model after debugging. */
     public static final class ModelFailureException extends ResponseStatusException {
         public ModelFailureException() {
             super(HttpStatus.BAD_GATEWAY,
-                "Speech service is unavailable; check the selected model and Harness media plugin");
+                I18nUtil.get("voice.service.unavailable"));
         }
     }
 }

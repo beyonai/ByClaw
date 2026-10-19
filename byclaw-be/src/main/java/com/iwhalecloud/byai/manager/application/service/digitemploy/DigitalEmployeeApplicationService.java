@@ -1760,7 +1760,7 @@ public class DigitalEmployeeApplicationService {
                     if (resourceBindingSourceService.hasAutomatic(digitalEmployee.getComAcctId(), digitalEmployee.getResourceId(),
                         relation.getRelResourceId())) continue;
                     if (!ssResourceRelDetailService.removeById(relation.getResourceRelDetailId())) {
-                        throw new BaseException("数字员工关联资源删除失败");
+                        throw new BaseException("digemployee.resource.remove.failed");
                     }
                 }
             }
@@ -3622,7 +3622,7 @@ public class DigitalEmployeeApplicationService {
             if (!existingIds.contains(requested.getResourceId())
                 && (Boolean.TRUE.equals(requested.getViewAuthControlled()) || Boolean.TRUE.equals(requested.getUseAuthControlled()))
                 && !authApplicationService.hasResourceUsePermission(requested, CurrentUserHolder.getCurrentUserId())) {
-                throw new BaseException("无权限关联该资源");
+                throw new BaseException("digemployee.resource.link.denied");
             }
         }
         Set<Long> requestedSkillResourceIds = requestedResources.stream()

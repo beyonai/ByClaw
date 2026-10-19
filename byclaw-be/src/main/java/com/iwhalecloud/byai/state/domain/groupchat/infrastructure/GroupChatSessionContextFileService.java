@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -74,16 +76,16 @@ public class GroupChatSessionContextFileService {
     /** Tenant callers supply a snapshot already authorized by the owning Node; storage remains shared. */
     public ContextFile prepareGroupSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, GroupChatContextResponse snapshot) {
-        requireMatchingSnapshot(groupRequest, snapshot, "历史上下文边界无效，请重试");
+        requireMatchingSnapshot(groupRequest, snapshot, I18nUtil.get("groupchat.context.history.boundary.invalid"));
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, null).get(0);
     }
 
     /** 租户名单与历史快照由所属 Node 鉴权，存储流程仍校验发起人的工作区身份。 */
     public ContextFile prepareGroupMemberSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, GroupChatContextResponse snapshot, List<GroupMember> members) {
-        requireMatchingSnapshot(groupRequest, snapshot, "成员上下文边界无效，请重试");
+        requireMatchingSnapshot(groupRequest, snapshot, I18nUtil.get("groupchat.context.members.boundary.invalid"));
         if (members == null) {
-            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.members.failed"),
                 new IllegalArgumentException("Missing member roster"));
         }
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, members).get(0);
@@ -102,7 +104,7 @@ public class GroupChatSessionContextFileService {
     public ContextFile prepareGroupMembers(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, List<GroupMember> members) {
         if (members == null) {
-            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.members.failed"),
                 new IllegalArgumentException("Missing member roster"));
         }
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, null, members).get(0);
@@ -124,7 +126,7 @@ public class GroupChatSessionContextFileService {
     private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, boolean includeTaskHistory, GroupChatContextResponse authorizedSnapshot,
         List<GroupMember> members) {
-        String failureMessage = members == null ? "历史上下文准备失败，请重试" : "成员上下文准备失败，请重试";
+        String failureMessage = members == null ? I18nUtil.get("groupchat.context.history.failed") : I18nUtil.get("groupchat.context.members.failed");
         try {
             if (StringUtils.isBlank(userCode) || StringUtils.isBlank(traceId) || groupRequest == null
                 || groupRequest.getChildSessionId() == null || groupRequest.getChildSessionId() <= 0
