@@ -186,8 +186,8 @@ export class GroupForwardRecoveryStore {
         return null;
       const row = await first(
         db,
-        "SELECT * FROM byai.byai_message WHERE enterprise_id=$1 AND session_id=$2 AND message_id=$3",
-        [this.tenant, t.targetSessionId, messageId],
+        "SELECT * FROM byai.byai_message WHERE session_id=$1 AND message_id=$2",
+        [t.targetSessionId, messageId],
       );
       if (!row || row.archivedAt != null || ![1, 2].includes(row.usage)) return null;
       const history = new SqlHistoryRepository(db, this.tenant);

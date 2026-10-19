@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantGroupMessageDisplayService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerDeltaPayload;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MirrorAnswerMetadata;
@@ -37,6 +38,9 @@ public class TenantChatMirrorService {
     private final TenantNodeClient node;
     private final ObjectMapper objectMapper;
     private final GroupChatEventPublisher groupEvents;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageDisplayService messageDisplayService;
 
     @org.springframework.beans.factory.annotation.Autowired
     private TenantScopedSessionEventService tenantProjections;
@@ -235,7 +239,9 @@ public class TenantChatMirrorService {
             Map<String, Object> committed = node.request(context.tenantContext, "GET",
                 "/internal/v1/group-chats/" + groupId + "/messages/" + messageId + "/context", null,
                 new TypeReference<Map<String, Object>>() { });
-            if (committed == null || !(committed.get("messages") instanceof List<?> messages)) return;
+            // 广播也直接读取 Node 历史，引用中的用户名称须与公开 context 响应保持一致。
+            Object displayed = messageDisplayService == null ? committed : messageDisplayService.resolve(committed);
+            if (!(displayed instanceof Map<?, ?> page) || !(page.get("messages") instanceof List<?> messages)) return;
             Map<?, ?> stored = messages.stream().filter(Map.class::isInstance).map(Map.class::cast)
                 .filter(message -> messageId.toString().equals(String.valueOf(message.get("messageId"))))
                 .findFirst().orElse(null);

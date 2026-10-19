@@ -201,21 +201,17 @@ export class GroupForwardRepository {
     );
     return rows;
   }
-  /** Live lease predicates consume the locking CTE output after row acquisition, including unchanged-row waits.
-   * Keep the CTE boundary: a derived lookup can evaluate expiry before waiting for its row lock.
-   * One atomic SQL statement preserves this order even when SqlSession is used in autocommit mode.
-   */
+  /** 调用方使用写事务；先执行同值更新等待在途写入，再以数据库时钟和当前行条件更新租约。 */
   async claimRequest(
     requestId: string,
     owner: string,
     leaseDurationMs: number,
   ): Promise<ForwardRequestRow | null> {
     this.checkLeaseInput(this.tenantId, leaseDurationMs);
+    await this.lockRequest(requestId);
     const [row] = await this.rows<ForwardRequestRow>(
       `UPDATE byai.byai_group_chat_forward_request SET lease_owner=$3, lease_until=clock_timestamp() + (CAST($4 AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-       WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request WHERE enterprise_id=$1 AND request_id=$2 FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=$1 AND request_id=$2 AND state='RUNNING' AND sources_frozen=FALSE AND (lease_until IS NULL OR lease_until <= clock_timestamp()) AND $4 > 0) RETURNING *`,
+       WHERE enterprise_id=$1 AND request_id=$2 AND state='RUNNING' AND sources_frozen=FALSE AND (lease_until IS NULL OR lease_until <= clock_timestamp()) AND $4 > 0 RETURNING *`,
       [this.tenantId, requestId, owner, leaseDurationMs],
     );
     return row ?? null;
@@ -226,12 +222,11 @@ export class GroupForwardRepository {
     version: string,
     sourceManifestJson: string,
   ): Promise<void> {
+    await this.lockRequest(requestId);
     if (
       !(await this.mutate(
         `UPDATE byai.byai_group_chat_forward_request SET source_manifest_json=$5, sources_frozen=TRUE, fencing_version=fencing_version+1, lease_owner=NULL, lease_until=NULL, update_time=CURRENT_TIMESTAMP
-       WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request WHERE enterprise_id=$1 AND request_id=$2 FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=$1 AND request_id=$2 AND state='RUNNING' AND sources_frozen=FALSE AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp())`,
+       WHERE enterprise_id=$1 AND request_id=$2 AND state='RUNNING' AND sources_frozen=FALSE AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp()`,
         [this.tenantId, requestId, owner, version, sourceManifestJson],
       ))
     )
@@ -243,11 +238,10 @@ export class GroupForwardRepository {
     leaseDurationMs: number,
   ): Promise<ForwardTargetRow | null> {
     this.checkLeaseInput(this.tenantId, leaseDurationMs);
+    await this.lockTarget(targetId);
     const [row] = await this.rows<ForwardTargetRow>(
       `UPDATE byai.byai_group_chat_forward_target SET lease_owner=$3, lease_until=clock_timestamp() + (CAST($4 AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, state=CASE WHEN state='READY' THEN 'READY' ELSE 'COPYING' END, update_time=CURRENT_TIMESTAMP
-       WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=$1 AND target_id=$2 AND state IN ('PENDING','COPYING','READY') AND (lease_until IS NULL OR lease_until <= clock_timestamp()) AND $4 > 0) RETURNING *`,
+       WHERE enterprise_id=$1 AND target_id=$2 AND state IN ('PENDING','COPYING','READY') AND (lease_until IS NULL OR lease_until <= clock_timestamp()) AND $4 > 0 RETURNING *`,
       [this.tenantId, targetId, owner, leaseDurationMs],
     );
     return row ?? null;
@@ -263,11 +257,10 @@ export class GroupForwardRepository {
     >,
     state: "COPYING" | "READY",
   ): Promise<ForwardTargetRow> {
+    await this.lockTarget(targetId);
     return this.fenced(
       `UPDATE byai.byai_group_chat_forward_target SET checkpoint_json=$5, state=$6, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-       WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=$1 AND target_id=$2 AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp() AND ((state='COPYING' AND $6 IN ('COPYING','READY')) OR (state='READY' AND $6='READY')))`,
+       WHERE enterprise_id=$1 AND target_id=$2 AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp() AND ((state='COPYING' AND $6 IN ('COPYING','READY')) OR (state='READY' AND $6='READY'))`,
       [this.tenantId, targetId, owner, version, JSON.stringify(checkpoint), state],
     );
   }
@@ -278,11 +271,10 @@ export class GroupForwardRepository {
     version: string,
     messageIds: readonly string[],
   ): Promise<ForwardTargetRow> {
+    await this.lockTarget(targetId);
     return this.fenced(
       `UPDATE byai.byai_group_chat_forward_target SET state='SUCCEEDED', message_ids_json=$5, pending_delivery=TRUE, error_code=NULL, retryable=FALSE, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-       WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=$1 AND target_id=$2 AND state='READY' AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp())`,
+       WHERE enterprise_id=$1 AND target_id=$2 AND state='READY' AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp()`,
       [this.tenantId, targetId, owner, version, JSON.stringify(messageIds)],
     );
   }
@@ -293,11 +285,10 @@ export class GroupForwardRepository {
     errorCode: string,
     retryable: boolean,
   ): Promise<ForwardTargetRow> {
+    await this.lockTarget(targetId);
     return this.fenced(
       `UPDATE byai.byai_group_chat_forward_target SET state='FAILED', error_code=$5, retryable=$6, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-       WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=$1 AND target_id=$2 AND state IN ('COPYING','READY') AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp())`,
+       WHERE enterprise_id=$1 AND target_id=$2 AND state IN ('COPYING','READY') AND lease_owner=$3 AND fencing_version=$4 AND lease_until > clock_timestamp()`,
       [this.tenantId, targetId, owner, version, errorCode, retryable],
     );
   }
@@ -341,25 +332,23 @@ export class GroupForwardRepository {
     messageId: string,
     attachmentsJson: string,
   ): Promise<boolean> {
+    await this.lockTarget(targetId);
     return this.mutate(
-      `UPDATE byai.byai_group_chat_forward_item SET bound_message_id=$6, attachments_json=$7 WHERE enterprise_id=$1 AND target_id=$2 AND item_id=$3 AND bound_message_id IS NULL AND EXISTS (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE
-      ) SELECT 1 FROM locked_forward t WHERE t.enterprise_id=$1 AND t.target_id=$2 AND t.state='READY' AND t.lease_owner=$4 AND t.fencing_version=$5 AND t.lease_until > clock_timestamp())`,
+      `UPDATE byai.byai_group_chat_forward_item SET bound_message_id=$6, attachments_json=$7 WHERE enterprise_id=$1 AND target_id=$2 AND item_id=$3 AND bound_message_id IS NULL AND EXISTS (SELECT 1 FROM byai.byai_group_chat_forward_target t WHERE t.enterprise_id=$1 AND t.target_id=$2 AND t.state='READY' AND t.lease_owner=$4 AND t.fencing_version=$5 AND t.lease_until > clock_timestamp())`,
       [this.tenantId, targetId, itemId, owner, version, messageId, attachmentsJson],
     );
   }
   /** Uses only the persisted live lease and database clock; caller-provided leaseUntil is not authority. */
   async renewTarget(lease: TargetLease, leaseDurationMs: number): Promise<ForwardTargetRow> {
     this.checkLeaseInput(lease.actor.enterpriseId, leaseDurationMs);
+    await this.lockTarget(lease.targetId);
     return this.fenced(
       `UPDATE byai.byai_group_chat_forward_target
        SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST($9 AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
-       WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$3 FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=$1 AND request_id=$2 AND target_id=$3 AND target_session_id=$4
+       WHERE enterprise_id=$1 AND request_id=$2 AND target_id=$3 AND target_session_id=$4
          AND lease_owner=$5 AND fencing_version=$6 AND state IN ('COPYING','READY') AND lease_until > clock_timestamp()
          AND $9 > 0 AND EXISTS (SELECT 1 FROM byai.byai_group_chat_forward_request r
-           WHERE r.enterprise_id=$1 AND r.request_id=$2 AND r.actor_user_id=$7 AND r.source_session_id=$8 AND r.state='RUNNING'))`,
+           WHERE r.enterprise_id=$1 AND r.request_id=$2 AND r.actor_user_id=$7 AND r.source_session_id=$8 AND r.state='RUNNING')`,
       [
         this.tenantId,
         lease.requestId,
@@ -375,13 +364,12 @@ export class GroupForwardRepository {
   }
   async renewRequest(lease: RequestLease, leaseDurationMs: number): Promise<ForwardRequestRow> {
     this.checkLeaseInput(lease.actor.enterpriseId, leaseDurationMs);
+    await this.lockRequest(lease.requestId);
     const [row] = await this.rows<ForwardRequestRow>(
       `UPDATE byai.byai_group_chat_forward_request
        SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST($6 AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
-       WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request WHERE enterprise_id=$1 AND request_id=$2 FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=$1 AND request_id=$2 AND actor_user_id=$3 AND lease_owner=$4 AND fencing_version=$5
-         AND state='RUNNING' AND sources_frozen=FALSE AND lease_until > clock_timestamp() AND $6 > 0) RETURNING *`,
+       WHERE enterprise_id=$1 AND request_id=$2 AND actor_user_id=$3 AND lease_owner=$4 AND fencing_version=$5
+         AND state='RUNNING' AND sources_frozen=FALSE AND lease_until > clock_timestamp() AND $6 > 0 RETURNING *`,
       [
         this.tenantId,
         lease.requestId,
@@ -394,12 +382,12 @@ export class GroupForwardRepository {
     if (!row) throw new DomainError("FORWARD_LEASE_LOST");
     return row;
   }
-  /** High-level operations acquire the request before any target to serialize admission and aggregate state. */
+  /** 写事务内先串行处理请求再处理目标；同值更新不消耗 fencing_version，持有至事务结束。 */
   async lockRequest(requestId: string): Promise<ForwardRequestRow | null> {
     return (
       (
         await this.rows<ForwardRequestRow>(
-          `SELECT * FROM byai.byai_group_chat_forward_request WHERE enterprise_id=$1 AND request_id=$2 FOR UPDATE`,
+          `UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=$1 AND request_id=$2 RETURNING *`,
           [this.tenantId, requestId],
         )
       )[0] ?? null
@@ -409,7 +397,7 @@ export class GroupForwardRepository {
     return (
       (
         await this.rows<ForwardTargetRow>(
-          `SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2 FOR UPDATE`,
+          `UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=$1 AND target_id=$2 RETURNING *`,
           [this.tenantId, targetId],
         )
       )[0] ?? null

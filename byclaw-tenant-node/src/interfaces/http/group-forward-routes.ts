@@ -122,13 +122,30 @@ export function groupForwardRoutes(
     },
   );
 
-  app.post(base, async (req: any, reply) =>
-    reply
-      .code(202)
-      .send(
-        await service.prepare(actor(req), requireId(req.params.sourceId), normalizeInput(req.body)),
-      ),
-  );
+  // Preparation is durable before fast completion; transport/SQL uncertainty remains recoverable by request ID.
+  const complete = async (
+    req: any,
+    source: string,
+    operation: Awaited<ReturnType<GroupForwardService["prepare"]>>,
+  ) => {
+    if (operation.state !== "RUNNING") return operation;
+    try {
+      return await service.completeText(actor(req), source, operation.requestId);
+    } catch {
+      req.log.warn({ requestId: operation.requestId }, "Forward text completion deferred");
+      return operation;
+    }
+  };
+  app.post(base, async (req: any, reply) => {
+    const source = requireId(req.params.sourceId);
+    const operation = await service.prepare(actor(req), source, normalizeInput(req.body));
+    return reply.code(202).send(await complete(req, source, operation));
+  });
+  app.post(`${base}/:requestId/complete-text`, async (req: any) => {
+    object(req.body, []);
+    const p = path(req);
+    return service.completeText(actor(req), p.source, p.request);
+  });
   app.get(`${base}/:requestId`, async (req: any) => {
     const p = path(req);
     return service.status(actor(req), p.source, p.request);
@@ -146,13 +163,18 @@ export function groupForwardRoutes(
     )
       invalid();
     const p = path(req);
-    return service.retry(actor(req), p.source, p.request, b.targetSessionIds.map(requireId));
+    return complete(
+      req,
+      p.source,
+      await service.retry(actor(req), p.source, p.request, b.targetSessionIds.map(requireId)),
+    );
   });
   app.get("/internal/v1/forward-work", async (req: any) => {
-    const q = object(req.query, ["limit", "afterTargetId"]);
+    const q = object(req.query, ["limit", "afterTargetId", "requestId"]);
     return service.discoverWork(
       q.afterTargetId === undefined ? null : requireId(q.afterTargetId),
       q.limit === undefined ? 20 : Number(q.limit),
+      q.requestId === undefined ? undefined : requireId(q.requestId),
     );
   });
   app.get("/internal/v1/forward-work/:requestId/targets/:targetId/binding", async (req: any) =>

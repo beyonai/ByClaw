@@ -10,8 +10,10 @@ public interface GroupChatForwardStore extends AttachmentCheckpointWriter {
     CommitResult commit(TargetLease lease);
     void failTarget(TargetLease lease,String code,boolean retryable);
     void failRequest(RequestLease lease,String code,boolean retryable);
+    ForwardOperation completeText(ForwardActor actor,long sourceId,long requestId);
     ForwardOperation prepare(ForwardActor actor,long sourceId,ForwardInput input);
     WorkPage discoverWork(long enterpriseId,String afterTargetId,int limit);
+    WorkPage discoverRequestWork(ForwardOperationLocator locator);
     TargetIdentity inspectTarget(ForwardOperationLocator locator,long targetId);
     OperationBinding inspect(ForwardOperationLocator locator);
     RequestLease claimRequest(ForwardOperationLocator locator,String owner,Duration duration);

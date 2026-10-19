@@ -304,6 +304,7 @@ export interface ForwardWork {
 }
 
 export interface WorkCandidate {
+  deliveryOnly?: boolean;
   locator: ForwardOperationLocator;
   targetId: string;
   sourcesFrozen: boolean;

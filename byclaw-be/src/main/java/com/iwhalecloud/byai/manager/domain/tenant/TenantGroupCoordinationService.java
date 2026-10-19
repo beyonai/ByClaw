@@ -39,6 +39,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TenantGroupCoordinationService implements ChatGatewayRequestDecorator {
     @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageDisplayService messageDisplayService;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
 
     private final TenantNodeClient node;
@@ -265,7 +267,9 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         Map<String, Object> raw = node.request(context.tenantContext, "POST", "/internal/v1/group-chats/" + groupId + "/context",
             Map.of("beforeMessageId", boundary, "maxMessages", 60, "maxCharacters", 30000, "agentContext", true),
             new TypeReference<Map<String, Object>>() { });
-        GroupChatContextResponse snapshot = historyMapper.convertValue(raw, GroupChatContextResponse.class);
+        // 内部上下文读取不经过公开接口切面，必须在 DTO 丢弃 creatorId 前补齐平台用户名。
+        GroupChatContextResponse snapshot = historyMapper.convertValue(
+            messageDisplayService == null ? raw : messageDisplayService.resolve(raw), GroupChatContextResponse.class);
         GroupChatContextRequest request = new GroupChatContextRequest();
         request.setConversationKey(groupId);
         request.setBeforeMessageId(boundary);

@@ -31,7 +31,14 @@ class ForwardSourceAuthorityReaderTest {
         when(messages.selectByMessageId(31L)).thenReturn(message);when(sources.items(1,30,31)).thenReturn(List.of());
         var source=reader.readMessage(new ForwardActor(20,1),30,31);
         assertThat(source.authority().sourceSessionId()).isEqualTo(30);assertThat(source.speaker().id()).isEqualTo("21");
+        message.setEnterpriseId(null);
+        assertThat(reader.readMessage(new ForwardActor(20,1),30,31).id()).isEqualTo(31);
         message.setEnterpriseId(2L);
+        assertThat(reader.readMessage(new ForwardActor(20,1),30,31).id()).isEqualTo(31);
+        // 消息的历史企业字段可忽略，跨群消息和跨租户群聊仍不可访问。
+        message.setSessionId(32L);
+        assertThatThrownBy(() -> reader.readMessage(new ForwardActor(20,1),30,31)).hasMessage("RESOURCE_NOT_ACCESSIBLE");
+        message.setSessionId(30L);group.setEnterpriseId(2L);
         assertThatThrownBy(() -> reader.readMessage(new ForwardActor(20,1),30,31)).hasMessage("RESOURCE_NOT_ACCESSIBLE");
     }
     @Test void nodeFailureNeverReadsSharedMessageStore() {

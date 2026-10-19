@@ -48,6 +48,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 /** Actual PG connections and production final publisher/recall/remove services; no H2 concurrency claim. */
 @EnabledIfEnvironmentVariable(named="FORWARD_TEST_PG",matches=".+")
 class GroupChatForwardDatabaseIntegrationTest {
+    org.springframework.context.MessageSource originalMessages;
+    @BeforeEach void initializeMessages() {
+        originalMessages=(org.springframework.context.MessageSource)ReflectionTestUtils.getField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource");
+        var messages=new org.springframework.context.support.StaticMessageSource();messages.setUseCodeAsDefaultMessage(true);
+        ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource",messages);
+    }
+    @AfterEach void restoreMessages() {
+        ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource",originalMessages);
+    }
     DriverManagerDataSource ds;JdbcTemplate db;DataSourceTransactionManager manager;
     LegacyGroupChatForwardStore store;ByaiGroupChatForwardMapper rows;
     GroupChatForwardCommitService commits;GroupChatMessageRecallService recalls;GroupChatApplicationService groups;
@@ -90,7 +99,36 @@ class GroupChatForwardDatabaseIntegrationTest {
     TargetLease ready(){return ready(10,20,List.of(101L,102L),"key");}
     void mutate(String kind){var login=new LoginInfo();login.setUserId("recall".equals(kind)?30L:31L);login.setEnterpriseId(1L);CurrentUserHolder.setLoginInfo(login);try{if("recall".equals(kind))recalls.recall(10L,101L);else groups.remove(10L,"USER",30L);}finally{CurrentUserHolder.clearLoginInfo();}}
     void await(java.util.function.BooleanSupplier condition)throws Exception{long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(4);while(!condition.getAsBoolean()&&System.nanoTime()<until)Thread.sleep(10);assertThat(condition.getAsBoolean()).isTrue();}
+    @Test void textFastPathsInOppositeDirectionsCommitWithRealTransactions() throws Exception {
+        @SuppressWarnings("unchecked") var provider=(org.springframework.beans.factory.ObjectProvider<GroupChatForwardCommitService>)mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(provider.getObject()).thenReturn(commits);ReflectionTestUtils.setField(store,"commits",provider);
+        var a=store.prepare(actor,10,new ForwardInput("text-left",ForwardMode.SINGLE,List.of(101L),List.of(20L)));
+        var b=store.prepare(actor,20,new ForwardInput("text-right",ForwardMode.SINGLE,List.of(201L),List.of(10L)));
+        var start=new CountDownLatch(1);
+        try(var workers=Executors.newFixedThreadPool(2)) {
+            var left=workers.submit(()->{start.await();return store.completeText(actor,10,a.requestId());});
+            var right=workers.submit(()->{start.await();return store.completeText(actor,20,b.requestId());});
+            start.countDown();
+            assertThat(left.get(5,TimeUnit.SECONDS).state()).isEqualTo(ForwardOperationState.SUCCEEDED);
+            assertThat(right.get(5,TimeUnit.SECONDS).state()).isEqualTo(ForwardOperationState.SUCCEEDED);
+        }
+        assertThat(store.completeText(actor,10,a.requestId()).targets().getFirst().messageIds()).hasSize(1);
+        assertThat(db.queryForObject("SELECT count(*) FROM byai.byai_message",Integer.class)).isEqualTo(5);
+    }
     @Test void oppositeDirectionsBothCommitWithoutDeadlock()throws Exception{var a=ready();var b=ready(20,10,List.of(201L),"reverse");try(var workers=Executors.newFixedThreadPool(2)){var left=workers.submit(()->commits.commit(a));var right=workers.submit(()->commits.commit(b));assertThat(left.get(5,TimeUnit.SECONDS).messageIds()).hasSize(2);assertThat(right.get(5,TimeUnit.SECONDS).messageIds()).hasSize(1);}}
+    @Test void concurrentSameLeasePublishesOnlyOnce()throws Exception{
+        var lease=ready();var start=new CountDownLatch(1);
+        try(var workers=Executors.newFixedThreadPool(2)){
+            var left=workers.submit(()->{start.await();return commits.commit(lease);});
+            var right=workers.submit(()->{start.await();return commits.commit(lease);});
+            start.countDown();
+            var result=left.get(5,TimeUnit.SECONDS);
+            assertThat(right.get(5,TimeUnit.SECONDS)).isEqualTo(result);
+            assertThat(result.messageIds()).hasSize(2);
+        }
+        assertThat(rows.items(1L,lease.targetId())).allMatch(item->item.getBoundMessageId()!=null);
+        assertThat(db.queryForObject("SELECT count(*) FROM byai.byai_message WHERE session_id=20 AND usage=1",Integer.class)).isEqualTo(3);
+    }
     @ParameterizedTest @ValueSource(strings={"recall","remove"}) void actualLifecycleWriterWaitsAfterFinalValidation(String kind)throws Exception{
         var lease=ready();var reached=new CountDownLatch(1);var release=new CountDownLatch(1);var pid=new AtomicInteger();
         beforePublish.set(()->{pid.set(db.queryForObject("SELECT pg_backend_pid()",Integer.class));reached.countDown();try{assertThat(release.await(5,TimeUnit.SECONDS)).isTrue();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}});
@@ -99,7 +137,7 @@ class GroupChatForwardDatabaseIntegrationTest {
     }
     @ParameterizedTest @ValueSource(strings={"recall","remove"}) void lifecycleWriterWinningFirstPreventsPublication(String kind){var lease=ready();mutate(kind);assertThatThrownBy(()->commits.commit(lease)).hasMessage("RESOURCE_NOT_ACCESSIBLE");assertThat(rows.target(1L,lease.targetId()).getState()).isEqualTo("READY");}
     @Test void groupLockWaitCannotExtendExpiredLease()throws Exception{
-        var lease=ready();try(Connection blocker=ds.getConnection();var workers=Executors.newSingleThreadExecutor()){blocker.setAutoCommit(false);try(var statement=blocker.createStatement()){statement.execute("SELECT session_id FROM byai.byai_session WHERE session_id=10 FOR UPDATE");}
+        var lease=ready();try(Connection blocker=ds.getConnection();var workers=Executors.newSingleThreadExecutor()){blocker.setAutoCommit(false);try(var statement=blocker.createStatement()){statement.execute("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=10");}
             db.update("UPDATE byai.byai_group_chat_forward_target SET lease_until=clock_timestamp()+interval '300 milliseconds' WHERE target_id=?",lease.targetId());var pending=workers.submit(()->commits.commit(lease));
             await(()->db.queryForObject("SELECT lease_until<clock_timestamp() FROM byai.byai_group_chat_forward_target WHERE target_id=?",Boolean.class,lease.targetId()));blocker.rollback();assertThatThrownBy(()->pending.get(5,TimeUnit.SECONDS)).hasRootCauseMessage("FORWARD_LEASE_LOST");}
         assertThat(rows.target(1L,lease.targetId()).getMessageIdsJson()).isEqualTo("[]");

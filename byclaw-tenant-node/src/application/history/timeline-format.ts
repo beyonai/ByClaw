@@ -20,6 +20,25 @@ export async function displayMessages(
       : []
     ).map((r) => [r.messageId, r]),
   );
+  // 群昵称属于消息所在群，不能使用发送时保存的 creatorName 或转发内部的发言人快照。
+  const userSessions = [
+    ...new Set([...rows, ...byId.values()].filter((r) => r.usage === 1).map((r) => r.sessionId)),
+  ].filter(Boolean);
+  const nicknames = new Map(
+    await Promise.all(
+      userSessions.map(
+        async (sessionId) =>
+          [
+            sessionId,
+            new Map(
+              (await repository.members(sessionId))
+                .filter((m) => m.memObjType === "USER" && m.memName?.trim())
+                .map((m) => [String(m.memObjId), m.memName]),
+            ),
+          ] as const,
+      ),
+    ),
+  );
   const tasks = new Map(
     (rows.length ? await repository.tasks(rows[0]!.sessionId) : []).map((r) => [
       r.taskSessionId,
@@ -87,7 +106,13 @@ export async function displayMessages(
       sourceMessageId: passive ? undefined : row.messageRef,
       speaker: {
         type: row.usage === 1 ? "user" : row.usage === 5 ? "system" : "agent",
-        displayName: row.usage === 5 ? "系统" : row.creatorName,
+        // Node 不持有平台用户资料；缺少群昵称时由 BE 按 creatorId 补齐当前 userName。
+        displayName:
+          row.usage === 1
+            ? (nicknames.get(row.sessionId)?.get(String(row.creatorId)) ?? null)
+            : row.usage === 5
+              ? "系统"
+              : row.creatorName,
         userCode: row.usage === 1 ? row.creatorId : undefined,
         agentId,
         agentName: row.usage === 2 ? row.creatorName || "Assistant" : undefined,

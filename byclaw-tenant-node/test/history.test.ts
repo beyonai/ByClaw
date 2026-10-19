@@ -43,6 +43,67 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("reads current target-group nicknames for old forwards without changing source snapshots", async () => {
+    const { service, repo } = setup();
+    const sender = "9007199254740993";
+    const source = message({
+      creatorId: sender,
+      creatorName: sender,
+      metadata: {
+        kind: "FORWARD_MERGED",
+        forward: {
+          forwardId: "900",
+          mode: "MERGED",
+          resourceMode: "SNAPSHOT_ONLY",
+          itemCount: 1,
+          preview: [{ speakerName: "原发言人快照", content: "原文" }],
+        },
+      },
+    });
+    vi.mocked(repo.messages).mockResolvedValue([source]);
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: sender, memName: "当前群昵称" },
+      { memObjType: "AGENT", memObjId: sender, memName: "同 ID 员工" },
+    ]);
+
+    const first = await service.context("20", "30", "101", 60, 30000);
+
+    expect(first.messages[0]?.speaker).toMatchObject({
+      type: "user",
+      userCode: sender,
+      displayName: "当前群昵称",
+    });
+    expect(first.messages[0]?.forward.preview[0].speakerName).toBe("原发言人快照");
+    expect(source.creatorName).toBe(sender);
+    expect(repo.members).toHaveBeenCalledExactlyOnceWith("30");
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: sender, memName: "修改后的昵称" },
+    ]);
+    const next = await service.context("20", "30", "101", 60, 30000);
+    expect(next.messages[0]?.speaker.displayName).toBe("修改后的昵称");
+  });
+  it("leaves missing and blank nicknames for BE userName resolution, including quoted users", async () => {
+    const { repo } = setup();
+    const quoted = message({ creatorId: "21", creatorName: "21" });
+    vi.mocked(repo.messages).mockResolvedValue([quoted]);
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: "20", memName: " \t" },
+      { memObjType: "USER", memObjId: "21", memName: "引用人群昵称" },
+    ]);
+    const result = await displayMessages(repo, [
+      message({ messageId: "101", creatorId: "20", creatorName: "过期用户名", messageRef: "100" }),
+      message({ messageId: "102", creatorId: "22", creatorName: "22" }),
+      message({ messageId: "103", usage: 2, creatorId: "20", creatorName: "员工名称" }),
+      message({ messageId: "104", usage: 5, creatorId: "20" }),
+    ]);
+
+    expect(result[0]?.speaker.displayName).toBeNull();
+    expect(result[0]?.replyTo.speaker.displayName).toBe("引用人群昵称");
+    expect(result[1]?.speaker.displayName).toBeNull();
+    expect(result[2]?.speaker.agentName).toBe("员工名称");
+    expect(result[3]?.speaker.displayName).toBe("系统");
+    expect(repo.members).toHaveBeenCalledExactlyOnceWith("30");
+  });
   it("validates project IDs before reading tenant group membership", async () => {
     const { repo, service } = setup();
     await expect(service.groupProjectAccess("21", "50")).resolves.toEqual({

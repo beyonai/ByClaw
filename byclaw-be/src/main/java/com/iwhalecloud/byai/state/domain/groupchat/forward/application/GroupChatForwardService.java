@@ -16,6 +16,9 @@ import java.util.concurrent.*;
 /** Remote source reads and ordinary uploads run outside transactions; stores own each short durable transition. */
 @Service
 public class GroupChatForwardService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<GroupChatForwardRecoveryService> recovery;
+    private static final org.slf4j.Logger LOG=org.slf4j.LoggerFactory.getLogger(GroupChatForwardService.class);
     private final LegacyGroupChatForwardStore legacy;
     private final TenantGroupForwardService tenant;
     private final GroupChatForwardExecutionContextService contexts;
@@ -53,13 +56,52 @@ public class GroupChatForwardService {
     public ForwardOperation create(ForwardActor actor,long source,ForwardInput input) {
         var store=interactive(actor);
         policy.requireNewWork(actor,store==tenant?ForwardBackend.TENANT:ForwardBackend.LEGACY);
-        return store.prepare(actor,source,input);
+        var operation=store.prepare(actor,source,input);
+        if(store==legacy&&operation.state()==ForwardOperationState.RUNNING
+            &&!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            try { operation=store.completeText(actor,source,operation.requestId()); }
+            catch(RuntimeException failure) {
+                // Preparation is durable; an unknown completion outcome is recovered from the same receipt.
+                LOG.warn("Forward text completion deferred, request={}, code={}",operation.requestId(),GroupChatForwardRecoveryService.errorCode(failure));
+            }
+        }
+        dispatchAfterCommit(store,actor,operation);
+        return operation;
     }
     public ForwardOperation status(ForwardActor actor,long source,long request) {
         return interactive(actor).status(actor,source,request);
     }
     public ForwardOperation retry(ForwardActor actor,long source,long request,Set<Long> targets) {
-        return interactive(actor).retry(actor,source,request,targets);
+        var store=interactive(actor);
+        var operation=store.retry(actor,source,request,targets);
+        if(store==legacy&&operation.state()==ForwardOperationState.RUNNING
+            &&!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            try { operation=store.completeText(actor,source,operation.requestId()); }
+            catch(RuntimeException failure) {
+                // Preparation is durable; an unknown completion outcome is recovered from the same receipt.
+                LOG.warn("Forward text completion deferred, request={}, code={}",operation.requestId(),GroupChatForwardRecoveryService.errorCode(failure));
+            }
+        }
+        dispatchAfterCommit(store,actor,operation);
+        return operation;
+    }
+    private void dispatchAfterCommit(GroupChatForwardStore store,ForwardActor actor,ForwardOperation operation) {
+        if(recovery==null)return;
+        var locator=new ForwardOperationLocator(actor.enterpriseId(),operation.requestId(),store==tenant?ForwardBackend.TENANT:ForwardBackend.LEGACY);
+        Runnable dispatch=()->{
+            try{
+                if(operation.state()==ForwardOperationState.RUNNING)recovery.getObject().submitRequest(locator);
+                if(operation.targets().stream().anyMatch(t->t.state()==ForwardState.SUCCEEDED))recovery.getObject().submitDeliveryRequest(locator);
+            }
+            catch(RuntimeException failure){LOG.warn("Forward post-commit dispatch deferred, backend={}, enterprise={}, request={}",locator.backend(),locator.enterpriseId(),locator.requestId());}
+        };
+        // store 无外层事务时已完成提交；存在外层写事务时必须等待真正提交，回滚不投递。
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+            &&org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()){
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){
+                @Override public void afterCommit(){dispatch.run();}
+            });
+        }else dispatch.run();
     }
     public ClaimedWork claimWork(ForwardBackend backend,long enterprise,String after,int limit,Duration duration) {
         var store=backend==ForwardBackend.LEGACY?legacy:tenant;

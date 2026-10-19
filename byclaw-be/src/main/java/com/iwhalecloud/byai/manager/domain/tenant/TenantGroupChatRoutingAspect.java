@@ -29,6 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 public class TenantGroupChatRoutingAspect {
     @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageDisplayService messageDisplayService;
+    @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupMessageAckService messageAckService;
     @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupManagementService management;
@@ -176,13 +178,13 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private Object read(TenantRequestContext context, String path) {
-        return ResponseUtil.successResponse(node.request(context, "GET", path, null,
-            new TypeReference<Object>() { }));
+        Object response = node.request(context, "GET", path, null, new TypeReference<Object>() { });
+        return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
     private Object write(TenantRequestContext context, String path, Object body) {
-        return ResponseUtil.successResponse(node.request(context, "POST", path, body,
-            new TypeReference<Object>() { }));
+        Object response = node.request(context, "POST", path, body, new TypeReference<Object>() { });
+        return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
     private String requirePath(String path) {

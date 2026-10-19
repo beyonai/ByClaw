@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +35,9 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
+import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
@@ -76,6 +80,103 @@ class GroupChatContextServiceTest extends I18nTestSupport {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void timelineResolvesCurrentGroupNicknamesAndUserNamesForExistingForwards() {
+        SessionMemberService members = mock(SessionMemberService.class);
+        UserService users = mock(UserService.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, members, null);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ByaiSession session = new ByaiSession();
+        session.setSessionId(3L);
+        when(sessionService.findById(3L)).thenReturn(session);
+        when(members.findSessionMember(3L, "USER", 100L)).thenReturn(new ByaiSessionMember());
+        ByaiSessionMember nickname = member(200L, "当前群昵称");
+        ByaiSessionMember blankNickname = member(300L, " \t");
+        when(members.findSessionMembers(3L, "USER", null)).thenReturn(List.of(nickname, blankNickname));
+        Users user = new Users();
+        user.setUserId(300L);
+        user.setUserName("当前用户名");
+        Users formerMember = new Users();
+        formerMember.setUserId(400L);
+        formerMember.setUserName("已退群用户");
+        when(users.findByIds(anyCollection())).thenReturn(List.of(user, formerMember));
+        ByaiMessage forwarded = message(10L, 1, "聊天记录（1 条）", 200L);
+        forwarded.setCreatorId(200L);
+        forwarded.setCreatorName("200");
+        forwarded.setMetadata("""
+            {"kind":"FORWARD_MERGED","forward":{"forwardId":"900","mode":"MERGED",
+            "resourceMode":"SNAPSHOT_ONLY","itemCount":1,
+            "preview":[{"speakerName":"原发言人快照","content":"原文"}]}}
+            """);
+        ByaiMessage fallback = message(20L, 1, "普通消息", 300L);
+        fallback.setCreatorId(300L);
+        fallback.setCreatorName("过期名称");
+        ByaiMessage departed = message(30L, 1, "退群前消息", 400L);
+        departed.setCreatorId(400L);
+        departed.setCreatorName("400");
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 40L, 60))
+            .thenReturn(List.of(departed, fallback, forwarded));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("40");
+
+        var first = service.loadTimeline(request).getMessages();
+
+        assertThat(first).extracting(item -> item.getSpeaker().getDisplayName())
+            .containsExactly("当前群昵称", "当前用户名", "已退群用户");
+        assertThat(new ObjectMapper().valueToTree(first.get(0)).path("forward").path("preview").get(0)
+            .path("speakerName").asText()).isEqualTo("原发言人快照");
+        assertThat(forwarded.getCreatorName()).isEqualTo("200");
+        assertThat(fallback.getCreatorName()).isEqualTo("过期名称");
+        verify(members).findSessionMembers(3L, "USER", null);
+        verify(users).findByIds(anyCollection());
+
+        nickname.setMemName("修改后的群昵称");
+        user.setUserName("修改后的用户名");
+        assertThat(service.loadTimeline(request).getMessages()).extracting(item -> item.getSpeaker().getDisplayName())
+            .containsExactly("修改后的群昵称", "修改后的用户名", "已退群用户");
+    }
+
+    @Test
+    void quotedUserUsesItsOwnCurrentNameWithoutChangingAgentOrSystemSpeakers() {
+        SessionMemberService members = mock(SessionMemberService.class);
+        UserService users = mock(UserService.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, members, null);
+        ReflectionTestUtils.setField(service, "userService", users);
+        when(members.findSessionMembers(3L, "USER", null)).thenReturn(List.of(member(200L, "引用人群昵称")));
+        Users sender = new Users();
+        sender.setUserId(100L);
+        sender.setUserName("当前发送人用户名");
+        when(users.findByIds(anyCollection())).thenReturn(List.of(sender));
+        ByaiMessage quoted = message(10L, 1, "原消息", 200L);
+        quoted.setCreatorId(200L);
+        quoted.setCreatorName("200");
+        ByaiMessage reply = message(20L, 1, "回复", 100L);
+        reply.setCreatorId(100L);
+        reply.setMessageRef(10L);
+        ByaiMessage agent = message(30L, 2, "员工回复", 200L);
+        agent.setCreatorName("员工名称");
+        ByaiMessage event = message(40L, 5, "系统事件", 200L);
+        var result = service.toMessages(List.of(reply, agent, event), Map.of(10L, quoted));
+
+        assertThat(result.get(0).getSpeaker().getDisplayName()).isEqualTo("当前发送人用户名");
+        assertThat(result.get(0).getReplyTo().getSpeaker().getDisplayName()).isEqualTo("引用人群昵称");
+        assertThat(result.get(1).getSpeaker().getAgentName()).isEqualTo("员工名称");
+        assertThat(result.get(2).getSpeaker().getDisplayName()).isEqualTo("System");
+        verify(members).findSessionMembers(3L, "USER", null);
+        verify(users).findByIds(anyCollection());
+        verify(messageMapper, never()).selectByMessageId(10L);
+    }
+
+    private ByaiSessionMember member(Long userId, String nickname) {
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setSessionId(3L);
+        member.setMemObjId(userId);
+        member.setMemObjType("USER");
+        member.setMemName(nickname);
+        return member;
     }
 
     @Test

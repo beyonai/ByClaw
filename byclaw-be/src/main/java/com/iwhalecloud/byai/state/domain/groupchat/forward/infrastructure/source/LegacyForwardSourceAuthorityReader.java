@@ -49,7 +49,8 @@ public class LegacyForwardSourceAuthorityReader implements ForwardSourceAuthorit
     }
     @Override public SourceMessage readMessage(ForwardActor actor, long sourceId, long selectedId) {
         var session = session(actor, sourceId, true); var message = messages.selectByMessageId(selectedId);
-        if (message == null || !Objects.equals(message.getSessionId(), sourceId) || !Objects.equals(message.getEnterpriseId(), actor.enterpriseId())
+        // 群租户与成员权限已校验；历史消息的企业字段不作为归属依据，与消息列表保持一致。
+        if (message == null || !Objects.equals(message.getSessionId(), sourceId)
             || message.isRecalled() || message.getArchivedAt() != null || !Set.of(1,2).contains(message.getUsage())) throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
         var metadata = map(message.getMetadata()); var related = map(message.getRelatedResources());
         List<Map<String,Object>> publicationFiles = List.of();

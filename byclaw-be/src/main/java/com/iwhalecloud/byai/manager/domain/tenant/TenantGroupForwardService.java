@@ -61,6 +61,10 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         }
         );
     }
+    @Override public WorkPage discoverRequestWork(ForwardOperationLocator locator) {
+        if(locator.backend()!=ForwardBackend.TENANT)throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
+        return forwarding(() -> node.serviceRequest(locator.enterpriseId(),"GET","/internal/v1/forward-work?limit=20&requestId="+locator.requestId(),null,new TypeReference<WorkPage>(){}));
+    }
     @Override public TargetIdentity inspectTarget(ForwardOperationLocator locator,long target) {
         inspect(locator);
         return forwarding(() -> node.serviceRequest(locator.enterpriseId(),"GET","/internal/v1/forward-work/"+locator.requestId()+"/targets/"+target+"/binding",null,new TypeReference<TargetIdentity>() {
@@ -79,6 +83,9 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         return call(actor,"POST","/internal/v1/group-chats/"+source+"/forward-requests",input,new TypeReference<ForwardOperation>() {
         }
         );
+    }
+    @Override public ForwardOperation completeText(ForwardActor actor,long source,long request) {
+        return call(actor,"POST",path(source,request)+"/complete-text",Map.of(),new TypeReference<ForwardOperation>(){});
     }
     @Override public ForwardOperation status(ForwardActor actor,long source,long request) {
         return node.request(new TenantRequestContext(actor.userId(),actor.enterpriseId(),null),"GET",path(source,request),null,new TypeReference<ForwardOperation>() {
@@ -107,10 +114,6 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         if(!binding.actor().equals(lease.actor()))throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
         return binding;
     }
-    private void bound(TargetLease lease) {
-        var binding=inspect(new ForwardOperationLocator(lease.actor().enterpriseId(),lease.requestId(),ForwardBackend.TENANT));
-        if(!binding.actor().equals(lease.actor())||binding.sourceSessionId()!=lease.sourceSessionId())throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
-    }
     @Override public RequestLease renewRequest(RequestLease lease,Duration duration) {
         var b=bound(lease);
         return call(b.actor(),"PATCH",path(b.sourceSessionId(),lease.requestId())+"/lease",new Renew<>(lease,duration.toMillis()),new TypeReference<RequestLease>() {
@@ -118,7 +121,7 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         );
     }
     @Override public TargetLease renewTarget(TargetLease lease,Duration duration) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         return call(lease.actor(),"PATCH",path(lease)+"/lease",new Renew<>(lease,duration.toMillis()),new TypeReference<TargetLease>() {
         }
         );
@@ -131,7 +134,7 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         );
     }
     @Override public TargetLease checkpointAttachment(TargetLease lease,long version,AttachmentCheckpointPatch patch) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         return call(lease.actor(),"PATCH",path(lease)+"/attachments/"+patch.object().attachmentId(),new Patch(lease,version,patch),new TypeReference<TargetLease>() {
         }
         );
@@ -143,12 +146,12 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         node.serviceRequest(lease.actor().enterpriseId(),"POST","/internal/v1/forward-maintenance/request-failure",Map.of("lease",lease,"code",code,"retryable",retryable),new TypeReference<JsonNode>(){});
     }
     @Override public CommitResult commit(TargetLease lease) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         // Unknown transport outcomes propagate; the caller retries this stable target receipt, never a new batch.
         return call(lease.actor(), "POST", path(lease)+"/commit", new LeaseBody<>(lease), new TypeReference<CommitResult>() { });
     }
     @Override public TargetLease markReady(TargetLease lease) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         return call(lease.actor(),"POST",path(lease)+"/ready",new LeaseBody<>(lease),new TypeReference<TargetLease>() {
         }
         );
@@ -160,7 +163,7 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         );
     }
     @Override public ForwardWork targetWork(TargetLease lease) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         return call(lease.actor(),"POST",path(lease)+"/work",new LeaseBody<>(lease),new TypeReference<ForwardWork>() {
         }
         );
@@ -173,7 +176,7 @@ public class TenantGroupForwardService implements GroupChatForwardStore {
         return ForwardSourceProjection.fromNode(result,b.actor());
     }
     @Override public SourceMessage source(TargetLease lease,long selected) {
-        bound(lease);
+        // The owning Node route and transaction validate the complete target lease binding.
         var result=call(lease.actor(),"POST",path(lease)+"/sources/"+selected,new LeaseBody<>(lease),new TypeReference<JsonNode>() {
         }
         );

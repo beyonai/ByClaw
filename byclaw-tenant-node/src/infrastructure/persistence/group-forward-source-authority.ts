@@ -146,9 +146,10 @@ export class SqlForwardSourceAuthorityReader {
   ): Promise<SourceMessage> {
     requireId(selectedMessageId);
     const session = await this.session(actor, sourceSessionId, true);
+    // 租户及成员权限取自所属群，兼容消息企业字段为空或保留旧值的历史记录。
     const [message] = await this.rows(
-      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND session_id=$2 AND enterprise_id=$3",
-      [selectedMessageId, sourceSessionId, this.tenantId],
+      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND session_id=$2",
+      [selectedMessageId, sourceSessionId],
     );
     if (
       !message ||

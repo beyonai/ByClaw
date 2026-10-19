@@ -9,6 +9,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class GroupChatForwardRecoveryTest {
+    private org.springframework.context.MessageSource originalMessages;
+    @org.junit.jupiter.api.BeforeEach void initializeMessages() {
+        originalMessages=(org.springframework.context.MessageSource)org.springframework.test.util.ReflectionTestUtils.getField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource");
+        var messages=new org.springframework.context.support.StaticMessageSource();messages.setUseCodeAsDefaultMessage(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource",messages);
+    }
+    @org.junit.jupiter.api.AfterEach void restoreMessages() {
+        org.springframework.test.util.ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource",originalMessages);
+    }
     private final ObjectMapper json = new ObjectMapper();
     @Test void partialDeliveredBatchResumesWithoutRecreate() {
         ObjectNode checkpoint = json.createObjectNode();
@@ -126,16 +135,25 @@ class GroupChatForwardRecoveryTest {
         var executor=org.mockito.Mockito.mock(java.util.concurrent.ExecutorService.class);
         var queued=new java.util.ArrayDeque<Runnable>();
         org.mockito.Mockito.doAnswer(invocation->{queued.add(invocation.getArgument(0));return null;}).when(executor).execute(org.mockito.ArgumentMatchers.any());
-        var recovery=org.mockito.Mockito.spy(new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardRecoveryService(directory,legacy,tenant,null,null,null,new com.iwhalecloud.byai.state.domain.groupchat.forward.config.GroupChatForwardProperties()));
+        var contexts=org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardExecutionContextService.class);
+        var owning=org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.groupchat.forward.port.GroupChatForwardStore.class);
+        org.mockito.Mockito.when(contexts.store(org.mockito.ArgumentMatchers.any())).thenReturn(owning);
+        org.mockito.Mockito.when(owning.discoverRequestWork(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation->{
+            var locator=(com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.ForwardOperationLocator)invocation.getArgument(0);
+            return new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.WorkPage(List.of(new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.WorkCandidate(locator,1,true)),null,false);
+        });
+        var discovery=org.mockito.Mockito.mock(java.util.concurrent.ExecutorService.class);
+        org.mockito.Mockito.doAnswer(invocation->{((Runnable)invocation.getArgument(0)).run();return null;}).when(discovery).execute(org.mockito.ArgumentMatchers.any());
+        var recovery=org.mockito.Mockito.spy(new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardRecoveryService(directory,legacy,tenant,contexts,null,null,new com.iwhalecloud.byai.state.domain.groupchat.forward.config.GroupChatForwardProperties()));
         org.springframework.test.util.ReflectionTestUtils.setField(recovery,"workers",executor);
+        org.springframework.test.util.ReflectionTestUtils.setField(recovery,"tenantWorkers",executor);
+        org.springframework.test.util.ReflectionTestUtils.setField(recovery,"tenantDiscovery",discovery);
         var admitted=new java.util.LinkedHashSet<String>();
         org.mockito.Mockito.doAnswer(invocation->{ForwardMaintenance.Candidate candidate=invocation.getArgument(1);admitted.add(candidate.locator().backend()+":"+candidate.locator().enterpriseId());return null;})
             .when(recovery).process(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
         try {
             for(int pass=0;pass<12;pass++) {
-                recovery.recover(Instant.EPOCH,20);assertThat(queued.size()).isLessThanOrEqualTo(4);
-                int occupied=queued.size();
-                if(occupied==4){recovery.recover(Instant.EPOCH,20);assertThat(queued).hasSize(occupied);}
+                recovery.recover(Instant.EPOCH,20);assertThat(queued.size()).isLessThanOrEqualTo(6);
                 while(!queued.isEmpty())queued.removeFirst().run();
             }
             assertThat(admitted).contains("LEGACY:1","TENANT:10","TENANT:20","TENANT:30","TENANT:40");

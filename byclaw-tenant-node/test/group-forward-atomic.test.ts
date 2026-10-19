@@ -326,6 +326,13 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
     expect(JSON.stringify(first)).not.toContain("earlier");
     expect(() => store.discoverWork(null, 21)).toThrow();
   });
+  it("immediate discovery only returns the submitted request", async () => {
+    const first = await store.prepare(actor, "10", input("first"));
+    await store.prepare(actor, "10", input("second"));
+    const page = await store.discoverWork(null, 20, first.requestId);
+    expect(page.candidates).toHaveLength(2);
+    expect(page.candidates.every((candidate) => candidate.locator.requestId === first.requestId)).toBe(true);
+  });
   it("completionAndRetrySerializeAggregateFromCurrentBranches", async () => {
     const { operation, targets } = await frozen();
     let lease = await store.claimTarget(

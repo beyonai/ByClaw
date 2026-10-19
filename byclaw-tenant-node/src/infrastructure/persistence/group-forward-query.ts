@@ -143,8 +143,8 @@ export class GroupChatForwardMessageQuery {
     );
     if (!member) return denied();
     const [current] = await this.rows(
-      "SELECT message_id,usage,recalled_at,archived_at FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3",
-      [group, message, this.tenant],
+      "SELECT message_id,usage,recalled_at,archived_at FROM byai.byai_message WHERE session_id=$1 AND message_id=$2",
+      [group, message],
     );
     if (
       !current ||

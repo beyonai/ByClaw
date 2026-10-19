@@ -655,7 +655,7 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
     }
   });
   it.each(["succeed", "renew", "checkpoint", "bind"])(
-    "unchangedTargetRowLockWaitCannotAuthorizeExpired%s",
+    "targetUpdateWaitCannotAuthorizeExpired%s",
     async (operation) => {
       await repository.insertItem({
         itemId: "401",
@@ -697,7 +697,7 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
       try {
         await blocker.query("BEGIN");
         await blocker.query(
-          "SELECT target_id FROM byai.byai_group_chat_forward_target WHERE target_id=$1 FOR UPDATE",
+          "UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE target_id=$1",
           [targetId],
         );
         await db.query("BEGIN");
@@ -756,7 +756,7 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
     },
   );
   it.each(["freeze", "renew"])(
-    "unchangedRequestRowLockWaitCannotAuthorizeExpired%s",
+    "requestUpdateWaitCannotAuthorizeExpired%s",
     async (operation) => {
       await repository.claimRequest(requestId, "resolver", 1000);
       const requestLease: RequestLease = {
@@ -773,7 +773,7 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
       try {
         await blocker.query("BEGIN");
         await blocker.query(
-          "SELECT request_id FROM byai.byai_group_chat_forward_request WHERE request_id=$1 FOR UPDATE",
+          "UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE request_id=$1",
           [requestId],
         );
         await db.query("BEGIN");

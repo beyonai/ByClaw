@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -86,14 +87,20 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
             throw new IllegalArgumentException("FORWARD_ENCODING_FAILED",e);
         }
     }
+    /** 同值更新持有到事务结束，不消耗租约版本；随后读取最新回执。 */
     private ByaiGroupChatForwardRequest lock(long tenant,long id) {
-        db.queryForList("SELECT request_id FROM byai.byai_group_chat_forward_request WHERE enterprise_id=? AND request_id=? FOR UPDATE",tenant,id);
+        db.update("UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=? AND request_id=?",tenant,id);
         var r=rows.request(tenant,id);
         if(r==null||!"LEGACY".equals(r.getBackend()))throw denied();
         return r;
     }
+    private ByaiGroupChatForwardRequest readRequest(long tenant,long request) {
+        var r=rows.request(tenant,request);
+        if(r==null||!"LEGACY".equals(r.getBackend()))throw denied();
+        return r;
+    }
     private ByaiGroupChatForwardTarget lockTarget(long tenant,long id) {
-        db.queryForList("SELECT target_id FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND target_id=? FOR UPDATE",tenant,id);
+        db.update("UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=? AND target_id=?",tenant,id);
         var t=rows.target(tenant,id);
         if(t==null)throw denied();
         return t;
@@ -112,10 +119,10 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         policy.requireNewWork(actor,ForwardBackend.LEGACY);
         var groups=new TreeSet<Long>(targets);
         groups.add(r.getSourceSessionId());
-        // These are real row locks. The historical SessionService.lockById SQL did not actually lock.
+        // 在短事务内按固定顺序执行同值更新，串行处理请求、群状态与成员变更。
         for(long id:groups) {
-            db.queryForList("SELECT session_id FROM byai.byai_session WHERE session_id=? FOR UPDATE",id);
-            db.queryForList("SELECT byai_session_member_id FROM byai.byai_session_member WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=? FOR UPDATE",id,actor.userId());
+            db.update("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=?",id);
+            db.update("UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=?",id,actor.userId());
         }
         var source=identity(r.getSourceSessionId());
         ForwardEligibility.requireSource(actor,source,members.findSessionMember(r.getSourceSessionId(),"USER",actor.userId())!=null);
@@ -136,7 +143,12 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         return s==null?null:new ForwardEligibility.GroupIdentity(id,s.getEnterpriseId(),s.getSessionType(),s.getState());
     }
     private ForwardOperation operation(ByaiGroupChatForwardRequest r) {
-        return new ForwardOperation(r.getRequestId(),ForwardOperationState.valueOf(r.getState()),rows.targets(r.getEnterpriseId(),r.getRequestId()).stream().map(t->new ForwardTarget(t.getTargetSessionId(),ForwardState.valueOf(t.getState()),Arrays.asList(read(t.getMessageIdsJson(),String[].class)),t.getErrorCode(),Boolean.TRUE.equals(t.getRetryable()))).toList());
+        var targets=rows.targets(r.getEnterpriseId(),r.getRequestId()).stream().map(t->new ForwardTarget(t.getTargetSessionId(),ForwardState.valueOf(t.getState()),Arrays.asList(read(t.getMessageIdsJson(),String[].class)),t.getErrorCode(),Boolean.TRUE.equals(t.getRetryable()))).toList();
+        // Aggregate from the same target SELECT as the receipts; polling never needs to lock the request.
+        var state=targets.stream().anyMatch(t->Set.of(ForwardState.PENDING,ForwardState.COPYING,ForwardState.READY).contains(t.state()))?ForwardOperationState.RUNNING
+            :targets.stream().allMatch(t->t.state()==ForwardState.SUCCEEDED)?ForwardOperationState.SUCCEEDED
+            :targets.stream().anyMatch(t->t.state()==ForwardState.SUCCEEDED)?ForwardOperationState.PARTIAL_FAILED:ForwardOperationState.FAILED;
+        return new ForwardOperation(r.getRequestId(),state,targets);
     }
     /** The caller holds request lock before touching a branch, including final publication's later consumer. */
     public void recompute(ByaiGroupChatForwardRequest r) {
@@ -146,8 +158,26 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         r.setState(state);
     }
     @Override public ForwardOperation prepare(ForwardActor actor,long source,ForwardInput input) {
-        return run(()-> {
-            String hash=new ForwardCodec().canonicalHash(actor,source,input);var old=rows.requestByKey(actor.enterpriseId(),actor.userId(),input.clientRequestId()); if(old!=null)return replay(old,actor,source,hash); long requestId=ids.nextVal();int won=db.update("INSERT INTO byai.byai_group_chat_forward_request(request_id,enterprise_id,actor_user_id,backend,source_session_id,client_request_id,mode,request_hash,snapshot_version,frozen_json,source_manifest_json) VALUES(?,?,?,'LEGACY',?,?,?,?,1,'{}','{}') ON CONFLICT DO NOTHING",requestId,actor.enterpriseId(),actor.userId(),source,input.clientRequestId(),input.mode().name(),hash); if(won==0)return replay(rows.requestByKey(actor.enterpriseId(),actor.userId(),input.clientRequestId()),actor,source,hash); var request=lock(actor.enterpriseId(),requestId);var valid=eligible(request,input.targetSessionIds(),true); String placeholders=String.join(",",Collections.nCopies(input.messageIds().size(),"?"));List<Object> parameters=new ArrayList<>(List.of(actor.enterpriseId(),source));parameters.addAll(input.messageIds()); var ordered=db.queryForList("SELECT message_id FROM byai.byai_message WHERE enterprise_id=? AND session_id=? AND message_id IN ("+placeholders+") ORDER BY create_time ASC,message_id ASC FOR UPDATE",Long.class,parameters.toArray()); if(ordered.size()!=input.messageIds().size())throw denied();List<ForwardSnapshotFactory.SourceMessage> selected=new ArrayList<>();for(long id:ordered) {
+        return tx.execute(status-> {
+            String hash=new ForwardCodec().canonicalHash(actor,source,input);
+            var old=rows.requestByKey(actor.enterpriseId(),actor.userId(),input.clientRequestId());
+            if(old!=null)return replay(old,actor,source,hash);
+            long requestId=ids.nextVal();
+            Object savepoint=status.createSavepoint();
+            try {
+                db.update("INSERT INTO byai.byai_group_chat_forward_request(request_id,enterprise_id,actor_user_id,backend,source_session_id,client_request_id,mode,request_hash,snapshot_version,frozen_json,source_manifest_json) VALUES(?,?,?,'LEGACY',?,?,?,?,1,'{}','{}')",requestId,actor.enterpriseId(),actor.userId(),source,input.clientRequestId(),input.mode().name(),hash);
+            }
+            catch(DuplicateKeyException conflict) {
+                // 唯一键冲突会使当前事务进入失败状态，恢复保存点后才能查询并发请求的回执。
+                status.rollbackToSavepoint(savepoint);
+                status.releaseSavepoint(savepoint);
+                var existing=rows.requestByKey(actor.enterpriseId(),actor.userId(),input.clientRequestId());
+                if(existing==null)throw conflict;
+                return replay(existing,actor,source,hash);
+            }
+            status.releaseSavepoint(savepoint);
+            var request=lock(actor.enterpriseId(),requestId);var valid=eligible(request,input.targetSessionIds(),true); String placeholders=String.join(",",Collections.nCopies(input.messageIds().size(),"?"));List<Object> parameters=new ArrayList<>(List.of(source));parameters.addAll(input.messageIds()); var ordered=db.queryForList("SELECT message_id FROM byai.byai_message WHERE session_id=? AND message_id IN ("+placeholders+") ORDER BY create_time ASC,message_id ASC",Long.class,parameters.toArray()); if(ordered.size()!=input.messageIds().size())throw denied();List<ForwardSnapshotFactory.SourceMessage> selected=new ArrayList<>();for(long id:ordered) {
+                if(db.update("UPDATE byai.byai_message SET message_id=message_id WHERE session_id=? AND message_id=?",source,id)!=1)throw denied();
                 var m=sources.readMessage(actor,ForwardBackend.LEGACY,source,id);selected.add(new ForwardSnapshotFactory.SourceMessage(m.id(),selected.size(),m.content(),m.speaker(),m.createdAt(),m.resourceList(),m.relatedResources(),m.metadata(),m.mergedItems(),m.authority()));
             }
             var frozen=new ForwardSnapshotFactory().freeze(actor,source,selected);List<PreparedCandidate> candidates=new ArrayList<>();for(var c:frozen.candidates()) {
@@ -171,24 +201,35 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         bind(r,actor,source);
         return operation(r);
     }
+    @Override public WorkPage discoverRequestWork(ForwardOperationLocator locator) {
+        if(locator.backend()!=ForwardBackend.LEGACY)throw denied();
+        var page=discoverWork(locator.enterpriseId(),null,20,locator.requestId());
+        var candidates=new ArrayList<>(page.candidates());
+        candidates.addAll(db.query("SELECT target_id FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND request_id=? AND state='SUCCEEDED' AND pending_delivery=TRUE AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY target_id",
+            (rs,index)->new WorkCandidate(locator,rs.getLong("target_id"),true,true),locator.enterpriseId(),locator.requestId()));
+        return new WorkPage(candidates,null,false);
+    }
     @Override public WorkPage discoverWork(long enterprise,String after,int limit) {
+        return discoverWork(enterprise,after,limit,null);
+    }
+    private WorkPage discoverWork(long enterprise,String after,int limit,Long requestId) {
         if(enterprise<=0||limit<=0||limit>20)throw new IllegalArgumentException("FORWARD_INVALID_REQUEST");
         long cursor=after==null?0:ForwardCodec.parseId(after);
         return run(()-> {
-            var found=db.query("SELECT t.target_id,t.request_id,r.sources_frozen FROM byai.byai_group_chat_forward_target t JOIN byai.byai_group_chat_forward_request r ON r.enterprise_id=t.enterprise_id AND r.request_id=t.request_id WHERE t.enterprise_id=? AND r.backend='LEGACY' AND r.state='RUNNING' AND t.target_id>? AND t.state IN ('PENDING','COPYING','READY') AND (t.lease_until IS NULL OR t.lease_until<=clock_timestamp()) AND (r.sources_frozen=TRUE OR r.lease_until IS NULL OR r.lease_until<=clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_forward_target live WHERE live.enterprise_id=t.enterprise_id AND live.request_id=t.request_id AND live.state IN ('COPYING','READY') AND live.lease_until>clock_timestamp()) ORDER BY t.target_id LIMIT ?",(rs,index)->new WorkCandidate(new ForwardOperationLocator(enterprise,rs.getLong("request_id"),ForwardBackend.LEGACY),rs.getLong("target_id"),rs.getBoolean("sources_frozen")),enterprise,cursor,limit+1);boolean more=found.size()>limit;var page=found.stream().limit(limit).toList();return new WorkPage(page,more?Long.toString(page.getLast().targetId()):null,more);
+            var found=db.query("SELECT t.target_id,t.request_id,r.sources_frozen FROM byai.byai_group_chat_forward_target t JOIN byai.byai_group_chat_forward_request r ON r.enterprise_id=t.enterprise_id AND r.request_id=t.request_id WHERE t.enterprise_id=? AND r.backend='LEGACY' AND r.state='RUNNING' AND t.target_id>? AND (CAST(? AS BIGINT) IS NULL OR r.request_id=?) AND t.state IN ('PENDING','COPYING','READY') AND (t.lease_until IS NULL OR t.lease_until<=clock_timestamp()) AND (r.sources_frozen=TRUE OR r.lease_until IS NULL OR r.lease_until<=clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_forward_target live WHERE live.enterprise_id=t.enterprise_id AND live.request_id=t.request_id AND live.state IN ('COPYING','READY') AND live.lease_until>clock_timestamp()) ORDER BY t.target_id LIMIT ?",(rs,index)->new WorkCandidate(new ForwardOperationLocator(enterprise,rs.getLong("request_id"),ForwardBackend.LEGACY),rs.getLong("target_id"),rs.getBoolean("sources_frozen")),enterprise,cursor,requestId,requestId,limit+1);boolean more=found.size()>limit;var page=found.stream().limit(limit).toList();return new WorkPage(page,more?Long.toString(page.getLast().targetId()):null,more);
         }
         );
     }
     @Override public TargetIdentity inspectTarget(ForwardOperationLocator locator,long target) {
         if(locator.backend()!=ForwardBackend.LEGACY)throw denied();
         return run(()-> {
-            var request=lock(locator.enterpriseId(),locator.requestId());var row=rows.target(locator.enterpriseId(),target);if(row==null||!row.getRequestId().equals(request.getRequestId()))throw denied();return new TargetIdentity(target,row.getTargetSessionId(),ForwardState.valueOf(row.getState()));
+            var request=readRequest(locator.enterpriseId(),locator.requestId());var row=rows.target(locator.enterpriseId(),target);if(row==null||!row.getRequestId().equals(request.getRequestId()))throw denied();return new TargetIdentity(target,row.getTargetSessionId(),ForwardState.valueOf(row.getState()));
         }
         );
     }
     @Override public OperationBinding inspect(ForwardOperationLocator locator) {
         if(locator.backend()!=ForwardBackend.LEGACY)throw denied();
-        return run(()->binding(lock(locator.enterpriseId(),locator.requestId())));
+        return binding(readRequest(locator.enterpriseId(),locator.requestId()));
     }
     private static void owner(String owner,Duration duration) {
         if(owner==null||!owner.matches("[A-Za-z0-9:_-]{1,128}")||duration==null||duration.toMillis()<=0)throw new IllegalArgumentException("FORWARD_INVALID_REQUEST");
@@ -286,9 +327,43 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
     @Override public ForwardSnapshotFactory.SourceMessage source(TargetLease lease,long selected) {
         return run(()->source(checked(lease).request(),selected));
     }
+    /** Empty server-owned manifests can publish locally without source I/O or asynchronous copy workers. */
+    @Override public ForwardOperation completeText(ForwardActor actor,long source,long request) {
+        status(actor,source,request);
+        for(var target:rows.targets(actor.enterpriseId(),request)) {
+            try {
+                run(()->{
+                    var r=lock(actor.enterpriseId(),request);bind(r,actor,source);
+                    var manifest=read(r.getSourceManifestJson(),SourceManifest.class);
+                    // Candidates include hidden file references and merged-card files, not only the public files array.
+                    if(!manifest.candidates().isEmpty()||!manifest.attachments().isEmpty()||!manifest.proofs().isEmpty())return null;
+                    var current=rows.target(actor.enterpriseId(),target.getTargetId());
+                    if(!"RUNNING".equals(r.getState())||!"PENDING".equals(current.getState())
+                        ||live("byai_group_chat_forward_request","request_id",actor.enterpriseId(),request)
+                        ||!db.queryForList("SELECT 1 FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND request_id=? AND lease_until>clock_timestamp()",actor.enterpriseId(),request).isEmpty())return null;
+                    // Nested request freezing also locks the source; acquire both groups in canonical order first.
+                    eligible(r,List.of(current.getTargetSessionId()),false);
+                    var locator=new ForwardOperationLocator(actor.enterpriseId(),request,ForwardBackend.LEGACY);
+                    if(!Boolean.TRUE.equals(r.getSourcesFrozen()))freezeSources(claimRequest(locator,"text-"+UUID.randomUUID(),Duration.ofSeconds(60)),new FreezeCompletion(List.of(),List.of()));
+                    var lease=claimTarget(locator,current.getTargetId(),"text-"+UUID.randomUUID(),Duration.ofSeconds(60));
+                    // Claim, readiness, message rows and the success receipt commit or roll back together per target.
+                    commit(markReady(lease));
+                    return null;
+                });
+            } catch(IllegalArgumentException rejected) {
+                if(!"RESOURCE_NOT_ACCESSIBLE".equals(rejected.getMessage()))throw rejected;
+                run(()->{
+                    var r=lock(actor.enterpriseId(),request);bind(r,actor,source);
+                    db.update("UPDATE byai.byai_group_chat_forward_target SET state='FAILED',error_code='RESOURCE_NOT_ACCESSIBLE',retryable=FALSE,fencing_version=fencing_version+1 WHERE enterprise_id=? AND request_id=? AND target_id=? AND state='PENDING' AND (lease_until IS NULL OR lease_until<=clock_timestamp())",actor.enterpriseId(),request,target.getTargetId());
+                    recompute(r);return null;
+                });
+            }
+        }
+        return status(actor,source,request);
+    }
     @Override public ForwardOperation status(ForwardActor actor,long source,long request) {
         return run(()-> {
-            var r=lock(actor.enterpriseId(),request);bind(r,actor,source);return operation(r);
+            var r=readRequest(actor.enterpriseId(),request);bind(r,actor,source);return operation(r);
         }
         );
     }

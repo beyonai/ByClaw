@@ -253,6 +253,10 @@ public class GroupChatContextService {
         Map<Long, String> cloudResources = new HashMap<>();
         Map<Long, ByaiGroupChatTask> tasks = loadMessageTasks(ordered);
         Map<Long, List<ByaiGroupChatMessageAck>> acknowledgements = loadAcknowledgements(ordered);
+        Map<Long, ByaiMessage> references = loadReferences(ordered, visibleReferences);
+        List<ByaiMessage> speakers = new ArrayList<>(ordered);
+        references.values().stream().filter(Objects::nonNull).forEach(speakers::add);
+        Map<Long, Map<Long, String>> displayNames = loadSpeakerDisplayNames(speakers);
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         for (int index = 0; index < ordered.size(); index++) {
             ByaiMessage source = projection.display(ordered.get(index));
@@ -291,11 +295,10 @@ public class GroupChatContextService {
             }
             message.setTarget(passive ? null : toTarget(source));
             message.setRole(toRole(source.getUsage()));
-            message.setSpeaker(toSpeaker(source, resources));
+            message.setSpeaker(toSpeaker(source, resources, displayNames));
             message.setAttachments(source.isRecalled() ? List.of() : toAttachments(source, cloudResources));
             if (!passive && source.getMessageRef() != null) {
-                ByaiMessage referenced = visibleReferences == null ? messageMapper.selectByMessageId(source.getMessageRef())
-                    : visibleReferences.get(source.getMessageRef());
+                ByaiMessage referenced = references.get(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
                     GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
@@ -310,13 +313,58 @@ public class GroupChatContextService {
                     }
                     reply.setUsage(referenced.getUsage());
                     reply.setRole(toRole(referenced.getUsage()));
-                    reply.setSpeaker(toSpeaker(referenced, resources));
+                    reply.setSpeaker(toSpeaker(referenced, resources, displayNames));
                     message.setReplyTo(reply);
                 }
             }
             result.add(message);
         }
         return result;
+    }
+
+    /** 只收集实际展示的同群引用，话题页的可见引用边界不能被额外查询绕过。 */
+    private Map<Long, ByaiMessage> loadReferences(List<ByaiMessage> messages, Map<Long, ByaiMessage> visibleReferences) {
+        Map<Long, ByaiMessage> references = new HashMap<>();
+        for (ByaiMessage message : messages) {
+            Long referenceId = message.getMessageRef();
+            if (referenceId == null || ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata())
+                || references.containsKey(referenceId)) continue;
+            ByaiMessage reference = visibleReferences == null ? messageMapper.selectByMessageId(referenceId)
+                : visibleReferences.get(referenceId);
+            references.put(referenceId, reference != null && Objects.equals(message.getSessionId(), reference.getSessionId())
+                ? reference : null);
+        }
+        return references;
+    }
+
+    /** 每次查询按群批量读取当前昵称，缺失时批量回退平台用户名，不修改消息中的姓名快照。 */
+    private Map<Long, Map<Long, String>> loadSpeakerDisplayNames(List<ByaiMessage> messages) {
+        List<ByaiMessage> userMessages = messages.stream().filter(message -> Integer.valueOf(1).equals(message.getUsage()))
+            .filter(message -> message.getSessionId() != null && message.getCreatorId() != null).toList();
+        Map<Long, Map<Long, String>> names = new HashMap<>();
+        userMessages.stream().map(ByaiMessage::getSessionId).distinct().forEach(sessionId -> {
+            Map<Long, String> groupNames = new HashMap<>();
+            if (memberService != null) {
+                memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null).stream()
+                    .filter(member -> Objects.equals(sessionId, member.getSessionId())
+                        && MemObjType.USER.name().equals(member.getMemObjType()) && member.getMemObjId() != null
+                        && StringUtils.isNotBlank(member.getMemName()))
+                    .forEach(member -> groupNames.put(member.getMemObjId(), member.getMemName()));
+            }
+            names.put(sessionId, groupNames);
+        });
+        List<Long> missingUserIds = userMessages.stream()
+            .filter(message -> !names.get(message.getSessionId()).containsKey(message.getCreatorId()))
+            .map(ByaiMessage::getCreatorId).distinct().toList();
+        Map<Long, String> userNames = new HashMap<>();
+        if (userService != null && !missingUserIds.isEmpty()) {
+            userService.findByIds(missingUserIds).stream()
+                .filter(user -> user.getUserId() != null && StringUtils.isNotBlank(user.getUserName()))
+                .forEach(user -> userNames.put(user.getUserId(), user.getUserName()));
+        }
+        userMessages.forEach(message -> names.get(message.getSessionId()).putIfAbsent(message.getCreatorId(),
+            userNames.getOrDefault(message.getCreatorId(), I18nUtil.get("groupchat.memberFallback"))));
+        return names;
     }
 
     private Map<Long, List<ByaiGroupChatMessageAck>> loadAcknowledgements(List<ByaiMessage> messages) {
@@ -468,7 +516,8 @@ public class GroupChatContextService {
         }
     }
 
-    private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources) {
+    private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources,
+        Map<Long, Map<Long, String>> displayNames) {
         GroupChatContextResponse.Speaker speaker = new GroupChatContextResponse.Speaker();
         if (Integer.valueOf(5).equals(message.getUsage())) {
             speaker.setType("system");
@@ -478,9 +527,9 @@ public class GroupChatContextService {
         if (Integer.valueOf(1).equals(message.getUsage())) {
             speaker.setType("user");
             speaker.setUserCode(resolveUserCode(message));
-            if (StringUtils.isNotBlank(message.getCreatorName())) {
-                speaker.setDisplayName(message.getCreatorName());
-            }
+            Map<Long, String> groupNames = displayNames.get(message.getSessionId());
+            speaker.setDisplayName(StringUtils.defaultIfBlank(groupNames == null ? null : groupNames.get(message.getCreatorId()),
+                I18nUtil.get("groupchat.memberFallback")));
             return speaker;
         }
 

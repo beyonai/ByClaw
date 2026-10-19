@@ -57,6 +57,7 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final GroupChatCandidateSessionService candidates = mock(GroupChatCandidateSessionService.class);
     private GroupChatTurnCoordinator coordinator;
+    private GroupChatContextService contextService;
     private final Map<String, ByaiGroupChatExecution> anchorRows = new HashMap<>();
     private final Map<String, ByaiGroupChatTurn> turnRows = new HashMap<>();
 
@@ -90,7 +91,7 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
         when(resources.findById(anyLong())).thenAnswer(call -> { SsResource agent = new SsResource(); agent.setResourceName("Agent " + call.getArgument(0)); return agent; });
         PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        GroupChatContextService contextService = new GroupChatContextService(messages, mock(SessionService.class),
+        contextService = new GroupChatContextService(messages, mock(SessionService.class),
             resources);
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, messages, candidates, sequence, members,
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
@@ -372,11 +373,18 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
 
     @Test
     void quotedMessageIncludesItsIdentityContentAndAttachmentsInTurnContext() {
+        UserService users = mock(UserService.class);
+        Users reporter = new Users();
+        reporter.setUserId(7L);
+        reporter.setUserName("Reporter");
+        when(users.findByIds(List.of(7L))).thenReturn(List.of(reporter));
+        ReflectionTestUtils.setField(contextService, "userService", users);
         ByaiMessage quoted = new ByaiMessage();
         quoted.setMessageId(21L);
         quoted.setSessionId(10L);
         quoted.setUsage(1);
-        quoted.setCreatorName("Reporter");
+        quoted.setCreatorId(7L);
+        quoted.setCreatorName("Stored reporter name");
         quoted.setMessageContent("Please review the report");
         quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"report.pdf\",\"fileUrl\":\"/files/report.pdf\"}]}");
         when(messages.selectByMessageId(21L)).thenReturn(quoted);

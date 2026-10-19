@@ -48,7 +48,10 @@ public final class ForwardPreparation {
     }
     public record ForwardWork(ForwardOperationLocator locator,ForwardActor actor,long sourceSessionId,PreparedSnapshot frozen,SourceManifest manifest,boolean sourcesFrozen,TargetWork target) {
     }
-    public record WorkCandidate(ForwardOperationLocator locator,long targetId,boolean sourcesFrozen) {
+    public record WorkCandidate(ForwardOperationLocator locator,long targetId,boolean sourcesFrozen,boolean deliveryOnly) {
+        public WorkCandidate(ForwardOperationLocator locator,long targetId,boolean sourcesFrozen) {
+            this(locator,targetId,sourcesFrozen,false);
+        }
     }
     public record WorkPage(List<WorkCandidate> candidates,String nextCursor,boolean hasMore) {
     }

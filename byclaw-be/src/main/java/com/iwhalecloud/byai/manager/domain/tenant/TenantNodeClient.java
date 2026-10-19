@@ -78,7 +78,7 @@ public class TenantNodeClient {
 
     /** Service discovery is operation-scoped and has no fabricated user or ambient login. */
     public <I, O> O serviceRequest(long enterpriseId, String method, String path, I body, TypeReference<O> responseType) {
-        if (enterpriseId <= 0 || !(path.matches("/internal/v1/forward-work(?:\\?limit=(?:[1-9]|1[0-9]|20)(?:&afterTargetId=[1-9][0-9]*)?|/[1-9][0-9]*(?:/targets/[1-9][0-9]*)?/binding)") || path.matches("/internal/v1/forward-maintenance/(scan|delivery/(claim|read|mark|renew)|cleanup/(collect|claim|renew|complete)|failure|request-failure)")))
+        if (enterpriseId <= 0 || !(path.matches("/internal/v1/forward-work(?:\\?limit=(?:[1-9]|1[0-9]|20)(?:&afterTargetId=[1-9][0-9]*)?(?:&requestId=[1-9][0-9]*)?|/[1-9][0-9]*(?:/targets/[1-9][0-9]*)?/binding)") || path.matches("/internal/v1/forward-maintenance/(scan|delivery/(claim|read|mark|renew)|cleanup/(collect|claim|renew|complete)|failure|request-failure)")))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid forward service request");
         return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
     }

@@ -47,7 +47,7 @@ public class GroupChatForwardCommitService {
 
     private CommitResult publish(TargetLease lease) {
         long tenant = lease.actor().enterpriseId();
-        db.queryForList("SELECT request_id FROM byai.byai_group_chat_forward_request WHERE enterprise_id=? AND request_id=? FOR UPDATE", tenant, lease.requestId());
+        db.update("UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=? AND request_id=?", tenant, lease.requestId());
         var request = rows.request(tenant, lease.requestId());
         var before = rows.target(tenant, lease.targetId());
         if (request == null || before == null || !"LEGACY".equals(request.getBackend())
@@ -58,24 +58,27 @@ public class GroupChatForwardCommitService {
         policy.requireNewWork(lease.actor(), ForwardBackend.LEGACY);
         Map<Long, Map<String,Object>> groups = new HashMap<>(), members = new HashMap<>();
         for (long group : new TreeSet<>(List.of(request.getSourceSessionId(), before.getTargetSessionId()))) {
-            var found = db.queryForList("SELECT session_id,enterprise_id,session_type,state,project_id FROM byai.byai_session WHERE session_id=? FOR UPDATE", group);
+            db.update("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=?", group);
+            var found = db.queryForList("SELECT session_id,enterprise_id,session_type,state,project_id FROM byai.byai_session WHERE session_id=?", group);
             groups.put(group, found.isEmpty() ? null : found.getFirst());
-            var membership = db.queryForList("SELECT mem_obj_id,mem_name FROM byai.byai_session_member WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=? FOR UPDATE", group, lease.actor().userId());
+            db.update("UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=?", group, lease.actor().userId());
+            var membership = db.queryForList("SELECT mem_obj_id,mem_name FROM byai.byai_session_member WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=?", group, lease.actor().userId());
             members.put(group, membership.isEmpty() ? null : membership.getFirst());
         }
         var source = identity(groups.get(lease.sourceSessionId()));
         ForwardEligibility.requireSource(lease.actor(), source, members.get(lease.sourceSessionId()) != null);
         ForwardEligibility.requireTarget(lease.actor(), source, identity(groups.get(lease.targetSessionId())), members.get(lease.targetSessionId()) != null);
-        db.queryForList("SELECT target_id FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND target_id=? FOR UPDATE", tenant, lease.targetId());
+        db.update("UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=? AND target_id=?", tenant, lease.targetId());
         var target = rows.target(tenant, lease.targetId());
         if (target == null || !target.getRequestId().equals(request.getRequestId()) || target.getTargetSessionId() != before.getTargetSessionId().longValue()
             || !"READY".equals(target.getState()) || lease.state() != ForwardState.READY || !Objects.equals(target.getLeaseOwner(), lease.owner())
             || target.getFencingVersion() != lease.fencingVersion() || !Boolean.TRUE.equals(request.getSourcesFrozen()) || !"RUNNING".equals(request.getState())
             || db.queryForList("SELECT 1 FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND target_id=? AND lease_until>clock_timestamp()", tenant, lease.targetId()).isEmpty()) throw lost();
         var snapshot = read(request.getFrozenJson(), PreparedSnapshot.class);
-        // Lock selected outer messages, never original inner provenance. Generic delete/archive writers then wait too.
+        // 同值更新选中的外层消息，在最终校验至事务提交之间串行处理撤回、归档与删除。
         for (long selected : new TreeSet<>(snapshot.selectedMessageIds())) {
-            var found = db.queryForList("SELECT usage,recalled_at,archived_at FROM byai.byai_message WHERE enterprise_id=? AND session_id=? AND message_id=? FOR UPDATE", tenant, request.getSourceSessionId(), selected);
+            db.update("UPDATE byai.byai_message SET message_id=message_id WHERE session_id=? AND message_id=?", request.getSourceSessionId(), selected);
+            var found = db.queryForList("SELECT usage,recalled_at,archived_at FROM byai.byai_message WHERE session_id=? AND message_id=?", request.getSourceSessionId(), selected);
             if (found.size() != 1 || found.getFirst().get("recalled_at") != null || found.getFirst().get("archived_at") != null
                 || !Set.of(1, 2).contains(((Number) found.getFirst().get("usage")).intValue())) throw denied();
         }

@@ -41,9 +41,9 @@ public class LegacyForwardMaintenanceStore implements ForwardMaintenanceStore {
     private record Locked(ByaiGroupChatForwardRequest request,ByaiGroupChatForwardTarget target,Instant now,ObjectNode checkpoint) { }
     private Locked bound(ForwardOperationLocator l,long target){
         if(l.backend()!=ForwardBackend.LEGACY)throw denied();
-        db.queryForList("SELECT request_id FROM byai.byai_group_chat_forward_request WHERE enterprise_id=? AND request_id=? FOR UPDATE",l.enterpriseId(),l.requestId());
+        db.update("UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=? AND request_id=?",l.enterpriseId(),l.requestId());
         var r=rows.request(l.enterpriseId(),l.requestId());
-        db.queryForList("SELECT target_id FROM byai.byai_group_chat_forward_target WHERE enterprise_id=? AND target_id=? FOR UPDATE",l.enterpriseId(),target);
+        db.update("UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=? AND target_id=?",l.enterpriseId(),target);
         var t=rows.target(l.enterpriseId(),target);
         if(r==null||!"LEGACY".equals(r.getBackend())||t==null||t.getRequestId()!=l.requestId())throw denied();
         Instant now=db.queryForObject("SELECT clock_timestamp()",java.sql.Timestamp.class).toInstant();
@@ -66,7 +66,7 @@ public class LegacyForwardMaintenanceStore implements ForwardMaintenanceStore {
     @Override public Delivery delivery(DeliveryLease l,long messageId){return run(()->{var b=bound(l.locator(),l.targetId());deliveryOwned(b,l);var t=b.target();if(!ForwardMaintenance.pending(b.checkpoint(),ids(t)).contains(Long.toString(messageId)))throw denied();
         if(rows.items(t.getEnterpriseId(),t.getTargetId()).stream().noneMatch(i->Objects.equals(i.getBoundMessageId(),messageId)))throw denied();
         var s=sessions.findById(t.getTargetSessionId());if(s==null||!Objects.equals(s.getEnterpriseId(),t.getEnterpriseId())||!"hs_as".equals(s.getSessionType())||Set.of("CLOSED","GROUP_DISSOLVED","GROUP_CHAT_ROUTING","GROUP_CHAT_DISPATCH").contains(Objects.toString(s.getState(),"")))return null;
-        var m=messages.selectByMessageId(messageId);if(m==null||!Objects.equals(m.getEnterpriseId(),t.getEnterpriseId())||!Objects.equals(m.getSessionId(),t.getTargetSessionId())||m.getArchivedAt()!=null||!Set.of(1,2).contains(m.getUsage()))return null;
+        var m=messages.selectByMessageId(messageId);if(m==null||!Objects.equals(m.getSessionId(),t.getTargetSessionId())||m.getArchivedAt()!=null||!Set.of(1,2).contains(m.getUsage()))return null;
         List<Map<String,Object>> displayed=json.convertValue(projection.toMessages(List.of(m)),new com.fasterxml.jackson.core.type.TypeReference<>(){});
         var recipients=members.findSessionMembers(t.getTargetSessionId(),"USER",null).stream().map(v->v.getMemObjId()).distinct().toList();
         return new Delivery(t.getTargetId(),t.getEnterpriseId(),t.getTargetSessionId(),displayed,recipients);});}

@@ -33,9 +33,10 @@ export interface GroupForwardService {
   ): Promise<ItemPage>;
 
   commit(lease: TargetLease): Promise<CommitResult>;
-  discoverWork(after: string | null, limit: number): Promise<WorkPage>;
+  discoverWork(after: string | null, limit: number, requestId?: string): Promise<WorkPage>;
   inspectTarget(requestId: string, targetId: string): Promise<TargetIdentity>;
   prepare(actor: ForwardActor, sourceId: string, input: ForwardInput): Promise<ForwardOperation>;
+  completeText(actor: ForwardActor, sourceId: string, requestId: string): Promise<ForwardOperation>;
   status(actor: ForwardActor, sourceId: string, requestId: string): Promise<ForwardOperation>;
   retry(
     actor: ForwardActor,

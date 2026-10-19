@@ -72,6 +72,7 @@ function setup() {
   const forwards: any = new SqlGroupForwardStore({ write: async (work) => work({ query }) }, "10");
   forwards.prepare = vi.fn(async () => operation);
   forwards.status = vi.fn(async () => operation);
+  forwards.completeText = vi.fn(async () => operation);
   forwards.retry = vi.fn(async () => operation);
   forwards.inspect = vi.fn(async () => ({
     actor: { userId: "20", enterpriseId: "10" },
@@ -111,6 +112,33 @@ function setup() {
   };
 }
 describe("forwarding HTTP contracts", () => {
+  it("returns completed text receipts in the create response and retains accepted work on uncertainty", async () => {
+    const s = setup();
+    const completed = {
+      ...operation,
+      state: "SUCCEEDED",
+      targets: [{ targetSessionId: "50", state: "SUCCEEDED", messageIds: ["9007199254740994"] }],
+    };
+    s.forwards.completeText.mockResolvedValueOnce(completed);
+    const request = {
+      method: "POST" as const,
+      url: `${base}/forward-requests`,
+      headers,
+      payload: {
+        clientRequestId: "fast",
+        mode: "SINGLE",
+        messageIds: ["40"],
+        targetSessionIds: ["50"],
+      },
+    };
+    const success = await s.app.inject(request);
+    expect(success.statusCode).toBe(202);
+    expect(success.json()).toEqual(completed);
+    s.forwards.completeText.mockRejectedValueOnce(new Error("COMMIT_UNCERTAIN"));
+    const deferred = await s.app.inject(request);
+    expect(deferred.statusCode).toBe(202);
+    expect(deferred.json()).toEqual(operation);
+  });
   it("exposes accepted create, bound status/retry and strict candidate input", async () => {
     const s = setup();
     expect(
@@ -191,7 +219,9 @@ describe("forwarding HTTP contracts", () => {
       headers,
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json().items[0].attachments).toEqual([uploadedFile]);
+    expect(response.json().items[0].attachments).toEqual([
+      { ...uploadedFile, cloudResourceId: null },
+    ]);
     expect(response.body).not.toMatch(/checkpoint|reservationOwner|attemptId/);
     expect(response.json().items[0].content).toBe("{{opaque}}");
     expect(response.json().hasMore).toBe(true);
@@ -376,7 +406,9 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)("production forwarding bigint read
           expect(page.statusCode).toBe(200);
           expect(page.json().items[0].itemId).toBe(stored.itemId);
           expect(page.json().items[0].speaker.id).toBe(user);
-          expect(page.json().items[0].attachments).toEqual([stored.uploadedFile]);
+          expect(page.json().items[0].attachments).toEqual([
+            { ...stored.uploadedFile, cloudResourceId: null },
+          ]);
           throw rollback;
         })
         .catch((error) => {

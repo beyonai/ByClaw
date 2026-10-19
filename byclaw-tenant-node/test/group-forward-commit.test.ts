@@ -79,6 +79,154 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
  INSERT INTO byai.byai_session_member(byai_session_member_id,session_id,mem_obj_type,mem_obj_id,com_acct_id) VALUES(1,10,'USER',30,1),(2,20,'USER',30,1),(3,21,'USER',30,1);
  INSERT INTO byai.byai_message(message_id,enterprise_id,session_id,usage,creator_id,creator_name,message_content,create_time,related_resources,metadata,recalled_at,archived_at) VALUES(9007199254741001,1,10,1,30,'sender','later','2026-10-16 01:00:00','{}','{}',NULL,NULL),(9007199254741002,1,10,1,30,'sender','earlier','2026-10-16 00:00:00','{}','{}',NULL,NULL);`);
   });
+  it("completes text targets atomically and replays after source membership removal", async () => {
+    const operation = await store.prepare(actor, "10", input("fast"));
+    const result = await store.completeText(actor, "10", operation.requestId);
+    expect(result.state).toBe("SUCCEEDED");
+    expect(result.targets.map((t) => t.messageIds.length)).toEqual([2, 2]);
+    expect(
+      await sql(
+        "SELECT target_id FROM byai.byai_group_chat_forward_target WHERE pending_delivery=TRUE",
+      ),
+    ).toHaveLength(2);
+    await sql("DELETE FROM byai.byai_session_member WHERE session_id=10");
+    expect(await store.completeText(actor, "10", operation.requestId)).toEqual(result);
+    expect(
+      await sql("SELECT message_id FROM byai.byai_message WHERE session_id IN (20,21)"),
+    ).toHaveLength(4);
+  });
+
+  it("status and binding reads do not wait for an in-flight request writer", async () => {
+    const operation = await store.prepare(actor, "10", input("read"));
+    const writer = await pool.connect();
+    await writer.query("BEGIN");
+    await writer.query(
+      "UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE request_id=$1",
+      [operation.requestId],
+    );
+    const reader = new SqlGroupForwardStore(
+      {
+        write: async (work: any) => {
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL lock_timeout='100ms'");
+            const result = await work({
+              query: async (q: string, a?: unknown[]) => (await client.query(q, a)).rows,
+            });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            client.release();
+          }
+        },
+      },
+      "1",
+    );
+    try {
+      expect(await reader.status(actor, "10", operation.requestId)).toEqual(operation);
+      expect((await reader.inspect(operation.requestId)).actor).toEqual(actor);
+    } finally {
+      await writer.query("ROLLBACK");
+      writer.release();
+    }
+  });
+
+  it("concurrent text completion publishes once and rejects a different actor", async () => {
+    const operation = await store.prepare(actor, "10", input("concurrent-text"));
+    const [a, b] = await Promise.all([
+      store.completeText(actor, "10", operation.requestId),
+      store.completeText(actor, "10", operation.requestId),
+    ]);
+    expect(a).toEqual(b);
+    expect(a.state).toBe("SUCCEEDED");
+    expect(
+      await sql("SELECT message_id FROM byai.byai_message WHERE session_id IN (20,21)"),
+    ).toHaveLength(4);
+    await expect(
+      store.completeText({ ...actor, userId: "31" }, "10", operation.requestId),
+    ).rejects.toMatchObject({ code: "RESOURCE_NOT_ACCESSIBLE" });
+  });
+  it("text completion preserves per-target rejection and source recall checks", async () => {
+    const operation = await store.prepare(actor, "10", input("revoked-text"));
+    await sql("DELETE FROM byai.byai_session_member WHERE session_id=21");
+    const result = await store.completeText(actor, "10", operation.requestId);
+    expect(result.state).toBe("PARTIAL_FAILED");
+    expect(result.targets[1]).toMatchObject({
+      state: "FAILED",
+      retryable: false,
+      errorCode: "RESOURCE_NOT_ACCESSIBLE",
+    });
+    const next = await store.prepare(actor, "10", input("recalled-text"));
+    await sql(
+      "UPDATE byai.byai_message SET recalled_at=CURRENT_TIMESTAMP WHERE message_id=9007199254741001",
+    );
+    expect((await store.completeText(actor, "10", next.requestId)).state).toBe("FAILED");
+    expect(await sql("SELECT message_id FROM byai.byai_message WHERE session_id=21")).toHaveLength(
+      0,
+    );
+  });
+  it("failed text transaction leaves no messages or leases and retries without waiting", async () => {
+    const operation = await store.prepare(actor, "10", input("rollback-text"));
+    await sql(
+      "ALTER TABLE byai.byai_message ADD CONSTRAINT fail_text CHECK(session_id=10 OR message_content<>'later')",
+    );
+    try {
+      await expect(store.completeText(actor, "10", operation.requestId)).rejects.toThrow();
+    } finally {
+      await sql("ALTER TABLE byai.byai_message DROP CONSTRAINT fail_text");
+    }
+    expect(
+      await sql("SELECT message_id FROM byai.byai_message WHERE session_id IN (20,21)"),
+    ).toHaveLength(0);
+    expect(
+      (await sql("SELECT state,lease_until FROM byai.byai_group_chat_forward_target")).every(
+        (t: any) => t.state === "PENDING" && t.lease_until === null,
+      ),
+    ).toBe(true);
+    expect((await store.completeText(actor, "10", operation.requestId)).state).toBe("SUCCEEDED");
+  });
+  it("file references stay asynchronous when merged forwarding has no public files", async () => {
+    await sql("UPDATE byai.byai_message SET metadata=$1 WHERE message_id=9007199254741001", [
+      JSON.stringify({
+        resourceList: [
+          {
+            id: "COMMON_FILE_file",
+            resourceId: "/by/file.txt",
+            resourceName: "File",
+            resourceType: "COMMON_FILE",
+          },
+        ],
+      }),
+    ]);
+    const operation = await store.prepare(actor, "10", { ...input("files"), mode: "MERGED" });
+    expect((await store.completeText(actor, "10", operation.requestId)).state).toBe("RUNNING");
+    expect(
+      await sql("SELECT message_id FROM byai.byai_message WHERE session_id IN (20,21)"),
+    ).toHaveLength(0);
+    expect(
+      (await sql("SELECT sources_frozen FROM byai.byai_group_chat_forward_request"))[0]
+        .sources_frozen,
+    ).toBe(false);
+  });
+  it("live asynchronous claims cannot be stolen by text completion", async () => {
+    const operation = await store.prepare(actor, "10", input("owned"));
+    const lease = await store.claimRequest(operation.requestId, actor, "10", "resolver", 60000);
+    expect((await store.completeText(actor, "10", operation.requestId)).state).toBe("RUNNING");
+    await store.freezeSources(lease, { proofs: [], resolutions: [] });
+    const target = (
+      await sql("SELECT target_id FROM byai.byai_group_chat_forward_target ORDER BY target_id")
+    )[0];
+    await store.claimTarget(operation.requestId, target.target_id, actor, "10", "worker", 60000);
+    expect((await store.completeText(actor, "10", operation.requestId)).state).toBe("RUNNING");
+    expect(
+      await sql("SELECT message_id FROM byai.byai_message WHERE session_id IN (20,21)"),
+    ).toHaveLength(0);
+  });
+
   async function prepared() {
     const operation = await store.prepare(actor, "10", input());
     const targets = await sql(
@@ -111,6 +259,20 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
     );
     return { ...p, lease: await store.markReady(lease) };
   }
+  it.each([null, "99"])(
+    "forwards historical message enterprise %s through preparation and commit",
+    async (enterprise) => {
+      await sql("UPDATE byai.byai_message SET enterprise_id=$1 WHERE session_id=10", [enterprise]);
+      const { lease } = await ready();
+      const result = await store.commit(lease);
+      expect(result.messageIds).toHaveLength(2);
+      expect(
+        await sql(
+          "SELECT message_id FROM byai.byai_message WHERE session_id=20 AND enterprise_id=1",
+        ),
+      ).toHaveLength(2);
+    },
+  );
   it("oneTargetCommitsAllOrNone", async () => {
     const { lease } = await ready();
     await sql(
@@ -148,6 +310,7 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
     expect(messages.map((m: any) => m.topic_id)).toEqual(result.messageIds);
     expect(messages.every((m: any) => m.message_ref === null)).toBe(true);
     expect(JSON.parse(messages[0].metadata)).toEqual({
+      files: [],
       scene: "GROUP_CHAT",
       kind: "FORWARD_SINGLE",
       forward: {

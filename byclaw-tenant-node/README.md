@@ -164,6 +164,8 @@ API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务�
 
 群消息“收到”确认：`POST /internal/v1/group-chats/:id/messages/:messageId/ack` 使用 `ACK_MESSAGE`，同路径 `DELETE` 使用 `UNACK_MESSAGE`。请求体沿用完整命令信封，payload 为 `{ "messageId": "...", "userName": "可选的显示名称" }`；实际确认用户取鉴权后的 actor，不接受 payload 指定其他用户。仅未撤回消息的被 @ 群成员可操作，发送者不能确认自己的消息。重复确认保留原时间，重复撤销无副作用。
 
+群上下文、搜索、定位及话题消息中的用户 `speaker.displayName` 在查询时按消息所属群和 `creatorId` 解析，优先当前 USER 成员的非空白 `memName`。Node 不持有平台用户资料；无群昵称或发送人已退群时返回 `null`，由 BE 在平台消费边界（公开响应、Agent 公共历史快照、群回复广播）批量补齐当前 `userName`（资料缺失时使用本地化的“群成员”）。Node Worker `GET_CONTEXT` 保留相同的内部空值契约，消费方需在平台边界补名。不再使用消息保存时的 `creatorName` 作为用户展示名，已有转发消息无需回填；引用消息使用同样规则，Agent、系统消息以及转发内部原发言人快照保持原有规则。此变更需同时部署 BE 和 Node。
+
 确认结果包含 `messageId` 和 `acknowledgements[{messageId,userId,userName,acknowledgedAt}]`，时间为毫秒时间戳。Node 只持久化；BE 提交成功后广播 `MESSAGE_ACK_UPDATED`。群上下文、搜索、消息定位和话题消息返回确认列表及当前用户的 `canAcknowledge`。该操作不推进已读游标，不新增聊天消息。
 
 `V0.5.0__baseline__ddl.sql` 与打包 ZIP 已包含 `byai.byai_group_chat_message_ack`、联合主键及消息确认查询索引；新租户初始化可直接创建。主库 SQL 与租户 baseline 是独立制品，仅合并主库建表语句不会更新已有租户数据库；已有租户升级仍需由部署执行器检查并补齐此表。2026-10-10 与 229《百应开源》租户库的同引擎 catalog 对照为 15 张表、272 列、43 个索引、21 个约束和 2 个序列，结构及指纹一致。

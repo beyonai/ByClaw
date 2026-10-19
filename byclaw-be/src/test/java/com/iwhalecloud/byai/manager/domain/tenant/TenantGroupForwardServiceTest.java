@@ -16,6 +16,18 @@ class TenantGroupForwardServiceTest {
         when(node.request(eq(context),eq("POST"),contains("/lease"),any(),any())).thenAnswer(inv->{var wire=TenantNodeClient.protocolMapper(new ObjectMapper().findAndRegisterModules()).valueToTree(inv.getArgument(3));assertThat(wire.path("durationMs").isNumber()).isTrue();assertThat(wire.path("durationMs").asLong()).isEqualTo(60000);assertThat(wire.has("actor")).isFalse();return new RequestLease(locator.requestId(),actor,"claim",9007199254740995L,Instant.now().plusSeconds(60));});
         var service=new TenantGroupForwardService(node,policy,new GroupChatForwardProperties());var result=service.claimRequest(locator,"claim",Duration.ofMinutes(1));assertThat(result.actor()).isEqualTo(actor);verify(policy).requireNewWork(actor,ForwardBackend.TENANT);
     }
+    @Test void targetWorkUsesOneOwningCallWithNodeEnforcingBinding() {
+        var node=mock(TenantNodeClient.class);var policy=mock(ForwardPlatformPolicy.class);
+        var actor=new ForwardActor(30,10);var context=new TenantRequestContext(30,10,"MEMBER");
+        when(policy.requireNewWork(actor,ForwardBackend.TENANT)).thenReturn(context);
+        var lease=new TargetLease(100,200,actor,40,50,"worker",1,Instant.now().plusSeconds(60),ForwardState.COPYING);
+        var work=new ForwardWork(new ForwardOperationLocator(10,100,ForwardBackend.TENANT),actor,40,null,null,true,null);
+        when(node.request(eq(context),eq("POST"),eq("/internal/v1/group-chats/40/forward-requests/100/targets/200/work"),any(),any())).thenReturn(work);
+        var service=new TenantGroupForwardService(node,policy,new GroupChatForwardProperties());
+        assertThat(service.targetWork(lease)).isSameAs(work);
+        verify(node,never()).serviceRequest(anyLong(),anyString(),anyString(),any(),any());
+        verify(node,times(1)).request(eq(context),anyString(),anyString(),any(),any());
+    }
     @Test void proofAndUploadBytesRemainNumbersWhileIdsAndFencesRemainStrings()throws Exception{
         var wire=TenantNodeClient.protocolMapper(new ObjectMapper().findAndRegisterModules());var proof=new SourceProof("proof",new SourceIdentity(10,9007199254740993L,"minio","owner","file",null),2147483648L,"a".repeat(64));var p=wire.valueToTree(proof);assertThat(p.path("size").isNumber()).isTrue();assertThat(p.path("identity").path("ownerId").asText()).isEqualTo("9007199254740993");var object=new ForwardUploadedFile(10, 30, 9007199254740994L, "item", "attachment", "attempt", "file", null, 3, proof.sha256(), Instant.now());assertThat(wire.valueToTree(object).path("size").isNumber()).isTrue();assertThat(wire.valueToTree(object).path("createdAt").isTextual()).isTrue();assertThat(wire.valueToTree(new RequestLease(1,new ForwardActor(2,3),"claim",9007199254740993L,Instant.now())).path("leaseUntil").isTextual()).isTrue();
     }

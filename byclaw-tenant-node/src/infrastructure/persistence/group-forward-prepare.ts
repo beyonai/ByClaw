@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { GroupForwardRecoveryStore } from "./group-forward-recovery.js";
 import {
   GroupChatForwardTargetQueryService,
@@ -131,6 +132,11 @@ export class SqlGroupForwardStore {
     if (!r || r.backend !== "TENANT") return denied();
     return r;
   }
+  private async readRequest(repo: GroupForwardRepository, id: string): Promise<ForwardRequestRow> {
+    const r = await repo.request(positiveId(id));
+    if (!r || r.backend !== "TENANT") return denied();
+    return r;
+  }
   private binding(r: ForwardRequestRow, actor: ForwardActor, source: string): void {
     this.checkActor(actor);
     if (r.actorUserId !== actor.userId || r.sourceSessionId !== source) denied();
@@ -142,12 +148,12 @@ export class SqlGroupForwardStore {
   ): Promise<{ group: GroupIdentity | null; member: boolean }> {
     const group = await first(
       db,
-      `SELECT session_id,enterprise_id,session_type,state FROM byai.byai_session WHERE session_id=$1 FOR UPDATE`,
+      `UPDATE byai.byai_session SET session_id=session_id WHERE session_id=$1 RETURNING session_id,enterprise_id,session_type,state`,
       [id],
     );
     const member = await first(
       db,
-      `SELECT mem_obj_id FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 FOR UPDATE`,
+      `UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 RETURNING mem_obj_id`,
       [id, actor.userId, actor.enterpriseId],
     );
     return { group: group as unknown as GroupIdentity | null, member: member !== null };
@@ -186,10 +192,20 @@ export class SqlGroupForwardStore {
     repo: GroupForwardRepository,
     r: ForwardRequestRow,
   ): Promise<ForwardOperation> {
+    const targets = await repo.targets(r.requestId);
+    const states = targets.map((t) => t.state);
+    // State and receipts share one SELECT snapshot, so read-only polling needs no request row lock.
+    const state = states.some((s) => ["PENDING", "COPYING", "READY"].includes(s))
+      ? "RUNNING"
+      : states.every((s) => s === "SUCCEEDED")
+        ? "SUCCEEDED"
+        : states.some((s) => s === "SUCCEEDED")
+          ? "PARTIAL_FAILED"
+          : "FAILED";
     return {
       requestId: r.requestId,
-      state: r.state,
-      targets: (await repo.targets(r.requestId)).map((t) => ({
+      state,
+      targets: targets.map((t) => ({
         targetSessionId: t.targetSessionId,
         state: t.state,
         messageIds: JSON.parse(t.messageIdsJson),
@@ -249,14 +265,20 @@ export class SqlGroupForwardStore {
       // The history timeline is create_time then message_id, not selected-ID/input ordering.
       const order = (
         await db.query(
-          `SELECT message_id FROM byai.byai_message WHERE enterprise_id=$1 AND session_id=$2 AND message_id=ANY($3::bigint[]) ORDER BY create_time ASC,message_id ASC FOR UPDATE`,
-          [this.tenantId, sourceId, input.messageIds],
+          `SELECT message_id FROM byai.byai_message WHERE session_id=$1 AND message_id=ANY($2::bigint[]) ORDER BY create_time ASC,message_id ASC`,
+          [sourceId, input.messageIds],
         )
       ).map((r) => String(r.message_id));
       if (order.length !== input.messageIds.length) denied();
       const reader = new SqlForwardSourceAuthorityReader(db, this.tenantId);
       const messages = [];
       for (const id of order) {
+        // 按历史顺序串行处理源消息，防止快照读取期间被撤回或删除。
+        const selected = await db.query(
+          "UPDATE byai.byai_message SET message_id=message_id WHERE session_id=$1 AND message_id=$2 RETURNING message_id",
+          [sourceId, id],
+        );
+        if (selected.length !== 1) denied();
         const message = await reader.readMessage(actor.userId, sourceId, id);
         messages.push({ ...message, timelineOrdinal: messages.length });
       }
@@ -325,9 +347,90 @@ export class SqlGroupForwardStore {
       ),
     );
   }
+  /** Complete only server-proven resource-free snapshots; final publication retains all authority checks. */
+  async completeText(
+    actor: ForwardActor,
+    source: string,
+    requestId: string,
+  ): Promise<ForwardOperation> {
+    const targets = await this.run(async (_db, repo) => {
+      const r = await this.request(repo, requestId);
+      this.binding(r, actor, source);
+      return repo.targets(requestId);
+    });
+    for (const target of targets) {
+      try {
+        await this.run(async (db, repo) => {
+          const r = await this.request(repo, requestId);
+          this.binding(r, actor, source);
+          const manifest = manifestOf(r);
+          if (manifest.candidates.length || manifest.attachments.length || manifest.proofs.length)
+            return;
+          const current = (await repo.target(target.targetId)) ?? denied();
+          if (
+            r.state !== "RUNNING" ||
+            current.state !== "PENDING" ||
+            (await repo.liveRequest(requestId)) ||
+            (await repo.live(current.targetId)) ||
+            (await repo.otherLiveTarget(requestId, current.targetId))
+          )
+            return;
+          if (!r.sourcesFrozen) {
+            const claim =
+              (await repo.claimRequest(requestId, `text-${randomUUID()}`, 60000)) ?? lost();
+            const completed = completeManifest(
+              manifest,
+              { proofs: [], resolutions: [] },
+              actor,
+              (await repo.targets(requestId))
+                .filter((t) => t.state !== "FAILED")
+                .map((t) => t.targetId),
+            );
+            await repo.freezeSources(
+              requestId,
+              claim.leaseOwner!,
+              claim.fencingVersion,
+              JSON.stringify(completed),
+            );
+            r.sourcesFrozen = true;
+          }
+          const claimed =
+            (await repo.claimTarget(current.targetId, `text-${randomUUID()}`, 60000)) ?? lost();
+          const lease = targetLease(r, claimed);
+          const checkpoint: DurableCheckpoint = JSON.parse(claimed.checkpointJson);
+          assertReady(checkpoint, manifest, lease);
+          const ready = await repo.checkpoint(
+            current.targetId,
+            lease.owner,
+            lease.fencingVersion,
+            { ...checkpoint, progress: 100, copiedObjects: [], attachmentMapping: {} },
+            "READY",
+          );
+          // One owning transaction includes the claim and the existing message/receipt publication.
+          await commitForward(db, repo, this.tenantId, targetLease(r, ready), (rows, request) =>
+            this.recompute(rows, request),
+          );
+        });
+      } catch (error) {
+        if (!(error instanceof DomainError) || error.code !== "RESOURCE_NOT_ACCESSIBLE")
+          throw error;
+        await this.run(async (db, repo) => {
+          const r = await this.request(repo, requestId);
+          this.binding(r, actor, source);
+          await db.query(
+            `UPDATE byai.byai_group_chat_forward_target SET state='FAILED',error_code='RESOURCE_NOT_ACCESSIBLE',retryable=FALSE,fencing_version=fencing_version+1
+            WHERE enterprise_id=$1 AND request_id=$2 AND target_id=$3 AND state='PENDING' AND (lease_until IS NULL OR lease_until<=clock_timestamp())`,
+            [this.tenantId, requestId, target.targetId],
+          );
+          await this.recompute(repo, r);
+        });
+      }
+    }
+    return this.status(actor, source, requestId);
+  }
   status(actor: ForwardActor, source: string, requestId: string): Promise<ForwardOperation> {
     return this.run(async (_db, repo) => {
-      const r = await this.request(repo, requestId);
+      const r = await this.readRequest(repo, requestId);
       this.binding(r, actor, source);
       return this.operation(repo, r);
     });
@@ -337,7 +440,7 @@ export class SqlGroupForwardStore {
     requestId: string,
   ): Promise<{ locator: ForwardOperationLocator; actor: ForwardActor; sourceSessionId: string }> {
     return this.run(async (_db, repo) => {
-      const r = await this.request(repo, requestId);
+      const r = await this.readRequest(repo, requestId);
       return {
         locator: { enterpriseId: this.tenantId, requestId: r.requestId, backend: r.backend },
         actor: actorOf(r),
@@ -345,14 +448,15 @@ export class SqlGroupForwardStore {
       };
     });
   }
-  discoverWork(after: string | null, limit: number): Promise<WorkPage> {
+  discoverWork(after: string | null, limit: number, requestId?: string): Promise<WorkPage> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20)
       throw new DomainError("FORWARD_INVALID_REQUEST");
     if (after !== null) positiveId(after);
+    if (requestId !== undefined) positiveId(requestId);
     return this.run(async (db, _repo) => {
       const rows = await db.query(
-        `SELECT t.target_id,t.request_id,r.sources_frozen FROM byai.byai_group_chat_forward_target t JOIN byai.byai_group_chat_forward_request r ON r.enterprise_id=t.enterprise_id AND r.request_id=t.request_id WHERE t.enterprise_id=$1 AND r.backend='TENANT' AND r.state='RUNNING' AND t.target_id>$2 AND t.state IN ('PENDING','COPYING','READY') AND (t.lease_until IS NULL OR t.lease_until<=clock_timestamp()) AND (r.sources_frozen=TRUE OR r.lease_until IS NULL OR r.lease_until<=clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_forward_target live WHERE live.enterprise_id=t.enterprise_id AND live.request_id=t.request_id AND live.state IN ('COPYING','READY') AND live.lease_until>clock_timestamp()) ORDER BY t.target_id LIMIT $3`,
-        [this.tenantId, after ?? "0", limit + 1],
+        `SELECT t.target_id,t.request_id,r.sources_frozen FROM byai.byai_group_chat_forward_target t JOIN byai.byai_group_chat_forward_request r ON r.enterprise_id=t.enterprise_id AND r.request_id=t.request_id WHERE t.enterprise_id=$1 AND r.backend='TENANT' AND r.state='RUNNING' AND t.target_id>$2 AND ($4::bigint IS NULL OR r.request_id=$4) AND t.state IN ('PENDING','COPYING','READY') AND (t.lease_until IS NULL OR t.lease_until<=clock_timestamp()) AND (r.sources_frozen=TRUE OR r.lease_until IS NULL OR r.lease_until<=clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_forward_target live WHERE live.enterprise_id=t.enterprise_id AND live.request_id=t.request_id AND live.state IN ('COPYING','READY') AND live.lease_until>clock_timestamp()) ORDER BY t.target_id LIMIT $3`,
+        [this.tenantId, after ?? "0", limit + 1, requestId ?? null],
       );
       const more = rows.length > limit;
       const page = rows.slice(0, limit).map((r) => ({
@@ -363,13 +467,29 @@ export class SqlGroupForwardStore {
         },
         targetId: String(r.target_id),
         sourcesFrozen: r.sources_frozen === true,
+        deliveryOnly: false,
       }));
+      if (requestId !== undefined) {
+        const deliveries = await db.query(
+          `SELECT target_id FROM byai.byai_group_chat_forward_target
+          WHERE enterprise_id=$1 AND request_id=$2 AND state='SUCCEEDED' AND pending_delivery=TRUE
+          AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY target_id`,
+          [this.tenantId, requestId],
+        );
+        for (const target of deliveries)
+          page.push({
+            locator: { enterpriseId: this.tenantId, requestId, backend: "TENANT" },
+            targetId: String(target.target_id),
+            sourcesFrozen: true,
+            deliveryOnly: true,
+          });
+      }
       return { candidates: page, nextCursor: more ? page.at(-1)!.targetId : null, hasMore: more };
     });
   }
   inspectTarget(requestId: string, targetId: string): Promise<TargetIdentity> {
     return this.run(async (_db, repo) => {
-      const r = await this.request(repo, requestId);
+      const r = await this.readRequest(repo, requestId);
       const t = await repo.target(positiveId(targetId));
       if (!t || t.requestId !== r.requestId) return denied();
       return { targetId: t.targetId, targetSessionId: t.targetSessionId, state: t.state };

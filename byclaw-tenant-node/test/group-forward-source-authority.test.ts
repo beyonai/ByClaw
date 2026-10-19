@@ -38,8 +38,20 @@ it("reads actual source tenant and preserves bigint strings without sender owner
   expect(source.speaker.id).toBe("21");
   expect(source.authority?.sourceSessionId).toBe("30");
 });
-it("rejects cross-tenant message even inside a matching session", async () => {
-  db.exec("UPDATE byai.byai_message SET enterprise_id='11'");
+it.each([null, "11"])("reads historical message enterprise %s using authorized session", async (enterprise) => {
+  db.prepare("UPDATE byai.byai_message SET enterprise_id=?").run(enterprise);
+  const source = await reader.readMessage("20", "30", "9007199254740993");
+  expect(source.id).toBe("9007199254740993");
+  expect(source.authority?.actor.enterpriseId).toBe("10");
+});
+it("rejects a message belonging to another session", async () => {
+  db.exec("UPDATE byai.byai_message SET session_id='31'");
+  await expect(reader.readMessage("20", "30", "9007199254740993")).rejects.toMatchObject({
+    code: "RESOURCE_NOT_ACCESSIBLE",
+  });
+});
+it("rejects a source group belonging to another tenant", async () => {
+  db.exec("UPDATE byai.byai_session SET enterprise_id='11'");
   await expect(reader.readMessage("20", "30", "9007199254740993")).rejects.toMatchObject({
     code: "RESOURCE_NOT_ACCESSIBLE",
   });

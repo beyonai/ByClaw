@@ -13,121 +13,97 @@
     INSERT INTO byai.byai_group_chat_forward_item (item_id, enterprise_id, request_id, target_id, ordinal, selected_message_id, selected_merged_card, source_message_id, content, speaker_json, source_created_at, references_json, attachments_json)
       VALUES (#{itemId}, #{enterpriseId}, #{requestId}, #{targetId}, #{ordinal}, #{selectedMessageId}, #{selectedMergedCard}, #{sourceMessageId}, #{content}, #{speakerJson}, #{sourceCreatedAt}, #{referencesJson}, #{attachmentsJson})
   </insert>
-  <select id="request" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
+  <select id="request" flushCache="true" useCache="false" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
     SELECT * FROM byai.byai_group_chat_forward_request
       WHERE enterprise_id=#{enterpriseId}
       AND request_id=#{requestId}
   </select>
-  <select id="requestByKey" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
+  <!-- 并发请求插入后需要重新读取回执，不能复用首次查询未命中的会话缓存。 -->
+  <select id="requestByKey" flushCache="true" useCache="false" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
     SELECT * FROM byai.byai_group_chat_forward_request
       WHERE enterprise_id=#{enterpriseId}
       AND actor_user_id=#{actorUserId}
       AND client_request_id=#{clientRequestId}
   </select>
-  <select id="target" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+  <select id="target" flushCache="true" useCache="false" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
     SELECT * FROM byai.byai_group_chat_forward_target
       WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
   </select>
-  <select id="targets" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+  <select id="targets" flushCache="true" useCache="false" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
     SELECT * FROM byai.byai_group_chat_forward_target
       WHERE enterprise_id=#{enterpriseId}
       AND request_id=#{requestId}
       ORDER BY target_session_id
   </select>
-  <select id="items" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardItem">
+  <select id="items" flushCache="true" useCache="false" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardItem">
     SELECT * FROM byai.byai_group_chat_forward_item
       WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
       ORDER BY ordinal
   </select>
-  <!-- The CTE boundary keeps live lease predicates above row acquisition, including unchanged-row waits.
-       Keep it scoped to the SELECT: H2 supports this shared syntax without weakening the production lock. -->
+  <!-- 调用方在短事务内先串行处理请求和目标，租约写入仍由当前行的状态、owner、版本和数据库时钟共同约束。 -->
   <update id="claimRequest">
     UPDATE byai.byai_group_chat_forward_request
       SET lease_owner=#{owner}, lease_until=clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-    WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request
-              WHERE enterprise_id=#{enterpriseId} AND request_id=#{requestId}
-              FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND request_id=#{requestId}
       AND state='RUNNING'
       AND sources_frozen=FALSE
       AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
-      AND #{leaseMillis} > 0)
+      AND #{leaseMillis} > 0
   </update>
   <update id="freezeSources">
     UPDATE byai.byai_group_chat_forward_request
       SET source_manifest_json=#{sourceManifestJson}, sources_frozen=TRUE, fencing_version=fencing_version+1, lease_owner=NULL, lease_until=NULL, update_time=CURRENT_TIMESTAMP
-    WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request
-              WHERE enterprise_id=#{enterpriseId} AND request_id=#{requestId}
-              FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND request_id=#{requestId}
       AND state='RUNNING'
       AND sources_frozen=FALSE
       AND lease_owner=#{owner}
       AND fencing_version=#{version}
-      AND lease_until > clock_timestamp())
+      AND lease_until > clock_timestamp()
   </update>
   <update id="claimTarget">
     UPDATE byai.byai_group_chat_forward_target
       SET lease_owner=#{owner}, lease_until=clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, state=CASE WHEN state='READY' THEN 'READY' ELSE 'COPYING' END, update_time=CURRENT_TIMESTAMP
-    WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
-              FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
       AND state IN ('PENDING','COPYING','READY')
       AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
-      AND #{leaseMillis} > 0)
+      AND #{leaseMillis} > 0
   </update>
   <update id="checkpoint">
     UPDATE byai.byai_group_chat_forward_target
       SET checkpoint_json=#{checkpointJson}, state=#{state}, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-    WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
-              FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
       AND lease_owner=#{owner}
       AND fencing_version=#{version}
       AND lease_until > clock_timestamp()
       AND ((state='COPYING'
       AND #{state} IN ('COPYING','READY')) OR (state='READY'
-      AND #{state}='READY')))
+      AND #{state}='READY'))
   </update>
   <update id="succeedTarget">
     UPDATE byai.byai_group_chat_forward_target
       SET state='SUCCEEDED', message_ids_json=#{messageIdsJson}, pending_delivery=TRUE, error_code=NULL, retryable=FALSE, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-    WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
-              FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
       AND state='READY'
       AND lease_owner=#{owner}
       AND fencing_version=#{version}
-      AND lease_until > clock_timestamp())
+      AND lease_until > clock_timestamp()
   </update>
   <update id="failTarget">
     UPDATE byai.byai_group_chat_forward_target
       SET state='FAILED', error_code=#{errorCode}, retryable=#{retryable}, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
-    WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
-              FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+    WHERE enterprise_id=#{enterpriseId}
       AND target_id=#{targetId}
       AND state IN ('COPYING','READY')
       AND lease_owner=#{owner}
       AND fencing_version=#{version}
-      AND lease_until > clock_timestamp())
+      AND lease_until > clock_timestamp()
   </update>
   <update id="resetFailedTarget">
     UPDATE byai.byai_group_chat_forward_target
@@ -176,11 +152,7 @@
       AND target_id=#{targetId}
       AND item_id=#{itemId}
       AND bound_message_id IS NULL
-      AND EXISTS (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
-              FOR UPDATE
-      ) SELECT 1 FROM locked_forward t WHERE t.enterprise_id=#{enterpriseId}
+      AND EXISTS (SELECT 1 FROM byai.byai_group_chat_forward_target t WHERE t.enterprise_id=#{enterpriseId}
       AND t.target_id=#{targetId}
       AND t.state='READY'
       AND t.lease_owner=#{owner}
@@ -191,26 +163,18 @@
   <update id="renewTarget">
     UPDATE byai.byai_group_chat_forward_target
     SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
-    WHERE target_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_target
-              WHERE enterprise_id=#{lease.actor.enterpriseId} AND target_id=#{lease.targetId}
-              FOR UPDATE
-      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND target_id=#{lease.targetId}
+    WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND target_id=#{lease.targetId}
     AND target_session_id=#{lease.targetSessionId} AND lease_owner=#{lease.owner} AND fencing_version=#{lease.fencingVersion}
     AND state IN ('COPYING','READY') AND lease_until > clock_timestamp() AND #{leaseMillis} > 0
     AND EXISTS (SELECT 1 FROM byai.byai_group_chat_forward_request r
       WHERE r.enterprise_id=#{lease.actor.enterpriseId} AND r.request_id=#{lease.requestId}
-      AND r.actor_user_id=#{lease.actor.userId} AND r.source_session_id=#{lease.sourceSessionId} AND r.state='RUNNING'))
+      AND r.actor_user_id=#{lease.actor.userId} AND r.source_session_id=#{lease.sourceSessionId} AND r.state='RUNNING')
   </update>
   <update id="renewRequest">
     UPDATE byai.byai_group_chat_forward_request
     SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
-    WHERE request_id = (WITH locked_forward AS (
-        SELECT * FROM byai.byai_group_chat_forward_request
-              WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId}
-              FOR UPDATE
-      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND actor_user_id=#{lease.actor.userId}
+    WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND actor_user_id=#{lease.actor.userId}
     AND lease_owner=#{lease.owner} AND fencing_version=#{lease.fencingVersion} AND state='RUNNING' AND sources_frozen=FALSE
-    AND lease_until > clock_timestamp() AND #{leaseMillis} > 0)
+    AND lease_until > clock_timestamp() AND #{leaseMillis} > 0
   </update>
 </mapper>
