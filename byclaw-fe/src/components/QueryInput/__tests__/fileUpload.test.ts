@@ -50,7 +50,7 @@ describe('upload button visibility', () => {
   });
 });
 
-describe('upload count limits and server-side size validation', () => {
+describe('upload count and size limits', () => {
   it.each([undefined, null, {}, { maxFileSize: 0, maxFileCount: 0 }])(
     'does not impose limits for missing or zero configuration: %p',
     (config) => {
@@ -68,13 +68,22 @@ describe('upload count limits and server-side size validation', () => {
     expect(isUploadFileSizeExceeded(config, 100 * 1024 * 1024)).toBe(false);
   });
 
-  it('does not enforce the configured size limit in the frontend', () => {
+  it('enforces the configured byte limit while allowing files exactly at the limit', () => {
     const config = { maxFileCount: 0, maxFileSize: 10 };
     const sizeLimit = 10 * 1024 * 1024;
 
     expect(isUploadFileCountExceeded(config, 100)).toBe(false);
     expect(isUploadFileSizeExceeded(config, sizeLimit - 1)).toBe(false);
     expect(isUploadFileSizeExceeded(config, sizeLimit)).toBe(false);
-    expect(isUploadFileSizeExceeded(config, sizeLimit + 1)).toBe(false);
+    expect(isUploadFileSizeExceeded(config, sizeLimit + 1)).toBe(true);
+  });
+
+  it('rejects the reported video before upload when the configured limit is 10 MB', () => {
+    expect(isUploadFileSizeExceeded({ maxFileSize: 10 }, 21196721)).toBe(true);
+  });
+
+  it('uses the configured limit instead of a fixed 10 MB limit', () => {
+    expect(isUploadFileSizeExceeded({ maxFileSize: 30 }, 21196721)).toBe(false);
+    expect(isUploadFileSizeExceeded({ maxFileSize: -1 }, 21196721)).toBe(false);
   });
 });

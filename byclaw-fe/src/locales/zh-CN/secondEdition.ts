@@ -249,6 +249,7 @@ export default {
   // 文件上传相关
   'upload.maxFilesLimit': '最多只能上传{count}个文件',
   'upload.fileSizeLimit': '单个文件大小不能超过{size}M',
+  'upload.failed': '附件上传失败，请重试',
   'upload.fileNotUploaded': '文件未上传完成，请稍后再试',
   'upload.fileUploadIncomplete': '文件未上传完成',
   'upload.duplicateFile': '不能上传相同的文件',

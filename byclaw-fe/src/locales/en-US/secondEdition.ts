@@ -254,6 +254,7 @@ export default {
   // 文件上传相关
   'upload.maxFilesLimit': 'You can upload up to {count} files',
   'upload.fileSizeLimit': 'File size cannot exceed {size}M',
+  'upload.failed': 'Attachment upload failed. Please try again.',
   'upload.fileNotUploaded': 'File upload not complete, please try again later',
   'upload.fileUploadIncomplete': 'File upload incomplete',
   'upload.duplicateFile': 'Cannot upload duplicate files',
