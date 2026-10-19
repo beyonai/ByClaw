@@ -19,8 +19,8 @@ public class SandboxRecoveryController {
         this.store = store; this.service = service; this.systemConfigService = systemConfigService;
     }
     private void guard() {
-        if (!CurrentUserHolder.isAdminVip() && !"openSource".equals(systemConfigService.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "仅 adminvip 或开源版本可处理恢复任务");
+        if (!CurrentUserHolder.isAdminVip() || !"openSource".equals(systemConfigService.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "仅开源版本的 adminvip 可处理恢复任务");
     }
     @PostMapping("/queues")
     public ResponseUtil<?> queues(@RequestBody Map<String, String> query) {

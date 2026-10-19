@@ -1,6 +1,6 @@
 # 沙箱恢复任务管理
 
-管理入口：`/manager/systemParams/sandbox` → **恢复任务**。接口位于 `/sandbox/recovery`，前端入口和每个接口仅允许 `adminvip` 或明确配置 `BYAI_BRAND_VERSION=openSource` 的开源版本访问。商业版本的平台管理/运维角色不再单独授予权限；版本未知时不开放。
+管理入口：`/manager/systemParams/sandbox` → **恢复任务**。接口位于 `/sandbox/recovery`，前端入口和每个接口仅允许账号为 `adminvip` 且明确配置 `BYAI_BRAND_VERSION=openSource` 时访问。商业版本的平台管理/运维角色不再单独授予权限；版本未知时不开放。
 
 ## 查看
 
@@ -32,3 +32,9 @@
 验证：`mvn -B -f byclaw-be/pom.xml verify`；前端 RecoveryPanel 交互测试；隔离 Redis 可使用 `-Dtest=SandboxRecoveryRedisTest -Drecovery.test.redis.port=<专用端口> test` 验证真实 reclaim/ACK 竞争。不要把该测试端口指向业务 Redis。
 
 Redis 连接管理：单机模式每次命令执行后（包括异常）归还借出的 Jedis；集群模式不关闭共享客户端，节点扫描单独归还节点连接。避免刷新列表耗尽框架连接池、阻塞沙箱列表与恢复操作。
+
+### 自动恢复历史
+
+定时对账确认远端沙箱异常并取得记录更新权后，追加发现异常、重建成功/失败历史。DSH 共享命令队列中的待确认任务会保存脱敏摘要（每组最多 500 条），每 15 秒检查新消费者及执行状态。只有执行记录明确结束才标记结束；仅 ACK 或裁剪无法证明成功，显示结果未知。发现时间不等于停止时间，不推断 OOM。记录失败只记告警，不中断恢复。
+
+页面默认展示最近 10 条历史，完整抽屉显示最近 100 条；沿用 Redis 历史 Stream 约 10000 条上限，不是永久审计。观察器跨 BE 加锁，每批最多 200 个追踪，超过 1 小时仍不确定的任务标记结果未知。此记录从部署后开始，不补造过去 OOM 历史；未经过定时对账的重建暂不包含此链路记录。

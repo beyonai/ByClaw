@@ -48,9 +48,19 @@ const outcomeNames: Record<string, string> = {
   WAKE_CONFIRMED: '已确认唤醒',
   DISMISSED: '已移出待确认',
   FAILED: '失败',
+  DETECTED: '发现沙箱异常（停止时间未知）',
+  REBUILT: '沙箱已重建，任务待核对',
+  REBUILD_FAILED: '沙箱重建失败',
+  AWAITING_RECLAIM: '等待任务接管',
+  RECLAIMED: '已观察到新 Worker 接管',
+  TASK_FINISHED: '执行状态已结束',
+  TASK_FAILED: '执行失败或取消',
+  RESULT_UNKNOWN: '结果未知，需核对会话',
 };
 const operationName = (value: string) =>
-  value === 'AUTO_WAKE' ? '自动唤醒' : actionNames[value as RecoveryAction] || value;
+  ({ AUTO_WAKE: '自动唤醒', AUTO_REBUILD: '自动重建', AUTO_TASK: '自动恢复任务' }[value] ||
+  actionNames[value as RecoveryAction] ||
+  value);
 const time = (value?: string | number | null) => (value ? new Date(Number(value)).toLocaleString() : '未知');
 const duration = (value?: number) =>
   value === undefined || value === null ? '-' : value < 60000 ? '不足 1 分钟' : `${Math.floor(value / 60000)} 分钟`;
@@ -73,6 +83,7 @@ export default function RecoveryPanel() {
   const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
   const [form] = Form.useForm();
   const generation = useRef(0);
   const queueGeneration = useRef(0);
@@ -153,16 +164,24 @@ export default function RecoveryPanel() {
     }
   };
 
-  const openHistory = async () => {
-    setHistoryOpen(true);
+  const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
       setHistory(await listRecoveryHistory());
+      setHistoryError(false);
     } catch {
-      setHistory([]);
+      setHistoryError(true);
     } finally {
       setHistoryLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+  const openHistory = async () => {
+    setHistoryOpen(true);
+    await loadHistory();
   };
 
   const visibleRows = rows.filter((row) =>
@@ -180,7 +199,14 @@ export default function RecoveryPanel() {
         description="这里展示当前连接 Redis 的任务与唤醒队列。最后领取时间不是停止时间；Redis 未记录准确退出时间时显示未知。唤醒后仍需核对成员回报和最终结果。"
       />
       <Space>
-        <Button icon={<ReloadOutlined />} loading={queueLoading} onClick={() => void loadQueues()}>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={queueLoading}
+          onClick={() => {
+            void loadQueues();
+            void loadHistory();
+          }}
+        >
           刷新队列
         </Button>
         {queueCursor !== '0' && (
@@ -193,6 +219,34 @@ export default function RecoveryPanel() {
           {queueCursor !== '0' ? '扫描尚未完成，当前结果不是全部队列' : '本次扫描已完成'}
         </Typography.Text>
       </Space>
+      {historyError && <Alert type="error" message="恢复历史读取失败，请刷新重试。" />}
+      <Typography.Title level={5}>最近恢复历史（自动处理后仍保留）</Typography.Title>
+      <Table
+        rowKey="eventId"
+        size="small"
+        loading={historyLoading}
+        dataSource={history.slice(0, 10)}
+        expandable={{
+          expandedRowRender: (event) => (
+            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+              {event.content || event.reason || '未记录任务内容'}
+            </Typography.Paragraph>
+          ),
+        }}
+        pagination={false}
+        scroll={{ x: 1100 }}
+        columns={[
+          { title: '时间', dataIndex: 'time', render: time },
+          { title: '用户', dataIndex: 'userCode' },
+          { title: '数字员工 / 组', dataIndex: 'resourceName' },
+          { title: '会话', dataIndex: 'sessionId' },
+          { title: '操作', dataIndex: 'action', render: operationName },
+          { title: '结果', dataIndex: 'outcome', render: (value: string) => outcomeNames[value] || value },
+          { title: '旧沙箱', dataIndex: 'oldSandboxId', ellipsis: true },
+          { title: '新沙箱', dataIndex: 'newSandboxId', ellipsis: true },
+        ]}
+      />
+      <Typography.Title level={5}>当前待处理队列</Typography.Title>
       {queryError && <Alert type="error" message="队列读取失败，不能将当前列表视为空队列。请重试。" />}
       <Table<RecoveryQueue>
         rowKey={queueId}
@@ -417,7 +471,7 @@ export default function RecoveryPanel() {
         </Form>
       </Modal>
       <Drawer
-        title="恢复操作记录（最近 100 条，含自动唤醒失败）"
+        title="恢复操作记录（最近 100 条，含自动恢复过程）"
         width={1000}
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
@@ -432,6 +486,9 @@ export default function RecoveryPanel() {
             { title: '时间', dataIndex: 'time', render: time },
             { title: '管理员', dataIndex: 'operator' },
             { title: '所属用户', dataIndex: 'userCode' },
+            { title: '数字员工 / 组', dataIndex: 'resourceName' },
+            { title: '旧沙箱', dataIndex: 'oldSandboxId', ellipsis: true },
+            { title: '新沙箱', dataIndex: 'newSandboxId', ellipsis: true },
             { title: '会话', dataIndex: 'sessionId' },
             { title: '操作', dataIndex: 'action', render: operationName },
             { title: '结果', dataIndex: 'outcome', render: (value: string) => outcomeNames[value] || value },

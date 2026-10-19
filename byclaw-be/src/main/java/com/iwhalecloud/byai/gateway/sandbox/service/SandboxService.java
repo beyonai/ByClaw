@@ -77,6 +77,11 @@ import redis.clients.jedis.Jedis;
  */
 @Service
 public class SandboxService {
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.recovery.SandboxRecoveryRecorder recoveryRecorder;
+    private void recordRecovery(SsSandboxRecord record, String outcome, String newSandboxId) {
+        if (recoveryRecorder != null) recoveryRecorder.lifecycle(record, outcome, newSandboxId);
+    }
     @Autowired
     private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway> platformGatewayProvider;
     private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway() { return platformGatewayProvider.getObject(); }
@@ -2118,16 +2123,25 @@ public class SandboxService {
             return;
         }
         incrementVersions(record, true);
+        recordRecovery(record, "DETECTED", null);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-        SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
-            () -> launchSandbox(record.getUserCode(), record.getResourceId()));
+        SandboxLaunchData launchData;
+        try {
+            launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
+                () -> launchSandbox(record.getUserCode(), record.getResourceId()));
+        } catch (RuntimeException failure) {
+            recordRecovery(record, "REBUILD_FAILED", null);
+            throw failure;
+        }
         if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
+            recordRecovery(record, "REBUILT", launchData.getSandboxId());
             report.addAffectedSandbox(sandboxRef(record) + " -> newSandboxId=" + launchData.getSandboxId());
             LOGGER.info("沙箱一致性检测重拉成功，旧记录：{}，新sandboxId：{}，新endpoint：{}",
                 sandboxRef(record), launchData.getSandboxId(), launchData.getEndpoint());
         }
         else {
             report.addFailedSandbox(sandboxRef(record));
+            recordRecovery(record, "REBUILD_FAILED", null);
             LOGGER.warn("沙箱一致性检测重拉失败，旧记录：{}", sandboxRef(record));
         }
     }

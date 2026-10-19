@@ -6,6 +6,7 @@ import {
   actOnRecoveryMessage,
   listRecoveryMessages,
   listRecoveryQueues,
+  listRecoveryHistory,
 } from '@/pages/manager/service/SandboxRecovery';
 
 // Exercise real Ant Design forms while avoiding animation timing under parallel CI load.
@@ -92,4 +93,14 @@ it('makes incomplete scanning explicit and preserves earlier queues on continuat
   await waitFor(() => expect(listRecoveryQueues).toHaveBeenCalledWith('27'));
   expect(await screen.findByText('本次扫描已完成')).toBeInTheDocument();
   expect(screen.getByText('待确认任务')).toBeInTheDocument();
+});
+
+it('keeps automatic rebuild history visible when there are no pending queues', async () => {
+  (listRecoveryQueues as jest.Mock).mockResolvedValue({ items: [], nextCursor: '0' });
+  (listRecoveryHistory as jest.Mock).mockResolvedValue([
+    { eventId: '1-0', time: '1', action: 'AUTO_REBUILD', outcome: 'REBUILT', userCode: 'recovered-user' },
+  ]);
+  render(<RecoveryPanel />);
+  expect(await screen.findByText('recovered-user')).toBeInTheDocument();
+  expect(screen.getByText('沙箱已重建，任务待核对')).toBeInTheDocument();
 });

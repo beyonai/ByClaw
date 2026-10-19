@@ -33,6 +33,12 @@ class SandboxRecoveryRedisTest {
         var commands = redis.getResource();
         try {
             var store = new SandboxRecoveryStore(redis);
+            String tracking = UUID.randomUUID().toString();
+            try {
+                store.trackRecovery(tracking, Map.of("sessionId", "11", "outcome", "AWAITING_RECLAIM"));
+                assertThat(store.trackedRecoveries().get(tracking)).containsEntry("sessionId", "11");
+            } finally { store.stopTracking(tracking); }
+            assertThat(store.trackedRecoveries()).doesNotContainKey(tracking);
             var first = commands.xadd(stream, StreamEntryID.NEW_ENTRY, Map.of("data", "{}"));
             var second = commands.xadd(stream, StreamEntryID.NEW_ENTRY, Map.of("data", "{}"));
             commands.xgroupCreate(stream, "test-group", new StreamEntryID("0-0"), false);

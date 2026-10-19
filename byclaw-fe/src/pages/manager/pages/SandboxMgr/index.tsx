@@ -257,7 +257,7 @@ const SandboxMgr = () => {
       active = false;
     };
   }, []);
-  const canManageRecovery = isAdminVip(userInfo) || brandVersion === 'openSource';
+  const canManageRecovery = userInfo?.userCode?.toLowerCase() === 'adminvip' && brandVersion === 'openSource';
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const canViewTenantResources =
     multiTenancyEnabled &&

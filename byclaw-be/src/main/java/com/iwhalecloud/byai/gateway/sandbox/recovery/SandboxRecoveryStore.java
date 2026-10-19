@@ -49,6 +49,13 @@ public class SandboxRecoveryStore {
         throw new IllegalArgumentException("不是可管理的沙箱队列");
     }
 
+    public List<Queue> queuesForStream(String stream) {
+        kind(stream);
+        if (!"stream".equals(execute(c -> c.type(stream)))) return List.of();
+        return execute(c -> c.xinfoGroups(stream)).stream()
+            .map(g -> new Queue(stream, g.getName(), "COMMAND", g.getPending(), null)).toList();
+    }
+
     public QueuePage queues(String cursor) {
         // Bounded SCAN, with continuation across every cluster primary.
         var scan = scan(cursor);
@@ -208,4 +215,26 @@ public class SandboxRecoveryStore {
         execute(commands -> commands.eval("if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0",
             List.of("byclaw:sandbox:recovery:lock:" + identity), List.of(token)));
     }
+    public void trackRecovery(String key, Map<String, String> event) {
+        execute(c -> c.set("byclaw:sandbox:recovery:tracking:" + key,
+            com.alibaba.fastjson.JSON.toJSONString(event), new SetParams().ex(7200)));
+        execute(c -> c.zadd("byclaw:sandbox:recovery:tracking-index", System.currentTimeMillis(), key));
+    }
+    public Map<String, Map<String, String>> trackedRecoveries() {
+        Map<String, Map<String, String>> result = new LinkedHashMap<>();
+        var keys = execute(c -> c.zrange("byclaw:sandbox:recovery:tracking-index", 0, 199));
+        for (String key : keys) {
+            String json = execute(c -> c.get("byclaw:sandbox:recovery:tracking:" + key));
+            if (json == null) { stopTracking(key); continue; }
+            Map<String, String> value = new LinkedHashMap<>();
+            com.alibaba.fastjson.JSON.parseObject(json).forEach((k, v) -> value.put(k, String.valueOf(v)));
+            result.put(key, value);
+        }
+        return result;
+    }
+    public void stopTracking(String key) {
+        execute(c -> c.del("byclaw:sandbox:recovery:tracking:" + key));
+        execute(c -> c.zrem("byclaw:sandbox:recovery:tracking-index", key));
+    }
+
 }
