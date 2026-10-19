@@ -951,6 +951,12 @@ export class ByClawAsyncTeamGate {
     this.finish()
   }
 
+  /** Reattach a cold command to durable work without requiring another start tool call. */
+  retainActiveTeam(): void {
+    this.begin('team')
+    if (this.waiting && this.kind === 'team') this.teamActive = true
+  }
+
   completeRetainedTeamWhenQuiescent(activeChildCount = 0): void {
     if (!this.waiting || this.kind !== 'team' || this.startCallId !== undefined || !this.teamActive) return
     this.teamQuiescent = true
@@ -1801,6 +1807,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.queueRuntimeProjection(turn, turn.runtime.observeTurnActive(true))
     teamModelOverrides?.set(String(rootAgent.id), hasConversationModelOverride ? selection : undefined)
     try {
+      // The start tool belongs to the old process. Restore its wait fence before
+      // the resumed captain can answer, even if no member status edge arrives.
+      turn.teamSnapshots.request()
+      await turn.teamSnapshots.flush()
       const agent = directTarget === undefined
         ? await this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
         : (() => {
@@ -2899,7 +2909,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   private async emitTeamSnapshots(turn: ActiveTurn): Promise<void> {
-    const captainSessionIds = new Set([turn.rootSessionId, ...turn.announcedChildren])
+    // A direct expert-group route can cold-resume its team captain before the
+    // captain emits a child event in this process. Keep that response session
+    // in the ownership scope so the first durable snapshot can restore the
+    // team's wait fence instead of treating it as an unrelated team.
+    const captainSessionIds = new Set([turn.rootSessionId, turn.responseSessionId, ...turn.announcedChildren])
     const ownsCaptain = (captainSessionId: string): boolean => captainSessionIds.has(captainSessionId)
     const roots = [{
       workspace: turn.workspace,
@@ -2920,6 +2934,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const workingChildren = new Set(ownedLiveSnapshots.flatMap(team => (
       team.members.filter(member => member.activity === 'working').map(member => member.id)
     )))
+    if (ownedLiveSnapshots.some(team => team.lifecycle !== 'draft' && team.stoppedAt === undefined
+      && ((team.tasks.length > 0 && !isQuiescentTeamSnapshot(team))
+        || team.members.some(member => member.activity === 'working')))) {
+      turn.teamGate.retainActiveTeam()
+    }
     turn.teamGate.observeSnapshotActiveChildren(workingChildren.size)
     this.queueRuntimeProjection(turn, turn.runtime.observeTeamActivity(
       ownedLiveSnapshots.some(team => !isQuiescentTeamSnapshot(team)),
