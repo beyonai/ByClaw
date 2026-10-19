@@ -211,7 +211,7 @@ Each plugin README owns the detailed field semantics, failure conditions, and li
 
 ## Verification and startup
 
-AgentTeams, ByClaw Integration, Better Sidebar, and Iron Rules are verified against DSH `0.1.3-alpha.2` (`c389f96`) and its current session, subagent, and prompt APIs; peer dependencies declare the required API versions. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
+The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
 
 The current-runtime end-to-end check launches the official headless profile twice with an isolated `DSH_HOME` and a deterministic local model adapter. It checks FIFO prompts, live output, template configuration, session persistence, and cold resume without Redis or API keys. Build the plugins first, then run:
 
@@ -235,6 +235,8 @@ pnpm --dir plugins/dsh-devflow-plugins run build
 dsh --profile web --dump-config
 dsh web --host 0.0.0.0 --no-open
 ```
+
+DSH 0.2 rejects wildcard listeners, so `@byclaw/dsh-lan-web` binds `--host 0.0.0.0` to the first non-internal IPv4 address and does not serve 127.0.0.1. The image entrypoint mirrors that Web port on 127.0.0.1 (`scripts/dsh-loopback-forward.mjs`) so in-container clients, such as the OpenSandbox execd `/proxy/<port>` route, still reach DSH.
 
 `--dump-config` must show `agent-teams`, `byclaw-dsh`, `better-sidebar`, `dsh-diff-viewer`, `codegraph-mcp`, `dsh-codegraph`, `byclaw-lan-web-startup`, `byclaw-bash-provider`, `byclaw-browser-use`, and the Devflow rows from `devflow` through `devflow-ui`. Browser Use exposes exactly one stateful tool named `browser`; private leases and capabilities never enter model context. Integration subscribes to Redis and completes one blocking resource synchronization before its Worker starts.
 

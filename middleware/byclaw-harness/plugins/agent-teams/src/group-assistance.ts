@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolveTeamStateRoot } from './runtime-state.ts'
@@ -104,7 +105,7 @@ export async function requestGroupMemberAssistance(ctx: Context, member: Agent, 
   const captain = ctx.agents.get(requested.team.captainSessionId as SessionId)
   if (captain !== undefined && requested.message !== undefined) {
     try { captain.steer(createUserMessage({ content: [{ type: 'text', text: requested.message.content }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' } }))
+      source: { kind: 'plugin:dsh-agent-teams' } }))
     await withTeamLock(`team:${stateRoot}:${requested.team.id}`, () => acknowledgeMailbox(
       stateRoot, requested.team.id, CAPTAIN_KEY, [requested.message!.id]))
     } catch { /* The persisted assistance mailbox will be delivered on resume. */ }

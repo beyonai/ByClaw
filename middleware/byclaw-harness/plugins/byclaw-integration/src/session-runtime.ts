@@ -5,10 +5,10 @@ import { normalizeByClawSessionId } from './session-extensions.ts'
 import { byClawSessionCwd } from './session-cwd.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionInspection, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installModelSelection, type Agent, type AgentHandle, type AssistantStreamFrame, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, expandAssistantStream, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
@@ -181,15 +181,29 @@ function editDiffOperation(toolName: string): ByClawEditDiffOperation | undefine
   return undefined
 }
 
+/**
+ * One tool call's result as a `tool/result` event carries it: a tool-role message answering the
+ * call, with the tool's presentation metadata on the event.
+ */
+function toolResultOf(event: Extract<SessionEvent, { type: 'tool/result' }>): {
+  toolCallId: string
+  content: readonly ContentBlock[]
+  isError: boolean
+  meta: Record<string, unknown> | undefined
+} {
+  const message = event.data.message
+  const meta = event.data.meta
+  return {
+    toolCallId: String(message.toolCallId),
+    content: message.content,
+    isError: event.data.error !== undefined || message.isError === true,
+    meta: meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta as Record<string, unknown> : undefined,
+  }
+}
+
 function editDiffResultHunks(event: SessionEvent): DiffHunkLike[] | undefined {
   if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch') return undefined
-  const block = event.type === 'tool/result'
-    ? event.data.message.content.find(item => item.type === 'tool-result')
-    : undefined
-  const blockRecord = block?.type === 'tool-result' ? block as unknown as Record<string, unknown> : undefined
-  const meta = typeof blockRecord?.['meta'] === 'object' && blockRecord['meta'] !== null
-    ? blockRecord['meta'] as Record<string, unknown>
-    : undefined
+  const meta = event.type === 'tool/result' ? toolResultOf(event).meta : undefined
   const value = meta?.['diffs']
   if (!Array.isArray(value)) return undefined
   const hunks = value.filter((item): item is DiffHunkLike => {
@@ -711,12 +725,11 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
   if (event.type === 'user/message') {
     if (event.data.source.kind === 'user') return undefined
     const source = event.data.source as unknown as Record<string, unknown>
-    const systemPromptSource = source['kind'] === 'plugin'
-      && source['plugin'] === '@deepseek-ai/dsh-system-prompt'
+    // DSH's runtime context (formerly the system-prompt plugin's injection) keeps its ByClaw name;
+    // other producers' kinds, including `plugin:<name>`, are their own names.
+    const systemPromptSource = source['kind'] === 'runtime-context'
     const sourceName = systemPromptSource
       ? 'plugin:system-prompt'
-      : source['kind'] === 'plugin' && typeof source['plugin'] === 'string'
-        ? `plugin:${source['plugin']}`
       : String(source['kind'] ?? 'injected')
     const text = contentText(event.data.content)
     return {
@@ -752,10 +765,10 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
     }
   }
   if (event.type === 'tool/result') {
-    const block = event.data.message.content.find(item => item.type === 'tool-result')
-    const toolCallId = block?.type === 'tool-result' ? String(block.toolCallId) : undefined
-    const result = block?.type === 'tool-result' ? contentText(block.content) : ''
-    const isError = event.data.error !== undefined || (block?.type === 'tool-result' && block.isError === true)
+    const answered = toolResultOf(event)
+    const toolCallId: string | undefined = answered.toolCallId
+    const result = contentText(answered.content)
+    const isError = answered.isError
     return {
       eventKind: 'tool.result', status: isError ? 'failed' : 'running',
       summary: isError ? 'Tool result · 调用失败' : 'Tool result · 调用完成',
@@ -1144,17 +1157,14 @@ export class ByClawAsyncTeamGate {
       return
     }
     if (event.type === 'tool/result') {
-      const result = event.data.message.content.find(block => (
-        block.type === 'tool-result'
-        && (String(block.toolCallId) === this.startCallId || String(block.toolCallId) === this.deleteCallId)
-      ))
-      const callId = result?.type === 'tool-result' ? String(result.toolCallId) : undefined
-      if (callId !== undefined && this.startCallId === callId) {
-        this.observeTeamResult('agent_teams_start', callId, event.data.error !== undefined || result?.isError === true)
+      const result = toolResultOf(event)
+      const callId = result.toolCallId
+      if (this.startCallId === callId) {
+        this.observeTeamResult('agent_teams_start', callId, result.isError)
         return
       }
-      if (callId !== undefined && this.deleteCallId === callId) {
-        this.observeTeamResult('agent_teams_delete', callId, event.data.error !== undefined || result?.isError === true)
+      if (this.deleteCallId === callId) {
+        this.observeTeamResult('agent_teams_delete', callId, result.isError)
         return
       }
     }
@@ -1163,14 +1173,12 @@ export class ByClawAsyncTeamGate {
       return
     }
     if (event.type === 'tool/result' && this.templateCallId !== undefined) {
-      const result = event.data.message.content.find(block => (
-        block.type === 'tool-result' && block.toolCallId === this.templateCallId
-      ))
-      if (result?.type !== 'tool-result') return
-      const meta = (result as unknown as { meta?: Record<string, unknown> }).meta
+      const result = toolResultOf(event)
+      if (result.toolCallId !== String(this.templateCallId)) return
+      const meta = result.meta
       const text = contentText(result.content)
       const assistanceReturned = this.templateCallIsAssistance && (meta?.['byclaw_assistance_status'] === 'completed' || meta?.['byclaw_assistance_status'] === 'blocked' || /^Assistance status: (completed|blocked)\b/u.test(text))
-      if (result.isError === true || event.data.error !== undefined || assistanceReturned) this.templateReported = true
+      if (result.isError || assistanceReturned) this.templateReported = true
       else {
         const meta = event.data.meta
         const childId = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta['instance_session_id'] : undefined
@@ -1636,13 +1644,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     turn.cancellation = (async () => {
       await stopTeam
       const children = await this.ctx.subagents.listChildren(agent.id)
-      await this.ctx.subagents.drainContinuableChildren(agent, children.map(child => child.id))
+      await this.ctx.subagents.drainChildren(agent, children.map(child => child.id))
       // A tool already creating members may finish during cancellation. Wait for
       // the owner, then cancel that late roster before returning the command.
       await agent.whenIdle()
       await cancelCaptainTeam(this.ctx, agent, this.options.stateDir)
       const lateChildren = await this.ctx.subagents.listChildren(agent.id)
-      await this.ctx.subagents.drainContinuableChildren(agent, lateChildren.map(child => child.id))
+      await this.ctx.subagents.drainChildren(agent, lateChildren.map(child => child.id))
       agent.cancel({ kind: 'hook', reason })
       await agent.whenIdle()
     })()
@@ -2353,11 +2361,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       argsRaw = JSON.stringify(event.data.arguments)
       phase = 'running'
     } else if (event.type === 'tool/result') {
-      const block = event.data.message.content.find(item => item.type === 'tool-result')
-      if (block?.type !== 'tool-result') return false
-      callId = String(block.toolCallId)
-      phase = event.data.error !== undefined || block.isError === true ? 'failed' : 'applied'
-      error = phase === 'failed' ? contentText(block.content) || String(event.data.error ?? 'tool failed') : undefined
+      const result = toolResultOf(event)
+      callId = result.toolCallId
+      phase = result.isError ? 'failed' : 'applied'
+      error = phase === 'failed' ? contentText(result.content) || String(event.data.error ?? 'tool failed') : undefined
     } else if (event.type === 'tool/ptc-dispatch') {
       callId = String(event.data.subCallId)
       phase = event.data.isError ? 'failed' : 'applied'
@@ -2889,7 +2896,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       const text = `[ByClaw 内部运行巡检]\n当前命令连续 ${notice.timeoutMs}ms 没有新的运行进展，等待器已触发检查；这不表示任务或成员已经失败，原命令与消息转发仍保持打开。\n${teamScope}${missingScope}\n请判断是否正常长时间执行、等待输入、成员失败、任务阻塞或成员已完成但尚未汇报。正常运行就让成员继续；确有停滞时，在现有团队内催办、重试或调整分工，并核对已有产物以避免重复执行。不要仅因耗时较长就取消成员或删除团队。若任务已完成，汇总成员结果并给出完整最终答复；若需要用户协助，请明确说明阻塞原因并请求输入。完成本次检查后等待异步事件，不要循环查询或 sleep。`
       turn.recoveryNotifiedAgents.add(id)
       try {
-        agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'byclaw-integration' } }))
+        agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:byclaw-integration' } }))
       } catch (error: unknown) {
         turn.recoveryNotifiedAgents.delete(id)
         this.ctx.logger.warn(`byclaw-dsh could not wake recovery captain ${id}: ${sanitizeByClawOperationalLog(error)}`)

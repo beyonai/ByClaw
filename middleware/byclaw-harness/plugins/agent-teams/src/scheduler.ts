@@ -30,6 +30,7 @@ import { groupTaskSummaryOutcome, validateGroupTaskSummary, renderGroupTaskSumma
 import { groupInputRevision, recoverGroupAssistanceOutboxes, beginGroupAssistanceResultDelivery, groupAssistanceResultRequest, hasPendingGroupAssistanceResult } from './group-assistance.ts'
 import { memberTaskContextDeclaration } from './group-context.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import { type GroupExternalExecution, groupPolicy } from './group-scope.ts'
 import { CAPTAIN_KEY } from './state.ts'
 import { runClaudeTurn } from './claude-bridge.ts'
@@ -263,7 +264,7 @@ export function installTeamScheduler(
     })
     if (prepared === undefined) return
     try {
-      captain.steer(createUserMessage({ content: [{ type: 'text', text: prepared.message.content }], source: { kind: 'plugin', plugin: 'dsh-agent-teams' } }))
+      captain.steer(createUserMessage({ content: [{ type: 'text', text: prepared.message.content }], source: { kind: 'plugin:dsh-agent-teams' } }))
       await withTeamLock(teamLockKey(stateRoot, teamId), () => acknowledgeMailbox(stateRoot, teamId, CAPTAIN_KEY, [prepared.message.id]))
     } catch {
       await withTeamLock(teamLockKey(stateRoot, teamId), () => releaseMailboxDelivery(stateRoot, teamId, CAPTAIN_KEY, [prepared.message.id]))
@@ -305,7 +306,7 @@ export function installTeamScheduler(
         })
         for (const message of recovered) {
           try {
-            captain.steer(createUserMessage({ content: [{ type: 'text', text: message.content }], source: { kind: 'plugin', plugin: 'dsh-agent-teams' } }))
+            captain.steer(createUserMessage({ content: [{ type: 'text', text: message.content }], source: { kind: 'plugin:dsh-agent-teams' } }))
             await withTeamLock(teamLockKey(stateRoot, team.id), () => acknowledgeMailbox(stateRoot, team!.id, CAPTAIN_KEY, [message.id]))
           } catch { /* The recovered durable request is delivered on captain resume. */ }
         }
@@ -528,7 +529,7 @@ export function installTeamScheduler(
             await appendMailbox(stateRoot, team!.id, CAPTAIN_KEY, message)
             try {
               captain.steer(createUserMessage({ content: [{ type: 'text', text: message.content }],
-                source: { kind: 'plugin', plugin: 'dsh-agent-teams' } }))
+                source: { kind: 'plugin:dsh-agent-teams' } }))
               await withTeamLock(teamLockKey(stateRoot, team!.id), () => acknowledgeMailbox(stateRoot, team!.id, CAPTAIN_KEY, [message.id]))
             } catch { /* Durable mailbox remains available. */ }
             activeExternalAttempts.delete(ticket.attemptId)

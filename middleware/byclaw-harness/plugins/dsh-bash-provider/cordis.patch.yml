@@ -10,16 +10,15 @@
 - id: credentials
   disabled: true
 
-# Keep the settings file provider and add the busy-Enter environment default.
-- id: settings
-  disabled: true
+# Busy Enter defaults to BYCLAW_DSH_BUSY_ENTER (queue unless set). A preference the
+# user saves is written to the profile patch, which replaces this config.
+- id: ui-conversation
+  config:
+    busyEnter: !!js "process.env.BYCLAW_DSH_BUSY_ENTER ?? 'queue'"
 
 - insert:
     - id: byclaw-credentials
       name: '@byclaw/dsh-bash-provider/credentials'
-
-    - id: byclaw-settings
-      name: '@byclaw/dsh-bash-provider/settings'
 
     - id: byclaw-bash-provider
       name: '@byclaw/dsh-bash-provider'

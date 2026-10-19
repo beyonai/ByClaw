@@ -16,6 +16,7 @@ import { groupPolicy, groupScope, assertGroupCoordinator } from './group-scope.t
 import { resolveTeamStateRoot } from './runtime-state.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
@@ -51,6 +52,7 @@ import {
   deliverToMember,
   installAgentTeamsReportDeliveryGuard,
   installRetiredMemberGuard,
+  installMemberComposition,
   installMemberSelectionRuntime,
   interruptMember,
   memberLabel,
@@ -340,7 +342,7 @@ export function steerCaptainReport(captain: Pick<Agent, 'steer'>, from: string, 
   try {
     captain.steer(createUserMessage({
       content: [{ type: 'text', text: `AgentTeams message from member ${from}:\n\n${content}` }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
+      source: { kind: 'plugin:dsh-agent-teams' },
     }))
     return true
   } catch {
@@ -373,7 +375,7 @@ export function steerSubmittedTaskReport(
         type: 'text',
         text: `AgentTeams submitted-task event:\n${details}\n\nThe downstream result woke this requester asynchronously. Do not poll or sleep. Use agent_teams_get_submitted_task at most once per listed task only if authoritative state is still needed, then respond to the user or end the turn.`,
       }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
+      source: { kind: 'plugin:dsh-agent-teams' },
     }))
     return true
   } catch {
@@ -441,6 +443,7 @@ function settlementKeyForMessage(team: TeamState, memberName: string, content: s
 export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void {
   installRetiredMemberGuard(ctx, config.stateDir)
   installAgentTeamsReportDeliveryGuard(ctx, config.stateDir)
+  installMemberComposition(ctx, config.stateDir)
   const memberSelections = config.memberSelectionRuntime ?? installMemberSelectionRuntime(ctx, config.stateDir)
   const scheduler = installTeamScheduler(ctx, {
     stateDir: config.stateDir,

@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ShellExecutor from '@deepseek-ai/dsh-shell'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import {
   ReviewError,
   STDOUT_BUDGET,
@@ -43,7 +43,7 @@ class ScriptedExecutor extends ShellExecutor {
     }
   }
 
-  run(spec: ShellExecSpec): Promise<ShellRunResult> {
+  private scripted(spec: ShellExecSpec): Promise<ShellRunResult> {
     this.commands.push(spec.command)
     this.specs.push(spec)
     const entry = this.script.find(([match]) => spec.command.includes(match))?.[1]
@@ -59,8 +59,10 @@ class ScriptedExecutor extends ShellExecutor {
     })
   }
 
-  start(): ShellProcess {
-    throw new Error('the review gate never starts background processes')
+  execute(spec: ShellExecSpec): Promise<ShellExecution> {
+    // Foreground callers only read the result projection.
+    const result = this.scripted(spec)
+    return Promise.resolve({ result: () => result } as unknown as ShellExecution)
   }
 }
 
@@ -255,14 +257,16 @@ describe('resolving the review scope', () => {
       ["'preview'", { stdout: preview }],
       ["'rule'", { stdout: '' }],
     ])
-    vi.spyOn(shell, 'run').mockImplementation((spec) => {
+    const execution = (result: ShellRunResult): Promise<ShellExecution> =>
+      Promise.resolve({ result: () => Promise.resolve(result) } as unknown as ShellExecution)
+    vi.spyOn(shell, 'execute').mockImplementation((spec) => {
       shell.commands.push(spec.command)
       if (spec.command.includes("'preview'")) {
-        return Promise.resolve(runResult(preview))
+        return execution(runResult(preview))
       }
       const paths = [...spec.command.matchAll(/'([^']*\.ts)'/g)].map(match => match[1])
       calls.push(paths)
-      return Promise.resolve(runResult(JSON.stringify({
+      return execution(runResult(JSON.stringify({
         groups: [{ source: 'system', pattern: '**/*.ts', files: paths, rule: 'TS rules' }],
       })))
     })

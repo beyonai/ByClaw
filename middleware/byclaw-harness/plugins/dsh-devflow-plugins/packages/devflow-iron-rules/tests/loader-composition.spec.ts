@@ -493,7 +493,7 @@ describe('devflow-iron-rules real Loader composition through cordis.yml', () => 
       // A shell whose resolve itself faults: infrastructure, not a verdict.
       ctx.provide('shell', {
         resolve: () => { throw new Error('no shell available') },
-        run: () => Promise.reject(new Error('unreachable')),
+        execute: () => Promise.reject(new Error('unreachable')),
       })
       await new Promise(resolve => setTimeout(resolve, 0))
 

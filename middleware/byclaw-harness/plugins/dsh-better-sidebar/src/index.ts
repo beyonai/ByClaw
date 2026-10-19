@@ -4,9 +4,9 @@
  * preview route, the /sidebar/bundle lazy-chunk route (client code splits),
  * and the terminal WebSocket upgrade. Every route passes the same
  * browser-trust fence as the /api gateway — Host-header loopback or the
- * web runtime's `trustedHosts` (LAN IP literals sampled at boot plus
- * `--trusted-host` authorities), read per request from the live service
- * value so the fence tracks the same trust source the /api gateway derives
+ * listener's bind IP literal or the `webStartup` service's `trustedHosts`
+ * (`--trusted-host` authorities), read per request from the live service
+ * values so the fence tracks the same trust source the /api gateway derives
  * its list from.
  *
  * All operations are conversation-scoped: requests carry a sessionId, the
@@ -21,13 +21,14 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { Context, SidebarHttpRequest } from './context-types.ts'
 import {
   Config,
-  PrefsSchema,
+  readSidebarPrefs,
   resolveSidebarConfig,
   SIDEBAR_PREFS_DEFAULTS,
   SIDEBAR_PREFS_NS,
   type ResolvedSidebarConfig,
   type SidebarConfig,
   type SidebarPrefs,
+  type SidebarPrefsConfig,
 } from './config.ts'
 import { parentOf, requireAbsolute, listDirectory, rootLabel } from './fs-tree.ts'
 import { writeWorkspaceUpload } from './fs-operations.ts'
@@ -83,8 +84,8 @@ export type {
 /** Plugin identity for cordis.yml rows. */
 export const name = 'dsh-better-sidebar'
 
-/** Services required before mounting: the webserver routes, the session store, the web runtime's trusted hosts, and the tool registry. */
-export const inject = ['webServer', 'sessions', 'webRuntime', 'tools']
+/** Services required before mounting: the webserver routes, the session store, the web startup's trusted hosts, and the tool registry. */
+export const inject = ['webServer', 'sessions', 'webStartup', 'tools']
 
 /** Content types for the media route, by extension. */
 const MEDIA_TYPES: Record<string, string> = {
@@ -713,12 +714,12 @@ function buildApi(
 
 /**
  * Plugin body: mount the fenced routes and the pty lifecycle.
- * @param ctx - host plugin context (webServer, sessions, webRuntime).
+ * @param ctx - host plugin context (webServer, sessions, webStartup).
  * @param config - deployment-provided limits; the Loader validates against
  * {@link Config} and fills defaults, direct callers get them from
  * {@link resolveSidebarConfig}.
  */
-export function apply(ctx: Context, config?: SidebarConfig): void {
+export function apply(ctx: Context, config?: SidebarConfig & SidebarPrefsConfig): void {
   // pnpm strips the executable bit from node-pty's prebuilt spawn-helper;
   // restore it before any terminal can spawn (idempotent).
   ensureSpawnHelper()
@@ -728,11 +729,13 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   // configured shell fixes one surface and silently leaves the other on the
   // platform default.
   const terminalShell = defaultShell({ explicit: resolved.shell })
-  // The web runtime's bind-derived trust list (boot-sampled LAN literals
-  // plus --trusted-host authorities) — the authoritative source the /api
-  // gateway fence derives its list from. Read per request from the live
-  // service value; a replaced list takes effect without a plugin restart.
-  const fence = (req: SidebarHttpRequest): boolean => isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
+  // The invocation's --trusted-host authorities (webStartup) plus the
+  // listener's own bind IP literal — the same sources the DSH 0.2.1 /api
+  // gateway fence accepts (0.2.1 replaced the webRuntime service and its
+  // bind-derived LAN list with these). Read per request from the live
+  // service values; a replaced list takes effect without a plugin restart.
+  const fence = (req: SidebarHttpRequest): boolean =>
+    isTrustedApiRequest(req, ctx.webStartup.trustedHosts, ctx.webServer.host)
   // node-pty is loaded lazily, never at module top level (issue #140): a
   // missing or broken install must degrade THIS plugin — terminal tab shows
   // a repair command, agent terminal tools stay unregistered — instead of
@@ -763,10 +766,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   const agentOpenRegistry = new AgentOpenRegistry()
 
   // ── User-facing "Side card" preferences ──────────────────────────────────
-  // Register the namespace with the settings provider so the Settings page
-  // (client half) can render and persist the new-conversation defaults. The
-  // DSH settings RPC domain (api-proxy) only serves allowlisted namespaces to
-  // configuration clients, so the client reaches this namespace through the
+  // The preferences are volatile fields of this row's Config (DSH 0.2.1
+  // replaced settings.register with volatile row config): the settings
+  // service describes and writes them under this plugin's profile entry id,
+  // the Loader commits writes into the running references and emits
+  // `loader/volatile-update`. The client reaches the namespace through the
   // plugin's own fenced routes below ('settings.get'/'settings.update'),
   // which call the seam in-process. Deployments without a settings service
   // simply never fill the face and the client falls back to the defaults.
@@ -798,14 +802,13 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     }
   }
   ctx.inject(['settings'], (sctx) => {
-    const ns = SIDEBAR_PREFS_NS
-    // The structural settings mirror types `schema` as unknown, so the
-    // generic is not inferred here; the real service resolves it from the
-    // schemastery schema (PrefsSchema) — narrow the owner scope explicitly.
-    const scope = sctx.settings.register(ns, PrefsSchema) as {
-      get(): SidebarPrefs
-      watch(callback: (next: SidebarPrefs, prev: SidebarPrefs) => void): () => void
-    }
+    // The settings namespace is this plugin's profile entry id (the bundle
+    // row's `better-sidebar`, or an aggregate's own id); direct callers
+    // without a Loader entry keep the historical namespace name.
+    const entry = (ctx.fiber as { entry?: { options?: { id?: unknown } } } | undefined)?.entry
+    const ns = typeof entry?.options?.id === 'string' ? entry.options.id : SIDEBAR_PREFS_NS
+    // The live preferences: the row config's volatile references.
+    const scope = { get: (): SidebarPrefs => readSidebarPrefs(config) }
     const viewOf = (): { value?: unknown; revision?: number } => {
       const descriptor = sctx.settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === ns)
       return descriptor === undefined
@@ -864,8 +867,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     syncOpenToolsGate()
     // ONE watch subscription drives both gates: settings commits re-evaluate
     // the terminal tools AND the open tool together (each gate is idempotent
-    // and owns its own disposer).
-    scope.watch(() => { syncToolsGate(scope); syncOpenToolsGate() })
+    // and owns its own disposer). The Loader delivers `loader/volatile-update`
+    // only to listeners of the owning fiber, so the listener sits on the
+    // plugin context; the effect ties it to this settings child's lifetime.
+    sctx.effect(() => ctx.on('loader/volatile-update', () => { syncToolsGate(scope); syncOpenToolsGate() }),
+      'dsh-better-sidebar: side card preference watch')
   })
 
   // ── JSON API ────────────────────────────────────────────────────────────

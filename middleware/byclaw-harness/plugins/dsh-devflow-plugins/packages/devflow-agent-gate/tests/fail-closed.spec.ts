@@ -12,6 +12,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture from '../../../tests/working-directory-fixture'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
 import type { CardLocation, DevActor, TransitionResult } from '@zhchxiao123/dsh-devflow'
@@ -63,6 +64,7 @@ async function boot(options: BootOptions = {}): Promise<Booted> {
   if (options.withRuntime !== false) {
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentDefaultModelConfig, MODEL_ROUTE)
+    await ctx.plugin(WorkingDirectoryFixture)
     await ctx.plugin(SubagentRuntime)
     if (options.provider !== undefined) ctx.subagents.registerProvider(options.provider)
   }
@@ -111,7 +113,7 @@ describe('devflow-agent-gate fails closed', () => {
     const booted = await boot({
       provider: {
         name: 'checker',
-        capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+        capabilities: { agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: false },
         inheritsParentContext: false,
         start: () => Promise.reject(new Error('spawn backend down')),
       },
@@ -171,7 +173,7 @@ describe('devflow-agent-gate fails closed', () => {
       checkTimeoutMs: 20,
       provider: {
         name: 'checker',
-        capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+        capabilities: { agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: false },
         inheritsParentContext: false,
         start: () => new Promise<SubagentRun>((resolve) => {
           setTimeout(() => {

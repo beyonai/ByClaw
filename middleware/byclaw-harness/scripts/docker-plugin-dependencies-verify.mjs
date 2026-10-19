@@ -10,7 +10,7 @@ const manifest = JSON.parse(await readFile(
 
 assert.deepEqual(
   Object.keys(manifest.dependencies ?? {}).sort(),
-  ['node-pty', 'schemastery', 'ws'],
+  ['@deepseek-ai/schemastery', 'node-pty', 'ws'],
   'better-sidebar production dependencies must contain only host runtime modules',
 )
 

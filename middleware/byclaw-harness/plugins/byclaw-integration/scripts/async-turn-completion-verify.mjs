@@ -39,7 +39,7 @@ const delegatedGate = new ByClawAsyncTeamGate()
 delegatedGate.observe({ type: 'tool/call', data: { name: 'byclaw_instantiate_template', callId: 'delegate' } })
 delegatedGate.observe({ type: 'tool/result', data: {
   meta: { instance_session_id: 'child' },
-  message: { content: [{ type: 'tool-result', toolCallId: 'delegate', content: [], isError: false }] },
+  message: { role: 'tool', source: { kind: 'tool', callId: 'delegate' }, toolCallId: 'delegate', content: [], isError: false },
 } })
 delegatedGate.observeAgentActive('child', true)
 delegatedGate.observe({ type: 'user/message', data: {
@@ -68,7 +68,7 @@ earlySettlementGate.observe({ type: 'user/message', data: {
 } })
 earlySettlementGate.observe({ type: 'tool/result', data: {
   meta: { instance_session_id: 'fast-child' },
-  message: { content: [{ type: 'tool-result', toolCallId: 'fast-delegate', content: [] }] },
+  message: { role: 'tool', source: { kind: 'tool', callId: 'fast-delegate' }, toolCallId: 'fast-delegate', content: [] },
 } })
 earlySettlementGate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
 assert.equal(earlySettlementGate.waiting, false, 'a fast matching settlement must survive result metadata arriving later')
@@ -77,7 +77,7 @@ earlySettlementGate.dispose()
 const failedTemplateGate = new ByClawAsyncTeamGate()
 failedTemplateGate.observe({ type: 'tool/call', data: { name: 'byclaw_instantiate_template', callId: 'failed-delegate' } })
 failedTemplateGate.observe({ type: 'tool/result', data: {
-  message: { content: [{ type: 'tool-result', toolCallId: 'failed-delegate', content: [], isError: true }] },
+  message: { role: 'tool', source: { kind: 'tool', callId: 'failed-delegate' }, toolCallId: 'failed-delegate', content: [], isError: true },
 } })
 failedTemplateGate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
 assert.equal(failedTemplateGate.waiting, false, 'failed template dispatch must not wait for a nonexistent child')
@@ -254,8 +254,10 @@ const turn = {
   chunkSequences: new Map(), reasoningChunkSequences: new Map(),
 }
 runtime.active.set('root', turn)
+// A live Agent carries its scope; the runtime installs its model-failure capture there.
+const agentCtx = { on() { return () => {} } }
 const status = (session, running) => listeners.get('agent/status')({
-  agent: { id: session.id, session }, status: running ? 'running' : 'idle',
+  agent: { id: session.id, session, ctx: agentCtx }, status: running ? 'running' : 'idle',
 })
 const chunk = (session, text, seq) => frames(session, 1, 0, { type: 'text-delta', index: 0, text }).forEach(frame =>
     listeners.get('agent/assistant-stream')({ agent: { id: session.id, session: session }, frame }))
@@ -381,7 +383,7 @@ async function verifySessionEventQueueRecovery() {
 async function verifyRuntimeProjectionQueueRecovery() {
   const harness = forwardingRecoveryHarness()
   const status = running => harness.listeners.get('agent/status')({
-    agent: { id: harness.memberSession.id, session: harness.memberSession },
+    agent: { id: harness.memberSession.id, session: harness.memberSession, ctx: { on() { return () => {} } } },
     status: running ? 'running' : 'idle',
   })
   try {

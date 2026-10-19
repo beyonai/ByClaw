@@ -213,7 +213,7 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 
 ## 验证与启动
 
-AgentTeams、ByClaw Integration、Better Sidebar 和 Iron Rules 已在 DSH `0.1.3-alpha.2`（`c389f96`）上验证当前会话、子代理和提示词接口；相关 peer 依赖声明了所需接口的最低版本。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
+插件面向 DSH `0.2.1-rc.2`，即 `Dockerfile.base` 固定的版本（`DSH_REF`）；peer 依赖固定为该版本。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
 
 当前运行时端到端检查会使用独立的 `DSH_HOME` 和本地确定性模型适配器，两次启动官方 headless profile，验证 FIFO 后续任务、实时输出、模板配置、会话落盘与冷恢复，无需 Redis 或 API Key。先构建插件，再执行：
 
@@ -237,6 +237,8 @@ pnpm --dir plugins/dsh-devflow-plugins run build
 dsh --profile web --dump-config
 dsh web --host 0.0.0.0 --no-open
 ```
+
+DSH 0.2 拒绝通配监听地址，因此 `@byclaw/dsh-lan-web` 把 `--host 0.0.0.0` 绑定到第一个非内部 IPv4 地址，不再监听 127.0.0.1。镜像入口会在 127.0.0.1 上镜像同一 Web 端口（`scripts/dsh-loopback-forward.mjs`），容器内的客户端（例如 OpenSandbox execd 的 `/proxy/<port>` 路由）仍可访问 DSH。
 
 `--dump-config` 应显示 `agent-teams`、`byclaw-dsh`、`better-sidebar`、`dsh-diff-viewer`、`codegraph-mcp`、`dsh-codegraph`、`byclaw-lan-web-startup`、`byclaw-bash-provider`、`byclaw-browser-use`，以及从 `devflow` 到 `devflow-ui` 的 Devflow 运行项。Browser Use 只向模型暴露一个有状态的 `browser` 工具，私有租约与 capability 不进入模型上下文。Integration 启动时会先完成 Redis 订阅和一次阻塞式资源同步，再上线 Worker。
 

@@ -13,6 +13,12 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  // One React for the plugin and the DSH client packages it renders: inside
+  // the DSH workspace the linked `dsh-client-ui-*` sources resolve their own
+  // react copy, and two copies break every hook (`useRef` of null).
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   test: {
     server: {
       deps: {

@@ -33,7 +33,7 @@ import type { IronRule } from './types.ts'
  * Stamped on every message this plugin contributes so the durable record can
  * never be mistaken for something the user typed.
  */
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'devflow-iron-rules' }
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin:devflow-iron-rules' }
 
 /** First-party tools whose success means the turn produced a code change. */
 const MUTATING_TOOLS = new Set(['write', 'edit'])
@@ -170,7 +170,7 @@ async function runCheckScript(
       timeoutMs: config.checkTimeoutMs,
       signal: AbortSignal.any([signal, timeout]),
     })
-    const result = await ctx.shell.run(spec)
+    const result = await (await ctx.shell.execute(spec)).result()
     return {
       passed: result.exitCode === 0,
       output: result.stdout.text.trim().length > 0 ? result.stdout.text : result.stderr.text,

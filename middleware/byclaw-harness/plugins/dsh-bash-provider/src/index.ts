@@ -28,7 +28,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { SandboxBashExecutor } from '@deepseek-ai/dsh-bash-sandbox'
 import type { Config } from '@deepseek-ai/dsh-bash-sandbox'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellExecution } from '@deepseek-ai/dsh-shell'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -78,6 +78,13 @@ declare module '@deepseek-ai/dsh-bash-local' {
     ulimitEnabled?: boolean
     /** Directory for single-host slot locks when Redis is unreachable. */
     slotLockDir?: string
+  }
+}
+
+/** The build guard's advisory message source (session format v4 per-plugin kind). */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:byclaw-bash-provider': { kind: 'plugin:byclaw-bash-provider' }
   }
 }
 
@@ -522,7 +529,7 @@ export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
           ...decision.additionalContexts ?? [],
           createUserMessage({
             content: [{ type: 'text', text: verdict.advisory }],
-            source: { kind: 'plugin', plugin: name },
+            source: { kind: 'plugin:byclaw-bash-provider' },
           }),
         ],
       }
@@ -625,16 +632,13 @@ export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
     }
   }
 
-  /** Refresh Redis immediately before each foreground command. */
-  override async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+  /**
+   * Refresh Redis immediately before each command, foreground or background,
+   * then execute with the refreshed values overlaid.
+   */
+  override async execute(spec: ShellExecSpec): Promise<ShellExecution> {
     await this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
-    return super.run(this.withRuntimeEnvironment(spec))
-  }
-
-  /** Background commands use the last-good cache while triggering an asynchronous refresh. */
-  override start(spec: ShellExecSpec): ShellProcess {
-    void this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
-    return super.start(this.withRuntimeEnvironment(spec))
+    return super.execute(this.withRuntimeEnvironment(spec))
   }
 }
 

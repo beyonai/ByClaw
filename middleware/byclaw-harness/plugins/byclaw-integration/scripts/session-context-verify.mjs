@@ -390,7 +390,7 @@ assert.equal(registry.getTurn(childSession.id), undefined)
 const first = appendByClawContext(session, [userMessage], workspace, inboundTurn)
 assert.equal(first.length, 3)
 assert.equal(first[0], userMessage)
-assert.deepEqual(first[1].source, { kind: 'plugin', plugin: 'byclaw-context' })
+assert.deepEqual(first[1].source, { kind: 'plugin:byclaw-context' })
 assert.match(first[1].content[0].text, /session_id: 350860623218590448/u)
 assert.match(first[1].content[0].text, /cwd: \/workspace\/byclaw/u)
 assert.match(first[1].content[0].text, /default_output_root: \/srv\/byclaw\/by\/\.sessions\/350860623218590448/u)
@@ -433,6 +433,6 @@ const delegated = appendByClawContext({
   ...sessionLog([{ type: 'seed/a' }, persistedContextEvent], 2),
 }, [userMessage], workspace)
 assert.equal(delegated.length, 2)
-assert.deepEqual(delegated[1].source, { kind: 'plugin', plugin: 'byclaw-context' })
+assert.deepEqual(delegated[1].source, { kind: 'plugin:byclaw-context' })
 
 console.info('ByClaw session context verification passed')

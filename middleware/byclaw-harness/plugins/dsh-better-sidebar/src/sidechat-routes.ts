@@ -45,6 +45,13 @@ import {
 } from './sidechat-core.ts'
 import { requireString, SidebarError } from './wire.ts'
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** The Side Chat context injection (boundary prompt + parked snapshot). */
+    'plugin:dsh-better-sidebar': { kind: 'plugin:dsh-better-sidebar' }
+  }
+}
+
 /** The five Side Chat routes of the sidebar API (wire method names). */
 export interface SidechatRoutes {
   /** Create a side thread child seeded with the parent's log up to now.
@@ -143,13 +150,15 @@ function admitFollowup(agent: Agent, blocks: ContentBlock[]): void {
  * log therefore records two user/message events (injection, then question)
  * instead of one wrapped blob: the transcript shows the question as a user
  * bubble and collapses the injection as a context row. The injection source
- * is stamped `kind: 'plugin'` so recognition is structural; its text still
- * opens with SIDE_BOUNDARY_PREFIX, keeping boundaryDelivered intact.
+ * is stamped `kind: 'plugin:dsh-better-sidebar'` (DSH 0.2.1 plugin-owned
+ * source kind; 0.1.5 logs' `{ kind: 'plugin', plugin }` convert to it on
+ * load) so recognition is structural; its text still opens with
+ * SIDE_BOUNDARY_PREFIX, keeping boundaryDelivered intact.
  */
 function admitFirstContact(agent: Agent, injectionText: string, question: string): void {
   agent.inject(createUserMessage({
     content: textPrompt(injectionText),
-    source: { kind: 'plugin', plugin: SIDE_INJECTION_PLUGIN },
+    source: { kind: `plugin:${SIDE_INJECTION_PLUGIN}` },
   }))
   admitFollowup(agent, textPrompt(question))
 }

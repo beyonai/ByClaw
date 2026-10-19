@@ -29,7 +29,13 @@ import type { StaleAnchor, StaleDocument } from './types.ts'
  * Stamped on every message this plugin contributes so the durable record can
  * never be mistaken for something the user typed.
  */
-export const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'devflow-spec-sentinel' }
+export const PLUGIN_SOURCE: MessageSource = { kind: 'plugin:devflow-spec-sentinel' }
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:devflow-spec-sentinel': { kind: 'plugin:devflow-spec-sentinel' }
+  }
+}
 
 /** The two per-agent roots the turn-end evaluation derives. */
 export interface SentinelWorkspace {

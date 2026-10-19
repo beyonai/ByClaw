@@ -83,7 +83,7 @@ export interface Config {
    * is keyed by workspace and namespace under `$DSH_HOME/runtime/byclaw-agent-teams/`.
    */
   stateDir?: string
-  /** `ctx.subagents` provider used to spawn members; must support continuable children and personas (default `spawn`). */
+  /** `ctx.subagents` provider used to spawn members; must support continuable children; AgentTeams applies the member persona itself (default `spawn`). */
   memberProvider?: string
   /** Optional model override applied to every member. */
   memberModel?: string

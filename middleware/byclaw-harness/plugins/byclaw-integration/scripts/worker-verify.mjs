@@ -357,14 +357,14 @@ if (sessionEventCard.contentType !== '3015'
 const contextProjection = describeDshSessionEvent({
   type: 'user/message',
   data: {
-    source: { kind: 'plugin', plugin: 'skill-loader', form: 'catalog' },
+    source: { kind: 'plugin:skill-loader', form: 'catalog' },
     content: [{ type: 'text', text: 'Loaded Spring Boot skills' }],
   },
 })
 const systemPromptProjection = describeDshSessionEvent({
   type: 'user/message',
   data: {
-    source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'system-prompt' },
+    source: { kind: 'runtime-context', form: 'snapshot' },
     content: [{ type: 'text', text: 'DeepSeek-AI DeepSeek DSH runtime instructions' }],
   },
 })
@@ -374,9 +374,10 @@ const toolCallProjection = describeDshSessionEvent({
 })
 const toolResultProjection = describeDshSessionEvent({
   type: 'tool/result',
-  data: { message: { content: [{
-    type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'file body' }],
-  }] } },
+  data: { message: {
+    role: 'tool', source: { kind: 'tool', callId: 'call-1' }, toolCallId: 'call-1',
+    content: [{ type: 'text', text: 'file body' }],
+  } },
 })
 const planProjection = describeDshSessionEvent({
   type: 'todo/write',
@@ -600,13 +601,9 @@ asyncTeamGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } 
 if (!asyncTeamGate.waiting) {
   throw new Error('active team did not remain pending across a completed captain turn')
 }
-asyncTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'start-call', isError: false, content: [],
-}] } } })
+asyncTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'start-call' }, toolCallId: 'start-call', content: [], isError: false } } })
 asyncTeamGate.observe({ type: 'tool/call', data: { name: 'agent_teams_delete', callId: 'delete-call' } })
-asyncTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'delete-call', isError: false, content: [],
-}] } } })
+asyncTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'delete-call' }, toolCallId: 'delete-call', content: [], isError: false } } })
 asyncTeamGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
 await asyncTeamGate.completion
 asyncTeamGate.assertHealthy()
@@ -615,9 +612,7 @@ if (asyncTeamGate.waiting) throw new Error('deleted temporary team did not compl
 const retainedTeamGate = new ByClawAsyncTeamGate()
 retainedTeamGate.observe({ type: 'turn/start', data: { turn: 1 } })
 retainedTeamGate.observe({ type: 'tool/call', data: { name: 'agent_teams_start', callId: 'retained-start' } })
-retainedTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'retained-start', isError: false, content: [],
-}] } } })
+retainedTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'retained-start' }, toolCallId: 'retained-start', content: [], isError: false } } })
 retainedTeamGate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
 retainedTeamGate.completeRetainedTeamWhenQuiescent()
 await Promise.resolve()
@@ -678,9 +673,7 @@ assert.throws(() => cancelledGate.assertHealthy(), /was cancelled/u)
 
 const templateGate = new ByClawAsyncTeamGate()
 templateGate.observe({ type: 'tool/call', data: { name: 'byclaw_instantiate_template', callId: 'instantiate-call' } })
-templateGate.observe({ type: 'tool/result', data: { meta: { instance_session_id: 'child' }, message: { content: [{
-  type: 'tool-result', toolCallId: 'instantiate-call', isError: false, content: [],
-}] } } })
+templateGate.observe({ type: 'tool/result', data: { meta: { instance_session_id: 'child' }, message: { role: 'tool', source: { kind: 'tool', callId: 'instantiate-call' }, toolCallId: 'instantiate-call', content: [], isError: false } } })
 templateGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
 if (!templateGate.waiting) throw new Error('template dispatch conclusion incorrectly completed the ByClaw turn')
 templateGate.observe({ type: 'user/message', data: {

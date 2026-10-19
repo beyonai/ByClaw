@@ -15,8 +15,16 @@
       "patch": "./cordis.patch.yml"
     }
   },
+  "dependencies": {
+    "js-yaml": "4.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis-plugin-include": "workspace:*",
+    "@deepseek-ai/dsh-agent-preset-registry": "workspace:*"
+  },
   "peerDependencies": {
-    "@deepseek-ai/dsh-agent-presets": "*"
+    "@deepseek-ai/cordis-plugin-include": "*",
+    "@deepseek-ai/dsh-agent-preset-registry": "*"
   },
   "scripts": {
     "test": "node --test tests/*.test.js"

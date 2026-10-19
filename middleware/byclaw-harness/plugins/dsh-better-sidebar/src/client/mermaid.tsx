@@ -28,7 +28,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEv
 import { createPortal } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import mermaid from 'mermaid'
-import { IconCopyOutline16, MarkdownText, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCopyOutlineRegular, MarkdownText, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import { isDarkScheme, subscribeColorScheme } from './theme.ts'
 import { t } from './locales.ts'
 import { sanitizeSvg } from './mermaid-sanitize.ts'
@@ -287,7 +287,7 @@ function MermaidDiagram({ code }: { code: string }): React.ReactNode {
           aria-label={t('copy')}
           title={t('copy')}
         >
-          <IconCopyOutline16 />
+          <IconCopyOutlineRegular />
           <span>{copied ? t('copied') : t('copy')}</span>
         </button>
       </div>

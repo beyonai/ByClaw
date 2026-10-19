@@ -5,7 +5,7 @@
  * handles — so the official Sidebar body only coordinates data and layout.
  */
 import { useMemo, useState, type ReactNode } from 'react'
-import { IconChevronDownOutline14, Input, MarkdownText, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineRegular, Input, MarkdownText, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ArtifactRecord, CardLocation, ClaimHolder, DevActor, DevCard, DevflowCardId, DevflowJournalEntry, ServiceClass } from '@zhchxiao123/dsh-devflow/client'
@@ -639,7 +639,7 @@ function BoardGroupRows({ row, collapsed, toggle, openCardDetail, actions, t }: 
               aria-label={t(collapsed ? 'row.children.expand' : 'row.children.collapse', { id: row.card.id })}
               onClick={() => { toggle(row.card.id) }}
             >
-              <IconChevronDownOutline14 className={collapsed ? css.rowToggleCollapsed : undefined} />
+              <IconChevronDownOutlineRegular className={collapsed ? css.rowToggleCollapsed : undefined} />
             </button>
           )}
           <BoardCardRow

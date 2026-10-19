@@ -11,8 +11,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
-  Button, IconBranchOutline16, IconCodeOutline16, IconCopyOutline16, IconRefreshOutline16,
-  IconTrashOutline16, Input, Menu, Modal, writeClipboard,
+  Button, IconBranchOutlineRegular, IconCodeOutlineRegular, IconCopyOutlineRegular, IconRefreshOutlineRegular,
+  IconTrashOutlineRegular, Input, Menu, Modal, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   GitBranchResult,
@@ -660,7 +660,7 @@ export function GitView(props: {
           disabled={busy}
           onClick={() => { void manualRefresh() }}
         >
-          <IconRefreshOutline16 size={14} />
+          <IconRefreshOutlineRegular size={14} />
         </button>
       </div>
 
@@ -757,17 +757,17 @@ export function GitView(props: {
               // every path under it. Hide the action for that checkout so
               // the menu does not offer a no-op that confuses the user.
               ...(fileMenu !== null && isWithinWorkspace(scope.cwd ?? '', resolveSidebarPath(worktreePath ?? scope.cwd, fileMenu.entry.path))
-                ? [{ id: 'open', label: t('openEditor'), icon: <IconCodeOutline16 size={14} /> }]
+                ? [{ id: 'open', label: t('openEditor'), icon: <IconCodeOutlineRegular size={14} /> }]
                 : []),
               fileMenu?.staged === true
-                ? { id: 'stage', label: t('unstage'), icon: <IconTrashOutline16 size={14} /> }
-                : { id: 'stage', label: t('stage'), icon: <IconBranchOutline16 size={14} /> },
+                ? { id: 'stage', label: t('unstage'), icon: <IconTrashOutlineRegular size={14} /> }
+                : { id: 'stage', label: t('stage'), icon: <IconBranchOutlineRegular size={14} /> },
               ...(fileMenu !== null && !isUntracked(fileMenu.entry)
-                ? [{ id: 'discard', label: t('discard'), icon: <IconTrashOutline16 size={14} />, danger: true }]
+                ? [{ id: 'discard', label: t('discard'), icon: <IconTrashOutlineRegular size={14} />, danger: true }]
                 : []),
               { type: 'separator', id: 'sep1' },
-              { id: 'relative', label: t('copyRelative'), icon: <IconCopyOutline16 size={14} /> },
-              { id: 'absolute', label: t('copyAbsolute'), icon: <IconCopyOutline16 size={14} /> },
+              { id: 'relative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
+              { id: 'absolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
             ]}
             onSelect={(id) => {
               const menuEntry = fileMenu
@@ -817,9 +817,9 @@ export function GitView(props: {
             onClose={() => { setHistoryMenu(null) }}
             items={[
               { id: 'view', label: t('viewCommitDiff') },
-              { id: 'copyShort', label: t('copyShortHash'), icon: <IconCopyOutline16 size={14} /> },
-              { id: 'copyFull', label: t('copyFullHash'), icon: <IconCopyOutline16 size={14} /> },
-              { id: 'copySubject', label: t('copySubject'), icon: <IconCopyOutline16 size={14} /> },
+              { id: 'copyShort', label: t('copyShortHash'), icon: <IconCopyOutlineRegular size={14} /> },
+              { id: 'copyFull', label: t('copyFullHash'), icon: <IconCopyOutlineRegular size={14} /> },
+              { id: 'copySubject', label: t('copySubject'), icon: <IconCopyOutlineRegular size={14} /> },
               { type: 'separator', id: 'sep2' },
               { id: 'revert', label: t('revertCommit'), danger: true },
               { id: 'cherryPick', label: t('cherryPickCommit'), danger: true },

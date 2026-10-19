@@ -48,7 +48,9 @@ function callToolName(block: ToolCallBlock): string {
 export function diffCardModel(block: ToolCallBlock): DiffCardModel | null {
   const toolName = callToolName(block)
   if (!('kind' in block)) {
-    // Running presentation is now derived from the durable raw call.
+    // Running presentation is now derived from the durable raw call; a call
+    // still preparing (DSH 0.2) has no complete arguments yet, so no card.
+    if (block.phase === 'preparing') return null
     const fallback = callTimeDiffs(toolName, block.argsRaw)
     return fallback === null ? null : { card: { diffs: fallback } }
   }

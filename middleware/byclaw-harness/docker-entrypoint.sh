@@ -73,17 +73,11 @@ if [[ ! -e "${persistent_profile}/cordis.patch.yml" ]]; then
     cp "${managed_profile}/cordis.patch.yml" "${persistent_profile}/cordis.patch.yml"
 fi
 
-# DSH heals installation dependencies into the persistent fallback. Packages
-# imported from the managed profile must see that same directory at their
-# natural ESM ancestor path under /opt.
-persistent_fallback="${dsh_home}/profiles/node_modules"
-if [[ -L "${persistent_fallback}" || ( -e "${persistent_fallback}" && ! -d "${persistent_fallback}" ) ]]; then
-    rm -rf -- "${persistent_fallback}"
-fi
-mkdir -p "${persistent_fallback}"
-link_managed_directory \
-    "${persistent_fallback}" \
-    "${managed_home}/profiles/node_modules"
+# Packages imported from the managed profile resolve DSH installation peers
+# through the image-built ${managed_home}/profiles/node_modules, their natural
+# ESM ancestor under /opt (see link-dsh-installation-peers.mjs). DSH 0.2
+# resolves those peers in memory and no longer heals a persistent fallback, so
+# that directory stays image-owned.
 
 if [[ -d "${managed_profile}/node_modules" ]]; then
     link_managed_directory \
@@ -109,19 +103,41 @@ fi
 
 # The sandbox launcher may omit --host. Bind web to the container interface by
 # default while preserving any explicit host supplied by the caller.
+node_imports=(--import tsx/esm)
 if [[ "$1" == web ]]; then
-    has_host=false
-    for argument in "$@"; do
-        if [[ "${argument}" == --host || "${argument}" == --host=* ]]; then
-            has_host=true
-            break
-        fi
+    web_host=''
+    web_port=3080
+    previous=''
+    for argument in "${@:2}"; do
+        case "${previous}" in
+            --host) web_host="${argument}" ;;
+            --port) web_port="${argument}" ;;
+        esac
+        case "${argument}" in
+            --host=*) web_host="${argument#--host=}" ;;
+            --port=*) web_port="${argument#--port=}" ;;
+        esac
+        previous="${argument}"
     done
-    if [[ "${has_host}" == false ]]; then
+    if [[ "${previous}" == --host ]]; then
+        web_host='--host'
+    fi
+    if [[ -z "${web_host}" ]]; then
+        web_host=0.0.0.0
         set -- web --host 0.0.0.0 "${@:2}"
+    fi
+    # DSH 0.2 rejects wildcard listeners, so @byclaw/dsh-lan-web binds 0.0.0.0
+    # to the container's own IPv4 address and loopback goes unserved. Mirror the
+    # Web port on 127.0.0.1 for in-container clients such as the sandbox execd
+    # /proxy/<port> route; the forwarder dials the bound address, so DSH sees
+    # the same Host header and authentication as a direct LAN request.
+    loopback_forwarder="${BYCLAW_DSH_LOOPBACK_FORWARDER:-/usr/local/lib/byclaw/dsh-loopback-forward.mjs}"
+    if [[ "${web_host}" == 0.0.0.0 && "${web_port}" =~ ^[1-9][0-9]*$ && -f "${loopback_forwarder}" ]]; then
+        export BYCLAW_DSH_LOOPBACK_PORT="${web_port}"
+        node_imports+=(--import "${loopback_forwarder}")
     fi
 fi
 
 # Keep the supervisor-provided secret descriptor alive until the browser plugin
 # consumes it. pnpm/bash wrappers may close inherited descriptors before Node.
-exec node --import tsx/esm "${BYCLAW_DSH_CLI_ENTRY:-apps/cli/src/bin.ts}" "$@"
+exec node "${node_imports[@]}" "${BYCLAW_DSH_CLI_ENTRY:-apps/cli/src/bin.ts}" "$@"

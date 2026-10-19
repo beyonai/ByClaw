@@ -55,9 +55,9 @@ describe('forwarded Bash environment', () => {
     process.env['DEEPSEEK_API_KEY'] = 'api-key-visible'
     const bash = await setup()
 
-    const result = await bash.run(bash.resolve({
+    const result = await (await bash.execute(bash.resolve({
       command: `python3 -c 'import os; print(os.environ.get("BEYOND_TOKEN", "")); print(os.environ.get("DEEPSEEK_API_KEY", ""))'`,
-    }))
+    }))).result()
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout.text).toBe('beyond-visible\napi-key-visible\n')
@@ -67,10 +67,10 @@ describe('forwarded Bash environment', () => {
     process.env['DSH_SESSION_ID'] = 'stale-host-session'
     const bash = await setup()
 
-    const result = await bash.run(bash.resolve({
+    const result = await (await bash.execute(bash.resolve({
       command: 'printf %s "$DSH_SESSION_ID"',
       dshEnv: { DSH_SESSION_ID: 'current-session' },
-    }))
+    }))).result()
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout.text).toBe('current-session')

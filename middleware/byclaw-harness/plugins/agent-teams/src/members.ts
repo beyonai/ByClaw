@@ -21,6 +21,7 @@ import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent
 import { deliverSubagentPrompt, queueHostSubagentPrompt, type HostPromptDeliverer } from '@deepseek-ai/dsh-subagent/internal'
 import { registerContinuableChildSetup } from './child-setup.ts'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
@@ -346,6 +347,90 @@ export async function resolveMemberLlmSelection(
   }
 }
 
+/** Member personas visible while Harness materializes one fresh member child. */
+const pendingMemberPersonas = new Map<string, string>()
+
+/** Make one fresh member's persona visible to the child composition below. */
+async function withPendingMemberPersona<T>(
+  parentSessionId: string,
+  label: string,
+  persona: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const key = pendingSelectionKey(parentSessionId, label)
+  if (pendingMemberPersonas.has(key)) throw new Error(`member persona is already pending for "${label}"`)
+  pendingMemberPersonas.set(key, persona)
+  try {
+    return await operation()
+  } finally {
+    pendingMemberPersonas.delete(key)
+  }
+}
+
+/**
+ * Apply the member persona and captain-only tool denial to every fresh or
+ * cold-resumed AgentTeams member child. DSH 0.2.1 removed the per-child
+ * `persona`/`toolFilter` start options (and their descriptor fields for new
+ * children), so AgentTeams contributes the same shadowing persona section and
+ * tool restriction itself, exactly as the 0.1.5 subagent composition did.
+ * Children whose historical descriptor already carries them are restored by
+ * Harness and left alone here.
+ */
+export function installMemberComposition(ctx: Context, stateDir: string): void {
+  registerContinuableChildSetup(ctx, (childCtx, child) => {
+    const descriptor = foldSubagentDescriptor(child.session.ownEvents())
+    if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
+      return () => undefined
+    }
+    const parentSessionId = child.session.header.parentSession
+    if (parentSessionId === undefined) return () => undefined
+    const disposers: Array<() => void> = []
+    const disposeAll = (): void => {
+      for (const dispose of disposers.reverse()) dispose()
+    }
+    try {
+    if (descriptor.persona === undefined) {
+      let persona = pendingMemberPersonas.get(pendingSelectionKey(parentSessionId, descriptor.label))
+      if (persona === undefined) {
+        const identity = descriptor.label.slice(MEMBER_LABEL_PREFIX.length)
+        const separator = identity.indexOf(':')
+        const team = separator < 1
+          ? undefined
+          : readTeamSync(resolveTeamStateRoot(child.session.header.cwd ?? process.cwd(), stateDir), identity.slice(0, separator))
+        const member = team?.captainSessionId === parentSessionId
+          ? team.members.find(candidate => candidate.name === identity.slice(separator + 1))
+          : undefined
+        if (team !== undefined && member !== undefined) persona = memberPersona(team, member, stateDir)
+      }
+      if (persona === undefined) {
+        ctx.logger.warn(`agent-teams: member child ${child.id} has no resolvable team persona`)
+      } else {
+        disposers.push(childCtx.systemPrompt.section({
+          name: 'deployment:persona-prefix',
+          order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+          text: persona,
+        }))
+      }
+    }
+    if (descriptor.toolFilter === undefined) {
+      // One restriction per name: restrictions intersect, and a captain-only
+      // tool absent from this composition has nothing to hide.
+      for (const name of MEMBER_DENIED_TOOLS) {
+        try {
+          disposers.push(childCtx.tools.restrict({ deny: [name] }))
+        } catch (error: unknown) {
+          if (!(error instanceof Error && error.message.includes('unknown global tool'))) throw error
+        }
+      }
+    }
+    } catch (error: unknown) {
+      disposeAll()
+      throw error
+    }
+    return disposeAll
+  })
+}
+
 /**
  * Install the member selection bridge for every fresh or cold-resumed
  * continuable child. Fresh creation reads the pending in-memory selection;
@@ -650,23 +735,9 @@ export async function spawnMember(
       `本会话仅承载团队可见性（会话树/消息/历史）。团队: ${team.name}，成员: ${member.name}。` +
       `收到消息时无需执行任何工作，简短确认即可。`
     try {
-      const start = await ctx.subagents.startContinuable({
-        provider: config.provider,
-        label,
-        request: {
-          prompt: [{ type: 'text', text: shellWelcome }],
-          parent: captain,
-          persona: memberPersona(team, member, stateDir),
-          toolFilter: { deny: [...MEMBER_DENIED_TOOLS] },
-          agentOptions: {
-            provider: llmSelection.provider,
-            model: llmSelection.model,
-            ...llmSelection.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
-          },
-          ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
-        },
-        signal,
-      })
+      const start = await withPendingMemberPersona(captain.id, label, memberPersona(team, member, stateDir), () => (
+        startMemberActivation(ctx, config, label, captain, shellWelcome, llmSelection, signal)
+      ))
       member.id = start.childId
     } catch (error) {
       ctx.logger.warn(
@@ -690,37 +761,56 @@ export async function spawnMember(
   if (provider.prepareContinuable === undefined) {
     throw new Error(`agent-teams: provider "${config.provider}" does not support continuable members`)
   }
-  if (!provider.capabilities.persona) {
-    throw new Error(`agent-teams: provider "${config.provider}" cannot apply a member persona`)
-  }
-  if (!provider.capabilities.toolFilter) {
-    throw new Error(`agent-teams: provider "${config.provider}" cannot restrict captain-only tools for members`)
-  }
   if (team.groupCoordination !== undefined) {
     const provider = ctx.subagents.getProvider(config.provider)
     if (provider?.inheritsParentContext !== false) throw new Error('Group members require a fresh-context spawn provider; inheriting the captain transcript would expose the full roster')
   }
   const label = memberLabel(team.id, member.name)
   const start = await selections.withPending(captain.id, label, initialSelection, member, () => (
-    ctx.subagents.startContinuable({
-      provider: config.provider,
-      label,
-      request: {
-        prompt: [{ type: 'text', text: memberWelcome(team) }],
-        parent: captain,
-        persona: memberPersona(team, member, stateDir),
-        toolFilter: { deny: [...MEMBER_DENIED_TOOLS] },
-        agentOptions: {
-          provider: llmSelection.provider,
-          model: llmSelection.model,
-          ...llmSelection.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
-        },
-        ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
-      },
-      signal,
-    })
+    withPendingMemberPersona(captain.id, label, memberPersona(team, member, stateDir), () => (
+      startMemberActivation(ctx, config, label, captain, memberWelcome(team), llmSelection, signal)
+    ))
   ))
   member.id = start.childId
+}
+
+/**
+ * Establish one member as a durable continuable child of the captain. DSH
+ * 0.2.1 replaced `startContinuable` with managed activations; `parent`
+ * delivery keeps the 0.1.5 continuable contract (the captain receives the
+ * runtime settlement notice, the child stays listed and resumable). The
+ * activation is intentionally retained by the runtime, not disposed here:
+ * disposal would stop the member.
+ */
+async function startMemberActivation(
+  ctx: Context,
+  config: MemberRuntimeConfig,
+  label: string,
+  captain: Agent,
+  welcome: string,
+  llmSelection: MemberLlmSelection,
+  signal: AbortSignal,
+): Promise<{ childId: SessionId }> {
+  const activation = await ctx.subagents.startActivation({
+    provider: config.provider,
+    label,
+    request: {
+      prompt: [{ type: 'text', text: welcome }],
+      parent: captain,
+      agentOptions: {
+        provider: llmSelection.provider,
+        model: llmSelection.model,
+        ...llmSelection.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
+      },
+      ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
+    },
+    signal,
+    delivery: 'parent',
+  })
+  void activation.result.catch((error: unknown) => {
+    ctx.logger.warn(`agent-teams: member activation ${activation.childId} ended with an infrastructure failure: ${String(error)}`)
+  })
+  return { childId: activation.childId }
 }
 
 /**
@@ -749,7 +839,7 @@ export async function deliverToMember(
 ): Promise<MemberDeliveryResult> {
   try {
     await queueHostSubagentPrompt(ctx.subagents, captain, brandedSessionId(childId), [{ type: 'text', text }],
-      { kind: 'plugin', plugin: 'dsh-agent-teams' }, signal)
+      { kind: 'plugin:dsh-agent-teams' }, signal)
     return { ok: true }
   } catch (error: unknown) {
     const failure = dispatchFailure(error)
@@ -863,7 +953,6 @@ export async function memberActivity(
   const entries = await ctx.subagents.listChildren(brandedSessionId(captainSessionId))
   const activity = new Map<string, 'running' | 'idle' | 'ready'>()
   for (const entry of entries) {
-    if (entry.kind !== 'child') continue
     const live = ctx.agents.get(entry.id)
     activity.set(entry.id, live === undefined ? 'ready' : live.status)
   }

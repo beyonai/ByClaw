@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import {
-  IconChevronRightOutline14, IconRefreshOutline14, StateDot,
+  IconChevronRightOutlineRegular, IconRefreshOutlineRegular, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   Context,
@@ -290,7 +290,7 @@ function CatalogRows({
             className={css.subagentErrorRetry}
             onClick={() => { refresh(parentSessionId) }}
           >
-            <IconRefreshOutline14 />
+            <IconRefreshOutlineRegular size={14} />
             {t('retry')}
           </button>
         </div>
@@ -361,7 +361,7 @@ function CatalogRows({
                     onToggle(entry.id)
                   }}
                 >
-                  <IconChevronRightOutline14 size={12} aria-hidden />
+                  <IconChevronRightOutlineRegular size={12} aria-hidden />
                 </button>
               )}
               <StateDot
@@ -854,7 +854,7 @@ export function SubagentView(props: {
           disabled={rootId === undefined}
           onClick={() => { if (rootId !== undefined) refresh(rootId) }}
         >
-          <IconRefreshOutline14 />
+          <IconRefreshOutlineRegular size={14} />
         </button>
       </div>
       <div
@@ -898,7 +898,7 @@ export function SubagentView(props: {
                     toggleBranch(rootId)
                   }}
                 >
-                  <IconChevronRightOutline14 size={12} aria-hidden />
+                  <IconChevronRightOutlineRegular size={12} aria-hidden />
                 </button>
               )}
               <StateDot

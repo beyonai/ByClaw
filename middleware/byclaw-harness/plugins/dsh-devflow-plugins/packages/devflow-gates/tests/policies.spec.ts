@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ShellExecutor from '@deepseek-ai/dsh-shell'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
 import type { DevActor, TransitionResult } from '@zhchxiao123/dsh-devflow'
 import FilesystemDevflowStore from '@zhchxiao123/dsh-devflow-filesystem'
@@ -48,7 +48,7 @@ class ScriptedExecutor extends ShellExecutor {
     }
   }
 
-  async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+  private async scripted(spec: ShellExecSpec): Promise<ShellRunResult> {
     this.specs.push(spec)
     this.started.push(spec.command)
     const entry = this.script[spec.command]
@@ -65,8 +65,10 @@ class ScriptedExecutor extends ShellExecutor {
     }
   }
 
-  start(): ShellProcess {
-    throw new Error('gates never start background processes')
+  execute(spec: ShellExecSpec): Promise<ShellExecution> {
+    // Foreground callers only read the result projection.
+    const result = this.scripted(spec)
+    return Promise.resolve({ result: () => result } as unknown as ShellExecution)
   }
 }
 

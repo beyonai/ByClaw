@@ -13,7 +13,7 @@ try {
     const agent = { id: 'root', session: { id: 'root', header: { cwd: workspace } }, cancel() { calls.push('root') }, whenIdle() { return Promise.resolve() } }
     const ctx = { root: { on() { return () => {} } }, logger: { debug() {}, warn() {} },
       subagents: { async listChildren(id) { assert.equal(id, 'root'); return resident.map(id => ({ id })) },
-        async drainContinuableChildren(owner, children) { assert.equal(owner, agent); calls.push(...children); resident = [] } } }
+        async drainChildren(owner, children) { assert.equal(owner, agent); calls.push(...children); resident = [] } } }
     const runtime = new ByClawDshSessionRuntime(ctx, { stateDir: '.agent-teams' })
     const turn = { teamGate: new ByClawAsyncTeamGate() }
     runtime.active.set('root', turn)

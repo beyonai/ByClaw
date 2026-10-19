@@ -42,9 +42,9 @@
  */
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  IconChevronDownOutline14,
-  IconPlusOutline16,
-  IconSettingsOutline16,
+  IconChevronDownOutlineRegular,
+  IconPlusOutlineRegular,
+  IconSettingsOutlineRegular,
   Input,
   Menu,
   Modal,
@@ -424,7 +424,7 @@ function SelectMenu(props: {
       <span className={css.selectAnchorText}>
         {selected.length === 0 ? (placeholder ?? '—') : selected.map(option => textOf(option.title)).join(', ')}
       </span>
-      <IconChevronDownOutline14 size={12} />
+      <IconChevronDownOutlineRegular size={12} />
     </button>
   )
 
@@ -844,7 +844,7 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
             aria-label={`${props.title} ${t('settingsPopup')}`}
             onClick={props.onOpenSettings}
           >
-            <IconSettingsOutline16 size={12} />
+            <IconSettingsOutlineRegular size={12} />
             <span>{t('settingsPopup')}</span>
           </button>
         )}
@@ -963,7 +963,7 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
                 title={t('settingsPopup')}
                 onClick={() => { setStripSettingsOpen(true) }}
               >
-                <IconSettingsOutline16 size={14} />
+                <IconSettingsOutlineRegular size={14} />
               </button>
             )}
           </span>
@@ -1005,7 +1005,7 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
           >
             <span className={css.cardTop}>
               <span className={css.cardIconChip}>
-                <IconPlusOutline16 size={16} />
+                <IconPlusOutlineRegular size={16} />
               </span>
               <span className={css.cardTitle}>{t('addPluginsTabCard')}</span>
             </span>
@@ -1044,7 +1044,7 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
           >
             <span className={css.cardTop}>
               <span className={css.cardIconChip}>
-                <IconPlusOutline16 size={16} />
+                <IconPlusOutlineRegular size={16} />
               </span>
               <span className={css.cardTitle}>{t('addPluginsViewerCard')}</span>
             </span>

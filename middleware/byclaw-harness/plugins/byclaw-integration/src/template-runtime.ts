@@ -116,6 +116,20 @@ function installTemplateSkills(
   }
 }
 
+/** A template child's persona: the template's own, scoped to its parent's group when there is one. */
+function childPersona(
+  template: DshAgentTemplate,
+  parentScope: ReturnType<ByClawGroupCoordinationRuntime['get']>,
+): string {
+  if (parentScope === undefined) return groupScopedPersona(undefined, template.persona, 'user')
+  const coordinator = template.source.resourceId === parentScope.coordination.coordinatorAgentId
+  return groupScopedPersona(
+    { ...parentScope, employeeId: template.source.resourceId, role: coordinator ? 'coordinator' : 'member' },
+    template.persona,
+    parentScope.role === 'member' && coordinator ? 'assistance' : 'user',
+  )
+}
+
 function templateIdFromLabel(label: string): string | undefined {
   if (!label.startsWith(TEMPLATE_LABEL_PREFIX)) return undefined
   const suffix = label.slice(TEMPLATE_LABEL_PREFIX.length)
@@ -181,6 +195,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
 }): ByClawTemplateInstanceRuntime {
   const pending = new Map<string, DshAgentTemplate>()
   const pendingModels = new Map<string, ModelSelection>()
+  const pendingPersonas = new Map<string, string>()
   const soloRequests = new Map<string, { stateRoot: string; record: SoloAssistanceRecord }>()
   // Native Web/CLI roots have an authoritative SessionHeader.cwd but do not
   // pass through the ByClaw Worker that normally registers the namespace.
@@ -252,6 +267,15 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
       if (selection !== undefined) {
         disposers.push(installModelSelection(childCtx, { current: selection, assembled: undefined }))
       }
+      // DSH no longer takes a persona in the start request; a child recorded with one keeps it.
+      if (descriptor.persona === undefined) {
+        disposers.push(childCtx.systemPrompt.section({
+          name: PERSONA_PREFIX_SECTION,
+          order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+          text: pendingPersonas.get(descriptor.label)
+            ?? childPersona(template, config.groupCoordination?.get(String(parentSessionId))),
+        }))
+      }
       disposers.push(childCtx.systemPrompt.section({
         name: 'byclaw-template:report-policy',
         order: 118,
@@ -291,15 +315,17 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
     const label = `${TEMPLATE_LABEL_PREFIX}${template.id}:${randomUUID()}`
     pending.set(label, template)
     pendingModels.set(label, selection)
+    pendingPersonas.set(label, childPersona(template, parentScope))
     try {
-      const started = await ctx.subagents.startContinuable({
+      // Parent delivery: the child stays cataloged and resumable, and its settlement wakes the parent.
+      const started = await ctx.subagents.startActivation({
+        delivery: 'parent',
         provider: config.subagentProvider,
         label,
         ...childId === undefined ? {} : { childId },
         request: {
           prompt: [{ type: 'text', text: userText }],
           parent,
-          persona: groupScopedPersona(parentScope === undefined ? undefined : { ...parentScope, employeeId: template.source.resourceId, role: template.source.resourceId === parentScope.coordination.coordinatorAgentId ? 'coordinator' : 'member' }, template.persona, parentScope?.role === 'member' && template.source.resourceId === parentScope.coordination.coordinatorAgentId ? 'assistance' : 'user'),
           agentOptions: {
             provider: selection.provider,
             model: selection.model,
@@ -309,12 +335,17 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
         },
         signal,
       })
+      // Disposing the activation would stop the child; its outcome reaches the parent as a notice.
+      started.result.catch((error: unknown) => {
+        ctx.logger.warn(`template child ${String(started.childId)} ended without a result: ${error instanceof Error ? error.message : String(error)}`)
+      })
       const agent = ctx.agents.get(started.childId)
       if (agent === undefined) throw new Error(`template child "${started.childId}" was accepted but is not live`)
       return { childId: started.childId, agent }
     } finally {
       pending.delete(label)
       pendingModels.delete(label)
+      pendingPersonas.delete(label)
     }
     })
   }

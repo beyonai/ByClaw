@@ -88,12 +88,15 @@ it('matches the published rc.2 registry graph and exact fetchBundle transformati
     await ctx.loader.await()
     await ctx.plugin(Registry)
     const entry = ctx.clientModules.graph().entries.find(value => value.id === 'fixture-ui')
-    expect(entry?.url).toContain('/plugins/??fixture-ui/client.js&rev=')
+    // DSH 0.2.1 publishes the entry URL relative to the Web root; build info
+    // keeps reporting the root-absolute path it resolves to.
+    expect(entry?.url).toContain('plugins/??fixture-ui/client.js&rev=')
+    const served = new URL(entry!.url, 'http://fixture.invalid')
     const result = await createBuildInfo({ artifact, entry: 'fixture-ui' }, pathToFileURL(server).href, () => ctx.clientModules)()
-    expect(result).toMatchObject({ available: true, client: { path: entry?.url } })
+    expect(result).toMatchObject({ available: true, client: { path: served.pathname + served.search } })
     if (!result.available) throw new Error('Published registry identity unavailable')
     const { createHash } = await import('node:crypto')
-    const body = await ctx.clientModules.fetchBundle(new Request(new URL(result.client.path, 'http://fixture.invalid'))).arrayBuffer()
+    const body = await (await ctx.clientModules.fetchBundle(new Request(new URL(result.client.path, 'http://fixture.invalid')))).arrayBuffer()
     expect(result.client.sha256).toBe(createHash('sha256').update(Buffer.from(body)).digest('hex'))
   } finally { await ctx.fiber.dispose() }
 })

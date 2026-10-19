@@ -104,18 +104,18 @@ function mountRuntime() {
     async sendMessage(parent, childId, content, options) { return this[deliverSubagentPrompt](parent, childId, content, { kind: 'subagent', sessionId: parent.id }, options.signal, 'steer') },
       getProvider(name) {
         if (name !== 'spawn') return undefined
-        return { prepareContinuable() {}, inheritsParentContext: false, capabilities: { persona: true, toolFilter: true } }
+        return { prepareContinuable() {}, inheritsParentContext: false, capabilities: { agentOptions: true, agentPreset: true, outputSchema: false, depthLimit: true } }
       },
       list() {
         return ['spawn']
       },
-      async startContinuable(spec) {
+      async startActivation(spec) {
         const id = `stress-member-${++childSeq}`
         const child = makeAgent(id, captain.id)
         child.status = 'running'
         liveAgents.set(id, child)
         children.push({ id, label: spec.label, mode: 'continuable' })
-        return { childId: id, messageId: `welcome-${childSeq}` }
+        return { childId: id, messageId: `welcome-${childSeq}`, result: new Promise(() => {}), async dispose() {} }
       },
       async listChildren(parentId) {
         if (parentId !== captain.id) return []

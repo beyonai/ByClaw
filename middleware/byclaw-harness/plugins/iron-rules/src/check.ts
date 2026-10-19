@@ -29,7 +29,14 @@ import { loadRules, resolveProjectRoot, watchStatus, type IronRule } from './rul
  * Stamped on every message this plugin contributes so the durable record can
  * never be mistaken for something the user typed.
  */
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'iron-rules' }
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin:iron-rules' }
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Session format v4 per-plugin source; 0.1.5 `{ kind: 'plugin', plugin: 'iron-rules' }` converts to it on load. */
+    'plugin:iron-rules': { kind: 'plugin:iron-rules' }
+  }
+}
 
 /** First-party tools whose success means the turn produced a code change. */
 const MUTATING_TOOLS = new Set(['write', 'edit'])
@@ -151,7 +158,7 @@ async function runCheckScript(
       timeoutMs: config.checkTimeoutMs,
       signal,
     })
-    const result = await ctx.shell.run(spec)
+    const result = await (await ctx.shell.execute(spec)).result()
     // exitCode is `number | null`; null means the process died by signal, which
     // for a check means no verdict was produced — treat it as a violation
     // rather than a pass so a killed script cannot silently approve the tree.
