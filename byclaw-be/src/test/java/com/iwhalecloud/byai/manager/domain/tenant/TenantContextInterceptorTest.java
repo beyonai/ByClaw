@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +93,59 @@ class TenantContextInterceptorTest {
         request.addHeader("X-Tenant-Context", "context-token");
         assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
         assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+    }
+
+    @Test
+    void fileCopyAcceptsAndValidatesTenantContextInsteadOfIgnoringIt() {
+        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
+        when(service.validate("123", "context-token")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
+        request.setMethod("POST");
+        request.addHeader("X-Tenant-Context", "context-token");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+
+        verify(service).validate("123", "context-token");
+        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/datasetController/copyKnowledgeFile/other", "/datasetController/uploadFiles"})
+    void fileCopyRegistrationDoesNotOpenOtherKnowledgeRoutes(String path) {
+        MockHttpServletRequest request = request("/byaiService" + path, "123");
+        request.setMethod("POST");
+        request.addHeader("X-Tenant-Context", "context-token");
+
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void fileCopyStillRejectsInvalidOrIncompleteTenantIdentity() {
+        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
+        request.setMethod("POST");
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("401");
+        request.addHeader("X-Tenant-Context", "invalid-token");
+        when(service.validate("123", "invalid-token")).thenThrow(new ResponseStatusException(
+            org.springframework.http.HttpStatus.UNAUTHORIZED, "invalid tenant context"));
+
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("invalid tenant context");
+
+        assertThat(TenantRequestContextHolder.get()).isNull();
+    }
+
+    @Test
+    void fileCopyTenantRegistrationIsLimitedToPost() {
+        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
+        request.addHeader("X-Tenant-Context", "context-token");
+
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
+
+        verifyNoInteractions(service);
     }
 
     @Test

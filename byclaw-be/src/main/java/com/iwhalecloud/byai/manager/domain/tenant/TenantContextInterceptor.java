@@ -40,7 +40,11 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         if (contextToken == null || contextToken.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.token.required");
         }
+        // 云盘存储位于平台，复制按两端资源独立鉴权；租户选择仍须通过正常令牌验证。
+        boolean knowledgeFileCopy = "POST".equalsIgnoreCase(request.getMethod())
+            && "/datasetController/copyKnowledgeFile".equals(path);
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
+            && !knowledgeFileCopy
             && !"/api/v1/sessionResources/query".equals(path)
             && !"/project/session/listByQo".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)

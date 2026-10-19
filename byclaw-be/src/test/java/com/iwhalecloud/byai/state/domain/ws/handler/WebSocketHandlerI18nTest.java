@@ -156,7 +156,7 @@ class WebSocketHandlerI18nTest extends I18nTestSupport {
             ack.release();
 
             channel.writeInbound(new TextWebSocketFrame(
-                "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\",\"language\":\"" + language + "\"}"));
+                "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\"}"));
             verify(chatService).llmChat(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
             assertThat(TenantRequestContextHolder.get()).isNull();
         }

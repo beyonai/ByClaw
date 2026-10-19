@@ -34,6 +34,8 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -237,6 +239,14 @@ public class DatasetController {
         Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
             datasetApplicationService.moveKnowledgeItems(request, headers));
+    }
+
+    /** 复制原始文档到指定知识库目录，支持项目云盘及跨知识库复制。 */
+    @PostMapping("/copyKnowledgeFile")
+    public ResponseUtil<KnowledgeFileCopyResult> copyKnowledgeFile(HttpServletRequest httpServletRequest,
+        @Valid @RequestBody KnowledgeFileCopyRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.copy.success"),
+            datasetApplicationService.copyKnowledgeFile(request, this.parseHeadersFromRequest(httpServletRequest)));
     }
 
     /**
