@@ -837,7 +837,7 @@ describe('hooks/useChat/index', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {
+  it('limits programmatic multi-employee payloads to the latest employee', async () => {
     const { result } = renderHook(() =>
       useChat({
         sessionId: 's1',
@@ -869,34 +869,16 @@ describe('hooks/useChat/index', () => {
 
     expect(mockSend).toHaveBeenCalledTimes(1);
     const payload = mockSend.mock.calls[0]?.[1] as any;
-    expect(payload.multiAgent).toMatchObject({
-      mode: 'parallel',
-      lanes: [
-        {
-          agentId: '101',
-          agentCode: 'agent-a',
-          agentName: 'Agent A',
-          order: 0,
-        },
-        {
-          agentId: '102',
-          agentCode: 'agent-b',
-          agentName: 'Agent B',
-          order: 1,
-        },
-      ],
-    });
-    expect(payload.multiAgent.turnId).toBeTruthy();
-    expect(payload.extParams.multiAgent).toEqual(payload.multiAgent);
-    expect(payload.clientRequestId).toBe(payload.multiAgent.lanes[0].clientRequestId);
-    expect(payload.multiAgent.lanes[0].queryMessageId).toBe(payload.multiAgent.turnId);
-    expect(payload.multiAgent.lanes[0].answerMessageId).toBe(payload.multiAgent.lanes[0].laneId);
-    expect(payload.multiAgent.lanes[1].answerMessageId).toBe(payload.multiAgent.lanes[1].laneId);
+    expect(payload.multiAgent).toBeUndefined();
+    expect(payload.extParams.multiAgent).toBeUndefined();
+    expect(payload.agentId).toBe('102');
+    expect(payload.agentCode).toBeNull();
+    expect(payload.resourceList.map((item: any) => item.resourceId)).toEqual(['102']);
 
     const updatedMessages = mockUpdateMessage.mock.calls.map(([msg]) => msg);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(2);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(1);
     expect(updatedMessages.filter((msg) => !msg.fromBeyond)).toHaveLength(1);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['101', '102']);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['102']);
   });
 
   it('uses the single inline mentioned digital employee for the answer placeholder even when payload has an agentId', async () => {
