@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.List;
 import java.util.Map;
 import java.time.LocalDateTime;
@@ -39,19 +40,19 @@ public class TenantAdminTenantService {
         TenantListFilter query = filter == null ? new TenantListFilter(null, null, null, null, null) : filter;
         String name = query.name() == null ? null : query.name().trim();
         if (name != null && name.length() > 200) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant name filter is too long");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.filter.nameTooLong");
         }
         if (query.sortField() != null && !List.of("createdAt", "openedAt", "enterpriseName")
             .contains(query.sortField())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sort field");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.sort.field.invalid");
         }
         if (query.sortOrder() != null && !List.of("asc", "desc").contains(query.sortOrder())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sort order");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.sort.order.invalid");
         }
         LocalDateTime from = parseTime(query.createdFrom());
         LocalDateTime to = parseTime(query.createdTo());
         if (from != null && to != null && !from.isBefore(to)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant creation time range");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.createdRange.invalid");
         }
         return tenantMapper.selectTenants(name, from, to, query.sortField(), query.sortOrder())
             .stream().map(this::toView).toList();
@@ -63,7 +64,7 @@ public class TenantAdminTenantService {
             return LocalDateTime.parse(value);
         }
         catch (DateTimeParseException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant creation time", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.createdTime.invalid", e);
         }
     }
 
@@ -80,24 +81,24 @@ public class TenantAdminTenantService {
         requirePlatformAdmin();
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
         }
         if (name == null || name.isBlank() || name.length() > 200 || !name.equals(name.trim())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant name");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.name.invalid");
         }
         if (requestId == null || !requestId.matches("[a-zA-Z0-9_-]{8,64}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid request ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.requestId.invalid");
         }
         TenantPackageRow selectedPackage = tenantMapper.selectEnabledPackage(packageId);
         if (selectedPackage == null || !validPackage(selectedPackage.getPackageContent())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant package");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.package.invalid");
         }
 
         TenantAdminTenantRow existing = tenantMapper.selectByRequestId(requestId);
         if (existing != null) {
             if (!userId.equals(existing.getCreatedBy()) || !name.equals(existing.getEnterpriseName())
                 || !selectedPackage.getPackageName().equals(existing.getPackageName())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "request ID already used");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.requestId.used");
             }
             return toView(existing);
         }
@@ -151,12 +152,33 @@ public class TenantAdminTenantService {
             // Invalid persisted state never grants tenant access.
         }
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), row.getFailureReason());
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getFailureReason()));
+    }
+
+    /** 后台任务保存稳定错误键；读取时按查看者语言展示，历史诊断原文保持可读。 */
+    private String failureReason(String reason) {
+        if (reason == null) return null;
+        // 兼容已持久化的任务失败前缀，异常类型仍保留用于排查。
+        for (var entry : Map.of(
+            "tenant deletion failed: ", "tenant.failure.deletion",
+            "tenant sandbox restart failed: ", "tenant.failure.restart",
+            "tenant Node replacement failed: ", "tenant.failure.replacement").entrySet()) {
+            if (reason.startsWith(entry.getKey())) {
+                return I18nUtil.get(entry.getValue(), reason.substring(entry.getKey().length()));
+            }
+        }
+        if ("tenant provisioning failed".equals(reason)) return I18nUtil.get("tenant.failure.provisioning");
+        if (!reason.startsWith("tenant.")) return reason;
+        try {
+            return I18nUtil.get(reason);
+        } catch (org.springframework.context.NoSuchMessageException ignored) {
+            return reason;
+        }
     }
 
     private void requirePlatformAdmin() {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.admin.required");
         }
     }
 

@@ -662,23 +662,23 @@ const ConnectorControl = ({
   };
 
   const confirmRevokeAuthorization = (connector: Connector) => {
-    let revokeDescription = '当前 CLI 登录凭证将被清除，再次使用时需要重新授权。';
+    let revokeDescription = intl.formatMessage({ id: 'connector.revoke.cliHint' });
     if (connector.authMode === 'AK_SK') {
-      revokeDescription = '仅移除 ByClaw 保存的凭据，第三方平台上的凭据仍保持有效。';
+      revokeDescription = intl.formatMessage({ id: 'connector.revoke.credentialsHint' });
     }
     if (connector.code === 'ima-openapi' && connector.authMode === 'AK_SK') {
-      revokeDescription = '仅移除 ByClaw 保存的凭据，IMA 网站上的 API Key 仍保持有效。';
+      revokeDescription = intl.formatMessage({ id: 'connector.revoke.imaHint' });
     }
     if (connector.code === 'weixin-official-api' && connector.authMode === 'AK_SK') {
-      revokeDescription = '仅移除 ByClaw 保存的凭据，微信公众平台上的 AppSecret 仍保持有效';
+      revokeDescription = intl.formatMessage({ id: 'connector.revoke.weixinHint' });
     }
     setRevokeConfirmationOpen(true);
     Modal.confirm({
-      title: `取消${connector.name}授权？`,
+      title: intl.formatMessage({ id: 'connector.revoke.title' }, { name: connector.name }),
       content: revokeDescription,
-      okText: '确认取消授权',
+      okText: intl.formatMessage({ id: 'connector.revoke.confirm' }),
       okButtonProps: { danger: true },
-      cancelText: '暂不取消',
+      cancelText: intl.formatMessage({ id: 'connector.revoke.cancel' }),
       centered: true,
       afterClose: () => setRevokeConfirmationOpen(false),
       onOk: async () => {
@@ -696,11 +696,11 @@ const ConnectorControl = ({
               detail: { connectorId: connector.id, enableFlag: null },
             })
           );
-          message.success(`${connector.name}授权已取消`);
+          message.success(intl.formatMessage({ id: 'connector.revoke.success' }, { name: connector.name }));
           await loadAuthorizedConnectors();
         } catch {
-          message.error('取消授权失败，请稍后重试');
-          throw new Error('取消授权失败');
+          message.error(intl.formatMessage({ id: 'connector.revoke.failed' }));
+          throw new Error(intl.formatMessage({ id: 'connector.revoke.error' }));
         } finally {
           setRevokingConnectorIds((ids) => {
             const nextIds = new Set(ids);
@@ -721,7 +721,9 @@ const ConnectorControl = ({
         const refreshedConnector = refreshedConnectors?.find((item) => item.id === connector.id);
 
         if (!hasValidCredentialForm(refreshedConnector)) {
-          message.error(`${connector.name} 连接配置暂不可用，请稍后重试`);
+          message.error(
+            intl.formatMessage({ id: 'connector.namedConfigurationUnavailable' }, { name: connector.name })
+          );
           return;
         }
 
@@ -749,7 +751,7 @@ const ConnectorControl = ({
         const connectorList = await loadAuthorizedConnectors();
         const connector = connectorList?.find((item) => item.code === connectorCode);
         if (!connector) {
-          message.error('对应的连接器配置暂不可用，请稍后重试');
+          message.error(intl.formatMessage({ id: 'connector.configurationUnavailable' }));
           return;
         }
         setSettingsOpen(false);

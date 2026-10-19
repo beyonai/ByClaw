@@ -180,7 +180,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             if (this.isExactPostRequestPath(request, ConversationSearchConstants.QUERY_PATH)) {
                 CurrentUserHolder.clearLoginInfo();
                 if (!this.authenticateBeyondTokenOnlyRequest(request, "对话记录搜索技能")) {
-                    throw new RuntimeException("对话记录搜索技能身份认证失败");
+                    throw new RuntimeException(I18nUtil.get("conversation.search.authentication.failed"));
                 }
                 return true;
             }

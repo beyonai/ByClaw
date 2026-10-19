@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 
 import java.util.Collections;
@@ -403,7 +404,7 @@ public class GroupChatTaskService {
 
     public Long tenantProjectCloudResourceId(Long projectId) {
         Project project = projectService.findById(projectId);
-        if (project == null || project.getCloudResourceId() == null) throw new IllegalArgumentException("Group project cloud drive is unavailable");
+        if (project == null || project.getCloudResourceId() == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.project.cloudUnavailable"));
         return project.getCloudResourceId();
     }
 
@@ -411,7 +412,7 @@ public class GroupChatTaskService {
         ByaiSession group = sessionService.findById(task.getGroupSessionId());
         Project project = group == null ? null : projectService.findById(group.getProjectId());
         if (project == null || project.getCloudResourceId() == null) {
-            throw new IllegalArgumentException("Group project cloud drive is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.project.cloudUnavailable"));
         }
         return project.getCloudResourceId();
     }

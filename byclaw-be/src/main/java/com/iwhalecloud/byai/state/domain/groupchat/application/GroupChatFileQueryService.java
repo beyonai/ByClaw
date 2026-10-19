@@ -37,7 +37,7 @@ public class GroupChatFileQueryService {
         authorization.requireCurrentUserMember(sessionId);
         int pageSize = requestedPageSize == null ? DEFAULT_PAGE_SIZE : requestedPageSize;
         if (pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageSize must be between 1 and 50");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupchat.files.page.size.invalid");
         }
         Cursor resume = decodeCursor(sessionId, cursor);
         Long beforeMessageId = resume == null ? null : resume.messageId();
@@ -97,7 +97,7 @@ public class GroupChatFileQueryService {
             return new Cursor(messageId, index);
         }
         catch (IllegalArgumentException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid group file cursor");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupchat.files.cursor.invalid");
         }
     }
 

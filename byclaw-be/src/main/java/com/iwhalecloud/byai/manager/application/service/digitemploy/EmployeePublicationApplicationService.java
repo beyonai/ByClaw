@@ -187,7 +187,7 @@ public class EmployeePublicationApplicationService {
         return transaction.execute(status -> {
             SsResource requested = requireEntryResource(resourceId, tenant);
             boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
-            if (fromPersonalUpdate && official) throw new BaseException("请从原个人员工发起发布更新");
+            if (fromPersonalUpdate && official) throw new BaseException("employee.publication.updateFromPersonal");
             Long sourceId = official ? requested.getPublicationSourceId() : resourceId;
             if (!Objects.equals(requested.getResourceStatus(), 2)) throw new BaseException("仅在用数字员工支持发起发布或更新");
             // A stable source row serializes initial publication and official-update requests.
@@ -203,7 +203,7 @@ public class EmployeePublicationApplicationService {
             SsResource existing = publications.official(sourceId, tenant);
             if (fromPersonalUpdate && existing == null) throw new BaseException(
                 com.iwhalecloud.byai.common.i18n.I18nUtil.get("employee.publication.enterprise.copy.required"));
-            if (!official && !fromPersonalUpdate && existing != null) throw new BaseException("该员工已有官方副本，请从个人员工卡片发起发布更新");
+            if (!official && !fromPersonalUpdate && existing != null) throw new BaseException("employee.publication.officialExists");
             SsResource target = official ? requested : fromPersonalUpdate ? existing : null;
             if (target != null) {
                 target = publications.lockResource(target.getResourceId(), tenant);
@@ -298,7 +298,7 @@ public class EmployeePublicationApplicationService {
             } else {
                 requireEditable(publication);
             }
-            if (publication.getOfficialId() == null) throw new BaseException("当前申请不是官方员工更新");
+            if (publication.getOfficialId() == null) throw new BaseException("employee.publication.notOfficialUpdate");
             SsResource target = publications.lockResource(publication.getOfficialId(), tenant);
             requireUpdateTarget(target, publication.getSourceId(), tenant);
             captureUpdateTarget(publication, target, isFromPersonal(publication));
@@ -389,7 +389,7 @@ public class EmployeePublicationApplicationService {
                 SsResource source = publications.lockResource(publication.getSourceId(), tenant);
                 requireEmployee(source);
                 if (!Objects.equals(source.getComAcctId(), publication.getTenantId())) {
-                    throw new BaseException("发布申请与原员工的企业归属不一致");
+                    throw new BaseException("employee.publication.requestTenantMismatch");
                 }
                 validateCandidate(publication);
                 requireReviewer(publication);
@@ -397,11 +397,11 @@ public class EmployeePublicationApplicationService {
                 boolean fresh = official == null;
                 if (!fresh) official = publications.lockResource(official.getResourceId(), tenant);
                 if (!fresh && (official == null || !Objects.equals(official.getComAcctId(), source.getComAcctId()))) {
-                    throw new BaseException("官方副本与原员工的企业归属不一致");
+                    throw new BaseException("employee.publication.copyTenantMismatch");
                 }
-                if (!fresh && !Objects.equals(official.getResourceStatus(), 2)) throw new BaseException("官方副本已下架或注销，请先处理其状态");
+                if (!fresh && !Objects.equals(official.getResourceStatus(), 2)) throw new BaseException("employee.publication.copyInactive");
                 if (publication.getOfficialId() != null) {
-                    if (fresh || !Objects.equals(publication.getOfficialId(), official.getResourceId())) throw new BaseException("官方副本已变化，请重新发起更新");
+                    if (fresh || !Objects.equals(publication.getOfficialId(), official.getResourceId())) throw new BaseException("employee.publication.copyChanged");
                     requireUnchangedUpdateTarget(publication, official);
                 }
                 DigitalEmployeeDTO snapshot = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
@@ -665,9 +665,9 @@ public class EmployeePublicationApplicationService {
         requireEmployee(source);
         if (!Objects.equals(source.getComAcctId(), publication.getTenantId())
             || !Objects.equals(source.getCreateBy(), publication.getAuthorId()) || !"personal".equals(source.getOwnerType())) {
-            throw new BaseException("原个人员工归属已变更，请重新发起发布");
+            throw new BaseException("employee.publication.sourceOwnerChanged");
         }
-        if (!Objects.equals(source.getResourceStatus(), 2)) throw new BaseException("原个人员工已下架或注销");
+        if (!Objects.equals(source.getResourceStatus(), 2)) throw new BaseException("employee.publication.sourceInactive");
         return sanitize(readConfiguration(source.getResourceId()), source);
     }
 
@@ -733,7 +733,7 @@ public class EmployeePublicationApplicationService {
     private DigitalEmployeeDetailsDTO readConfiguration(Long resourceId) {
         EmployeeIdDTO id = new EmployeeIdDTO(); id.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = employees.findDetailsById(id);
-        if (details == null) throw new BaseException("数字员工配置不存在");
+        if (details == null) throw new BaseException("employee.publication.configMissing");
         // 查询对象不被候选配置修改；关联资源中的非技能配置仍参与发布及对照。
         DigitalEmployeeDetailsDTO copy = JSON.parseObject(JSON.toJSONString(details), DigitalEmployeeDetailsDTO.class);
         if (copy.getRelResourceList() != null) copy.setRelResourceInfoList(copy.getRelResourceList().stream()
@@ -745,8 +745,8 @@ public class EmployeePublicationApplicationService {
     private void requireUpdateTarget(SsResource target, Long sourceId, Long tenant) {
         if (!DigitalEmployeeGovernanceService.isOfficialCopy(target)
             || !Objects.equals(target.getPublicationSourceId(), sourceId)
-            || !Objects.equals(target.getComAcctId(), tenant)) throw new BaseException("官方副本已变化，请重新发起更新");
-        if (!Objects.equals(target.getResourceStatus(), 2)) throw new BaseException("官方副本已下架或注销，请先处理其状态");
+            || !Objects.equals(target.getComAcctId(), tenant)) throw new BaseException("employee.publication.copyChanged");
+        if (!Objects.equals(target.getResourceStatus(), 2)) throw new BaseException("employee.publication.copyInactive");
     }
 
     private String configurationFingerprint(SsResource target) {
@@ -800,9 +800,9 @@ public class EmployeePublicationApplicationService {
 
     private void requireUnchangedUpdateTarget(DigitalEmployeePublication publication, SsResource target) {
         JSONObject metadata = JSON.parseObject(publication.getSnapshotJson()).getJSONObject(UPDATE_TARGET);
-        if (metadata == null) throw new BaseException("当前更新申请尚未对照官方配置，请重新对照并确认覆盖范围");
+        if (metadata == null) throw new BaseException("employee.publication.comparisonRequired");
         if (!Objects.equals(metadata.getString("fingerprint"), configurationFingerprint(target))) {
-            throw new BaseException("官方员工配置已变化，请重新对照官方配置并确认覆盖范围后再提交或审核");
+            throw new BaseException("employee.publication.comparisonStale");
         }
     }
 
@@ -875,7 +875,7 @@ public class EmployeePublicationApplicationService {
     }
     private void requireEditable(DigitalEmployeePublication publication) {
         requireState(publication, "DRAFT", "PENDING");
-        if ("PENDING".equals(publication.getStatus()) && !canReview(publication)) throw new BaseException("审核期间不可编辑，请先撤回申请");
+        if ("PENDING".equals(publication.getStatus()) && !canReview(publication)) throw new BaseException("employee.publication.pendingEdit");
     }
     private void requireReviewer(DigitalEmployeePublication publication) {
         if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("仅 adminvip 和平台管理员可以审核");

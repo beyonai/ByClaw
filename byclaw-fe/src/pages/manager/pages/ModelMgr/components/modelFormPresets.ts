@@ -540,6 +540,20 @@ const CAPABILITY_FIELDS = [
   'extendParam',
 ];
 
+/** 选择提供商的旧快捷入口也遵守手填值保护，不把整套预设直接覆盖表单。 */
+export function applyAutofillFields(state: ModelAutofillState, values: Values, suggestions: Values) {
+  const patch: Values = {};
+  Object.entries(suggestions).forEach(([key, value]) => {
+    if (state.edited.has(key)) return;
+    const empty = values[key] === undefined || values[key] === null || values[key] === '';
+    if (empty || isEqual(values[key], state.automatic[key])) {
+      patch[key] = cloneDeep(value);
+      state.automatic[key] = cloneDeep(value);
+    }
+  });
+  return patch;
+}
+
 /** 仅用于尚未保存的新增表单；用户主动修改（包括清空）的字段永远优先于自动建议。 */
 export function applyModelAutofill(
   state: ModelAutofillState,
@@ -574,20 +588,6 @@ export function applyModelAutofill(
   suggestions.displayName = `${values.modelCode || ''}`.trim().slice(0, 50);
   delete suggestions.modelCode;
   return applyAutofillFields(state, values, suggestions);
-}
-
-/** 选择提供商的旧快捷入口也遵守手填值保护，不把整套预设直接覆盖表单。 */
-export function applyAutofillFields(state: ModelAutofillState, values: Values, suggestions: Values) {
-  const patch: Values = {};
-  Object.entries(suggestions).forEach(([key, value]) => {
-    if (state.edited.has(key)) return;
-    const empty = values[key] === undefined || values[key] === null || values[key] === '';
-    if (empty || isEqual(values[key], state.automatic[key])) {
-      patch[key] = cloneDeep(value);
-      state.automatic[key] = cloneDeep(value);
-    }
-  });
-  return patch;
 }
 
 /** 全列表按型号自然排序，厂商与渠道仅作为展示后缀，不改变模板 ID 或调用配置。 */

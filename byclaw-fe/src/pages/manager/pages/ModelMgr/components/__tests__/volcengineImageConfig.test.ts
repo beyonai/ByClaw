@@ -135,6 +135,21 @@ describe('Volcengine image configuration compatibility', () => {
     ).not.toHaveProperty('imageGenerationConfig');
   });
 
+  it.each([undefined, null])('clears missing image configuration represented by %s', (imageGenerationConfig) => {
+    expect(getImageConfigFormValues({ imageGenerationConfig })).toEqual({
+      extendParam: undefined,
+      imageGenerationConfig: undefined,
+    });
+  });
+
+  it('preserves an explicit empty configuration and copies saved image settings', () => {
+    expect(getImageConfigFormValues({ imageGenerationConfig: {} }).imageGenerationConfig).toEqual({});
+    const imageGenerationConfig = { size: '4K', watermark: false };
+    const fields = getImageConfigFormValues({ imageGenerationConfig });
+    expect(fields.imageGenerationConfig).toEqual(imageGenerationConfig);
+    expect(fields.imageGenerationConfig).not.toBe(imageGenerationConfig);
+  });
+
   it('preserves a manually entered model version and proxy URL on provider selection', () => {
     expect(
       getImageProviderTransitionFormValues('VOLCENGINE', {

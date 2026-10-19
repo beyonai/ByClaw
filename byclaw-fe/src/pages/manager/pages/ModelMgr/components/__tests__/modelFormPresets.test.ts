@@ -383,12 +383,15 @@ describe('deterministic model form presets', () => {
     expect(values.temperature).toBeUndefined();
     expect(values.topP).toBeUndefined();
     expect(getModelPresetLimits(values)).toBeUndefined();
+    expect(JSON.parse(values.reasoningEffortMapText)).toEqual({ low: 'low', high: 'high', max: 'max' });
     values.modelCode = 'glm-5.1';
     values = { ...values, ...applyModelAutofill(state, {}, values) };
     expect(values).toMatchObject(manual);
     expect(values.contextTokens).toBe(202745);
-    expect(values.reasoningEffortMapText).toBeUndefined();
+    // 文本控件清空为 ''；保存时也不能残留上一模板的 effort 映射。
+    expect(values.reasoningEffortMapText).toBe('');
     expect(values.reasoningConfig).toMatchObject({ enabled: false, compatFormat: 'bailian' });
+    expect(buildModelUpsertPayload({ values }).reasoningConfig).not.toHaveProperty('effortMap');
   });
 
   it('keeps official templates separate from saved aliases and supported gateway protocols', () => {

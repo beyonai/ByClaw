@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import java.util.List;
@@ -14,7 +15,12 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class GroupChatMemberRoutingServiceTest {
+class GroupChatMemberRoutingServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     @Test
     void legacySuperMembersFollowCompatibilitySwitchEvenWhenPersonalDshIsDisabled() {
         var resources = mock(SsResourceService.class);
@@ -61,4 +67,18 @@ class GroupChatMemberRoutingServiceTest {
         assertThat(employee.getWorkerAgentType()).isEqualTo("BYCLAW_EXE");
         assertThat(scope).doesNotContainKey("effectiveWorkerAgentTypes");
     }
+
+    @Test
+    void unavailableEmployeeMessagesPreserveLargeIdsInBothLanguages() {
+        var resources = mock(SsResourceService.class);
+        var service = new GroupChatMemberRoutingService(resources, mock(TargetAgentResolver.class));
+        Map<String, Object> scope = Map.of("coordinatorAgentId", "9007199254740993", "allowedAgentIds", List.of());
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.withRoutes(scope, "u"))
+            .hasMessage("Group employee is unavailable: 9007199254740993");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.withRoutes(scope, "u"))
+            .hasMessage("群数字员工不可用：9007199254740993");
+    }
+
 }

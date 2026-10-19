@@ -118,6 +118,14 @@ public class SandboxService {
     /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
     private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
 
+    /** DSH 上报 releasable 且前端空闲时释放的原因。 */
+    private static final String RELEASE_REASON_DSH_RELEASABLE = "release.dsh.releasable";
+
+    /** DSH 曾上报但超过静默阈值未再上报时释放的原因。 */
+    private static final String RELEASE_REASON_DSH_SILENT = "release.dsh.silent";
+
+    private static final String RESIZE_STATUS_PROCESSING = "PROCESSING";
+
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
 
@@ -169,6 +177,14 @@ public class SandboxService {
     @Lazy
     @Autowired
     private RedisClient redisClient;
+
+    @Lazy
+    @Autowired
+    private DshActivityStateStore dshActivityStateStore;
+
+    @Lazy
+    @Autowired
+    private DshActivityStreamListener dshActivityStreamListener;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
     private static final String PARAM_ENABLE_USE_SANDBOX_NUM = "ENABLE_USE_SANDBOX_NUM";
@@ -234,6 +250,21 @@ public class SandboxService {
 
     @Value("${sandbox.reconcile.orphan-cleanup.enabled:true}")
     private boolean reconcileOrphanCleanupEnabled;
+
+    /** 关闭后 byclaw-dsh 沙箱完全沿用原有空闲释放、续约及 running-state 心跳规则。 */
+    @Value("${byclaw.sandbox.dsh-activity.enabled:true}")
+    private boolean dshActivityEnabled;
+
+    /** 曾上报的 DSH 沙箱超过该时长没有新上报视为静默；默认 4 个 30 秒心跳，与 running-state 的 dsh-max-age-seconds 对齐。 */
+    @Value("${byclaw.sandbox.dsh-activity.silent-seconds:120}")
+    private long dshActivitySilentSeconds;
+
+    /**
+     * 单轮静默释放的熔断阈值：一轮里静默的沙箱超过该数量，更可能是容器到 Redis 的上报链路整体中断而不是沙箱都死了，
+     * 本轮跳过并告警。被跳过的沙箱仍按前端空闲规则释放。
+     */
+    @Value("${byclaw.sandbox.dsh-activity.silent-max-per-round:10}")
+    private int dshActivitySilentMaxPerRound = 10;
 
     @Lazy
     @Autowired
@@ -820,7 +851,7 @@ public class SandboxService {
     private void rejectTenantSpecFromUserLaunch(String sandboxType, SandboxServiceSpec spec) {
         if ("tenant-opengauss".equals(sandboxType) || "tenant-data-node".equals(sandboxType)
             || (spec != null && "TENANT".equals(spec.getOwnerScope()))) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程创建");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.createOnly"));
         }
     }
 
@@ -997,8 +1028,17 @@ public class SandboxService {
         }
         Date now = new Date();
         int updatedCount = 0;
+        int streamManagedCount = 0;
         List<String> skippedRecords = new ArrayList<>();
         for (SsSandboxRecord record : records) {
+            if (isDshStreamManaged(record)) {
+                // 已通过活动 Stream 上报的 DSH 沙箱由 Stream 状态决定释放，旧 busy 心跳不再刷新前端访问时间，
+                // 健康观测仍按忙碌心跳保持；心跳时间另行记录，Stream 静默时用它证明容器仍活着
+                sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(record));
+                touchDshBusyHeartbeat(record, now.getTime());
+                streamManagedCount++;
+                continue;
+            }
             SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
             if (updatedRecord == null) {
                 skippedRecords.add(sandboxRef(record));
@@ -1010,6 +1050,10 @@ public class SandboxService {
         }
         if (!skippedRecords.isEmpty()) {
             LOGGER.warn("running-state 心跳部分记录跳过，用户编码：{}，跳过记录：{}", userCode, skippedRecords);
+        }
+        if (updatedCount == 0 && streamManagedCount > 0 && skippedRecords.isEmpty()) {
+            LOGGER.debug("running-state 心跳忽略：DSH 沙箱已由活动 Stream 管理，用户编码：{}，沙箱类型：{}", userCode, sandboxType);
+            return true;
         }
         if (updatedCount == 0) {
             LOGGER.warn("running-state 心跳失败：运行中记录均未更新，用户编码：{}，沙箱类型：{}", userCode, sandboxType);
@@ -1261,7 +1305,7 @@ public class SandboxService {
             throw new BdpRuntimeException("sandbox record not found");
         }
         if ("TENANT".equals(record.getOwnerScope())) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.manageOnly"));
         }
         String releaseReason = manualReleaseReason(record.getUserCode());
         if (STATUS_STARTING.equals(record.getStatus())) {
@@ -1293,7 +1337,7 @@ public class SandboxService {
             throw new BdpRuntimeException("sandbox record not found");
         }
         if ("TENANT".equals(record.getOwnerScope())) {
-            throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.tenant.manageOnly"));
         }
         int updated = sandboxRecordMapper.updateAutoRelease(id, autoRelease, record.getLockVersion());
         if (updated == 0) {
@@ -1459,9 +1503,20 @@ public class SandboxService {
 
             for (SsSandboxRecord record : records) {
                 try {
-                    LOGGER.info("命中超时释放候选：{}，lastAccessTime：{}，autoRelease：{}",
-                        sandboxRef(record), record.getLastAccessTime(), record.getAutoRelease());
-                    doRemoveSandbox(record, RELEASE_REASON_AUTO_IDLE_TIMEOUT);
+                    String releaseReason = RELEASE_REASON_AUTO_IDLE_TIMEOUT;
+                    DshActivity activity = dshActivityFor(record);
+                    if (activity != null) {
+                        releaseReason = resolveDshIdleReleaseReason(record, activity, System.currentTimeMillis());
+                        if (releaseReason == null) {
+                            report.addSkippedSandbox(sandboxRef(record));
+                            LOGGER.debug("前端已空闲但 DSH 沙箱仍需保留：{}，state：{}，receivedAt：{}",
+                                sandboxRef(record), activity.state(), new Date(activity.receivedAt()));
+                            continue;
+                        }
+                    }
+                    LOGGER.info("命中超时释放候选：{}，lastAccessTime：{}，autoRelease：{}，releaseReason：{}",
+                        sandboxRef(record), record.getLastAccessTime(), record.getAutoRelease(), releaseReason);
+                    doRemoveSandbox(record, releaseReason);
                     cleanedCount++;
                     report.addAffectedSandbox(sandboxRef(record));
                 }
@@ -1475,6 +1530,232 @@ public class SandboxService {
         LOGGER.debug("清理超时沙箱完成，候选 {} 个，扫描 {} 个，清理 {} 个沙箱，释放记录：{}，失败记录：{}",
             total, scannedCount, cleanedCount, report.getAffectedSandboxes(), report.getFailedSandboxes());
         return report;
+    }
+
+    /**
+     * 释放曾通过活动 Stream 上报、但超过静默阈值未再上报的 byclaw-dsh 沙箱（不看前端是否活跃）。
+     * 仅在本实例已连续正常消费 Stream 至少一个静默阈值后执行；没有对应运行中记录的状态直接清理。
+     * 一轮静默沙箱超过 silent-max-per-round 时整轮跳过：后端只能看到自己读 Redis 是否正常，
+     * 容器到 Redis 的写链路整体中断时 Stream 同样安静，不能把这当成所有沙箱都死了。
+     *
+     * @return 静默释放报告
+     */
+    public SandboxLifecycleJobReport releaseSilentDshSandboxes() {
+        SandboxLifecycleJobReport report = new SandboxLifecycleJobReport("dsh-silent");
+        if (!dshActivityEnabled) {
+            return report;
+        }
+        long now = System.currentTimeMillis();
+        if (!isDshSilentCheckReady(now)) {
+            LOGGER.debug("DSH 活动 Stream 尚未连续消费满静默阈值，跳过静默释放检查");
+            return report;
+        }
+        long silentMillis = dshSilentMillis();
+        Map<String, DshActivity> entries = dshActivityStateStore.entries();
+        Map<String, DshActivity> silentEntries = new LinkedHashMap<>();
+        entries.forEach((workerId, activity) -> {
+            if (!activity.isFresh(now, silentMillis)) {
+                silentEntries.put(workerId, activity);
+            }
+        });
+        report.addScannedCount(entries.size());
+        report.setTotalCandidates(silentEntries.size());
+        if (dshActivitySilentMaxPerRound > 0 && silentEntries.size() > dshActivitySilentMaxPerRound) {
+            silentEntries.keySet().forEach(workerId -> report.addSkippedSandbox("workerId=" + workerId));
+            LOGGER.warn("DSH 静默沙箱 {} 个超过单轮熔断阈值 {}，疑似上报链路整体中断，本轮不按静默释放，workerIds：{}",
+                silentEntries.size(), dshActivitySilentMaxPerRound, silentEntries.keySet());
+            return report;
+        }
+        for (Map.Entry<String, DshActivity> entry : silentEntries.entrySet()) {
+            try {
+                releaseSilentDshSandbox(entry.getKey(), entry.getValue(), report);
+            }
+            catch (Exception e) {
+                report.addFailedSandbox("workerId=" + entry.getKey());
+                LOGGER.error("DSH 静默释放失败，workerId：{}，userCode：{}", entry.getKey(), entry.getValue().userCode(), e);
+            }
+        }
+        return report;
+    }
+
+    private void releaseSilentDshSandbox(String workerId, DshActivity activity, SandboxLifecycleJobReport report) {
+        String userCode = activity.userCode();
+        List<SsSandboxRecord> owned = new ArrayList<>();
+        // workerId 与 userCode 不一致的记录（如未注入 BYAI_WORKER_ID 时的主机名）不映射到任何沙箱
+        if (StringUtils.equals(workerId,
+            buildSandboxWorkerId(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE))) {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
+                SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+            if (records != null) {
+                records.stream().filter(record -> belongsToRecord(activity, record)).forEach(owned::add);
+            }
+        }
+        if (owned.isEmpty()) {
+            if (dshActivityStateStore.removeIfUnchanged(workerId, activity)) {
+                LOGGER.info("清理无对应运行中沙箱的 DSH 活动状态，workerId：{}，userCode：{}，receivedAt：{}",
+                    workerId, userCode, new Date(activity.receivedAt()));
+            }
+            return;
+        }
+        for (SsSandboxRecord record : owned) {
+            if (!"USER".equals(record.getOwnerScope()) || !AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())) {
+                report.addSkippedSandbox(sandboxRef(record));
+                continue;
+            }
+            if (isDshSilenceSuspended(workerId, record, System.currentTimeMillis())) {
+                report.addSkippedSandbox(sandboxRef(record));
+                continue;
+            }
+            // 释放前复核最新状态，避免与刚到达的上报竞争
+            DshActivity latest = dshActivityStateStore.find(workerId);
+            if (latest == null || !belongsToRecord(latest, record)
+                || latest.isFresh(System.currentTimeMillis(), dshSilentMillis())) {
+                report.addSkippedSandbox(sandboxRef(record));
+                continue;
+            }
+            LOGGER.info("命中 DSH 静默释放候选：{}，receivedAt：{}，state：{}，lastActiveAt：{}",
+                sandboxRef(record), new Date(latest.receivedAt()), latest.state(), latest.lastActiveAt());
+            doRemoveSandbox(record, RELEASE_REASON_DSH_SILENT);
+            report.addAffectedSandbox(sandboxRef(record));
+        }
+    }
+
+    /**
+     * 返回属于该记录的 DSH 活动状态；功能关闭、非 byclaw-dsh 沙箱或该沙箱尚未上报时返回 null。
+     * 只有在记录创建之后收到的上报才属于该记录，避免同一用户上一个沙箱的状态影响新沙箱。
+     */
+    DshActivity dshActivityFor(SsSandboxRecord record) {
+        if (!dshActivityEnabled || record == null
+            || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
+            return null;
+        }
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (workerId == null) {
+            return null;
+        }
+        DshActivity activity = dshActivityStateStore.find(workerId);
+        return belongsToRecord(activity, record) ? activity : null;
+    }
+
+    private boolean belongsToRecord(DshActivity activity, SsSandboxRecord record) {
+        return activity != null && record != null && record.getCreateTime() != null
+            && StringUtils.equals(activity.userCode(), record.getUserCode())
+            && activity.receivedAt() >= record.getCreateTime().getTime();
+    }
+
+    /**
+     * 前端空闲的已上报 DSH 沙箱：新鲜 releasable 释放，新鲜 busy 保留；
+     * 静默时仅在 Stream 已连续消费满静默阈值后释放，否则保留（避免后端重启后误判）。
+     *
+     * @return 释放原因，null 表示保留
+     */
+    private String resolveDshIdleReleaseReason(SsSandboxRecord record, DshActivity activity, long nowMillis) {
+        if (activity.isFresh(nowMillis, dshSilentMillis())) {
+            return activity.isReleasable() ? RELEASE_REASON_DSH_RELEASABLE : null;
+        }
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (isDshSilenceSuspended(workerId, record, nowMillis)) {
+            return null;
+        }
+        return isDshSilentCheckReady(nowMillis) ? RELEASE_REASON_DSH_SILENT : null;
+    }
+
+    /**
+     * Stream 静默但有其他证据说明容器仍在运行或正在重启时，不按静默释放：
+     * 变配会重启容器，期间及完成后一个静默阈值内停止上报属于预期；
+     * 同一容器的 {@code worker:stats:dsh} busy 心跳仍在一个静默阈值内到达，说明只是上报插件出了问题，容器本身活着。
+     */
+    private boolean isDshSilenceSuspended(String workerId, SsSandboxRecord record, long nowMillis) {
+        if (StringUtils.equalsIgnoreCase(record.getResizeStatus(), RESIZE_STATUS_PROCESSING)
+            || (record.getLastResizeAt() != null
+            && nowMillis - record.getLastResizeAt().getTime() <= dshSilentMillis())) {
+            LOGGER.info("DSH 沙箱变配中或刚完成变配，暂不按静默释放：{}，resizeStatus：{}，lastResizeAt：{}",
+                sandboxRef(record), record.getResizeStatus(), record.getLastResizeAt());
+            return true;
+        }
+        long busyHeartbeatAt = dshBusyHeartbeatAt(workerId);
+        if (busyHeartbeatAt > 0 && nowMillis - busyHeartbeatAt <= dshSilentMillis()) {
+            LOGGER.warn("DSH 沙箱活动 Stream 静默但 busy 心跳仍在到达，疑似上报插件异常，暂不按静默释放：{}，busyHeartbeatAt：{}",
+                sandboxRef(record), new Date(busyHeartbeatAt));
+            return true;
+        }
+        return false;
+    }
+
+    /** 读取失败时按未收到心跳处理，不阻止静默判断。 */
+    private long dshBusyHeartbeatAt(String workerId) {
+        if (workerId == null) {
+            return 0L;
+        }
+        try {
+            return dshActivityStateStore.busyHeartbeatAt(workerId);
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取 DSH busy 心跳时间失败，按未收到处理，workerId：{}，原因：{}", workerId, e.getMessage());
+            return 0L;
+        }
+    }
+
+    /** 记录失败只影响静默判断的一个旁证，不影响心跳本身。 */
+    private void touchDshBusyHeartbeat(SsSandboxRecord record, long nowMillis) {
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (workerId == null) {
+            return;
+        }
+        try {
+            dshActivityStateStore.touchBusyHeartbeat(workerId, nowMillis);
+        }
+        catch (Exception e) {
+            LOGGER.warn("记录 DSH busy 心跳时间失败，workerId：{}，原因：{}", workerId, e.getMessage());
+        }
+    }
+
+    /** 已上报且最新状态为新鲜 busy 的 DSH 沙箱，前端空闲时仍需续约；读取失败时按原规则处理。 */
+    private boolean isDshBusy(SsSandboxRecord record, long nowMillis) {
+        try {
+            DshActivity activity = dshActivityFor(record);
+            return activity != null && activity.isBusy() && activity.isFresh(nowMillis, dshSilentMillis());
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取 DSH 活动状态失败，按前端空闲规则处理续约：{}，原因：{}", sandboxRef(record), e.getMessage());
+            return false;
+        }
+    }
+
+    /** 已通过活动 Stream 上报的 DSH 沙箱；读取失败时按未上报处理，保留旧心跳刷新。 */
+    private boolean isDshStreamManaged(SsSandboxRecord record) {
+        try {
+            return dshActivityFor(record) != null;
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取 DSH 活动状态失败，按未上报处理 running-state 心跳：{}，原因：{}", sandboxRef(record),
+                e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isDshSilentCheckReady(long nowMillis) {
+        return dshActivityStreamListener != null && dshActivityStreamListener.isSilentCheckReady(nowMillis);
+    }
+
+    private long dshSilentMillis() {
+        return TimeUnit.SECONDS.toMillis(dshActivitySilentSeconds);
+    }
+
+    private void removeDshActivityState(SsSandboxRecord record) {
+        if (!dshActivityEnabled || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
+            return;
+        }
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (workerId == null) {
+            return;
+        }
+        try {
+            dshActivityStateStore.remove(workerId);
+        }
+        catch (Exception e) {
+            LOGGER.warn("清理 DSH 活动状态失败，workerId：{}，原因：{}", workerId, e.getMessage());
+        }
     }
 
     /**
@@ -1514,7 +1795,9 @@ public class SandboxService {
             for (SsSandboxRecord record : records) {
                 if (AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())
                     && (record.getLastAccessTime() == null
-                    || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis)) {
+                    || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis)
+                    // 已上报且最新状态为 busy 的 DSH 沙箱即使前端空闲也继续续约，避免远端到期绕过释放规则
+                    && !isDshBusy(record, now.getTime())) {
                     report.addSkippedSandbox(sandboxRef(record));
                     LOGGER.debug("沙箱已空闲，跳过远端续约，等待释放策略处理：{}，lastAccessTime：{}",
                         sandboxRef(record), record.getLastAccessTime());
@@ -2068,6 +2351,7 @@ public class SandboxService {
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType(), record.getProfileKey());
         cleanupWorkerRegistryForSandbox(record);
+        removeDshActivityState(record);
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 

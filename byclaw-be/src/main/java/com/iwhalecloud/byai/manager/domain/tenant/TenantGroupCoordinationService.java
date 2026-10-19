@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,7 +75,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         var resource = resources.findById(coordinatorId);
         if (resource == null || !Integer.valueOf(2).equals(resource.getResourceStatus())
             || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Group coordinator is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.group.coordinator.unavailable");
         }
         // Default membership is server-managed. Existing group users receive the same grant as new groups.
         if (bound == null && group.get("members") instanceof List<?> members) {
@@ -234,7 +235,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     private Object appendContext(ChatProcessContext context, Map<?, ?> scope, Object content, Map<String, Object> gatewayParams,
         List<?> groupMembers) {
         if (context.userMessageId == null || context.traceId == null || contextFiles == null) {
-            throw new ChatTurnPreparationException("历史上下文身份不完整，请重试", null);
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.identityIncomplete"), null);
         }
         List<MessageView> inputs = node.request(context.tenantContext, "POST", "/internal/v1/assiman/getMessageByIds",
             new MessageIds(List.of(context.userMessageId)), new TypeReference<List<MessageView>>() { });
@@ -345,10 +346,10 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                 }
             }
         }
-        throw new ChatTurnPreparationException("群任务消息缺少正文，请重试", null);
+        throw new ChatTurnPreparationException(I18nUtil.get("groupchat.task.textMissing"), null);
     }
 
     private ResponseStatusException forbidden() {
-        return new ResponseStatusException(HttpStatus.FORBIDDEN, "Group task execution is outside its assigned scope");
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.group.task.scope");
     }
 }

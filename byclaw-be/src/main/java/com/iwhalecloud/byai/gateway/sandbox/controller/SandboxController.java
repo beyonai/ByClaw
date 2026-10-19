@@ -448,7 +448,7 @@ public class SandboxController {
 
         enterpriseId = userResourceEnterpriseScope(enterpriseId);
         if (!CurrentUserHolder.isPlatformManager() && !"USER".equals(ownerScope)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "user sandbox scope required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.userScope.required");
         }
 
         int offset = (pageIndex - 1) * pageSize;
@@ -553,7 +553,7 @@ public class SandboxController {
         Long enterpriseId = CurrentUserHolder.getEnterpriseId();
         if (!CurrentUserHolder.isBusinessAdmin() || enterpriseId == null || enterpriseId <= 0
             || (requestedEnterpriseId != null && !enterpriseId.equals(requestedEnterpriseId))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
         }
         return enterpriseId;
     }
@@ -561,7 +561,7 @@ public class SandboxController {
     private void requireUserSandboxRecordAccess(Long id) {
         Long enterpriseId = userResourceEnterpriseScope(null);
         if (enterpriseId != null && sandboxRecordMapper.countEnterpriseUserSandbox(id, enterpriseId) != 1) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "enterprise access denied");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
         }
     }
 
@@ -571,13 +571,13 @@ public class SandboxController {
         try {
             if (platformRemote != null && platformRemote.isRemote()) {
                 ResponseUtil result = platformRemote.controller("resize", params);
-                return result.isSuccess() ? result : ResponseUtil.fail("沙箱扩缩容处理失败: " + result.getMsg());
+                return result.isSuccess() ? result : ResponseUtil.fail(I18nUtil.get("sandbox.resize.failed", result.getMsg()));
             }
             SsSandboxResizeRecord record = sandboxResizeService.handleResizeRequest(params);
             return ResponseUtil.successResponse(record);
         }
         catch (Exception e) {
-            return ResponseUtil.fail("沙箱扩缩容处理失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("sandbox.resize.failed", e.getMessage()));
         }
     }
 
@@ -592,14 +592,14 @@ public class SandboxController {
             SsSandboxResizeRecord record = sandboxResizeService.handlePrometheusAlert(payload);
             if (record != null && "FAILED".equals(record.getStatus())) {
                 response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + record.getErrorMessage());
+                return ResponseUtil.fail(I18nUtil.get("sandbox.resize.alert.failed", record.getErrorMessage()));
             }
             return ResponseUtil.successResponse(record);
         }
         catch (Exception e) {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return ResponseUtil.fail(platformBackgroundExecution.isLegacyExecutor()
-                ? "沙箱扩缩容告警处理失败: " + e.getMessage() : "沙箱扩缩容告警远程处理失败");
+                ? I18nUtil.get("sandbox.resize.alert.failed", e.getMessage()) : I18nUtil.get("sandbox.resize.alert.remote.failed"));
         }
     }
 

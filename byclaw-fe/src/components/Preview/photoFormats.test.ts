@@ -43,6 +43,10 @@ describe('photo_formats sample archive', () => {
   it('decodes the real JP2 into nonblank RGB pixels and preserves its source', async () => {
     const input = await sample('sample.jp2');
     const before = input.slice(0);
+    // 真实文件内的码流是带偏移的浏览器 Uint8Array，不能依赖 Node Buffer 才能解码。
+    const { source } = inspectJp2(input);
+    expect(source.constructor).toBe(Uint8Array);
+    expect(source.byteOffset).toBeGreaterThan(0);
     const document = await openImageDocument(input, 'jp2');
     const image = await document.render(0);
     const reference = decodePpm(await sample('sample.ppm'));

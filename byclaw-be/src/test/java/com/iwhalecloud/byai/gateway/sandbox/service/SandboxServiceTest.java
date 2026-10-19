@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import java.time.OffsetDateTime;
 import java.time.Instant;
 import java.util.Date;
@@ -46,7 +47,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class SandboxServiceTest {
+class SandboxServiceTest extends I18nTestSupport {
 
     @Test
     void userLaunch_rejectsTenantSandboxSpecBeforeCreatingRecord() {

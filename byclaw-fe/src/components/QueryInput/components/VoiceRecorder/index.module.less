@@ -4,6 +4,15 @@
   padding: 4px;
   color: #687080;
   font-size: 19px;
+
+  // 麦克风图标外层不使用文字行盒，保持图标与按钮几何中心重合。
+  :global {
+    .@{antPrefix}-btn-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
 }
 
 .recordingPanel {

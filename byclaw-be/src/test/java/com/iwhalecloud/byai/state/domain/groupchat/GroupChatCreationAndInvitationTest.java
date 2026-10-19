@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,7 +71,7 @@ import org.springframework.transaction.annotation.AnnotationTransactionAttribute
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-class GroupChatCreationAndInvitationTest {
+class GroupChatCreationAndInvitationTest extends I18nTestSupport {
     private final AuthApplicationService authService = mock(AuthApplicationService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);

@@ -112,19 +112,19 @@ public class TenantDbProvisioningService {
 
     public void request(long enterpriseId) {
         if (deletionRequested(enterpriseId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant deletion is in progress");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
         taskExecutor.execute(() -> provision(enterpriseId));
     }
 
     public void requestRestart(long enterpriseId, String sandboxType, long recordId) {
         if (deletionRequested(enterpriseId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant deletion is in progress");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
         SsSandboxRecord latest = sandboxService.latestRecord(enterpriseId, sandboxType);
         if (latest == null || latest.getId() == null || latest.getId() != recordId
             || !("RUNNING".equals(latest.getStatus()) || "FAILED".equals(latest.getStatus()))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox is not restartable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.notRestartable");
         }
         taskExecutor.execute(() -> restart(enterpriseId, sandboxType, recordId));
     }
@@ -138,11 +138,11 @@ public class TenantDbProvisioningService {
             SsSandboxRecord latest = sandboxService.latestRecord(enterpriseId, sandboxType);
             if (latest == null || latest.getId() == null || latest.getId() != recordId
                 || !("RUNNING".equals(latest.getStatus()) || "FAILED".equals(latest.getStatus()))) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox changed before restart");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedBeforeRestart");
             }
             Map<String, String> config = readConfig(enterpriseId);
             if (!config.containsKey("PROVISION_REQUEST_ID")) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant provisioning was not requested");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.provision.notRequested");
             }
             replacing = true;
             setState(enterpriseId, "FAILED");
@@ -188,7 +188,7 @@ public class TenantDbProvisioningService {
         String lockKey = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant provisioning is in progress");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.provision.inProgress");
         }
         boolean replacing = false;
         try {
@@ -196,13 +196,13 @@ public class TenantDbProvisioningService {
             JsonNode state = objectMapper.readTree(config.get("PROVISION_STATE"));
             if (!"READY".equals(state.path("status").asText())
                 || state.path("generation").asLong() <= 0) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant is not ready");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.notReady");
             }
             JsonNode packageContent = objectMapper.readTree(config.get("PACKAGE_CONTENT_SNAPSHOT"));
             String profileKey = packageContent.path("profileKey").asText();
             String dbRecord = config.get("DB_SANDBOX_RECORD_ID");
             if (dbRecord == null || !dbRecord.matches("[1-9][0-9]*")) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database record is missing");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.recordMissing");
             }
             replacing = true;
             TenantSandboxView node = sandboxService.recreateDataNode(enterpriseId, profileKey,
@@ -427,7 +427,7 @@ public class TenantDbProvisioningService {
 
     private void setState(long enterpriseId, String status) {
         if (deletionRequested(enterpriseId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant deletion is in progress");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
         upsertConfig(enterpriseId, "PROVISION_STATE", stateJson(status));
     }

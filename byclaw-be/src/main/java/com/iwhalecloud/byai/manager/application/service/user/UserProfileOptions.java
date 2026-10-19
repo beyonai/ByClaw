@@ -21,7 +21,7 @@ final class UserProfileOptions {
         if (value == null) return null;
         String role = value.trim();
         if (!role.isEmpty() && !ROLES.contains(role)) {
-            throw new BaseException("请选择有效的岗位");
+            throw new BaseException("profile.role.invalid");
         }
         return role;
     }
@@ -37,7 +37,7 @@ final class UserProfileOptions {
             return interests.stream().distinct().toList();
         }
         catch (Exception exception) {
-            throw new BaseException("请选择有效的兴趣领域");
+            throw new BaseException("profile.interests.invalid");
         }
     }
 }

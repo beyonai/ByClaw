@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import jakarta.annotation.PreDestroy;
@@ -179,7 +180,7 @@ public class GroupChatTurnCoordinator {
                 coordination.resolveForExecution(group, turn.getCandidateSessionId(), selectedIds, coordinatorId,
                     GroupChatCoordinationService.COORDINATED);
             }
-            taskService.promote(turn, "协作任务", null);
+            taskService.promote(turn, I18nUtil.get("groupchat.task.coordinatedTitle"), null);
             return turn;
         });
     }

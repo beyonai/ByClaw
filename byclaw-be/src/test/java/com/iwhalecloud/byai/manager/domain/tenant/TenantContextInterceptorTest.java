@@ -55,7 +55,7 @@ class TenantContextInterceptorTest {
         MockHttpServletRequest request = request("/byaiService" + path, "123");
         request.addHeader("X-Tenant-Context", "context-token");
         assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant route is not ready");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 
@@ -65,7 +65,7 @@ class TenantContextInterceptorTest {
         request.addHeader("X-Tenant-Context", "context-token");
         assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("tenant route is not ready");
+            .hasMessageContaining("tenant.route.notReady");
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 

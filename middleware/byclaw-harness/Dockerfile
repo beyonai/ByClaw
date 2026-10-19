@@ -114,6 +114,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && r
 
 ARG BYCLI_VERSION=2.1.69
 ARG BYCLI_EXTENSION_VERSION=2.1.25
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.85
 
 ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_DSH_MANAGED_HOME=/opt/byclaw/dsh-managed \
@@ -249,6 +251,17 @@ RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
     && /opt/searxng-cli-venv/bin/python -m pip check \
     && su -s /bin/sh byclaw -c 'searxng-cli --list-engines >/dev/null' \
     && rm -rf /tmp/byclaw-search-runtime
+
+# Shared connector Skills need these executables in the final image. Keep their
+# versions aligned with OpenClaw and check access as the DSH runtime user.
+RUN set -eu; \
+    npm install --global "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    wecom_version="$(wecom-cli --version)"; \
+    test "${wecom_version}" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    lark_version="$(lark-cli --version)"; \
+    test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    su -s /bin/sh byclaw -c 'wecom-cli --help >/dev/null && lark-cli --help >/dev/null'; \
+    npm cache clean --force
 
 RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
     && test "$(bycli --version)" = "${BYCLI_VERSION}" \

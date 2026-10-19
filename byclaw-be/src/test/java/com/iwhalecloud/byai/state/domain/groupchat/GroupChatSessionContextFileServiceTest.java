@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,7 +56,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessi
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.GroupMember;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionContextFileService.TaskHandoffHistory;
 
-class GroupChatSessionContextFileServiceTest {
+class GroupChatSessionContextFileServiceTest extends I18nTestSupport {
     private final UserFS storage = mock(UserFS.class);
     private final SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
     private final GroupChatContextService groupContext = mock(GroupChatContextService.class);

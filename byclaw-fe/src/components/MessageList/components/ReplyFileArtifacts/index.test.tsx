@@ -7,6 +7,8 @@ import { transcribeVoice } from '@/service/voice';
 import { IMessageState } from '@/constants/message';
 import type { IMessage } from '@/typescript/message';
 
+jest.mock('@umijs/max', () => ({ useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl() }));
+
 jest.mock('@/service/chatFileArtifact', () => ({
   downloadChatFileArtifact: jest.fn(),
   resolveChatFileArtifacts: jest.fn(),

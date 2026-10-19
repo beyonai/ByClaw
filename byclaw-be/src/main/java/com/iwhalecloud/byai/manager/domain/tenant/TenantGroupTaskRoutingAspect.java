@@ -48,14 +48,14 @@ public class TenantGroupTaskRoutingAspect {
             if (registered != null) {
                 var user = com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getLoginInfo();
                 if (user == null || !Long.valueOf(registered.userId()).equals(user.getUserId())) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant task owner required");
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.task.owner.required");
                 }
                 context = contexts.validate(Long.toString(registered.enterpriseId()));
             }
         }
         if (context == null) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid group task");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.group.task.invalid");
         }
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         String path = "/internal/v1/group-chat/tasks/" + taskId;

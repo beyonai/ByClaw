@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ConfigProvider } from 'antd';
 import { getByParamGroupCode } from '@/pages/manager/service/System';
 import SharedModelFormModal from '../SharedModelFormModal';
 
@@ -11,6 +12,7 @@ jest.mock('@umijs/max', () => ({
 jest.mock('@/pages/manager/service/System', () => ({ getByParamGroupCode: jest.fn() }));
 jest.mock('../ModelDebugPanel', () => () => <div />);
 
+// 使用真实表单、字典加载与下拉交互；只延长此完整流程，避免 CI 并发时触及默认 5 秒上限。
 it('loads ASR providers from the server and applies the selected provider connection and options', async () => {
   const asrProviders = [
     {
@@ -30,29 +32,45 @@ it('loads ASR providers from the server and applies the selected provider connec
       data: { byaiSystemConfigLists: paramGroupCode === 'SYSTEM_MODEL_ASR_PROVIDER_NAME' ? asrProviders : [] },
     })
   );
-  render(
-    <SharedModelFormModal
-      open
-      type="add"
-      data={{}}
-      onCancel={jest.fn()}
-      onSaved={jest.fn()}
-      loadDetail={jest.fn()}
-      saveModelRequest={jest.fn()}
-      runDebugRequest={jest.fn()}
-      statusOptions={[]}
-      showTags={false}
-    />
-  );
+  await act(async () => {
+    render(
+      <ConfigProvider virtual={false} theme={{ token: { motion: false } }}>
+        <SharedModelFormModal
+          open
+          type="add"
+          data={{}}
+          onCancel={jest.fn()}
+          onSaved={jest.fn()}
+          loadDetail={jest.fn()}
+          saveModelRequest={jest.fn()}
+          runDebugRequest={jest.fn()}
+          statusOptions={[]}
+          showTags={false}
+        />
+      </ConfigProvider>
+    );
+  });
 
-  fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelType'));
-  fireEvent.click(await screen.findByText('modelMgr.modal.modelTypeASR'));
+  await act(async () => {
+    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.modelType'));
+  });
+  const asrOption = await screen.findByRole('option', { name: 'modelMgr.modal.modelTypeASR' });
+  await act(async () => {
+    fireEvent.click(asrOption);
+  });
   await waitFor(() =>
     expect(getByParamGroupCode).toHaveBeenCalledWith({ paramGroupCode: 'SYSTEM_MODEL_ASR_PROVIDER_NAME' })
   );
-  fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
-  fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.provider'));
-  fireEvent.click(await screen.findByText('火山引擎'));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+  });
+  await act(async () => {
+    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.provider'));
+  });
+  const providerOption = await screen.findByRole('option', { name: '火山引擎' });
+  await act(async () => {
+    fireEvent.click(providerOption);
+  });
 
   await waitFor(() =>
     expect(screen.getByLabelText('modelMgr.modal.apiEndpoint')).toHaveValue('https://speech.example.test/asr')
@@ -63,4 +81,4 @@ it('loads ASR providers from the server and applies the selected provider connec
   );
   expect(screen.getByText('VOLCENGINE_ASR_FLASH')).toBeInTheDocument();
   expect(screen.queryByLabelText('modelMgr.modal.temperature')).not.toBeInTheDocument();
-});
+}, 15000);

@@ -8,6 +8,15 @@ jest.mock('recorder-core/src/engine/mp3', () => ({}));
 jest.mock('recorder-core/src/engine/mp3-engine', () => ({}));
 jest.mock('@/components/AntdIcon', () => () => <span />);
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+});
+
 describe('voice recording gestures', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -93,5 +102,37 @@ describe('voice recording gestures', () => {
     expect(mockRecorder.start).not.toHaveBeenCalled();
     expect(mockRecorder.close).toHaveBeenCalled();
     expect(onRecorded).not.toHaveBeenCalled();
+  });
+  it('localizes the mobile hold, duration limit, and cancellation hints', async () => {
+    mockLocale = 'en-US';
+    render(<VoiceRecorder onRecorded={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record voice message' }));
+    const button = await screen.findByRole('button', { name: 'Hold to talk' });
+    expect(screen.getByRole('status')).toHaveTextContent('Hold to talk, release to send');
+    expect(screen.getByText('Up to 60 seconds')).toBeInTheDocument();
+    fireEvent(button, new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 200 }));
+    expect(screen.getByRole('status')).toHaveTextContent('Release to send, slide up to cancel');
+    fireEvent(button, new MouseEvent('pointermove', { bubbles: true, clientY: 100 }));
+    expect(screen.getByRole('status')).toHaveTextContent('Release to cancel');
+    fireEvent(button, new MouseEvent('pointerup', { bubbles: true }));
+  });
+
+  it('localizes desktop controls and microphone failures', () => {
+    mockLocale = 'en-US';
+    window.matchMedia = jest.fn().mockReturnValue({ matches: false });
+    render(<VoiceRecorder onRecorded={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record voice message' }));
+    expect(screen.getByRole('group', { name: 'Voice recording' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send voice message' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel voice message' }));
+    mockRecorder.open.mockImplementation((_opened, failed) => failed());
+    const { message } = require('antd');
+    const error = jest.spyOn(message, 'error').mockImplementation(() => () => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Record voice message' }));
+      expect(error).toHaveBeenCalledWith('Microphone unavailable. Check the browser recording permissions.');
+    } finally {
+      error.mockRestore();
+    }
   });
 });

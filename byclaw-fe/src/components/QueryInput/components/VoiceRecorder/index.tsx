@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { ArrowUpOutlined, CloseOutlined } from '@ant-design/icons';
 import AntdIcon from '@/components/AntdIcon';
 import { Button, message, Popover, Tooltip } from 'antd';
@@ -16,6 +17,7 @@ type Props = {
 type Status = 'idle' | 'opening' | 'recording' | 'ready' | 'sending';
 
 export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: Props) {
+  const intl = useIntl();
   const recorderRef = useRef<any>(undefined);
   const aliveRef = useRef(true);
   const holdingRef = useRef(false);
@@ -63,7 +65,8 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
       if (aliveRef.current) setOpen(false);
       updateStatus('idle');
     } catch (error) {
-      if (aliveRef.current) message.error(typeof error === 'string' ? error : '语音发送失败，请重试');
+      if (aliveRef.current)
+        message.error(typeof error === 'string' ? error : intl.formatMessage({ id: 'voice.sendFailed' }));
       updateStatus('ready');
     }
   };
@@ -76,7 +79,7 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
         closeRecorder();
         if (!aliveRef.current) return;
         if (durationMs < 500) {
-          message.warning('录音时间太短，请重新录制');
+          message.warning(intl.formatMessage({ id: 'voice.tooShort' }));
           updateStatus('idle');
           return;
         }
@@ -87,7 +90,7 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
       },
       () => {
         closeRecorder();
-        if (aliveRef.current) message.error('录音失败，请重试');
+        if (aliveRef.current) message.error(intl.formatMessage({ id: 'voice.recordFailed' }));
         updateStatus('idle');
       }
     );
@@ -165,22 +168,22 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
       },
       () => {
         closeRecorder();
-        if (aliveRef.current) message.error('无法使用麦克风，请检查浏览器录音权限');
+        if (aliveRef.current) message.error(intl.formatMessage({ id: 'voice.microphoneUnavailable' }));
         updateStatus('idle');
       }
     );
   };
 
-  let recordingHint = '按住说话，松开发送';
-  if (status === 'sending') recordingHint = '正在发送语音…';
-  else if (canceling) recordingHint = '松开取消';
-  else if (status === 'recording') recordingHint = '松开发送，上滑取消';
+  let recordingHint = intl.formatMessage({ id: 'voice.holdHint' });
+  if (status === 'sending') recordingHint = intl.formatMessage({ id: 'voice.sending' });
+  else if (canceling) recordingHint = intl.formatMessage({ id: 'voice.releaseCancel' });
+  else if (status === 'recording') recordingHint = intl.formatMessage({ id: 'voice.recordingHint' });
 
   const microphone = (
-    <Tooltip title="发语音">
+    <Tooltip title={intl.formatMessage({ id: 'voice.record' })}>
       <Button
         type="text"
-        aria-label="发语音"
+        aria-label={intl.formatMessage({ id: 'voice.record' })}
         aria-pressed={open || status !== 'idle'}
         className={styles.recordButton}
         disabled={disabled}
@@ -193,11 +196,11 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
   if (!mobile) {
     if (status === 'idle') return microphone;
     return (
-      <div className={styles.desktopBar} role="group" aria-label="语音录制">
+      <div className={styles.desktopBar} role="group" aria-label={intl.formatMessage({ id: 'voice.recording' })}>
         <Button
           type="text"
           size="small"
-          aria-label="取消语音"
+          aria-label={intl.formatMessage({ id: 'voice.cancel' })}
           className={styles.cancelButton}
           icon={<CloseOutlined />}
           disabled={status === 'sending'}
@@ -211,12 +214,18 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
         <span className={styles.desktopDuration} role="timer">
           {seconds}″
         </span>
-        <Tooltip title={status === 'ready' ? '发送语音' : '结束录音并发送'}>
+        <Tooltip
+          title={
+            status === 'ready'
+              ? intl.formatMessage({ id: 'voice.send' })
+              : intl.formatMessage({ id: 'voice.finishAndSend' })
+          }
+        >
           <Button
             type="primary"
             shape="circle"
             size="small"
-            aria-label="发送语音"
+            aria-label={intl.formatMessage({ id: 'voice.send' })}
             className={styles.sendButton}
             icon={<ArrowUpOutlined />}
             loading={status === 'opening' || status === 'sending'}
@@ -280,10 +289,10 @@ export default function VoiceRecorder({ disabled, onRecorded, onActiveChange }: 
                 <span role="timer">{seconds}″</span>
               </>
             ) : (
-              '按住说话'
+              intl.formatMessage({ id: 'voice.hold' })
             )}
           </Button>
-          <span className={styles.limitHint}>最长 60 秒</span>
+          <span className={styles.limitHint}>{intl.formatMessage({ id: 'voice.limit' }, { seconds: 60 })}</span>
         </div>
       }
     >

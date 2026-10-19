@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.asr;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -10,7 +12,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-class HarnessMediaAuthorizationServiceTest {
+class HarnessMediaAuthorizationServiceTest extends I18nTestSupport {
     @AfterEach void cleanup() { CurrentUserHolder.clearLoginInfo(); }
 
     @Test

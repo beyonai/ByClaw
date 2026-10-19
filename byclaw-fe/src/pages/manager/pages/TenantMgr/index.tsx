@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import { Alert, Button, DatePicker, Form, Input, Modal, Popover, Select, Space, Table, Tag, message } from 'antd';
 import {
   createTenant,
@@ -16,14 +16,15 @@ import TenantProvisionProgress from './TenantProvisionProgress';
 import { tenantProvisionDisplayStatus } from './provisionStatus';
 
 const stateColor: Record<string, string> = {
-  已开通: 'green',
-  失败: 'red',
-  开通中: 'blue',
-  删除中: 'orange',
-  删除失败: 'red',
+  READY: 'green',
+  FAILED: 'red',
+  PROVISIONING: 'blue',
+  DELETING: 'orange',
+  DELETE_FAILED: 'red',
 };
 
 export default function TenantMgr() {
+  const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const isPlatformAdmin = (userInfo?.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
   const [tenants, setTenants] = useState<TenantItem[]>([]);
@@ -85,7 +86,7 @@ export default function TenantMgr() {
     return () => window.clearInterval(timer);
   }, [isPlatformAdmin, hasProvisioningTenant, nameFilter, createdRange, sortField, sortOrder]);
 
-  if (!isPlatformAdmin) return <Alert type="warning" message="仅平台管理员可管理租户。" />;
+  if (!isPlatformAdmin) return <Alert type="warning" message={intl.formatMessage({ id: 'tenant.adminOnly' })} />;
 
   const submitCreate = async () => {
     const values = await createForm.validateFields();
@@ -96,7 +97,7 @@ export default function TenantMgr() {
         packageId: values.packageId,
         requestId: requestIdRef.current,
       });
-      message.success('租户已创建，正在执行开通流程');
+      message.success(intl.formatMessage({ id: 'tenant.created' }));
       setCreateOpen(false);
       setProgressTenant(tenant);
       createForm.resetFields();
@@ -112,7 +113,7 @@ export default function TenantMgr() {
     setRetrying(true);
     try {
       await provisionTenant(progressTenant.enterpriseId);
-      message.success('已重新提交开通任务');
+      message.success(intl.formatMessage({ id: 'tenant.retrySubmitted' }));
       const resumed = {
         ...progressTenant,
         provisionState: progressTenant.provisionStage || 'DB_CREATING',
@@ -130,9 +131,14 @@ export default function TenantMgr() {
     setDeleting(true);
     try {
       await deleteTenant(deleteTarget.enterpriseId, deleteTarget.enterpriseName);
-      message.success('已提交租户删除，正在清理沙箱和数据');
-      setTenants((items) => items.map((item) => item.enterpriseId === deleteTarget.enterpriseId
-        ? { ...item, provisionState: 'DELETING', failureReason: null } : item));
+      message.success(intl.formatMessage({ id: 'tenant.deleteSubmitted' }));
+      setTenants((items) =>
+        items.map((item) =>
+          item.enterpriseId === deleteTarget.enterpriseId
+            ? { ...item, provisionState: 'DELETING', failureReason: null }
+            : item
+        )
+      );
       setDeleteTarget(null);
       setDeleteConfirmation('');
       setProgressTenant(null);
@@ -145,9 +151,9 @@ export default function TenantMgr() {
   return (
     <div style={{ padding: 24 }}>
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>租户管理</h2>
+        <h2 style={{ margin: 0 }}>{intl.formatMessage({ id: 'tenant.title' })}</h2>
         <Space>
-          <Button onClick={() => void refresh()}>刷新</Button>
+          <Button onClick={() => void refresh()}>{intl.formatMessage({ id: 'tenant.refresh' })}</Button>
           <Button
             type="primary"
             onClick={() => {
@@ -156,13 +162,13 @@ export default function TenantMgr() {
               setCreateOpen(true);
             }}
           >
-            创建租户
+            {intl.formatMessage({ id: 'tenant.create' })}
           </Button>
         </Space>
       </Space>
       <Space wrap style={{ marginBottom: 16 }}>
         <Input.Search
-          placeholder="按租户名称搜索"
+          placeholder={intl.formatMessage({ id: 'tenant.search' })}
           allowClear
           value={nameFilter}
           onChange={(event) => setNameFilter(event.target.value)}
@@ -184,7 +190,7 @@ export default function TenantMgr() {
             ]);
           }}
         />
-        <Button onClick={() => void refresh()}>查询</Button>
+        <Button onClick={() => void refresh()}>{intl.formatMessage({ id: 'tenant.query' })}</Button>
       </Space>
       <Table<TenantItem>
         rowKey="enterpriseId"
@@ -202,17 +208,17 @@ export default function TenantMgr() {
         }}
         columns={[
           {
-            title: '租户名称',
+            title: intl.formatMessage({ id: 'tenant.name' }),
             dataIndex: 'enterpriseName',
             width: 130,
             ellipsis: true,
             sorter: true,
             sortOrder: sortField === 'enterpriseName' ? (sortOrder === 'asc' ? 'ascend' : 'descend') : null,
           },
-          { title: '企业 ID', dataIndex: 'enterpriseId', width: 110 },
-          { title: '套餐', dataIndex: 'packageName', width: 90 },
+          { title: intl.formatMessage({ id: 'tenant.enterpriseId' }), dataIndex: 'enterpriseId', width: 110 },
+          { title: intl.formatMessage({ id: 'tenant.package' }), dataIndex: 'packageName', width: 90 },
           {
-            title: '创建时间',
+            title: intl.formatMessage({ id: 'tenant.createdAt' }),
             dataIndex: 'createdAt',
             width: 150,
             sorter: true,
@@ -220,7 +226,7 @@ export default function TenantMgr() {
             render: (value: string | null) => value || '—',
           },
           {
-            title: '开通时间',
+            title: intl.formatMessage({ id: 'tenant.openedAt' }),
             dataIndex: 'openedAt',
             width: 150,
             sorter: true,
@@ -228,17 +234,22 @@ export default function TenantMgr() {
             render: (value: string | null) => value || '—',
           },
           {
-            title: '开通状态',
+            title: intl.formatMessage({ id: 'tenant.provisionState' }),
             dataIndex: 'provisionState',
             width: 110,
             render: (state: string, tenant: TenantItem) => {
-              const label = tenantProvisionDisplayStatus(state);
+              // 状态码用于颜色和交互，显示文案随当前语言重新计算。
+              const status = tenantProvisionDisplayStatus(state);
+              const label = intl.formatMessage({ id: `tenant.status.${status}` });
               return (
-                <Button type="link" style={{ padding: 0 }}
+                <Button
+                  type="link"
+                  style={{ padding: 0 }}
                   onClick={() => {
                     if (!['DELETING', 'DELETE_FAILED'].includes(state)) setProgressTenant(tenant);
-                  }}>
-                  <Tag color={stateColor[label] || 'default'} style={{ cursor: 'pointer' }}>
+                  }}
+                >
+                  <Tag color={stateColor[status] || 'default'} style={{ cursor: 'pointer' }}>
                     {label}
                   </Tag>
                 </Button>
@@ -246,20 +257,20 @@ export default function TenantMgr() {
             },
           },
           {
-            title: '开通失败原因',
+            title: intl.formatMessage({ id: 'tenant.failureReason' }),
             dataIndex: 'failureReason',
             width: 260,
             render: (value: string | null) =>
               value ? (
                 <Popover
                   trigger="click"
-                  title="开通失败原因"
+                  title={intl.formatMessage({ id: 'tenant.failureReason' })}
                   content={<div style={{ maxWidth: 420, overflowWrap: 'anywhere' }}>{value}</div>}
                 >
                   <span
                     role="button"
                     tabIndex={0}
-                    title="点击查看完整原因"
+                    title={intl.formatMessage({ id: 'tenant.fullReason' })}
                     style={{
                       display: 'block',
                       overflow: 'hidden',
@@ -279,19 +290,29 @@ export default function TenantMgr() {
               ),
           },
           {
-            title: '操作',
+            title: intl.formatMessage({ id: 'tenant.operations' }),
             width: 190,
             render: (_, tenant) => (
               <Space size={0}>
-                <Button type="link" onClick={() => setOrgTenant(tenant)} disabled={tenant.provisionState === 'DELETING'}>
-                  添加成员
+                <Button
+                  type="link"
+                  onClick={() => setOrgTenant(tenant)}
+                  disabled={tenant.provisionState === 'DELETING'}
+                >
+                  {intl.formatMessage({ id: 'tenant.addMember' })}
                 </Button>
-                <Button type="link" danger disabled={tenant.provisionState === 'DELETING'}
+                <Button
+                  type="link"
+                  danger
+                  disabled={tenant.provisionState === 'DELETING'}
                   onClick={() => {
                     setDeleteConfirmation('');
                     setDeleteTarget(tenant);
-                  }}>
-                  {tenant.provisionState === 'DELETE_FAILED' ? '重试删除' : '删除租户'}
+                  }}
+                >
+                  {tenant.provisionState === 'DELETE_FAILED'
+                    ? intl.formatMessage({ id: 'tenant.retryDelete' })
+                    : intl.formatMessage({ id: 'tenant.delete' })}
                 </Button>
               </Space>
             ),
@@ -306,10 +327,14 @@ export default function TenantMgr() {
         retrying={retrying}
       />
       <Modal
-        title={`删除租户：${deleteTarget?.enterpriseName || ''}`}
+        title={intl.formatMessage({ id: 'tenant.deleteTitle' }, { name: deleteTarget?.enterpriseName || '' })}
         open={!!deleteTarget}
-        okText="确认删除"
-        okButtonProps={{ danger: true, disabled: deleteConfirmation !== deleteTarget?.enterpriseName, loading: deleting }}
+        okText={intl.formatMessage({ id: 'tenant.confirmDelete' })}
+        okButtonProps={{
+          danger: true,
+          disabled: deleteConfirmation !== deleteTarget?.enterpriseName,
+          loading: deleting,
+        }}
         onOk={() => void submitDelete()}
         onCancel={() => {
           if (!deleting) {
@@ -318,24 +343,31 @@ export default function TenantMgr() {
           }
         }}
       >
-        <p>删除后将释放该租户的数据库和数据服务沙箱，并删除其私有持久化数据。此操作不可撤销。</p>
-        <p>请输入租户名称 <strong>{deleteTarget?.enterpriseName}</strong> 以确认：</p>
-        <Input aria-label="输入租户名称确认删除" value={deleteConfirmation}
-          onChange={(event) => setDeleteConfirmation(event.target.value)} />
+        <p>{intl.formatMessage({ id: 'tenant.deleteWarning' })}</p>
+        <p>{intl.formatMessage({ id: 'tenant.deleteConfirmation' }, { name: deleteTarget?.enterpriseName })}</p>
+        <Input
+          aria-label={intl.formatMessage({ id: 'tenant.confirmName' })}
+          value={deleteConfirmation}
+          onChange={(event) => setDeleteConfirmation(event.target.value)}
+        />
       </Modal>
       <Modal
-        title="创建租户"
+        title={intl.formatMessage({ id: 'tenant.create' })}
         open={createOpen}
-        okText="创建"
+        okText={intl.formatMessage({ id: 'tenant.createConfirm' })}
         okButtonProps={{ loading: creating }}
         onOk={() => void submitCreate()}
         onCancel={() => setCreateOpen(false)}
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item name="enterpriseName" label="租户名称" rules={[{ required: true, max: 200 }]}>
+          <Form.Item
+            name="enterpriseName"
+            label={intl.formatMessage({ id: 'tenant.name' })}
+            rules={[{ required: true, max: 200 }]}
+          >
             <Input maxLength={200} />
           </Form.Item>
-          <Form.Item name="packageId" label="套餐" rules={[{ required: true }]}>
+          <Form.Item name="packageId" label={intl.formatMessage({ id: 'tenant.package' })} rules={[{ required: true }]}>
             <Select options={packages.map((item) => ({ value: item.id, label: item.packageName }))} />
           </Form.Item>
         </Form>

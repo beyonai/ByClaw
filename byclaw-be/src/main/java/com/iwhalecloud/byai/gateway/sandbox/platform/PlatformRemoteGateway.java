@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.databind.*;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
@@ -47,7 +49,7 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
-            throw new BdpRuntimeException("Platform request failed, HTTP " + failure.status());
+            throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
         }
     }
 
@@ -61,10 +63,10 @@ public class PlatformRemoteGateway {
 
     public Object data(Map<String, Object> response) {
         if (response == null || !(response.get("code") instanceof Number))
-            throw new BdpRuntimeException("Invalid platform response");
+            throw new BdpRuntimeException(I18nUtil.get("platform.response.invalid"));
         if (((Number) response.get("code")).intValue() != 0)
             throw new BdpRuntimeException(
-                    Objects.toString(response.get("msg"), "Platform operation failed"));
+                    Objects.toString(response.get("msg"), I18nUtil.get("platform.operation.failed")));
         return response.get("data");
     }
 
@@ -112,11 +114,11 @@ public class PlatformRemoteGateway {
     public ResponseUtil controller(String path, Map<String, Object> params) {
         Map<String, Object> response = envelope("sandbox", path, params);
         if (response == null || !(response.get("code") instanceof Number))
-            throw new BdpRuntimeException("Invalid platform response");
+            throw new BdpRuntimeException(I18nUtil.get("platform.response.invalid"));
         return ((Number) response.get("code")).intValue() == 0
                 ? ResponseUtil.successResponse(response.get("data"))
                 : ResponseUtil.fail(
-                        Objects.toString(response.get("msg"), "Platform operation failed"));
+                        Objects.toString(response.get("msg"), I18nUtil.get("platform.operation.failed")));
     }
 
     public String metrics() {

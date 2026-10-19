@@ -200,7 +200,7 @@ public class RouteService {
             && "COORDINATED".equals(scope.get("mode"))
             && String.valueOf(ctx.getAssistantChatDto().getAgentId()).equals(scope.get("coordinatorAgentId"))) {
             throw new com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException(
-                "群组工作助手的当前执行渠道不支持团队调度，请配置支持团队协作的执行渠道", null);
+                I18nUtil.get("groupchat.team.channelUnsupported"), null);
         }
         if (interfaceIntegration) {
             interfaceRouteService.route(ctx);
