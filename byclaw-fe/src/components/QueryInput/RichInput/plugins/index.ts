@@ -18,6 +18,16 @@ export const withMention = (editor: Editor) => {
 export const withEditableNavigation = (editor: Editor) => {
   const { deleteBackward, deleteForward } = editor;
 
+  const removeNodePreservingSelection = (path: number[]) => {
+    if (!editor.selection) return;
+    const selectionRef = Editor.rangeRef(editor, editor.selection, { affinity: 'forward' });
+    Transforms.removeNodes(editor, { at: path });
+    const preservedSelection = selectionRef.unref();
+    if (preservedSelection) {
+      Transforms.select(editor, preservedSelection);
+    }
+  };
+
   editor.deleteBackward = (unit) => {
     const { selection } = editor;
 
@@ -67,6 +77,10 @@ export const withEditableNavigation = (editor: Editor) => {
           ) {
             // 前一个节点是 void 元素，删除它
             const voidElementPath = [...paragraphPath, prevChildIndex];
+            if (prevChild.type === ELEMENT_RESOURCE && prevChild.requiresAgentResourceReplacement) {
+              removeNodePreservingSelection(voidElementPath);
+              return;
+            }
             Transforms.removeNodes(editor, { at: voidElementPath });
 
             // 设置光标位置：放在 void 元素前一个节点的末尾，如果 void 元素是第一个节点，则放在段落开始位置
@@ -113,6 +127,24 @@ export const withEditableNavigation = (editor: Editor) => {
 
     if (selection && Range.isCollapsed(selection)) {
       const [start] = Range.edges(selection);
+      const paragraphPath = start.path.slice(0, -1);
+      const [paragraphNode] = Editor.node(editor, paragraphPath);
+      if (Element.isElement(paragraphNode) && paragraphNode.children) {
+        const currentChildIndex = start.path[start.path.length - 1];
+        const currentChild = paragraphNode.children[currentChildIndex];
+        const nextChild = paragraphNode.children[currentChildIndex + 1];
+        if (
+          currentChild &&
+          'text' in currentChild &&
+          start.offset === currentChild.text.length &&
+          Element.isElement(nextChild) &&
+          nextChild.type === ELEMENT_RESOURCE &&
+          nextChild.requiresAgentResourceReplacement
+        ) {
+          removeNodePreservingSelection([...paragraphPath, currentChildIndex + 1]);
+          return;
+        }
+      }
       const elementEntry = Editor.above(editor, {
         at: start,
         match: (n) => Element.isElement(n) && n.type === ELEMENT_EDITABLE,

@@ -56,6 +56,12 @@ export function getNodeResourceData(
     // 冗余chatAvatar
     chatAvatar: node.chatAvatar,
   };
+  if (isResourceElement(node)) {
+    resource.ownerAgentId = node.ownerAgentId;
+    resource.isAgentResourceValidationPending = node.isAgentResourceValidationPending;
+    resource.requiresAgentResourceReplacement = node.requiresAgentResourceReplacement;
+    resource.resourceReplacementType = node.resourceReplacementType;
+  }
   if (includeAgentSelectionState) {
     resource.agentType = node.agentType;
     resource.isInactiveAgentSelection = node.isInactiveAgentSelection;

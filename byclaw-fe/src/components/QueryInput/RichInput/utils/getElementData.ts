@@ -152,6 +152,10 @@ export default function getElementData(type: IResourceType, data: any) {
         resourceCode: data.resourceCode,
         isFromResourceModule: data.isFromResourceModule,
         showQuotePrefix: data.showQuotePrefix,
+        ownerAgentId: data.ownerAgentId,
+        isAgentResourceValidationPending: data.isAgentResourceValidationPending,
+        requiresAgentResourceReplacement: data.requiresAgentResourceReplacement,
+        resourceReplacementType: data.resourceReplacementType,
         // 引用XXX
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };
