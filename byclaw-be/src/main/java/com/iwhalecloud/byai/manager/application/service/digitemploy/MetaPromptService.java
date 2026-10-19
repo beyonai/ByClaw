@@ -71,7 +71,8 @@ public class MetaPromptService {
         List<FieldSpec> specs = buildFieldSpecs(isChinese, skeleton);
 
         Map<String, Object> generatedFields = generateAllFields(systemPrompt,
-            buildAllFieldsUserPrompt(request, skeleton, contextBlock, specs, isChinese), modelCode, isChinese);
+            buildAllFieldsUserPrompt(request, skeleton, contextBlock, specs, isChinese), modelCode,
+            request.getModelId(), isChinese);
         Map<String, Object> fields = normalizeGeneratedFields(generatedFields, specs, skeleton, resourceContext,
             isChinese);
 
@@ -127,13 +128,20 @@ public class MetaPromptService {
 
     private Map<String, Object> generateAllFields(String systemPrompt, String userPrompt, String modelCode,
         boolean isChinese) {
+        return generateAllFields(systemPrompt, userPrompt, modelCode, null, isChinese);
+    }
+
+    private Map<String, Object> generateAllFields(String systemPrompt, String userPrompt, String modelCode,
+        String modelId, boolean isChinese) {
         long startTime = System.currentTimeMillis();
         boolean acquired = false;
         try {
             LLM_SEMAPHORE.acquire();
             acquired = true;
-            String content = aiService.generateText(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS);
-            Map<String, Object> fields = parseOrRepairGeneratedFields(content, modelCode, isChinese);
+            String content = StringUtils.isBlank(modelId)
+                ? aiService.generateText(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS)
+                : aiService.generateText(systemPrompt, userPrompt, modelCode, modelId, LLM_ALL_FIELDS_MAX_TOKENS);
+            Map<String, Object> fields = parseOrRepairGeneratedFields(content, modelCode, modelId, isChinese);
             log.info("Meta prompt stream generated all fields in {} ms", System.currentTimeMillis() - startTime);
             return fields;
         } catch (InterruptedException e) {
@@ -158,10 +166,15 @@ public class MetaPromptService {
             LLM_SEMAPHORE.acquire();
             acquired = true;
             String userPrompt = buildAllFieldsUserPrompt(request, skeleton, contextBlock, specs, isChinese);
-            String content = aiService.generateTextStream(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS,
-                chunk -> writeSseEvent(outputStream, "textDelta",
-                    OBJECT_MAPPER.writeValueAsString(Map.of("value", chunk))));
-            Map<String, Object> generatedFields = parseOrRepairGeneratedFields(content, modelCode, isChinese);
+            AIService.TextChunkHandler chunkHandler = chunk -> writeSseEvent(outputStream, "textDelta",
+                OBJECT_MAPPER.writeValueAsString(Map.of("value", chunk)));
+            String content = StringUtils.isBlank(request.getModelId())
+                ? aiService.generateTextStream(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS,
+                    chunkHandler)
+                : aiService.generateTextStream(systemPrompt, userPrompt, modelCode, request.getModelId(),
+                    LLM_ALL_FIELDS_MAX_TOKENS, chunkHandler);
+            Map<String, Object> generatedFields = parseOrRepairGeneratedFields(content, modelCode,
+                request.getModelId(), isChinese);
             Map<String, Object> normalizedFields = normalizeGeneratedFields(generatedFields, specs, skeleton,
                 resourceContext, isChinese);
             alignPromptConfigsWithRequest(normalizedFields, request);
@@ -197,7 +210,8 @@ public class MetaPromptService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> parseOrRepairGeneratedFields(String content, String modelCode, boolean isChinese)
+    private Map<String, Object> parseOrRepairGeneratedFields(String content, String modelCode, String modelId,
+        boolean isChinese)
         throws JsonProcessingException {
         String jsonText = extractJsonObject(content);
         try {
@@ -205,8 +219,11 @@ public class MetaPromptService {
         } catch (JsonProcessingException e) {
             log.warn("Meta prompt model output is not valid JSON, attempting repair once", e);
             String repairPrompt = buildJsonRepairPrompt(jsonText, isChinese);
-            String repairedContent = aiService.generateText(buildJsonRepairSystemPrompt(isChinese), repairPrompt,
-                modelCode, LLM_ALL_FIELDS_MAX_TOKENS);
+            String repairedContent = StringUtils.isBlank(modelId)
+                ? aiService.generateText(buildJsonRepairSystemPrompt(isChinese), repairPrompt, modelCode,
+                    LLM_ALL_FIELDS_MAX_TOKENS)
+                : aiService.generateText(buildJsonRepairSystemPrompt(isChinese), repairPrompt, modelCode, modelId,
+                    LLM_ALL_FIELDS_MAX_TOKENS);
             return OBJECT_MAPPER.readValue(extractJsonObject(repairedContent), Map.class);
         }
     }

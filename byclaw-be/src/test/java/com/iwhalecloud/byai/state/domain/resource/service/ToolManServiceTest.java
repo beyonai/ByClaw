@@ -416,7 +416,7 @@ class ToolManServiceTest {
             verify(skillApplication).refreshSkillBasicInfo(resource);
             if (status == 2) {
                 verify(storage).syncResourceJsonByBizType(targetContent, "SKILL", 802L);
-                verify(artifacts).upsertStandardJsonArtifact(802L, "SKILL", "resource-basic-info-sync");
+                verify(artifacts).upsertBasicInfoJsonArtifact(802L, "SKILL", "resource-basic-info-sync");
             } else {
                 org.mockito.Mockito.verifyNoInteractions(storage, artifacts);
             }

@@ -1275,7 +1275,7 @@ public class ToolManService {
             return;
         }
         resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
-        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
+        ssResourceArtifactService.upsertBasicInfoJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
         LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}", resourceId, resourceBizType);
     }
 

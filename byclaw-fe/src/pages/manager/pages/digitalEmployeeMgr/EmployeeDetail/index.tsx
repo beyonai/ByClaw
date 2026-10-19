@@ -2320,6 +2320,7 @@ const EmployeeDetail = ({ loading }) => {
         agentType={effectiveAgentType}
         resourceId={agentId}
         modelCode={modelName}
+        modelId={prologueRef.current?.modelInfo?.modelId}
         onOk={(formValue, myQuestionList) => {
           if (publicationId) onValuesChange();
           setQuestionList(myQuestionList);

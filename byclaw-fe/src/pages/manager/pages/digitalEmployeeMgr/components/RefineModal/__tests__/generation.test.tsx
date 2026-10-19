@@ -50,7 +50,7 @@ const existing = [
   { key: 'memory', name: '记忆规范', value: '原记忆规范' },
   { key: 'custom', name: '教学要求', value: '原教学要求', tip: '保留提示' },
 ];
-function Harness({ onOk }: any) {
+function Harness({ onOk, modelId = 123 }: any) {
   const [form] = Form.useForm();
   return (
     <>
@@ -72,6 +72,7 @@ function Harness({ onOk }: any) {
         form={form}
         questionList={[]}
         modelCode="selected-model"
+        modelId={modelId}
         agentType="001"
       />
     </>
@@ -115,6 +116,7 @@ describe('generation stream and page field contract', () => {
     expect(JSON.parse(body.corePersonaDefinition)).toEqual(existing);
     expect(JSON.parse(body.coreCompetencies)[0].coreCompetency).toBe('制定完整教学计划');
     expect(body.modelCode).toBe('selected-model');
+    expect(body.modelId).toBe('123');
     fireEvent.change(screen.getByLabelText('教学要求'), { target: { value: '编辑后的教学要求' } });
     fireEvent.click(screen.getByLabelText('apply-memory'));
     fireEvent.click(screen.getByRole('button', { name: 'common.use' }));
@@ -131,6 +133,27 @@ describe('generation stream and page field contract', () => {
       custom: '编辑后的教学要求',
     });
     expect(result.coreCompetencies[0].coreCompetency).toBe('制定完整教学计划');
+  });
+
+  it('sends the same selected model instance when regenerating the draft', async () => {
+    const fields = { agentDescription: '生成描述', corePersonaDefinition: JSON.stringify(existing) };
+    global.fetch = jest
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          response(`event: finalFields\ndata: ${JSON.stringify(fields)}\n\nevent: done\ndata: [DONE]\n\n`)
+        )
+      );
+    render(<Harness onOk={jest.fn()} />);
+    await screen.findByDisplayValue('生成描述', {}, { timeout: 10000 });
+    fireEvent.click(screen.getByRole('button', { name: 'refineModal.regenerate' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    for (const [, options] of (global.fetch as jest.Mock).mock.calls) {
+      const request = JSON.parse(options.body);
+      expect(request.modelId).toBe('123');
+      expect(request.modelCode).toBe('selected-model');
+    }
+    await screen.findByDisplayValue('生成描述');
   });
 
   it('preserves page values when the server sends an error instead of generated fields', async () => {
@@ -150,5 +173,25 @@ describe('generation stream and page field contract', () => {
     await waitFor(() => expect(onOk).toHaveBeenCalled());
     expect(JSON.parse(onOk.mock.calls[0][0].corePersonaDefinition)).toEqual(existing);
     expect(onOk.mock.calls[0][0].coreCompetencies[0].coreCompetency).toBe('制定完整教学计划');
+  });
+
+  it('uses the new model instance after the page selection changes', async () => {
+    const fields = { agentDescription: '生成描述', corePersonaDefinition: JSON.stringify(existing) };
+    global.fetch = jest
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          response(`event: finalFields\ndata: ${JSON.stringify(fields)}\n\nevent: done\ndata: [DONE]\n\n`)
+        )
+      );
+    const onOk = jest.fn();
+    const view = render(<Harness onOk={onOk} modelId={123} />);
+    await screen.findByDisplayValue('生成描述', {}, { timeout: 10000 });
+    view.rerender(<Harness onOk={onOk} modelId={456} />);
+    fireEvent.click(screen.getByRole('button', { name: 'refineModal.regenerate' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    const request = JSON.parse((global.fetch as jest.Mock).mock.calls[1][1].body);
+    expect(request.modelId).toBe('456');
+    await screen.findByDisplayValue('生成描述');
   });
 });

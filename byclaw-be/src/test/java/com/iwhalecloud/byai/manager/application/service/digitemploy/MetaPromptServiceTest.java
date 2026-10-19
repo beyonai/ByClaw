@@ -76,4 +76,25 @@ class MetaPromptServiceTest {
             .contains("event: error", "MODEL_NOT_AVAILABLE", "diagnosticId")
             .doesNotContain("event: finalFields", "event: done", "Selected model is unavailable", "\"success\":false");
     }
+
+    @Test
+    void regenerationAndJsonRepairKeepTheSelectedModelInstance() throws Exception {
+        AIService ai = mock(AIService.class);
+        MetaPromptGenerateRequest request = new MetaPromptGenerateRequest();
+        request.setModelCode("Display name");
+        request.setModelId("selected-id");
+        when(ai.generateTextStream(anyString(), anyString(), eq("Display name"), eq("selected-id"), anyInt(), any()))
+            .thenReturn("invalid JSON");
+        when(ai.generateText(anyString(), anyString(), eq("Display name"), eq("selected-id"), anyInt()))
+            .thenReturn("{\"agentDescription\":\"Generated description\",\"corePersonaDefinition\":[]}");
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        service(ai).generateV3Stream(request, output);
+
+        assertThat(output.toString(StandardCharsets.UTF_8))
+            .contains("event: finalFields", "event: done").doesNotContain("event: error");
+        verify(ai).generateText(anyString(), anyString(), eq("Display name"), eq("selected-id"), anyInt());
+        verify(ai, never()).generateTextStream(anyString(), anyString(), anyString(), anyInt(), any());
+        verify(ai, never()).generateText(anyString(), anyString(), anyString(), anyInt());
+    }
 }

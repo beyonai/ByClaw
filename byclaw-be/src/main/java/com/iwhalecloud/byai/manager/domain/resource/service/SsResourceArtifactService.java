@@ -43,6 +43,11 @@ public class SsResourceArtifactService {
         upsertStandardJsonArtifact(resourceId, resourceBizType, remark);
     }
 
+    /** 基础信息保存已持有产物行的写锁，产物登记必须加入同一事务，避免挂起后等待自身。 */
+    public void upsertBasicInfoJsonArtifact(Long resourceId, String resourceBizType, String remark) {
+        upsertStandardJsonArtifact(resourceId, resourceBizType, remark);
+    }
+
     public void upsertStandardJsonArtifact(Long resourceId, String resourceBizType, String remark) {
         if (resourceId == null || StringUtils.isBlank(resourceBizType)) {
             return;
