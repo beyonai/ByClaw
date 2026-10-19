@@ -22,7 +22,13 @@ function setup() { const telemetry = new Telemetry(); const sent = []; const ing
 
 test('resolves OTLP configuration and Langfuse auth', () => {
   const config = resolveConfig({}, { LANGFUSE_BASE_URL: 'http://lf/', LANGFUSE_PUBLIC_KEY: 'pk', LANGFUSE_SECRET_KEY: 'sk' })
-  assert.equal(config.endpoint, 'http://lf/api/public/otel/v1/traces'); assert.match(config.headers.Authorization, /^Basic /); assert.equal(config.serviceName, 'byclaw-dsh')
+  assert.equal(config.endpoint, 'http://lf/api/public/otel/v1/traces'); assert.match(config.headers.Authorization, /^Basic /); assert.equal(config.serviceName, 'byclaw-dsh'); assert.equal(config.enabled, true)
+})
+
+test('enables Langfuse only when base URL and both keys are configured', () => {
+  assert.equal(resolveConfig({}, {}).enabled, false)
+  assert.equal(resolveConfig({}, { LANGFUSE_BASE_URL: 'http://lf', LANGFUSE_PUBLIC_KEY: 'pk' }).enabled, false)
+  assert.equal(resolveConfig({}, { LANGFUSE_BASE_URL: 'http://lf', LANGFUSE_PUBLIC_KEY: 'pk', LANGFUSE_SECRET_KEY: 'sk' }).enabled, true)
 })
 
 test('bounds content and redacts credentials', () => {
@@ -75,15 +81,15 @@ test('records model, tool and turn failures without throwing into DSH', () => {
 })
 
 test('missing configuration disables cleanly and network failure is isolated', async () => {
-  const listeners = new Map(); const warnings = []; apply({ on(name, listener) { listeners.set(name, listener) }, logger: { info() {}, warn: message => warnings.push(message) } }, {})
-  assert.equal(listeners.size, 0); assert.match(warnings[0], /disabled/)
+  const listeners = new Map(); const warnings = []; const infos = []; apply({ on(name, listener) { listeners.set(name, listener) }, logger: { info: message => infos.push(message), warn: message => warnings.push(message) } }, {})
+  assert.equal(listeners.size, 0); assert.match(infos[0], /disabled/)
   const ingestion = new LangfuseIngestion({ baseUrl: 'http://lf', publicKey: 'pk', secretKey: 'sk', retryCount: 1 }, { warn: message => warnings.push(message) }, async () => { throw new Error('offline') })
   assert.equal(await ingestion.send([{ type: 'trace-create', body: { id: 't' } }]), false); assert.match(warnings.at(-1), /offline/)
 })
 
 test('preserves waterfalls and disposes subscriptions/exporters', async () => {
   const listeners = new Map(); const effects = []; const telemetry = new Telemetry(); const ingestion = { enqueue() {}, async close() {} }; const root = { on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) } }
-  apply({ root, logger: { info() {}, warn() {} }, effect(factory) { effects.push(factory()) } }, { baseUrl: 'http://lf', publicKey: 'pk', secretKey: 'sk', telemetry, ingestion })
+  apply({ root, logger: { info() {}, warn() {} }, effect(factory) { effects.push(factory()) } }, { enabled: true, baseUrl: 'http://lf', publicKey: 'pk', secretKey: 'sk', telemetry, ingestion })
   const a = agent(); const decision = { kind: 'enter', messages: [] }; assert.equal(await listeners.get('agent/pre-step')({ agent: a, turn: 1, step: 1, messages: [] }, async () => decision), decision); assert.deepEqual(await listeners.get('agent/request')({ agent: a, turn: 1, step: 1 }, async () => ({ provider: 'p', model: 'm' })), { provider: 'p', model: 'm' })
   await effects[0](); assert.equal(listeners.size, 0); assert.equal(telemetry.closed, true)
 })
