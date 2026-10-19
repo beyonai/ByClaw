@@ -536,4 +536,21 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         assertThat(params).isEmpty();
         verify(executions).selectByCandidateSessionId(99L);
     }
+
+    @Test
+    void referenceToForwardDoesNotRestoreRuntimeResources() throws Exception {
+        ByaiMessage original = new ByaiMessage(); original.setMessageId(20L); original.setSessionId(10L);
+        original.setMessageContent("{{opaque}}");
+        original.setMetadata("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceType\":\"COMMON_FILE\",\"resourceCode\":\"secret\"}]}");
+        when(messages.selectByMessageId(20L)).thenReturn(original);
+        child.setMessageContent(original.getMessageContent());
+        child.setMetadata("{\"scene\":\"GROUP_TASK\",\"resourceList\":[{\"id\":\"opaque\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceType\":\"COMMON_FILE\",\"resourceCode\":\"secret\"}]}");
+        executor.execute(execution, "/by/.sessions/60");
+        var dto = ArgumentCaptor.forClass(AssistantChatDto.class);
+        verify(script).startExistingMessageTurn(dto.capture(), any());
+        assertThat(dto.getValue().getResourceList()).isNullOrEmpty();
+        assertThat(dto.getValue().getFiles()).isNullOrEmpty();
+        assertThat(dto.getValue().getChatContent()).isEqualTo("需求说明");
+    }
+
 }

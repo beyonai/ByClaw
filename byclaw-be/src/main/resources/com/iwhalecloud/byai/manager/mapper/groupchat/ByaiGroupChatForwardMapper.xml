@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatForwardMapper">
+  <insert id="insertRequest">
+    INSERT INTO byai.byai_group_chat_forward_request (request_id, enterprise_id, actor_user_id, source_session_id, client_request_id, mode, request_hash, frozen_json, source_manifest_json, snapshot_version, backend)
+      VALUES (#{requestId}, #{enterpriseId}, #{actorUserId}, #{sourceSessionId}, #{clientRequestId}, #{mode}, #{requestHash}, #{frozenJson}, #{sourceManifestJson}, #{snapshotVersion}, #{backend})
+  </insert>
+  <insert id="insertTarget">
+    INSERT INTO byai.byai_group_chat_forward_target (target_id, enterprise_id, request_id, target_session_id)
+      VALUES (#{targetId}, #{enterpriseId}, #{requestId}, #{targetSessionId})
+  </insert>
+  <insert id="insertItem">
+    INSERT INTO byai.byai_group_chat_forward_item (item_id, enterprise_id, request_id, target_id, ordinal, selected_message_id, selected_merged_card, source_message_id, content, speaker_json, source_created_at, references_json, attachments_json)
+      VALUES (#{itemId}, #{enterpriseId}, #{requestId}, #{targetId}, #{ordinal}, #{selectedMessageId}, #{selectedMergedCard}, #{sourceMessageId}, #{content}, #{speakerJson}, #{sourceCreatedAt}, #{referencesJson}, #{attachmentsJson})
+  </insert>
+  <select id="request" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
+    SELECT * FROM byai.byai_group_chat_forward_request
+      WHERE enterprise_id=#{enterpriseId}
+      AND request_id=#{requestId}
+  </select>
+  <select id="requestByKey" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardRequest">
+    SELECT * FROM byai.byai_group_chat_forward_request
+      WHERE enterprise_id=#{enterpriseId}
+      AND actor_user_id=#{actorUserId}
+      AND client_request_id=#{clientRequestId}
+  </select>
+  <select id="target" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+    SELECT * FROM byai.byai_group_chat_forward_target
+      WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+  </select>
+  <select id="targets" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+    SELECT * FROM byai.byai_group_chat_forward_target
+      WHERE enterprise_id=#{enterpriseId}
+      AND request_id=#{requestId}
+      ORDER BY target_session_id
+  </select>
+  <select id="items" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardItem">
+    SELECT * FROM byai.byai_group_chat_forward_item
+      WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      ORDER BY ordinal
+  </select>
+  <!-- The CTE boundary keeps live lease predicates above row acquisition, including unchanged-row waits.
+       Keep it scoped to the SELECT: H2 supports this shared syntax without weakening the production lock. -->
+  <update id="claimRequest">
+    UPDATE byai.byai_group_chat_forward_request
+      SET lease_owner=#{owner}, lease_until=clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
+    WHERE request_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_request
+              WHERE enterprise_id=#{enterpriseId} AND request_id=#{requestId}
+              FOR UPDATE
+      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND request_id=#{requestId}
+      AND state='RUNNING'
+      AND sources_frozen=FALSE
+      AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
+      AND #{leaseMillis} > 0)
+  </update>
+  <update id="freezeSources">
+    UPDATE byai.byai_group_chat_forward_request
+      SET source_manifest_json=#{sourceManifestJson}, sources_frozen=TRUE, fencing_version=fencing_version+1, lease_owner=NULL, lease_until=NULL, update_time=CURRENT_TIMESTAMP
+    WHERE request_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_request
+              WHERE enterprise_id=#{enterpriseId} AND request_id=#{requestId}
+              FOR UPDATE
+      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND request_id=#{requestId}
+      AND state='RUNNING'
+      AND sources_frozen=FALSE
+      AND lease_owner=#{owner}
+      AND fencing_version=#{version}
+      AND lease_until > clock_timestamp())
+  </update>
+  <update id="claimTarget">
+    UPDATE byai.byai_group_chat_forward_target
+      SET lease_owner=#{owner}, lease_until=clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND), fencing_version=fencing_version+1, state=CASE WHEN state='READY' THEN 'READY' ELSE 'COPYING' END, update_time=CURRENT_TIMESTAMP
+    WHERE target_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
+              FOR UPDATE
+      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND state IN ('PENDING','COPYING','READY')
+      AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
+      AND #{leaseMillis} > 0)
+  </update>
+  <update id="checkpoint">
+    UPDATE byai.byai_group_chat_forward_target
+      SET checkpoint_json=#{checkpointJson}, state=#{state}, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
+    WHERE target_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
+              FOR UPDATE
+      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND lease_owner=#{owner}
+      AND fencing_version=#{version}
+      AND lease_until > clock_timestamp()
+      AND ((state='COPYING'
+      AND #{state} IN ('COPYING','READY')) OR (state='READY'
+      AND #{state}='READY')))
+  </update>
+  <update id="succeedTarget">
+    UPDATE byai.byai_group_chat_forward_target
+      SET state='SUCCEEDED', message_ids_json=#{messageIdsJson}, pending_delivery=TRUE, error_code=NULL, retryable=FALSE, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
+    WHERE target_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
+              FOR UPDATE
+      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND state='READY'
+      AND lease_owner=#{owner}
+      AND fencing_version=#{version}
+      AND lease_until > clock_timestamp())
+  </update>
+  <update id="failTarget">
+    UPDATE byai.byai_group_chat_forward_target
+      SET state='FAILED', error_code=#{errorCode}, retryable=#{retryable}, lease_owner=NULL, lease_until=NULL, fencing_version=fencing_version+1, update_time=CURRENT_TIMESTAMP
+    WHERE target_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
+              FOR UPDATE
+      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND state IN ('COPYING','READY')
+      AND lease_owner=#{owner}
+      AND fencing_version=#{version}
+      AND lease_until > clock_timestamp())
+  </update>
+  <update id="resetFailedTarget">
+    UPDATE byai.byai_group_chat_forward_target
+      SET state='PENDING', error_code=NULL, retryable=FALSE, fencing_version=fencing_version+1, lease_owner=NULL, lease_until=NULL, update_time=CURRENT_TIMESTAMP
+      WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND state='FAILED'
+      AND retryable=TRUE
+      AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
+  </update>
+  <update id="updateRequestState">
+    UPDATE byai.byai_group_chat_forward_request
+      SET state=#{state}, update_time=CURRENT_TIMESTAMP
+      WHERE enterprise_id=#{enterpriseId}
+      AND request_id=#{requestId}
+      AND state &lt;&gt; 'SUCCEEDED'
+  </update>
+  <update id="markDelivered">
+    UPDATE byai.byai_group_chat_forward_target
+      SET pending_delivery=FALSE, update_time=CURRENT_TIMESTAMP
+      WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND state='SUCCEEDED'
+      AND pending_delivery=TRUE
+  </update>
+  <select id="pendingDeliveries" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+    SELECT * FROM byai.byai_group_chat_forward_target
+      WHERE enterprise_id=#{enterpriseId}
+      AND state='SUCCEEDED'
+      AND pending_delivery=TRUE
+      ORDER BY target_id
+      LIMIT #{limit}
+  </select>
+  <select id="recoverableTargets" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatForwardTarget">
+    SELECT * FROM byai.byai_group_chat_forward_target
+      WHERE enterprise_id=#{enterpriseId}
+      AND state IN ('PENDING','COPYING','READY')
+      AND (lease_until IS NULL OR lease_until &lt;= clock_timestamp())
+      ORDER BY target_id
+      LIMIT #{limit}
+  </select>
+  <update id="bindItem">
+    UPDATE byai.byai_group_chat_forward_item
+      SET bound_message_id=#{messageId}, attachments_json=#{attachmentsJson}
+      WHERE enterprise_id=#{enterpriseId}
+      AND target_id=#{targetId}
+      AND item_id=#{itemId}
+      AND bound_message_id IS NULL
+      AND EXISTS (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{enterpriseId} AND target_id=#{targetId}
+              FOR UPDATE
+      ) SELECT 1 FROM locked_forward t WHERE t.enterprise_id=#{enterpriseId}
+      AND t.target_id=#{targetId}
+      AND t.state='READY'
+      AND t.lease_owner=#{owner}
+      AND t.fencing_version=#{version}
+      AND t.lease_until > clock_timestamp())
+  </update>
+  <!-- Deadline extension never authorizes a new owner or consumes a data/ownership revision. -->
+  <update id="renewTarget">
+    UPDATE byai.byai_group_chat_forward_target
+    SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
+    WHERE target_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_target
+              WHERE enterprise_id=#{lease.actor.enterpriseId} AND target_id=#{lease.targetId}
+              FOR UPDATE
+      ) SELECT target_id FROM locked_forward WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND target_id=#{lease.targetId}
+    AND target_session_id=#{lease.targetSessionId} AND lease_owner=#{lease.owner} AND fencing_version=#{lease.fencingVersion}
+    AND state IN ('COPYING','READY') AND lease_until > clock_timestamp() AND #{leaseMillis} > 0
+    AND EXISTS (SELECT 1 FROM byai.byai_group_chat_forward_request r
+      WHERE r.enterprise_id=#{lease.actor.enterpriseId} AND r.request_id=#{lease.requestId}
+      AND r.actor_user_id=#{lease.actor.userId} AND r.source_session_id=#{lease.sourceSessionId} AND r.state='RUNNING'))
+  </update>
+  <update id="renewRequest">
+    UPDATE byai.byai_group_chat_forward_request
+    SET lease_until=GREATEST(lease_until, clock_timestamp() + (CAST(#{leaseMillis} AS BIGINT) * INTERVAL '0.001' SECOND)), update_time=CURRENT_TIMESTAMP
+    WHERE request_id = (WITH locked_forward AS (
+        SELECT * FROM byai.byai_group_chat_forward_request
+              WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId}
+              FOR UPDATE
+      ) SELECT request_id FROM locked_forward WHERE enterprise_id=#{lease.actor.enterpriseId} AND request_id=#{lease.requestId} AND actor_user_id=#{lease.actor.userId}
+    AND lease_owner=#{lease.owner} AND fencing_version=#{lease.fencingVersion} AND state='RUNNING' AND sources_frozen=FALSE
+    AND lease_until > clock_timestamp() AND #{leaseMillis} > 0)
+  </update>
+</mapper>

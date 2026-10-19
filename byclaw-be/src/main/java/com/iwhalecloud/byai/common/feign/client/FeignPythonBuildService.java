@@ -13,6 +13,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import com.iwhalecloud.byai.common.io.ResponseOwnedInputStream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -409,21 +411,67 @@ public class FeignPythonBuildService {
         return downloadKnowledgeFile(kbFileDownload, resourceId, KnowledgeServiceOperation.DOWNLOAD_FILE);
     }
 
+    /** The caller has already authorized this actor/resource pair; no ambient credentials are consulted. */
+    public InputStream fileDownloadForActor(KbFileDownload request, Long resourceId, LoginInfo actor) {
+        return downloadKnowledgeFile(request, resourceId, KnowledgeServiceOperation.DOWNLOAD_FILE, actorHeaders(actor, resourceId));
+    }
+
+    public PythonBuildResponse<Data> listDirForActor(KbListDir request, Long resourceId, LoginInfo actor) {
+        try {
+            String path = resolvePath(request, KnowledgeServiceOperation.LIST_DIR);
+            KnowledgeServiceEndpoint endpoint = resolveRoute(request);
+            Map<String,String> headers = actorHeaders(actor, resourceId);
+            TypeReference<PythonBuildResponse<Data>> type = new TypeReference<>() { };
+            if (endpoint.isDirectUrl()) {
+                Request.Builder builder = new Request.Builder().url(concatUrl(endpoint.getBaseUrl(), path))
+                    .post(RequestBody.create(JSON.toJSONString(request), JSON_MEDIA_TYPE));
+                headers.forEach(builder::addHeader);
+                try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) { return parseDirectResponse(response, type, path); }
+            }
+            HttpResponse response = discoveryHttpClient.post(endpoint.getServiceName(), path, headers, request, null)
+                .get(gatewaySecondTimeOut, TimeUnit.SECONDS);
+            return parseResponse(response, type, path);
+        } catch (Exception error) { throw new BaseException("FORWARD_SOURCE_UNAVAILABLE", error); }
+    }
+
+    private Map<String,String> actorHeaders(LoginInfo actor, Long resourceId) {
+        if (actor == null || actor.getUserId() == null || actor.getEnterpriseId() == null || actor.getUserCode() == null) throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
+        Map<String,String> headers = new HashMap<>();
+        headers.put("Content-Type", "application/json"); headers.put("System-Code", SystemCode.BYAI.getCode());
+        headers.put("Beyond-Token", jwtService.createJwt(actor));
+        return addResourceContext(headers, resourceId);
+    }
+
     private InputStream downloadKnowledgeFile(KbFileDownload kbFileDownload, Long resourceId,
                                               KnowledgeServiceOperation operation) {
+        return downloadKnowledgeFile(kbFileDownload, resourceId, operation, buildHeaders(resourceId));
+    }
+
+    private InputStream downloadKnowledgeFile(KbFileDownload kbFileDownload, Long resourceId,
+            KnowledgeServiceOperation operation, Map<String,String> headers) {
         try {
             String requestPath = resolvePath(kbFileDownload, operation);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileDownload);
-            if (endpoint.isDirectUrl()) {
-                return validateDownloadResponse(directDownload(endpoint.getBaseUrl(), requestPath, kbFileDownload),
-                    requestPath);
+            long openingDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(gatewaySecondTimeOut);
+            String baseUrl = endpoint.getBaseUrl();
+            if (!endpoint.isDirectUrl()) {
+                // Only discovery runs asynchronously; authenticated HTTP headers are built on the caller thread.
+                CompletableFuture<String> discovered = CompletableFuture.supplyAsync(
+                    () -> resolveDiscoveryBaseUrl(endpoint.getServiceName()));
+                try {
+                    baseUrl = discovered.get(gatewaySecondTimeOut, TimeUnit.SECONDS);
+                } finally {
+                    // A late discovery completion cannot open an unowned HTTP response after caller timeout.
+                    discovered.cancel(false);
+                }
             }
-            CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
-                endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, kbFileDownload, null);
-            // 提取文件流，设置超时时间与 post 请求一致
-            return validateDownloadResponse(completableFuture.get(this.gatewaySecondTimeOut, TimeUnit.SECONDS), requestPath);
+            return validateDownloadResponse(directDownload(baseUrl, requestPath, kbFileDownload,
+                headers, !endpoint.isDirectUrl(), openingDeadline), requestPath);
         } catch (BaseException e) {
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BaseException(I18nUtil.get("pythonBuild.fileStreamFailed"), e);
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw new BaseException(I18nUtil.get("pythonBuild.fileStreamFailed"), e);
@@ -744,17 +792,41 @@ public class FeignPythonBuildService {
     }
 
     /**
-     * 第三方知识库模式下的文件流下载。
+     * 直连与服务发现共用的流式下载，响应生命周期转交给调用方。
      */
-    private InputStream directDownload(String baseUrl, String path, Object payload) {
+    private InputStream directDownload(String baseUrl, String path, Object payload, Map<String,String> headers,
+                                       boolean discovery, long openingDeadline) {
         String requestUrl = concatUrl(baseUrl, path);
         RequestBody requestBody = RequestBody.create(JSON.toJSONString(payload), JSON_MEDIA_TYPE);
         Request.Builder builder = new Request.Builder().url(requestUrl).post(requestBody);
-        buildHeaders().forEach(builder::addHeader);
-        try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
+        headers.forEach(builder::addHeader);
+        // The discovery SDK uses 30-second socket timeouts and does not retry downloads.
+        okhttp3.OkHttpClient client = discovery ? OkHttpUtil.getHttpClient().newBuilder()
+            .connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
+            : OkHttpUtil.getHttpClient();
+        okhttp3.Call call = client.newCall(builder.build());
+        java.util.concurrent.ScheduledFuture<?> openingTimeout = discovery
+            ? DOWNLOAD_OPEN_TIMEOUTS.schedule(call::cancel, Math.max(0, openingDeadline - System.nanoTime()),
+                TimeUnit.NANOSECONDS) : null;
+        Response response;
+        try {
+            response = call.execute();
+        } catch (IOException e) {
+            throw new BaseException(discovery ? I18nUtil.get("pythonBuild.fileStreamFailed") : I18nUtil.get("pythonBuild.external.downloadFailed"), e);
+        } finally {
+            if (openingTimeout != null) { openingTimeout.cancel(false); }
+        }
+        try {
             if (!response.isSuccessful()) {
+                if (discovery) {
+                    // The SDK reports a failed download status; close it without draining its potentially endless body.
+                    throw new BaseException(I18nUtil.get("pythonBuild.fileStreamFailed"),
+                        new IOException("Download failed with status: " + response.code()));
+                }
                 ResponseBody errorBody = response.body();
-                String errorText = errorBody == null ? null : errorBody.string();
+                String errorText = errorBody == null ? null
+                    : new String(errorBody.byteStream().readNBytes(MAX_DOWNLOAD_ERROR_BODY_BYTES), StandardCharsets.UTF_8);
                 String resultMsg = extractQaResultMessage(errorText);
                 throw new BaseException(
                     StringUtil.isEmpty(resultMsg) ? I18nUtil.get("pythonBuild.external.downloadStatus", path, String.valueOf(response.code()))
@@ -764,10 +836,27 @@ public class FeignPythonBuildService {
             if (body == null) {
                 throw new BaseException(I18nUtil.get("pythonBuild.external.downloadEmpty", path));
             }
-            return new ByteArrayInputStream(body.bytes());
-        } catch (IOException e) {
-            throw new BaseException(I18nUtil.get("pythonBuild.external.downloadFailed"), e);
+            // 返回流持有 HTTP 响应，调用方关闭文件流时同步释放连接。
+            return new ResponseOwnedInputStream(body.byteStream(), response);
+        } catch (IOException | RuntimeException e) {
+            response.close();
+            if (e instanceof BaseException base) { throw base; }
+            throw new BaseException(discovery ? I18nUtil.get("pythonBuild.fileStreamFailed")
+                : I18nUtil.get("pythonBuild.external.downloadFailed"), e);
         }
+    }
+
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor DOWNLOAD_OPEN_TIMEOUTS = downloadOpenTimeouts();
+
+    private static java.util.concurrent.ScheduledThreadPoolExecutor downloadOpenTimeouts() {
+        var executor = new java.util.concurrent.ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "qa-download-open-timeout");
+            thread.setDaemon(true);
+            return thread;
+        });
+        // Completed opens must not retain scheduled call references until the original timeout expires.
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
     }
 
     private String extractQaResultMessage(String responseBody) {

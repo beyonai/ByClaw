@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -108,7 +110,8 @@ public class GroupChatMessageAckService {
         authorizationService.requireGroup(sessionId);
         ByaiSessionMember member = authorizationService.requireCurrentUserMember(sessionId);
         ByaiMessage message = messageMapper.selectByMessageId(messageId);
-        if (message == null || !sessionId.equals(message.getSessionId()) || message.isRecalled()) {
+        if (message == null || !sessionId.equals(message.getSessionId()) || message.isRecalled()
+            || ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata())) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.ack.denied"));
         }
         if (!MemObjType.USER.name().equals(member.getMemObjType())

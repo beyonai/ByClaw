@@ -158,10 +158,12 @@ class TenantNodeClientTest {
         HttpServer replacementServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         List<String> paths = new CopyOnWriteArrayList<>();
         List<String> replacementPaths = new CopyOnWriteArrayList<>();
+        List<String> serviceActors = new CopyOnWriteArrayList<>();
         for (HttpServer endpoint : List.of(server, replacementServer)) {
             List<String> receivedPaths = endpoint == server ? paths : replacementPaths;
             endpoint.createContext("/", exchange -> {
                 receivedPaths.add(exchange.getRequestURI().toString());
+                if (exchange.getRequestURI().toString().contains("forward-work") || exchange.getRequestURI().toString().contains("forward-maintenance")) serviceActors.add(java.util.Objects.toString(exchange.getRequestHeaders().getFirst("X-Actor-User-Id"), "absent"));
                 String response = exchange.getRequestURI().getPath().endsWith("/health/ready")
                     ? "{\"ready\":true,\"enterpriseId\":\"123\",\"generation\":\"1\",\"dbSandboxRecordId\":\"987\"}"
                     : "{\"groups\":[]}";
@@ -210,6 +212,12 @@ class TenantNodeClientTest {
                 "/node%20proxy/internal/v1/group-chats?pageNum=1&pageSize=20");
             assertThat(replacementPaths).containsExactly("/replacement-proxy/internal/v1/health/ready",
                 "/replacement-proxy/internal/v1/group-chats");
+            assertThat(client.serviceRequest(123L, "GET", "/internal/v1/forward-work?limit=20&afterTargetId=9007199254740993", null,
+                new TypeReference<Map<String,Object>>() {})).containsEntry("groups", List.of());
+            assertThat(client.serviceRequest(123L,"POST","/internal/v1/forward-maintenance/scan",Map.of("category","DELIVERY","limit",20),new TypeReference<Map<String,Object>>(){})).containsEntry("groups",List.of());
+            assertThat(serviceActors).containsExactly("absent","absent");
+            assertThatThrownBy(() -> client.serviceRequest(123L, "GET", "/internal/v1/group-chats", null,
+                new TypeReference<Map<String,Object>>() {})).hasMessageContaining("invalid forward service request");
         }
         finally {
             client.close();
@@ -238,6 +246,99 @@ class TenantNodeClientTest {
             "987", List.of())).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
             "987", List.of(instance, instance))).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void forwardingClaimBatchSkipsOnlyExactNodeAdmissionAndAuthorizationRejections() throws Exception {
+        var json = TenantNodeClient.protocolMapper(new ObjectMapper().findAndRegisterModules());
+        var actor = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(8, 123);
+        var backend = com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardBackend.TENANT;
+        var locator = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.ForwardOperationLocator(123, 100, backend);
+        var binding = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.OperationBinding(locator, actor, 10);
+        var page = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.WorkPage(List.of(
+            new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.WorkCandidate(locator, 200, true),
+            new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.WorkCandidate(locator, 201, true)), "201", false);
+        var rejectionCode = new java.util.concurrent.atomic.AtomicReference<>("FORWARD_LEASE_LOST");
+        var rejectionStatus = new java.util.concurrent.atomic.AtomicInteger(409);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            Object response;
+            int status = 200;
+            if (path.endsWith("/health/ready")) {
+                response = Map.of("ready", true, "enterpriseId", "123", "generation", "1", "dbSandboxRecordId", "987");
+            } else if (path.endsWith("/binding")) {
+                response = binding;
+            } else if (path.endsWith("/forward-work")) {
+                response = page;
+            } else if (path.endsWith("/targets/200/lease")) {
+                String owner = json.readTree(exchange.getRequestBody()).path("owner").asText();
+                response = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.TargetLease(
+                    100, 200, actor, 10, 20, owner, 1, java.time.Instant.now().plusSeconds(60),
+                    com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardState.COPYING);
+            } else {
+                status = rejectionStatus.get();
+                response = Map.of("error", Map.of("code", rejectionCode.get()));
+            }
+            byte[] bytes = json.writeValueAsBytes(response);
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        var tenants = mock(TenantAdminTenantMapper.class);
+        var sandboxes = mock(SsSandboxRecordMapper.class);
+        var discovery = mock(DiscoveryClient.class);
+        var client = new TenantNodeClient(tenants, sandboxes, json, mock(RedisClient.class), "test-token");
+        ReflectionTestUtils.setField(client, "discovery", discovery);
+        when(tenants.selectConfig(123L, "NODE_SANDBOX_RECORD_ID")).thenReturn("31");
+        when(tenants.selectConfig(123L, "DB_SANDBOX_RECORD_ID")).thenReturn("987");
+        when(tenants.selectConfig(123L, "PROVISION_STATE")).thenReturn("{\"status\":\"READY\",\"generation\":1}");
+        var record = new SsSandboxRecord();
+        record.setId(31L);
+        record.setEnterpriseId(123L);
+        record.setOwnerScope("TENANT");
+        record.setStatus("RUNNING");
+        record.setSandboxId("a8bc9cb9-dd5f-48cc-8bdd-81ab69e20c47");
+        when(sandboxes.selectActiveTenantByResourceAndType(123L, "tenant-data-node")).thenReturn(record);
+        var endpoint = instance("123", "1", "987", "READY");
+        endpoint.setHost("127.0.0.1");
+        endpoint.setPort(server.getAddress().getPort());
+        when(discovery.getInstances("TENANT_DATA_123")).thenReturn(List.of(endpoint));
+        var policy = mock(com.iwhalecloud.byai.state.domain.groupchat.forward.application.ForwardPlatformPolicy.class);
+        var context = new TenantRequestContext(8, 123, "MEMBER");
+        when(policy.requireNewWork(actor, backend)).thenReturn(context);
+        var properties = new com.iwhalecloud.byai.state.domain.groupchat.forward.config.GroupChatForwardProperties();
+        var tenant = new TenantGroupForwardService(client, policy, properties);
+        var contexts = new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardExecutionContextService(null, tenant, policy);
+        var coordinator = new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService(
+            null, tenant, contexts, policy, null, null, null, null, properties);
+        try {
+            var claimed = coordinator.claimWork(backend, 123, null, 20, java.time.Duration.ofMinutes(1));
+            assertThat(claimed.leases()).hasSize(1);
+            assertThat(claimed.leases().getFirst().targetId()).isEqualTo(200);
+            assertThat(claimed.nextCursor()).isEqualTo("201");
+            rejectionCode.set("RESOURCE_NOT_ACCESSIBLE");
+            rejectionStatus.set(404);
+            assertThat(coordinator.claimWork(backend, 123, null, 20, java.time.Duration.ofMinutes(1)).leases()).hasSize(1);
+
+            // Other conflicts and an unexpected status retain the existing transport failure contract.
+            rejectionCode.set("FORWARD_IDEMPOTENCY_CONFLICT");
+            rejectionStatus.set(409);
+            assertThatThrownBy(() -> tenant.claimTarget(locator, 201, "claim", java.time.Duration.ofMinutes(1)))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("502");
+            rejectionCode.set("FORWARD_LEASE_LOST");
+            rejectionStatus.set(500);
+            assertThatThrownBy(() -> tenant.claimTarget(locator, 201, "claim", java.time.Duration.ofMinutes(1)))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("502");
+            rejectionStatus.set(409);
+            assertThatThrownBy(() -> client.request(context, "POST", "/internal/v1/commands", null,
+                new TypeReference<Map<String, Object>>() {}))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("502");
+        } finally {
+            client.close();
+            server.stop(0);
+        }
     }
 
     private ServiceInstance instance(String enterpriseId, String generation, String dbRecordId, String mode) {

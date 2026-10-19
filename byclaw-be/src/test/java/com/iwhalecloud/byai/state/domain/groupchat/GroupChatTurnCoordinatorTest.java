@@ -414,4 +414,30 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
         assertFalse(context.contains("secret.pdf"));
     }
 
+
+    @Test
+    void activeSelectionSurvivesBesidePassiveSnapshot() {
+        ByaiMessage root = new ByaiMessage(); root.setMessageId(20L); root.setSessionId(10L); root.setUsage(1);
+        root.setMessageContent("{{opaque}} {{普通文本}}");
+        root.setMetadata("""
+            {"kind":"FORWARD_SINGLE","forward":{"resourceMode":"SNAPSHOT_ONLY","forwardId":"800","mode":"SINGLE","itemCount":1},
+             "resourceList":[{"id":"opaque","resourceType":"KG_DOC_FILE","resourceId":"/original/private","resourceName":"需求说明","resourceCode":"private-dataset","extData":"secret"}]}
+            """);
+        when(messages.selectByMessageId(20L)).thenReturn(root);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(root);
+        ByaiMessage current = new ByaiMessage(); current.setMessageId(21L); current.setSessionId(10L); current.setUsage(1);
+        current.setMessageContent("主动读取 {{KG_DOC_FILE_/original/private}}");
+        current.setMetadata("{\"resourceList\":[{\"id\":\"KG_DOC_FILE_/original/private\",\"resourceType\":\"KG_DOC_FILE\",\"resourceId\":\"/original/private\",\"resourceName\":\"主动资源\",\"resourceCode\":\"active-dataset\"}]}");
+        when(messages.selectByMessageId(21L)).thenReturn(current);
+        var result = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+        var metadata = JSON.parseObject(result.getInputMetadata());
+        assertEquals(1, metadata.getJSONArray("resourceList").size());
+        assertEquals("active-dataset", metadata.getJSONArray("resourceList").getJSONObject(0).getString("resourceCode"));
+        assertFalse(metadata.containsKey("forward"));
+        assertTrue(result.getInputContent().contains("需求说明 {{普通文本}}"));
+        assertFalse(result.getInputContent().contains("private-dataset"));
+        assertFalse(JSON.parseObject(result.getInputContent()).getJSONObject("本次引用消息").toJSONString().contains("/original/private"));
+        assertEquals(current.getMessageContent(), JSON.parseObject(result.getInputContent()).getString("本次消息"));
+    }
+
 }

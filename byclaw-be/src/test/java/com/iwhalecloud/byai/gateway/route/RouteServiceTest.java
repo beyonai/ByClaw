@@ -1049,4 +1049,32 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     private String output(ChatProcessContext ctx) {
         return new String(((ByteArrayOutputStream) ctx.res).toByteArray(), StandardCharsets.UTF_8);
     }
+
+    @Test
+    void routeKeepsActiveSelectionWhileAppendingOnlyPassiveNames() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ResourceVo active = new ResourceVo(); active.setResourceId("123"); active.setResourceType(AgentMetaEnum.KG_DOC);
+        active.setResourceName("主动知识库"); active.setResourceCode("active-dataset");
+        ctx.getAssistantChatDto().setResourceList(List.of(active));
+        ctx.getParams().put("resource_list", List.of(active));
+        var snapshot = new com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse.Message();
+        snapshot.setForward(Map.of("resourceMode", "SNAPSHOT_ONLY")); snapshot.setContent("{{opaque}}");
+        ResourceVo passive = new ResourceVo(); passive.setId("opaque"); passive.setResourceId("123"); passive.setResourceType(AgentMetaEnum.KG_DOC);
+        passive.setResourceName("需求说明"); passive.setResourceCode("private-dataset"); passive.setExtData("/private/path");
+        snapshot.setResourceList(List.of(passive));
+        com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection.agentMessage(snapshot);
+        ChatGatewayRequestDecorator decorator = (context, content, params) -> content + "\n" + com.alibaba.fastjson.JSON.toJSONString(snapshot);
+        ObjectProvider<ChatGatewayRequestDecorator> decorators = mock(ObjectProvider.class);
+        when(decorators.orderedStream()).thenAnswer(call -> Stream.of(decorator));
+        ReflectionTestUtils.setField(routeService, "requestDecorators", decorators);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(call -> { ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx)); return successResponse(); });
+        routeService.route(ctx);
+        ArgumentCaptor<Object> body = ArgumentCaptor.forClass(Object.class);
+        ArgumentCaptor<Map<String, Object>> params = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), body.capture(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), params.capture(), any());
+        assertThat(params.getValue().get("resource_list")).isEqualTo(List.of(active));
+        assertThat(body.getValue().toString()).contains("需求说明").doesNotContain("private-dataset", "/private/path");
+    }
+
 }

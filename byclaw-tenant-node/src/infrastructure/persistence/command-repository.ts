@@ -1,3 +1,4 @@
+import { lockSessions } from "./session-locks.js";
 import type { ConnectionManager } from "../../application/connection-manager.js";
 import type { TenantCommand } from "../../application/command.js";
 import type { CommandTransaction, CommandTransactions } from "../../application/command-service.js";
@@ -64,7 +65,7 @@ class SqlCommandTransaction implements CommandTransaction {
   constructor(private readonly db: SqlSession) {}
   /** 会话级事务锁与镜像写入共用同一锁键，避免成员、消息和幂等记录交错更新。 */
   async lock(sessionId: string): Promise<void> {
-    await this.db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${sessionId}`]);
+    await lockSessions(this.db, [sessionId]);
   }
   authorize(command: TenantCommand) {
     return new CommandContext(this.db, command).authorize();

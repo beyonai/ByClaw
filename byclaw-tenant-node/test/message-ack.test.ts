@@ -36,3 +36,21 @@ describe("tenant message acknowledgement", () => {
     expect(write?.[0]).not.toContain("WHEN MATCHED");
   });
 });
+
+it.each(["ACK_MESSAGE", "UNACK_MESSAGE"] as const)(
+  "rejects snapshot %s despite a stale mention",
+  async (operation) => {
+    const query = vi.fn(async (sql: string) =>
+      sql.startsWith("SELECT m.creator_id")
+        ? [{ creator_id: "20", metadata: { kind: "FORWARD_SINGLE" } }]
+        : [{ exists: 1 }],
+    );
+    const context = new CommandContext(
+      { query },
+      command({ userId: "21", operation, payload: { messageId: "40" } }),
+    );
+    vi.spyOn(context, "member").mockResolvedValue({ memName: "张三" });
+    await expect(acknowledgeMessage(context)).rejects.toThrow("FORBIDDEN");
+    expect(query.mock.calls.some(([sql]) => /^(MERGE|DELETE)/.test(sql))).toBe(false);
+  },
+);

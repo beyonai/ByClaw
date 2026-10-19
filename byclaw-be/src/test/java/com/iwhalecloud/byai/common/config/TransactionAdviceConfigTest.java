@@ -25,6 +25,20 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
+    void forwardingTransportSuspendsAnActualCallerTransaction() {
+        var ds=new org.springframework.jdbc.datasource.DriverManagerDataSource("jdbc:h2:mem:forwardAdvice;DB_CLOSE_DELAY=-1","sa","");
+        var manager=new DataSourceTransactionManager(ds);var config=new TransactionAdviceConfig();ReflectionTestUtils.setField(config,"transactionManager",manager);
+        var node=mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class);
+        org.mockito.Mockito.when(node.request(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.eq("GET"),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.isNull(),org.mockito.ArgumentMatchers.any())).thenAnswer(inv->{
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardOperation(3,com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardOperationState.SUCCEEDED,java.util.List.of());
+        });
+        var target=new com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService(node,mock(com.iwhalecloud.byai.state.domain.groupchat.forward.application.ForwardPlatformPolicy.class),new com.iwhalecloud.byai.state.domain.groupchat.forward.config.GroupChatForwardProperties());
+        var factory=new ProxyFactory(target);factory.setProxyTargetClass(true);factory.addAdvice(config.getAdvisor());var proxy=(com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService)factory.getProxy();
+        new org.springframework.transaction.support.TransactionTemplate(manager).execute(status->{assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();proxy.status(new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(1,2),4,3);assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();return null;});
+    }
+
+    @Test
     void commonFileFallbackCannotMarkTheCallingChatRollbackOnly() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

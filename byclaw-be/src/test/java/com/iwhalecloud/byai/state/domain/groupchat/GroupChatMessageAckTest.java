@@ -164,4 +164,14 @@ class GroupChatMessageAckTest extends I18nTestSupport {
         verify(acknowledgements, never()).insertIfAbsent(any());
         verifyNoInteractions(events);
     }
+
+    @Test
+    void snapshotRejectsAcknowledgementAndUndoDespiteStaleMention() {
+        message.setMetadata("{\"kind\":\"FORWARD_SINGLE\"}");
+        assertThatThrownBy(() -> service.acknowledge(7L, 20L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.unacknowledge(7L, 20L)).isInstanceOf(IllegalArgumentException.class);
+        verify(acknowledgements, never()).insertIfAbsent(any());
+        verify(acknowledgements, never()).deleteByMessageAndUser(any(), any(), any());
+    }
+
 }

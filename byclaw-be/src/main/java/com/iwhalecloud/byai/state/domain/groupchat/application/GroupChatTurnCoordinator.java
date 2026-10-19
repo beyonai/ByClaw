@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
@@ -214,7 +215,11 @@ public class GroupChatTurnCoordinator {
         quoted.put("role", projected.getRole());
         quoted.put("speaker", projected.getSpeaker());
         quoted.put("content", projected.getContent());
-        quoted.put("resourceList", projected.getResourceList());
+        boolean passive = ForwardRuntimeProjection.isSnapshotOnly(visible.getMetadata());
+        if (passive) ForwardRuntimeProjection.agentMessage(projected);
+        quoted.put("content", projected.getContent());
+        if (!passive) quoted.put("resourceList", projected.getResourceList());
+        if (passive) quoted.put("forward", projected.getForward());
         quoted.put("attachments", projected.getAttachments());
         return quoted;
     }
@@ -531,8 +536,10 @@ public class GroupChatTurnCoordinator {
 
     /** Rendering resources cover all supplied background; scheduling uses only the current trigger. */
     private void mergeResources(JSONObject target, JSONObject background) {
+        // Filter by source provenance before identities are merged; an active selection may share the same ID.
         Map<String, JSONObject> merged = new LinkedHashMap<>();
         for (JSONObject source : new JSONObject[] {background, target}) {
+            if (ForwardRuntimeProjection.isSnapshotOnly(source.toJSONString())) continue;
             Object resources = source.get("resourceList");
             if (resources == null) {
                 continue;
@@ -552,7 +559,7 @@ public class GroupChatTurnCoordinator {
     }
 
     private String visibleContent(ByaiMessage message) {
-        return message.isRecalled() ? "消息已撤回" : message.getMessageContent();
+        return message.isRecalled() ? "消息已撤回" : ForwardRuntimeProjection.projectMetadata(message.getMessageContent(), message.getMetadata());
     }
 
     private JSONObject metadata(ByaiMessage message) {

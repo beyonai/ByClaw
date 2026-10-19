@@ -67,6 +67,17 @@ class TenantProjectCloudAccessServiceTest {
     }
 
     @Test
+    void explicitForwardingActorIgnoresDifferentAmbientLogin() {
+        configureTenant();
+        LoginInfo ambient = new LoginInfo(); ambient.setUserId(999L); CurrentUserHolder.setLoginInfo(ambient);
+        when(data.query(eq(tenant), eq("group-chats/project-access"), any())).thenReturn(
+            new ObjectMapper().valueToTree(Map.of("bound", true, "canRead", true)));
+        assertThat(service.canRead(project, tenant.userId(), tenant.enterpriseId())).isTrue();
+        assertThat(service.canRead(project, tenant.userId(), 1L)).isFalse();
+        verify(data).query(tenant, "group-chats/project-access", Map.of("projectId", "11246210"));
+    }
+
+    @Test
     void legacyProjectsDoNotRequireNode() {
         assertThat(service.canRead(project)).isNull();
         project.setEnterpriseId(null);

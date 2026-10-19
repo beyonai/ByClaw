@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+
+
 import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -153,6 +156,14 @@ public class ParamService {
         AuthContextBo authContextBo = resourceAuthContextService.getAuthContextBo();
 
         AssistantChatDto assistantChatDto = ctx.getAssistantChatDto();
+        // Existing input is server-owned; quoted backgrounds never mark the whole active request passive.
+        if (ctx.existingUserMessage != null && ForwardRuntimeProjection.isSnapshotOnly(ctx.existingUserMessage.getMetadata())) {
+            if (java.util.Objects.equals(assistantChatDto.getChatContent(), ctx.existingUserMessage.getMessageContent())) {
+                assistantChatDto.setChatContent(ForwardRuntimeProjection.projectMetadata(assistantChatDto.getChatContent(), ctx.existingUserMessage.getMetadata()));
+            }
+            assistantChatDto.setResourceList(Collections.emptyList());
+            assistantChatDto.setFiles(null);
+        }
         Integer isDebug = assistantChatDto.getIsDebug();
         List<ResourceVo> resourceList = assistantChatDto.getResourceList();
 
@@ -957,7 +968,10 @@ public class ParamService {
                 continue;
             }
             // user 消息若关联文件，按 Python message_and_files 的形式前置 markdown 文件链接
-            if ("user".equals(role)) {
+            if (ForwardRuntimeProjection.isSnapshotOnly(msg.getMetadata())) {
+                content = ForwardRuntimeProjection.projectMetadata(content, msg.getMetadata());
+            }
+            else if ("user".equals(role)) {
                 content = prependUserMessageFiles(msg.getRelatedResources(), content);
             }
             Map<String, String> entry = new HashMap<>(2);

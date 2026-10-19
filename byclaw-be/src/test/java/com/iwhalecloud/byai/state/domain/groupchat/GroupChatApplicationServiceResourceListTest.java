@@ -630,4 +630,21 @@ class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
         resource.setResourceName("成员");
         return resource;
     }
+
+    @Test
+    void forwardReplyEventPreservesItsOwnWhitelistWithoutMarkingActiveMessagePassive() {
+        ByaiMessage source = new ByaiMessage(); source.setMessageId(199L); source.setSessionId(GROUP_ID); source.setUsage(1);
+        source.setMessageContent("{{opaque}}"); source.setMetadata("{\"kind\":\"FORWARD_SINGLE\",\"forward\":{\"resourceMode\":\"SNAPSHOT_ONLY\",\"forwardId\":\"800\",\"mode\":\"SINGLE\",\"itemCount\":1},\"resourceList\":[{\"id\":\"opaque\",\"resourceId\":\"/private\",\"resourceName\":\"需求\",\"resourceType\":\"COMMON_FILE\"}]}");
+        when(messageMapper.selectByMessageId(199L)).thenReturn(source);
+        ChatMessage command = command(List.of()); command.setReplyToMessageId(199L);
+        service.acceptUserMessage(command);
+        var event = ArgumentCaptor.forClass(JSONObject.class); verify(eventPublisher).publish(eq(GROUP_ID), event.capture(), isNull());
+        var wire = JSON.parseObject(event.getValue().toJSONString());
+        assertThat(wire.containsKey("forward")).isFalse();
+        assertThat(wire.getJSONObject("replyTo").getString("content")).isEqualTo("{{opaque}}");
+        assertThat(wire.getJSONObject("replyTo").getJSONArray("resourceList").getJSONObject(0).containsKey("targetAttachmentId")).isFalse();
+        assertThat(wire.getJSONObject("replyTo").getBooleanValue("canAcknowledge")).isFalse();
+        assertThat(wire.toJSONString()).doesNotContain("resourceCode", "secret");
+    }
+
 }
