@@ -123,6 +123,8 @@ export interface ByClawDshSessionRuntimeOptions {
   emitter: GatewayDataEmitter
   interactionStore?: ByClawInteractionStore
   sessionMetadata: ByClawSessionMetadataStore
+  /** Notify independently owned session observers; failure must not reject user input. */
+  sessionOpening?: (command: AskAgentCommand, firstSession: boolean, signal: AbortSignal) => Promise<void>
   /** Bind trusted root role before extensions, including new roots without metadata yet. */
   rootSetup?: (agentCtx: Context, agent: Agent, binding: ByClawRootBinding) => void
   /** Await host extensions before a new, resumed, or reused session accepts input. */
@@ -1368,6 +1370,28 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly voiceRequests = new Map<string, { fingerprint: string; promise: Promise<ByClawDshAskResult> }>()
   private readonly voiceControllers = new Map<string, AbortController>()
   private readonly voiceSummaryStreams = new WeakMap<ActiveTurn, Map<string, VoiceSummaryStreamFilter>>()
+  private readonly sessionOpeningJobs = new Set<Promise<void>>()
+  private readonly sessionOpeningController = new AbortController()
+  private readonly sessionOpeningHeaders = new Set<string>()
+  private readonly sessionOpeningOwners = new WeakSet<AskAgentCommand>()
+  private readonly sessionOpeningNotified = new WeakSet<AskAgentCommand>()
+
+  /** Own notification failures and teardown without making user input await observers. */
+  private observeSessionOpening(command: AskAgentCommand, firstSession: () => boolean | Promise<boolean>): void {
+    const opening = this.options.sessionOpening
+    if (opening === undefined || this.sessionOpeningController.signal.aborted) return
+    if (!this.sessionOpeningOwners.has(command) || this.sessionOpeningNotified.has(command)) return
+    this.sessionOpeningNotified.add(command)
+    const operation = (async () => {
+      const first = await firstSession()
+      if (!this.sessionOpeningController.signal.aborted) await opening(command, first, this.sessionOpeningController.signal)
+    })().catch((error: unknown) => {
+      if (this.sessionOpeningController.signal.aborted) return
+      const message = `byclaw-dsh session-opening observer failed; conversation continues: ${sanitizeByClawOperationalLog(error)}`
+      try { this.ctx.logger.warn(message) } catch (reportError: unknown) { console.warn(message, sanitizeByClawOperationalLog(reportError)) }
+    }).finally(() => { this.sessionOpeningJobs.delete(operation) })
+    this.sessionOpeningJobs.add(operation)
+  }
 
   async ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     const payload = byClawVoicePayload(command)
@@ -1419,6 +1443,21 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
     try {
+      const opening = this.options.sessionOpening
+      if (opening !== undefined) {
+        const headerId = normalizeByClawSessionId(command.header.sessionId)
+        // Reserve arrival order before any lookup can let a later dispatch overtake this one.
+        if (!this.sessionOpeningHeaders.has(headerId)) {
+          this.sessionOpeningHeaders.add(headerId)
+          this.sessionOpeningOwners.add(command)
+        }
+        if (headerId !== route.externalRootSessionId || route.targetDshSessionId !== undefined) {
+          // Routed requests never create a root under this header, so their lookup can run independently.
+          this.observeSessionOpening(command, async () => this.options.sessionMetadata.get(headerId) === undefined
+            && this.ctx.agents.get(SessionId(headerId)) === undefined
+            && await loadPersistedSessionById(this.ctx.sessionPersistence, SessionId(headerId)) === undefined)
+        }
+      }
       const background = this.waitingTurnFor(command, route)
       if (background !== undefined) {
         const previous = this.foregroundQueues.get(key) ?? Promise.resolve()
@@ -1698,6 +1737,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async close(): Promise<void> {
+    this.sessionOpeningController.abort()
+    await Promise.allSettled(this.sessionOpeningJobs)
+    this.sessionOpeningHeaders.clear()
     for (const controller of this.voiceControllers.values()) controller.abort()
     this.voiceControllers.clear()
     this.voiceRequests.clear()
@@ -1990,6 +2032,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const key = `${command.header.userCode}\0${sessionId}`
     const existing = this.handles.get(key)
     if (existing !== undefined && this.ctx.agents.get(existing.handle.agent.id) === existing.handle.agent) {
+      if (normalizeByClawSessionId(command.header.sessionId) === externalRootSessionId) this.observeSessionOpening(command, () => false)
       assertStableSessionCwd(externalRootSessionId, existing.handle.agent.session.header.cwd, route.cwd)
       await this.ensureRootMetadata(existing.handle.agent.session, externalRootSessionId, requestedBinding, 'reuse', coordination)
       preparedRoot?.bindLiveGroupScope?.(existing.handle.agent)
@@ -2134,6 +2177,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const persisted = persistedSession !== undefined
     const mode = resolveRootSessionOpenMode(live !== undefined, persisted)
+    if (normalizeByClawSessionId(command.header.sessionId) === externalRootSessionId) {
+      // Reuse the factory's read instead of racing an observer lookup against creation of this root.
+      const firstSession = mode === 'create' && this.options.sessionMetadata.get(externalRootSessionId) === undefined
+      this.observeSessionOpening(command, () => firstSession)
+    }
     const handle = mode === 'reuse'
       ? { agent: live as Agent, dispose: () => Promise.resolve() }
       : mode === 'resume'

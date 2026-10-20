@@ -137,6 +137,16 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 
 ## 会话扩展
 
+`byclaw/session-opening` 向独立管理工作的监听器通知根会话开启或路由请求。每个 header 的首次请求会同步认领监听顺序。普通根会话复用创建流程已有的新建、恢复或复用结果，路由请求的 header 状态查询及监听器通知则作为受管理的后台任务运行。内置群聊监听器排入后台工作后立即返回，正常会话不等待监听器专用的存储查询、监听器、模型分类或文件写入；监听器失败只记录日志，不拒绝用户输入。判定以 `command.header.sessionId` 为准，与 `byclaw_root_session_id` 或内部 Agent ID 无关：只有首次开启且存在 `extraPayload.groupChat.executionId` 时才分类，已有活动会话或持久化会话不参与分类。后台工作在模型调用前将 `{ "schemaVersion": "1" }` 原子写入 `/by/.sessions/<header sessionId>/.byclaw/session-opened.json` 以认领首次开启，包括不带 `groupChat` 的请求，避免后续补带参数时触发分类。该记录在进程重启后仍有效，只有成功认领的 Worker 发起分类。
+
+满足条件的请求通过当前用户配置的默认模型发起独立、无工具的分类调用，然后原子发布 `/by/.sessions/<header sessionId>/.byclaw/group-chat-disposition.json`。文件可能在正常会话返回最终答案之后才出现。JSON 包含 `schemaVersion: "1"`、从 `executionId` 复制的 `dispatchId`，以及只能选 `TASK` 或 `CHAT` 的 `kind`。解析后的 JSON 为 `kind: "TASK"` 时保留非空 `taskName` 及可选的非空字符串 `ackText`；任务名缺失或无效时使用用户请求正文兜底。解析成功但没有有效 kind 时判为 `CHAT`。JSON 解析失败时，响应包含大写字面值 `TASK` 就判为 `TASK`，否则判为 `CHAT`。模型返回的额外字段及非字符串接收语会被忽略，`CHAT` 不包含任务字段。提示词引导生成或修改交付物、可能耗时较长的信息收集请求判为 `TASK`，普通问答和身份询问判为 `CHAT`；身份问题仍由正常会话回答直接自我介绍。分类文本不进入会话输出，`groupChat` 中的凭据不进入辅助分类提示词。
+
+仅在分类流程中，`extraPayload.groupChat.originalContent` 只要已定义就优先使用，包括空值；未定义时才从 `command.content` 提取问题，正常会话 command 不会被修改。存在 `groupChat.groupHistoryPath` 时，插件通过宿主的 `/by` 适配方法解析路径，读取当前用户 ByClaw 根目录内的普通文件，再向无工具的分类模型发送 `{ userRequest, groupHistory: { path, available, content, truncated } }`。模型同时获得原始文件路径及内联历史内容，无需自行调用文件工具即可理解上下文。`groupChatDispositionHistoryMaxBytes` 默认 `65536` 个 UTF-8 字节，较大文件保留最近部分并标记已截取。历史缺失或不可读取时会记录日志并标记 `available: false`，仍使用原始问题继续分类。分类超时预算包含历史加载。
+
+分类流程还会检查 `BYCLAW_GROUP_CHAT_DISPOSITION_ENABLED`：仅去掉首尾空格后等于 `0` 时关闭模型判定，未设置、空值及其他值均开启。开关不能替代首次开启会话和 `groupChat.executionId` 条件。关闭判定时仍记录会话首次开启，之后开启开关不会对已开启的会话补判。可同时配置 `BYCLAW_GROUP_CHAT_DISPOSITION_BASE_URL`、`BYCLAW_GROUP_CHAT_DISPOSITION_API_KEY` 和 `BYCLAW_GROUP_CHAT_DISPOSITION_MODEL`，使用独立的 OpenAI 兼容 Chat Completions 接口。URL 是 API 基础地址，例如 `https://api.example.com/v1`，不包含凭据、查询参数或片段。三项均未设置或为空时沿用现有模型解析逻辑。独立连接不读取 Redis 模型记录，也不修改正常会话的模型。配置不完整或无效时记录日志并沿用已有的 `CHAT` 失败兜底，不借用正常模型的凭据。环境变量在分类器安装时读取，修改后需重启 Worker。
+
+模型错误和超时会记录日志，并对已收到的文本使用同样的容错规则；没有可用响应时兜底 `CHAT`。已有状态无效或文件操作失败只记录日志，不打断正常会话，也不覆盖已有文件。首次开启标记防止后续请求自动重复失败的后台尝试。后台工作自行管理插件生命周期内的取消，插件退出时会中止并收尾已接收的任务。路径遵循配置的 `/by` 本地存储映射。插件配置 `groupChatDispositionTimeoutMs` 默认 `30000`，`groupChatDispositionMaxTokens` 默认 `1024`，均为正整数。可运行 `pnpm run verify:group-chat-disposition` 执行无需 API Key 的容错与会话并行回归检查。
+
 `byclaw/session-setup` 是接收输入前等待完成的串行事件，覆盖新建、恢复、复用会话，以及后台工作期间的前台追问。事件提供显式的 Agent 实例及其作用域、可信 command，以及 BE 地址、当前用户登录请求头和 `/by/` 路径解析等宿主适配方法。类型从 `@byclaw/dsh-integration/session-extensions` 导出。监听器必须支持重复装配，不能启动 Agent；监听器失败会阻止本次输入进入会话。可选插件自行管理配置、启用条件和持久状态，Integration 不依赖这些插件。
 
 ## 配置
