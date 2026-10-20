@@ -199,6 +199,19 @@ public class SandboxService {
     /** Redis key 前缀：用户首选沙箱 serviceKey */
     private static final String PREFERRED_SERVICE_KEY_PREFIX = "byai:sandbox:preferred-service-key:";
 
+    /**
+     * Redis key 前缀：由共享 DSH 宿主承载的用户。宿主为它承载的每个用户写入此 key（值为宿主标识）
+     * 并定期续期；key 存在时该用户的消息由宿主的 BYCLAW_DSH_<user> worker 处理，不再启动独立的
+     * byclaw-dsh 沙箱。宿主停止后 key 过期，自动恢复为每用户独立沙箱。
+     * 配置了 byclaw.sandbox.shared-dsh-host.base-url 时由 SharedDshHostRuntimeProvider 管理宿主上的用户上下文，
+     * 此跳过逻辑不再生效（否则 BE 自己 PUT 出的用户会被挡在记录与 endpoint 之外）。
+     */
+    static final String SHARED_DSH_HOST_KEY_PREFIX = "byclaw:dsh:shared-host:user:";
+
+    /** 非空表示 byclaw-dsh 由 SharedDshHostRuntimeProvider 托管到共享宿主。 */
+    @Value("${byclaw.sandbox.shared-dsh-host.base-url:}")
+    private String sharedDshHostBaseUrl;
+
     private static final String CRON_NEXT_RUN_REDIS_KEY = "sandbox:cron:nextRunTime";
 
     /** 沙箱空闲超时时间（分钟） */
@@ -517,6 +530,27 @@ public class SandboxService {
         }
     }
 
+    /**
+     * 用户的 byclaw-dsh 由不受 BE 管理的共享 DSH 宿主承载时返回宿主标识，否则返回 null。Redis 不可用时按未承载处理，
+     * 保持原有的每用户沙箱行为。宿主由 BE 托管（配置了 shared-dsh-host.base-url）时始终返回 null，走正常启动流程。
+     */
+    private String sharedDshHost(String userCode, SandboxLaunchRouting routing) {
+        if (StringUtils.isNotBlank(sharedDshHostBaseUrl)) {
+            return null;
+        }
+        if (StringUtils.isBlank(userCode) || routing == null
+            || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(routing.getSandboxType())) {
+            return null;
+        }
+        try {
+            return StringUtils.trimToNull(RedisUtil.getString(SHARED_DSH_HOST_KEY_PREFIX + userCode.trim()));
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("查询共享 DSH 宿主失败，按独立沙箱处理，用户编码：{}，原因：{}", userCode, e.getMessage());
+            return null;
+        }
+    }
+
     private String buildLaunchLockKey(String userCode, SandboxLaunchRouting routing) {
         return SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
             + routing.getEffectiveResourceId();
@@ -550,6 +584,10 @@ public class SandboxService {
     public SandboxLaunchData launchSandboxAwait(String userCode, Long resourceId) {
         if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        if (sharedDshHost(userCode, routing) != null) {
+            // 共享宿主没有每用户沙箱 endpoint 可等待；消息经宿主 worker 处理。
+            return new SandboxLaunchData();
+        }
 
         // 1. 查询DB是否已有运行中的沙箱记录
         SsSandboxRecord existingRecord = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
@@ -678,6 +716,11 @@ public class SandboxService {
 
     private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
         boolean skipReusableSandbox) {
+        String sharedHost = sharedDshHost(userCode, routing);
+        if (sharedHost != null) {
+            LOGGER.info("用户 {} 的 DSH 由共享宿主 {} 承载，跳过启动独立 byclaw-dsh 沙箱", userCode, sharedHost);
+            return new SandboxLaunchData();
+        }
         // 校验运行中沙箱数量是否超过系统参数上限
         checkRunningSandboxLimit();
 
@@ -1837,7 +1880,7 @@ public class SandboxService {
         incrementVersions(record, true);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
-            () -> launchSandbox(record.getUserCode(), record.getResourceId()));
+            () -> relaunchMissingRecord(record));
         if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
             report.addAffectedSandbox(sandboxRef(record) + " -> newSandboxId=" + launchData.getSandboxId());
             LOGGER.info("沙箱一致性检测重拉成功，旧记录：{}，新sandboxId：{}，新endpoint：{}",
@@ -1847,6 +1890,18 @@ public class SandboxService {
             report.addFailedSandbox(sandboxRef(record));
             LOGGER.warn("沙箱一致性检测重拉失败，旧记录：{}", sandboxRef(record));
         }
+    }
+
+    /**
+     * 远端缺失的记录按它自己的沙箱类型重拉。按 resourceId 重新解析路由只看员工的 workerAgentType，
+     * 会把 byclaw-dsh 记录重拉成 openclaw；共享 DSH 宿主重启后它承载的每个用户都会走到这里。
+     */
+    SandboxLaunchData relaunchMissingRecord(SsSandboxRecord record) {
+        String sandboxType = record.getSandboxType();
+        if (StringUtils.isBlank(sandboxType) || SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
+            return launchSandbox(record.getUserCode(), record.getResourceId());
+        }
+        return launchSandboxWithServiceKey(record.getUserCode(), sandboxType);
     }
 
     private void logRemoteOrphans(SandboxReconcileGroup group, List<SsSandboxRecord> records,

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import org.mockito.MockedStatic;
 import java.time.OffsetDateTime;
 import java.time.Instant;
 import java.util.Date;
@@ -35,10 +37,13 @@ import redis.clients.jedis.Jedis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -271,6 +276,122 @@ class SandboxServiceTest {
             "user001", "openclaw", "sandbox-1", "fresh-token");
 
         assertThat(result).isEqualTo("persisted-token");
+    }
+
+    @Test
+    void doLaunchSandbox_skipsByclawDshServedBySharedHost() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade lifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", lifecycleFacade);
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "user001"))
+                .thenReturn("multi-host-a");
+
+            SandboxLaunchData result = ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+                "user001", 100L, routing);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getSandboxId()).isNull();
+        }
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+        verify(lifecycleFacade, never()).launchSandbox(any());
+        verify(contextFactory, never()).buildContext(any(), any(), any());
+    }
+
+    @Test
+    void sharedDshHost_onlyAppliesToByclawDshAndMarkedUsers() {
+        SandboxService sandboxService = new SandboxService();
+        SandboxLaunchRouting dsh = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        SandboxLaunchRouting openclaw = new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "served"))
+                .thenReturn(" multi-host-a ");
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "broken"))
+                .thenThrow(new IllegalStateException("redis down"));
+
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", dsh))
+                .isEqualTo("multi-host-a");
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", openclaw))
+                .isNull();
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "other", dsh))
+                .isNull();
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "broken", dsh))
+                .isNull();
+        }
+    }
+
+    @Test
+    void doLaunchSandbox_recordsSharedHostContextWhenHostIsManaged() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade lifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", lifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", mock(SandboxMetadataCache.class));
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService",
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostBaseUrl", "http://10.0.0.5:7300");
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(contextFactory.buildContext("user001", 100L, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE))
+            .thenReturn(new SandboxLaunchContext(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE, Map.of(), Map.of(),
+                "be-token"));
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(recordMapper).insert(any(SsSandboxRecord.class));
+        SandboxLaunchData launched = new SandboxLaunchData();
+        launched.setSandboxId("byclaw-dsh-user001");
+        launched.setEndpoint("https://dsh.example.com/u/user001/");
+        launched.setGatewayToken("web-token");
+        when(lifecycleFacade.launchSandbox(any())).thenReturn(SandboxResponse.success(launched));
+        when(recordMapper.updateLaunchSuccess(eq(99L), eq("byclaw-dsh-user001"), any(), eq("web-token"),
+            any(), any(), any(), any(), any(), eq(0))).thenReturn(1);
+
+        SandboxLaunchData result;
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            // The host's own claim must not short-circuit a BE-managed launch.
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "user001"))
+                .thenReturn("multi-host-a");
+            result = ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox", "user001", 100L, routing);
+        }
+
+        assertThat(result).isNotNull();
+        assertThat(result.getSandboxId()).isEqualTo("byclaw-dsh-user001");
+        assertThat(result.getEndpoint()).isEqualTo("https://dsh.example.com/u/user001/chat?token=web-token");
+        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest> request =
+            ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        verify(lifecycleFacade).launchSandbox(request.capture());
+        assertThat(request.getValue().getEnvs()).containsEntry("BYAI_WORKER_ID", "byclaw-dsh-user001");
+    }
+
+    @Test
+    void sharedDshHost_guardIsOffWhenHostIsManaged() {
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostBaseUrl", "http://10.0.0.5:7300");
+        SandboxLaunchRouting dsh = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(any())).thenReturn("multi-host-a");
+
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", dsh))
+                .isNull();
+            redis.verifyNoInteractions();
+        }
     }
 
     @Test
@@ -905,6 +1026,73 @@ class SandboxServiceTest {
         assertThat(CurrentUserHolder.getLoginInfo()).isNull();
         verify(loginApplicationService).getLoginInfo("user001");
         verify(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+    }
+
+    @Test
+    void reconcileSandboxes_relaunchesMissingRemoteWithRecordSandboxType() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        SandboxUserContextRunner sandboxUserContextRunner = new SandboxUserContextRunner(loginApplicationService);
+        SandboxService sandboxService = spy(new SandboxService());
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxUserContextRunner", sandboxUserContextRunner);
+        ReflectionTestUtils.setField(sandboxService, "reconcileJobLockEnabled", false);
+        ReflectionTestUtils.setField(sandboxService, "reconcileGroupLimit", 50);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRecordLimitPerGroup", 500);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemotePageSize", 200);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxRecordsPerRun", 3000);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxDurationMs", 30000L);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemoteConcurrency", 1);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("user001");
+        record.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("RUNNING");
+        record.setSandboxId("byclaw-dsh-user001");
+        record.setEndpoint("http://host:7300/u/user001/chat?token=old-token");
+        record.setGatewayToken("old-token");
+        record.setTimeoutSeconds(600);
+        record.setLockVersion(0);
+        record.setVersion(1);
+        record.setCreateTime(new Date());
+        record.setLastAccessTime(new Date());
+
+        LoginInfo dbLoginInfo = new LoginInfo();
+        dbLoginInfo.setUserCode("user001");
+        when(loginApplicationService.getLoginInfo("user001")).thenReturn(dbLoginInfo);
+        when(sandboxRecordMapper.countReconcileSandboxes()).thenReturn(1);
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        group.setRecordCount(1);
+        when(sandboxRecordMapper.selectReconcileGroups(eq(50))).thenReturn(List.of(group));
+        when(sandboxRecordMapper.selectReconcileSandboxesByGroup(eq("user001"),
+            eq(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE), isNull(), isNull(), eq(500)))
+            .thenReturn(List.of(record));
+        when(sandboxLifecycleFacade.listSandboxesByMetadata(
+            eq(Map.of("userCode", "user001", "serviceKey", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)),
+            eq(1), eq(200))).thenReturn(SandboxResponse.success(SandboxRuntimePage.empty(1, 200)));
+        when(sandboxRecordMapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
+            .thenReturn(1);
+
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("byclaw-dsh-user001");
+        launchData.setEndpoint("http://host:7300/u/user001/chat?token=new-token");
+        doReturn(launchData).when(sandboxService)
+            .launchSandboxWithServiceKey("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+
+        SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
+
+        assertThat(report.getAffectedCount()).isEqualTo(1);
+        // The record's own type drives the relaunch; resolving by resourceId would pick the employee's openclaw.
+        verify(sandboxService).launchSandboxWithServiceKey("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        verify(sandboxService, never()).launchSandbox(anyString(), any());
     }
 
     @Test
