@@ -414,7 +414,10 @@ public class FilesApplicationService {
         if (StringUtil.isEmpty(bucketName)) {
             bucketName = userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
         }
+        logger.info("开始预览公共文件，style={}, bucketName={}, filePath={}", style, bucketName, filePath);
         try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath);) {
+            logger.info("公共文件输入流获取成功，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
+                response.isCommitted());
 
             int firstByte = inputStream.read();
             if (firstByte == -1) {
@@ -435,11 +438,16 @@ public class FilesApplicationService {
 
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
+            logger.info("开始写入公共文件响应，bucketName={}, filePath={}, contentDisposition={}", bucketName, filePath,
+                contentDisposition);
             response.getOutputStream().write(firstByte);
             IOUtils.copy(inputStream, response.getOutputStream());
+            logger.info("公共文件响应写入完成，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
+                response.isCommitted());
         }
         catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            logger.error("公共文件预览失败，style={}, bucketName={}, filePath={}, responseCommitted={}", style, bucketName,
+                filePath, response.isCommitted(), e);
             if (!response.isCommitted()) {
                 response.reset();
                 response.setStatus(e instanceof java.io.FileNotFoundException
@@ -494,7 +502,9 @@ public class FilesApplicationService {
                 return inputStream;
             }
             catch (RuntimeException fallbackException) {
-                primaryException.addSuppressed(fallbackException);
+                if (fallbackException != primaryException) {
+                    primaryException.addSuppressed(fallbackException);
+                }
                 throw primaryException;
             }
         }
