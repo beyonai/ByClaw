@@ -5,6 +5,10 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'resource.resourceManageAudit': '管理权限',
+  'digitalEmployees.applyManage': '申请管理权限',
+  'digitalEmployees.manageApplyPending': '管理权限审核中',
+  'digitalEmployees.manageApplySubmitted': '管理权限申请已提交',
   'ui.employee.notFound': '数字员工不存在',
   'ui.card.urlRequired': '缺少链接地址',
   'ui.chat.errorDetails': '错误详情',

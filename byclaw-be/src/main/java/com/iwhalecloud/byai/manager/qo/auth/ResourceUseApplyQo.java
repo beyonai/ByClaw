@@ -20,6 +20,8 @@ public class ResourceUseApplyQo {
      */
     @NotNull(message = "resourceId不能为空")
     private Long resourceId;
+    /** USE (default) or MANAGE. Existing clients keep the use-application contract. */
+    private String permissionType;
 
     /**
      * 是否查询已处理的历史申请。未传或 false 时仅查询待审核申请。

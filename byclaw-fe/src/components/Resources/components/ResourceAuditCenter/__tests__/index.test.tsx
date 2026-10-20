@@ -332,7 +332,40 @@ describe('ResourceAuditCenter', () => {
     expect(onAuditComplete).not.toHaveBeenCalled();
   });
 
-  it.each(['001', '017'])('hides application type in both lists for employee type %s', async (agentType) => {
+  it.each(['approve', 'reject'])(
+    'handles a management %s independently from the same user’s use request',
+    async (action) => {
+      mockQueryResourceUseApplyAudit.mockResolvedValue({
+        data: ['USE', 'MANAGE'].map((auditType) => ({
+          resourceId: 'employee-1',
+          resourceBizType: 'DIG_EMPLOYEE',
+          agentType: '001',
+          resourceName: auditType === 'MANAGE' ? '管理申请员工' : '使用申请员工',
+          privilegeGrantId: `grant-${auditType}`,
+          userId: 'applicant',
+          userName: '申请人',
+          auditType,
+          applyStatus: 'P',
+        })),
+      });
+      render(<ResourceAuditCenter resourceBizTypeList={['DIG_EMPLOYEE']} />);
+      const row = within((await screen.findByText('管理申请员工')).closest('tr')!);
+      expect(row.getByText('resource.resourceManageAudit')).toBeInTheDocument();
+      fireEvent.click(row.getByRole('button', { name: `resourceCenter.${action}` }));
+      fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
+      await waitFor(() =>
+        expect(action === 'approve' ? approveUseApply : rejectUseApply).toHaveBeenCalledWith({
+          resourceId: 'employee-1',
+          applyUserId: 'applicant',
+          auditType: 'MANAGE',
+        })
+      );
+      await waitFor(() => expect(screen.queryByText('管理申请员工')).not.toBeInTheDocument());
+      expect(screen.getByText('使用申请员工')).toBeInTheDocument();
+    }
+  );
+
+  it.each(['001', '017'])('shows application type in both lists for employee type %s', async (agentType) => {
     mockQueryResourceUseApplyAudit.mockImplementation(({ history }: { history: boolean }) =>
       Promise.resolve({
         data: [
@@ -356,13 +389,13 @@ describe('ResourceAuditCenter', () => {
     expect(
       screen.getByText(agentType === '017' ? 'common.digitalEmployeeGroup' : 'common.digitalEmployee')
     ).toBeInTheDocument();
-    // 员工和员工组的待审核、历史列表均不再重复显示固定的使用权限类型。
-    expect(screen.queryByRole('columnheader', { name: 'resource.auditApplicationType' })).not.toBeInTheDocument();
-    expect(screen.queryByText('resource.resourceUseAudit')).not.toBeInTheDocument();
+    // 员工和员工组支持不同权限申请，需要在待审核和历史列表中保留申请类型。
+    expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
+    expect(screen.getByText('resource.resourceUseAudit')).toBeInTheDocument();
     fireEvent.click(screen.getByText('resourceCenter.reviewHistory'));
     await screen.findByText('审核人员');
-    expect(screen.queryByRole('columnheader', { name: 'resource.auditApplicationType' })).not.toBeInTheDocument();
-    expect(screen.queryByText('resource.resourceUseAudit')).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'resource.auditApplicationType' })).toBeInTheDocument();
+    expect(screen.getByText('resource.resourceUseAudit')).toBeInTheDocument();
     expect(screen.getByText('2026-10-08 10:00:00')).toBeInTheDocument();
     expect(screen.getByText('resource.useApplyApproveSuccess')).toBeInTheDocument();
   });

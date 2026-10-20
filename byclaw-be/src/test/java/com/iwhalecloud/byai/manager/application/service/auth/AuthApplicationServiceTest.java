@@ -1635,10 +1635,11 @@ class AuthApplicationServiceTest {
         qo.setResourceId(300L);
         qo.setApplyUserId(1001L);
 
+        when(privilegeGrantMapper.update(any(), any())).thenReturn(1);
         service.approveUseApply(qo);
 
         verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
-        verify(privilegeGrantService).update(eq(pendingApply));
+        verify(privilegeGrantMapper).update(any(), any());
     }
 
     @Test
@@ -2092,6 +2093,7 @@ class AuthApplicationServiceTest {
         when(resources.selectById(607L)).thenReturn(employee);
         PrivilegeGrant pending = useGrant(607L, 3L, "USER", Color.RED, "P");
         when(mapper.selectOne(any())).thenReturn(pending);
+        when(mapper.update(any(), any())).thenReturn(1);
         doNothing().when(service).syncUserAuthToRedis(3L);
         if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronize(employee, null);
         ResourceUseApplyApproveQo request = new ResourceUseApplyApproveQo(); request.setResourceId(607L); request.setApplyUserId(3L);

@@ -91,3 +91,9 @@ CREATE TABLE IF NOT EXISTS byai.digital_employee_publish_scope (
 COMMENT ON TABLE byai.digital_employee_publish_scope IS '数字员工当前生效发布范围，独立于尚未完成的审核申请';
 CREATE INDEX IF NOT EXISTS ix_employee_publish_scope_org
     ON byai.digital_employee_publish_scope (tenant_id, org_id, resource_id);
+
+-- 历史待审重复记录须在执行前检查；存在重复时索引创建会失败，不自动删改历史申请。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_pending_permission
+    ON byai.au_privilege_grant (grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type)
+    WHERE status_cd = 'P' AND grant_obj_type = 'DIG_EMPLOYEE' AND grant_to_obj_type = 'USER'
+      AND grant_to_type = 'RED' AND grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY');

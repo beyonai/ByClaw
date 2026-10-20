@@ -5,6 +5,10 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'resource.resourceManageAudit': 'Management access',
+  'digitalEmployees.applyManage': 'Request management access',
+  'digitalEmployees.manageApplyPending': 'Management request pending',
+  'digitalEmployees.manageApplySubmitted': 'Management request submitted',
   'ui.employee.notFound': 'The digital employee does not exist',
   'ui.card.urlRequired': 'A link URL is required',
   'ui.chat.errorDetails': 'Error details',

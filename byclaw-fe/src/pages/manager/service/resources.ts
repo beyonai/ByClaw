@@ -276,6 +276,7 @@ export interface ResourceImportResult {
  * 资源使用申请参数
  */
 export interface ResourceUseApplyParams {
+  permissionType?: 'USE' | 'MANAGE';
   resourceId: string | number; // 资源ID
   history?: boolean; // 是否查询已处理的历史申请
 }
@@ -285,7 +286,7 @@ export interface ResourceUseApplyParams {
  * 记录单个资源使用申请的详细信息
  */
 export interface ResourceUseApplyAuditItem {
-  auditType?: 'SKILL_PUBLICATION';
+  auditType?: 'SKILL_PUBLICATION' | 'MANAGE' | 'USE';
   privilegeGrantId: string; // 权限授权ID
   userId: string; // 用户ID
   userName: string; // 用户名称
@@ -305,7 +306,7 @@ export interface ResourceUseApplyAuditItem {
  * 审批资源使用申请参数
  */
 export interface ApproveResourceUseApplyParams {
-  auditType?: 'SKILL_PUBLICATION'; // 上架审核复用审核接口，保持与使用权限审核分流
+  auditType?: 'SKILL_PUBLICATION' | 'MANAGE' | 'USE'; // 上架审核复用审核接口，保持与使用权限审核分流
   resourceId: string | number; // 资源ID
   applyUserId: string | number; // 申请用户ID
 }
@@ -645,6 +646,8 @@ export interface ResourceOperationPermissions {
   canManageAuth: boolean; // 是否有管理权限权限
   canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
+  canApplyManage?: boolean;
+  manageApplyPending?: boolean;
   canApplyUse: boolean; // 是否可以申请使用
   canRestore: boolean; // 是否有恢复权限
   canOnShelf?: boolean; // 是否可上架

@@ -739,3 +739,22 @@ HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于
 部分组织拒绝后可以重新申请；已生效范围保留，重新申请只增加范围，使用现有企业配置。
 企业配置保持一个共享版本，更新必须经所有已发布组织审核通过后一起切换，期间继续使用旧版本。
 审核权限不包含修改候选配置；管理员修改待审配置会重置全部组织审核结果。
+
+员工使用与管理申请任一合法审核人通过即生效。除既有创建者/资源管理者、平台管理员、超管外，
+申请人所在组织的管理员可审核本组织管理范围内已发布的企业员工；不允许借此审批跨范围或个人员工。
+管理申请使用独立的 `MANAGE_APPLY` 待审记录，批准后才授予 `ALLOW_MANAGE`；条件更新避免重复处理。
+
+部署前请人工检查 `deploy/migrations/versions/V0.5.1/V0.5.1__ddl.sql` 和 `V0.5.1__dml.sql`，先 DDL 后 DML。
+迁移只登记已有企业发布副本的全公司历史范围，不扩大手工创建资源的授权。
+创建待审申请唯一索引前，先检查以下查询是否返回重复记录；迁移不会自动删除历史申请：
+
+```sql
+SELECT grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type, COUNT(*)
+FROM byai.au_privilege_grant
+WHERE status_cd = 'P' AND grant_obj_type = 'DIG_EMPLOYEE' AND grant_to_obj_type = 'USER'
+  AND grant_to_type = 'RED' AND grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')
+GROUP BY grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type
+HAVING COUNT(*) > 1;
+```
+
+本次查询没有增加行锁子句，并发依赖条件更新、事务及唯一约束。版本迁移不自动合并初始化 SQL。

@@ -177,7 +177,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         const params = {
           resourceId: row.resourceId,
           applyUserId: row.userId,
-          ...(row.auditType === 'SKILL_PUBLICATION' ? { auditType: row.auditType } : {}),
+          ...(row.auditType && row.auditType !== 'USE' ? { auditType: row.auditType } : {}),
         };
         if (action === 'approve') {
           await approveUseApply(params);
@@ -246,15 +246,19 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
       },
     ];
 
-    // 员工申请均为使用权限，发布审核已有独立视图；其他资源保留申请类型以区分技能上架审核。
-    if (!employeeMode) {
+    // 使用、管理申请共用待办列表，明确展示并传递申请类型。
+    {
       columns.splice(2, 0, {
         title: intl.formatMessage({ id: 'resource.auditApplicationType' }),
         key: 'auditType',
         width: 150,
         render: (_, row) =>
           intl.formatMessage({
-            id: row.auditType === 'SKILL_PUBLICATION' ? 'resource.skillPublicationAudit' : 'resource.resourceUseAudit',
+            id: {
+              MANAGE: 'resource.resourceManageAudit',
+              SKILL_PUBLICATION: 'resource.skillPublicationAudit',
+              USE: 'resource.resourceUseAudit',
+            }[row.auditType || 'USE'],
           }),
       });
     }
