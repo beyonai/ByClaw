@@ -150,6 +150,7 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
   } = props;
   const intl = useIntl();
   const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
+  const usePdfCanvas = type === 'pdf' && /MicroMessenger|DingTalk/i.test(window.navigator.userAgent);
   const [tab, setTab] = useState<'source' | 'preview'>();
 
   /** 资源链接 - 用于预览 */
@@ -284,12 +285,17 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
           </Suspense>
         </div>
         <div
-          style={{ display: !!uri && tab === 'preview' && ['h5', 'html', 'pdf'].includes(type) ? 'block' : 'none' }}
+          style={{
+            display:
+              !!uri && tab === 'preview' && (HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas))
+                ? 'block'
+                : 'none',
+          }}
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            {/* PDF 必须保留二进制 URL 交给浏览器预览，避免被 HTML 资源解析分支读取为文本而显示乱码。 */}
-            {(HTML_PREVIEW_TYPES.includes(type) || type === 'pdf') &&
+            {/* 非微信、钉钉环境继续使用浏览器内置 PDF 预览。 */}
+            {(HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas)) &&
               (type !== 'pdf' && resolveHtmlResource ? (
                 <HtmlRenderComponent
                   content={content?.[1]}
@@ -302,6 +308,13 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
               ))}
           </Suspense>
         </div>
+        {usePdfCanvas && data instanceof Blob && tab === 'preview' && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OfficeComponent data={data} type="pdf" fileName={title} />
+            </Suspense>
+          </div>
+        )}
         <div
           style={{
             display: !!uri && tab === 'preview' && IMAGE_PREVIEW_TYPES.includes(type) ? 'block' : 'none',
