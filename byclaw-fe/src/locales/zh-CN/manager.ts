@@ -5,6 +5,13 @@ import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/loc
 
 export default {
   'orgMgr.modal.administrators': '组织管理员',
+  'orgMgr.administrators.select': '选择组织管理员',
+  'orgMgr.administrators.search': '搜索当前组织的用户',
+  'orgMgr.administrators.directMembers': '仅显示所选组织的直属用户，不包含子组织',
+  'orgMgr.administrators.membershipHint': '支持选择多名管理员；保存后，所选用户将成为本组织成员',
+  'orgMgr.administrators.selected': '已选择 {count} 人',
+  'orgMgr.administrators.loadFailed': '加载组织管理员失败，请重试',
+  'orgMgr.administrators.retry': '重试',
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
@@ -266,6 +273,8 @@ export default {
   'orgTree.addSameLevelDept': '添加同级部门',
   'orgTree.addSubDept': '添加子部门',
   'orgTree.deleteOrg': '删除组织',
+  'orgTree.editOrg': '编辑组织',
+  'orgTree.actions': '组织操作',
   'orgTree.deleteConfirm': '请问确认要删除吗？',
   'orgTree.dataPermission': '数据权限设置',
 

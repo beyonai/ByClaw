@@ -46,6 +46,29 @@ public class OrganizationController {
 
     public record OrganizationId(@jakarta.validation.constraints.NotNull Long orgId) { }
 
+    @lombok.Data
+    public static class SelectionContext {
+        private Long orgId;
+        private Long parentOrgId;
+    }
+
+    @lombok.Data
+    @lombok.EqualsAndHashCode(callSuper = true)
+    public static class CandidateRequest extends SelectionContext {
+        @jakarta.validation.constraints.NotNull
+        private Long memberOrgId;
+    }
+
+    @RequestMapping(value = "/administratorOrganizations", method = RequestMethod.POST)
+    public ResponseUtil administratorOrganizations(@RequestBody SelectionContext request) {
+        return ResponseUtil.successResponse(organizationAdmins.getAdministratorOrganizations(request.getOrgId(), request.getParentOrgId()));
+    }
+
+    @RequestMapping(value = "/administratorCandidates", method = RequestMethod.POST)
+    public ResponseUtil administratorCandidates(@RequestBody @jakarta.validation.Valid CandidateRequest request) {
+        return ResponseUtil.successResponse(organizationAdmins.getAdministratorCandidates(request.getOrgId(), request.getParentOrgId(), request.getMemberOrgId()));
+    }
+
     /**
      * 新增组织
      *

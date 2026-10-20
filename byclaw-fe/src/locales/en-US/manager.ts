@@ -5,6 +5,14 @@ import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/loc
 
 export default {
   'orgMgr.modal.administrators': 'Organization administrators',
+  'orgMgr.administrators.select': 'Select organization administrators',
+  'orgMgr.administrators.search': 'Search users in this organization',
+  'orgMgr.administrators.directMembers': 'Only direct members of the selected organization are shown',
+  'orgMgr.administrators.membershipHint':
+    'Select one or more administrators; selected users will join this organization when saved',
+  'orgMgr.administrators.selected': '{count} selected',
+  'orgMgr.administrators.loadFailed': 'Failed to load organization administrators. Please retry.',
+  'orgMgr.administrators.retry': 'Retry',
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
@@ -261,6 +269,8 @@ export default {
   'orgTree.addSameLevelDept': 'Same Level',
   'orgTree.addSubDept': 'Sub Level',
   'orgTree.deleteOrg': 'Delete Organization',
+  'orgTree.editOrg': 'Edit Organization',
+  'orgTree.actions': 'Organization actions',
   'orgTree.deleteConfirm': 'Are you sure you want to delete?',
   'orgTree.dataPermission': 'Data Permission Settings',
 

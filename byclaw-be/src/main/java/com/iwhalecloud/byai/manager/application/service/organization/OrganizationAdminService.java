@@ -6,11 +6,15 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UsersOrganizationService;
+import com.iwhalecloud.byai.manager.entity.organization.Organization;
 import com.iwhalecloud.byai.manager.entity.users.UsersOrganization;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminMemberMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantOrganizationMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
+import com.iwhalecloud.byai.manager.mapper.organization.OrganizationMapper;
+import com.iwhalecloud.byai.manager.qo.organization.OrgTreeQo;
+import com.iwhalecloud.byai.manager.vo.organization.OrgTreeVo;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,8 +30,78 @@ public class OrganizationAdminService {
     private final UsersMapper users;
     private final TenantOrganizationMapper tenantOrganizations;
     private final TenantAdminMemberMapper tenantMembers;
+    private final OrganizationMapper organizationMapper;
 
     public record Member(String userId, String userName, boolean administrator) { }
+
+    private void requireCreationParent(Long parentOrgId) {
+        Long tenant = CurrentUserHolder.getEnterpriseId();
+        boolean platformAdmin = CurrentUserHolder.isAdminVip() || CurrentUserHolder.isPlatformManager();
+        if (tenant == null || parentOrgId == null || (parentOrgId != -1 && parentOrgId <= 0)) {
+            throw new BaseException("请选择有效的上级组织");
+        }
+        if (parentOrgId != -1) requireOrganization(parentOrgId);
+        if (!platformAdmin && !managedOrgIds().contains(parentOrgId)) {
+            throw new BaseException("无权在该组织下新增组织");
+        }
+    }
+
+    private List<Member> enterpriseCandidates() {
+        Long tenant = CurrentUserHolder.getEnterpriseId();
+        List<Long> ids;
+        if (tenantMembers.selectProvisionState(tenant) == null) {
+            Set<Long> orgIds = allowedOrgIds();
+            if (orgIds.isEmpty()) return List.of();
+            ids = tenantOrganizations.selectActiveUsersByOrgIds(new ArrayList<>(orgIds)).stream()
+                .map(com.iwhalecloud.byai.manager.mapper.tenant.TenantMemberRow::getUserId).distinct().toList();
+        } else {
+            ids = tenantMembers.selectMembers(tenant).stream().filter(row -> "ACTIVE".equals(row.getStatus()))
+                .map(com.iwhalecloud.byai.manager.mapper.tenant.TenantMemberRow::getUserId).distinct().toList();
+        }
+        if (ids.isEmpty()) return List.of();
+        return users.selectBatchIds(ids).stream().filter(user -> "A".equals(user.getState()))
+            .map(user -> new Member(String.valueOf(user.getUserId()), user.getUserName(), false)).toList();
+    }
+
+    private void requireSelectionAccess(Long orgId, Long parentOrgId) {
+        if (orgId == null) {
+            requireCreationParent(parentOrgId);
+        } else {
+            requireOrganization(orgId);
+            if (!CurrentUserHolder.isAdminVip() && !CurrentUserHolder.isPlatformManager() && !managedOrgIds().contains(orgId)) {
+                throw new BaseException("无权设置该组织的管理员");
+            }
+        }
+    }
+
+    public List<OrgTreeVo> getAdministratorOrganizations(Long orgId, Long parentOrgId) {
+        requireSelectionAccess(orgId, parentOrgId);
+        Set<Long> allowed = allowedOrgIds();
+        return organizationMapper.getOrgTree(new OrgTreeQo()).stream()
+            .filter(organization -> allowed.contains(organization.getOrgId())).toList();
+    }
+
+    public List<Member> getAdministratorCandidates(Long orgId, Long parentOrgId, Long memberOrgId) {
+        requireSelectionAccess(orgId, parentOrgId);
+        // 精确匹配成员所属组织，不包含子组织。
+        return members(memberOrgId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void createOrganization(Organization organization) {
+        requireCreationParent(organization.getParentOrgId());
+        Set<Long> selected = organization.getAdministratorIds() == null ? Set.of()
+            : new LinkedHashSet<>(organization.getAdministratorIds());
+        Set<Long> valid = new HashSet<>();
+        enterpriseCandidates().forEach(member -> valid.add(Long.valueOf(member.userId())));
+        if (!valid.containsAll(selected)) throw new BaseException("组织管理员必须是当前企业的有效成员");
+        organizations.addOrg(organization);
+        Long tenant = CurrentUserHolder.getEnterpriseId();
+        if (tenantMembers.selectProvisionState(tenant) != null) {
+            tenantOrganizations.insertAttachment(tenant, organization.getOrgId(), CurrentUserHolder.getCurrentUserId());
+        }
+        selected.forEach(userId -> addRole(organization.getOrgId(), userId, UserType.ORG_MAN, null));
+    }
 
     public Set<Long> managedOrgIds() {
         Long userId = CurrentUserHolder.getCurrentUserId();
@@ -104,10 +178,10 @@ public class OrganizationAdminService {
         }
         if (userIds == null) throw new BaseException("请提供组织管理员列表");
         Set<Long> selected = new HashSet<>(userIds);
-        List<Member> candidates = members(orgId);
+        List<Member> candidates = enterpriseCandidates();
         Set<Long> valid = new HashSet<>();
         candidates.forEach(m -> valid.add(Long.valueOf(m.userId())));
-        if (!valid.containsAll(selected)) throw new BaseException("组织管理员必须是当前组织的有效成员");
+        if (!valid.containsAll(selected)) throw new BaseException("组织管理员必须是当前企业的有效成员");
         List<UsersOrganization> roles = memberships.selectList(new LambdaQueryWrapper<UsersOrganization>()
             .eq(UsersOrganization::getOrgId, orgId));
         Set<Long> existing = new HashSet<>();

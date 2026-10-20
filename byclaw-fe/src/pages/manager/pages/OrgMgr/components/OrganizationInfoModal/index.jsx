@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { connect } from 'dva';
-import { Form, Input, message, TreeSelect, Modal, InputNumber, Select } from 'antd';
+import { Alert, Button, Form, Input, message, TreeSelect, Modal, InputNumber } from 'antd';
 import { useIntl } from '@umijs/max';
 import pinyin from 'pinyin';
 import { getOrganizationAdministrators } from '@/service/orgMgr';
+import AdministratorPicker from '../AdministratorPicker';
 
 const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk }) => {
   const [form] = Form.useForm();
@@ -11,8 +12,12 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
 
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [treeData, setTreeData] = useState([]);
-  const [administratorOptions, setAdministratorOptions] = useState([]);
+  const [administratorMembers, setAdministratorMembers] = useState([]);
   const [administratorsLoading, setAdministratorsLoading] = useState(false);
+  const [administratorsReady, setAdministratorsReady] = useState(type === 'add');
+  const [administratorsError, setAdministratorsError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const parentOrgId = Form.useWatch('parentOrgId', form) ?? record?.parentOrgId;
   // 记录是否手动修改过组织编码
   const [isCodeModified, setIsCodeModified] = useState(false);
 
@@ -53,20 +58,34 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
   }, [record]);
 
   useEffect(() => {
-    if (!visible || type === 'add' || !record?.orgId) return undefined;
+    if (!visible) return undefined;
+    if (type === 'add') {
+      setAdministratorsReady(true);
+      return undefined;
+    }
+    if (!record?.orgId) return undefined;
     let active = true;
     setAdministratorsLoading(true);
+    setAdministratorsReady(false);
+    setAdministratorsError('');
     getOrganizationAdministrators(record.orgId)
       .then((members) => {
         if (!active) return;
-        setAdministratorOptions(members.map((member) => ({ value: member.userId, label: member.userName })));
+        if (!Array.isArray(members)) throw new Error(intl.formatMessage({ id: 'orgMgr.administrators.loadFailed' }));
+        setAdministratorMembers(members);
         form.setFieldValue(
           'administratorIds',
           members.filter((member) => member.administrator).map((member) => member.userId)
         );
+        setAdministratorsReady(true);
       })
       .catch((error) => {
-        if (active) message.error(error?.message || intl.formatMessage({ id: 'employeePublication.refreshFailed' }));
+        if (active) {
+          setAdministratorsError(
+            (typeof error === 'string' ? error : error?.message) ||
+              intl.formatMessage({ id: 'orgMgr.administrators.loadFailed' })
+          );
+        }
       })
       .finally(() => {
         if (active) setAdministratorsLoading(false);
@@ -74,7 +93,7 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
     return () => {
       active = false;
     };
-  }, [visible, type, record?.orgId]);
+  }, [visible, type, record?.orgId, loadAttempt]);
 
   // 将汉字转换为拼音
   const handleNameChange = (e) => {
@@ -106,8 +125,9 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
       width={480}
       footer={type === 'detail' ? null : undefined}
       confirmLoading={confirmLoading}
-      okButtonProps={{ disabled: administratorsLoading }}
+      okButtonProps={{ disabled: administratorsLoading || !administratorsReady }}
       onOk={() => {
+        if (administratorsLoading || !administratorsReady) return;
         form.validateFields().then((vals) => {
           setConfirmLoading(true);
           const url = type === 'add' ? 'orgMgr/addOrg' : 'orgMgr/updateOrg';
@@ -131,7 +151,13 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
         });
       }}
     >
-      <Form form={form} labelCol={{ span: 5 }} wrapperCol={{ span: 19 }} disabled={type === 'detail'}>
+      <Form
+        form={form}
+        initialValues={{ administratorIds: [] }}
+        labelCol={{ span: 5 }}
+        wrapperCol={{ span: 19 }}
+        disabled={type === 'detail'}
+      >
         <Form.Item
           label={intl.formatMessage({ id: 'orgMgr.modal.orgName' })}
           name="orgName"
@@ -214,7 +240,7 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
             placeholder={
               record?.parentOrgId === -1 ? '' : intl.formatMessage({ id: 'orgMgr.modal.parentOrgPlaceholder' })
             }
-            dropdownStyle={{ maxHeight: 200, overflow: 'auto' }}
+            styles={{ popup: { root: { maxHeight: 200, overflow: 'auto' } } }}
             treeDataSimpleMode={{
               id: 'orgId',
               pId: 'parentOrgId',
@@ -239,17 +265,29 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
             style={{ width: '100%' }}
           />
         </Form.Item>
-        {type !== 'add' && (
-          <Form.Item label={intl.formatMessage({ id: 'orgMgr.modal.administrators' })} name="administratorIds">
-            <Select
-              mode="multiple"
-              options={administratorOptions}
-              loading={administratorsLoading}
-              disabled={administratorsLoading || type === 'detail'}
-              optionFilterProp="label"
-              allowClear
-            />
-          </Form.Item>
+        <Form.Item
+          label={intl.formatMessage({ id: 'orgMgr.modal.administrators' })}
+          name="administratorIds"
+          extra={intl.formatMessage({ id: 'orgMgr.administrators.membershipHint' })}
+        >
+          <AdministratorPicker
+            orgId={type === 'add' ? undefined : record?.orgId}
+            parentOrgId={parentOrgId}
+            initialMembers={administratorMembers}
+            disabled={administratorsLoading || !administratorsReady || type === 'detail'}
+          />
+        </Form.Item>
+        {administratorsError && (
+          <Alert
+            type="error"
+            showIcon
+            message={administratorsError}
+            action={
+              <Button onClick={() => setLoadAttempt((previous) => previous + 1)}>
+                {intl.formatMessage({ id: 'orgMgr.administrators.retry' })}
+              </Button>
+            }
+          />
         )}
         <Form.Item label={intl.formatMessage({ id: 'orgMgr.modal.orgDesc' })} name="orgDesc">
           <Input.TextArea
