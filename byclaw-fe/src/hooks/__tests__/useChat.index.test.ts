@@ -181,6 +181,52 @@ describe('hooks/useChat/index', () => {
     });
   });
 
+  it('does not create a default-employee placeholder when resuming after sandbox state was lost', async () => {
+    mockMessageList = [
+      {
+        msgId: 'query-client',
+        messageId: '101',
+        text: '原始问题',
+        agentType: 'agent',
+        sessionId: '101',
+      },
+      {
+        msgId: 'answer-client',
+        messageId: '201',
+        queryMsgId: 'query-client',
+        fromBeyond: true,
+        agentId: 'employee-42',
+        agentName: '当前数字员工',
+        messageState: IMessageState.Answer,
+        sessionId: '101',
+      },
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery({
+        queryQuestion: '苹果',
+        inheritQryMsgId: 'query-client',
+        payload: {
+          actionType: 'RESUME',
+          traceId: 'trace-1',
+          llmMessageId: '201',
+          sourceAgentType: 'BYCLAW_DSH_u1',
+        },
+        msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+      });
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
   it('waits for session messages before restoring running messages', async () => {
     let resolveSessionMessages!: () => void;
     const sessionMessagesPromise = new Promise<void>((resolve) => {

@@ -9,6 +9,7 @@ import {
   runCommand,
 } from './bridge-bootstrap.mjs';
 import {
+  CHANNELS_COMMAND_ACCESS,
   blockedCliPayload,
   errorCode,
   runGate,
@@ -17,7 +18,6 @@ import {
 const LIST_TIMEOUT_MS = 60_000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_GRACE_MS = 30_000;
-const CHANNELS_COMMANDS = new Set(['overview', 'trend', 'sources', 'posts', 'post-detail']);
 
 function isBrowserConnect(result) {
   const exitCode = Number(result?.exitCode);
@@ -110,8 +110,8 @@ function validateInvocation(stateDir, argv) {
     || !String(argv[2])) {
     throw new Error('runner command must begin with: bycli weixin <command> or bycli weixin-channels <command>');
   }
-  if (argv[1] === 'weixin-channels' && !CHANNELS_COMMANDS.has(String(argv[2]))) {
-    throw new Error('unsupported weixin-channels statistics command');
+  if (argv[1] === 'weixin-channels' && !Object.hasOwn(CHANNELS_COMMAND_ACCESS, String(argv[2]))) {
+    throw new Error('unsupported weixin-channels command');
   }
 }
 
@@ -125,7 +125,8 @@ function optionValue(argv, name) {
 }
 
 export function commandExecutionTimeoutMs(argv) {
-  const commandTimeoutSeconds = Number(optionValue(argv, '--timeout'));
+  const defaultSeconds = argv[1] === 'weixin-channels' && argv[2] === 'video-publish' ? 180 : null;
+  const commandTimeoutSeconds = Number(optionValue(argv, '--timeout') ?? defaultSeconds);
   if (!Number.isFinite(commandTimeoutSeconds) || commandTimeoutSeconds <= 0) {
     return DEFAULT_COMMAND_TIMEOUT_MS;
   }
@@ -187,13 +188,15 @@ export async function loadRuntimeCapability(commandName, site = 'weixin') {
     : entry;
 }
 
-function capabilityDecision(capability, selectedMode, site) {
+function capabilityDecision(capability, selectedMode, site, commandName) {
   if (site === 'weixin-channels') {
-    if (capability?.browser === true && capability?.access === 'read'
+    const browserAllowed = capability?.browser === true
+      || (commandName === 'video-status' && capability?.browser === 'conditional' && selectedMode === 'browser');
+    if (browserAllowed && capability?.access === CHANNELS_COMMAND_ACCESS[commandName]
       && capability?.domain === 'channels.weixin.qq.com') return { allowed: true };
     return {
       allowed: false,
-      message: 'Weixin Channels statistics require read-only browser capability for channels.weixin.qq.com',
+      message: 'Weixin Channels command requires matching access and browser capability for channels.weixin.qq.com; conditional video-status requires --selected-mode browser',
     };
   }
   const browser = capability?.browser;
@@ -245,7 +248,7 @@ export async function runWeixinBrowser({
           message: error.message,
         });
       }
-      const decision = capabilityDecision(capability, selectedMode, commandArgv[1]);
+      const decision = capabilityDecision(capability, selectedMode, commandArgv[1], commandArgv[2]);
       if (!decision.allowed) {
         return internalError({
           exitCode: 2,

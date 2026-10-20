@@ -701,7 +701,7 @@ await new Promise(resolve => setImmediate(resolve))
 if (!emitted?.metadata?.interaction_id || !emitted.prompt.includes('选择方案')) {
   throw new Error('ask_user request did not emit a correlated interaction')
 }
-if (!broker.resume('external-session', '问题 1: B', emitted.metadata.interaction_id)) {
+if (!await broker.resume('external-session', '', '问题 1: B', emitted.metadata.interaction_id)) {
   throw new Error('Resume did not resolve the pending ask_user interaction')
 }
 const answer = await waiting
@@ -739,7 +739,7 @@ const structured = dshProtocol.parseDshInteractionResponse(structuredCommand)
 if (structured?.answers[0]?.selected[0] !== 'B' || structured?.answers[1]?.skipped !== true) {
   throw new Error('structured DSH interaction response was not parsed')
 }
-if (!broker.resumeStructured('structured-session', structured)) {
+if (!await broker.resumeStructured('structured-session', '', structured)) {
   throw new Error('structured DSH interaction did not resolve its matching question')
 }
 const structuredAnswer = await structuredWaiting
@@ -772,5 +772,17 @@ await handler.process(new ResumeCommand(header, 'B', 'RESUMED', null, {
   interaction_id: emitted.metadata.interaction_id,
 }), resumeContext)
 if (calls[1]?.kind !== 'resume' || resumeContext.finished !== true) throw new Error('Resume was not correlated to DSH ask_user')
+
+const recoveredHandler = new ByClawDshCommandHandler({
+  async ask() { throw new Error('recovered Resume must not enter the handler Ask branch') },
+  async resume(_command, context) {
+    assert.equal(context, resumeContext)
+    return { answer: 'continued', finalAnswer: '已根据回答继续', dshSessionId: 'recovered-root' }
+  },
+  cancel() {},
+})
+const recoveredResult = await recoveredHandler.process(new ResumeCommand(header, 'B', 'RESUMED'), resumeContext)
+assert.equal(recoveredResult.content, '已根据回答继续')
+assert.equal(recoveredResult.metadata?.dshSessionId, 'recovered-root')
 
 console.log('BYCLAW_DSH command bridge checks passed')

@@ -10,7 +10,16 @@ import { pathToFileURL } from 'node:url';
 
 const SCHEMA_VERSION = '1.0';
 const MAX_CONFIRMED_RERUNS = 10;
-const CHANNELS_COMMANDS = new Set(['overview', 'trend', 'sources', 'posts', 'post-detail']);
+export const CHANNELS_COMMAND_ACCESS = Object.freeze({
+  overview: 'read',
+  trend: 'read',
+  sources: 'read',
+  posts: 'read',
+  'post-detail': 'read',
+  'video-stats': 'read',
+  'video-status': 'read',
+  'video-publish': 'write',
+});
 const EXCLUDED_OPTIONS = new Map([
   ['--output', true],
   ['--adapter-session', true],
@@ -80,7 +89,7 @@ function canonicalCommand(argv) {
     || !['weixin', 'weixin-channels'].includes(argv[1])) {
     throw new Error('gate command must begin with: bycli weixin <command>');
   }
-  if (argv[1] === 'weixin-channels' && !CHANNELS_COMMANDS.has(argv[2])) {
+  if (argv[1] === 'weixin-channels' && !Object.hasOwn(CHANNELS_COMMAND_ACCESS, argv[2])) {
     throw new Error('unsupported weixin-channels command');
   }
   const canonical = ['bycli', argv[1], String(argv[2])];

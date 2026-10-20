@@ -89,7 +89,7 @@ test('identical business arguments are isolated by the Weixin namespace', async 
   assert.equal(outcome.phase, 'waiting-confirmation');
 });
 
-for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail']) {
+for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail', 'video-stats', 'video-status', 'video-publish']) {
   test(`video ${name} waits without confirmation and completes after a confirmed rerun`, async (t) => {
     const stateDir = await channelsStateDir(t);
     const attempts = [];
@@ -244,7 +244,7 @@ test('video state never persists arbitrary error codes or credentials', async (t
   assert.equal((await stat(statePath)).mode & 0o777, 0o600);
 });
 
-test('video rejects unknown and write commands before either initial or confirmed execution', async (t) => {
+test('video rejects unsupported commands before either initial or confirmed execution', async (t) => {
   const stateDir = await channelsStateDir(t);
   for (const name of ['download', 'delete', 'overview-invalid']) {
     for (const verificationConfirmed of [false, true]) {
