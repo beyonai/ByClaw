@@ -478,26 +478,37 @@ public class FilesApplicationService {
      * @return 输入流
      */
     private InputStream openCommonFileInputStream(String bucketName, String filePath, String shareType) {
+        String fallbackPath = stripBucketPrefix(filePath, bucketName);
+        String userFsFallbackPath = prefixUserFsRootPath(fallbackPath);
+        String primaryPath = shouldPreferUserFsPath(filePath) ? userFsFallbackPath : filePath;
         try {
-            return readCommonFile(bucketName, filePath, shareType);
+            return readCommonFile(bucketName, primaryPath, shareType);
         }
         catch (RuntimeException primaryException) {
             if (StringUtils.isBlank(bucketName)) {
                 throw primaryException;
             }
-            String fallbackPath = stripBucketPrefix(filePath, bucketName);
-            String userFsFallbackPath = prefixUserFsRootPath(fallbackPath);
-            InputStream userFsInputStream = tryReadCommonFile(bucketName, userFsFallbackPath, shareType);
-            if (userFsInputStream != null) {
-                logger.warn(
-                    "Common file preview fallback succeeded with UserFS root prefix, bucketName={}, filePath={}, fallbackPath={}",
-                    bucketName, filePath, userFsFallbackPath);
-                return userFsInputStream;
+            if (!StringUtils.equals(primaryPath, userFsFallbackPath)) {
+                InputStream userFsInputStream = tryReadCommonFile(bucketName, userFsFallbackPath, shareType);
+                if (userFsInputStream != null) {
+                    logger.warn(
+                        "Common file fallback succeeded with UserFS root prefix, bucketName={}, filePath={}, fallbackPath={}",
+                        bucketName, filePath, userFsFallbackPath);
+                    return userFsInputStream;
+                }
+            }
+            if (!StringUtils.equals(primaryPath, filePath)) {
+                InputStream legacyInputStream = tryReadCommonFile(bucketName, filePath, shareType);
+                if (legacyInputStream != null) {
+                    logger.warn("Common file fallback succeeded at legacy session path, bucketName={}, filePath={}",
+                        bucketName, filePath);
+                    return legacyInputStream;
+                }
             }
             try {
                 InputStream inputStream = readCommonFile(null, fallbackPath, shareType);
                 logger.warn(
-                    "Common file preview fallback succeeded without bucket prefix, bucketName={}, filePath={}, fallbackPath={}",
+                    "Common file fallback succeeded without bucket prefix, bucketName={}, filePath={}, fallbackPath={}",
                     bucketName, filePath, fallbackPath);
                 return inputStream;
             }
@@ -505,9 +516,14 @@ public class FilesApplicationService {
                 if (fallbackException != primaryException) {
                     primaryException.addSuppressed(fallbackException);
                 }
-                throw primaryException;
             }
+            throw primaryException;
         }
+    }
+
+    private boolean shouldPreferUserFsPath(String filePath) {
+        String normalizedPath = StringUtils.defaultString(filePath).trim().replace('\\', '/').replaceAll("/+", "/");
+        return normalizedPath.startsWith("/.sessions/") || StringUtils.equals(normalizedPath, "/.sessions");
     }
 
     private InputStream readCommonFile(String bucketName, String filePath, String shareType) {
@@ -603,8 +619,11 @@ public class FilesApplicationService {
         String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("bucketName");
         String filePath = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("filePath");
 
+        logger.info("开始下载公共文件，fileId={}, bucketName={}, filePath={}", fileId, bucketName, filePath);
         try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath,
             WhaleAgentStorageService.SHARE_TYPE_PUBLIC);) {
+            logger.info("公共文件下载输入流获取成功，fileId={}, bucketName={}, filePath={}, responseCommitted={}", fileId,
+                bucketName, filePath, response.isCommitted());
 
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
@@ -614,9 +633,13 @@ public class FilesApplicationService {
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
+            logger.info("公共文件下载响应写入完成，fileId={}, bucketName={}, filePath={}, responseCommitted={}", fileId,
+                bucketName, filePath, response.isCommitted());
         }
         catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            logger.error("公共文件下载失败，fileId={}, bucketName={}, filePath={}, responseCommitted={}", fileId,
+                bucketName, filePath, response.isCommitted(), e);
+            throw new IllegalStateException("公共文件下载失败: " + filePath, e);
         }
 
     }
