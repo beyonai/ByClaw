@@ -228,3 +228,7 @@ const target = 'http://your-api-server:8569';
 本项目基于 [Apache License 2.0](LICENSE) 开源。
 
 Copyright 2026 beyondAI
+
+## 组织发布与开源版资源入口
+
+组织编辑页可设置多名组织管理员。

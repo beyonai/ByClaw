@@ -4,6 +4,7 @@ import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/zh-CN';
 import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/zh-CN';
 
 export default {
+  'orgMgr.modal.administrators': '组织管理员',
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,

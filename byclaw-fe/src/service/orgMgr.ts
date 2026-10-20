@@ -6,3 +6,11 @@ export async function getOrgTree(params: any) {
     ...params,
   });
 }
+
+export interface OrganizationMember {
+  userId: string;
+  userName: string;
+  administrator: boolean;
+}
+export const getOrganizationAdministrators = (orgId: string | number) =>
+  POST<OrganizationMember[]>('/byaiService/system/organization/administrators', { orgId });

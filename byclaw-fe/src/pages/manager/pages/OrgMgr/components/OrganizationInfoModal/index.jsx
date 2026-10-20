@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { connect } from 'dva';
-import { Form, Input, message, TreeSelect, Modal, InputNumber } from 'antd';
+import { Form, Input, message, TreeSelect, Modal, InputNumber, Select } from 'antd';
 import { useIntl } from '@umijs/max';
 import pinyin from 'pinyin';
+import { getOrganizationAdministrators } from '@/service/orgMgr';
 
 const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk }) => {
   const [form] = Form.useForm();
@@ -10,6 +11,8 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
 
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [treeData, setTreeData] = useState([]);
+  const [administratorOptions, setAdministratorOptions] = useState([]);
+  const [administratorsLoading, setAdministratorsLoading] = useState(false);
   // 记录是否手动修改过组织编码
   const [isCodeModified, setIsCodeModified] = useState(false);
 
@@ -49,6 +52,30 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
     }
   }, [record]);
 
+  useEffect(() => {
+    if (!visible || type === 'add' || !record?.orgId) return undefined;
+    let active = true;
+    setAdministratorsLoading(true);
+    getOrganizationAdministrators(record.orgId)
+      .then((members) => {
+        if (!active) return;
+        setAdministratorOptions(members.map((member) => ({ value: member.userId, label: member.userName })));
+        form.setFieldValue(
+          'administratorIds',
+          members.filter((member) => member.administrator).map((member) => member.userId)
+        );
+      })
+      .catch((error) => {
+        if (active) message.error(error?.message || intl.formatMessage({ id: 'employeePublication.refreshFailed' }));
+      })
+      .finally(() => {
+        if (active) setAdministratorsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [visible, type, record?.orgId]);
+
   // 将汉字转换为拼音
   const handleNameChange = (e) => {
     const nameValue = e.target.value;
@@ -79,6 +106,7 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
       width={480}
       footer={type === 'detail' ? null : undefined}
       confirmLoading={confirmLoading}
+      okButtonProps={{ disabled: administratorsLoading }}
       onOk={() => {
         form.validateFields().then((vals) => {
           setConfirmLoading(true);
@@ -184,11 +212,7 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
             disabled={type === 'detail' || type === 'edit' || (type === 'add' && record?.parentOrgId)}
             treeData={treeData}
             placeholder={
-              record?.parentOrgId === -1
-                ? ''
-                : intl.formatMessage({
-                  id: 'orgMgr.modal.parentOrgPlaceholder',
-                })
+              record?.parentOrgId === -1 ? '' : intl.formatMessage({ id: 'orgMgr.modal.parentOrgPlaceholder' })
             }
             dropdownStyle={{ maxHeight: 200, overflow: 'auto' }}
             treeDataSimpleMode={{
@@ -215,6 +239,18 @@ const OrganizationInfoModal = ({ visible, onCancel, type, record, dispatch, onOk
             style={{ width: '100%' }}
           />
         </Form.Item>
+        {type !== 'add' && (
+          <Form.Item label={intl.formatMessage({ id: 'orgMgr.modal.administrators' })} name="administratorIds">
+            <Select
+              mode="multiple"
+              options={administratorOptions}
+              loading={administratorsLoading}
+              disabled={administratorsLoading || type === 'detail'}
+              optionFilterProp="label"
+              allowClear
+            />
+          </Form.Item>
+        )}
         <Form.Item label={intl.formatMessage({ id: 'orgMgr.modal.orgDesc' })} name="orgDesc">
           <Input.TextArea
             rows={4}

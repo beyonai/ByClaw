@@ -36,6 +36,15 @@ public class OrganizationController {
 
     @Autowired
     private OrganizationApplicationService organizationApplicationService;
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.organization.OrganizationAdminService organizationAdmins;
+
+    @RequestMapping(value = "/administrators", method = RequestMethod.POST)
+    public ResponseUtil administrators(@RequestBody @jakarta.validation.Valid OrganizationId request) {
+        return ResponseUtil.successResponse(organizationAdmins.members(request.orgId()));
+    }
+
+    public record OrganizationId(@jakarta.validation.constraints.NotNull Long orgId) { }
 
     /**
      * 新增组织

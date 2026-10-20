@@ -56,6 +56,8 @@ public class OrganizationApplicationService {
 
     @Autowired
     private OrganizationService organizationService;
+    @Autowired
+    private OrganizationAdminService organizationAdmins;
 
     /**
      * 查询组织
@@ -64,7 +66,14 @@ public class OrganizationApplicationService {
      * @return 组织视图对象
      */
     public OrganizationVo searchOrg(SearchOrgQo searchOrgQo) {
-        return organizationMapper.searchOrg(searchOrgQo);
+        OrganizationVo result = organizationMapper.searchOrg(searchOrgQo);
+        if (result != null) {
+            var admins = organizationAdmins.members(result.getOrgId()).stream()
+                .filter(OrganizationAdminService.Member::administrator).toList();
+            result.setAdministratorIds(admins.stream().map(OrganizationAdminService.Member::userId).toList());
+            result.setAdministratorNames(admins.stream().map(OrganizationAdminService.Member::userName).toList());
+        }
+        return result;
     }
 
     /**
@@ -233,6 +242,9 @@ public class OrganizationApplicationService {
         }
 
         Organization updateOrganization = organizationService.updateOrg(organization);
+        if (organization.getAdministratorIds() != null) {
+            organizationAdmins.setAdministrators(organization.getOrgId(), organization.getAdministratorIds());
+        }
 
         // 更新缓存
         ShareCacheUtil.setShareOrganization(updateOrganization);
