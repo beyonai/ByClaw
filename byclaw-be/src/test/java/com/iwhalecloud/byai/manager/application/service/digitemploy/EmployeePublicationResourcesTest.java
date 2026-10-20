@@ -56,6 +56,23 @@ class EmployeePublicationResourcesTest {
         CurrentUserHolder.clearLoginInfo();
         org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
     }
+    @Test void scopedPublicationRestrictsVisibilityAndUseWithoutACompanyRootGrant() {
+        var sequence = mock(com.iwhalecloud.byai.state.domain.sys.service.SequenceService.class);
+        when(sequence.nextVal()).thenReturn(100L, 101L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sequence", sequence);
+        resource.setOwnerType("enterprise");
+        service.grantAudience(resource, 1L, List.of(10L));
+        verify(resources).updateResourceEntity(argThat(r -> Boolean.TRUE.equals(r.getViewAuthControlled())));
+        var inserted = org.mockito.ArgumentCaptor.forClass(PrivilegeGrant.class);
+        verify(grants, times(2)).insert(inserted.capture());
+        assertThat(inserted.getAllValues()).extracting(PrivilegeGrant::getGrantType).containsExactly("ALLOW_VIEW", "FORCE_USE");
+        assertThat(inserted.getAllValues()).allSatisfy(grant -> {
+            assertThat(grant.getGrantToObjId()).isEqualTo(10L);
+            assertThat(grant.getGrantToObjType()).isEqualTo("ORG");
+        });
+        verify(auth, never()).handleAuth(any());
+    }
+
     @Test void audienceUsesTheSourceAndLoginTenantWithoutInferringADefaultEnterprise() {
         assertThat(service.audienceRoots(1L)).containsExactly(1L);
         CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);

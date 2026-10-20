@@ -1,5 +1,20 @@
 // 员工发布、审批及关联资源说明共用文案，避免不同入口遗漏国际化。
 export default {
+  'employeePublication.audience.title': 'Publication audience',
+  'employeePublication.audience.all': 'Entire company',
+  'employeePublication.audience.organizations': 'Selected organizations',
+  'employeePublication.audience.status': 'Review status',
+  'employeePublication.audience.reviewer': 'Reviewer',
+  'employeePublication.audience.comment': 'Review comment',
+  'employeePublication.audience.approve': 'Approve this organization',
+  'employeePublication.audience.PENDING': 'Pending',
+  'employeePublication.audience.APPROVED': 'Approved',
+  'employeePublication.audience.REJECTED': 'Rejected',
+  'employeePublication.audience.required': 'Select at least one organization',
+  'employeePublication.audience.initialHint':
+    'Each organization reviews independently. Only approved organizations and their descendants receive access.',
+  'employeePublication.audience.updateHint':
+    'Shared updates take effect after every published organization approves. The current version remains available during review.',
   'employeePublication.toolbar.reviewNotesLabel': 'Review notes: ',
   'employeePublication.detailLoadFailed': 'Failed to load the publication configuration. Please try again later.',
   'employeePublication.audit.total': 'Total applications: {count}',

@@ -51,3 +51,43 @@ CREATE TABLE IF NOT EXISTS byai.byai_resource_sync_job (
 );
 CREATE INDEX IF NOT EXISTS ix_resource_sync_pending
     ON byai.byai_resource_sync_job (status, next_retry_time);
+
+
+-- 组织级数字员工发布：审核目标与生效范围分别登记；既有副本仍共享同一版本。
+ALTER TABLE byai.digital_employee_publication ADD COLUMN IF NOT EXISTS scope_update BOOLEAN NOT NULL DEFAULT FALSE;
+COMMENT ON COLUMN byai.digital_employee_publication.scope_update IS '配置更新需全部已发布组织审核通过后统一生效；首次发布可逐组织生效';
+
+CREATE TABLE IF NOT EXISTS byai.digital_employee_publication_target (
+    target_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    request_id BIGINT NOT NULL,
+    org_id BIGINT NOT NULL,
+    org_name VARCHAR(255) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    revision BIGINT NOT NULL DEFAULT 0,
+    reviewer_id BIGINT,
+    reviewer_name VARCHAR(255),
+    reviewed_at TIMESTAMP,
+    comment VARCHAR(2000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_employee_publication_target UNIQUE (tenant_id, request_id, org_id),
+    CONSTRAINT ck_employee_publication_target_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    CONSTRAINT ck_employee_publication_target_org CHECK (org_id = -1 OR org_id > 0)
+);
+COMMENT ON TABLE byai.digital_employee_publication_target IS '发布申请的逐组织审核记录；org_id=-1为全公司';
+CREATE INDEX IF NOT EXISTS ix_employee_target_inbox
+    ON byai.digital_employee_publication_target (tenant_id, org_id, status, request_id);
+
+CREATE TABLE IF NOT EXISTS byai.digital_employee_publish_scope (
+    scope_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL,
+    org_id BIGINT NOT NULL,
+    request_id BIGINT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_employee_publish_scope UNIQUE (tenant_id, resource_id, org_id),
+    CONSTRAINT ck_employee_publish_scope_org CHECK (org_id = -1 OR org_id > 0)
+);
+COMMENT ON TABLE byai.digital_employee_publish_scope IS '数字员工当前生效发布范围，独立于尚未完成的审核申请';
+CREATE INDEX IF NOT EXISTS ix_employee_publish_scope_org
+    ON byai.digital_employee_publish_scope (tenant_id, org_id, resource_id);

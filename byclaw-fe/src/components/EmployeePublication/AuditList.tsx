@@ -75,7 +75,7 @@ function EnabledPublicationAuditList({
   onAuditComplete,
   initialReview = false,
   toolbarExtra,
-}: PublicationAuditListProps & { capabilities: { administrator: boolean } }) {
+}: PublicationAuditListProps & { capabilities: { administrator: boolean; reviewer?: boolean } }) {
   const intl = useIntl();
   // 状态说明按当前语言生成，切换语言时不沿用模块初始化时的文案。
   const statusDescription: Record<string, string> = {
@@ -100,8 +100,9 @@ function EnabledPublicationAuditList({
     return intl.formatMessage({ id: 'employeePublication.audit.viewDetails' });
   };
 
+  const canReviewPublications = capabilities.reviewer ?? capabilities.administrator;
   const navigate = useNavigate();
-  const [review, setReview] = useState(initialReview && capabilities.administrator);
+  const [review, setReview] = useState(initialReview && canReviewPublications);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Publication[]>([]);
   const [total, setTotal] = useState(0);
@@ -192,7 +193,7 @@ function EnabledPublicationAuditList({
             }}
             options={[
               { label: intl.formatMessage({ id: 'employeePublication.audit.mine' }), value: 'mine' },
-              ...(capabilities?.administrator
+              ...(canReviewPublications
                 ? [{ label: intl.formatMessage({ id: 'employeePublication.audit.records' }), value: 'review' }]
                 : []),
             ]}
@@ -347,7 +348,7 @@ function EnabledPublicationAuditList({
                     <Button type="link" size="small" disabled={loading || !!approvingId} onClick={() => open(row)}>
                       {detailLabel(row, review, capabilities?.administrator)}
                     </Button>
-                    {capabilities?.administrator && row.canReview && (
+                    {canReviewPublications && row.canReview && (
                       <Button
                         type="primary"
                         size="small"

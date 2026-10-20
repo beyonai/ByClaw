@@ -11,7 +11,8 @@ import {
 } from '@/service/employeePublication';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Alert, Button, Input, Modal, Popover, Space, Tag, message } from 'antd';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import PublicationAudience from './Audience';
 import dayjs from 'dayjs';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import PublicationResourceSummary from './ResourceSummary';
@@ -38,10 +39,19 @@ export default function PublicationToolbar({
   const [busyAction, setBusyAction] = useState<PublicationAction>();
   const busy = !!busyAction;
   const inFlight = useRef(false);
+  const targets = detail.publication.targets || [];
+  const savedAudience = targets.length ? targets.map((target) => String(target.orgId)).sort() : ['-1'];
+  const audienceKey = savedAudience.join(',');
+  const [audience, setAudience] = useState<string[]>(savedAudience);
+  const [reviewOrgIds, setReviewOrgIds] = useState<string[] | undefined>();
+  useEffect(() => {
+    setAudience(savedAudience);
+  }, [detail.publication.requestId, audienceKey]);
+  const audienceDirty = audience.slice().sort().join(',') !== audienceKey;
   const [rejecting, setRejecting] = useState(false);
   const [comment, setComment] = useState('');
   const { confirmPublication, confirmationDialog } = usePublicationConfirmation();
-  const run = async (action: PublicationAction) => {
+  const run = async (action: PublicationAction, targetOrgIds?: string[]) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusyAction(action);
@@ -57,6 +67,14 @@ export default function PublicationToolbar({
         current = saved;
         onChange(saved);
       }
+      if ((action === 'save' || publishing) && audienceDirty && current.canEdit) {
+        if (!audience.length) {
+          message.warning(intl.formatMessage({ id: 'employeePublication.audience.required' }));
+          return;
+        }
+        current = await publicationAction('scope', current.publication, { targetOrgIds: audience });
+        onChange(current);
+      }
       if (action === 'save') {
         message.success(intl.formatMessage({ id: 'employeePublication.toolbar.saved' }));
         return;
@@ -70,7 +88,10 @@ export default function PublicationToolbar({
         onChange(current);
         if ((await confirmPublication(current)) !== 'publish') return;
       }
-      const next = await publicationAction(action, current.publication, { comment });
+      const next = await publicationAction(action, current.publication, {
+        comment,
+        targetOrgIds: targetOrgIds || (action === 'reject' ? reviewOrgIds : undefined),
+      });
       onChange(next);
       if (action === 'submit' && next.publication.status === 'DRAFT' && next.sourceResourcesChanged) {
         message.warning(intl.formatMessage({ id: 'employeePublication.toolbar.sourceChanged' }));
@@ -82,6 +103,7 @@ export default function PublicationToolbar({
       }
       if (action === 'revise') history.replace(publicationUrl(next));
       setRejecting(false);
+      setReviewOrgIds(undefined);
       if (next.publication.status === 'FAILED')
         message.error(next.publication.publishError || intl.formatMessage({ id: 'employeePublication.publishFailed' }));
       else message.success(intl.formatMessage({ id: `employeePublication.status.${next.publication.status}` }));
@@ -156,7 +178,13 @@ export default function PublicationToolbar({
                   ? intl.formatMessage({ id: 'employeePublication.retryPublish' })
                   : intl.formatMessage({ id: 'employeePublication.approveAndPublish' })}
               </Button>
-              <Button disabled={busy} onClick={() => setRejecting(true)}>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setReviewOrgIds(undefined);
+                  setRejecting(true);
+                }}
+              >
                 {intl.formatMessage({ id: 'employeePublication.toolbar.reject' })}
               </Button>
             </>
@@ -212,6 +240,22 @@ export default function PublicationToolbar({
           )}
           {dirty && <span>{intl.formatMessage({ id: 'employeePublication.toolbar.dirtyHint' })}</span>}
         </Space>
+        <PublicationAudience
+          targets={targets}
+          editable={detail.canEdit && detail.publication.status === 'DRAFT'}
+          update={!!detail.publication.scopeUpdate}
+          value={audience}
+          onChange={setAudience}
+          busy={busy}
+          canReview={detail.canReview}
+          onReview={(orgId, approved) => {
+            if (approved) void run('approve', [orgId]);
+            else {
+              setReviewOrgIds([orgId]);
+              setRejecting(true);
+            }
+          }}
+        />
         <div className={styles.policy}>
           <InfoCircleOutlined />
           <span>

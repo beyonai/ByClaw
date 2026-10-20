@@ -502,7 +502,10 @@ const EmployeeDetail = ({ loading }) => {
   const readOnly =
     _readOnly === 'true' ||
     officialUpdate.busy ||
-    (!!publicationId && (!publicationDetail?.canEdit || publicationBusy));
+    (!!publicationId &&
+      (!publicationDetail?.canEdit ||
+        publicationBusy ||
+        (publicationDetail?.publication?.officialId && publicationDetail.publication.scopeUpdate === false)));
   const showManage = !publicationId && _manage === 'true';
   const showConfig = _config === 'true';
   const showOperation = !publicationId && _operation === 'true';

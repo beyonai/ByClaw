@@ -40,6 +40,7 @@ class EmployeePublicationApplicationServiceTest {
     SequenceService sequence = mock(SequenceService.class);
     PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
     EmployeePublicationApplicationService service;
+    EmployeePublicationScopeService scopeService = mock(EmployeePublicationScopeService.class);
     SsResource source;
     DigitalEmployeePublication publication;
     DigitalEmployeeDetailsDTO personalDetails;
@@ -55,6 +56,8 @@ class EmployeePublicationApplicationServiceTest {
         service = new EmployeePublicationApplicationService(publications, resources, governance, employees, dependencies,
             extensions, relations, mock(ResourceRuntimeInfoResolver.class), auth, sequence,
             new TransactionTemplate(transactions), mock(DigEmployeeChangeEventPublisher.class));
+        injectScopes();
+        when(publications.update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1);
         source = employee(10L, 7L);
         when(resources.selectById(10L)).thenReturn(source);
         when(publications.lockResource(10L, 1L)).thenReturn(source);
@@ -85,6 +88,13 @@ class EmployeePublicationApplicationServiceTest {
             var org = new com.iwhalecloud.byai.common.login.bean.UsersOrganization(); org.setUserType(role); org.setOrgId(1L); org.setPathCode("1"); return org;
         }).toList()); CurrentUserHolder.setLoginInfo(info);
     }
+    void injectScopes() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "scopeService", scopeService);
+        when(scopeService.approvedOrgs(any())).thenReturn(List.of(-1L));
+        when(scopeService.allApproved(any())).thenReturn(true);
+        when(scopeService.canReview(any())).thenAnswer(call -> DigitalEmployeeGovernanceService.isAdministrator());
+        when(scopeService.hasReviewAuthority(any())).thenAnswer(call -> DigitalEmployeeGovernanceService.isAdministrator());
+    }
     static SsResource employee(Long id, Long creator) {
         SsResource resource = new SsResource(); resource.setResourceId(id); resource.setCreateBy(creator);
         resource.setComAcctId(1L); resource.setOwnerType("personal"); resource.setResourceStatus(2);
@@ -93,6 +103,40 @@ class EmployeePublicationApplicationServiceTest {
     EmployeePublicationRequest request() {
         EmployeePublicationRequest request = new EmployeePublicationRequest(); request.setRequestId(100L);
         request.setRevision(publication.getRevision()); return request;
+    }
+
+    @Test void sharedVersionDoesNotChangeUntilEveryOrganizationApproves() {
+        login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        var official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        publication.setOfficialId(90L); publication.setScopeUpdate(true);
+        when(resources.selectById(90L)).thenReturn(official);
+        when(scopeService.allApproved(publication)).thenReturn(false);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PENDING");
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(employees, never()).syncPublicationOpenClawWorkSpace(anyLong(), any());
+    }
+
+    @Test void organizationReviewAuthorityDoesNotGrantCandidateEditing() {
+        login("org-admin", 8L, List.of("ORG_MAN")); publication.setStatus("PENDING");
+        when(scopeService.canView(publication)).thenReturn(true);
+        when(scopeService.canReview(publication)).thenReturn(true);
+        when(scopeService.hasReviewAuthority(publication)).thenReturn(true);
+        assertThat(service.detail(100L).canReview()).isTrue();
+        assertThat(service.detail(100L).canEdit()).isFalse();
+        assertThatThrownBy(() -> service.save(request())).hasMessageContaining("审核期间不可编辑");
+    }
+
+    @Test void anotherInitialTargetOnlyAddsAudienceWithoutRewritingThePublishedConfiguration() {
+        login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        var official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        publication.setOfficialId(90L); publication.setScopeUpdate(false);
+        when(resources.selectById(90L)).thenReturn(official);
+        when(scopeService.approvedOrgs(publication)).thenReturn(List.of(10L, 20L));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service, "captureUpdateTarget", publication, official, false);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PUBLISHED");
+        verify(dependencies).grantAudience(official, 1L, List.of(10L, 20L));
+        verify(resources, never()).updateById(any(SsResource.class));
+        verify(employees, never()).syncPublicationOpenClawWorkSpace(anyLong(), any());
     }
 
     @Test void ordinarySubmissionOnlyQueuesReview() {
@@ -131,7 +175,7 @@ class EmployeePublicationApplicationServiceTest {
         EmployeePublicationRequest stale = request(); stale.setRevision(0L);
         assertThatThrownBy(() -> service.preview(stale)).hasMessageContaining("申请已被修改");
         publication.setStatus("PENDING");
-        assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("仅 adminvip");
+        assertThatThrownBy(() -> service.preview(request())).hasMessageContaining("审核权限");
         login("admin", 8L, List.of("PLAT_MAN"));
         assertThat(service.preview(request()).canReview()).isTrue();
         publication.setStatus("PUBLISHED");
@@ -202,7 +246,7 @@ class EmployeePublicationApplicationServiceTest {
     @Test void existingOfficialIsUpdatedInPlaceWithOriginalAttribution() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
         SsResource official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
-        publication.setOfficialId(90L);
+        publication.setOfficialId(90L); publication.setScopeUpdate(true);
         when(resources.selectById(90L)).thenReturn(official);
         when(publications.lockResource(90L, 1L)).thenReturn(official);
         when(publications.official(10L, 1L)).thenReturn(official);
@@ -507,6 +551,15 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(publication.getReviewedAt()).isNotNull();
     }
 
+    @Test void usersWithoutReviewableOrganizationRequestsDoNotScanAllTenantPublications() {
+        login("ordinary", 8L, List.of());
+        assertThat(service.pendingCount()).isZero();
+        when(scopeService.hasOrganizationReviewRole()).thenReturn(true);
+        when(scopeService.visibleRequestIds()).thenReturn(java.util.Set.of());
+        assertThat(service.pendingCount()).isZero();
+        verify(publications, never()).selectList(any());
+    }
+
     @ParameterizedTest @ValueSource(longs = {7L, 9L})
     void copiedAdminvipSkillStillRequiresAdminvipRegardlessOfEmployeeCreator(Long skillCreator) {
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(skillCreator)).thenReturn(creator);
@@ -748,7 +801,7 @@ class EmployeePublicationApplicationServiceTest {
     }
 
     @Test void officialEditingCreatesUpdateDraftWhileReadOnlyEntryShowsPublishedResult() {
-        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L);
+        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L); publication.setScopeUpdate(true);
         SsResource official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
         when(resources.selectById(90L)).thenReturn(official);
         when(publications.lockResource(90L, 1L)).thenReturn(official);
@@ -762,7 +815,7 @@ class EmployeePublicationApplicationServiceTest {
     }
 
     SsResource publishedCopyForPersonalUpdate() {
-        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L);
+        publication.setStatus("PUBLISHED"); publication.setOfficialId(90L); publication.setScopeUpdate(true);
         SsResource official = employee(90L, 7L);
         official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
         official.setResourceName("官方维护名称(企业)");
@@ -958,7 +1011,7 @@ class EmployeePublicationApplicationServiceTest {
     @Test void applyingAttemptCannotBeStartedTwice() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("APPLYING");
         publication.setUpdatedAt(new java.util.Date());
-        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("当前申请状态");
+        assertThatThrownBy(() -> service.approve(request())).hasMessageContaining("发布正在执行");
         verify(resources, never()).insert(any(SsResource.class));
     }
     @Test void administratorCanRecoverAnAbandonedAttempt() {
@@ -1014,6 +1067,7 @@ class EmployeePublicationApplicationServiceTest {
             new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC", url, null, null));
         jdbc.execute("CREATE TABLE request (status TEXT, revision BIGINT, official_id BIGINT, error TEXT, snapshot TEXT)");
         jdbc.execute("CREATE TABLE resource (id BIGINT PRIMARY KEY, body TEXT)");
+        publication.setScopeUpdate(existing);
         jdbc.update("INSERT INTO request VALUES ('PENDING', 1, ?, NULL, ?)", existing ? 90L : null, publication.getSnapshotJson());
         jdbc.update("INSERT INTO resource VALUES (10, ?)", JSON.toJSONString(source));
         if (existing) {
@@ -1058,6 +1112,7 @@ class EmployeePublicationApplicationServiceTest {
         service = new EmployeePublicationApplicationService(publications, resources, governance, txEmployees, dependencies,
             extensions, relations, mock(ResourceRuntimeInfoResolver.class), auth, sequence,
             new TransactionTemplate(manager), mock(DigEmployeeChangeEventPublisher.class));
+        injectScopes();
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.addAdvice(advice.getAdvisor());
         var proxied = (EmployeePublicationApplicationService) factory.getProxy();

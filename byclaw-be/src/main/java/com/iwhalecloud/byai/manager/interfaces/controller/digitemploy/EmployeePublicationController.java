@@ -21,6 +21,14 @@ import org.springframework.web.bind.annotation.*;
 public class EmployeePublicationController {
     private final EmployeePublicationApplicationService publication;
 
+    @GetMapping("/scopeOptions")
+    public ResponseUtil<?> scopeOptions() { return ResponseUtil.successResponse(publication.scopeOptions()); }
+
+    @PostMapping("/scope")
+    public ResponseUtil<Detail> scope(@Valid @RequestBody EmployeePublicationRequest request) {
+        return ResponseUtil.successResponse(publication.saveScope(request));
+    }
+
     /** 发布业务校验应展示具体原因，不能按服务器故障返回 500。 */
     @ExceptionHandler(com.iwhalecloud.byai.common.exception.BaseException.class)
     public org.springframework.http.ResponseEntity<ResponseUtil<Object>> validationFailure(

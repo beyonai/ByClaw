@@ -18,6 +18,7 @@ jest.mock('@umijs/max', () => ({
 
 jest.mock('@/service/employeePublication', () => ({
   publicationAction: jest.fn(),
+  getPublicationScopeOptions: jest.fn(() => Promise.resolve([])),
   previewPublication: jest.fn(),
   downloadPublicationSkill: jest.fn(),
   getPublication: jest.fn(),
