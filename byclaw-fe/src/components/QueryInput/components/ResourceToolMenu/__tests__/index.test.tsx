@@ -8,6 +8,9 @@ import { useSessionDataSourcesVisible } from '@/components/ChatLayoutComp/ChatRe
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import ResourceTabs from '../../../RichInput/mentionPopover/resourceTabsCompact';
 import { ResourceType } from '../../../RichInput/utils/constants';
+import useCommercialEdition from '@/hooks/useCommercialEdition';
+
+jest.mock('@/hooks/useCommercialEdition', () => ({ __esModule: true, default: jest.fn(() => true) }));
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
@@ -47,6 +50,20 @@ describe('resource menu local shared tab', () => {
 });
 
 describe('resource menu categories', () => {
+  it('hides tools and knowledge in open source, including a requested hidden panel, and keeps skills', () => {
+    (useCommercialEdition as jest.Mock).mockReturnValue(false);
+    try {
+      const { rerender } = render(<ResourceToolMenu activeKey="tool" onSelect={jest.fn()} />);
+      expect(screen.queryByRole('button', { name: 'queryInput.tools.tool' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'queryInput.tools.knowledge' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'queryInput.tools.skill' })).toBeVisible();
+      expect(screen.queryByText('resource content tool')).toBeNull();
+      rerender(<ResourceToolMenu activeKey="knowledge" onSelect={jest.fn()} />);
+      expect(screen.queryByText('resource content knowledge')).toBeNull();
+    } finally {
+      (useCommercialEdition as jest.Mock).mockReturnValue(true);
+    }
+  });
   it('reports the natural category height instead of the stretched panel height', () => {
     const originalObserver = global.ResizeObserver;
     global.ResizeObserver = jest.fn(() => ({ observe: jest.fn(), disconnect: jest.fn() })) as any;
