@@ -773,4 +773,16 @@ await handler.process(new ResumeCommand(header, 'B', 'RESUMED', null, {
 }), resumeContext)
 if (calls[1]?.kind !== 'resume' || resumeContext.finished !== true) throw new Error('Resume was not correlated to DSH ask_user')
 
+const recoveredHandler = new ByClawDshCommandHandler({
+  async ask() { throw new Error('recovered Resume must not enter the handler Ask branch') },
+  async resume(_command, context) {
+    assert.equal(context, resumeContext)
+    return { answer: 'continued', finalAnswer: '已根据回答继续', dshSessionId: 'recovered-root' }
+  },
+  cancel() {},
+})
+const recoveredResult = await recoveredHandler.process(new ResumeCommand(header, 'B', 'RESUMED'), resumeContext)
+assert.equal(recoveredResult.content, '已根据回答继续')
+assert.equal(recoveredResult.metadata?.dshSessionId, 'recovered-root')
+
 console.log('BYCLAW_DSH command bridge checks passed')

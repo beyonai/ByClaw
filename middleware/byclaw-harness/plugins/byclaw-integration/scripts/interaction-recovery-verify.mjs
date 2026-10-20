@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import {
   ByClawInteractionStore,
+  buildRecoveredAskPayload,
   interactionRecordKey,
 } from '../src/interaction-recovery.ts'
 
@@ -36,6 +37,13 @@ class FakeRedis {
       record.status = 'ANSWERED'
       record.answer = JSON.parse(args[2])
       record.updatedAt = Number(args[3])
+      this.strings.set(key, JSON.stringify(record))
+      return 1
+    }
+    if (script.includes('BYCLAW_INTERACTION_REOPEN')) {
+      if (!record || record.status !== 'CONSUMED' || record.sessionId !== args[0] || record.userCode !== args[1]) return 0
+      record.status = 'ANSWERED'
+      record.updatedAt = Number(args[2])
       this.strings.set(key, JSON.stringify(record))
       return 1
     }
@@ -89,5 +97,32 @@ assert.equal(await secondProcess.answer({
   interactionId: 'interaction-1', sessionId: 'session-1', userCode: 'user-1',
   answer: { answers: [{ id: 'fruit', selected: ['梨'] }] },
 }), false, 'a consumed interaction must reject duplicate Resume')
+
+assert.deepEqual(buildRecoveredAskPayload({
+  sessionId: 'session-1',
+  agentSessionId: 'agent-child',
+  parentAgentSessionId: 'agent-root',
+  questions: [{ id: 'fruit', question: '喜欢哪些水果？' }],
+  answer: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
+}), {
+  extraPayload: {
+    byclaw_root_session_id: 'session-1',
+    dsh_target_session_id: 'agent-child',
+    dsh_parent_session_id: 'agent-root',
+  },
+  text: '用户已回答之前的 ask_user_question，请根据回答继续原任务。\n喜欢哪些水果：苹果',
+})
+
+await firstProcess.create({
+  interactionId: 'interaction-retry', sessionId: 'session-1', userCode: 'user-1',
+  agentSessionId: 'agent-1', questions: [{ id: 'car', question: '喜欢哪些车？' }],
+})
+await firstProcess.answer({
+  interactionId: 'interaction-retry', sessionId: 'session-1', userCode: 'user-1',
+  answer: { answers: [{ id: 'car', selected: ['BYD'] }] },
+})
+await firstProcess.consume('interaction-retry', 'session-1', 'user-1')
+assert.equal(await firstProcess.reopen('interaction-retry', 'session-1', 'user-1'), true)
+assert.ok(await firstProcess.consume('interaction-retry', 'session-1', 'user-1'), 'failed continuation must remain retryable')
 
 console.log('interaction recovery verification passed')
