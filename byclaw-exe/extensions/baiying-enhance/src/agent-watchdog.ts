@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import {
@@ -12,7 +13,14 @@ import {
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
 import { hasManagedProviderConfigDrift, mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
-import { mutateOpenClawConfigFile } from "./config-writer.js";
+import { assertSafeRuntimeConfigUpdate, mutateOpenClawConfigFile } from "./config-writer.js";
+import { withThinkingProviderReloadConfig } from "./configured-thinking.js";
+import {
+    createRuntimeUpdateQueue,
+    RuntimeUpdateDeferredError,
+    type RuntimeUpdatePayload,
+    type RuntimeUpdateQueue,
+} from "../../shared/src/redis-runtime-update-gate.js";
 import {
     MANAGED_AGENT_PREFIX,
     MANAGED_PROVIDER_PREFIX,
@@ -413,11 +421,13 @@ export type AgentWatchdog = {
     start: (options?: { deferInitialFlush?: boolean }) => Promise<void>;
     stop: () => Promise<void>;
     /**
-     * Run one sync immediately (same as debounced flush).
+     * Queue one sync and attempt it only if the Redis gate permits an idle update.
      * `fullWorkspaceReseed`: dig-employee auth set changed — re-read JSON is already done each flush;
      * also force config write and workspace markdown re-seed for all currently visible agents.
      */
     __flushNow?: (opts?: AgentFlushNowOptions) => Promise<void>;
+    /** Record intent without waiting for idle or running the update in the notification callback. */
+    enqueueSync: (opts?: AgentFlushNowOptions) => Promise<void>;
 };
 
 export function createAgentWatchdog(params: {
@@ -430,17 +440,21 @@ export function createAgentWatchdog(params: {
     aimodelSecretResolverScriptPath?: string;
     debounceMs: number;
     workspaceArchiveApi?: WorkspaceArchiveApi;
+    runtimeUpdateQueue?: RuntimeUpdateQueue;
+    /** Called after an authorized snapshot has actually been applied, including a no-op sync. */
+    onSynced?: () => Promise<void> | void;
+    /** Existing authorized, hash-verified runtime snapshots were restored without applying pending config. */
+    onReadonlySnapshotRestored?: () => Promise<void> | void;
     authorizationFilter?: {
         getAuthorizedSourceKeys: () => Set<string> | undefined;
     };
 }): AgentWatchdog {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let flushInFlight = false;
-    let flushQueued = false;
-    /** Set by `__flushNow({ fullWorkspaceReseed: true })` (Redis auth) to mirror a full directory refresh. */
-    let pendingFullWorkspaceReseed = false;
-    /** Resource ids pending explicit delete (Pub/Sub DIG_EMPLOYEE_DELETED). */
-    const pendingDeletedSourceKeys = new Set<string>();
+    const updateQueue = params.runtimeUpdateQueue ?? createRuntimeUpdateQueue({ logger: params.api.logger });
+    const syncJobKey = "baiying-enhance:managed-agent-sync";
+    const skillJobKey = "baiying-enhance:workspace-skills";
+    let stopped = false;
+    let readonlySnapshotRestored = false;
     /** Content hash of each Redis agent JSON from the last successful sync (loaded from persisted index at start when enabled). */
     const prevHashes = new Map<string, string>();
     /** Effective `agents.list[].skills` signatures from the last successful sync. */
@@ -450,6 +464,7 @@ export function createAgentWatchdog(params: {
     /** Last successful JSON/auth-filtered baseline, before workspace-uploaded skills are merged. */
     let lastBaseManaged: LoadedManagedAgent[] = [];
     let skillRefreshInFlight = false;
+    let lastQueuedSkillSignature = "";
     let lastSkillSyncFailureSignature = "";
     let skillScanTimer: ReturnType<typeof setInterval> | undefined;
     let closeSkillWatchers: (() => void) | undefined;
@@ -527,18 +542,70 @@ export function createAgentWatchdog(params: {
         }
         timer = setTimeout(() => {
             timer = undefined;
-            void flush();
+            void enqueueSync().catch(logEnqueueFailure);
         }, params.debounceMs);
     };
 
+    const logEnqueueFailure = (err: unknown) => {
+        params.api.logger.warn(
+            `baiying-enhance: runtime update enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+    };
+
+    const enqueueSync = (payload: AgentFlushNowOptions = {}): Promise<void> =>
+        updateQueue.enqueue(syncJobKey, payload);
+
+    // Scanning is read-only. Only a changed snapshot is queued; repeated 500ms scans
+    // must not keep replacing pending intent or postpone the idle window forever.
     const refreshWorkspaceSkillsOnly = async () => {
-        if (!workspaceSkillAutoEnable || skillRefreshInFlight || flushInFlight) {
+        if (stopped || !workspaceSkillAutoEnable || skillRefreshInFlight || lastBaseManaged.length === 0) {
+            return;
+        }
+        skillRefreshInFlight = true;
+        try {
+            const effectiveManaged = await mergeWorkspaceSkillsIntoManagedAgents({
+                api: params.api,
+                managed: lastBaseManaged,
+                includeMainShared: workspaceSkillIncludeMainShared,
+                mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+            });
+            const cfg = params.api.runtime.config.loadConfig();
+            const existingSkillsById = new Map(
+                (cfg?.agents?.list ?? []).filter((entry) => entry.id)
+                    .map((entry) => [entry.id!, skillSignature(entry.skills ?? [])]),
+            );
+            const changed = effectiveManaged.some((agent) => {
+                const signature = skillSignature(agent.listEntry.skills ?? []);
+                return prevSkillSignatures.get(agent.agentId) !== signature ||
+                    existingSkillsById.get(agent.agentId) !== signature;
+            });
+            if (!changed) {
+                lastQueuedSkillSignature = "";
+                return;
+            }
+            const signature = managedSnapshotSignature(effectiveManaged);
+            if (signature !== lastQueuedSkillSignature) {
+                await updateQueue.enqueue(skillJobKey);
+                lastQueuedSkillSignature = signature;
+            }
+        } catch (err) {
+            const signature = err instanceof Error ? err.message : String(err);
+            if (signature !== lastSkillSyncFailureSignature) {
+                lastSkillSyncFailureSignature = signature;
+                params.api.logger.warn(`baiying-enhance: workspace skill scan failed: ${signature}`);
+            }
+        } finally {
+            skillRefreshInFlight = false;
+        }
+    };
+
+    const applyWorkspaceSkillsOnly = async () => {
+        if (!workspaceSkillAutoEnable) {
             return;
         }
         if (lastBaseManaged.length === 0) {
             return;
         }
-        skillRefreshInFlight = true;
         let attemptedSkillSyncSignature = "";
         try {
             const effectiveManaged = await mergeWorkspaceSkillsIntoManagedAgents({
@@ -561,7 +628,7 @@ export function createAgentWatchdog(params: {
                 params.api.logger.info(
                     `baiying-enhance: workspace skill sync found stale config snapshot; running full managed agent sync for ${missingManagedIds.length} missing agent(s)`,
                 );
-                void flush();
+                await enqueueSync();
                 return;
             }
             const skillDeltaLines: string[] = [];
@@ -661,28 +728,118 @@ export function createAgentWatchdog(params: {
                     }`,
                 );
             }
-        } finally {
-            skillRefreshInFlight = false;
+            throw err;
         }
     };
 
-    const flush = async () => {
-        if (flushInFlight) {
-            flushQueued = true;
+    const restoreReadonlyRuntimeSnapshot = async (options: {
+        managed: LoadedManagedAgent[];
+        authorizedSourceKeys: Set<string>;
+        deletedSourceKeys: Set<string>;
+        defaultModel: LoadedDefaultModel | null;
+        diskConfig: ReturnType<typeof params.api.runtime.config.loadConfig>;
+    }): Promise<void> => {
+        if (!params.onReadonlySnapshotRestored || readonlySnapshotRestored) {
             return;
         }
-        flushInFlight = true;
-        const forceAuthReseed = pendingFullWorkspaceReseed;
-        pendingFullWorkspaceReseed = false;
-        const deleteBatch = [...pendingDeletedSourceKeys];
-        pendingDeletedSourceKeys.clear();
-        const deleteBatchSet = new Set(deleteBatch.map((k) => k.trim()).filter(Boolean));
+        if (!persistIndex) {
+            params.api.logger.warn("baiying-enhance: pending initial update has no persisted content index; cold-start readiness remains unavailable");
+            return;
+        }
+        // A disk snapshot alone cannot establish what the host has applied.
+        const current = params.api.runtime.config.current?.();
+        if (!current) {
+            params.api.logger.warn("baiying-enhance: pending initial update has no verifiable live config; cold-start readiness remains unavailable");
+            return;
+        }
+        const registered = (current.agents?.list ?? [])
+            .filter((entry) => entry.id?.startsWith(MANAGED_AGENT_PREFIX));
+        if (registered.length === 0) {
+            params.api.logger.warn("baiying-enhance: pending initial update has no existing managed snapshot; cold-start readiness remains unavailable");
+            return;
+        }
+        const effective = workspaceSkillAutoEnable
+            ? await mergeWorkspaceSkillsIntoManagedAgents({
+                  api: params.api,
+                  managed: options.managed,
+                  includeMainShared: workspaceSkillIncludeMainShared,
+                  mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+              })
+            : options.managed;
+        const candidate = mergeManagedAgentsIntoConfig({
+            base: options.diskConfig,
+            managed: effective,
+            defaultModel: options.defaultModel,
+            mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+            mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
+            aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+            aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+            aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+            aimodelSecretResolverCommand: process.execPath,
+            aimodelSecretResolverArgs: [params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js"],
+        });
+        const byId = new Map(effective.map((agent) => [agent.agentId, agent]));
+        const restored: LoadedManagedAgent[] = [];
+        for (const entry of registered) {
+            const agent = byId.get(entry.id!);
+            const expected = candidate.agents?.list?.find((item) => item.id === entry.id);
+            const primary = agent?.listEntry.model?.primary;
+            const model = primary ? parseModelPrimaryRef(primary) : null;
+            const expectedProvider = model ? candidate.models?.providers?.[model.provider] : undefined;
+            const appliedProvider = model ? current.models?.providers?.[model.provider] : undefined;
+            // SecretRefs materialize to strings in current(); compare their declaration
+            // against disk and every non-secret applied provider field instead.
+            let providerMatches = isDeepStrictEqual(appliedProvider, expectedProvider);
+            if (expectedProvider?.apiKey && typeof expectedProvider.apiKey === "object" &&
+                typeof appliedProvider?.apiKey === "string" && appliedProvider.apiKey.length > 0) {
+                const diskProvider = model ? options.diskConfig.models?.providers?.[model.provider] : undefined;
+                providerMatches = isDeepStrictEqual(diskProvider?.apiKey, expectedProvider.apiKey) &&
+                    isDeepStrictEqual({ ...appliedProvider, apiKey: undefined }, { ...expectedProvider, apiKey: undefined });
+            }
+            if (!agent || !options.authorizedSourceKeys.has(agent.sourceKey) ||
+                options.deletedSourceKeys.has(agent.sourceKey) ||
+                prevHashes.get(agent.agentId) !== agent.contentHash ||
+                !expected || !isDeepStrictEqual(entry, expected) ||
+                !model || !expectedProvider || !appliedProvider || !providerMatches) {
+                params.api.logger.warn(
+                    `baiying-enhance: existing snapshot ${entry.id} could not be verified against authorization, content index and live config; cold-start readiness remains unavailable`,
+                );
+                return;
+            }
+            restored.push(agent);
+        }
+        const latestAuthorization = params.authorizationFilter?.getAuthorizedSourceKeys();
+        if (!latestAuthorization || restored.some((agent) => !latestAuthorization.has(agent.sourceKey))) {
+            return;
+        }
+        params.registry.replaceAll(restored);
+        readonlySnapshotRestored = true;
+        params.api.logger.info(`baiying-enhance: restored ${restored.length} authorized existing runtime snapshot(s) read-only; native reload remains pending`);
+        await params.onReadonlySnapshotRestored();
+    };
 
+    const flush = async (payload: RuntimeUpdatePayload) => {
+        const forceAuthReseed = payload.fullWorkspaceReseed === true;
+        const deleteBatchSet = new Set((payload.deletedSourceKeys ?? []).map((key) => key.trim()).filter(Boolean));
         try {
             const cfgBeforeLoad = params.api.runtime.config.loadConfig();
             const defaultModel = await resolveDefaultModelForFlush(cfgBeforeLoad);
             const authorizedSourceKeys = params.authorizationFilter?.getAuthorizedSourceKeys();
             if (authorizedSourceKeys === undefined) {
+                if (defaultModel) {
+                    assertSafeRuntimeConfigUpdate(cfgBeforeLoad, withThinkingProviderReloadConfig(
+                        mergeDefaultAimodelIntoConfig({
+                            base: cfgBeforeLoad,
+                            defaultModel,
+                            mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                            aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                            aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                            aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                            aimodelSecretResolverCommand: process.execPath,
+                            aimodelSecretResolverArgs: [params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js"],
+                        }),
+                    ), params.api.runtime.version ?? "unknown");
+                }
                 await syncDefaultModelOnlyIfNeeded({
                     cfgBeforeLoad,
                     defaultModel,
@@ -762,9 +919,6 @@ export function createAgentWatchdog(params: {
                 unauthorizedMountedWorkspaceCheckDone = true;
             };
 
-            // Cold start / auth refresh: compare auth dig-employee ids with on-disk workspaces BEFORE restore/sync.
-            await runMountedWorkspaceCheck("pre-restore");
-
             const previousByAgentId = new Map(
                 params.registry.list().map((agent) => [agent.agentId, agent] as const),
             );
@@ -786,6 +940,36 @@ export function createAgentWatchdog(params: {
                 managed = managed.filter((agent) => !deleteBatchSet.has(agent.sourceKey));
             }
             const filteredManaged = managed;
+            // Determine whether this update needs native plugin reload BEFORE any
+            // restore, download, cleanup, archive, seed or registry replacement.
+            try {
+                assertSafeRuntimeConfigUpdate(cfgBeforeLoad, withThinkingProviderReloadConfig(
+                    mergeManagedAgentsIntoConfig({
+                        base: cfgBeforeLoad,
+                        managed: filteredManaged,
+                        defaultModel,
+                        mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                        mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
+                        aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                        aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                        aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                        aimodelSecretResolverCommand: process.execPath,
+                        aimodelSecretResolverArgs: [params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js"],
+                    }),
+                ), params.api.runtime.version ?? "unknown");
+            } catch (error) {
+                if (error instanceof RuntimeUpdateDeferredError) {
+                    await restoreReadonlyRuntimeSnapshot({
+                        managed: filteredManaged,
+                        authorizedSourceKeys,
+                        deletedSourceKeys: deleteBatchSet,
+                        defaultModel,
+                        diskConfig: cfgBeforeLoad,
+                    });
+                }
+                throw error;
+            }
+            await runMountedWorkspaceCheck("pre-restore");
             await restoreManagedAgentWorkspaces({
                 api: params.api,
                 pluginConfig: params.pluginConfig,
@@ -1098,6 +1282,7 @@ export function createAgentWatchdog(params: {
                         log: { warn: (m) => params.api.logger.warn(m) },
                     });
                 }
+                await params.onSynced?.();
                 return;
             }
 
@@ -1240,21 +1425,25 @@ export function createAgentWatchdog(params: {
                     warn: (m) => params.api.logger.warn(m),
                 });
             }
+            lastQueuedSkillSignature = "";
+            await params.onSynced?.();
         } catch (err) {
             params.api.logger.error(
-                `baiying-enhance: sync failed: ${err instanceof Error ? err.message : String(err)}`,
+                `baiying-enhance: sync deferred/failed: ${err instanceof Error ? err.message : String(err)}`,
             );
-        } finally {
-            flushInFlight = false;
-            if (flushQueued) {
-                flushQueued = false;
-                void flush();
-            }
+            // The Redis queue must retain the intent (including explicit deletes)
+            // on policy deferral or failure. Swallowing this loses pending work.
+            throw err;
         }
     };
 
+    const unregisterSync = updateQueue.register(syncJobKey, flush);
+    const unregisterSkills = updateQueue.register(skillJobKey, applyWorkspaceSkillsOnly);
+
     return {
         start: async (options?: { deferInitialFlush?: boolean }) => {
+            stopped = false;
+            updateQueue.start();
             params.api.logger.info(
                 "baiying-enhance: agent sync engine started (Redis JSON loading only; triggers: Redis Pub/Sub, dig-employee auth, __flushNow; main run aimodel diff)",
             );
@@ -1278,6 +1467,7 @@ export function createAgentWatchdog(params: {
             }
         },
         stop: async () => {
+            stopped = true;
             if (timer) {
                 clearTimeout(timer);
                 timer = undefined;
@@ -1288,20 +1478,15 @@ export function createAgentWatchdog(params: {
             }
             closeSkillWatchers?.();
             closeSkillWatchers = undefined;
+            if (!params.runtimeUpdateQueue) {
+                await updateQueue.stop();
+            }
+            unregisterSync();
+            unregisterSkills();
         },
+        enqueueSync,
         __flushNow: async (opts?: AgentFlushNowOptions) => {
-            if (opts?.fullWorkspaceReseed) {
-                pendingFullWorkspaceReseed = true;
-            }
-            if (opts?.deletedSourceKeys?.length) {
-                for (const k of opts.deletedSourceKeys) {
-                    const id = String(k ?? "").trim();
-                    if (id) {
-                        pendingDeletedSourceKeys.add(id);
-                    }
-                }
-            }
-            await flush();
+            await updateQueue.applyNow(syncJobKey, opts ?? {});
         },
     };
 }

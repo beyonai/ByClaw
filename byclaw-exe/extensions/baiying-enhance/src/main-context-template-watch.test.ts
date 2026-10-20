@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMainContextTemplateWatch } from "./main-context-template-watch.js";
 import { seedMainAgentAgentsMd } from "./main-workspace-seed.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
@@ -11,6 +11,8 @@ import { SUBAGENT_ROUTING_FILENAME } from "./subagent-routing-seed.js";
 const REDIS_KEY = "byai:SystemConfig:paramCode";
 const PARAM_CODE = "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT";
 const HASH_ENTRY_KEY = `${REDIS_KEY}:${PARAM_CODE}`;
+
+afterEach(() => vi.useRealTimers());
 
 function payloadFromContent(key: string, content: string): RedisJsonPayload {
   return {
@@ -75,6 +77,58 @@ function mainContextTemplate(version: string) {
 }
 
 describe("main context template watcher", () => {
+  it("retries an unchanged first template on the polling timer after Redis enqueue fails", async () => {
+    vi.useFakeTimers();
+    const hashEntries = new Map([[HASH_ENTRY_KEY, systemConfigPayload(mainContextTemplate("v1"))]]);
+    const onChange = vi.fn().mockRejectedValueOnce(new Error("Redis enqueue unavailable")).mockResolvedValue(undefined);
+    const watcher = createMainContextTemplateWatch({
+      redisJsonStore: createMemoryRedisJsonStore(hashEntries),
+      pluginConfig: { mainContextTemplatePollMs: 1000 },
+      logger: { info: vi.fn(), warn: vi.fn() },
+      onChange,
+    });
+
+    try {
+      await watcher.start();
+      expect(onChange).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange.mock.calls[1][0]).toEqual(onChange.mock.calls[0][0]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onChange).toHaveBeenCalledTimes(2);
+    } finally {
+      await watcher.stop();
+    }
+  });
+
+  it("keeps the previous acknowledged hash until a changed template is queued successfully", async () => {
+    vi.useFakeTimers();
+    const hashEntries = new Map([[HASH_ENTRY_KEY, systemConfigPayload(mainContextTemplate("v1"))]]);
+    const onChange = vi.fn().mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Redis enqueue unavailable")).mockResolvedValue(undefined);
+    const watcher = createMainContextTemplateWatch({
+      redisJsonStore: createMemoryRedisJsonStore(hashEntries),
+      pluginConfig: { mainContextTemplatePollMs: 1000 },
+      logger: { info: vi.fn(), warn: vi.fn() },
+      onChange,
+    });
+
+    try {
+      await watcher.start();
+      hashEntries.set(HASH_ENTRY_KEY, systemConfigPayload(mainContextTemplate("v2")));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onChange).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onChange).toHaveBeenCalledTimes(3);
+      expect(onChange.mock.calls[2][0]).toEqual(onChange.mock.calls[1][0]);
+      expect(onChange.mock.calls[2][0].firstRun).toBe(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onChange).toHaveBeenCalledTimes(3);
+    } finally {
+      await watcher.stop();
+    }
+  });
+
   it("polls Redis context template independently and refreshes only when hash changes", async () => {
     const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-main-context-watch-"));
     await writeFile(path.join(mainWs, "SOUL.md"), "# Base SOUL\n", "utf8");

@@ -462,13 +462,15 @@ export function registerManagedAgentModelHooks(
   );
 
   setSessionModelPreparer(
-    aimodelRunSync ? async (sessionId) => {
+    aimodelRunSync ? async (sessionId, signal) => {
       await resolveSessionModelOverride({
         api,
         pluginConfig: aimodelRunSync.pluginConfig,
         sessionId,
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
         log: api.logger,
+        requireReady: true,
+        signal,
       });
     } : undefined,
   );
@@ -491,6 +493,7 @@ export function registerManagedAgentModelHooks(
           sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
           aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
           log: api.logger,
+          allowConfigMutation: false,
         }).catch((error: unknown) => {
           api.logger.warn(
             `baiying-enhance: session model override resolve failed: ${
@@ -537,6 +540,7 @@ export function registerManagedAgentModelHooks(
         sessionId: resolveLangfuseSessionIdFromHookContext(ctx),
         aimodelSecretResolverScriptPath: aimodelRunSync.aimodelSecretResolverScriptPath,
         log: api.logger,
+        allowConfigMutation: false,
       });
       if (sessionOverride) {
         api.logger.info(
@@ -547,7 +551,7 @@ export function registerManagedAgentModelHooks(
           modelOverride: sessionOverride.model,
         };
       }
-      const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId);
+      const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId, { allowConfigMutation: false });
       if (mainDefault) {
         return mainDefault;
       }

@@ -5,7 +5,9 @@ import {
     resolveAimodelSecretProviderName,
     resolveBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
-import { mutateOpenClawConfigFile } from "./config-writer.js";
+import { mutateOpenClawConfigFile, waitForQueuedRuntimeConfig } from "./config-writer.js";
+import { isManagedModelRegisteredInConfig } from "./agent-session-model-reconcile.js";
+import { isRuntimeUpdateApplying, RuntimeUpdateDeferredError } from "../../shared/src/redis-runtime-update-gate.js";
 import { getSharedRedisJsonStore, type RedisJsonPayload } from "./redis-json-store.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 
@@ -46,11 +48,13 @@ function readString(raw: unknown, key: string): string {
 async function readOverridePayload(params: {
     sessionId: string;
     log: LoggerLike;
+    requireReady?: boolean;
 }): Promise<RedisJsonPayload | null> {
     const store = getSharedRedisJsonStore({ logger: params.log });
     try {
         return await store.getJsonByKey(sessionModelOverrideRedisKey(params.sessionId));
     } catch (error) {
+        if (params.requireReady || isRuntimeUpdateApplying()) throw error;
         params.log.warn?.(
             `baiying-enhance: session model override read failed, sessionId=${params.sessionId}: ${
                 error instanceof Error ? error.message : String(error)
@@ -65,18 +69,35 @@ async function readOverridePayload(params: {
  *
  * <p>返回 undefined 表示没有会话覆盖或覆盖不可用，调用方应回退到数字员工配置模型。
  */
-export async function resolveSessionModelOverride(params: {
+type SessionModelOverrideParams = {
     api: OpenClawPluginApi;
     pluginConfig: BaiyingEnhancePluginConfig;
     sessionId?: string;
     aimodelSecretResolverScriptPath?: string;
     log: LoggerLike;
-}): Promise<SessionModelOverrideRef | undefined> {
+    allowConfigMutation?: boolean;
+    requireReady?: boolean;
+    signal?: AbortSignal;
+};
+
+export async function resolveSessionModelOverride(params: SessionModelOverrideParams): Promise<SessionModelOverrideRef | undefined> {
+    try {
+        return await resolveSessionModelOverrideInternal(params);
+    } catch (error) {
+        if (isRuntimeUpdateApplying() || params.allowConfigMutation !== false) throw error;
+        // A refresh failure in a running model hook must leave the prepared
+        // model alone. New dispatch preparation reports its own failure.
+        params.log.warn?.(`baiying-enhance: session model refresh unavailable: ${String(error)}`);
+        return undefined;
+    }
+}
+
+async function resolveSessionModelOverrideInternal(params: SessionModelOverrideParams): Promise<SessionModelOverrideRef | undefined> {
     const sessionId = params.sessionId?.trim();
     if (!sessionId) {
         return undefined;
     }
-    const payload = await readOverridePayload({ sessionId, log: params.log });
+    const payload = await readOverridePayload({ sessionId, log: params.log, requireReady: params.requireReady });
     const modelId = readString(payload?.raw, "modelId");
     if (!modelId) {
         return undefined;
@@ -100,7 +121,12 @@ export async function resolveSessionModelOverride(params: {
     if (!hasManagedProviderConfigDrift(cfg, bundle.providerKey, bundle.provider)) {
         return { providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId };
     }
-    await mutateOpenClawConfigFile(params.api, (base) =>
+    const updateKey = `session-model:${sessionId}`;
+    const ready = () => isManagedModelRegisteredInConfig(
+        currentRuntimeConfig(params.api), bundle.providerKey, bundle.provider.modelId,
+    );
+    try {
+      await mutateOpenClawConfigFile(params.api, (base) =>
         mergeAimodelProviderIntoConfig({
             base,
             providerKey: bundle.providerKey,
@@ -112,16 +138,30 @@ export async function resolveSessionModelOverride(params: {
             aimodelSecretResolverArgs: [
                 params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
             ],
-        }),
-    );
-    // `mutateConfigFile` performs the native in-process reload. The config
-    // object captured by this plugin instance can remain stale while that
-    // reload replaces plugin instances, so polling `current()` here can turn
-    // a successful hot switch into a false timeout. Dispatch resolves the
-    // model from the refreshed runtime after this preparer completes.
-    params.log.info?.(
-        `baiying-enhance: registered session model override provider ${bundle.modelRef} for sessionId=${sessionId}`,
-    );
+        }), {
+          key: updateKey,
+          payload: { sessionId },
+          enqueueOnly: params.allowConfigMutation === false,
+          refresh: async () => { await resolveSessionModelOverride({ ...params, allowConfigMutation: true, requireReady: false }); },
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof RuntimeUpdateDeferredError)) {
+        if (params.allowConfigMutation !== false) throw error;
+        params.log.warn?.(`baiying-enhance: session model update could not be queued: ${String(error)}`);
+        return ready() ? { providerKey: bundle.providerKey, modelRef: bundle.modelRef, model: bundle.provider.modelId } : undefined;
+      }
+      // An update handler must propagate the policy rejection so Redis keeps the job pending.
+      if (isRuntimeUpdateApplying()) throw error;
+      if (params.requireReady && !ready()) {
+        await waitForQueuedRuntimeConfig(updateKey, ready, params.signal);
+      } else if (!ready()) {
+        return undefined;
+      }
+    }
+    // Only ordinary config paths are allowed here. This proves model availability,
+    // not completion of OpenClaw's asynchronous plugin reload machinery.
+    if (!ready()) return undefined;
     return {
         providerKey: bundle.providerKey,
         modelRef: bundle.modelRef,

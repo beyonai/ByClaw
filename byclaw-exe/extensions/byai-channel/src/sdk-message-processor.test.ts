@@ -1,4 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const runtimeUpdateGate = vi.hoisted(() => ({
+  acquire: vi.fn(),
+  prepareModel: vi.fn(),
+}));
+
+vi.mock("../../shared/src/redis-runtime-update-gate.js", () => ({
+  acquireRuntimeExecution: runtimeUpdateGate.acquire,
+}));
+vi.mock("../../shared/src/session-model-runtime.js", () => ({
+  prepareSessionModelForDispatch: runtimeUpdateGate.prepareModel,
+}));
+
+beforeEach(() => {
+  runtimeUpdateGate.acquire.mockReset().mockImplementation(async () => ({
+    release: vi.fn(async () => {}),
+    retain: () => async () => {},
+  }));
+  runtimeUpdateGate.prepareModel.mockReset().mockResolvedValue(undefined);
+});
 
 afterEach(() => vi.useRealTimers());
 
@@ -344,5 +364,168 @@ describe("SDK precheck recovery", () => {
     expect(states).toHaveLength(0);
     await result.finalize();
     expect(states).toHaveLength(1);
+  });
+});
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+function createUpdateGateDispatchFixture(options: {
+  run?: () => Promise<void>;
+  currentConfig?: () => any;
+  agentId?: string;
+  log?: { warn?: (message: string) => void };
+} = {}) {
+  const account = { accountId: "acct-update-gate", enabled: true, configured: true,
+    config: { sessionKeyPerSessionId: false, forceReasoningStream: false } } as ResolvedByaiAccount;
+  const initialConfig = { channels: {}, session: {} };
+  const dispatch = vi.fn(async ({ ctx, replyOptions }: any) => {
+    const runId = `run-update-${ctx.SessionKey}`;
+    await replyOptions.onAgentRunStart(runId);
+    await options.run?.();
+    recordActiveSdkDispatchRunId(ctx.SessionKey, runId);
+    getAgentRunEndPromiseResolver(runId)?.({ success: true });
+    recordActiveSdkRootAgentEnd({ runId, sessionKey: ctx.SessionKey, success: true,
+      messages: [{ role: "assistant", content: "done" }] });
+    markActiveSdkRootLifecycleFinished(ctx.SessionKey, "end", runId);
+    return { queuedFinal: false, counts: {} };
+  });
+  setByaiRuntime({
+    config: { current: options.currentConfig ?? (() => initialConfig) },
+    agent: { resolveAgentWorkspaceDir: () => "/tmp/byai-channel-test-workspace" },
+    channel: {
+      inbound: { runPreparedReply: async ({ runDispatch }: any) => ({ dispatchResult: await runDispatch() }) },
+      routing: { resolveAgentRoute: ({ peer }: any) => ({ sessionKey: `agent:test-agent:direct:${peer.id}`,
+        agentId: options.agentId ?? "test-agent", channel: "byai-channel", accountId: account.accountId }) },
+      session: { recordInboundSession: vi.fn(), resolveStorePath: () => "/tmp/byai-channel-test-sessions.json" },
+      reply: {
+        formatAgentEnvelope: ({ body }: any) => body,
+        resolveEnvelopeFormatOptions: () => ({}),
+        createReplyDispatcherWithTyping: () => ({ dispatcher: {}, replyOptions: {} }),
+        finalizeInboundContext: (ctx: unknown) => ctx,
+        withReplyDispatcher: async ({ run }: any) => run(),
+        dispatchReplyFromConfig: dispatch,
+      },
+    },
+  } as never);
+  registerSdkEmitter(account.accountId, { emitChunk: async () => {}, emitState: async () => {} } as unknown as GatewayDataEmitter);
+  const invoke = (sessionId: string, abortController?: AbortController) => deliverReplyToAgentViaSdk({
+    account, cfg: initialConfig as never, abortController, log: options.log,
+    message: { messageId: `msg-${sessionId}`, sessionId, userId: sessionId, text: "test",
+      timestamp: Date.now(), traceId: `trace-${sessionId}`, accountId: account.accountId,
+      extraPayload: {}, language: "en_US", languageProvided: true },
+    onReply: async () => {},
+  });
+  return { dispatch, invoke };
+}
+
+describe("SDK Redis update admission", () => {
+  it("finishes model preparation before acquiring an execution lease", async () => {
+    const preparation = deferred();
+    runtimeUpdateGate.prepareModel.mockReturnValue(preparation.promise);
+    const fixture = createUpdateGateDispatchFixture();
+    const controller = new AbortController();
+    const pending = fixture.invoke("prepare-before-lease", controller);
+    await vi.waitFor(() => expect(runtimeUpdateGate.prepareModel).toHaveBeenCalledWith("prepare-before-lease", controller.signal));
+    expect(runtimeUpdateGate.acquire).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    preparation.resolve();
+    const result = await pending;
+    expect(runtimeUpdateGate.acquire).toHaveBeenCalledWith({ signal: controller.signal });
+    await result.finalize();
+  });
+
+  it("waits behind an update and reads the applied configuration after admission", async () => {
+    const admission = deferred<any>();
+    const release = vi.fn(async () => {});
+    runtimeUpdateGate.acquire.mockReturnValue(admission.promise);
+    let cfg = { channels: {}, session: {}, updateGeneration: 1 };
+    const fixture = createUpdateGateDispatchFixture({ currentConfig: () => cfg });
+    const pending = fixture.invoke("update-wait");
+    await vi.waitFor(() => expect(runtimeUpdateGate.acquire).toHaveBeenCalledOnce());
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    cfg = { ...cfg, updateGeneration: 2 };
+    admission.resolve({ release, retain: () => async () => {} });
+    const result = await pending;
+    expect(fixture.dispatch.mock.calls[0]?.[0].cfg).toBe(cfg);
+    expect(release).not.toHaveBeenCalled();
+    await result.finalize();
+    await result.finalize();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("holds concurrent model and tool executions through each final output", async () => {
+    const model = deferred();
+    const tool = deferred();
+    const releases = [vi.fn(async () => {}), vi.fn(async () => {})];
+    for (const release of releases) runtimeUpdateGate.acquire.mockResolvedValueOnce({ release, retain: () => async () => {} });
+    const work = vi.fn().mockReturnValueOnce(model.promise).mockReturnValueOnce(tool.promise);
+    const fixture = createUpdateGateDispatchFixture({ run: work });
+    const first = fixture.invoke("parallel-first");
+    const second = fixture.invoke("parallel-second");
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledTimes(2));
+    expect(releases.every((release) => release.mock.calls.length === 0)).toBe(true);
+    model.resolve();
+    const firstResult = await first;
+    expect(releases.every((release) => release.mock.calls.length === 0)).toBe(true);
+    await firstResult.finalize();
+    expect(releases[0]).toHaveBeenCalledOnce();
+    expect(releases[1]).not.toHaveBeenCalled();
+    tool.resolve();
+    const secondResult = await second;
+    expect(releases[1]).not.toHaveBeenCalled();
+    await secondResult.finalize();
+    expect(releases[1]).toHaveBeenCalledOnce();
+  });
+
+  it("retains a cancelled model or tool operation until its actual cleanup finishes", async () => {
+    const running = deferred();
+    const releaseRoot = vi.fn(async () => {});
+    const releaseDispatch = vi.fn(async () => {});
+    const retain = vi.fn(() => releaseDispatch);
+    runtimeUpdateGate.acquire.mockResolvedValue({ release: releaseRoot, retain });
+    const fixture = createUpdateGateDispatchFixture({ run: () => running.promise });
+    const controller = new AbortController();
+    const pending = fixture.invoke("cancelled-original-dispatch", controller);
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledOnce());
+    controller.abort(new Error("user cancelled"));
+    await expect(pending).rejects.toThrow("user cancelled");
+    expect(releaseRoot).toHaveBeenCalledOnce();
+    expect(retain).toHaveBeenCalledOnce();
+    expect(releaseDispatch).not.toHaveBeenCalled();
+    running.resolve();
+    await vi.waitFor(() => expect(releaseDispatch).toHaveBeenCalledOnce());
+  });
+
+  it("does not dispatch a managed employee removed while waiting for an update", async () => {
+    const admission = deferred<any>();
+    const release = vi.fn(async () => {});
+    runtimeUpdateGate.acquire.mockReturnValue(admission.promise);
+    let cfg: any = { agents: { list: [{ id: "baiying-agent-ready", model: "provider/model" }] },
+      models: { providers: { provider: { models: [{ id: "model" }] } } } };
+    const fixture = createUpdateGateDispatchFixture({ agentId: "baiying-agent-ready", currentConfig: () => cfg });
+    const pending = fixture.invoke("removed-employee");
+    await vi.waitFor(() => expect(runtimeUpdateGate.acquire).toHaveBeenCalledOnce());
+    cfg = { agents: { list: [] } };
+    admission.resolve({ release, retain: () => async () => {} });
+    await expect(pending).rejects.toThrow("agent_missing");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it.each(["root", "dispatch"])("does not fail a completed business result when the %s lease release fails", async (scope) => {
+    const releaseRoot = vi.fn(async () => { if (scope === "root") throw new Error("Redis unavailable"); });
+    const releaseDispatch = vi.fn(async () => { if (scope === "dispatch") throw new Error("Redis unavailable"); });
+    runtimeUpdateGate.acquire.mockResolvedValue({ release: releaseRoot, retain: () => releaseDispatch });
+    const warn = vi.fn();
+    const fixture = createUpdateGateDispatchFixture({ log: { warn } });
+    const result = await fixture.invoke(`release-failure-${scope}`);
+    expect(result.finalAnswer).toBe("done");
+    await expect(result.finalize()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("execution release failed; updates remain blocked"));
   });
 });

@@ -1,9 +1,11 @@
+import { createRuntimeUpdateQueue } from "../../shared/src/redis-runtime-update-gate.js";
 import { registerConfiguredThinkingAdapter } from "./configured-thinking.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { AgentRegistryState } from "./agent-state.js";
+import { stopRuntimeConfigUpdates } from "./config-writer.js";
 import {
   DEFAULT_AIMODEL_TYPELIST_FIELD,
   resolveAimodelSecretProviderName,
@@ -87,15 +89,6 @@ const registry = new AgentRegistryState();
 const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ID = "baiying-enhance";
 
-function resolveColdStartReadySettleMs(): number {
-  const raw = Number.parseInt(process.env.BAIYING_COLD_START_READY_SETTLE_MS || "2000", 10);
-  return Number.isFinite(raw) ? Math.max(0, raw) : 2000;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
   try {
     const cfg =
@@ -140,6 +133,12 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
   });
 
+  const runtimeUpdateQueue = createRuntimeUpdateQueue({ logger: api.logger });
+  const mainTemplateJobKey = "baiying-enhance:main-context-template";
+  const zreadModelJobKey = "baiying-enhance:zread-default-model";
+  let unregisterMainTemplateUpdate: (() => void) | undefined;
+  let coldStartReady = false;
+
   let agentWatch: Awaited<ReturnType<typeof import("./agent-watchdog.js").createAgentWatchdog>> | undefined;
   const debounceMs = pluginCfg.watchDebounceMs ?? 500;
   const executorResourcesDir = resolveExecutorResourcesDir(api, pluginCfg);
@@ -161,7 +160,8 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   const notifyZreadDefaultModel = (
     resolved: ResolvedDefaultBaiyingAimodelProviderBundle,
   ): Promise<void> => {
-    return zreadDefaultModelSync.notify(resolved);
+    // Re-read the latest model at apply time; never persist credentials in queue payloads.
+    return runtimeUpdateQueue.enqueue(zreadModelJobKey, { reason: "default-model-changed" });
   };
   const syncZreadDefaultModelFromRedis = async (): Promise<void> => {
     if (!zreadModelSyncSettings.enabled) {
@@ -177,10 +177,11 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       log: { warn: (message) => api.logger.warn(message) },
     });
     if (resolved) {
-      await notifyZreadDefaultModel(resolved);
+      await zreadDefaultModelSync.notify(resolved);
     }
   };
 
+  runtimeUpdateQueue.register(zreadModelJobKey, syncZreadDefaultModelFromRedis);
   setSharedRedisJsonStore(redisJsonStore);
 
   const managePermissionStore = createManagePermissionStore({
@@ -322,6 +323,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     start: async (ctx) => {
       const startMs = performance.now();
       serviceStopped = false;
+      coldStartReady = false;
       resetBaiyingEnhanceColdStartReadiness("service_starting");
 
       const [
@@ -395,8 +397,22 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           api.logger.info(
             `baiying-enhance: dig-employee auth changed (${authorizedIds.size} authorized id(s)); triggering managed agent sync`,
           );
-          await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
+          await agentWatch?.enqueueSync({ fullWorkspaceReseed: true });
         },
+      });
+      unregisterMainTemplateUpdate = runtimeUpdateQueue.register(mainTemplateJobKey, async () => {
+        await seedMainAgentAgentsMd({
+          api,
+          pluginConfig: pluginCfg,
+          redisJsonStore,
+          managedAgents: registry.list(),
+          redisContextOnly: true,
+          skipSubagentRouting: true,
+          log: {
+            warn: (message) => api.logger.warn(message),
+            info: (message) => api.logger.info(message),
+          },
+        });
       });
       if (
         pluginCfg.mainWorkspaceAgentsAutoSeed !== false &&
@@ -414,18 +430,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
             if (serviceStopped) {
               return;
             }
-            await seedMainAgentAgentsMd({
-              api,
-              pluginConfig: pluginCfg,
-              redisJsonStore,
-              managedAgents: registry.list(),
-              redisContextOnly: true,
-              skipSubagentRouting: true,
-              log: {
-                warn: (message) => api.logger.warn(message),
-                info: (message) => api.logger.info(message),
-              },
-            });
+            await runtimeUpdateQueue.enqueue(mainTemplateJobKey);
           },
         });
       } else {
@@ -446,6 +451,23 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         ),
         debounceMs,
         workspaceArchiveApi,
+        runtimeUpdateQueue,
+        onSynced: () => {
+          if (serviceStopped || coldStartReady || digEmployeeAuthWatch?.getAuthorizedIds() === undefined) {
+            return;
+          }
+          coldStartReady = true;
+          markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
+          api.logger.info("baiying-enhance: cold-start readiness signalled after queued initial managed agent sync completed");
+        },
+        onReadonlySnapshotRestored: () => {
+          if (serviceStopped || coldStartReady) {
+            return;
+          }
+          coldStartReady = true;
+          markBaiyingEnhanceColdStartReady("existing_authorized_snapshot_restored_pending_reload");
+          api.logger.info("baiying-enhance: existing authorized runtime snapshot ready; queued native reload is still pending");
+        },
         authorizationFilter: {
           getAuthorizedSourceKeys: () => digEmployeeAuthWatch?.getAuthorizedIds(),
         },
@@ -465,12 +487,12 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
             if (serviceStopped) {
               return;
             }
-            await agentWatch?.__flushNow?.(opts);
+            await agentWatch?.enqueueSync(opts);
           },
         });
       }
       await agentWatch.start({ deferInitialFlush: true });
-      await syncZreadDefaultModelFromRedis().catch((err) => {
+      await runtimeUpdateQueue.enqueue(zreadModelJobKey).catch((err) => {
         api.logger.warn(
           `baiying-enhance: initial Zread default model sync failed: ${
             err instanceof Error ? err.message : String(err)
@@ -498,15 +520,6 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           api.logger.warn(
             "baiying-enhance: cold-start readiness unavailable because dig-employee auth did not load",
           );
-        } else {
-          const settleMs = resolveColdStartReadySettleMs();
-          if (settleMs > 0) {
-            await delay(settleMs);
-          }
-          markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
-          api.logger.info(
-            `baiying-enhance: cold-start readiness signalled after initial managed agent sync (${authorizedIds.size} authorized id(s), settleMs=${settleMs})`,
-          );
         }
         await digEmployeeChangeSubscriber?.start();
       })().catch((err) => {
@@ -529,8 +542,14 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       mainContextTemplateWatch = undefined;
       await digEmployeeAuthWatch?.stop();
       digEmployeeAuthWatch = undefined;
+      // Stop taking queue work and wait for an applying update before closing its stores.
+      // This never aborts an active execution or the applying handler.
+      await runtimeUpdateQueue.stop();
+      await stopRuntimeConfigUpdates();
       await agentWatch?.stop();
       agentWatch = undefined;
+      unregisterMainTemplateUpdate?.();
+      unregisterMainTemplateUpdate = undefined;
       await redisJsonStore.close();
       setSharedRedisJsonStore(null);
       await managePermissionStore.close();

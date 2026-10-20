@@ -4,6 +4,7 @@ import { buildContextFailureText } from "./i18n.js";
 const SLOT = Symbol.for("byclaw.contextRecoveryOperations");
 const MAX_TRACKED_OPERATIONS = 256;
 type Operation = { uncertain: boolean };
+type RetainExecution = () => () => Promise<void>;
 const shared = globalThis as typeof globalThis & { [SLOT]?: Map<string, Operation> };
 function operations(): Map<string, Operation> {
   return shared[SLOT] ??= new Map();
@@ -31,9 +32,20 @@ function release(sessionKey: string, operation: Operation): void {
 }
 
 /** A local abort only stops waiting. Retain protection until the original dispatch settles. */
-export function retainUnsettledContextDispatch(sessionKey: string, promise: Promise<void>, language?: string): void {
+export function retainUnsettledContextDispatch(
+  sessionKey: string,
+  promise: Promise<void>,
+  language?: string,
+  retainExecution?: RetainExecution,
+): void {
   const operation = reserve(sessionKey, true, language);
-  void promise.then(() => release(sessionKey, operation), () => release(sessionKey, operation));
+  const releaseExecution = retainExecution?.();
+  const finish = () => {
+    release(sessionKey, operation);
+    // A failed Redis release leaves the token busy rather than guessing idle.
+    void releaseExecution?.().catch(() => undefined);
+  };
+  void promise.then(finish, finish);
 }
 
 /**
@@ -41,21 +53,30 @@ export function retainUnsettledContextDispatch(sessionKey: string, promise: Prom
  * quarantined; no TTL silently releases it. Resolved RPC results release it normally.
  * Records hold no history/credentials and admission is capped to bound memory.
  */
-export async function withTrackedContextCompaction<T>(sessionKey: string, run: () => Promise<T>, language?: string): Promise<T> {
+export async function withTrackedContextCompaction<T>(
+  sessionKey: string,
+  run: () => Promise<T>,
+  language?: string,
+  retainExecution?: RetainExecution,
+): Promise<T> {
   const operation = reserve(sessionKey, false, language);
+  const releaseExecution = retainExecution?.();
+  let result: T;
   try {
-    const result = await run();
-    release(sessionKey, operation);
-    return result;
+    result = await run();
   } catch (error) {
     // These explicit pre-execution rejections cannot have started a compaction.
     if (error instanceof Error && /^(?:Unauthorized|Forbidden|Gateway requests are only available to bundled or trusted official plugins\.)$/i.test(error.message)) {
       release(sessionKey, operation);
+      await releaseExecution?.();
     } else {
       operation.uncertain = true;
     }
     throw error;
   }
+  release(sessionKey, operation);
+  await releaseExecution?.();
+  return result;
 }
 
 export function resetContextRecoveryOperationsForTest(): void {

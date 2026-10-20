@@ -86,15 +86,33 @@
 
 Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscribe: false` 或环境变量 `BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=false`。插件会读取现有环境变量，也会尝试从 `BAIYING_ENV_FILE`、当前工作目录向上的 `.env`、以及 OpenClaw 状态目录 `.env` 加载 Redis 默认值（不覆盖已存在环境变量），与 `scripts/listen_dig_employee_redis_pubsub.py` 的本地调试体验保持一致。
 
+### Redis 空闲更新队列
+
+数字员工、授权、模型、工作区技能、Hub 技能、main 上下文模板和 Zread 默认模型的后台更新统一进入 Redis 队列。任务执行期间仅合并更新意图，不写 OpenClaw 配置、不覆盖托管文件、不下载技能或清理工作区。执行时重新读取最新 Redis 数据，不把密钥或旧配置快照放入队列。
+
+`byai-channel` 在真实执行边界登记执行 token，覆盖模型调用、工具、重试、续跑和收尾；取消请求并不提前释放 token。最后一个执行结束后必须连续空闲 **3 秒**，队列才能通过 Lua 原子取得更新锁。空闲期间出现新任务会重新计时；更新持锁期间新任务等待。worker 心跳及 telemetry busy 只用于诊断，不作为判空闲依据。需同时部署本次版本的 `baiying-enhance` 和 `byai-channel`。
+
+普通 `agents`、`models`、技能及文件更新在空闲窗口执行。普通配置写入沿用 OpenClaw 原生应用；新派发重新读取已生效配置，模型准备检查可用性。写盘完成不代表完整重载完成。自动写入仅允许经审查不会触发插件或 channel 重启的普通路径，且实际运行版本须为 `2026.7.1`（允许 `-` / `+` 后缀）；其他版本的配置变更保留 pending。会触发原生插件重载、channel 重启或网关重启的变化保留为 **pending**，不写配置、不清理工作区，旧配置继续接单。例如生成的 `thinkingProviderIds` 集合变化需要原生插件重载，必须在受控维护窗口处理；纯插件接口没有可靠的完整重载回执，本实现不使用固定延时或 health 成功冒充重载完成。
+
+若冷启动的首次同步因原生重载而 pending，插件会尝试只读恢复旧运行态：当前生效配置中的每个托管员工都必须仍获授权、未被显式删除，Redis 快照内容 hash 与持久化同步索引一致，且 agent/model/tools 配置与当前生效配置匹配。全部验证通过后只恢复内存 registry 并允许旧配置接单，pending 不会被标记完成；不会改配置或工作区。缺少索引、快照变化或任一现有员工不匹配时，明确保持未 ready，等待维护处理。
+
+pending 按稳定实例标识持久保存（优先 `BYAI_WORKER_ID`，否则使用用户与主机组合），跨网关进程重启保留；执行 token 和更新锁按进程 generation 隔离。Redis 故障、已初始化状态丢失、活动计数与 token 集合不一致或执行 token 未正常释放时暂停更新，不会因心跳超时或 TTL 自动认定任务已结束；FINISH 响应丢失后按 owner 重试 CAS 释放。插件停止等待正在应用的更新退出，不主动中断模型或工具。外部直接修改配置、手工重启及未接入执行 token 的其他 channel 不在本次保护范围内。
+
+当前异常恢复仍有限制：首次 gate 初始化失败会缓存失败结果；执行 token 释放失败尚未自动重试；CLAIM 已生效但响应丢失时可能残留更新锁；Redis 状态 key 丢失后不会自动重建。这些情况不能保证通过再次保存配置恢复，须确认后台任务已停止后受控重启网关。状态 key、旧进程 key 和完成标记尚无自动清理。本次最小方案不包含这些恢复补丁。
+
+此方案沿用每个 worker 单个存活网关进程的部署方式；`BYAI_WORKER_ID` 应保持稳定且实例之间唯一。经审查的普通路径以原版 OpenClaw `2026.7.1` 为准，不能同时安装把这些路径重新声明为插件重载或重启的第三方插件（宿主未公开查询全部 reload 声明的接口）。
+
+并发集成测试仅使用显式指定的隔离 Redis：`RUNTIME_UPDATE_TEST_SOCKET=/path/to/disposable-redis.sock npm test -- src/redis-runtime-update-gate.integration.test.ts`。不设置此变量时该组跳过，不连接业务 Redis。
+
 ### 数字员工模型热切换
 
-数字员工同步会 `writeConfigFile`；本插件把 `agents` 与 `models` 注册为热重载前缀；在已验证的 7.1 上，自身 `plugins.entries.baiying-enhance` 配置使用原生插件重载规则，因此托管 Agent 条目、`models.providers.baiying-m-*`、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走**进程内热加载**（日志通常为 `config change detected` / `config hot reload applied`），**不会**整进程退出重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
+数字员工同步通过上述 Redis 队列保护后调用 `writeConfigFile`；`agents` 与 `models` 使用普通进程内热加载。写入前检查完整候选配置；涉及 `plugins.entries.*`、channel 或网关重启的差异保留 pending。`configSyncHotPluginEntriesPrefixes` 不会绕过该安全检查。
 
 完整链路如下：
 
-1. **监听层**：百应侧修改数字员工模型后，Redis Pub/Sub `digEmployeeChangeChannel` 或授权视图变化触发 `AgentWatchdog.__flushNow`；插件重新读取 `DIG_EMPLOYEE_{resourceId}`，有 `prologue.modelId` 时按该模型解析，没有时读取 Redis Hash `byai:aimodel:typelist` 的 `LLM` field 作为默认 LLM 模型。**main** 在每次 agent run 的 `before_model_resolve` 会再读 Redis typelist，与 `~/.openclaw/baiying-enhance/aimodel-default-llm-index.json` diff，**仅当默认 LLM 变化时**触发 sync 并自动切换 main 的模型（写 `agents.list[].model.primary` + 运行时 override）。
+1. **监听层**：百应侧修改数字员工模型后，Redis Pub/Sub `digEmployeeChangeChannel` 或授权视图变化提交待同步意图；连续空闲 3 秒后插件重新读取 `DIG_EMPLOYEE_{resourceId}`，有 `prologue.modelId` 时按该模型解析，没有时读取 Redis Hash `byai:aimodel:typelist` 的 `LLM` field 作为默认 LLM 模型。**main** 在每次 agent run 的 `before_model_resolve` 会再读 Redis typelist，与 `~/.openclaw/baiying-enhance/aimodel-default-llm-index.json` diff，**仅当默认 LLM 变化时**提交待同步意图，当前执行继续使用已生效配置，后续空闲更新再切换模型。
 2. **配置层**：`mergeManagedAgentsIntoConfig` 写入 `agents.list[].model.primary`、`agents.defaults.model.primary`（供 main/default 使用）、`models.providers.baiying-m-*`，并登记 `agents.defaults.models`；网关热重载会刷新内存配置与 model catalog（`resetModelCatalogCache`）。**API Key 不在 `auth-profiles.json`**：`authToken` 通过 `models.providers.*.apiKey` 的 exec SecretRef + `secrets.providers.baiying-aimodel-redis` 解析；每次成功 `writeConfigFile` 后 OpenClaw 会 `prepareSecretsRuntimeSnapshot` 刷新**运行时 secrets 快照**（内存中的 `getRuntimeConfig()`）。插件 sync 后若日志出现 `runtime secrets snapshot did not materialize apiKey`，说明快照未解析成功，请查 `SECRETS_RELOADER_DEGRADED` 或 aimodel resolver CLI/Redis。若 Redis 员工 JSON 未变但 `agents.list` 与托管 `modelRef` 不一致，插件也会强制 `writeConfigFile` 以触发刷新。
-3. **会话层**：OpenClaw auto-reply 实际读取 `providerOverride` / `modelOverride`；插件在每次成功 `writeConfigFile` 后会对当时已存在的 session 做 reconcile（日志 `reconciled session model for …`），同步 `providerOverride` / `modelOverride` 与 `modelProvider` / `model`，并在模型变化时写入 `liveModelSwitchPending`。**新建的 SDK/byai 会话**（例如 `byai-channel:direct:10006251`）可能在 reconcile 之后才创建，因此插件还会在每条入站消息的 `before_dispatch` 钩子里把当前 session 对齐到 `agents.list[].model.primary`。
+3. **会话层**：OpenClaw auto-reply 实际读取 `providerOverride` / `modelOverride`；后台同步不重写正在执行的 session store；session 模型在入站派发前对齐已生效配置。**新建的 SDK/byai 会话**（例如 `byai-channel:direct:10006251`）可能在 reconcile 之后才创建，因此插件还会在每条入站消息的 `before_dispatch` 钩子里把当前 session 对齐到 `agents.list[].model.primary`。
 4. **运行层**：`before_model_resolve` 在每轮 embedded run 再次强制 provider/model，避免内存 session 快照滞后；`before_prompt_build` 还会追加当前运行模型事实，减少模型自我介绍沿用旧上下文。上述 conversation hooks 从 `~/.openclaw/extensions/` 等非 bundled 路径加载时需 `plugins.entries.baiying-enhance.hooks.allowConversationAccess=true`，见下。
 5. **Channel 层**：`byai-channel` 的 SDK worker 在每次投递消息时读取 `getByaiRuntime().config.current()`，不再使用插件启动时捕获的旧配置，因此配置热重载后新的入站消息会走最新 agent/model 定义。
 
@@ -249,7 +267,7 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 
 配置写入时自动维护 `plugins.entries.baiying-enhance.config.thinkingProviderIds`（内部字段，无凭据、无需手填），与模型配置一起写入。新增/移除 provider 触发 7.1 正式插件热加载，重建缓存注册表；不采用轮询补注册。仅修改同一 provider 的配置不需要改变此列表。新增模型须等热加载完成后调用；完整插件环境已验证热新增和并发请求，页面首轮任务的业务时序仍需验收。
 
-自身插件配置使用 7.1 原生 `reload-plugins`，不再用普通 `hotPrefixes` 覆盖掉该动作。其它旧配置前缀仍按现有策略处理。适配器继承现有 Redis synthetic auth；配置中的 SecretRef 解析路径保持不变。
+自身插件配置使用 7.1 原生 `reload-plugins`，不再用普通 `hotPrefixes` 覆盖掉该动作；自动更新队列会将这类差异保留 pending，待维护窗口处理。其它旧配置前缀仍按现有策略处理。适配器继承现有 Redis synthetic auth；配置中的 SecretRef 解析路径保持不变。
 
 安装只需构建并安装正常的 `baiying-enhance` 插件，然后重启或热加载插件。**不修改 OpenClaw 文件、不替换全局 fetch，也没有运行时补丁脚本。** 此方案已在原始 2026.7.1 验证；仓库镜像默认若仍为 2026.6.6，构建时须显式指定 `OPENCLAW_VERSION=2026.7.1`，不要把本次结果视为 6.6.6 兼容证明。此前实验打过桥接补丁的环境需先恢复原始运行时或使用干净镜像。
 

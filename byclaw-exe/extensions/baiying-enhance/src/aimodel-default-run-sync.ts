@@ -19,6 +19,7 @@ import {
 } from "./agent-session-model-reconcile.js";
 import { mergeDefaultAimodelIntoConfig } from "./agent-registry.js";
 import { mutateOpenClawConfigFile } from "./config-writer.js";
+import { isRuntimeUpdateApplying, RuntimeUpdateDeferredError } from "../../shared/src/redis-runtime-update-gate.js";
 import type { ManagedAgentModelResolveResult } from "./managed-agent-model-hook.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
@@ -154,6 +155,7 @@ async function syncDefaultModelDirectly(params: {
     deps: AimodelDefaultRunSyncDeps;
     bundle: ResolvedDefaultBundle;
     reason: string;
+    enqueueOnly?: boolean;
 }): Promise<void> {
     await mutateOpenClawConfigFile(params.deps.api, (base) =>
         mergeDefaultAimodelIntoConfig({
@@ -171,7 +173,14 @@ async function syncDefaultModelDirectly(params: {
             aimodelSecretResolverArgs: [
                 params.deps.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
             ],
-        }),
+        }), {
+            key: "platform-default-model",
+            payload: { reason: params.reason },
+            enqueueOnly: params.enqueueOnly,
+            refresh: async () => {
+                await resolveMainDefaultAimodelOnAgentRun(params.deps, resolveMainParentAgentId(params.deps.pluginConfig));
+            },
+        },
     );
     params.deps.api.logger.info(
         `baiying-enhance: synced platform default LLM ${params.bundle.modelRef} (${params.reason})`,
@@ -183,6 +192,25 @@ async function syncDefaultModelDirectly(params: {
  * diff against the on-disk index, and auto-switch when the platform default changed.
  */
 export async function resolveMainDefaultAimodelOnAgentRun(
+    deps: AimodelDefaultRunSyncDeps,
+    agentId: string | undefined,
+    options?: AimodelDefaultRunSyncOptions,
+): Promise<ManagedAgentModelResolveResult | undefined> {
+    try {
+        return await resolveMainDefaultAimodelOnAgentRunInternal(deps, agentId, options);
+    } catch (error) {
+        if (isRuntimeUpdateApplying()) throw error;
+        if (!(error instanceof RuntimeUpdateDeferredError)) {
+            if (options?.allowConfigMutation !== false) throw error;
+            deps.api.logger.warn(`baiying-enhance: default model update could not be queued: ${String(error)}`);
+            return undefined;
+        }
+        deps.api.logger.info(`baiying-enhance: platform default model update pending: ${error.message}`);
+        return undefined;
+    }
+}
+
+async function resolveMainDefaultAimodelOnAgentRunInternal(
     deps: AimodelDefaultRunSyncDeps,
     agentId: string | undefined,
     options?: AimodelDefaultRunSyncOptions,
@@ -264,10 +292,8 @@ export async function resolveMainDefaultAimodelOnAgentRun(
             return override;
         }
         if (!allowConfigMutation) {
-            deps.api.logger.info(
-                `baiying-enhance: main agent run-check read-only; skipping config repair for ${bundle.modelRef}`,
-            );
-            return override;
+            await syncDefaultModelDirectly({ deps, bundle, reason: "main run aimodel config repair", enqueueOnly: true });
+            return undefined;
         }
         await syncDefaultModelDirectly({
             deps,
@@ -306,10 +332,8 @@ export async function resolveMainDefaultAimodelOnAgentRun(
     }
 
     if (!allowConfigMutation) {
-        deps.api.logger.info(
-            `baiying-enhance: main agent run-check read-only; skipping default LLM switch to ${bundle.modelRef}`,
-        );
-        return override;
+        await syncDefaultModelDirectly({ deps, bundle, reason: "main run aimodel diff", enqueueOnly: true });
+        return undefined;
     }
 
     await queueConfigFlush(deps.getFlushNow, warnLog);

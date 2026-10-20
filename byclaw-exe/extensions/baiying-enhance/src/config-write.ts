@@ -1,6 +1,8 @@
 import { withThinkingProviderReloadConfig } from "./configured-thinking.js";
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { MANAGED_PROVIDER_PREFIX } from "./types.js";
+import { assertSafeRuntimeConfigUpdate } from "./config-writer.js";
+import { isRuntimeUpdateApplying, RuntimeUpdateDeferredError } from "../../shared/src/redis-runtime-update-gate.js";
 
 /** Managed Baiying providers always need stream_options.include_usage on MiniMax-like endpoints. */
 export const MANAGED_MODEL_STREAMING_USAGE_COMPAT = {
@@ -57,7 +59,12 @@ export async function writeBaiyingMergedConfig(
     next: OpenClawConfig,
     options?: WriteConfigOptions,
 ): Promise<void> {
+    if (!isRuntimeUpdateApplying()) {
+        throw new RuntimeUpdateDeferredError("Config replacement must be submitted through the Redis update queue");
+    }
     next = withThinkingProviderReloadConfig(next);
+    const before = api.runtime.config.current?.() ?? api.runtime.config.loadConfig();
+    assertSafeRuntimeConfigUpdate(before, next, api.runtime.version);
     const explicitSetPaths = collectManagedProviderModelCompatExplicitSetPaths(next);
     await api.runtime.config.writeConfigFile(next, {
         ...options,

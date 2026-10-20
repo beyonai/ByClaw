@@ -6,6 +6,7 @@
 import { chatChainLog } from "./chat-chain-log.js";
 import path from "node:path";
 import { prepareSessionModelForDispatch } from "../../shared/src/session-model-runtime.js";
+import { acquireRuntimeExecution } from "../../shared/src/redis-runtime-update-gate.js";
 import {
   detectMime,
   fetchRemoteMedia,
@@ -48,7 +49,7 @@ import {
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
-import { waitForBaiyingAgentConfig } from "./managed-agent-config-wait.js";
+import { resolveBaiyingAgentConfigReadiness, waitForBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import {
@@ -433,10 +434,10 @@ export async function deliverReplyToAgentViaSdk(
     // Provider registration can replace the runtime config. Complete it before
     // taking the snapshot that OpenClaw retains throughout this dispatch.
     await awaitWithAbort(
-      prepareSessionModelForDispatch(message.sessionId),
+      prepareSessionModelForDispatch(message.sessionId, deps.abortController?.signal),
       deps.abortController?.signal,
     );
-    const dispatchCfg = await waitForBaiyingAgentConfig({
+    const preparedCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
       agentId: targetAgentId,
@@ -444,15 +445,50 @@ export async function deliverReplyToAgentViaSdk(
       signal: deps.abortController?.signal,
     });
 
-    return await deliverReplyToAgentViaSdkUnderGate({
-      ...deps,
-      cfg: dispatchCfg,
-      sessionKey,
-      routing,
-      targetAgentId,
-      extraPayload,
-      laneMetadata,
-    });
+    // Global model preparation must finish before taking an execution lease:
+    // it may itself wait for the idle update window. Refresh the config after
+    // admission because an update may have completed while this request waited.
+    const execution = await acquireRuntimeExecution({ signal: deps.abortController?.signal });
+    const releaseSafely = (release: () => Promise<void>) => async () => {
+      try {
+        await release();
+      } catch {
+        // The Redis token stays busy on an uncertain release. Do not turn an
+        // already completed model/tool result into a second business failure.
+        log?.warn?.(`[runtime-update] execution release failed; updates remain blocked: sessionKey=${sessionKey}`);
+      }
+    };
+    const releaseExecution = releaseSafely(() => execution.release());
+    try {
+      const dispatchCfg = rt.config?.current?.() ?? preparedCfg;
+      const readiness = resolveBaiyingAgentConfigReadiness(dispatchCfg, targetAgentId);
+      if (!readiness.ready) {
+        throw new Error(`byai-channel agent config not ready after update: agent=${targetAgentId}, reason=${readiness.reason}`);
+      }
+      const businessResult = await deliverReplyToAgentViaSdkUnderGate({
+        ...deps,
+        cfg: dispatchCfg,
+        sessionKey,
+        routing,
+        targetAgentId,
+        extraPayload,
+        laneMetadata,
+        retainExecution: () => releaseSafely(execution.retain()),
+      });
+      return {
+        finalAnswer: businessResult.finalAnswer,
+        finalize: async () => {
+          try {
+            await businessResult.finalize();
+          } finally {
+            await releaseExecution();
+          }
+        },
+      };
+    } catch (error) {
+      await releaseExecution();
+      throw error;
+    }
   }, { signal: deps.abortController?.signal });
 
   if (meta.queued) {
@@ -504,6 +540,7 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     thinkingLevel?: unknown;
   };
   laneMetadata?: ByaiLaneMetadata;
+  retainExecution: () => () => Promise<void>;
 };
 
 async function deliverReplyToAgentViaSdkUnderGate(
@@ -602,6 +639,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     laneMetadata,
     deferFrameworkFinalization: true,
   });
+  activeRequest.retainRuntimeExecution = deps.retainExecution;
   const connectorAuthorization = summarizeConnectorAuthorization(
     activeRequest.authConnectorList,
   );
@@ -724,6 +762,10 @@ async function deliverReplyToAgentViaSdkUnderGate(
       ...(includeMedia ? inboundMediaPayload : {}),
     };
 
+    // The observed-dispatch wrapper can stop waiting on cancellation while
+    // OpenClaw is still cleaning up a model or tool call. Keep the original
+    // operation protected until this function itself has actually exited.
+    const releaseDispatchExecution = deps.retainExecution();
     let dispatchStartedAt = 0;
     try {
       const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
@@ -849,19 +891,23 @@ async function deliverReplyToAgentViaSdkUnderGate(
       }
       throw err;
     } finally {
-      // Agent bus events are deferred with setImmediate. Drain them before
-      // deciding whether a failed precheck is safe to replay or starting RPC.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      await enqueueAfterAgentEvents("context recovery dispatch drain", async () => {});
-      if (isCurrentDispatch() && options?.signal?.aborted && isRecoverableContextPreflightError(options.signal.reason)) {
-        recovery.precheckError = formatDispatchError(options.signal.reason);
-      }
-      if (isCurrentDispatch() && activeRequest.contextOverflowRecovery.precheckError) {
-        markActiveSdkDispatchSettled(sessionKey);
-        markActiveSdkCompactionRetryPending(sessionKey, false);
-        if (activeRequest.boundRunIds.size > 0 && !activeRequest.rootLifecyclePhase) {
-          markActiveSdkRootLifecycleFinished(sessionKey, "error", [...activeRequest.boundRunIds].at(-1));
+      try {
+        // Agent bus events are deferred with setImmediate. Drain them before
+        // deciding whether a failed precheck is safe to replay or starting RPC.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await enqueueAfterAgentEvents("context recovery dispatch drain", async () => {});
+        if (isCurrentDispatch() && options?.signal?.aborted && isRecoverableContextPreflightError(options.signal.reason)) {
+          recovery.precheckError = formatDispatchError(options.signal.reason);
         }
+        if (isCurrentDispatch() && activeRequest.contextOverflowRecovery.precheckError) {
+          markActiveSdkDispatchSettled(sessionKey);
+          markActiveSdkCompactionRetryPending(sessionKey, false);
+          if (activeRequest.boundRunIds.size > 0 && !activeRequest.rootLifecyclePhase) {
+            markActiveSdkRootLifecycleFinished(sessionKey, "error", [...activeRequest.boundRunIds].at(-1));
+          }
+        }
+      } finally {
+        await releaseDispatchExecution();
       }
     }
   }
@@ -879,7 +925,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
         activeRequest.contextOverflowRecovery.generation = (activeRequest.contextOverflowRecovery.generation ?? 0) + 1;
         const runId = activeRequest.contextOverflowRecovery.dispatchRunId;
         if (runId) (activeRequest.contextOverflowRecovery.retiredRunIds ??= new Set()).add(runId);
-        retainUnsettledContextDispatch(sessionKey, operation, message.language);
+        retainUnsettledContextDispatch(sessionKey, operation, message.language, deps.retainExecution);
       },
       dispatch: (signal) => runOneDispatch(message.text, { signal }),
       compact: (signal, remainingMs) => {
@@ -891,7 +937,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
           sessionKey,
           signal,
           timeoutMs: Math.min(remainingMs, ((rt.config?.current?.() ?? cfg).agents?.defaults?.compaction?.timeoutSeconds ?? 180) * 1000 + 30_000),
-          trackOperation: (run) => withTrackedContextCompaction(sessionKey, run, message.language),
+          trackOperation: (run) => withTrackedContextCompaction(sessionKey, run, message.language, deps.retainExecution),
         });
       },
       notice: async (phase, attempt, failureKind) => {

@@ -11,6 +11,20 @@ import {
     resetAimodelDefaultRunSyncForTests,
     resolveMainDefaultAimodelOnAgentRun,
 } from "./aimodel-default-run-sync.js";
+import { resolveDefaultBaiyingAimodelProviderBundle } from "./aimodel-config.js";
+import { runRuntimeUpdateContext, RuntimeUpdateDeferredError } from "../../shared/src/redis-runtime-update-gate.js";
+
+const updates = vi.hoisted(() => ({
+    queue: {
+        register: vi.fn(), start: vi.fn(), enqueue: vi.fn(), applyNow: vi.fn(), stop: vi.fn(),
+    },
+    readPending: vi.fn(),
+}));
+vi.mock("../../shared/src/redis-runtime-update-gate.js", async (importOriginal) => ({
+    ...await importOriginal<typeof import("../../shared/src/redis-runtime-update-gate.js")>(),
+    createRuntimeUpdateQueue: () => updates.queue,
+    readPendingRuntimeUpdate: updates.readPending,
+}));
 
 const bundle = {
     providerKey: "baiying-m-10004014",
@@ -46,6 +60,8 @@ describe("aimodel-default-run-sync", () => {
         indexDir = await mkdtemp(path.join(tmpdir(), "aimodel-run-sync-"));
         vi.stubEnv("OPENCLAW_STATE_DIR", indexDir);
         flushCalls = 0;
+        updates.queue.enqueue.mockReset().mockResolvedValue(undefined);
+        updates.queue.applyNow.mockReset().mockResolvedValue("queued");
     });
 
     afterEach(() => {
@@ -72,6 +88,7 @@ describe("aimodel-default-run-sync", () => {
             api: {
                 logger: { info: vi.fn(), warn: vi.fn() },
                 runtime: {
+                    version: "2026.7.1",
                     config: {
                         current: () => cfg,
                         loadConfig: () => cfg,
@@ -101,6 +118,7 @@ describe("aimodel-default-run-sync", () => {
             api: {
                 logger: { info: vi.fn(), warn: vi.fn() },
                 runtime: {
+                    version: "2026.7.1",
                     config: {
                         current: () => currentCfg,
                         loadConfig: () => diskCfg,
@@ -171,6 +189,7 @@ describe("aimodel-default-run-sync", () => {
             api: {
                 logger: { info: vi.fn(), warn: vi.fn() },
                 runtime: {
+                    version: "2026.7.1",
                     config: {
                         current: () => cfg,
                         loadConfig: () => cfg,
@@ -220,21 +239,21 @@ describe("aimodel-default-run-sync", () => {
         expect(deps.api.logger.info).toHaveBeenCalled();
     });
 
-    it("skips config repair when allowConfigMutation is false", async () => {
+    it("queues a missing model without returning an unavailable override when allowConfigMutation is false", async () => {
         const deps = createUnregisteredDeps();
         const override = await resolveMainDefaultAimodelOnAgentRun(deps, "main", {
             allowConfigMutation: false,
         });
-        expect(override).toEqual({
-            providerOverride: "baiying-m-10004014",
-            modelOverride: "deepseek-v4-flash",
-        });
+        expect(override).toBeUndefined();
+        expect(updates.queue.register).toHaveBeenCalledWith("platform-default-model", expect.any(Function));
+        expect(updates.queue.enqueue).toHaveBeenCalledWith("platform-default-model", { reason: "main run aimodel diff" });
+        expect(updates.queue.applyNow).not.toHaveBeenCalled();
         expect(deps.api.runtime.config.writeConfigFile).not.toHaveBeenCalled();
     });
 
     it("writes the default provider when the watchdog is unavailable and keeps this run on the prior runtime model", async () => {
         const deps = createUnregisteredDeps();
-        const override = await resolveMainDefaultAimodelOnAgentRun(deps, "main");
+        const override = await runRuntimeUpdateContext(() => resolveMainDefaultAimodelOnAgentRun(deps, "main"));
         expect(override).toBeUndefined();
         const indexPath = path.join(indexDir, "baiying-enhance", "aimodel-default-llm-index.json");
         await expect(access(indexPath)).resolves.toBeUndefined();
@@ -265,6 +284,7 @@ describe("aimodel-default-run-sync", () => {
             api: {
                 logger: { info: vi.fn(), warn: vi.fn() },
                 runtime: {
+                    version: "2026.7.1",
                     config: {
                         current: () => currentCfg,
                         loadConfig: () => diskCfg,
@@ -282,10 +302,10 @@ describe("aimodel-default-run-sync", () => {
             getFlushNow: () => undefined,
         } as Parameters<typeof resolveMainDefaultAimodelOnAgentRun>[0];
 
-        const override = await resolveMainDefaultAimodelOnAgentRun(deps, "main", {
+        const override = await runRuntimeUpdateContext(() => resolveMainDefaultAimodelOnAgentRun(deps, "main", {
             runtimeConfigWaitMs: 200,
             runtimeConfigPollMs: 5,
-        });
+        }));
 
         expect(override).toEqual({
             providerOverride: "baiying-m-10004014",
@@ -307,5 +327,31 @@ describe("aimodel-default-run-sync", () => {
         const override = await resolveMainDefaultAimodelOnAgentRun(deps, "baiying-agent-1");
         expect(flushCalls).toBe(0);
         expect(override).toBeUndefined();
+    });
+
+    it("keeps a normal run on its prior model while the config repair is pending", async () => {
+        const deps = createUnregisteredDeps();
+
+        await expect(resolveMainDefaultAimodelOnAgentRun(deps, "main")).resolves.toBeUndefined();
+
+        expect(updates.queue.applyNow).toHaveBeenCalledWith("platform-default-model", { reason: "main run aimodel diff" });
+        expect(deps.api.runtime.config.writeConfigFile).not.toHaveBeenCalled();
+        expect(deps.api.runtime.config.loadConfig().models.providers).toEqual({});
+    });
+
+    it("propagates a plugin reload rejection from the update handler without writing or saving the index", async () => {
+        const deps = createUnregisteredDeps();
+        vi.mocked(resolveDefaultBaiyingAimodelProviderBundle).mockResolvedValueOnce({
+            ...bundle,
+            provider: { ...bundle.provider, reasoningConfig: { enabled: true, compatFormat: "bailian", capability: "effort" } },
+        } as any);
+
+        await expect(runRuntimeUpdateContext(() => resolveMainDefaultAimodelOnAgentRun(deps, "main")))
+            .rejects.toBeInstanceOf(RuntimeUpdateDeferredError);
+
+        expect(deps.api.runtime.config.writeConfigFile).not.toHaveBeenCalled();
+        expect(deps.api.runtime.config.loadConfig().models.providers).toEqual({});
+        const indexPath = path.join(indexDir, "baiying-enhance", "aimodel-default-llm-index.json");
+        await expect(access(indexPath)).rejects.toMatchObject({ code: "ENOENT" });
     });
 });

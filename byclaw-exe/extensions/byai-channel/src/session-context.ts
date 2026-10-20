@@ -39,6 +39,22 @@ const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
 /** Must match `baiying-enhance/src/channel-session-resolve.ts` (read-only access to this store). */
 const STORE_KEY = "__OPENCLAW_BYAI_CHANNEL_SESSION_CONTEXT_STORE__";
+const NATIVE_CHILD_EXECUTION_REFS = Symbol.for("byai-channel.nativeChildExecutionRefs");
+type ReleaseExecutionRef = () => Promise<void>;
+type NativeChildExecutionRef = {
+    childSessionKey: string;
+    retain: () => ReleaseExecutionRef;
+    release: ReleaseExecutionRef;
+};
+
+function nativeChildExecutionRefs(): Map<string, NativeChildExecutionRef> {
+    const shared = globalThis as typeof globalThis & {
+        [NATIVE_CHILD_EXECUTION_REFS]?: Map<string, NativeChildExecutionRef>;
+    };
+    // These are resource-release handles, not an idle counter. Redis remains
+    // authoritative. Keep handles after parent cancellation and plugin reload.
+    return shared[NATIVE_CHILD_EXECUTION_REFS] ??= new Map();
+}
 const MAX_CHAT_CONTEXT_MESSAGES_PER_SESSION = 80;
 const MAX_CHAT_CONTEXT_TEXT_CHARS = 12000;
 
@@ -175,6 +191,8 @@ export interface ActiveSdkRequest {
   firstAnswerDeltaAt?: number;
   firstVisibleResponseAt?: number;
   boundRunIds: Set<string>;
+  /** Retain this request's Redis execution token for independently running children. */
+  retainRuntimeExecution?: () => ReleaseExecutionRef;
   /**
    * native subagent 的权威台账，按 child runId 索引。child sessionKey 会被 core 跨代复用
    * （newerGenerationOwnsSession），只有 runId 能区分迟到的旧代终态。是否「还有 child 在跑」
@@ -1658,12 +1676,18 @@ export async function markActiveSdkRequestSubagentSpawned(
     return undefined;
   }
   const request = resolveActiveSdkRequestBySessionKey(requesterSessionKey);
-  if (!request) {
-    return undefined;
-  }
   const normalizedRunId = normalizeAlias(runId);
   // 由toolCall捕获的 sessions_spawn runId 可能会以*结尾，需要过滤
   if (!normalizedRunId || normalizedRunId.endsWith("*")) {
+    return undefined;
+  }
+  const executionRefs = nativeChildExecutionRefs();
+  const parentRef = [...executionRefs.values()].find((entry) => entry.childSessionKey === requesterSessionKey);
+  const retain = request?.retainRuntimeExecution ?? parentRef?.retain;
+  if (retain && !executionRefs.has(normalizedRunId)) {
+    executionRefs.set(normalizedRunId, { childSessionKey, retain, release: retain() });
+  }
+  if (!request) {
     return undefined;
   }
   // spawn 有两条通道（subagent_spawned hook 与 sessions_spawn 工具结果），同 runId 重复
@@ -1722,10 +1746,26 @@ export function markActiveSdkNativeChildRunTerminal(params: {
   childRunId: string | undefined;
   source: NativeChildRunTerminalSource;
   childSessionKey?: string;
+  outcome?: string;
+  reason?: string;
+  warn?: (message: string) => void;
 }): NativeChildRunTerminalOutcome | undefined {
   const normalizedRunId = normalizeAlias(params.childRunId);
   if (!normalizedRunId) {
     return undefined;
+  }
+  // A parent request can already have been cancelled or timed out. Release the
+  // child reference using the host's final child-ended event even when normal
+  // request lookup is gone. Earlier lifecycle/agent_end facts do not prove that
+  // child finalization and announce bookkeeping have finished.
+  if (params.source === "subagent_ended") {
+    const executionRef = nativeChildExecutionRefs().get(normalizedRunId);
+    if (executionRef && params.outcome === "ok") {
+      nativeChildExecutionRefs().delete(normalizedRunId);
+      void executionRef.release().catch(() => undefined);
+    } else if (executionRef) {
+      params.warn?.(`[runtime-update] native child execution remains protected: runId=${normalizedRunId}, outcome=${params.outcome ?? "unknown"}, reason=${params.reason ?? "unknown"}; confirm background work has stopped before a controlled process restart`);
+    }
   }
   pruneStaleActiveSdkRequests();
   const request = resolveNativeChildRunOwner(normalizedRunId, params.childSessionKey);

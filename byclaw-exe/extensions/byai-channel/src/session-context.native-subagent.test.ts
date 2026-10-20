@@ -75,8 +75,8 @@ async function spawnChild(
   await markActiveSdkRequestSubagentSpawned(request.sessionKey, childSessionKey, childRunId);
 }
 
-function reportTerminal(childRunId: string, source: NativeChildRunTerminalSource) {
-  return markActiveSdkNativeChildRunTerminal({ childRunId, source });
+function reportTerminal(childRunId: string, source: NativeChildRunTerminalSource, outcome?: string) {
+  return markActiveSdkNativeChildRunTerminal({ childRunId, source, outcome });
 }
 
 describe("native subagent completion gate", () => {
@@ -311,5 +311,72 @@ describe("native subagent completion gate", () => {
     expect(shouldCompleteActiveSdkRequest(request)).toBe(true);
 
     clearActiveSdkRequestRecord(request);
+  });
+
+  it("keeps a cancelled parent's execution token until the child's final ended event", async () => {
+    const suffix = "cancelled-parent-execution";
+    const request = setupRequest(suffix);
+    const releaseChild = vi.fn(async () => {});
+    request.retainRuntimeExecution = vi.fn(() => releaseChild);
+    const runId = `run-child-${suffix}`;
+    await spawnChild(request, `agent:test:subagent:${suffix}`, runId);
+    await spawnChild(request, `agent:test:subagent:${suffix}`, runId);
+    expect(request.retainRuntimeExecution).toHaveBeenCalledOnce();
+    finishInboundRun(request, suffix);
+    clearActiveSdkRequestRecord(request);
+    reportTerminal(runId, "child_lifecycle");
+    reportTerminal(runId, "agent_end");
+    reportTerminal(runId, "subagent_progress");
+    expect(releaseChild).not.toHaveBeenCalled();
+    reportTerminal(runId, "subagent_ended", "ok");
+    expect(releaseChild).toHaveBeenCalledOnce();
+    reportTerminal(runId, "subagent_ended", "ok");
+    expect(releaseChild).toHaveBeenCalledOnce();
+  });
+
+  it("does not release sibling execution references when only one child ends", async () => {
+    const suffix = "sibling-execution-refs";
+    const request = setupRequest(suffix);
+    const releases = [vi.fn(async () => {}), vi.fn(async () => {})];
+    request.retainRuntimeExecution = vi.fn().mockReturnValueOnce(releases[0]).mockReturnValueOnce(releases[1]);
+    await spawnChild(request, `agent:test:subagent:${suffix}-a`, `run-${suffix}-a`);
+    await spawnChild(request, `agent:test:subagent:${suffix}-b`, `run-${suffix}-b`);
+    clearActiveSdkRequestRecord(request);
+    reportTerminal(`run-${suffix}-a`, "subagent_ended", "ok");
+    expect(releases[0]).toHaveBeenCalledOnce();
+    expect(releases[1]).not.toHaveBeenCalled();
+    reportTerminal(`run-${suffix}-b`, "subagent_ended", "ok");
+    expect(releases[1]).toHaveBeenCalledOnce();
+  });
+
+  it("retains descendants spawned by a surviving child after parent cancellation", async () => {
+    const suffix = "background-descendant";
+    const request = setupRequest(suffix);
+    const releases = [vi.fn(async () => {}), vi.fn(async () => {})];
+    request.retainRuntimeExecution = vi.fn().mockReturnValueOnce(releases[0]).mockReturnValueOnce(releases[1]);
+    const childSessionKey = `agent:test:subagent:${suffix}`;
+    await spawnChild(request, childSessionKey, `run-${suffix}`);
+    clearActiveSdkRequestRecord(request);
+    await markActiveSdkRequestSubagentSpawned(childSessionKey, `agent:test:subagent:${suffix}-nested`, `run-${suffix}-nested`);
+    expect(request.retainRuntimeExecution).toHaveBeenCalledTimes(2);
+    reportTerminal(`run-${suffix}`, "subagent_ended", "ok");
+    expect(releases[0]).toHaveBeenCalledOnce();
+    expect(releases[1]).not.toHaveBeenCalled();
+    reportTerminal(`run-${suffix}-nested`, "subagent_ended", "ok");
+    expect(releases[1]).toHaveBeenCalledOnce();
+  });
+
+  it.each(["killed", "timeout", "error", undefined])("retains uncertain native child executions after %s ended events", async (outcome) => {
+    const suffix = `uncertain-child-${outcome ?? "unknown"}`;
+    const request = setupRequest(suffix);
+    const releaseChild = vi.fn(async () => {});
+    request.retainRuntimeExecution = () => releaseChild;
+    const runId = `run-${suffix}`;
+    await spawnChild(request, `agent:test:subagent:${suffix}`, runId);
+    clearActiveSdkRequestRecord(request);
+    const warn = vi.fn();
+    markActiveSdkNativeChildRunTerminal({ childRunId: runId, source: "subagent_ended", outcome, warn });
+    expect(releaseChild).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`outcome=${outcome ?? "unknown"}`));
   });
 });

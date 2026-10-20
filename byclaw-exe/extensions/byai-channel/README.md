@@ -151,6 +151,14 @@ SDK 模式下，`ByaiSdkApp` 不缓存启动时传入的 `OpenClawConfig`。每�
 
 这对 `baiying-enhance` 的数字员工模型热切换很关键：百应侧修改数字员工 `prologue.modelId` 后，`baiying-enhance` 会把最新 `agents.list[].model.primary` 与 `models.providers.baiying-m-*` 热写回 OpenClaw；`byai-channel` 后续入站消息会使用热重载后的 agent/model 定义，而不是继续使用 worker 启动时的旧配置。
 
+SDK 派发与插件热更新通过同一实例域的 Redis 状态互斥。需要注册模型的准备阶段先完成，再取得执行 token；若更新已开始，新任务在派发前等待，并在准入后重新读取配置。token 覆盖模型、工具、压缩重试、续跑及最终输出，直到业务 `finalize()` 完成才释放。多个会话各持有独立 token，插件更新等待全部执行结束并连续空闲 3 秒，期间有新任务进入就重新计算空闲时间。
+
+用户取消或 SDK 请求记录被清理不代表底层调用已经停止。原 dispatch 尚未退出时继续保留执行 token；压缩 RPC 结果不确定时保留保护，不按 TTL 假定后台已结束。Redis 不可用或释放失败时暂停更新。现有 telemetry `busy` 快照只作观测，不参与安全准入；本保护不修改 OpenClaw 核心，也不负责外部配置写入或手动网关重启。
+
+原生子任务按 runId 独立保留执行引用，父会话结束、取消或记录被清理后仍然有效；存活子任务再创建的后代也继续持有引用。仅宿主 `subagent_ended` 明确报告正常成功时释放；`killed`、`timeout`、`error` 或未知结果会记录原因并保留更新保护。OpenClaw 2026.7.1 的 `spawnMode=session` 正常结束不发该事件，也会保留保护。这些状态须在确认后台任务已停止后受控重启执行进程解除，不能按 TTL 自动解锁。纯插件接口无法在所有异常路径证明底层 I/O 已退出，因此优先延迟更新。
+
+并发回归覆盖模型准备与执行准入顺序、等待更新后重新读取配置、模型和工具并行执行、取消后的原调用收尾、原生子任务及后代、重复终态和 Redis 释放失败。若本地未安装 OpenClaw SDK，测试需接入官方对应版本；本轮使用官方 `openclaw@2026.7.1` 产物的运行时存储与路由实现，通过临时测试别名避免加载无关 SDK barrel 依赖，未修改正式依赖或 OpenClaw 核心。
+
 ## Session 单写者与 Takeover 防护
 
 OpenClaw embedded run 在模型 I/O 前会短暂释放 session transcript 写锁，并在重抢锁时校验 `.jsonl` 指纹。若同一 `sessionKey` 上并发触发第二次 `dispatchReplyFromConfig`，可能触发：

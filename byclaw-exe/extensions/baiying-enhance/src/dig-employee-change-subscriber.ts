@@ -174,6 +174,7 @@ export function createDigEmployeeChangeSubscriber(params: {
   const lastChangedAtByResourceId = new Map<string, number>();
   const pendingQueue: NormalizedDigEmployeeChangeEvent[] = [];
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushInFlight = false;
 
   const isAuthorized = (resourceIdStr: string): boolean => {
     const auth = params.getAuthorizedIds();
@@ -206,13 +207,13 @@ export function createDigEmployeeChangeSubscriber(params: {
     recordDigEmployeeChangedAt(ev, lastChangedAtByResourceId);
 
   const flushQueue = async () => {
-    if (pendingQueue.length === 0) {
+    if (flushInFlight || pendingQueue.length === 0) {
       return;
     }
     const snapshot = pendingQueue.splice(0, pendingQueue.length);
     const merged = mergeDigEmployeeChangeEvents(snapshot);
-    const deletes: string[] = [];
-    const otherIds: string[] = [];
+    const deletes: NormalizedDigEmployeeChangeEvent[] = [];
+    const others: NormalizedDigEmployeeChangeEvent[] = [];
 
     for (const ev of merged.values()) {
       if (!KNOWN_EVENT_TYPES.has(ev.eventType)) {
@@ -253,23 +254,41 @@ export function createDigEmployeeChangeSubscriber(params: {
       params.logger.info(
         `baiying-enhance: dig-employee change triggering flush (${authNote}) resourceId=${ev.resourceIdStr} eventType=${ev.eventType}${changedAtPart}${sourcePart}`,
       );
-      recordChangedAt(ev);
       if (isDelete) {
-        deletes.push(ev.resourceIdStr);
+        deletes.push(ev);
       } else {
-        otherIds.push(ev.resourceIdStr);
+        others.push(ev);
       }
     }
 
-    if (deletes.length > 0) {
-      await params.flushNow({ deletedSourceKeys: deletes });
-    }
-    if (otherIds.length > 0) {
-      await params.flushNow();
+    flushInFlight = true;
+    let retry = false;
+    let unacknowledged = [...deletes, ...others];
+    try {
+      if (deletes.length > 0) {
+        await params.flushNow({ deletedSourceKeys: deletes.map((event) => event.resourceIdStr) });
+        deletes.forEach(recordChangedAt);
+        unacknowledged = others;
+      }
+      if (others.length > 0) {
+        await params.flushNow();
+        others.forEach(recordChangedAt);
+      }
+    } catch (error) {
+      retry = true;
+      // Failed enqueue is not an acknowledgement. Keep explicit deletes and
+      // merge them with new arrivals before retrying, even without another event.
+      if (!stopped) pendingQueue.unshift(...unacknowledged);
+      throw error;
+    } finally {
+      flushInFlight = false;
+      if (!stopped && pendingQueue.length > 0) {
+        scheduleFlush(retry ? Math.max(1000, params.debounceMs) : params.debounceMs);
+      }
     }
   };
 
-  const scheduleFlush = () => {
+  const scheduleFlush = (delayMs = params.debounceMs) => {
     if (stopped) {
       return;
     }
@@ -283,7 +302,7 @@ export function createDigEmployeeChangeSubscriber(params: {
           `baiying-enhance: dig-employee Pub/Sub flush failed: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
-    }, params.debounceMs);
+    }, delayMs);
   };
 
   const scheduleReconnect = () => {

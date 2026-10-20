@@ -101,9 +101,6 @@ export function createMainContextTemplateWatch(params: {
           const state = await readSignature();
           const firstRun = !signatureReady;
           const changed = firstRun || state.signature !== lastSignature;
-          signatureReady = true;
-          lastSignature = state.signature;
-
           if (!state.payloadPresent) {
             if (!missingLogged || changed) {
               params.logger.info(
@@ -111,6 +108,8 @@ export function createMainContextTemplateWatch(params: {
               );
               missingLogged = true;
             }
+            signatureReady = true;
+            lastSignature = state.signature;
             continue;
           }
 
@@ -129,6 +128,10 @@ export function createMainContextTemplateWatch(params: {
             signature: state.signature,
             firstRun,
           });
+          // Acknowledge the hash only after the Redis update intent is durable.
+          // On failure the next scheduled poll retries the unchanged template.
+          signatureReady = true;
+          lastSignature = state.signature;
         } catch (err) {
           params.logger.warn(
             `baiying-enhance: main context template poll failed key=${label}: ${

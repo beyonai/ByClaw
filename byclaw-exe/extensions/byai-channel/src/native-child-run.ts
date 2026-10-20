@@ -16,12 +16,17 @@ export function reportNativeChildRunTerminal(
     childRunId: string | undefined;
     childSessionKey?: string;
     source: NativeChildRunTerminalSource;
+    outcome?: string;
+    reason?: string;
   },
 ): void {
   const outcome = markActiveSdkNativeChildRunTerminal({
     childRunId: params.childRunId,
     childSessionKey: params.childSessionKey,
     source: params.source,
+    outcome: params.outcome,
+    reason: params.reason,
+    warn: (message) => api.logger.warn(message),
   });
   if (!outcome) {
     return;

@@ -13,13 +13,19 @@ import {
     loadAgentContentIndex,
 } from "./agent-content-index.js";
 import {
-    createAgentWatchdog as createAgentWatchdogBase,
+    createAgentWatchdog as createAgentWatchdogProduction,
     loadManagedAgentsFromRedis,
 } from "./agent-watchdog.js";
+import {
+    createRuntimeUpdateQueue,
+    type RuntimeUpdateGate,
+    type RuntimeUpdatePayload,
+} from "../../shared/src/redis-runtime-update-gate.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
+
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +61,7 @@ function createMockApi(
             error: vi.fn(),
         },
         runtime: {
+            version: "2026.7.1",
             config: {
                 loadConfig,
                 writeConfigFile: writeConfigFile,
@@ -137,6 +144,43 @@ async function pathExists(target: string): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+/** Existing sync tests use immediate admission; Redis idle/Lua races have separate coverage. */
+function createAgentWatchdogBase(params: any) {
+    const pending = new Map<string, { revision: number; payload: RuntimeUpdatePayload }>();
+    let owner: string | undefined;
+    const gate: RuntimeUpdateGate = {
+        async enqueue(key, payload) {
+            const previous = pending.get(key);
+            pending.set(key, {
+                revision: (previous?.revision ?? 0) + 1,
+                payload: {
+                    ...previous?.payload,
+                    ...payload,
+                    fullWorkspaceReseed: previous?.payload.fullWorkspaceReseed || payload.fullWorkspaceReseed,
+                    deletedSourceKeys: [...new Set([
+                        ...(previous?.payload.deletedSourceKeys ?? []), ...(payload.deletedSourceKeys ?? []),
+                    ])],
+                },
+            });
+        },
+        async claim(key) {
+            const job = pending.get(key);
+            if (!job || owner) return null;
+            owner = key;
+            return { owner: key, ...job };
+        },
+        async finish(key, claim, error) {
+            if (!error && pending.get(key)?.revision === claim.revision) pending.delete(key);
+            owner = undefined;
+        },
+    };
+    const queue = createRuntimeUpdateQueue({ gate, pollMs: 10 });
+    const watchdog = createAgentWatchdogProduction({ ...params, runtimeUpdateQueue: queue });
+    const stop = watchdog.stop;
+    watchdog.stop = async () => { await queue.stop(); await stop(); };
+    return watchdog;
 }
 
 function createAgentWatchdog(params: any) {

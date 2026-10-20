@@ -73,6 +73,7 @@ function registerFull(api: OpenClawPluginApi) {
     runId: string;
     childSessionKey: string;
     agentId: string;
+    spawnMode?: "run" | "session";
   }, ctx: {
     requesterSessionKey: string;
   }) => {
@@ -84,6 +85,9 @@ function registerFull(api: OpenClawPluginApi) {
     if (!request) {
       return;
     }
+    if (event.spawnMode === "session" && request.retainRuntimeExecution) {
+      api.logger.warn(`[runtime-update] native child spawnMode=session has no normal ended acknowledgement; updates stay protected until a controlled process restart: runId=${event.runId}`);
+    }
     cancelActiveSdkCompletionCheck(request.sessionKey);
   });
   api.on("subagent_ended", (event) => {
@@ -91,6 +95,8 @@ function registerFull(api: OpenClawPluginApi) {
       childRunId: event?.runId,
       childSessionKey: event?.targetSessionKey,
       source: "subagent_ended",
+      outcome: event?.outcome,
+      reason: event?.reason,
     });
   });
   // 较新核才有的每 run 一次终态信号，且早于 announce 投递。老核不认识该 hook 名会 warn 并

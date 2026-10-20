@@ -39,4 +39,40 @@ describe("context recovery operation isolation", () => {
     await expect(withTrackedContextCompaction("session", async () => { throw new Error("Unauthorized"); })).rejects.toThrow();
     expect(() => assertContextRecoveryIdle("session")).not.toThrow();
   });
+  it.each(["resolve", "reject"])("retains the execution token after local cancellation until the original dispatch %ss", async (outcome) => {
+    let finish!: () => void;
+    let fail!: (error: Error) => void;
+    const originalDispatch = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
+    const release = vi.fn(async () => {});
+    const retain = vi.fn(() => release);
+    retainUnsettledContextDispatch("cancelled-session", originalDispatch, "en_US", retain);
+    expect(retain).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
+    expect(() => assertContextRecoveryIdle("cancelled-session")).toThrow();
+    if (outcome === "resolve") finish();
+    else fail(new Error("model request aborted after cleanup"));
+    await originalDispatch.catch(() => undefined);
+    expect(release).toHaveBeenCalledOnce();
+    expect(() => assertContextRecoveryIdle("cancelled-session")).not.toThrow();
+  });
+  it("keeps an uncertain compaction busy for hot updates after the request returns", async () => {
+    const release = vi.fn(async () => {});
+    const retain = vi.fn(() => release);
+    await expect(withTrackedContextCompaction("uncertain-session", async () => {
+      throw new Error("gateway disconnected while model was still running");
+    }, "en_US", retain)).rejects.toThrow("gateway disconnected");
+    expect(retain).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
+    expect(() => assertContextRecoveryIdle("uncertain-session")).toThrow();
+  });
+  it.each(["success", "pre-execution rejection"])("releases the retained execution token after confirmed %s", async (outcome) => {
+    const release = vi.fn(async () => {});
+    const run = async () => {
+      if (outcome === "pre-execution rejection") throw new Error("Forbidden");
+      return { ok: true, compacted: true };
+    };
+    await withTrackedContextCompaction("confirmed-session", run, "en_US", () => release).catch(() => undefined);
+    expect(release).toHaveBeenCalledOnce();
+    expect(() => assertContextRecoveryIdle("confirmed-session")).not.toThrow();
+  });
 });
