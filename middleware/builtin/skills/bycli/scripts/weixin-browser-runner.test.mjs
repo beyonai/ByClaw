@@ -108,7 +108,7 @@ test('initial Weixin capability lookup supplies the site to injected loaders', a
 });
 
 test('Channels statistics commands run with site-specific read-only browser capability', async (t) => {
-  for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail']) {
+  for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail', 'video-stats', 'video-status']) {
     const argv = channelsCommand(name);
     const events = [];
     const outcome = await runWeixinBrowser({
@@ -153,6 +153,97 @@ test('unknown Channels commands fail before capability, bridge, execution, or Ga
     }), /command/);
   }
   assert.deepEqual(await readdir(directory), []);
+});
+
+test('Channels remote status requires an explicit browser selection for conditional capability', async (t) => {
+  const capability = { ...channelsCapability, browser: 'conditional' };
+  for (const selectedMode of [null, 'browser']) {
+    let executions = 0;
+    const outcome = await runWeixinBrowser({
+      stateDir: await stateDir(t),
+      argv: [...channelsCommand('video-status'), '--operation', '/task/video.json', '--management-id', 'export/exact-id'],
+      selectedMode,
+      loadCapability: async () => capability,
+      ensureBridge: async () => {
+        assert.equal(selectedMode, 'browser');
+        return ready;
+      },
+      execute: async () => { executions += 1; return success(); },
+    });
+    assert.equal(outcome.exitCode, selectedMode === 'browser' ? 0 : 2);
+    assert.equal(executions, selectedMode === 'browser' ? 1 : 0);
+  }
+});
+
+test('Channels publishing accepts only write capability on the Channels browser domain', async (t) => {
+  for (const capability of [
+    { ...channelsCapability, access: 'write' },
+    channelsCapability,
+    { ...channelsCapability, access: 'write', domain: 'mp.weixin.qq.com' },
+    { ...channelsCapability, access: 'write', browser: false },
+    { ...channelsCapability, access: 'write', browser: 'conditional' },
+  ]) {
+    const allowed = capability.access === 'write' && capability.domain === 'channels.weixin.qq.com' && capability.browser === true;
+    let executions = 0;
+    const outcome = await runWeixinBrowser({
+      stateDir: await stateDir(t),
+      argv: [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'prepare', '--execute'],
+      selectedMode: 'browser',
+      loadCapability: async () => capability,
+      ensureBridge: async () => { assert.equal(allowed, true); return ready; },
+      execute: async () => { executions += 1; return success('[{"status":"prepared","submitted":false}]'); },
+    });
+    assert.equal(outcome.exitCode, allowed ? 0 : 2);
+    assert.equal(executions, allowed ? 1 : 0);
+  }
+});
+
+test('Channels submit bridge failure never automatically replays the write', async (t) => {
+  let executions = 0;
+  const directory = await stateDir(t);
+  const argv = [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'submit', '--execute', '--user-confirmed'];
+  const outcome = await runWeixinBrowser({
+    stateDir: directory,
+    argv,
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => { executions += 1; return typedError(69, 'BROWSER_CONNECT'); },
+  });
+  assert.equal(executions, 1);
+  assert.equal(JSON.parse(outcome.stderr).error.details.bridgeCode, 'BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL');
+  assert.deepEqual(await readdir(directory), []); // Recovery approval is separate from authentication state.
+});
+
+test('Channels unknown submission is retained and verification cannot replay it', async (t) => {
+  const directory = await stateDir(t);
+  const argv = [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'submit', '--execute', '--user-confirmed'];
+  const outcome = await runWeixinBrowser({
+    stateDir: directory, argv,
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => success('[{"status":"submit_unknown","submitted":true}]'),
+  });
+  assert.equal(JSON.parse(outcome.stdout)[0].status, 'submit_unknown');
+  const blocked = await runWeixinBrowser({
+    stateDir: directory, argv, verificationConfirmed: true,
+    loadCapability: async () => assert.fail('finalized write must not discover capabilities'),
+    ensureBridge: async () => assert.fail('finalized write must not observe the bridge'),
+    execute: async () => assert.fail('verification must not authorize write replay'),
+  });
+  assert.equal(blocked.code, 'OPERATION_ALREADY_FINALIZED');
+});
+
+test('Channels video stats retries a recovered bridge once', async (t) => {
+  let executions = 0;
+  const outcome = await runWeixinBrowser({
+    stateDir: await stateDir(t),
+    argv: [...channelsCommand('video-stats'), 'export/exact-id'],
+    loadCapability: async () => channelsCapability,
+    ensureBridge: async () => ready,
+    execute: async () => ++executions === 1 ? typedError(69, 'BROWSER_CONNECT') : success(),
+  });
+  assert.equal(executions, 2);
+  assert.equal(outcome.exitCode, 0);
 });
 
 test('Channels capability rejects writes, wrong domains, and non-browser commands before side effects', async (t) => {
@@ -245,6 +336,8 @@ test('command execution timeout includes the command timeout plus a safety margi
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', '60']), 90_000);
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout=180']), 210_000);
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', 'invalid']), 30_000);
+  assert.equal(commandExecutionTimeoutMs(channelsCommand('video-publish')), 210_000);
+  assert.equal(commandExecutionTimeoutMs([...channelsCommand('video-publish'), '--timeout', '300']), 330_000);
 });
 
 test('timeout without structured output becomes a diagnosable non-authentication result', async (t) => {
