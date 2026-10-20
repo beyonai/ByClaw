@@ -24,7 +24,7 @@ import {
   type MemberLlmSelection,
   type MemberSelectionRuntime,
 } from './members.ts'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { defaultTeamStateRuntime, type TeamStateRuntime } from './runtime-state.ts'
 import { GroupWorkerBlockedError } from './group-errors.ts'
 import { groupTaskSummaryOutcome, validateGroupTaskSummary, renderGroupTaskSummary } from './group-summary.ts'
 import { groupInputRevision, recoverGroupAssistanceOutboxes, beginGroupAssistanceResultDelivery, groupAssistanceResultRequest, hasPendingGroupAssistanceResult } from './group-assistance.ts'
@@ -33,7 +33,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from './message-source.ts'
 import { type GroupExternalExecution, groupPolicy } from './group-scope.ts'
 import { CAPTAIN_KEY } from './state.ts'
-import { runClaudeTurn } from './claude-bridge.ts'
+import { runClaudeTurn, type ClaudeBridgeOptions } from './claude-bridge.ts'
 import {
   acknowledgeMailbox,
   appendMailbox,
@@ -64,6 +64,10 @@ function recoveryFailureOutput(task: TeamTask, maxAttempts: number): string {
 export interface SchedulerConfig {
   readonly stateDir: string
   readonly maxTaskAttempts: number
+  /** Team-state placement of this context (default: the process-wide runtime). */
+  readonly stateRuntime?: TeamStateRuntime
+  /** How external Claude Code members run (default: the host `claude` CLI). */
+  readonly claude?: ClaudeBridgeOptions
 }
 
 export interface TeamScheduler {
@@ -93,7 +97,7 @@ interface DispatchTicket {
 }
 
 function stateRootOf(workspace: string, config: SchedulerConfig): string {
-  return resolveTeamStateRoot(workspace, config.stateDir)
+  return (config.stateRuntime ?? defaultTeamStateRuntime).resolveTeamStateRoot(workspace, config.stateDir)
 }
 
 function teamLockKey(stateRoot: string, teamId: string): string {
@@ -360,13 +364,14 @@ export function installTeamScheduler(
                   // Mirror failure is non-fatal.
                 }
               }
-              const memberCwd = captain.session?.header?.cwd ?? process.cwd()
+              const memberCwd = (config.stateRuntime ?? defaultTeamStateRuntime).workspaceOf(captain)
               const turn = await runClaudeTurn({
                 prompt: fallbackMailboxPrompt(unread),
                 cwd: memberCwd,
                 stateDir: stateRoot,
                 teamId: team.id,
                 memberName: member.name,
+                ...config.claude,
               })
               if (!turn.isError) {
                 // Write the claude reply back to every sender's mailbox so the
@@ -561,7 +566,7 @@ export function installTeamScheduler(
               // Mirror failure is non-fatal.
             }
           }
-          const memberCwd = captain.session?.header?.cwd ?? process.cwd()
+          const memberCwd = (config.stateRuntime ?? defaultTeamStateRuntime).workspaceOf(captain)
           const prompt = claudeTaskPrompt(ticket, config.stateDir, team.id)
           const turn = await runClaudeTurn({
             prompt,
@@ -569,6 +574,7 @@ export function installTeamScheduler(
             stateDir: stateRoot,
             teamId: team.id,
             memberName: ticket.memberName,
+            ...config.claude,
           })
           await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
             const fresh = await readTeam(stateRoot, team!.id)
@@ -639,7 +645,7 @@ export function installTeamScheduler(
     // record is committed. Its descriptor baseline is already known to the
     // selection bridge, so clear the initial conversation override first.
     if (status === 'idle') memberSelections?.restoreBaseline(String(agent.id))
-    const workspace = agent.session.header.cwd ?? process.cwd()
+    const workspace = (config.stateRuntime ?? defaultTeamStateRuntime).workspaceOf(agent)
     const stateRoot = stateRootOf(workspace, config)
     const located = await findTeamByParticipant(stateRoot, agent.id)
     if (located === undefined || located.captainSessionId === agent.id) return
@@ -675,7 +681,7 @@ export function installTeamScheduler(
   ctx.on('agent/request-error', async (payload, next) => {
     const decision = await next()
     if (decision?.kind === 'retry') return decision
-    const workspace = payload.agent.session.header.cwd ?? process.cwd()
+    const workspace = (config.stateRuntime ?? defaultTeamStateRuntime).workspaceOf(payload.agent)
     const stateRoot = stateRootOf(workspace, config)
     const located = await findTeamByParticipant(stateRoot, payload.agent.id)
     if (located === undefined || located.captainSessionId === payload.agent.id) return decision

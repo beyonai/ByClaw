@@ -73,15 +73,6 @@ export interface SidechatRoutes {
  *  handle becomes visible, so the child is never cancelled by it). */
 const CREATE_TIMEOUT_MS = 15_000
 
-/** Per-activation disposers of created thread agents (the dispose route
- *  releases them; the session and its history always stay persisted). */
-const threadDisposers = new Map<string, () => Promise<void>>()
-
-/** The in-progress-turn snapshot captured at creation of an EMPTY thread,
- *  waiting to ride the first prompt (lost on a host restart — the boundary
- *  prompt is then delivered alone, a logged degradation). */
-const pendingSnapshots = new Map<string, string>()
-
 /** Resolve the parent's preset and build the child's composition setup
  *  (mirror of api-proxy's composeAgent minus the model-selection install —
  *  the child carries the parent's provider/model in agentOptions). */
@@ -173,6 +164,15 @@ function liveThreadAgent(ctx: Context, childId: string): Agent | undefined {
  *  error the tab surfaces inline). The record keys are the FULL wire method
  *  names the /sidebar/api dispatcher looks up (`api[method]`). */
 export function buildSidechatApi(ctx: Context): SidechatRoutes {
+  // Per-plugin-instance state (never module-level: a shared host runs one
+  // instance per user context, and thread ids must not cross between them).
+  /** Disposers of created thread agents (the dispose route releases them;
+   *  the session and its history always stay persisted). */
+  const threadDisposers = new Map<string, () => Promise<void>>()
+  /** The in-progress-turn snapshot captured at creation of an EMPTY thread,
+   *  waiting to ride the first prompt (lost on a host restart — the boundary
+   *  prompt is then delivered alone, a logged degradation). */
+  const pendingSnapshots = new Map<string, string>()
   return {
     'sidechat.start': async (payload: unknown) => {
       const sessionId = requireString(payload, 'sessionId')

@@ -11,12 +11,13 @@
  * @module @zhchxiao123/dsh-devflow-spec-filesystem/src/store
  */
 
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import DevflowSpecStore, { checkAnchorCitations, checkWaivers, hasSourceOfTruth, isValidSpecId, worstFreshness } from '@zhchxiao123/dsh-devflow-spec'
 import type { AnchorVerdict, SpecAnchor, SpecAnchorRequest, SpecDocument, SpecSummary, SpecWriteRequest, SpecWriteResult, SpecWriteSpec } from '@zhchxiao123/dsh-devflow-spec'
+import { workspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import { evaluateAnchors } from './anchor-eval.ts'
 import type { AnchorEvaluationContext, AnchorSourceCache } from './anchor-eval.ts'
 import { decodeSpecFile, encodeSpecFile } from './document.ts'
@@ -50,6 +51,13 @@ export interface Config {
    * exists**; it is calibrated on that reasoning, not on measurement.
    */
   maxNetGrowthBytes?: number
+  /**
+   * Keep documents and the anchored sources on the context's tool environment:
+   * files go through `ctx.fs`, moves and git through `ctx.subprocess`, instead
+   * of this process. Set it, together with absolute `root` and `repoRoot`,
+   * when the workspace lives in a separate tool sandbox.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Schemastery validator supplying the provider defaults. */
@@ -57,6 +65,7 @@ export const Config: z<Config> = z.object({
   root: z.string().default('.devflow/spec'),
   repoRoot: z.string().default('.'),
   maxNetGrowthBytes: z.number().default(8192),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** Documents are Markdown files; the id is the path below the root without this suffix. */
@@ -68,10 +77,10 @@ const EXTENSION = '.md'
  * @param prefix - the id prefix accumulated so far.
  * @returns ids of the documents found, unordered.
  */
-async function collectIds(root: string, prefix: string): Promise<string[]> {
+async function collectIds(io: WorkspaceIo, root: string, prefix: string): Promise<string[]> {
   let entries
   try {
-    entries = await readdir(join(root, prefix), { withFileTypes: true })
+    entries = await io.readdir(join(root, prefix))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
@@ -79,7 +88,7 @@ async function collectIds(root: string, prefix: string): Promise<string[]> {
   const ids: string[] = []
   for (const entry of entries) {
     const child = prefix === '' ? entry.name : `${prefix}/${entry.name}`
-    if (entry.isDirectory()) ids.push(...await collectIds(root, child))
+    if (entry.isDirectory()) ids.push(...await collectIds(io, root, child))
     else if (entry.name.endsWith(EXTENSION)) ids.push(child.slice(0, -EXTENSION.length))
   }
   return ids
@@ -112,6 +121,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
   private readonly defaultRoot: string
   private readonly defaultRepoRoot: string
   private readonly maxNetGrowthBytes: number
+  private readonly io: WorkspaceIo
   private readonly repositories = new Map<string, {
     probed: boolean
     lastCommitAt?: (file: string) => Promise<string | undefined>
@@ -128,6 +138,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
     this.maxNetGrowthBytes = config.maxNetGrowthBytes ?? 8192
     this.defaultRoot = resolve(config.root ?? '.devflow/spec')
     this.defaultRepoRoot = resolve(config.repoRoot ?? '.')
+    this.io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
   }
 
   /**
@@ -143,12 +154,13 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
     }
     if (!repository.probed) {
       repository.probed = true
-      if (await isGitRepository(repoRoot)) repository.lastCommitAt = createLastCommitAt(repoRoot)
+      if (await isGitRepository(repoRoot, this.io.execFile)) repository.lastCommitAt = createLastCommitAt(repoRoot, this.io.execFile)
     }
     return {
       repoRoot,
       updatedAt,
       cache: repository.sources,
+      io: this.io,
       ...(repository.lastCommitAt === undefined ? {} : { lastCommitAt: repository.lastCommitAt }),
     }
   }
@@ -172,7 +184,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
     const path = join(root, `${id}${EXTENSION}`)
     let contents
     try {
-      contents = await readFile(path, 'utf8')
+      contents = await this.io.readFile(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`spec document ${id} does not exist under ${root}`)
       throw error
@@ -207,7 +219,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
   async list(scope?: string, root?: string, repoRoot?: string): Promise<SpecSummary[]> {
     const resolved = root === undefined ? this.defaultRoot : resolve(root)
     const resolvedRepo = repoRoot === undefined ? this.defaultRepoRoot : resolve(repoRoot)
-    const ids = (await collectIds(resolved, ''))
+    const ids = (await collectIds(this.io, resolved, ''))
       .filter(id => scope === undefined || id === scope || id.startsWith(`${scope}/`))
       .sort()
     return Promise.all(ids.map(id => this.summarize(resolved, resolvedRepo, id)))
@@ -264,7 +276,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
       // An unreadable or missing source, or a file no evaluator claims, leaves
       // the digest empty rather than throwing: the anchor evaluation
       // immediately after says why, in the vocabulary a caller already knows.
-      const source = await readFile(join(repoRoot, anchor.file), 'utf8').catch(() => undefined)
+      const source = await this.io.readFile(join(repoRoot, anchor.file)).catch(() => undefined)
       const evaluator = evaluatorFor(anchor.file)
       const hash = source === undefined || evaluator === undefined ? undefined : (await evaluator.lookup(source, anchor.symbol)).hash
       return { ...anchor, hash: hash ?? '' }
@@ -337,12 +349,12 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
     // Nothing above this line has touched the root. The replacement is written
     // before anything is removed, so an interrupted merge leaves duplication
     // rather than a gap.
-    await mkdir(dirname(path), { recursive: true })
+    await this.io.mkdir(dirname(path), { recursive: true })
     const temporary = `${path}.tmp`
-    await writeFile(temporary, contents, 'utf8')
-    await rename(temporary, path)
+    await this.io.writeFile(temporary, contents)
+    await this.io.rename(temporary, path)
     const superseded = replaces.filter(id => id !== spec.id)
-    for (const id of superseded) await rm(join(spec.root, `${id}${EXTENSION}`), { force: true })
+    for (const id of superseded) await this.io.rm(join(spec.root, `${id}${EXTENSION}`), { force: true })
     return {
       ok: true,
       document: {
@@ -366,7 +378,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
    */
   private async byteSize(path: string): Promise<number | undefined> {
     try {
-      return (await stat(path)).size
+      return (await this.io.stat(path)).size
     } catch {
       // stat is the try's only operation; an unreadable path is reported as
       // absent here and the caller rejects with `unknown-replaced`, naming the
@@ -382,7 +394,7 @@ export class FilesystemDevflowSpecStore extends DevflowSpecStore {
    */
   private async exists(path: string): Promise<boolean> {
     try {
-      await readFile(path)
+      await this.io.readFile(path)
       return true
     } catch {
       // Any unreadable path counts as absent here; a genuinely broken root

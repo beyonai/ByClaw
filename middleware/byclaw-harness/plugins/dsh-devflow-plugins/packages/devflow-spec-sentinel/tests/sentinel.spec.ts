@@ -234,6 +234,14 @@ describe('workspaceOf', () => {
       specRoot: resolve('/etc/spec'),
     })
   })
+
+  it('falls back to the configured repoRoot, resolving a relative root under it', () => {
+    const { agent } = agentWith('workspace-configured', null)
+    expect(workspaceOf(agent, { root: '.devflow/spec', repoRoot: '/by' })).toEqual({
+      repoRoot: '/by',
+      specRoot: join('/by', '.devflow', 'spec'),
+    })
+  })
 })
 
 describe('failingAnchors', () => {

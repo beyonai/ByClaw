@@ -39,7 +39,8 @@
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@zhchxiao123/dsh-devflow-spec": "workspace:^"
+    "@zhchxiao123/dsh-devflow-spec": "workspace:^",
+    "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
@@ -52,7 +53,8 @@
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
     "@zhchxiao123/dsh-devflow-iron-rules": "workspace:^",
     "@zhchxiao123/dsh-devflow-spec": "workspace:^",
-    "@zhchxiao123/dsh-devflow-spec-filesystem": "workspace:^"
+    "@zhchxiao123/dsh-devflow-spec-filesystem": "workspace:^",
+    "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "scripts": {
     "prepublishOnly": "node -e \"for (const f of require('./package.json').files.filter(f=>!f.includes('*'))) if (!require('node:fs').existsSync(f)) { console.error('prepublishOnly: '+f+' is missing; run pnpm run build at the repo root'); process.exit(1) }\""

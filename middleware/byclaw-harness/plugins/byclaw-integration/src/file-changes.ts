@@ -8,6 +8,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import type { ToolEnvironmentFiles } from './tool-environment-files.ts'
 
 export interface AggregatedFileChange extends ByClawEditDiffFile {
   sources: ByClawEditDiffOperation[]
@@ -68,8 +69,8 @@ export class ByClawFileChangeAccumulator {
   }
 }
 
-function userFsRoot(workspace: string): string | undefined {
-  const explicit = process.env['BYCLAW_USER_FS_ROOT']?.trim()
+function userFsRoot(workspace: string, configured?: string): string | undefined {
+  const explicit = configured?.trim() || process.env['BYCLAW_USER_FS_ROOT']?.trim()
   if (explicit) return resolve(explicit)
   for (const marker of [`${sep}.sessions${sep}`, `${sep}projects${sep}`]) {
     const index = workspace.lastIndexOf(marker)
@@ -99,12 +100,19 @@ export async function persistFileChangesSummary(
   workspace: string,
   sessionId: string,
   changes: readonly AggregatedFileChange[],
+  options: {
+    /** ByClaw UserFS root; overrides `BYCLAW_USER_FS_ROOT` and the workspace-marker inference. */
+    userFsRoot?: string
+    /** Write snapshots into the separate tool environment holding the user tree. */
+    files?: ToolEnvironmentFiles
+  } = {},
 ): Promise<FileChangesSummaryPayload | undefined> {
   const scopedChanges = normalizeWorkspaceEditDiffFiles(workspace, changes)
-  const root = userFsRoot(resolve(workspace))
+  const root = userFsRoot(resolve(workspace), options.userFsRoot)
   if (root === undefined || scopedChanges.length === 0) return undefined
   const directory = join(root, '.file_changes', sessionId, 'files')
-  await mkdir(directory, { recursive: true })
+  // `ctx.fs` text writes create parent directories on their own.
+  if (options.files === undefined) await mkdir(directory, { recursive: true })
   const files: FileChangesSummaryPayload['files'] = []
   for (const change of scopedChanges) {
     const uuid = randomUUID()
@@ -118,7 +126,8 @@ export async function persistFileChangesSummary(
       originalContent: change.oldText, modifiedContent: change.newText,
       additions: change.additions, deletions: change.deletions, sources: change.sources,
     }
-    await writeFile(join(directory, `${uuid}.json`), JSON.stringify(detail), 'utf8')
+    if (options.files === undefined) await writeFile(join(directory, `${uuid}.json`), JSON.stringify(detail), 'utf8')
+    else await options.files.writeText(join(directory, `${uuid}.json`), JSON.stringify(detail))
     files.push({
       uuid, path: change.path, changeType, binary: change.binary,
       additions: change.additions, deletions: change.deletions, sources: change.sources,

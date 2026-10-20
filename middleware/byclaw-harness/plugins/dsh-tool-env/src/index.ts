@@ -28,6 +28,8 @@ export interface Config {
   backend: 'static' | 'opensandbox'
   /** Directory in A's private DSH home holding keys, the client config and B's id. */
   stateDir: string
+  /** OpenSSH host alias; unique per user context when one process serves several users. */
+  alias: string
   /** Remote default workspace, shared with A through the same host volume. */
   workspace: string
   /** Pause B after this many idle milliseconds; 0 keeps it running. */
@@ -63,6 +65,7 @@ export class ToolEnv extends ToolEnvConnection {
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox']).required(),
     stateDir: schema.string().required(),
+    alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
     idleMs: schema.natural().default(600_000),
     requestTimeoutMs: schema.natural().default(30_000),
@@ -85,7 +88,7 @@ export class ToolEnv extends ToolEnvConnection {
   }) as schema<Config>
 
   constructor(ctx: Context, config: Config) {
-    const identity = new ToolEnvIdentity(config.stateDir)
+    const identity = new ToolEnvIdentity(config.stateDir, config.alias)
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
     const bootstrapPath = join(dirname(realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ptc-runtime-node')))), 'process.js')
     super(ctx, {

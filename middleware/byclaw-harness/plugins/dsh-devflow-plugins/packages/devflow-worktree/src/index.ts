@@ -18,6 +18,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { workspaceIo } from '@zhchxiao123/dsh-devflow'
 import { registerWorktreeFence } from './gate.ts'
 import { registerSkill } from './skill.ts'
 export type * from './types.ts'
@@ -45,11 +46,19 @@ export interface Config {
    * the same kind or the fence reads artifacts the gate never shaped.
    */
   artifactKind?: string
+  /**
+   * Read dispatch artifacts and run the fence's git questions on the
+   * context's tool environment (`ctx.fs` / `ctx.subprocess`) rather than in
+   * this process; set it wherever the store's own `workspaceOnToolEnvironment`
+   * is set.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Schemastery validator supplying the dispatch-kind default. */
 export const Config: z<Config> = z.object({
   artifactKind: z.string().default('worktree'),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /**
@@ -68,5 +77,5 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`devflow-worktree: artifactKind "${kind}" must match ${String(ARTIFACT_KIND)}`)
   }
   registerSkill(ctx)
-  registerWorktreeFence(ctx, kind)
+  registerWorktreeFence(ctx, kind, workspaceIo(ctx, config.workspaceOnToolEnvironment))
 }

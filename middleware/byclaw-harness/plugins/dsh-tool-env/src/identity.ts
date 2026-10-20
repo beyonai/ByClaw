@@ -7,6 +7,7 @@
  */
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -77,13 +78,22 @@ export class ToolEnvIdentity {
 
 async function ensureKey(path: string): Promise<void> {
   try { await readFile(path); await readFile(`${path}.pub`); return } catch { /* create below */ }
-  const staging = `${path}.new-${String(process.pid)}`
+  const staging = `${path}.new-${randomUUID()}`
   await run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'byclaw-tool-env', '-f', staging])
   await rename(`${staging}.pub`, `${path}.pub`)
   await rename(staging, path)
 }
 
-async function includeInUserConfig(file: string): Promise<void> {
+// Several user contexts in one process share ~/.ssh/config; serialize its edits.
+let userConfigEdits: Promise<unknown> = Promise.resolve()
+
+function includeInUserConfig(file: string): Promise<void> {
+  const edit = userConfigEdits.catch(() => {}).then(() => addInclude(file))
+  userConfigEdits = edit
+  return edit
+}
+
+async function addInclude(file: string): Promise<void> {
   // OpenSSH reads the passwd entry's home, not $HOME.
   const directory = join(userInfo().homedir, '.ssh')
   const config = join(directory, 'config')
@@ -97,7 +107,7 @@ async function includeInUserConfig(file: string): Promise<void> {
 }
 
 async function writeAtomic(path: string, content: string, mode: number): Promise<void> {
-  const staging = `${path}.tmp-${String(process.pid)}`
+  const staging = `${path}.tmp-${randomUUID()}`
   await writeFile(staging, content, { mode })
   await rename(staging, path)
 }

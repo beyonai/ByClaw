@@ -7,11 +7,12 @@ import { Config, resolveConfig } from '@zhchxiao123/dsh-devflow-spec-sentinel'
 
 describe('resolveConfig', () => {
   it('fills the defaults', () => {
-    expect(resolveConfig({})).toEqual({ root: '.devflow/spec', contextMaxBytes: 2048 })
+    expect(resolveConfig({})).toEqual({ root: '.devflow/spec', contextMaxBytes: 2048, repoRoot: undefined, workspaceOnToolEnvironment: false })
   })
 
   it('keeps explicit values', () => {
-    expect(resolveConfig({ root: '/etc/spec', contextMaxBytes: 512 })).toEqual({ root: '/etc/spec', contextMaxBytes: 512 })
+    expect(resolveConfig({ root: '/etc/spec', contextMaxBytes: 512, repoRoot: '/by', workspaceOnToolEnvironment: true }))
+      .toEqual({ root: '/etc/spec', contextMaxBytes: 512, repoRoot: '/by', workspaceOnToolEnvironment: true })
   })
 
   it('rejects a blank root', () => {

@@ -66,6 +66,15 @@ export interface SidebarConfig {
    * the existing default behavior is kept.
    */
   shellArgs?: string[]
+  /**
+   * The user workspace lives in a separate tool environment (the shared
+   * host: `ctx.fs` / `ctx.subprocess` point at the user's tool sandbox), not
+   * on this host. When true, the explorer, editor reads/writes, uploads,
+   * media/HTML previews and Git run through `ctx.fs` / `ctx.subprocess`, and
+   * terminals through `ctx.subprocess.spawnTerminal` without the host
+   * process environment. Default false: node-pty, host fs and host git.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Schemastery schema for the ordinary (restart-applied) host settings. */
@@ -78,6 +87,7 @@ const HostConfig: z<SidebarConfig> = z.object({
   reconnectGraceMs: z.number().step(1).min(0).default(30_000),
   shell: z.string().default(''),
   shellArgs: z.array(z.string()).default([]),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** Fully defaulted sidebar host settings. */
@@ -92,6 +102,8 @@ export interface ResolvedSidebarConfig {
   shell: string
   /** Explicit shell arguments; empty means use the platform defaults. */
   shellArgs: string[]
+  /** Workspace operations run in the tool environment (`ctx.fs` / `ctx.subprocess`). */
+  workspaceOnToolEnvironment: boolean
 }
 
 /**
@@ -110,6 +122,7 @@ export function resolveSidebarConfig(config: SidebarConfig | undefined): Resolve
     reconnectGraceMs: config?.reconnectGraceMs ?? 30_000,
     shell: config?.shell?.trim() ?? '',
     shellArgs: config?.shellArgs ?? [],
+    workspaceOnToolEnvironment: config?.workspaceOnToolEnvironment ?? false,
   }
 }
 

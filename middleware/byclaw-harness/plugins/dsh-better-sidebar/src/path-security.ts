@@ -3,11 +3,12 @@ import { realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { isWithin, requireAbsolute } from './fs-tree.ts'
 import { SidebarError } from './wire.ts'
+import type { ToolEnvironmentWorkspace } from './workspace-host.ts'
 
 /** Resolve a path and convert filesystem resolution failures to an API error. */
-async function resolveRealPath(path: string, label: string): Promise<string> {
+async function resolveRealPath(path: string, label: string, workspace?: ToolEnvironmentWorkspace): Promise<string> {
   try {
-    return await realpath(path)
+    return await (workspace === undefined ? realpath(path) : workspace.realpath(path))
   } catch (error) {
     throw new SidebarError('fs-error', `cannot resolve ${label} "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
   }
@@ -25,13 +26,14 @@ function assertWithinWorkspace(workspace: string, target: string): void {
  *
  * @param cwd - Session workspace directory.
  * @param target - Client-supplied absolute path.
+ * @param workspace - the tool-environment workspace; omitted = this host's filesystem.
  * @returns The canonical absolute path used for the filesystem operation.
  */
-export async function ensureWorkspacePath(cwd: string, target: string): Promise<string> {
+export async function ensureWorkspacePath(cwd: string, target: string, workspace?: ToolEnvironmentWorkspace): Promise<string> {
   const absolute = requireAbsolute(target)
   const [realCwd, realTarget] = await Promise.all([
-    resolveRealPath(cwd, 'workspace'),
-    resolveRealPath(absolute, 'target'),
+    resolveRealPath(cwd, 'workspace', workspace),
+    resolveRealPath(absolute, 'target', workspace),
   ])
   assertWithinWorkspace(realCwd, realTarget)
   return realTarget
@@ -46,17 +48,18 @@ export async function ensureWorkspacePath(cwd: string, target: string): Promise<
  *
  * @param cwd - Session workspace directory.
  * @param target - Client-supplied absolute destination path.
+ * @param workspace - the tool-environment workspace; omitted = this host's filesystem.
  * @returns A canonical path for an existing target or its nearest existing ancestor.
  */
-export async function ensureWorkspaceWritePath(cwd: string, target: string): Promise<string> {
+export async function ensureWorkspaceWritePath(cwd: string, target: string, workspace?: ToolEnvironmentWorkspace): Promise<string> {
   const absolute = requireAbsolute(target)
-  const realCwd = await resolveRealPath(cwd, 'workspace')
+  const realCwd = await resolveRealPath(cwd, 'workspace', workspace)
   let existingPath = absolute
   const missingSegments: string[] = []
 
   for (;;) {
     try {
-      const realTarget = await realpath(existingPath)
+      const realTarget = await (workspace === undefined ? realpath(existingPath) : workspace.realpath(existingPath))
       assertWithinWorkspace(realCwd, realTarget)
       return missingSegments.reduce((path, segment) => join(path, segment), realTarget)
     } catch (error) {

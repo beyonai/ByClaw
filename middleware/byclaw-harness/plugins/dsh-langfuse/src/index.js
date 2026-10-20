@@ -25,7 +25,7 @@ export function resolveConfig(config = {}, env = process.env) {
   const endpoint = rawEndpoint ? `${String(rawEndpoint).replace(/\/+$/u, '')}${String(rawEndpoint).endsWith('/v1/traces') ? '' : '/v1/traces'}` : baseUrl ? `${baseUrl}/api/public/otel/v1/traces` : ''
   const headers = parseHeaders(config.otlpHeaders ?? env.OTEL_EXPORTER_OTLP_HEADERS)
   if (publicKey && secretKey && !Object.keys(headers).some(key => key.toLowerCase() === 'authorization')) headers.Authorization = basic(publicKey, secretKey)
-  return { enabled: config.enabled ?? parseBool(env.LANGFUSE_ENABLED, true), baseUrl, publicKey, secretKey, endpoint, headers, serviceName: config.serviceName ?? env.LANGFUSE_SERVICE_NAME ?? env.OTEL_SERVICE_NAME ?? 'byclaw-dsh', sampleRate: Math.max(0, Math.min(1, Number(config.sampleRate ?? env.LANGFUSE_SAMPLE_RATE ?? 1))), maxText: Number(config.maxText ?? MAX_TEXT), maxArray: Number(config.maxArray ?? MAX_ARRAY), retryCount: Number(config.retryCount ?? 2), flushIntervalMs: Number(config.flushIntervalMs ?? 1000) }
+  return { enabled: config.enabled ?? parseBool(env.LANGFUSE_ENABLED, true), baseUrl, publicKey, secretKey, endpoint, headers, serviceName: config.serviceName ?? env.LANGFUSE_SERVICE_NAME ?? env.OTEL_SERVICE_NAME ?? 'byclaw-dsh', sampleRate: Math.max(0, Math.min(1, Number(config.sampleRate ?? env.LANGFUSE_SAMPLE_RATE ?? 1))), maxText: Number(config.maxText ?? MAX_TEXT), maxArray: Number(config.maxArray ?? MAX_ARRAY), retryCount: Number(config.retryCount ?? 2), flushIntervalMs: Number(config.flushIntervalMs ?? 1000), userId: config.userId === undefined || config.userId === null || String(config.userId).trim() === '' ? undefined : String(config.userId) }
 }
 
 function trim(value, depth, limits) {
@@ -41,7 +41,8 @@ function json(value, config) { return JSON.stringify(safeValue(value, config)) }
 function id(value) { return value === undefined || value === null ? undefined : String(value) }
 function sessionOf(value) { return value?.session ?? value?.agent?.session }
 function sessionIdOf(value) { return id(sessionOf(value)?.id ?? value?.sessionId ?? value?.agent?.id) }
-function userIdOf(value) { const session = sessionOf(value); return id(value?.userId ?? value?.user?.id ?? session?.header?.userId ?? session?.header?.user?.id ?? process.env.USER_CODE) }
+/** Per-agent identity first, then the configured user (one per context on a shared host), then `USER_CODE`. */
+function userIdOf(value, configured) { const session = sessionOf(value); return id(value?.userId ?? value?.user?.id ?? session?.header?.userId ?? session?.header?.user?.id ?? configured ?? process.env.USER_CODE) }
 function runKey(sessionId, turn) { return `${sessionId}:${turn}` }
 function modelKey(sessionId, turn, step) { return `${sessionId}:${turn}:${step}` }
 function now() { return new Date().toISOString() }
@@ -90,7 +91,7 @@ export class ObservationState {
   ensureRun(agent, turn, input) {
     const sessionId = sessionIdOf(agent) ?? 'unknown'; const key = runKey(sessionId, turn); let run = this.runs.get(key)
     if (!run) {
-      const userId = userIdOf(agent); const parentSession = id(sessionOf(agent)?.header?.parentSession); const parent = parentSession ? this.currentRuns.get(parentSession) : undefined
+      const userId = userIdOf(agent, this.config.userId); const parentSession = id(sessionOf(agent)?.header?.parentSession); const parent = parentSession ? this.currentRuns.get(parentSession) : undefined
       const span = this.telemetry.start('dsh.run', { 'langfuse.trace.name': 'dsh.run', 'langfuse.observation.type': 'span', 'langfuse.session.id': sessionId, 'dsh.session.id': sessionId, 'dsh.turn': turn, ...(userId ? { 'langfuse.user.id': userId } : {}), ...(parentSession ? { 'dsh.parent_session.id': parentSession } : {}) }, parent ? spanContext(parent.span) : undefined)
       run = { key, sessionId, turn, userId, span, inputs: [], output: undefined, ended: false }; this.runs.set(key, run); this.currentRuns.set(sessionId, run)
     }

@@ -18,6 +18,7 @@ English | [中文](README.zh.md)
 | `root` | `.devflow/spec` | Default spec root for operations whose caller derives none |
 | `repoRoot` | `.` | Repository root the anchor file paths resolve against |
 | `maxNetGrowthBytes` | `8192` | Ceiling on one write's NET growth: the new file's size minus everything it replaces. A merge is usually negative and always passes — charging a cluster merge as pure addition would refuse the one move that shrinks the set. It budgets reviewability, not context: bodies never reach a model in bulk, so a large document costs whoever must keep it true. |
+| `workspaceOnToolEnvironment` | `false` | Read and write documents and anchored sources through the context's `ctx.fs` / `ctx.subprocess` (and run `git` there) instead of this process; set absolute `root` and `repoRoot` with it. |
 
 The default root sits **inside `.devflow/`**, which `@zhchxiao123/dsh-devflow-fs-guard` already denies file tools by directory-name match. That is not incidental: it makes this store the only write path rather than merely the intended one, without a second guard entry.
 

@@ -14,7 +14,7 @@
 
 import { symbols, type Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { teamStateRuntime } from './runtime-state.ts'
 import { groupPolicy } from './group-scope.ts'
 // Declaration merge only: makes ctx.subagents visible.
 import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
@@ -265,7 +265,7 @@ export function installAgentTeamsReportDeliveryGuard(ctx: Context, stateDir: str
     const sendMessage = runtime.sendMessage
     const guardedSendMessage: typeof runtime.sendMessage = async function (this: typeof runtime, child, targetId, content, options) {
       if (child.session.header.parentSession === targetId) {
-        const stateRoot = resolveTeamStateRoot(child.session.header.cwd ?? process.cwd(), stateDir)
+        const stateRoot = teamStateRuntime(ctx).stateRootOf(child, stateDir)
         const [team, retired] = await Promise.all([
           findTeamByParticipant(stateRoot, child.id),
           readRetiredMemberIds(stateRoot),
@@ -396,7 +396,7 @@ export function installMemberComposition(ctx: Context, stateDir: string): void {
         const separator = identity.indexOf(':')
         const team = separator < 1
           ? undefined
-          : readTeamSync(resolveTeamStateRoot(child.session.header.cwd ?? process.cwd(), stateDir), identity.slice(0, separator))
+          : readTeamSync(teamStateRuntime(ctx).stateRootOf(child, stateDir), identity.slice(0, separator))
         const member = team?.captainSessionId === parentSessionId
           ? team.members.find(candidate => candidate.name === identity.slice(separator + 1))
           : undefined
@@ -480,8 +480,8 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
       if (separator < 1 || separator === identity.length - 1) return () => undefined
       const teamId = identity.slice(0, separator)
       const memberName = identity.slice(separator + 1)
-      const workspace = child.session.header.cwd ?? process.cwd()
-      const team = readTeamSync(resolveTeamStateRoot(workspace, stateDir), teamId)
+      const workspace = teamStateRuntime(ctx).workspaceOf(child)
+      const team = readTeamSync(teamStateRuntime(ctx).resolveTeamStateRoot(workspace, stateDir), teamId)
       if (team === undefined || team.captainSessionId !== parentSessionId) return () => undefined
       selection = selectionFromMember(team.members.find(member => member.name === memberName)) ?? descriptorBaseline
       // An old team record has no provider/reasoning snapshot. Its durable
@@ -494,10 +494,10 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
       }
     }
 
-    const workspace = child.session.header.cwd ?? process.cwd()
+    const workspace = teamStateRuntime(ctx).workspaceOf(child)
     const identity = descriptor.label.slice(MEMBER_LABEL_PREFIX.length)
     const separator = identity.indexOf(':')
-    const team = separator < 1 ? undefined : readTeamSync(resolveTeamStateRoot(workspace, stateDir), identity.slice(0, separator))
+    const team = separator < 1 ? undefined : readTeamSync(teamStateRuntime(ctx).resolveTeamStateRoot(workspace, stateDir), identity.slice(0, separator))
     const member = pendingChildMembers.get(String(child.id)) ?? pendingMembers.get(key)
       ?? (separator < 1 ? undefined : team?.members.find(candidate => candidate.name === identity.slice(separator + 1)))
     if (member?.source !== undefined) {
@@ -868,7 +868,7 @@ async function retiredForParent(ctx: Context, parentId: SessionId, stateDir: str
   const parent = ctx.agents.get(parentId)
   return parent === undefined
     ? new Set()
-    : readRetiredMemberIds(resolveTeamStateRoot(parent.session.header.cwd ?? process.cwd(), stateDir))
+    : readRetiredMemberIds(teamStateRuntime(ctx).stateRootOf(parent, stateDir))
 }
 
 /**
@@ -907,7 +907,7 @@ export function installRetiredMemberGuard(ctx: Context, stateDir: string): void 
       return entries.filter(entry => !retired.has(entry.id))
     }
     const assertNotRetired = async (parent: Agent, childId: SessionId): Promise<void> => {
-      const retired = await readRetiredMemberIds(resolveTeamStateRoot(parent.session.header.cwd ?? process.cwd(), stateDir))
+      const retired = await readRetiredMemberIds(teamStateRuntime(ctx).stateRootOf(parent, stateDir))
       if (retired.has(childId)) {
         throw new SubagentError(
           `AgentTeams member "${childId}" was retired and cannot be resumed`,

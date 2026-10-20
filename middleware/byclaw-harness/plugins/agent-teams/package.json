@@ -99,7 +99,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "sync:skill": "node scripts/sync-skill.mjs",
     "verify:skill": "node scripts/sync-skill.mjs --check",
-    "verify": "node --experimental-transform-types scripts/child-setup-verify.mjs && node --experimental-transform-types scripts/byclaw-skill-binding-verify.mjs && node --experimental-transform-types scripts/current-runtime-verify.mjs && node --experimental-transform-types scripts/model-override-verify.mjs && node scripts/snapshot-scope-verify.mjs && node scripts/cancellation-verify.mjs && node scripts/verify.mjs && node scripts/lifecycle-verify.mjs && node scripts/stress-verify.mjs && node scripts/controlled-workflow-verify.mjs && node scripts/dynamic-members-verify.mjs && node scripts/catalog-cli-verify.mjs && node scripts/expert-dock-verify.mjs && pnpm verify:skill",
+    "verify": "node --experimental-transform-types scripts/child-setup-verify.mjs && node --experimental-transform-types scripts/byclaw-skill-binding-verify.mjs && node --experimental-transform-types scripts/current-runtime-verify.mjs && node --experimental-transform-types scripts/model-override-verify.mjs && node scripts/snapshot-scope-verify.mjs && node scripts/cancellation-verify.mjs && node scripts/verify.mjs && node scripts/lifecycle-verify.mjs && node scripts/stress-verify.mjs && node scripts/controlled-workflow-verify.mjs && node scripts/dynamic-members-verify.mjs && node scripts/catalog-cli-verify.mjs && node scripts/expert-dock-verify.mjs && node scripts/shared-host-verify.mjs && pnpm verify:skill",
     "prepublishOnly": "pnpm build && pnpm verify"
   },
   "peerDependencies": {

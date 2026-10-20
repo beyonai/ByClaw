@@ -30,10 +30,15 @@ import { parseByClawDigitalEmployee } from './resources.ts'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defaultCatalogDir } from '@byclaw/dsh-agent-teams/catalog'
+import { teamStateRuntime } from '@byclaw/dsh-agent-teams'
 import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
+import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
+import { toolEnvironmentFiles } from './tool-environment-files.ts'
+import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
+import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
   ByClawSkillRuntime,
   type ByClawSkillPreparationError,
@@ -206,6 +211,34 @@ export interface Config {
   agentPreset?: string
   /** Safe final-wire LLM request audit level; omission reads `DSH_LLM_LOG`. */
   llmRequestLogLevel?: 'off' | 'info'
+  /**
+   * The user workspace (`byRoot`) exists only where tools run (a separate tool
+   * environment), not on this host; session directories are created there.
+   * User-tree reads and writes (employee Skills, voice/ASR files, media
+   * artifacts, connector projections, file-change snapshots) then go through
+   * `ctx.fs` / `ctx.subprocess` instead of this host's filesystem.
+   */
+  workspaceOnToolEnvironment?: boolean
+  /** The user's `/by` tree; defaults to `/by` (or the local-E2E storage mapping). */
+  byRoot?: string
+  /**
+   * This context's DSH home: group-member Skill copies, protected private roots
+   * (`sessions`, `storages`, `runtime`) and default catalog/template locations.
+   * Defaults to `DSH_HOME`, else `~/.dsh`.
+   */
+  dshHome?: string
+  /**
+   * Employee (agent-workspace) Skill root. Defaults to `<byRoot>/.openclaw` with
+   * `workspaceOnToolEnvironment`, otherwise `/by/.openclaw`.
+   */
+  agentSkillRoot?: string
+  /** ByClaw UserFS root for file-change snapshots; defaults to `BYCLAW_USER_FS_ROOT` or workspace inference. */
+  userFsRoot?: string
+  /**
+   * by-framework conversation history (`HistoryProvider`): `memory` keeps its
+   * process-wide in-memory store, `none` records nothing. Defaults to `memory`.
+   */
+  workerHistory?: ByClawWorkerHistory
 }
 
 export const Config: z<Config> = z.object({
@@ -221,6 +254,12 @@ export const Config: z<Config> = z.object({
   provider: z.string(),
   model: z.string(),
   workerId: z.string(),
+  workspaceOnToolEnvironment: z.boolean().default(false),
+  byRoot: z.string(),
+  dshHome: z.string(),
+  agentSkillRoot: z.string(),
+  userFsRoot: z.string(),
+  workerHistory: z.union(['memory', 'none']).default('memory'),
   agentTypes: z.array(z.string()).default(undefined as unknown as string[]),
   maxConcurrency: z.natural().min(1).default(8),
   refreshChannel: z.string().default('byai:pub:dig_employee_change'),
@@ -491,16 +530,24 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const userCode = config.userCode?.trim() || process.env['USER_CODE']?.trim()
   if (userCode === undefined || userCode === '') throw new Error('byclaw-dsh requires config.userCode or USER_CODE')
   let baseUrl = ''
-  const catalogDir = resolve(config.catalogDir?.trim() || defaultCatalogDir())
-  const agentTemplateDir = resolve(config.agentTemplateDir?.trim() || defaultAgentTemplateDir())
+  applyByClawWorkerHistory(config.workerHistory)
+  const dshHome = config.dshHome?.trim() ? resolve(config.dshHome.trim()) : undefined
+  const catalogDir = resolve(config.catalogDir?.trim() || (dshHome === undefined ? defaultCatalogDir() : join(dshHome, 'agent-teams')))
+  const agentTemplateDir = resolve(config.agentTemplateDir?.trim() || (dshHome === undefined ? defaultAgentTemplateDir() : join(dshHome, 'agent-templates')))
   const skillCacheDir = resolve(config.skillCacheDir?.trim() || defaultByClawSkillCache(agentTemplateDir))
   const workspace = resolve(config.workspace?.trim() || process.cwd())
   const localE2eStorageRoot = resolveByClawLocalE2eStorageRoot()
-  const byRoot = resolveByClawByRoot({
+  const byRoot = config.byRoot?.trim() ? resolve(config.byRoot.trim()) : resolveByClawByRoot({
     workspace,
     userCode,
     ...localE2eStorageRoot === undefined ? {} : { localE2eStorageRoot },
   })
+  // With a tool environment the user tree exists only there; never touch it through this host's `node:fs`.
+  const userFiles = config.workspaceOnToolEnvironment ? toolEnvironmentFiles(ctx) : undefined
+  const agentSkillRoot = config.agentSkillRoot?.trim()
+    ? resolve(config.agentSkillRoot.trim())
+    : userFiles === undefined ? AGENT_SKILLS_ROOT : agentSkillRootFor(byRoot)
+  const mediaModelOptions = userFiles === undefined ? {} : { projectionRoot: mediaProjectionRoot(byRoot), files: userFiles }
   const redisModelsEnabled = resolveByClawRedisModelsEnabled(process.env[BYCLAW_REDIS_MODEL_ENABLED_ENV])
   const modelRouting = resolveByClawModelRouting()
   ctx.logger.info(`[byclaw-integration] routers ${JSON.stringify({ agentRouterEnabled: agentRouterEnabled(), modelRouterEnabled: modelRouting.enabled, modelIds: modelRouting.modelIds })}`)
@@ -512,7 +559,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
-  const skillRuntime = await ByClawSkillRuntime.install(ctx, { builtinSkillDir: config.builtinSkillDir })
+  const skillRuntime = await ByClawSkillRuntime.install(ctx, {
+    builtinSkillDir: config.builtinSkillDir,
+    agentSkillRoot,
+    ...(userFiles === undefined ? {} : { files: userFiles }),
+    ...(dshHome === undefined ? {} : { dshHome }),
+  })
   const disposeAgentShellEnv = ctx.shellEnv.register({
     name: 'byclaw-agent-identity',
     variables: {
@@ -561,7 +613,10 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   // AgentTeams reads this service while the provider fiber is unloading, so
   // one composite effect drains runtime work before removing the registration.
   const lifecycle = ctx.effect(function* () {
-    yield installByClawSessionCwdCompatibility(ctx.get('sessionPersistence') as typeof ctx.sessionPersistence, sessionMetadata, byRoot)
+    yield installByClawSessionCwdCompatibility(
+      ctx.get('sessionPersistence') as typeof ctx.sessionPersistence, sessionMetadata, byRoot, () => teamStateRuntime(ctx),
+      ...(config.workspaceOnToolEnvironment ? [(path: string) => ensureRemoteDirectory(ctx, path)] : []),
+    )
     yield ctx.provide('byclawGenerationLease', generationLease)
     yield ctx.provide('byclawSkills', skillRuntime)
     yield () => disposeAgentShellEnv()
@@ -793,7 +848,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       },
       executeExternal: (request, scope, workerType) => externalWorkers.execute(request, scope, workerType),
     })
-    groupBoundary = new GroupStateBoundary({ privateRoots: [catalogDir, agentTemplateDir, skillCacheDir], getScope: id => groupCoordination.get(id) })
+    groupBoundary = new GroupStateBoundary({
+      privateRoots: [catalogDir, agentTemplateDir, skillCacheDir],
+      getScope: id => groupCoordination.get(id),
+      ...(dshHome === undefined ? {} : { dshHome }),
+      stateRuntime: () => teamStateRuntime(ctx),
+    })
     ctx.effect(() => groupBoundary.install(ctx), 'byclaw-group-private-storage-boundary')
     ctx.effect(() => ctx.provide('byclawGroupCoordination', groupCoordination), 'byclaw-group-coordination')
     // Web employee presets and Worker direct roots share template setup, including recovery.
@@ -961,11 +1021,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders,
       resolveSourcePath: source => resolveByClawInboundPath(source, byRoot),
       resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
-      resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken }),
+      resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
     }
     const voiceRuntime = new ByClawVoiceRuntime({
       byRoot, userCode,
-      resolveModel: type => resolvePluginMediaModel(redis, type, { decrypt: decryptByClawAuthToken }),
+      resolveModel: type => resolvePluginMediaModel(redis, type, { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+      ...(userFiles === undefined ? {} : { files: userFiles }),
     })
     const mountVoiceHttp = () => {
       const web = (ctx.get('webServer') ?? ctx.get('httpServer')) as VoiceWebHost | undefined
@@ -974,11 +1035,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         const authHeaders = async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders
         const disposeAsr = web.register({ kind: 'exact', path: '/api/byclaw/asr/transcribe', handler: createVoiceHttpHandler({
           byRoot, authHeaders,
-          resolveModel: () => resolvePluginMediaModel(redis, 'ASR', { decrypt: decryptByClawAuthToken }),
+          resolveModel: () => resolvePluginMediaModel(redis, 'ASR', { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+          ...(userFiles === undefined ? {} : { files: userFiles }),
         }) })
         const disposeTts = web.register({ kind: 'exact', path: '/api/byclaw/tts/debug', handler: createTtsDebugHttpHandler({
           authHeaders,
-          resolveModel: () => resolvePluginMediaModel(redis, 'TTS', { decrypt: decryptByClawAuthToken }),
+          resolveModel: () => resolvePluginMediaModel(redis, 'TTS', { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
         }) })
         return () => { disposeAsr(); disposeTts() }
       })
@@ -993,6 +1055,9 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       workspace,
       voiceRuntime,
       byRoot,
+      ...(config.workspaceOnToolEnvironment ? { ensureDirectory: (path: string) => ensureRemoteDirectory(ctx, path) } : {}),
+      ...(userFiles === undefined ? {} : { userFiles }),
+      ...(config.userFsRoot?.trim() ? { userFsRoot: resolve(config.userFsRoot.trim()) } : {}),
       stateDir: config.stateDir ?? '.agent-teams',
       agentTemplateDir,
       agentPreset: config.agentPreset?.trim() || 'standard',
@@ -1056,4 +1121,16 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     }
     throw error
   }
+}
+
+/** `mkdir -p` through the context's subprocess provider, i.e. on the tool environment. */
+async function ensureRemoteDirectory(ctx: Context, path: string): Promise<void> {
+  const subprocess = ctx.get('subprocess') as { spawn(spec: unknown): { done: Promise<{ exitCode: number | null }>; collected: { stderr?: { readFrom(offset: number): { text: string } } } } } | undefined
+  if (subprocess === undefined) throw new Error('byclaw-dsh: no subprocess provider to create the session directory')
+  const handle = subprocess.spawn({
+    argv: ['/bin/mkdir', '-p', '--', path], cwd: '/', graceMs: 1000,
+    stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } },
+  })
+  const outcome = await handle.done
+  if (outcome.exitCode !== 0) throw new Error(`byclaw-dsh: cannot create ${path}: ${handle.collected.stderr?.readFrom(0).text ?? ''}`)
 }

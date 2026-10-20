@@ -30,11 +30,13 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@zhchxiao123/dsh-devflow-spec": "workspace:^"
+    "@zhchxiao123/dsh-devflow-spec": "workspace:^",
+    "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@zhchxiao123/dsh-devflow-spec": "workspace:^"
+    "@zhchxiao123/dsh-devflow-spec": "workspace:^",
+    "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "scripts": {
     "prepublishOnly": "node -e \"for (const f of require('./package.json').files.filter(f=>!f.includes('*'))) if (!require('node:fs').existsSync(f)) { console.error('prepublishOnly: '+f+' is missing; run pnpm run build at the repo root'); process.exit(1) }\""

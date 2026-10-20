@@ -32,6 +32,7 @@ import {
   type AgentTeamsModelOverrideService,
 } from '@byclaw/dsh-agent-teams'
 import { mkdir } from 'node:fs/promises'
+import type { ToolEnvironmentFiles } from './tool-environment-files.ts'
 import { join, resolve } from 'node:path'
 import {
   collectArchivedTeamsActivity,
@@ -52,7 +53,7 @@ import {
 } from './file-changes.ts'
 import { readAgentTemplateSync } from './agent-template.ts'
 import { groupCoordinationFromExtra } from './group-coordination.ts'
-import { groupPolicy, resolveTeamStateRoot } from '@byclaw/dsh-agent-teams'
+import { groupPolicy, teamStateRuntime } from '@byclaw/dsh-agent-teams'
 import type { ByClawInboundTarget } from './inbound-routing.ts'
 import type { ByClawTemplateInstanceRuntime } from './template-runtime.ts'
 import {
@@ -109,6 +110,12 @@ import {
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
   byRoot?: string
+  /** Create a session directory where tools run; defaults to this host's filesystem. */
+  ensureDirectory?: (path: string) => Promise<void>
+  /** User-tree file access where tools run; defaults to this host's filesystem. */
+  userFiles?: ToolEnvironmentFiles
+  /** ByClaw UserFS root for file-change snapshots; defaults to `BYCLAW_USER_FS_ROOT` or workspace inference. */
+  userFsRoot?: string
   stateDir: string
   agentTemplateDir: string
   agentPreset: string
@@ -1727,7 +1734,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
-    await mkdir(sessionRoot, { recursive: true })
+    await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(sessionRoot)
     const entry = await this.handleFor(command, selection, preparedRoot)
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
@@ -1803,7 +1810,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       error => this.ctx.logger.warn(`byclaw-dsh AgentTeams snapshot refresh failed: ${sanitizeByClawOperationalLog(error)}`),
     )
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
-    await resumeCaptainTeam(rootAgent, this.options.stateDir)
+    await resumeCaptainTeam(rootAgent, this.options.stateDir, this.ctx)
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     this.active.set(String(rootAgent.id), turn)
     this.queueRuntimeProjection(turn, turn.runtime.observeTurnActive(true))
@@ -2408,7 +2415,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private async emitFileChangesSummary(turn: ActiveTurn): Promise<void> {
     if (turn.fileChangesEmitted) return
     turn.fileChangesEmitted = true
-    const payload = await persistFileChangesSummary(turn.workspace, normalizeByClawSessionId(turn.context.sessionId), turn.fileChanges.files())
+    const payload = await persistFileChangesSummary(turn.workspace, normalizeByClawSessionId(turn.context.sessionId), turn.fileChanges.files(), {
+      ...(this.options.userFsRoot === undefined ? {} : { userFsRoot: this.options.userFsRoot }),
+      ...(this.options.userFiles === undefined ? {} : { files: this.options.userFiles }),
+    })
     if (payload === undefined) return
     await this.options.emitter.emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
       content: JSON.stringify(payload),
@@ -2851,7 +2861,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     try {
       teams = await collectTeamsActivity(this.ctx, [{
         workspace: turn.workspace,
-        stateRoot: resolveTeamStateRoot(turn.workspace, this.options.stateDir),
+        stateRoot: teamStateRuntime(this.ctx).resolveTeamStateRoot(turn.workspace, this.options.stateDir),
       }], captainSessionIds)
     } catch (error: unknown) {
       this.ctx.logger.warn(`byclaw-dsh recovery snapshot unavailable; waking the response agent: ${sanitizeByClawOperationalLog(error)}`)
@@ -2910,7 +2920,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const ownsCaptain = (captainSessionId: string): boolean => captainSessionIds.has(captainSessionId)
     const roots = [{
       workspace: turn.workspace,
-      stateRoot: resolveTeamStateRoot(turn.workspace, this.options.stateDir),
+      stateRoot: teamStateRuntime(this.ctx).resolveTeamStateRoot(turn.workspace, this.options.stateDir),
     }]
     let live: TeamActivitySnapshot[]
     let archived: TeamActivitySnapshot[]

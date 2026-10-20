@@ -2,7 +2,7 @@
 
 import { getTraceable, type Context } from '@deepseek-ai/cordis'
 import { registerContinuableChildSetup } from '@byclaw/dsh-agent-teams/child-setup'
-import { requestGroupMemberAssistance, groupInputRevision, resolveTeamStateRoot } from '@byclaw/dsh-agent-teams'
+import { requestGroupMemberAssistance, groupInputRevision, teamStateRuntime } from '@byclaw/dsh-agent-teams'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
@@ -252,7 +252,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
             })
     config.groupCoordination?.bind(String(child.id), template.source.resourceId, String(parentSessionId))
     const disposeBoundary = config.groupCoordination?.installMemberBoundary?.(childCtx, child) ?? (() => undefined)
-    const childStateRoot = resolveTeamStateRoot(child.session.header.cwd ?? process.cwd(), config.stateDir ?? '.agent-teams')
+    const childStateRoot = teamStateRuntime(ctx).stateRootOf(child, config.stateDir ?? '.agent-teams')
     const assistance = soloAssistanceForChild(childStateRoot, String(parentSessionId), String(child.id))
     if (assistance !== undefined) soloRequests.set(String(child.id), { stateRoot: childStateRoot, record: assistance })
     const disposeAssistancePolicy = assistance === undefined ? () => undefined : childCtx.systemPrompt.section({ name: 'byclaw:linked-assistance-result', order: 119,
@@ -457,7 +457,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
       const parentId = child?.session.header.parentSession
       if (child === undefined || scope?.role !== 'coordinator' || parentId === undefined
         || config.groupCoordination?.get(String(parentId))?.role !== 'member') throw new Error('Only the server-bound assistance child may return this result')
-      const stateRoot = resolveTeamStateRoot(child.session.header.cwd ?? process.cwd(), config.stateDir ?? '.agent-teams')
+      const stateRoot = teamStateRuntime(ctx).stateRootOf(child, config.stateDir ?? '.agent-teams')
       const record = await resolveSoloAssistance(stateRoot, String(parentId), String(child.id), args.result, args.status, args.blocking_reason)
       soloRequests.set(String(child.id), { stateRoot, record })
       return { request_id: record.id, status: record.status, result: record.result ?? '' }
@@ -529,7 +529,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
           ...(memberRequest.result === undefined ? {} : { result: memberRequest.result }),
           ...(memberRequest.blockingReason === undefined ? {} : { blocking_reason: memberRequest.blockingReason }) }
       }
-      const stateRoot = resolveTeamStateRoot(parent.session.header.cwd ?? process.cwd(), config.stateDir ?? '.agent-teams')
+      const stateRoot = teamStateRuntime(ctx).stateRootOf(parent, config.stateDir ?? '.agent-teams')
       const requested = await requestSoloAssistance(stateRoot, { parentId: String(parent.id), taskSessionId: scope.coordination.taskSessionId,
         coordinatorAgentId: scope.coordination.coordinatorAgentId, objective, inputs: args.inputs, inputRevision: config.groupCoordination?.inputRevision?.(String(parent.id)) })
       const record = requested.record

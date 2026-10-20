@@ -48,7 +48,8 @@ export interface SentinelWorkspace {
 /**
  * Derive the calling agent's spec root the way every other devflow root
  * derives: `<session cwd>/.devflow/spec` for an agent whose session carries a
- * working directory, else the configured default root — NOT the nearest git
+ * working directory, else the configured default root under the configured
+ * `repoRoot` (this process's cwd when unset) — NOT the nearest git
  * ancestor, so rules, cards, and spec documents always share one `.devflow/`.
  * @param agent - the calling agent.
  * @param config - the resolved plugin configuration supplying the fallback.
@@ -60,7 +61,8 @@ export function workspaceOf(agent: Agent, config: ResolvedConfig): SentinelWorks
     const repoRoot = resolve(cwd)
     return { repoRoot, specRoot: join(repoRoot, '.devflow', 'spec') }
   }
-  return { repoRoot: process.cwd(), specRoot: resolve(config.root) }
+  const repoRoot = config.repoRoot ?? process.cwd()
+  return { repoRoot, specRoot: resolve(repoRoot, config.root) }
 }
 
 /**

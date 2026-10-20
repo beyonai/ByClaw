@@ -21,7 +21,6 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -33,8 +32,8 @@ import type { UserMessage } from '@deepseek-ai/dsh-session'
 // Also resolves ctx.subagents for the checker dispatch.
 import { parentAgentOptionsForDelegation } from '@deepseek-ai/dsh-subagent'
 import type { SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
-import { isCardLocation } from '@zhchxiao123/dsh-devflow'
-import type { DevActor, DevCard, GateCheck, TransitionAttempt, TransitionDecision } from '@zhchxiao123/dsh-devflow'
+import { isCardLocation, workspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { DevActor, DevCard, GateCheck, TransitionAttempt, TransitionDecision, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { CheckerVerdict, EdgeCheck, VerdictCacheKey, VerdictCacheRecord } from './types.ts'
 
 export type { CheckerVerdict, EdgeCheck, VerdictCacheKey, VerdictCacheRecord } from './types.ts'
@@ -95,6 +94,13 @@ export interface Config {
   edges?: Record<string, EdgeCheck>
   /** Milliseconds one checker may take from dispatch to verdict; exceeding it fails closed. */
   checkTimeoutMs?: number
+  /**
+   * Read artifacts and keep reports and the verdict cache through the
+   * context's tool environment (`ctx.fs` / `ctx.subprocess`) rather than this
+   * process's filesystem; set it wherever the store's own
+   * `workspaceOnToolEnvironment` is set.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /**
@@ -162,6 +168,7 @@ export const Config: z<Config> = z.object({
     prompt: z.string().required(),
   })).default(BYCLAW_EDGES),
   checkTimeoutMs: z.number().default(600_000),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** One edge's check with its input kinds validated and deduplicated. */
@@ -195,6 +202,7 @@ export function apply(ctx: Context, config: Config): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
     throw new Error('devflow-agent-gate: checkTimeoutMs must be a positive integer')
   }
+  const io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
 
   // One synthetic, never-prompted parent per root anchors checker lineage and
   // workspace for every one-shot checker dispatch.
@@ -232,13 +240,13 @@ export function apply(ctx: Context, config: Config): void {
       const card = await ctx.devflow.read(attempt.id, attempt.root)
       let inputs: CheckedInput[]
       try {
-        inputs = await readInputs(card, check.inputs)
+        inputs = await readInputs(io, card, check.inputs)
       } catch (error) {
         return failClosed(ctx, attempt, edge, `a required input cannot be read: ${message(error)}`)
       }
       const key = cacheKey(attempt, edge, inputs, check.prompt)
       const cacheDir = join(attempt.root, ...CACHE_SUBDIR)
-      const cached = await readCachedVerdict(ctx, cacheDir, key)
+      const cached = await readCachedVerdict(ctx, io, cacheDir, key)
       if (cached !== undefined) {
         if (cached.verdict === 'veto') {
           // decodeCacheRecord guarantees a veto record carries its report path.
@@ -253,16 +261,16 @@ export function apply(ctx: Context, config: Config): void {
         return failClosed(ctx, attempt, edge, message(error))
       }
       if (verdict.verdict === 'allow') {
-        await writeCache(ctx, cacheDir, key, { key, verdict: 'allow', summary: verdict.summary, at: attempt.at })
+        await writeCache(ctx, io, cacheDir, key, { key, verdict: 'allow', summary: verdict.summary, at: attempt.at })
         return await allowWithCheck(next, verdict.summary)
       }
       let reportPath: string
       try {
-        reportPath = await writeReport(join(attempt.root, ...REPORTS_SUBDIR), attempt, edge, inputs, verdict)
+        reportPath = await writeReport(io, join(attempt.root, ...REPORTS_SUBDIR), attempt, edge, inputs, verdict)
       } catch (error) {
         return failClosed(ctx, attempt, edge, `the veto report could not be written: ${message(error)}`)
       }
-      await writeCache(ctx, cacheDir, key, { key, verdict: 'veto', summary: verdict.summary, reportPath, at: attempt.at })
+      await writeCache(ctx, io, cacheDir, key, { key, verdict: 'veto', summary: verdict.summary, reportPath, at: attempt.at })
       return { allowed: false, reason: `agent check vetoed ${edge}: ${verdict.summary}; full report: ${reportPath}` }
     },
   ), 'devflow-agent-gate: admission fence')
@@ -309,7 +317,7 @@ function validatedEdges(edges: Record<string, EdgeCheck>): Record<string, Checke
  * @param kinds - the edge's configured input kinds.
  * @returns the inputs the checker will see, in configured order.
  */
-async function readInputs(card: DevCard, kinds: readonly string[]): Promise<CheckedInput[]> {
+async function readInputs(io: WorkspaceIo, card: DevCard, kinds: readonly string[]): Promise<CheckedInput[]> {
   const inputs: CheckedInput[] = []
   for (const kind of kinds) {
     // Records are in registration order and revisions only grow, so the last
@@ -318,7 +326,7 @@ async function readInputs(card: DevCard, kinds: readonly string[]): Promise<Chec
     if (newest === undefined) continue
     // The record's path is journal-recorded relative to the card directory,
     // which the seam names as the card file's parent.
-    const content = await readFile(join(dirname(card.path), newest.path), 'utf8')
+    const content = await io.readFile(join(dirname(card.path), newest.path))
     inputs.push({ kind, rev: newest.rev, content })
   }
   return inputs
@@ -553,11 +561,16 @@ function cacheFile(dir: string, key: VerdictCacheKey): string {
  * whose stored key detail differs (a filename-hash collision) is a silent
  * one — either way the checker runs again.
  */
-async function readCachedVerdict(ctx: Context, dir: string, key: VerdictCacheKey): Promise<VerdictCacheRecord | undefined> {
+async function readCachedVerdict(
+  ctx: Context,
+  io: WorkspaceIo,
+  dir: string,
+  key: VerdictCacheKey,
+): Promise<VerdictCacheRecord | undefined> {
   const file = cacheFile(dir, key)
   let raw: string
   try {
-    raw = await readFile(file, 'utf8')
+    raw = await io.readFile(file)
   } catch (error) {
     if (!isAbsentPathError(error)) {
       ctx.logger.warn(`devflow-agent-gate: could not read the verdict cache at ${file}: ${String(error)}`)
@@ -599,13 +612,13 @@ function decodeCacheRecord(raw: string): VerdictCacheRecord | undefined {
  * sees a torn file. A write failure only warns: the verdict already decided
  * the move, and losing the cache costs a re-check, not correctness.
  */
-async function writeCache(ctx: Context, dir: string, key: VerdictCacheKey, record: VerdictCacheRecord): Promise<void> {
+async function writeCache(ctx: Context, io: WorkspaceIo, dir: string, key: VerdictCacheKey, record: VerdictCacheRecord): Promise<void> {
   const file = cacheFile(dir, key)
   const temp = `${file}.${process.pid}.tmp`
   try {
-    await mkdir(dir, { recursive: true })
-    await writeFile(temp, JSON.stringify(record, null, 2) + '\n')
-    await rename(temp, file)
+    await io.mkdir(dir, { recursive: true })
+    await io.writeFile(temp, JSON.stringify(record, null, 2) + '\n')
+    await io.rename(temp, file)
   } catch (error) {
     ctx.logger.warn(`devflow-agent-gate: could not cache the ${record.verdict} verdict at ${file}: ${String(error)}`)
   }
@@ -617,6 +630,7 @@ async function writeCache(ctx: Context, dir: string, key: VerdictCacheKey, recor
  * lost it fails closed instead of pointing at a file that does not exist.
  */
 async function writeReport(
+  io: WorkspaceIo,
   reportDir: string,
   attempt: TransitionAttempt,
   edge: string,
@@ -643,8 +657,8 @@ async function writeReport(
     ...findings.length === 0 ? ['The checker listed no individual findings.'] : findings.map(finding => `- ${finding}`),
     '',
   ].join('\n')
-  await mkdir(reportDir, { recursive: true })
-  await writeFile(file, body)
+  await io.mkdir(reportDir, { recursive: true })
+  await io.writeFile(file, body)
   return file
 }
 

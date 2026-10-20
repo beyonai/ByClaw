@@ -25,13 +25,16 @@
  * @module @zhchxiao123/dsh-devflow-spec-sentinel
  */
 
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { workspaceIo } from '@zhchxiao123/dsh-devflow'
 import { applyCollect } from './collect.ts'
 import type { TouchState } from './collect.ts'
 import { applySentinel } from './sentinel.ts'
 import { applySpecMap } from './spec-map.ts'
 import { createWorkspaceLayout } from './workspace-layout.ts'
+import { DETECTORS } from './ecosystem-detectors.ts'
 
 export type * from './types.ts'
 
@@ -66,18 +69,35 @@ export interface Config {
    * announced in the output.
    */
   contextMaxBytes?: number
+  /**
+   * Workspace root used by callers whose session names no working directory,
+   * and the base a relative `root` resolves against. Unset, this process's
+   * cwd; a host serving several workspaces sets it per context.
+   */
+  repoRoot?: string
+  /**
+   * Read the workspace layout through the context's tool environment
+   * (`ctx.fs`) rather than this process's filesystem; set it wherever the spec
+   * store's own `workspaceOnToolEnvironment` is set.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Defaults: the spec provider's own root, and a cap fitting dozens of index lines. */
 export const Config: z<Config> = z.object({
   root: z.string().default('.devflow/spec'),
   contextMaxBytes: z.natural().min(1).default(2048),
+  repoRoot: z.string(),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** A configuration with every default resolved, passed to the internal modules. */
 export interface ResolvedConfig {
   readonly root: string
   readonly contextMaxBytes: number
+  /** Absolute fallback workspace root; `undefined` means this process's cwd. */
+  readonly repoRoot?: string | undefined
+  readonly workspaceOnToolEnvironment?: boolean
 }
 
 /**
@@ -90,6 +110,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
   const resolved: ResolvedConfig = {
     root: config.root ?? '.devflow/spec',
     contextMaxBytes: config.contextMaxBytes ?? 2048,
+    repoRoot: config.repoRoot === undefined ? undefined : resolve(config.repoRoot),
+    workspaceOnToolEnvironment: config.workspaceOnToolEnvironment ?? false,
   }
   if (resolved.root.trim().length === 0) {
     throw new Error('devflow-spec-sentinel: root must be a non-empty path')
@@ -115,7 +137,7 @@ export function apply(ctx: Context, config: Config): void {
   // question that does not depend on the seam — `/devflow spec`'s census
   // reads it to report coverage even before any document exists. Registered
   // as an effect, so disposing this fiber takes the service with it.
-  const workspace = createWorkspaceLayout(ctx)
+  const workspace = createWorkspaceLayout(ctx, DETECTORS, workspaceIo(ctx, resolved.workspaceOnToolEnvironment))
   ctx.effect(
     () => ctx.provide('devflowSpecWorkspace', workspace),
     'devflow-spec-sentinel: workspace-layout service',

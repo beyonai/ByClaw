@@ -27,6 +27,9 @@ lines.on('line', line => {
         capabilities: { tools: {} },
         serverInfo: { name: 'fake-codegraph', version: '1.0.0' },
       }
-    : request.method === 'tools/list' ? { tools } : {}
+    : request.method === 'tools/list' ? { tools }
+      : request.method === 'tools/call'
+        ? { content: [{ type: 'text', text: `fake ${request.params.name} in ${process.cwd()}` }] }
+        : {}
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, result })}\n`)
 })

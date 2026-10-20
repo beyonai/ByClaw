@@ -43,6 +43,7 @@ import {
   renderGuardStatus,
 } from './guard-runtime.ts'
 import { DEFAULT_GUARD_SETTINGS } from './guard-wrap.ts'
+import type { Capability } from './capability.ts'
 import { wrapWithRtk } from './rtk-wrap.ts'
 import {
   DEFAULT_SLOT_SETTINGS,
@@ -78,8 +79,32 @@ declare module '@deepseek-ai/dsh-bash-local' {
     ulimitEnabled?: boolean
     /** Directory for single-host slot locks when Redis is unreachable. */
     slotLockDir?: string
+    /**
+     * User whose Redis runtime environment commands receive. Defaults to
+     * `USER_CODE`; a host serving several users sets it per user context.
+     */
+    userCode?: string
+    /**
+     * Which host (`process.env`) variables every command receives on top of the
+     * Redis runtime environment and the request's own env. `'all'` (default)
+     * copies the whole host environment; `{ allow }` copies only the listed
+     * names. A host serving several users sets an allowlist so one process's
+     * environment does not reach every user's commands.
+     */
+    forwardHostEnvironment?: HostEnvironmentForwarding
+    /**
+     * Commands run in a separate tool environment, not on this host. The build
+     * guard then stays off without probing this host's `/proc` and cgroup (it
+     * would measure the wrong machine), takes no build slots from
+     * `/tmp/byclaw-build-slots` or the shared Redis key `byclaw:build-slots`,
+     * and registers no `build_guard_status` tool.
+     */
+    workspaceOnToolEnvironment?: boolean
   }
 }
+
+/** Host environment forwarding policy: everything, or an explicit allowlist of names. */
+export type HostEnvironmentForwarding = 'all' | { readonly allow: readonly string[] }
 
 /** The build guard's advisory message source (session format v4 per-plugin kind). */
 declare module '@deepseek-ai/dsh-llm' {
@@ -87,6 +112,27 @@ declare module '@deepseek-ai/dsh-llm' {
     'plugin:byclaw-bash-provider': { kind: 'plugin:byclaw-bash-provider' }
   }
 }
+
+/**
+ * Validate a configured forwarding policy.
+ *
+ * @param value - the raw config value.
+ * @returns the policy, `'all'` when omitted.
+ */
+export function hostEnvironmentForwarding(value: unknown): HostEnvironmentForwarding {
+  if (value === undefined || value === 'all') return 'all'
+  if (typeof value === 'object' && value !== null && Array.isArray((value as { allow?: unknown }).allow)
+    && ((value as { allow: unknown[] }).allow).every(name => typeof name === 'string' && name !== '')) {
+    return { allow: [...(value as { allow: string[] }).allow] }
+  }
+  throw new Error('[byclaw-bash-provider] forwardHostEnvironment must be \'all\' or { allow: string[] }')
+}
+
+/** Guard capability used when the guard must not look at this host at all. */
+const UNPROBED_CAPABILITY: Capability = Object.freeze({
+  version: 'none', cgroupPath: undefined, memoryLimitBytes: undefined, cgroupWritable: false,
+  oomGroup: undefined, oomCounterReadable: false, tier: 'C', degraded: Object.freeze(['no-cgroup'] as const),
+})
 
 /** Default directory for single-host slot locks. */
 const DEFAULT_SLOT_LOCK_DIR = '/tmp/byclaw-build-slots'
@@ -165,7 +211,8 @@ function exitCodeOf(result: unknown): number | undefined {
  */
 function guardConfigFrom(config: Config): GuardConfig {
   return {
-    enabled: config.buildGuardEnabled ?? DEFAULT_GUARD_CONFIG.enabled,
+    // This host's capacity says nothing about a separate tool environment.
+    enabled: config.workspaceOnToolEnvironment === true ? false : config.buildGuardEnabled ?? DEFAULT_GUARD_CONFIG.enabled,
     guard: {
       oomScoreAdj: config.oomScoreAdj ?? DEFAULT_GUARD_SETTINGS.oomScoreAdj,
       memPerJobMb: config.memPerJobMb ?? DEFAULT_GUARD_SETTINGS.memPerJobMb,
@@ -444,10 +491,18 @@ export function forwardEnvironment(
   parentEnv: Readonly<NodeJS.ProcessEnv>,
   requestEnv?: Readonly<Record<string, string>>,
   runtimeEnv?: Readonly<Record<string, string>>,
+  forwarding: HostEnvironmentForwarding = 'all',
 ): Record<string, string> {
   const forwarded: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parentEnv)) {
-    if (value !== undefined) forwarded[key] = value
+  if (forwarding === 'all') {
+    for (const [key, value] of Object.entries(parentEnv)) {
+      if (value !== undefined) forwarded[key] = value
+    }
+  } else {
+    for (const key of forwarding.allow) {
+      const value = parentEnv[key]
+      if (value !== undefined) forwarded[key] = value
+    }
   }
   return { ...forwarded, ...requestEnv, ...runtimeEnv }
 }
@@ -460,21 +515,28 @@ export function forwardEnvironment(
 export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
   private readonly runtimeEnvironment: RedisRuntimeEnvironment
   private readonly rtkAvailable: boolean
+  private readonly userCode: string
+  private readonly hostForwarding: HostEnvironmentForwarding
   readonly guard: GuardRuntime
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
     this.rtkAvailable = config.rtkAvailable ?? resolveRtk()
-    this.guard = new GuardRuntime(guardConfigFrom(config))
+    this.userCode = config.userCode ?? process.env['USER_CODE'] ?? ''
+    this.hostForwarding = hostEnvironmentForwarding(config.forwardHostEnvironment)
+    const remote = config.workspaceOnToolEnvironment === true
+    this.guard = remote
+      ? new GuardRuntime(guardConfigFrom(config), UNPROBED_CAPABILITY)
+      : new GuardRuntime(guardConfigFrom(config))
     this.runtimeEnvironment = new RedisRuntimeEnvironment({
       createClient: createRuntimeRedisClient,
       logger: ctx.logger,
     })
     ctx.effect(() => {
       const timer = setInterval(() => {
-        void this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
+        void this.runtimeEnvironment.refresh(this.userCode)
       }, REFRESH_INTERVAL_MS)
-      void this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
+      void this.runtimeEnvironment.refresh(this.userCode)
       return () => {
         clearInterval(timer)
         this.runtimeEnvironment.close()
@@ -491,7 +553,7 @@ export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
     // whole shell surface down for an observability feature. Deferring instead
     // means the guard's admission and OOM reporting attach when the registry
     // appears, and are simply absent if it never does.
-    void ctx.inject(['tools'], toolsCtx => { this.registerGuardHooks(toolsCtx) })
+    if (!remote) void ctx.inject(['tools'], toolsCtx => { this.registerGuardHooks(toolsCtx) })
   }
 
   /**
@@ -618,7 +680,7 @@ export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
     assertBrowserCommandAllowed(request.command)
     const spec = super.resolve({
       ...request,
-      env: forwardEnvironment(process.env, request.env),
+      env: forwardEnvironment(process.env, request.env, undefined, this.hostForwarding),
     })
 
     const routed = wrapWithRtk(spec.command, this.rtkAvailable)
@@ -637,7 +699,7 @@ export class ForwardingSandboxBashExecutor extends SandboxBashExecutor {
    * then execute with the refreshed values overlaid.
    */
   override async execute(spec: ShellExecSpec): Promise<ShellExecution> {
-    await this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
+    await this.runtimeEnvironment.refresh(this.userCode)
     return super.execute(this.withRuntimeEnvironment(spec))
   }
 }

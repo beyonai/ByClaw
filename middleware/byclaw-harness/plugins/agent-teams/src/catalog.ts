@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
-import { agentTeamsRuntimeRoot, canonicalRuntimePath, isPathWithin, resolveTeamStateRoot } from './runtime-state.ts'
+import { canonicalRuntimePath, defaultTeamStateRuntime, isPathWithin, type TeamStateRuntime } from './runtime-state.ts'
 import { readTeam, sanitizeKey } from './state.ts'
 import type { ByClawMemberSource, TaskStatus, TeamState } from './types.ts'
 
@@ -61,10 +61,10 @@ export interface RuntimeInstanceView extends RuntimeInstancePointer {
   taskStatusCounts: Partial<Record<TaskStatus, number>>
 }
 
-/** Resolve the catalog without depending on the caller's working directory. */
-export function defaultCatalogDir(): string {
-  const dshHome = process.env['DSH_HOME']?.trim()
-  return join(dshHome === undefined || dshHome === '' ? join(homedir(), '.dsh') : dshHome, 'agent-teams')
+/** Resolve the catalog without depending on the caller's working directory; `dshHome` overrides `DSH_HOME`. */
+export function defaultCatalogDir(dshHome?: string): string {
+  const home = dshHome?.trim() || process.env['DSH_HOME']?.trim()
+  return join(home === undefined || home === '' ? join(homedir(), '.dsh') : home, 'agent-teams')
 }
 
 function templatesDir(catalogDir: string): string {
@@ -188,13 +188,15 @@ function instanceId(stateRoot: string, teamId: string, captainSessionId: string)
   return createHash('sha256').update(stateRoot).update('\0').update(teamId).update('\0').update(captainSessionId).digest('hex').slice(0, 24)
 }
 
-function pointerStateRoot(pointer: RuntimeInstancePointer): string {
+function pointerStateRoot(pointer: RuntimeInstancePointer, runtime: TeamStateRuntime): string {
   const root = canonicalRuntimePath(pointer.stateRoot)
-  if (isPathWithin(root, agentTeamsRuntimeRoot())) return root
+  if (isPathWithin(root, runtime.runtimeRoot())) return root
+  // A tool-environment workspace never held legacy in-workspace state on this host.
+  if (runtime.workspaceOnToolEnvironment) return root
   const workspace = canonicalRuntimePath(pointer.workspace)
   // Legacy pointers retain the logical workspace namespace after its files move.
   if (root !== workspace && isPathWithin(root, workspace)) {
-    return resolveTeamStateRoot(workspace, relative(workspace, root))
+    return runtime.resolveTeamStateRoot(workspace, relative(workspace, root))
   }
   return root
 }
@@ -213,10 +215,11 @@ export async function registerRuntimeInstance(
   stateRoot: string,
   workspace: string,
   team: TeamState,
+  runtime: TeamStateRuntime = defaultTeamStateRuntime,
 ): Promise<RuntimeInstancePointer> {
   const root = canonicalRuntimePath(stateRoot)
   const existing = (await pointers(catalogDir)).filter(entry => entry.value.teamId === team.id
-    && entry.value.captainSessionId === team.captainSessionId && pointerStateRoot(entry.value) === root)
+    && entry.value.captainSessionId === team.captainSessionId && pointerStateRoot(entry.value, runtime) === root)
   // Prefer the pre-migration incarnation id if a duplicate pointer was already written.
   existing.sort((left, right) => Number(left.value.stateRoot === root) - Number(right.value.stateRoot === root))
   const pointer: RuntimeInstancePointer = {
@@ -240,23 +243,25 @@ export async function unregisterRuntimeInstance(
   stateRoot: string,
   teamId: string,
   captainSessionId: string,
+  runtime: TeamStateRuntime = defaultTeamStateRuntime,
 ): Promise<void> {
   for (const entry of await pointers(catalogDir)) {
-    const root = pointerStateRoot({ ...entry.value, stateRoot })
+    const root = pointerStateRoot({ ...entry.value, stateRoot }, runtime)
     if (entry.value.teamId === teamId && entry.value.captainSessionId === captainSessionId
-      && pointerStateRoot(entry.value) === root) {
+      && pointerStateRoot(entry.value, runtime) === root) {
       try { await unlink(entry.path) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     }
   }
 }
 
-export async function listRuntimeInstances(catalogDir: string): Promise<RuntimeInstanceView[]> {
+export async function listRuntimeInstances(catalogDir: string, runtime: TeamStateRuntime = defaultTeamStateRuntime): Promise<RuntimeInstanceView[]> {
+  const runtimeRoot = runtime.runtimeRoot()
   const instances: RuntimeInstanceView[] = []
   const seen = new Set<string>()
   const entries = await pointers(catalogDir)
-  entries.sort((left, right) => Number(isPathWithin(canonicalRuntimePath(left.value.stateRoot), agentTeamsRuntimeRoot())) - Number(isPathWithin(canonicalRuntimePath(right.value.stateRoot), agentTeamsRuntimeRoot())))
+  entries.sort((left, right) => Number(isPathWithin(canonicalRuntimePath(left.value.stateRoot), runtimeRoot)) - Number(isPathWithin(canonicalRuntimePath(right.value.stateRoot), runtimeRoot)))
   for (const { value } of entries) {
-    const root = pointerStateRoot(value)
+    const root = pointerStateRoot(value, runtime)
     const key = instanceId(root, value.teamId, value.captainSessionId)
     if (seen.has(key)) continue
     seen.add(key)
@@ -288,6 +293,6 @@ export async function listRuntimeInstances(catalogDir: string): Promise<RuntimeI
   return instances.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
 }
 
-export async function readRuntimeInstance(catalogDir: string, id: string): Promise<RuntimeInstanceView | undefined> {
-  return (await listRuntimeInstances(catalogDir)).find(instance => instance.id === id || instance.teamId === id)
+export async function readRuntimeInstance(catalogDir: string, id: string, runtime: TeamStateRuntime = defaultTeamStateRuntime): Promise<RuntimeInstanceView | undefined> {
+  return (await listRuntimeInstances(catalogDir, runtime)).find(instance => instance.id === id || instance.teamId === id)
 }
