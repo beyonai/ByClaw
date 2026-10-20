@@ -891,6 +891,7 @@ function useChat(props: IProps) {
               `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
             );
           });
+          const hasPersistedAnswer = Boolean(answerMsg);
 
           if (!answerMsg) {
             answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
@@ -898,7 +899,13 @@ function useChat(props: IProps) {
           answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
           chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
           restoreAnswerState(answerMsg);
-          answerMsg = updateMessage(answerMsg, { isAssign: true });
+          // runningStatus is a Redis lease, not proof that a visible answer exists. A worker
+          // failure can leave the lease behind without a snapshot or persisted answer. Keep
+          // the synthetic object only as the target for a later real stream event; publishing
+          // it here would render an empty default-assistant message after page refresh.
+          if (hasPersistedAnswer) {
+            answerMsg = updateMessage(answerMsg, { isAssign: true });
+          }
 
           const runtimeInfo =
             chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
