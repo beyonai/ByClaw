@@ -143,11 +143,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
-        ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
         ReflectionTestUtils.setField(routeService, "projectService", projectService);
         ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
-        ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
-        ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", tempDir.toString());
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -473,12 +470,12 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
         assertThat(paramsCaptor.getValue())
             .containsEntry("cwd", "/by/.sessions/3");
-        assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/3"))).isTrue();
+        assertThat(tempDir.resolve("byclaw-u1/by/.sessions/3")).doesNotExist();
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
             .containsEntry("project_id", 123L)
             .containsEntry("workspace", "/by/projects/123");
-        verify(projectApplicationService).getProjectWorkspacePath(123L);
+        verifyNoInteractions(projectApplicationService);
     }
 
     @Test
@@ -501,7 +498,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
             verify(gatewayClient).sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(),
                 argThat(params -> ("/by/.sessions/" + sessionId).equals(params.get("cwd"))), any());
-            assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId))).isTrue();
+            assertThat(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId)).doesNotExist();
         }
     }
 
@@ -526,9 +523,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
             .containsEntry("cwd", "/by/.sessions/3");
         assertThat(metadataCaptor.getValue())
             .doesNotContainKey("project_info");
-        assertThat(Files.isDirectory(
-            tempDir.resolve("byclaw-u1/by/.sessions/3")))
-            .isTrue();
+        assertThat(tempDir.resolve("byclaw-u1/by/.sessions/3")).doesNotExist();
         verifyNoInteractions(projectApplicationService);
     }
 
@@ -556,18 +551,26 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
 
     @ParameterizedTest
     @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
-    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated(Long projectId) throws Exception {
+    void route_dispatchesWithoutTouchingBackendWorkspace(Long projectId) throws Exception {
         Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
         Files.createDirectories(conversationWorkspace.getParent());
         Files.createFile(conversationWorkspace);
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(projectId);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
 
-        assertThatThrownBy(() -> routeService.route(ctx))
-            .isInstanceOf(BdpRuntimeException.class)
-            .hasMessageContaining("会话工作目录初始化失败");
+        routeService.route(ctx);
 
-        verifyNoInteractions(gatewayClient);
+        assertThat(conversationWorkspace).isRegularFile();
+        verifyNoInteractions(projectApplicationService);
+        verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(),
+            argThat(params -> "/by/.sessions/3".equals(params.get("cwd"))), any());
     }
 
     @ParameterizedTest
@@ -591,7 +594,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     }
 
     @Test
-    void route_keepsActualProjectWorkspaceWhenItIsOutsideCurrentUserBucket() throws Exception {
+    void route_doesNotUseBackendHostPathAsSandboxProjectWorkspace() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
         Project project = mock(Project.class);
@@ -614,7 +617,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
             anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
-            .containsEntry("workspace", "/external/projects/123");
+            .containsEntry("workspace", "/by/projects/123");
+        verifyNoInteractions(projectApplicationService);
     }
 
     @Test
