@@ -5,6 +5,7 @@ import {
   ByClawInteractionStore,
   buildRecoveredAskPayload,
   interactionRecordKey,
+  shouldRetainInteractionAfterAskFailure,
 } from '../src/interaction-recovery.ts'
 
 class FakeRedis {
@@ -124,5 +125,16 @@ await firstProcess.answer({
 await firstProcess.consume('interaction-retry', 'session-1', 'user-1')
 assert.equal(await firstProcess.reopen('interaction-retry', 'session-1', 'user-1'), true)
 assert.ok(await firstProcess.consume('interaction-retry', 'session-1', 'user-1'), 'failed continuation must remain retryable')
+
+assert.equal(
+  shouldRetainInteractionAfterAskFailure({ requestEmitted: true, signalAborted: true }),
+  true,
+  'sandbox shutdown after rendering the card must retain the Redis interaction',
+)
+assert.equal(
+  shouldRetainInteractionAfterAskFailure({ requestEmitted: false, signalAborted: false }),
+  false,
+  'a request that was never emitted must be cleaned up',
+)
 
 console.log('interaction recovery verification passed')
