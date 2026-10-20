@@ -26,7 +26,7 @@ export interface ByClawDshAskResult {
 
 export interface ByClawDshSessionPort {
   ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult>
-  resume(command: ResumeCommand): boolean
+  resume(command: ResumeCommand): boolean | Promise<boolean>
   cancel(messageId: string, reason: string): void | Promise<void>
 }
 
@@ -41,7 +41,7 @@ export class ByClawDshCommandHandler {
 
   async process(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
     if (command instanceof ResumeCommand) {
-      if (!this.sessions.resume(command)) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
+      if (!await this.sessions.resume(command)) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
       context.setStreamFinished(true)
       return new AgentTaskResult({ status: AgentState.COMPLETED, content: '', replyData: null })
     }

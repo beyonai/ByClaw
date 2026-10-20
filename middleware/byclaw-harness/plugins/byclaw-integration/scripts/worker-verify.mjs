@@ -701,7 +701,7 @@ await new Promise(resolve => setImmediate(resolve))
 if (!emitted?.metadata?.interaction_id || !emitted.prompt.includes('选择方案')) {
   throw new Error('ask_user request did not emit a correlated interaction')
 }
-if (!broker.resume('external-session', '问题 1: B', emitted.metadata.interaction_id)) {
+if (!await broker.resume('external-session', '', '问题 1: B', emitted.metadata.interaction_id)) {
   throw new Error('Resume did not resolve the pending ask_user interaction')
 }
 const answer = await waiting
@@ -739,7 +739,7 @@ const structured = dshProtocol.parseDshInteractionResponse(structuredCommand)
 if (structured?.answers[0]?.selected[0] !== 'B' || structured?.answers[1]?.skipped !== true) {
   throw new Error('structured DSH interaction response was not parsed')
 }
-if (!broker.resumeStructured('structured-session', structured)) {
+if (!await broker.resumeStructured('structured-session', '', structured)) {
   throw new Error('structured DSH interaction did not resolve its matching question')
 }
 const structuredAnswer = await structuredWaiting
