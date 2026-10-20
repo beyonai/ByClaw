@@ -148,6 +148,10 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
         ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
         ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", tempDir.toString());
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway =
+            mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class);
+        ReflectionTestUtils.setField(routeService, "platformStorageRouting",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting(platformGateway, null));
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 

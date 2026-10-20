@@ -26,6 +26,10 @@ public interface PlatformStorageClient {
             @RequestHeader("Content-Type") String contentType,
             @RequestBody Object placeholder);
 
+    @PutMapping("/internal/platform/filesystem/content")
+    Map<String,Object> copyReplace(@RequestParam Map<String,Object> query,
+            @RequestHeader("Content-Type") String contentType,@RequestBody Object placeholder);
+
     class Configuration extends PlatformControlClient.Configuration {
         @Bean
         @Override

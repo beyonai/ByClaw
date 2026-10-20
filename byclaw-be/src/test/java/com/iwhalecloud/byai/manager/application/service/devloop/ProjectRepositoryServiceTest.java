@@ -283,6 +283,9 @@ class ProjectRepositoryServiceTest extends com.iwhalecloud.byai.common.i18n.I18n
         GitRepositoryProvider provider = mock(GitRepositoryProvider.class);
         when(provider.providerType()).thenReturn("github");
         ProjectRepositoryService service = new ProjectRepositoryService(List.of(provider));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformFileSystem",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), null, "/unused"));
         ProjectService projectService = mock(ProjectService.class);
         ProjectRepoMapper repoMapper = mock(ProjectRepoMapper.class);
         ProjectWorkspaceGitService workspaceGitService = mock(ProjectWorkspaceGitService.class);

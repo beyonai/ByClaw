@@ -55,6 +55,9 @@ class ConnectorCredentialProjectionServiceTest extends com.iwhalecloud.byai.comm
         when(workspaceService.resolveProjectionFile(USER_ID, PROJECTION_PATH)).thenReturn(credentialFile);
         service = new ConnectorCredentialProjectionService(workspaceService, secretStore, connectionStateService,
             manifestService, connectorInfoMapper, mock(ConnectorAuthMapper.class), objectMapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
     }
 
     @Test

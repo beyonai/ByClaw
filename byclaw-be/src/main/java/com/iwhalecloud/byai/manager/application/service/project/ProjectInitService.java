@@ -104,16 +104,16 @@ public class ProjectInitService {
     @Autowired
     private GitHubCredentialResolver githubCredentialResolver;
 
-    /**
-     * 初始化项目工作目录。
-     *
-     * @param projectId 项目 ID
-     * @return 项目工作目录
-     */
+
+    /** 仅解析原项目路径，不进行文件IO，供独立存储入口使用。 */
+    public Path resolveProjectWorkspace(Long projectId) {
+        return Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(), userFsRootPathSegment(),
+            "projects", String.valueOf(projectId));
+    }
+
+    /** 为BE本地Git/CLI初始化工作目录，不按平台模式选路。 */
     public Path initProjectWorkspace(Long projectId) {
-        Path projectWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(), userFsRootPathSegment(),
-            "projects",
-            String.valueOf(projectId));
+        Path projectWorkspace = resolveProjectWorkspace(projectId);
         try {
             Files.createDirectories(projectWorkspace);
             return projectWorkspace;

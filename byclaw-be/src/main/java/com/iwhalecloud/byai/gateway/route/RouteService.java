@@ -90,6 +90,9 @@ public class RouteService {
     private String fileStorageLocalPath;
 
     @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting platformStorageRouting;
+
+    @Autowired
     private GatewayClient gatewayClient;
 
     @Autowired
@@ -871,6 +874,11 @@ public class RouteService {
     }
 
     private void ensureConversationWorkspaceExists(String sessionId) {
+        platformStorageRouting.ensureDirectory(resolveCurrentUserBucket(), "by/.sessions/" + sessionId,
+            () -> ensureConversationWorkspaceExistsLocally(sessionId));
+    }
+
+    private void ensureConversationWorkspaceExistsLocally(String sessionId) {
         Path conversationWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(),
                 "by", ".sessions", sessionId)
             .toAbsolutePath()

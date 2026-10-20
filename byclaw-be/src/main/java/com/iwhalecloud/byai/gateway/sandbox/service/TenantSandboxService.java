@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory;
 @Service
 public class TenantSandboxService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformTenantFileRouting platformTenantFiles;
+
     private static final Logger LOG = LoggerFactory.getLogger(TenantSandboxService.class);
 
     private static final String DB_TYPE = "tenant-opengauss";
@@ -274,6 +277,13 @@ public class TenantSandboxService {
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenants = root.resolve("tenants");
         Path tenantDirectory = tenants.resolve(Long.toString(enterpriseId));
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()) {
+            try { platformTenantFiles.delete(root, tenants, tenantDirectory); return; }
+            catch (ResponseStatusException conflict) { throw conflict; }
+            catch (RuntimeException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.volume.delete.failed", e);
+            }
+        }
         if (!tenantDirectory.startsWith(tenants) || Files.isSymbolicLink(tenants)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.volume.path.invalid");
         }
@@ -405,6 +415,20 @@ public class TenantSandboxService {
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenantDirectory = root.resolve("tenants").resolve(Long.toString(enterpriseId)).resolve("opengauss");
         Path target = tenantDirectory.resolve("byclaw-tenant-entrypoint.py");
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()) {
+            try {
+                platformTenantFiles.prepare(root, tenantDirectory, tenantDirectory.resolve("data"));
+                try (java.io.InputStream source = new ClassPathResource("tenant/opengauss-entrypoint.py").getInputStream();
+                     java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[8192]; int length;
+                    while ((length = source.read(buffer)) != -1) bytes.write(buffer, 0, length);
+                    platformTenantFiles.copy(root, target, bytes.toByteArray());
+                }
+                return;
+            } catch (IOException | RuntimeException e) {
+                throw new IllegalStateException("tenant OpenGauss startup script could not be prepared", e);
+            }
+        }
         try {
             Files.createDirectories(tenantDirectory);
             // Create the subPath as the BE/tenant-image owner before kubelet creates it as root.

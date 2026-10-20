@@ -19,6 +19,9 @@ public class FileStorageUserSpaceProvisioner {
     @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
     private String fileRoot;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting platformStorageRouting;
+
     public Path ensureUserSpace(String bucketOrRoot) {
         if (StringUtils.isBlank(bucketOrRoot)) {
             throw new IllegalArgumentException("User file storage root cannot be blank");
@@ -27,7 +30,7 @@ public class FileStorageUserSpaceProvisioner {
             throw new IllegalArgumentException("file.storage.local.path cannot be blank");
         }
 
-        Path root = Path.of(fileRoot).normalize();
+        Path root = java.nio.file.Paths.get(fileRoot).normalize();
         if (!root.isAbsolute()) {
             throw new IllegalArgumentException("file.storage.local.path must be absolute: " + fileRoot);
         }
@@ -39,7 +42,8 @@ public class FileStorageUserSpaceProvisioner {
 
         Path privateWorkspace = userRoot.resolve(PRIVATE_WORKSPACE_DIR).normalize();
         try {
-            Files.createDirectories(privateWorkspace);
+            platformStorageRouting.createDirectoriesWithinRoot(fileRoot, privateWorkspace,
+                () -> Files.createDirectories(privateWorkspace));
             return privateWorkspace;
         }
         catch (IOException e) {

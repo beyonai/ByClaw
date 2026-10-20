@@ -321,7 +321,7 @@ class MailAccountProjectionServiceTest extends I18nTestSupport {
     private MailAccountProjectionService service() { return service(new TestMailFileOperations()); }
     private MailAccountProjectionService service(MailAccountProjectionService.FileOperations operations) {
         var workspace = mock(ConnectorCredentialWorkspaceService.class);
-        when(workspace.resolveProjectionFile(1001L, MailAccountProjectionService.PROJECTION_PATH))
+        when(workspace.resolveLocalProjectionFile(1001L, MailAccountProjectionService.PROJECTION_PATH))
             .thenReturn(file("qq-mail"));
         return new MailAccountProjectionService(workspace, resolver, state, lease, cache, json, operations);
     }

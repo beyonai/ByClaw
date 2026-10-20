@@ -41,9 +41,13 @@ class MediaModelConfigProjectionServiceTest extends com.iwhalecloud.byai.common.
         projection = Files.createDirectories(tempDir.resolve(".connector-auth/.model")).resolve("tts.json");
         when(workspaceService.resolveProjectionFile(userId, "/by/.connector-auth/.model/tts.json"))
             .thenReturn(projection);
+        ConnectorPrivateFileProjectionWriter writer = new ConnectorPrivateFileProjectionWriter();
+        org.springframework.test.util.ReflectionTestUtils.setField(writer, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
         service = new MediaModelConfigProjectionService(
             workspaceService,
-            new ConnectorPrivateFileProjectionWriter(),
+            writer,
             connectionStateService,
             connectorInfoMapper,
             mock(ConnectorAuthMapper.class),
