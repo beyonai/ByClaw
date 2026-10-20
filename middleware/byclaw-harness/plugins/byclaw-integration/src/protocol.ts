@@ -237,6 +237,7 @@ interface DurableQuestionStore {
     sessionId: string
     userCode: string
     agentSessionId: string
+    parentAgentSessionId?: string
     questions: ByClawQuestion[]
   }): Promise<void>
   get(interactionId: string): Promise<{
@@ -302,6 +303,7 @@ export class ByClawQuestionBroker {
     sessionId: string
     userCode?: string
     agentSessionId?: string
+    parentAgentSessionId?: string
     questions: ByClawQuestion[]
     emit(event: AskUserEvent): Promise<void>
     signal?: AbortSignal
@@ -338,6 +340,7 @@ export class ByClawQuestionBroker {
           sessionId: options.sessionId,
           userCode: options.userCode,
           agentSessionId: options.agentSessionId,
+          ...options.parentAgentSessionId === undefined ? {} : { parentAgentSessionId: options.parentAgentSessionId },
           questions: options.questions,
         })
       }
@@ -355,7 +358,7 @@ export class ByClawQuestionBroker {
   }
 
   /** Resolve the matching interaction, or the oldest pending interaction for that session. */
-  async resume(sessionId: string, userCode: string, response: string, interactionId?: string): Promise<boolean> {
+  async resume(sessionId: string, userCode: string, response: string, interactionId?: string): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
     const index = queue === undefined ? -1 : interactionId === undefined ? 0 : queue.findIndex(item => item.id === interactionId)
     const pending = index < 0 ? undefined : queue?.[index]
@@ -372,11 +375,11 @@ export class ByClawQuestionBroker {
       if (queue.length === 0) this.pending.delete(sessionId)
       pending.resolve(answer)
     }
-    return true
+    return pending === undefined ? 'cold' : 'hot'
   }
 
   /** Resolve exactly one pending interaction from a versioned structured response. */
-  async resumeStructured(sessionId: string, userCode: string, response: DshInteractionResponse): Promise<boolean> {
+  async resumeStructured(sessionId: string, userCode: string, response: DshInteractionResponse): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
     const index = queue?.findIndex(item => item.id === response.interactionId) ?? -1
     const pending = index < 0 ? undefined : queue?.[index]
@@ -393,7 +396,7 @@ export class ByClawQuestionBroker {
       if (queue.length === 0) this.pending.delete(sessionId)
       pending.resolve(answer)
     }
-    return true
+    return pending === undefined ? 'cold' : 'hot'
   }
 
   cancelSession(sessionId: string, reason: string): void {

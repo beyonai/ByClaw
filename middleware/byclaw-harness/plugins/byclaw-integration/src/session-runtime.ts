@@ -20,7 +20,7 @@ import {
   EventType,
   TaskCancelledError,
   type AgentContext,
-  type AskAgentCommand,
+  AskAgentCommand,
   type GatewayDataEmitter,
   type ResumeCommand,
 } from '@byclaw/by-framework'
@@ -105,7 +105,7 @@ import {
   terminalByClawModelError,
   type ByClawModelError,
 } from './model-error.ts'
-import type { ByClawInteractionStore } from './interaction-recovery.ts'
+import { buildRecoveredAskPayload, type ByClawInteractionStore } from './interaction-recovery.ts'
 
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
@@ -1617,16 +1617,46 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
   }
 
-  async resume(command: ResumeCommand): Promise<boolean> {
+  async resume(command: ResumeCommand, context?: AgentContext): Promise<boolean | ByClawDshAskResult> {
     const structured = parseDshInteractionResponse(command)
-    const accepted = structured !== undefined
+    const resumed = structured !== undefined
       ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
       : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command))
-    if (accepted) {
+    if (resumed) {
       const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
     }
-    return accepted
+    if (resumed !== 'cold') return resumed !== false
+    const recoveredInteractionId = structured?.interactionId ?? interactionId(command)
+    if (recoveredInteractionId === undefined || context === undefined || this.options.interactionStore === undefined) return false
+    const record = await this.options.interactionStore.consume(
+      recoveredInteractionId,
+      normalizeByClawSessionId(command.header.sessionId),
+      command.header.userCode,
+    )
+    if (record?.answer === undefined) return false
+    const recovered = buildRecoveredAskPayload(record)
+    this.ctx.logger.info(
+      `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
+    )
+    const recoveryCommand = new AskAgentCommand(
+      command.header,
+      recovered.text,
+      true,
+      { ...command.extraPayload, ...recovered.extraPayload, byclaw_recovered_interaction_id: recoveredInteractionId },
+    )
+    try {
+      return await this.ask(recoveryCommand, context)
+    } catch (error) {
+      await this.options.interactionStore.reopen(
+        recoveredInteractionId,
+        normalizeByClawSessionId(command.header.sessionId),
+        command.header.userCode,
+      ).catch(reopenError => {
+        this.ctx.logger.warn(`byclaw-dsh failed to reopen recovered interaction: ${sanitizeByClawOperationalLog(reopenError)}`)
+      })
+      throw error
+    }
   }
 
   async cancel(messageId: string, reason: string): Promise<void> {
@@ -2022,6 +2052,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
                 userCode: active.userCode,
                 agentSessionId: waitingSessionId,
+                ...(exec.agent?.session.header.parentSession === undefined ? {} : {
+                  parentAgentSessionId: String(exec.agent.session.header.parentSession),
+                }),
                 questions,
                 emit: async event => {
                 const askingSession = exec.agent?.session

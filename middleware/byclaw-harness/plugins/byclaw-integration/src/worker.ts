@@ -26,7 +26,7 @@ export interface ByClawDshAskResult {
 
 export interface ByClawDshSessionPort {
   ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult>
-  resume(command: ResumeCommand): boolean | Promise<boolean>
+  resume(command: ResumeCommand, context?: AgentContext): boolean | ByClawDshAskResult | Promise<boolean | ByClawDshAskResult>
   cancel(messageId: string, reason: string): void | Promise<void>
 }
 
@@ -41,9 +41,16 @@ export class ByClawDshCommandHandler {
 
   async process(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
     if (command instanceof ResumeCommand) {
-      if (!await this.sessions.resume(command)) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
+      const resumed = await this.sessions.resume(command, context)
+      if (!resumed) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
       context.setStreamFinished(true)
-      return new AgentTaskResult({ status: AgentState.COMPLETED, content: '', replyData: null })
+      const recovered = typeof resumed === 'boolean' ? undefined : resumed
+      return new AgentTaskResult({
+        status: AgentState.COMPLETED,
+        content: recovered?.finalAnswer ?? '',
+        replyData: null,
+        ...(recovered === undefined ? {} : { metadata: { dshSessionId: recovered.dshSessionId } }),
+      })
     }
     if (!(command instanceof AskAgentCommand)) throw new Error(`Unsupported BYCLAW_DSH command: ${command.actionType}`)
     if (extractByClawUserText(command.content) === '' && byClawVoicePayload(command) === undefined) throw new Error('BYCLAW_DSH AskAgent content is empty')

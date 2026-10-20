@@ -1043,6 +1043,15 @@ function useChat(props: IProps) {
         }
       }
     }
+    // Resume always continues the answer identified by traceId/llmMessageId.
+    // A sandbox release clears the browser's running registry, but must not
+    // turn the interaction response into a new default-employee chat turn.
+    if (isResumeChat) {
+      if (!payload.traceId) {
+        return false;
+      }
+      isContinuingRunningTrace = true;
+    }
 
     await checkSessionStateBeforeSendQuery();
 
@@ -1130,7 +1139,7 @@ function useChat(props: IProps) {
       ...get(msgOpt, 'queryMsg', {}),
     });
 
-    if (!onlyQuery) {
+    if (!onlyQuery && !isContinuingRunningTrace) {
       newQueryMsg = updateMessage(newQueryMsg, { isAssign: true });
     }
 
