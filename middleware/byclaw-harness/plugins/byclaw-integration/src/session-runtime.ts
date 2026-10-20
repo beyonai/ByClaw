@@ -1626,6 +1626,15 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
     }
+    if (resumed === false) {
+      const unmatchedInteractionId = structured?.interactionId ?? interactionId(command)
+      const persisted = unmatchedInteractionId === undefined
+        ? undefined
+        : await this.options.interactionStore?.get(unmatchedInteractionId).catch(() => undefined)
+      this.ctx.logger.warn(
+        `[byclaw-dsh] unmatched ask_user_question Resume (interaction=${unmatchedInteractionId ?? '-'}, session=${command.header.sessionId}, persisted=${persisted === undefined ? 'missing' : persisted.status})`,
+      )
+    }
     if (resumed !== 'cold') return resumed !== false
     const recoveredInteractionId = structured?.interactionId ?? interactionId(command)
     if (recoveredInteractionId === undefined || context === undefined || this.options.interactionStore === undefined) return false

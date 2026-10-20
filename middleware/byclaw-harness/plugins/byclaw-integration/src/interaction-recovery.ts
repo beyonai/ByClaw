@@ -33,6 +33,14 @@ export interface ByClawInteractionStoreOptions {
   now?: () => number
 }
 
+/** A rendered interaction must survive the process abort that accompanies sandbox release. */
+export function shouldRetainInteractionAfterAskFailure(options: {
+  requestEmitted: boolean
+  signalAborted: boolean
+}): boolean {
+  return options.requestEmitted && options.signalAborted
+}
+
 const ANSWER_SCRIPT = `-- BYCLAW_INTERACTION_ANSWER
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end

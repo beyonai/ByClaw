@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import type { AskUserEvent, ResumeCommand } from '@byclaw/by-framework'
+import { shouldRetainInteractionAfterAskFailure } from './interaction-recovery.ts'
 
 export const BYCLAW_DSH_AGENT_TYPE = 'BYCLAW_DSH'
 export const DEFAULT_BYCLAW_BE_BASE_URL = 'http://123.56.153.229:8080'
@@ -330,6 +331,7 @@ export class ByClawQuestionBroker {
       pending.reject(new Error('ByClaw ask_user interaction was aborted'))
     }
     options.signal?.addEventListener('abort', onAbort, { once: true })
+    let requestEmitted = false
     try {
       if (this.durable !== undefined) {
         if (options.userCode === undefined || options.agentSessionId === undefined) {
@@ -345,10 +347,14 @@ export class ByClawQuestionBroker {
         })
       }
       await options.emit({ prompt, metadata: { interaction_id: id, questions: options.questions } })
+      requestEmitted = true
       return await answer
     } catch (error) {
       this.remove(options.sessionId, id)
-      if (this.durable !== undefined && options.userCode !== undefined) {
+      if (this.durable !== undefined && options.userCode !== undefined && !shouldRetainInteractionAfterAskFailure({
+        requestEmitted,
+        signalAborted: options.signal?.aborted === true,
+      })) {
         await this.durable.remove({ interactionId: id, sessionId: options.sessionId, userCode: options.userCode }).catch(() => undefined)
       }
       throw error
