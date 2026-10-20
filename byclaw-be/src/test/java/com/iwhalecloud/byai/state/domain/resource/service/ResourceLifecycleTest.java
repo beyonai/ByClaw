@@ -131,7 +131,7 @@ class ResourceLifecycleTest {
         ext.setTargetContent("{}");
         when(toolkits.findById(10L)).thenReturn(ext);
         service.shelfResource(10L);
-        verify(artifacts).syncResourceJsonByBizType(contains("resourceId"), eq("TOOLKIT"), eq(10L));
+        verify(artifacts).publishResourceJson(contains("resourceId"), eq("TOOLKIT"), eq(10L));
         verify(toolkits).update(ext);
     }
 

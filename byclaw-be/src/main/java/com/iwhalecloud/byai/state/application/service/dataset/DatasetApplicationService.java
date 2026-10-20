@@ -421,7 +421,7 @@ public class DatasetApplicationService {
     private void syncDatasetTargetContentSafely(String targetContent, String resourceBizType, Long resourceId,
                                                 String scene) {
         try {
-            resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
+            resourceArtifactStorageService.publishResourceJson(targetContent, resourceBizType, resourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
             logImportedDatasetArtifactLocation(resourceBizType, resourceId);
 
@@ -1851,7 +1851,7 @@ public class DatasetApplicationService {
         ssResExtDocService.save(extDoc);
 
         // 导入成功后，把最终 target_content JSON 同步到开放资源目录。
-        resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(),
+        resourceArtifactStorageService.publishResourceJson(extDoc.getTargetContent(),
             datasetImportDto.getResourceBizType(), myResource.getResourceId());
         ssResourceArtifactService.upsertStandardJsonArtifact(myResource.getResourceId(),
             datasetImportDto.getResourceBizType(), "dataset-import-create");
@@ -1890,7 +1890,7 @@ public class DatasetApplicationService {
         SsResExtDoc extDoc = saveOrUpdateExtDoc(dto, rawJson, resourceId);
         // 下架/待上架知识可以更新 source/target 内容，但只能在显式上架后重新发布运行产物。
         if (ResourceLifecyclePolicy.isRuntimeAvailable(existing)) {
-            resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(),
+            resourceArtifactStorageService.publishResourceJson(extDoc.getTargetContent(),
                 dto.getResourceBizType(), resourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, dto.getResourceBizType(),
                 "dataset-import-update");

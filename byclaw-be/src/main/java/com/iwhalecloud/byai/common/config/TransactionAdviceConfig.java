@@ -69,6 +69,12 @@ public class TransactionAdviceConfig {
         RuleBasedTransactionAttribute notSurpportedTx = new RuleBasedTransactionAttribute();
         notSurpportedTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
 
+        // The JSON facade schedules Redis in the business transaction and delegates file I/O to NOT_SUPPORTED.
+        RuleBasedTransactionAttribute resourceJsonFacadeTx = new RuleBasedTransactionAttribute();
+        resourceJsonFacadeTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_SUPPORTS);
+        resourceJsonFacadeTx.setRollbackRules(Collections.singletonList(
+            new org.springframework.transaction.interceptor.NoRollbackRuleAttribute(Throwable.class)));
+
         Map<String, TransactionAttribute> txMap = new LinkedHashMap<String, TransactionAttribute>(10);
         // select,count开头的方法,开启只读,提高数据库访问性能
         txMap.put("select*", readOnlyTx);
@@ -135,6 +141,19 @@ public class TransactionAdviceConfig {
                     // File preview and legacy paths may fail before the UserFS fallback succeeds. Suspend the
                     // caller's database transaction so storage I/O cannot mark it rollback-only.
                     return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.domain.resource.service.ResourceJsonCacheService")) {
+                    return resourceJsonFacadeTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.runner.InitResourceJsonCacheRunner")) {
+                    return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService")
+                    && "publishResourceJson".equals(method.getName())) {
+                    return resourceJsonFacadeTx;
                 }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(

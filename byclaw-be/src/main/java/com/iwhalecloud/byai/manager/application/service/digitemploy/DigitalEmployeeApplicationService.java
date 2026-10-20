@@ -2762,7 +2762,7 @@ public class DigitalEmployeeApplicationService {
         // 2) 前端编辑回显时(findDetailsById)可以从这里反序列化 relTools 等不入库的运行期字段.
         this.persistTargetContent(resourceId, jsonContent);
 
-        resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
+        resourceArtifactStorageService.publishResourceJson(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             resourceId);
         if (publication) {
             ssResourceArtifactService.upsertPublicationJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
@@ -2943,7 +2943,7 @@ public class DigitalEmployeeApplicationService {
             logger.debug(
                 "数字员工关联资源JSON缺失,开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
-            resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
+            resourceArtifactStorageService.publishResourceJson(targetContent, resourceBizType, relResourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
                 "dig-employee-related-sync");
             logger.debug(

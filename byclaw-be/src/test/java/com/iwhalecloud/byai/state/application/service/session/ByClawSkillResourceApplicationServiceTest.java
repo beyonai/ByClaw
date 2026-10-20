@@ -2121,7 +2121,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(capture.getValue().getResourceCode()).isEqualTo("stable-business-code");
         assertThat(capture.getValue().getOwnerType()).isEqualTo("enterprise");
         verify(ssResourceRelDetailService, never()).save(any());
-        verify(resourceArtifactStorageService, never()).syncResourceJsonByBizType(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(resourceArtifactStorageService, never()).publishResourceJson(any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
     }
 

@@ -298,6 +298,8 @@ public class ToolManService {
         ssResExtTool.setTargetContent(wrappedJson);
         ssResExtToolService.save(ssResExtTool);
         authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
+        resourceArtifactStorageService.publishResourceJson(wrappedJson, "TOOL", resourceId);
+        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, "TOOL", "curl-tool-json");
     }
 
     /**
@@ -368,7 +370,7 @@ public class ToolManService {
         // 下架或待上架资源允许更新源内容，但不能因为导入动作重新发布运行产物；
         // 只有显式上架后才恢复开放目录和发现服务。
         if (runtimeAvailable) {
-            resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType,
+            resourceArtifactStorageService.publishResourceJson(finalJsonStr, resourceBizType,
                 resource.getResourceId());
             ssResourceArtifactService.upsertStandardJsonArtifact(resource.getResourceId(), resourceBizType,
                 "tool-json-import");
@@ -1258,6 +1260,7 @@ public class ToolManService {
         String targetContent = switch (resourceBizType) {
             case "VIEW" -> updateViewTargetContent(resourceId, resourceName, resourceDesc);
             case "OBJECT" -> updateObjectTargetContent(resourceId, resourceName, resourceDesc);
+            case "TOOL" -> updateToolTargetContent(resourceId, resourceName, resourceDesc);
             case "TOOLKIT" -> updateToolKitTargetContent(resourceId, resourceName, resourceDesc);
             case "MCP" -> updateMcpTargetContent(resourceId, resourceName, resourceDesc);
             case "AGENT" -> updateAgentTargetContent(resourceId, resourceName, resourceDesc);
@@ -1271,10 +1274,11 @@ public class ToolManService {
             return;
         }
 
-        if (!ResourceLifecyclePolicy.isRuntimeAvailable(resource)) {
+        if (!ResourceLifecyclePolicy.isRuntimeAvailable(resource)
+            || "TOOL".equals(resourceBizType) && !Objects.equals(resource.getResourceStatus(), 2)) {
             return;
         }
-        resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
+        resourceArtifactStorageService.publishResourceJson(targetContent, resourceBizType, resourceId);
         ssResourceArtifactService.upsertBasicInfoJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
         LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}", resourceId, resourceBizType);
     }
@@ -1319,6 +1323,14 @@ public class ToolManService {
             buildUpdatedTargetContent(extToolKit.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtToolKitService.update(extToolKit);
         return extToolKit.getTargetContent();
+    }
+
+    private String updateToolTargetContent(Long resourceId, String resourceName, String resourceDesc) {
+        SsResExtTool ext = ssResExtToolService.findById(resourceId);
+        if (ext == null) return null;
+        ext.setTargetContent(buildUpdatedTargetContent(ext.getTargetContent(), resourceId, resourceName, resourceDesc));
+        ssResExtToolService.update(ext);
+        return ext.getTargetContent();
     }
 
     private String updateMcpTargetContent(Long resourceId, String resourceName, String resourceDesc) {

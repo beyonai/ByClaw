@@ -405,7 +405,7 @@ public class ByClawSkillResourceApplicationService {
         SsResExtSkill ext = ssResExtSkillService.findById(resourceId);
         if (resource == null || ext == null) throw new IllegalStateException("技能同步资源不存在");
         syncSkillTargetContent(CurrentUserHolder.getCurrentUserCode(), resource, ext, false);
-        resourceArtifactStorageService.syncResourceJsonByBizType(ext.getTargetContent(), "SKILL", resourceId);
+        resourceArtifactStorageService.publishResourceJson(ext.getTargetContent(), "SKILL", resourceId);
     }
 
     public ObjectZipImportResult previewSkillZipImportConflicts(MultipartFile[] files, String ownerType) {

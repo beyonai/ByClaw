@@ -212,7 +212,7 @@ class DigitalEmployeeRedisConfigSyncTest {
             status.setRollbackOnly();
         });
         var json = ArgumentCaptor.forClass(String.class);
-        verify(storage).syncResourceJsonByBizType(json.capture(), eq("DIG_EMPLOYEE"), eq(9L));
+        verify(storage).publishResourceJson(json.capture(), eq("DIG_EMPLOYEE"), eq(9L));
         assertThat(JSONObject.parseObject(json.getValue()).getString("resourceName")).isEqualTo("本次待发布版本");
         verify(valueOperations).set(DigEmployeeRedisKeys.configJsonKey(9L), json.getValue());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artifact", Integer.class)).isZero();

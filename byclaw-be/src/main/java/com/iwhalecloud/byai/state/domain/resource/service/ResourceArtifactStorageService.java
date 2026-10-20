@@ -43,10 +43,23 @@ public class ResourceArtifactStorageService {
     @Autowired
     private ResourceArtifactPathResolver resourceArtifactPathResolver;
 
+    @Autowired
+    private ResourceJsonCacheService resourceJsonCacheService;
+
+    @Autowired
+    @org.springframework.context.annotation.Lazy
+    private ResourceArtifactStorageService ioDelegate;
+
+    /** Keep cache callbacks in the caller transaction while the file-only operation suspends it. */
+    public void publishResourceJson(String finalJson, String resourceBizType, long resourceId) {
+        ioDelegate.syncResourceJsonByBizType(finalJson, resourceBizType, resourceId);
+        resourceJsonCacheService.putAfterCommit(resourceBizType, resourceId, finalJson);
+    }
+
     public void syncResourceJsonByBizType(String finalJson, String resourceBizType, long resourceId) {
         String dirName = resourceArtifactPathResolver.resolveResourceDirectory(resourceBizType);
         String fileName = resourceArtifactPathResolver.buildResourceJsonFileName(resourceBizType, resourceId);
-        uploadToSubdirectory(finalJson.getBytes(java.nio.charset.StandardCharsets.UTF_8), dirName, fileName,
+        writeToSubdirectory(finalJson.getBytes(java.nio.charset.StandardCharsets.UTF_8), dirName, fileName,
             "application/json");
     }
 
@@ -75,6 +88,12 @@ public class ResourceArtifactStorageService {
 
     public void uploadToSubdirectory(byte[] content, String subDirectory, String fileName, String contentType) {
         byte[] safeContent = content == null ? new byte[0] : content;
+        writeToSubdirectory(safeContent, subDirectory, fileName, contentType);
+        if ("application/json".equals(contentType)) resourceJsonCacheService.publishedFile(subDirectory, fileName, safeContent);
+    }
+
+    private void writeToSubdirectory(byte[] content, String subDirectory, String fileName, String contentType) {
+        byte[] safeContent = content == null ? new byte[0] : content;
         String directoryPath = buildResourceDirectoryPath(subDirectory);
         MultipartFileUtil multipartFile = new MultipartFileUtil(fileName, fileName, contentType, safeContent);
         resourceFS.write(multipartFile, directoryPath);
@@ -91,6 +110,7 @@ public class ResourceArtifactStorageService {
 
     public void deleteWithinResourceRoot(String relativePath) {
         deleteWithinResourceRootInternal(relativePath);
+        resourceJsonCacheService.deletedFile(relativePath);
     }
 
     /**

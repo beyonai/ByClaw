@@ -108,7 +108,7 @@ class ResourceBasicInfoTransactionTest {
     @Test
     void failedSyncRollsBackBothResourceAndArtifactChanges() {
         doThrow(new IllegalStateException("Storage unavailable"))
-            .when(storage).syncResourceJsonByBizType(anyString(), eq("SKILL"), eq(1L));
+            .when(storage).publishResourceJson(anyString(), eq("SKILL"), eq(1L));
         assertThatThrownBy(() -> service.updateResourceBasicInfo(1L, "Updated", "Description", null, null))
             .isInstanceOf(IllegalStateException.class).hasMessage("Storage unavailable");
         assertThat(jdbc.queryForObject("SELECT name FROM resource_record WHERE id=1", String.class)).isEqualTo("Original");
