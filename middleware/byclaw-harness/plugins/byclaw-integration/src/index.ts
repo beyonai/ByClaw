@@ -51,6 +51,7 @@ import {
   DEFAULT_BYCLAW_BE_BASE_URL,
 } from './protocol.ts'
 import { ByClawDshSessionRuntime } from './session-runtime.ts'
+import { ByClawInteractionStore } from './interaction-recovery.ts'
 import { installByClawSessionCwdCompatibility } from './session-cwd-compat.ts'
 import { registerAgentTemplateRuntime } from './template-runtime.ts'
 import { resolveByClawInboundTarget } from './inbound-routing.ts'
@@ -1000,6 +1001,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       rosterPrompt: () => rosterPrompt(resources),
       sourceAgentType,
       emitter,
+      interactionStore: new ByClawInteractionStore(redis),
       sessionMetadata,
       rootSetup: (agentCtx, agent, binding) => {
         if (binding.kind === 'main') mainRoots.add(agent)
