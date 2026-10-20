@@ -151,9 +151,9 @@ public class TransactionAdviceConfig {
                 }
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService")
-                    && "openCommonFileInputStream".equals(method.getName())) {
-                    // Legacy paths may fail before the UserFS fallback succeeds. Suspend the caller's
-                    // database transaction so a recovered storage miss cannot mark a chat rollback-only.
+                    && ("openCommonFileInputStream".equals(method.getName()) || "preview".equals(method.getName()))) {
+                    // File preview and legacy paths may fail before the UserFS fallback succeeds. Suspend the
+                    // caller's database transaction so storage I/O cannot mark it rollback-only.
                     return notSurpportedTx;
                 }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
