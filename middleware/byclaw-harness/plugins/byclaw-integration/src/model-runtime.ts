@@ -1,5 +1,6 @@
 /** Dynamic ByClaw AI-model resolution and DSH LLM route registration. */
 
+import type { GroupChatDispositionModelConfig } from './group-chat-disposition-config.ts'
 import { modelFetch } from './model-fetch.ts'
 import { eligibleModel, type ModelCandidate, type ModelRequirements } from '@byclaw/byclaw-model-router'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -768,6 +769,7 @@ function materialize(
   modelId: string,
   resolution: 'explicit' | 'default',
   audit?: RequestAuditSink,
+  route = byClawProviderKey(modelId),
 ): MaterializedModel | undefined {
   if (numericFlag(raw.status) !== 1) return undefined
   const baseUrl = text(raw.url)
@@ -777,7 +779,6 @@ function materialize(
   const instanceParam = record(raw.instanceParam) ?? {}
   const providerAdapter = resolveByClawProviderAdapter(instanceParam)
   const protocol = providerAdapter.api
-  const route = byClawProviderKey(modelId)
   const contextWindow = positiveInt(raw.maxContentToken) ?? DEFAULT_CONTEXT_WINDOW
   const maxTokens = positiveInt(instanceParam['maxTokens']) ?? DEFAULT_MAX_TOKENS
   const abilities = Array.isArray(instanceParam['abilities'])
@@ -997,6 +998,23 @@ export class ByClawDynamicModelRuntime {
       return { ...this.fallback }
     }
     throw new Error(`byclaw-dsh could not resolve an AI model for ${bindingId}, and no fallback is configured`)
+  }
+
+  /** Register the classifier's environment connection independently of Redis and conversation bindings.
+   * @param connection - Validated OpenAI-compatible endpoint, key and model.
+   * @returns The private classifier route, with no credential or Redis model ID.
+   */
+  resolveGroupChatDispositionModel(connection: GroupChatDispositionModelConfig): ByClawModelSelection {
+    const route = 'byclaw-group-chat-disposition:environment'
+    const model = materialize({
+      status: 1, url: connection.baseUrl, modelCode: connection.model, authToken: connection.apiKey,
+      instanceParam: { providerName: 'OpenAI', modelProtocol: 'OpenAI' },
+    }, 'group-chat-disposition', 'explicit', this.requestAudit, route)
+    if (model === undefined) throw new Error('Group-chat disposition model connection is incomplete')
+    // Environment keys are plaintext; Redis token decryption does not apply to this connection.
+    model.token = connection.apiKey
+    model.selection = { provider: route, model: connection.model, protocol: 'openai-completions', resolution: 'local' }
+    return this.publish('group-chat-disposition:environment', model)
   }
 
   /** Identify the configured model behind a registered route without exposing credentials. */

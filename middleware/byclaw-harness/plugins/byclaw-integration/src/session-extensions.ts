@@ -1,8 +1,8 @@
-/** Awaited extension point for trusted ByClaw session composition. */
+/** Session-opening notifications and awaited extensions for trusted ByClaw composition. */
 
 import type { MediaModel } from '@byclaw/media-runtime'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { AskAgentCommand } from '@byclaw/by-framework'
 
 /** Runtime-owned identity, service location, and user-filesystem adapters. */
@@ -29,8 +29,29 @@ export interface ByClawSessionSetup {
   readonly host: ByClawSessionHost
 }
 
+/** Opening notification for independently owned classification and file publication. */
+export interface ByClawSessionOpening {
+  readonly command: AskAgentCommand
+  readonly host: ByClawSessionHost
+  /** No live or persisted session exists under the external header ID. */
+  readonly firstSession: boolean
+  /** Resolve the auxiliary route only when classification is required.
+   * @returns The configured model for this classification request.
+   */
+  resolveModel(): Promise<ModelSelection>
+  /** Runtime shutdown signal; detached work may own a stricter lifetime and timeout. */
+  readonly signal: AbortSignal
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    /**
+     * Notify independently owned observers of root opening or routed requests.
+     * Eligibility queries and listeners run without delaying input; failures are logged.
+     * @param payload - Inbound command, external-session eligibility, model resolver, and cancellation.
+     * @mode serial
+     */
+    'byclaw/session-opening'(payload: ByClawSessionOpening): void | Promise<void>
     /**
      * Compose optional session extensions before the first request or a follow-up.
      * Listeners must compose idempotently without starting the Agent. Rejection prevents input admission.
