@@ -142,6 +142,18 @@ class FilesApplicationServiceTest {
     }
 
     @Test
+    void previewRendersPdfInlineWithoutChangingOtherFileDownloads() {
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filesApplicationService.preview(response, "minio", BUCKET_NAME, "/.sessions/20079447/report.PDF");
+
+        assertThat(response.getContentType()).isEqualTo("application/pdf");
+        assertThat(response.getHeader("Content-Disposition"))
+            .startsWith("inline;filename=report.PDF");
+    }
+
+    @Test
     void previewPropagatesStorageFailureWithContext() {
         doThrow(new IllegalStateException("raw path missing")).when(commonFileStorage).read(any());
         doThrow(new IllegalStateException("user fs path missing")).when(commonFileStorage)
