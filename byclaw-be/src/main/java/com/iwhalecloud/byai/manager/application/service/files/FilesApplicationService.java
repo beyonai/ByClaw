@@ -414,7 +414,10 @@ public class FilesApplicationService {
         if (StringUtil.isEmpty(bucketName)) {
             bucketName = userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
         }
+        logger.info("开始预览公共文件，style={}, bucketName={}, filePath={}", style, bucketName, filePath);
         try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath);) {
+            logger.info("公共文件输入流获取成功，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
+                response.isCommitted());
 
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
@@ -427,10 +430,16 @@ public class FilesApplicationService {
 
             String contentDisposition = "attachment;filename=" + URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             response.setHeader("Content-Disposition", contentDisposition);
+            logger.info("开始写入公共文件响应，bucketName={}, filePath={}, contentDisposition={}", bucketName, filePath,
+                contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
+            logger.info("公共文件响应写入完成，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
+                response.isCommitted());
         }
         catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            logger.error("公共文件预览失败，style={}, bucketName={}, filePath={}, responseCommitted={}", style, bucketName,
+                filePath, response.isCommitted(), e);
+            throw new IllegalStateException("公共文件预览失败: " + filePath, e);
         }
     }
 
@@ -480,7 +489,9 @@ public class FilesApplicationService {
                 return inputStream;
             }
             catch (RuntimeException fallbackException) {
-                primaryException.addSuppressed(fallbackException);
+                if (fallbackException != primaryException) {
+                    primaryException.addSuppressed(fallbackException);
+                }
                 throw primaryException;
             }
         }

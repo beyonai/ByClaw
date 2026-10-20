@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.files;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doReturn;
@@ -131,6 +132,20 @@ class FilesApplicationServiceTest {
         filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH);
 
         assertThat(response.getContentAsByteArray()).isEqualTo(content);
+    }
+
+    @Test
+    void previewPropagatesStorageFailureWithContext() {
+        doThrow(new IllegalStateException("raw path missing")).when(commonFileStorage).read(any());
+        doThrow(new IllegalStateException("user fs path missing")).when(commonFileStorage)
+            .read(argThat(userFsLocation("")));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertThatThrownBy(() -> filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(SESSION_FILE_PATH)
+            .hasCauseInstanceOf(IllegalStateException.class);
     }
 
     private static ArgumentMatcher<StorageLocation> userFsLocation(String shareType) {
