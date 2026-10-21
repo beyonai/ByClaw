@@ -14,7 +14,11 @@ function setup(ready = true) {
   const services = {
     commands: { execute },
     mirror: { apply },
-    history: { detail: vi.fn(async () => ({ sessionId: "30" })), groupNameCheck, groupProjectAccess },
+    history: {
+      detail: vi.fn(async () => ({ sessionId: "30" })),
+      groupNameCheck,
+      groupProjectAccess,
+    },
     sessions: {},
     schema: { accept: vi.fn(async () => ({ status: "PENDING" })) },
     connected: () => true,
@@ -30,6 +34,30 @@ function setup(ready = true) {
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("routes recall undo and rejects a mismatched message path", async () => {
+    const s = setup();
+    const payload = command({
+      operation: "UNDO_RECALL_MESSAGE",
+      payload: { messageId: "90", recalledAt: 1000 },
+    });
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/messages/90/recall/undo",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(s.execute).toHaveBeenCalledWith(payload);
+    const denied = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/messages/91/recall/undo",
+      headers,
+      payload,
+    });
+    expect(denied.statusCode).toBe(409);
+    expect(s.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("checks project cloud access using the authenticated actor and tenant", async () => {
     const s = setup();
     const response = await s.app.inject({

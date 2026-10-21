@@ -84,7 +84,7 @@ public class TenantGroupChatRoutingAspect {
                 Long.valueOf(id(args[0])), Long.valueOf(id(args[1])), "acknowledge".equals(method)));
         }
         if (List.of("nickname", "changeRole", "transferOwnership", "leave", "dissolve",
-            "acknowledgeDissolution", "recall", "directSession").contains(method))
+            "acknowledgeDissolution", "recall", "undoRecall", "directSession").contains(method))
             return ResponseUtil.successResponse(management.change(context, method, Long.valueOf(id(args[0])), args));
         switch (method) {
             case "list": {

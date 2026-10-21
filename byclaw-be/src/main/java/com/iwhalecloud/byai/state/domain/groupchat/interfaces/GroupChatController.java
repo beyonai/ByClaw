@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageRecallService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatRecallUndoRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -81,6 +82,13 @@ public class GroupChatController {
     @PostMapping("/{sessionId}/messages/{messageId}/recall")
     public ResponseUtil<JSONObject> recall(@PathVariable Long sessionId, @PathVariable Long messageId) {
         return ResponseUtil.successResponse(recallService.recall(sessionId, messageId));
+    }
+
+    /** 撤回人可在两分钟内恢复原消息展示，不恢复已取消的执行和任务。 */
+    @PostMapping("/{sessionId}/messages/{messageId}/recall/undo")
+    public ResponseUtil<JSONObject> undoRecall(@PathVariable Long sessionId, @PathVariable Long messageId,
+        @Valid @RequestBody GroupChatRecallUndoRequest request) {
+        return ResponseUtil.successResponse(recallService.undoRecall(sessionId, messageId, request.getRecalledAt()));
     }
 
     @GetMapping("/default-assistant")
