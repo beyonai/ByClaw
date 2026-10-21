@@ -112,8 +112,8 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.70
-ARG BYCLI_EXTENSION_VERSION=2.1.26
+ARG BYCLI_VERSION=2.1.71
+ARG BYCLI_EXTENSION_VERSION=2.1.27
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 
