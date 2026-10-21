@@ -87,7 +87,7 @@
   "devDependencies": {
     "@deepseek-ai/dsh-scope": "workspace:^",
     "@earendil-works/pi-ai": "0.85.1",
-    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-presets": "workspace:^",
     "@deepseek-ai/dsh-api-session-controller": "workspace:^",
@@ -102,7 +102,7 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tool-todo": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/schemastery": "3.18.1",
+    "@deepseek-ai/schemastery": "workspace:^",
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "tsx": "4.22.4",
