@@ -15,7 +15,8 @@ else
 fi
 mkdir -p /opt/searxng-cli
 cp "$settings" /opt/searxng-cli/searxng_pack_settings.yml
+install -m 644 "$(dirname "$0")/searxng-cli/runtime.py" /opt/searxng-cli/runtime.py
 install -m 755 "$(dirname "$0")/searxng-cli/launcher.sh" /usr/local/bin/byclaw-searxng-cli
 ln -sf /usr/local/bin/byclaw-searxng-cli /usr/local/bin/searxng-cli
-SEARXNG_CLI_SETTINGS=/opt/searxng-cli/searxng_pack_settings.yml \
-    searxng-cli --list-engines >/dev/null
+# Engine initialization belongs to the image's runtime-user verification.
+# Running it as the installer would populate root-owned caches in the image.
