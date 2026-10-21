@@ -27,9 +27,8 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 /**
  * 用户工作空间 skill 上传应用服务。
  *
- * 校验范围（明确仅这两条，其它问题用静默忽略而不是抛错）：
- * 1. 压缩包文件大小 ≤ 50MB；
- * 2. 压缩包最外层 skill 目录下必须有且仅有一个 SKILL.md（文件名忽略大小写），子目录中的 SKILL.md 不参与唯一性校验。
+ * 上传大小与资源中心技能导入统一由 multipart 配置和网关请求体限制控制，本服务不额外设置大小上限。
+ * 校验非空 ZIP 及最外层 skill 目录下 SKILL.md 的唯一性（文件名忽略大小写），子目录中的 SKILL.md 不参与唯一性校验。
  *
  * 落盘规则（与 {@link ByClawSkillQueryApplicationService} 完全对齐）：
  * - bucket = byclaw-{userCode}（由 UserFS / UserBucketNameResolver 统一生成）；
@@ -47,9 +46,6 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 public class ByClawSkillUploadApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(ByClawSkillUploadApplicationService.class);
-
-    /** 服务端再设一道软限制（50MB），避免上传超大压缩包长时间阻塞 worker。 */
-    private static final long MAX_ZIP_SIZE_BYTES = 50L * 1024 * 1024;
 
     /** SKILL.md 的规范文件名；query 服务用 case-sensitive 匹配，写入时统一规范化为该值。 */
     private static final String CANONICAL_SKILL_DOC_NAME = "SKILL.md";
@@ -72,7 +68,7 @@ public class ByClawSkillUploadApplicationService {
     private ByClawSkillPathResolver skillPathResolver;
 
     /**
-     * 上传单个 skill 压缩包。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
+     * 上传单个 skill 压缩包。校验非空 ZIP 和 SKILL.md 唯一性，大小限制沿用资源中心技能导入的部署配置。
      *
      * @param userCode  目标用户编码（决定 bucket 名）
      * @param zipFile   前端上传的 zip MultipartFile
@@ -86,7 +82,7 @@ public class ByClawSkillUploadApplicationService {
             // 桶不存在则创建；createBucketIfAbsent 是幂等操作，反复调用安全。
             userFS.init();
 
-            // 一次性把压缩包全部 entry 解析到内存中（已被 50MB 总大小约束），便于：
+            // 一次性把压缩包全部 entry 解析到内存中，便于：
             // 1. 先做整体校验（最外层 skill 目录下必须仅一个 SKILL.md），失败时不写半个 skill；
             // 2. 写入前先清空旧目录，最大化避免「写一半失败」的脏状态。
             List<ParsedEntry> entries = parseArchiveEntries(zipFile);
@@ -140,16 +136,13 @@ public class ByClawSkillUploadApplicationService {
         return result;
     }
 
-    /** 仅做硬性入参校验：userCode 非空、压缩包非空、压缩包 ≤ 50MB。 */
+    /** 校验 userCode 和非空 ZIP；大小统一由请求接入层校验，避免与资源中心技能导入产生不同上限。 */
     private void validateInput(String userCode, Long resourceId, MultipartFile zipFile) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
         if (zipFile == null || zipFile.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
-        }
-        if (zipFile.getSize() > MAX_ZIP_SIZE_BYTES) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.size.exceeded"));
         }
         if (!StringUtils.endsWithIgnoreCase(lastPathSegment(zipFile.getOriginalFilename()), ".zip")) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.file.invalid"));
@@ -158,7 +151,7 @@ public class ByClawSkillUploadApplicationService {
 
     /**
      * 一次性解析压缩包：跳过纯目录条目、噪音文件（__MACOSX/、.DS_Store）和路径穿越条目（含 ".."），
-     * 把内容缓存到 byte[]。单文件大小已被 MAX_ZIP_SIZE_BYTES 整体约束，缓存到内存可控。
+     * 把内容缓存到 byte[]，以便完成整体校验后再清理旧目录、写入新技能。
      */
     private List<ParsedEntry> parseArchiveEntries(MultipartFile zipFile) {
         return parseZipEntries(zipFile);
@@ -211,7 +204,7 @@ public class ByClawSkillUploadApplicationService {
 
     /**
      * 合规化压缩包 entry 名。返回 null 表示该 entry 应被忽略；返回非 null 表示一个合法相对路径。
-     * 路径穿越（".."）这里直接静默丢弃，不抛错，符合"仅校验大小与 SKILL.md"的口径。
+     * 路径穿越（".."）条目静默丢弃，不参与 SKILL.md 校验或后续写入。
      */
     private String normalizeEntryName(String rawName) {
         if (StringUtils.isBlank(rawName)) {
