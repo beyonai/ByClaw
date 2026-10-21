@@ -128,6 +128,35 @@ describe('EasyConfirm', () => {
     expect(screen.queryByTestId('query-input')).not.toBeInTheDocument();
   });
 
+  it('restores an unfinished interaction from a reloaded history message after sandbox release', () => {
+    const lastMsg = {
+      ...createPendingMessage(),
+      messageState: IMessageState.Done,
+      isHistoryMsg: true,
+    };
+
+    render(
+      <EasyConfirm
+        disabledInput={false}
+        isBottom
+        cannotAt={false}
+        disableInputDraft
+        queryInputProps={{}}
+        lastMsg={lastMsg}
+        sessionId="session-1"
+        onSend={jest.fn()}
+        onCancel={jest.fn()}
+        myAgentType={1 as any}
+        setMyAgentType={jest.fn()}
+        messageState={IMessageState.Done}
+        updateMessage={(message) => message}
+      />
+    );
+
+    expect(screen.getByTestId('easy-confirm-pending-1')).toHaveAttribute('data-presentation', 'dock');
+    expect(screen.queryByTestId('query-input')).not.toBeInTheDocument();
+  });
+
   it('keeps the canonical v2 sequence after compatibility events arrive out of order', () => {
     const lastMsg = createPendingMessage();
     lastMsg.thinkList![0].seq = 3;

@@ -234,7 +234,8 @@ export function AskUserQuestions(props: IProps) {
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
-  const isDisabled = messageInfo.isHistoryMsg || isFinished || isPreviewMode || submitting;
+  // 会话重载后消息会被标记为历史消息；只要持久化表单仍未结束，快捷确认区仍需允许用户提交。
+  const isDisabled = (messageInfo.isHistoryMsg && props.presentation !== 'dock') || isFinished || isPreviewMode || submitting;
 
   if (props.presentation !== 'dock') {
     if (!isFinished) return null;
