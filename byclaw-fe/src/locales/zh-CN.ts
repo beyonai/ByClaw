@@ -1248,6 +1248,8 @@ export default {
 
   // 数字员工页面
   'digitalEmployees.title': '数字员工',
+  'digitalEmployees.audienceOrganizations': '所属组织',
+  'digitalEmployees.audienceOrganizations.unset': '未设置组织',
   'digitalEmployees.available': '我的员工',
   'myEmployees.personal': '个人员工',
   'myEmployees.enterprise': '企业员工',

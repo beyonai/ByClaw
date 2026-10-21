@@ -112,11 +112,10 @@ public class EmployeePublicationApplicationService {
             .last("limit " + limit + " offset " + (Math.max(0, page - 1) * (long) limit));
         List<DigitalEmployeePublication> rows = publications.selectList(query);
         rows.forEach(publication -> {
-            publication.setTargets(scopeService.targets(publication));
             publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
             publication.setCanReview(canReview(publication));
         });
-        return new Page(rows, total);
+        return new Page(rows.stream().map(this::publicationForViewer).toList(), total);
     }
 
     public Detail detail(Long id) {
@@ -715,7 +714,7 @@ public class EmployeePublicationApplicationService {
     }
 
     private Detail view(DigitalEmployeePublication publication, boolean sourceResourcesChanged) {
-        publication.setTargets(scopeService.targets(publication));
+        DigitalEmployeePublication visiblePublication = publicationForViewer(publication);
         DigitalEmployeeDetailsDTO employee = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDetailsDTO.class);
         List<Dependency> deps = dependencyList(publication);
         if (deps.stream().anyMatch(d -> d.getResource() == null && d.getTargetId() != null
@@ -746,22 +745,37 @@ public class EmployeePublicationApplicationService {
             canRevise = current != null && Objects.equals(current.getRequestId(), publication.getRequestId());
         }
         ReviewResult previousReview = null;
-        if (List.of("DRAFT", "PENDING").contains(publication.getStatus()) && publication.getCreatedAt() != null) {
+        if (scopeService.canViewAllTargets(publication)
+            && List.of("DRAFT", "PENDING").contains(publication.getStatus()) && publication.getCreatedAt() != null) {
             DigitalEmployeePublication previous = publications.previousRejection(publication.getSourceId(), publication.getTenantId(),
                 publication.getCreatedAt(), publication.getRequestId());
             if (previous != null) previousReview = new ReviewResult(String.valueOf(previous.getRequestId()), previous.getReviewerName(),
                 previous.getReviewedAt(), previous.getComment());
         }
-        return new Detail(publication, employee, deps.stream().map(d -> {
+        return new Detail(visiblePublication, employee, deps.stream().map(d -> {
             EmployeePublicationResources.Availability availability = EmployeePublicationResources.describe(d);
             return new DependencyView(d.getResource() == null ? StringUtils.defaultIfBlank(d.getToolCode(), d.getTargetId() == null ? "" : String.valueOf(d.getTargetId())) : String.valueOf(d.getResource().getResourceId()),
                 d.getResource() == null ? StringUtils.defaultIfBlank(d.getLabel(), "资源 " + d.getTargetId()) : d.getResource().getResourceName(), d.getAction(), d.getError(), d.getWarning(),
                 availability.resourceType(), "COPY_SKILL".equals(d.getAction())
-                    && publication.getTargets().stream().anyMatch(t -> t.getOrgId() != -1L)
+                    && visiblePublication.getTargets().stream().anyMatch(t -> t.getOrgId() != -1L)
                         ? "所选组织（审核通过后）" : availability.scope(), availability.reason(), availability.impact());
         }).toList(),
             editable, editable && "DRAFT".equals(publication.getStatus()), canReview(publication), active && canEdit(publication), canRevise && canEdit(publication), previousReview,
             updateTarget(publication), sourceResourcesChanged);
+    }
+
+    private DigitalEmployeePublication publicationForViewer(DigitalEmployeePublication publication) {
+        DigitalEmployeePublication visible = new DigitalEmployeePublication();
+        BeanUtils.copyProperties(publication, visible);
+        visible.setTargets(scopeService.visibleTargets(publication));
+        if (!scopeService.canViewAllTargets(publication)) {
+            // 汇总字段可能属于其他组织；组织审核人从自己的目标行查看审核信息。
+            visible.setReviewerId(null);
+            visible.setReviewerName(null);
+            visible.setReviewedAt(null);
+            visible.setComment(null);
+        }
+        return visible;
     }
 
     private record SourceResources(DigitalEmployeeDTO employee, String fingerprint, boolean changed, boolean initialized) { }

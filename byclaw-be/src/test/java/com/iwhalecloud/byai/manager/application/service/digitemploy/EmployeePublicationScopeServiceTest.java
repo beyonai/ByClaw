@@ -78,6 +78,47 @@ class EmployeePublicationScopeServiceTest {
 
     @AfterEach void close() { if (session != null) session.close(); CurrentUserHolder.setLoginInfo(null); }
 
+    @Test void organizationViewerOnlySeesOwnAndDescendantTargetsWhileDecisionsKeepAllTargets() {
+        publication.setAuthorId(7L);
+        service.configure(publication, List.of(11L, 20L)); publication.setStatus("PENDING");
+        service.review(publication, List.of(11L), true, "A approved");
+        assertThat(service.visibleTargets(publication)).extracting("orgId").containsExactly(11L);
+        assertThat(service.canViewAllTargets(publication)).isFalse();
+        assertThat(service.targets(publication)).extracting("orgId").containsExactly(11L, 20L);
+        assertThat(service.allApproved(publication)).isFalse();
+        assertThat(service.hasPending(publication)).isTrue();
+        when(admins.managedOrgIds()).thenReturn(Set.of(20L)); login(9L);
+        assertThat(service.visibleTargets(publication)).extracting("orgId").containsExactly(20L);
+        assertThat(service.visibleTargets(publication).getFirst().getComment()).isNull();
+        service.review(publication, List.of(20L), true, "B approved");
+        assertThat(service.allApproved(publication)).isTrue();
+        when(admins.managedOrgIds()).thenReturn(Set.of());
+        assertThat(service.visibleTargets(publication)).isEmpty();
+    }
+
+    @Test void authorPlatformAndSuperAdminSeeAllTargetsButNeverAnotherTenant() {
+        publication.setAuthorId(7L);
+        service.configure(publication, List.of(10L, 20L));
+        login(7L);
+        assertThat(service.visibleTargets(publication)).hasSize(2);
+        login(9L);
+        var org = new com.iwhalecloud.byai.common.login.bean.UsersOrganization(); org.setUserType("PLAT_MAN");
+        CurrentUserHolder.getLoginInfo().setUsersOrganizations(List.of(org));
+        assertThat(service.visibleTargets(publication)).hasSize(2);
+        login(9L); CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        assertThat(service.visibleTargets(publication)).hasSize(2);
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(2L);
+        assertThat(service.canViewAllTargets(publication)).isFalse();
+        assertThat(service.visibleTargets(publication)).isEmpty();
+    }
+
+    @Test void organizationAdminCannotSeeAnAllCompanyReviewTarget() {
+        service.configure(publication, List.of(-1L)); publication.setAuthorId(7L);
+        assertThat(service.visibleTargets(publication)).isEmpty();
+        login(7L);
+        assertThat(service.visibleTargets(publication)).extracting("orgId").containsExactly(-1L);
+    }
+
     @Test void partialRejectionCanBeResubmittedWithoutReapprovingOrRemovingTheLiveOrganization() {
         service.configure(publication, List.of(10L, 20L));
         publication.setStatus("PENDING");

@@ -46,6 +46,21 @@ public class EmployeePublicationScopeService {
         return rows;
     }
 
+    public boolean canViewAllTargets(DigitalEmployeePublication publication) {
+        return Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())
+            && (DigitalEmployeeGovernanceService.isAdministrator()
+                || Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId()));
+    }
+
+    /** 仅用于接口展示；审核、共享版本更新和授权仍须使用完整 targets。 */
+    public List<EmployeePublicationTarget> visibleTargets(DigitalEmployeePublication publication) {
+        if (!Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())) return List.of();
+        List<EmployeePublicationTarget> rows = targets(publication);
+        if (canViewAllTargets(publication)) return rows;
+        Set<Long> managed = admins.managedOrgIds();
+        return rows.stream().filter(row -> row.getOrgId() != -1L && managed.contains(row.getOrgId())).toList();
+    }
+
     public Set<Long> visibleRequestIds() {
         Set<Long> managed = admins.managedOrgIds();
         if (managed.isEmpty()) return Set.of();

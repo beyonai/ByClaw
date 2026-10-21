@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -47,6 +48,8 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
     private final SsResourceArtifactService artifacts;
     private final ByClawSkillResourceApplicationService runtime;
     private final SequenceService sequence;
+    private final DigitalEmployeePublicationMapper publications;
+    private final EmployeePublicationScopeService scopes;
 
     @Override
     public CheckResult check(SsResource source, SsResExtSkill snapshot, byte[] bytes, Context context) {
@@ -130,11 +133,23 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
     @Override
     @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
     public Long publish(SsResource source, SsResExtSkill snapshot, byte[] bytes, Long officialEmployeeId, Context context) {
-        if (!DigitalEmployeeGovernanceService.isAdministrator() || context.requestId() == null
+        if (context.requestId() == null || context.tenantId() == null
             || !Objects.equals(context.tenantId(), CurrentUserHolder.getEnterpriseId())) throw new BaseException("无权执行技能发布");
+        var publication = publications.selectById(context.requestId());
+        if (publication == null || !"APPLYING".equals(publication.getStatus())
+            || !Objects.equals(publication.getTenantId(), context.tenantId())
+            || !scopes.hasReviewAuthority(publication)) throw new BaseException("无权执行技能发布");
         SsResource employee = resources.findById(officialEmployeeId);
         if (!DigitalEmployeeGovernanceService.isOfficialCopy(employee)
-            || !Objects.equals(employee.getComAcctId(), context.tenantId())) throw new BaseException("企业员工不存在或不属于当前企业");
+            || !Objects.equals(employee.getComAcctId(), context.tenantId())
+            || !Objects.equals(employee.getPublicationSourceId(), publication.getSourceId())
+            || !Objects.equals(employee.getPublicationRequestId(), context.requestId())
+            || publication.getOfficialId() != null && !Objects.equals(publication.getOfficialId(), officialEmployeeId)) {
+            throw new BaseException("企业员工不存在或不属于当前发布申请");
+        }
+        if (source == null || !"SKILL".equals(source.getResourceBizType())
+            || !Objects.equals(source.getComAcctId(), context.tenantId())
+            || !Objects.equals(source.getCreateBy(), context.authorId())) throw new BaseException("技能不属于当前发布来源");
         if (!DigestUtils.sha256Hex(bytes).equals(snapshot.getSkillPackageHash())) throw new BaseException("待审核技能文件已变化");
         CheckResult checked = check(source, snapshot, bytes, context);
         if (!checked.copyAllowed()) throw new BaseException("技能依赖已变化，请重新确认发布清单");

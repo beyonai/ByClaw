@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
 import com.iwhalecloud.byai.manager.entity.resource.*;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -31,7 +32,10 @@ class EmployeePublicationSkillServiceTest {
     SsResourceArtifactService artifacts = mock(SsResourceArtifactService.class);
     ByClawSkillResourceApplicationService runtime = mock(ByClawSkillResourceApplicationService.class);
     SequenceService sequence = mock(SequenceService.class);
-    EmployeePublicationSkillService service = new EmployeePublicationSkillService(resources, mapper, skills, relations, storage, artifacts, runtime, sequence);
+    DigitalEmployeePublicationMapper publications = mock(DigitalEmployeePublicationMapper.class);
+    EmployeePublicationScopeService scopes = mock(EmployeePublicationScopeService.class);
+    EmployeePublicationSkillService service = new EmployeePublicationSkillService(resources, mapper, skills, relations, storage, artifacts, runtime, sequence, publications, scopes);
+    DigitalEmployeePublication publication;
     EmployeePublicationSkillBridge.Context context = new EmployeePublicationSkillBridge.Context(1L, 7L, 100L);
     SsResource source, employee;
     SsResExtSkill snapshot;
@@ -41,7 +45,11 @@ class EmployeePublicationSkillServiceTest {
         source = EmployeePublicationApplicationServiceTest.employee(20L, 7L);
         source.setResourceBizType("SKILL"); source.setResourceName("客户分析");
         employee = EmployeePublicationApplicationServiceTest.employee(90L, 7L);
-        employee.setPublicationSourceId(10L); employee.setOwnerType("enterprise");
+        employee.setPublicationSourceId(10L); employee.setOwnerType("enterprise"); employee.setPublicationRequestId(100L);
+        publication = new DigitalEmployeePublication(); publication.setRequestId(100L); publication.setTenantId(1L);
+        publication.setSourceId(10L); publication.setOfficialId(90L); publication.setStatus("APPLYING");
+        when(publications.selectById(100L)).thenReturn(publication);
+        when(scopes.hasReviewAuthority(any())).thenAnswer(call -> DigitalEmployeeGovernanceService.isAdministrator());
         when(resources.findById(90L)).thenReturn(employee);
         when(sequence.nextVal()).thenReturn(99L, 101L, 102L, 103L);
         when(runtime.refreshSkillBasicInfo(any())).thenReturn("{}");
@@ -186,5 +194,36 @@ class EmployeePublicationSkillServiceTest {
         EmployeePublicationApplicationServiceTest.login("author", 7L, List.of());
         assertThatThrownBy(() -> service.publish(source, snapshot, bytes, 90L, context)).hasMessageContaining("无权");
         verifyNoInteractions(storage, mapper);
+    }
+
+    @Test void authorizedOrganizationReviewerCanMaterializeTheApprovedPublicationSkill() throws Exception {
+        EmployeePublicationApplicationServiceTest.login("org-admin", 8L, List.of("ORG_MAN"));
+        when(scopes.hasReviewAuthority(publication)).thenReturn(true);
+        byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        assertThat(service.publish(source, snapshot, bytes, 90L, context)).isEqualTo(99L);
+        verify(storage).uploadToSubdirectory(eq(bytes), eq("skill/org-hub/1/100/20"), anyString(), eq("application/zip"));
+        verify(mapper).insert(argThat((SsResource target) -> target.getCreateBy().equals(7L)
+            && target.getPublicationRequestId().equals(100L) && "enterprise".equals(target.getOwnerType())));
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"missing", "DRAFT", "PENDING", "FAILED", "PUBLISHED", "foreignTenant", "revoked", "otherSource", "otherRequest", "otherOfficial", "foreignSkill", "otherAuthor"})
+    void organizationReviewerCannotPublishOutsideTheExecutingRequest(String reason) throws Exception {
+        EmployeePublicationApplicationServiceTest.login("org-admin", 8L, List.of("ORG_MAN"));
+        when(scopes.hasReviewAuthority(publication)).thenReturn(true);
+        byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        switch (reason) {
+            case "missing" -> when(publications.selectById(100L)).thenReturn(null);
+            case "foreignTenant" -> publication.setTenantId(2L);
+            case "revoked" -> when(scopes.hasReviewAuthority(publication)).thenReturn(false);
+            case "otherSource" -> employee.setPublicationSourceId(11L);
+            case "otherRequest" -> employee.setPublicationRequestId(101L);
+            case "otherOfficial" -> publication.setOfficialId(91L);
+            case "foreignSkill" -> source.setComAcctId(2L);
+            case "otherAuthor" -> source.setCreateBy(9L);
+            default -> publication.setStatus(reason);
+        }
+        assertThatThrownBy(() -> service.publish(source, snapshot, bytes, 90L, context))
+            .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class);
+        verifyNoInteractions(storage, mapper, skills, relations, artifacts, runtime);
     }
 }

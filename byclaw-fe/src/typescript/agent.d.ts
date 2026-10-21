@@ -46,8 +46,7 @@ export type IAgent = {
   authorizeMe?: boolean;
 
   // 组织信息
-  // orgId?: number;
-  // orgName?: string;
+  audienceOrganizations?: Array<{ orgId: string; orgName: string }>;
 
   // 目录和分类
   catalogId: string | null;

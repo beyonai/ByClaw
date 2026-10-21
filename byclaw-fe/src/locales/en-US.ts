@@ -5,6 +5,8 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'digitalEmployees.audienceOrganizations': 'Organizations',
+  'digitalEmployees.audienceOrganizations.unset': 'No organization set',
   'resource.resourceManageAudit': 'Management access',
   'digitalEmployees.applyManage': 'Request management access',
   'digitalEmployees.manageApplyPending': 'Management request pending',

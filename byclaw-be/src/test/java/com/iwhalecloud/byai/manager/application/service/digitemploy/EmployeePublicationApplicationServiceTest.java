@@ -91,6 +91,13 @@ class EmployeePublicationApplicationServiceTest {
     void injectScopes() {
         org.springframework.test.util.ReflectionTestUtils.setField(service, "scopeService", scopeService);
         when(scopeService.approvedOrgs(any())).thenReturn(List.of(-1L));
+        doAnswer(call -> scopeService.targets(call.getArgument(0))).when(scopeService).visibleTargets(any());
+        doAnswer(call -> {
+            DigitalEmployeePublication row = call.getArgument(0);
+            return row != null && java.util.Objects.equals(row.getTenantId(), CurrentUserHolder.getEnterpriseId())
+                && (DigitalEmployeeGovernanceService.isAdministrator()
+                    || java.util.Objects.equals(row.getAuthorId(), CurrentUserHolder.getCurrentUserId()));
+        }).when(scopeService).canViewAllTargets(any());
         when(scopeService.allApproved(any())).thenReturn(true);
         when(scopeService.canReview(any())).thenAnswer(call -> DigitalEmployeeGovernanceService.isAdministrator());
         when(scopeService.hasReviewAuthority(any())).thenAnswer(call -> DigitalEmployeeGovernanceService.isAdministrator());
@@ -103,6 +110,46 @@ class EmployeePublicationApplicationServiceTest {
     EmployeePublicationRequest request() {
         EmployeePublicationRequest request = new EmployeePublicationRequest(); request.setRequestId(100L);
         request.setRevision(publication.getRevision()); return request;
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"detail", "open", "preview", "list"})
+    void organizationReviewResponsesDoNotExposeOtherTargetsOrAggregateReviewerData(String entry) {
+        login("org-admin", 8L, List.of("ORG_MAN")); publication.setStatus("PENDING");
+        publication.setReviewerId(9L); publication.setReviewerName("hidden reviewer");
+        publication.setComment("hidden organization comment"); publication.setReviewedAt(new java.util.Date());
+        publication.setCreatedAt(new java.util.Date());
+        var own = new EmployeePublicationTarget(); own.setOrgId(10L); own.setOrgName("Own organization");
+        own.setStatus("PENDING"); own.setCanReview(true);
+        var other = new EmployeePublicationTarget(); other.setOrgId(20L); other.setOrgName("Hidden organization");
+        other.setStatus("APPROVED"); other.setReviewerName("hidden reviewer");
+        publication.setTargets(List.of(own, other));
+        when(scopeService.targets(any())).thenReturn(List.of(own, other));
+        doReturn(List.of(own)).when(scopeService).visibleTargets(any());
+        when(scopeService.canView(any())).thenReturn(true);
+        when(scopeService.hasOrganizationReviewRole()).thenReturn(true);
+        when(scopeService.visibleRequestIds()).thenReturn(java.util.Set.of(100L));
+        when(scopeService.canReview(any())).thenReturn(true);
+        when(scopeService.hasReviewAuthority(any())).thenReturn(true);
+        when(publications.selectCount(any())).thenReturn(1L);
+        when(publications.selectList(any())).thenReturn(List.of(publication));
+        DigitalEmployeePublication response;
+        if ("list".equals(entry)) response = service.list(true, 1, 20).list().getFirst();
+        else {
+            var detail = switch (entry) {
+                case "open" -> service.open(100L);
+                case "preview" -> service.preview(request());
+                default -> service.detail(100L);
+            };
+            response = detail.publication();
+            assertThat(detail.previousReview()).isNull();
+        }
+        assertThat(response).isNotSameAs(publication);
+        assertThat(response.getTargets()).extracting("orgId").containsExactly(10L);
+        assertThat(response.getReviewerId()).isNull(); assertThat(response.getReviewedAt()).isNull();
+        assertThat(JSON.toJSONString(response)).doesNotContain("Hidden organization", "hidden reviewer", "hidden organization comment");
+        assertThat(publication.getTargets()).hasSize(2);
+        assertThat(publication.getReviewerName()).isEqualTo("hidden reviewer");
+        verify(publications, never()).previousRejection(anyLong(), anyLong(), any(), anyLong());
     }
 
     @Test void sharedVersionDoesNotChangeUntilEveryOrganizationApproves() {
@@ -517,7 +564,7 @@ class EmployeePublicationApplicationServiceTest {
         for (String edition : new String[]{"commercial", "openSource", null, "", "unknown"}) {
             when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn(edition);
             assertThat(service.capabilities()).containsEntry("enabled", true).containsEntry("administrator", false);
-            assertThat(service.current(10L).publication()).isSameAs(publication);
+            assertThat(service.current(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
             assertThat(service.detail(100L).canSubmit()).isTrue();
         }
         login("adminvip", 7L, List.of());
@@ -623,13 +670,14 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(next.getStatus()).isEqualTo("DRAFT");
         assertThat(next.getSnapshotJson()).contains("员工");
         assertThat(publication.getStatus()).isEqualTo("REJECTED");
-        verify(publications).insert(next);
+        verify(publications).insert(argThat((DigitalEmployeePublication saved) -> saved.getRequestId().equals(next.getRequestId())
+            && saved.getSnapshotJson().equals(next.getSnapshotJson())));
     }
 
     @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "APPLYING", "FAILED", "REJECTED", "WITHDRAWN", "PUBLISHED"})
     void openingCurrentApplicationShowsStoredSnapshotAndNeverCreatesDraft(String state) {
         publication.setStatus(state); publication.setComment("请修改岗位描述");
-        assertThat(service.current(10L).publication()).isSameAs(publication);
+        assertThat(service.current(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         assertThat(service.current(10L).employee().getResourceName()).isEqualTo("员工");
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
         verifyNoInteractions(dependencies);
@@ -694,7 +742,7 @@ class EmployeePublicationApplicationServiceTest {
     @ParameterizedTest @ValueSource(strings = {"REJECTED", "WITHDRAWN", "PUBLISHED"})
     void preparingPersonalEmployeeReusesItsLatestResult(String state) {
         publication.setStatus(state);
-        assertThat(service.prepare(10L).publication()).isSameAs(publication);
+        assertThat(service.prepare(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
         verify(employees, never()).findDetailsById(any());
     }
@@ -718,7 +766,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(draft.canEdit()).isTrue();
         assertThat(draft.dependencies()).extracting(EmployeePublicationApplicationService.DependencyView::error)
             .contains("请重新关联技能", "员工名称必填且不能超过 300 个字符");
-        verify(publications).insert(draft.publication());
+        verify(publications).insert(argThat((DigitalEmployeePublication saved) -> saved.getRequestId().equals(draft.publication().getRequestId())));
         verify(dependencies, never()).validate(anyList(), anyLong(), anyLong());
     }
 
@@ -806,7 +854,7 @@ class EmployeePublicationApplicationServiceTest {
         when(resources.selectById(90L)).thenReturn(official);
         when(publications.lockResource(90L, 1L)).thenReturn(official);
         when(publications.official(10L, 1L)).thenReturn(official);
-        assertThat(service.current(90L).publication()).isSameAs(publication);
+        assertThat(service.current(90L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
         var draft = service.prepare(90L).publication();
         assertThat(draft.getStatus()).isEqualTo("DRAFT");
@@ -845,7 +893,7 @@ class EmployeePublicationApplicationServiceTest {
 
     @Test void explicitPersonalUpdateCapturesLatestAAndKeepsBIdentityNameAndPermissions() {
         SsResource official = publishedCopyForPersonalUpdate();
-        assertThat(service.current(10L).publication()).isSameAs(publication);
+        assertThat(service.current(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
         var candidate = service.prepareUpdate(10L);
         assertThat(candidate.publication().getSourceId()).isEqualTo(10L);
@@ -909,7 +957,7 @@ class EmployeePublicationApplicationServiceTest {
         publishedCopyForPersonalUpdate(); publication.setStatus(state);
         if (List.of("DRAFT", "PENDING", "FAILED").contains(state)) when(publications.active(10L, 1L)).thenReturn(publication);
         clearInvocations(employees);
-        assertThat(service.prepareUpdate(10L).publication()).isSameAs(publication);
+        assertThat(service.prepareUpdate(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         verify(employees, never()).findDetailsById(any());
         verify(publications, never()).insert(any(DigitalEmployeePublication.class));
     }
@@ -998,14 +1046,14 @@ class EmployeePublicationApplicationServiceTest {
         login("outsider", 9L, List.of());
         assertThatThrownBy(() -> service.current(10L)).isInstanceOf(BaseException.class);
         login("reviewer", 9L, List.of("PLAT_MAN"));
-        assertThat(service.current(10L).publication()).isSameAs(publication);
+        assertThat(service.current(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
         Users creator = new Users(); creator.setUserCode("adminvip"); when(users.findById(7L)).thenReturn(creator);
         assertThat(service.current(10L).canSubmit()).isTrue();
         assertThat(service.current(10L).publication().isRequiresAdminVipReview()).isFalse();
         login("adminvip", 7L, List.of()); source.setComAcctId(2L);
         assertThatThrownBy(() -> service.current(10L)).hasMessageContaining("不存在");
         source.setComAcctId(1L); when(config.getDcSystemConfigValueByCode("BYAI_BRAND_VERSION")).thenReturn("commercial");
-        assertThat(service.current(10L).publication()).isSameAs(publication);
+        assertThat(service.current(10L).publication().getRequestId()).isEqualTo(publication.getRequestId());
     }
 
     @Test void applyingAttemptCannotBeStartedTwice() {

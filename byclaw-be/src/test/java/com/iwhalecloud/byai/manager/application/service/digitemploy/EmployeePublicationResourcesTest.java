@@ -174,7 +174,7 @@ class EmployeePublicationResourcesTest {
         byte[] bytes = EmployeePublicationSkillServiceTest.zip(Map.of("tax-policy/SKILL.md", "# tax-policy",
             "tax-policy/references/resourceMate.json", "{\"resources\":[{\"resourceId\":\"30\",\"resourceType\":\"KNOWLEDGE_BASE\"},{\"resourceId\":\"40\",\"resourceType\":\"TOOL\"}]}"));
         when(storage.readWithinResourceRoot(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(bytes));
-        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null);
+        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null, null, null);
         when(bridge.check(any(), any(), any(), any())).thenAnswer(invocation -> checker.check(
             invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), invocation.getArgument(3)));
         var captured = service.capture(dto, 7L, 1L, 100L);
