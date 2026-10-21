@@ -34,6 +34,24 @@ docker build -f middleware/byclaw-harness/Dockerfile \
 基础镜像构建需要访问上游 DSH 源码和依赖源，详见 `Dockerfile.base`。
 模块使用方式见 [README.zh.md](README.zh.md)；本地开发前置条件见 [LOCAL-START.md](LOCAL-START.md)。
 
+### 插件依赖来源
+
+两个业务 Dockerfile 在安装插件依赖前执行 `scripts/docker-workspace-prepare.mjs`。
+该脚本读取基础镜像的工作区包清单，为宿主已有的全部 `@deepseek-ai/*` 包建立根级
+`link:` overrides，覆盖插件的直接依赖、传递依赖和 peer 依赖，包含 `plugins/*/packages/*`
+内的嵌套包。Cordis、Schemastery 和 DSH 服务因此使用同一份宿主包及类型声明，避免
+`Context` 缺少服务属性或事件声明不兼容。日志打印统一的宿主包数量；基础镜像缺少
+Cordis 源码包时立即失败。
+
+规则只写入构建阶段的临时工作区，不改写插件独立开发、发布时的版本约定；第三方包
+及非宿主包沿用原配置。最终 profile 继续使用已有的官方初始化和模块回退机制，
+不会复制构建目录的 `link:` overrides。
+
+回归入口为 `node middleware/byclaw-harness/scripts/docker-workspace-prepare.test.mjs`，
+需要可解析的 `js-yaml`、TypeScript 和 pnpm。测试执行离线安装，验证顶层、嵌套、传递和
+peer 依赖的实际链接及 `Context` 声明合并，并检查重复执行与现有构建脚本策略。
+这些测试不替代完整镜像构建和容器启动验证。
+
 本次接入仅纳入源码及原有构建入口；未注册新的部署服务或修改现有中间件镜像流水线。
 
 ## 飞书与企业微信 CLI
