@@ -105,7 +105,7 @@ import {
   terminalByClawModelError,
   type ByClawModelError,
 } from './model-error.ts'
-import { buildRecoveredAskPayload, type ByClawInteractionStore } from './interaction-recovery.ts'
+import { buildRecoveredAskPayload, interactionAgentSessionId, type ByClawInteractionStore } from './interaction-recovery.ts'
 
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
@@ -2098,12 +2098,15 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
               ...question.options === undefined ? {} : { options: question.options },
             }))
             const waitingSessionId = String(exec.agent?.id ?? active.rootSessionId)
+            const durableAgentSessionId = exec.agent === undefined
+              ? active.rootSessionId
+              : interactionAgentSessionId(exec.agent)
             this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, true))
             try {
               const result = await this.questions.ask({
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
                 userCode: active.userCode,
-                agentSessionId: waitingSessionId,
+                agentSessionId: durableAgentSessionId,
                 ...(exec.agent?.session.header.parentSession === undefined ? {} : {
                   parentAgentSessionId: String(exec.agent.session.header.parentSession),
                 }),

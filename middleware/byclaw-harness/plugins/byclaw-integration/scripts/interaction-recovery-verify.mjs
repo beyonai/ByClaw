@@ -4,9 +4,16 @@ import assert from 'node:assert/strict'
 import {
   ByClawInteractionStore,
   buildRecoveredAskPayload,
+  interactionAgentSessionId,
   interactionRecordKey,
   shouldRetainInteractionAfterAskFailure,
 } from '../src/interaction-recovery.ts'
+
+assert.equal(
+  interactionAgentSessionId({ id: 'external-agent-id', session: { id: 'real-dsh-session-id' } }),
+  'real-dsh-session-id',
+  'ask_user_question must persist the DSH session id rather than Agent.id',
+)
 
 class FakeRedis {
   strings = new Map()
@@ -113,6 +120,18 @@ assert.deepEqual(buildRecoveredAskPayload({
   },
   text: '用户已回答之前的 ask_user_question，请根据回答继续原任务。\n喜欢哪些水果：苹果',
 })
+
+assert.deepEqual(buildRecoveredAskPayload({
+  sessionId: 'legacy-root',
+  agentSessionId: 'legacy-root',
+  questions: [{ id: 'fruit', question: '喜欢哪些水果？' }],
+  answer: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
+}), {
+  extraPayload: {
+    byclaw_root_session_id: 'legacy-root',
+  },
+  text: '用户已回答之前的 ask_user_question，请根据回答继续原任务。\n喜欢哪些水果：苹果',
+}, 'legacy root records must resume the reconstructed root instead of routing to a fake child')
 
 await firstProcess.create({
   interactionId: 'interaction-retry', sessionId: 'session-1', userCode: 'user-1',

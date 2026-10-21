@@ -33,6 +33,11 @@ export interface ByClawInteractionStoreOptions {
   now?: () => number
 }
 
+/** Persist the concrete DSH Session identity; Agent.id may be an external presentation identity. */
+export function interactionAgentSessionId(agent: { session: { id: unknown } }): string {
+  return String(agent.session.id)
+}
+
 /** A rendered interaction must survive the process abort that accompanies sandbox release. */
 export function shouldRetainInteractionAfterAskFailure(options: {
   requestEmitted: boolean
@@ -122,8 +127,12 @@ export function buildRecoveredAskPayload(record: Pick<
     text: `用户已回答之前的 ask_user_question，请根据回答继续原任务。\n${lines.join('\n')}`,
     extraPayload: {
       byclaw_root_session_id: record.externalSessionId ?? record.sessionId,
-      dsh_target_session_id: record.agentSessionId,
-      ...(record.parentAgentSessionId === undefined ? {} : {
+      // Early recovery records used the external root id as agentSessionId. Omitting the
+      // target lets the reconstructed deterministic root receive those answers safely.
+      ...(record.agentSessionId === record.sessionId ? {} : {
+        dsh_target_session_id: record.agentSessionId,
+      }),
+      ...(record.agentSessionId === record.sessionId || record.parentAgentSessionId === undefined ? {} : {
         dsh_parent_session_id: record.parentAgentSessionId,
       }),
     },
