@@ -160,6 +160,10 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         assertThat(decorated).containsOnlyOnce("/by/.sessions/60/.byclaw/context/members/group-members.json");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
+        assertThat(groupChat.get("executionId")).isEqualTo(50L);
+        assertThat(groupChat.get("groupHistoryPath"))
+            .isEqualTo("/by/.sessions/60/.byclaw/context/turn/group-history.json");
+        assertThat(groupChat.get("originalContent")).isEqualTo(child.getMessageContent());
         assertThat(groupChat.get("contextToken")).isEqualTo("signed-context-token");
         assertThat(groupChat.get("conversationKey")).isEqualTo("10");
         assertThat(groupChat.get("beforeMessageId")).isEqualTo("20");
@@ -519,7 +523,9 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         context.traceId = execution.getTraceId();
         context.assistantChatDto.setAgentId(40L);
         JSONArray content = JSON.parseArray("[{\"role\":\"user\",\"content\":{\"text\":\"分析附件\",\"files\":[{\"name\":\"report.txt\"}]}}]");
-        JSONArray decorated = (JSONArray) executor.decorate(context, content, new HashMap<>());
+        Map<String, Object> params = new HashMap<>();
+        JSONArray decorated = (JSONArray) executor.decorate(context, content, params);
+        assertThat(((Map<?, ?>) params.get("groupChat")).get("originalContent")).isEqualTo("分析附件");
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
             .contains("群聊判定协议", "group-members.json").doesNotContain("HUMAN_30", "用户三十");
         assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");

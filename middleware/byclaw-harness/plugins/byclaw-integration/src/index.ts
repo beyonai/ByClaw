@@ -2,6 +2,7 @@ import { createTtsDebugHttpHandler } from './tts-http.ts'
 import { ByClawVoiceRuntime } from './voice-runtime.ts'
 import { createVoiceHttpHandler, type VoiceWebHost } from './voice-http.ts'
 import { installBrowserText } from './browser-text.ts'
+import { installGroupChatDisposition } from './group-chat-disposition.ts'
 import { agentRouterEnabled, agentRoutingDecision, agentRouterBlocksDelegationTool, enforceAgentDelegation, isSuperAssistantRoot, AgentRoutingSelections } from '@byclaw/byclaw-agent-router'
 import { installByClawModelCatalog, installByClawModelRouting, resolveByClawModelRouting, type ByClawModelRoutingBinding } from './model-routing.ts'
 import { assertDshModelRoutingRuntime, modelRouterEnabled } from '@byclaw/byclaw-model-router'
@@ -203,6 +204,12 @@ export interface Config {
   skillSyncTimeoutMs?: number
   skillSyncAttempts?: number
   skillSyncRetryDelayMs?: number
+  /** Timeout for history loading and background first-session group-chat classification. */
+  groupChatDispositionTimeoutMs?: number
+  /** Output token budget for the auxiliary TASK/CHAT classification. */
+  groupChatDispositionMaxTokens?: number
+  /** Maximum UTF-8 bytes of recent group history sent to the classifier. */
+  groupChatDispositionHistoryMaxBytes?: number
   subagentProvider?: string
   agentPreset?: string
   /** Safe final-wire LLM request audit level; omission reads `DSH_LLM_LOG`. */
@@ -235,6 +242,9 @@ export const Config: z<Config> = z.object({
   skillSyncTimeoutMs: z.natural().min(1).default(60_000),
   skillSyncAttempts: z.natural().min(1).default(3),
   skillSyncRetryDelayMs: z.natural().default(250),
+  groupChatDispositionTimeoutMs: z.natural().min(1).default(30_000),
+  groupChatDispositionMaxTokens: z.natural().min(1).default(1_024),
+  groupChatDispositionHistoryMaxBytes: z.natural().min(1).default(65_536),
   subagentProvider: z.string().default('spawn'),
   agentPreset: z.string().default('standard'),
   llmRequestLogLevel: z.union(['off', 'info']),
@@ -574,6 +584,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   let models: ByClawDynamicModelRuntime
   let resources: AuthorizedByClawResources
   let sessions: ByClawDshSessionRuntime | undefined
+  let disposition: ReturnType<typeof installGroupChatDisposition> | undefined
   let worker: ByClawDshWorkerRuntime | undefined
   let sandboxBusy: ByClawDshSandboxBusyPublisher | undefined
   let resourceWatch: ByClawResourceWatch | undefined
@@ -585,6 +596,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const close = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    disposition?.stop()
     acceptingRefresh = false
     const failures: unknown[] = []
     const settle = async (operation: (() => Promise<unknown>) | undefined): Promise<void> => {
@@ -596,6 +608,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     await settle(() => sessionMetadata.close())
     await settle(() => refresh)
     await settle(worker === undefined ? undefined : () => worker?.close() ?? Promise.resolve())
+    await settle(disposition === undefined ? undefined : () => disposition?.close() ?? Promise.resolve())
     await settle(sessions === undefined ? undefined : () => sessions?.close() ?? Promise.resolve())
     await settle(sandboxBusy === undefined ? undefined : () => sandboxBusy?.close() ?? Promise.resolve())
     await settle(() => redis.quit())
@@ -990,6 +1003,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       disposeVoiceHttp?.()
       disposeVoiceHttp = mountVoiceHttp()
     })
+    disposition = installGroupChatDisposition(ctx, {
+      timeoutMs: config.groupChatDispositionTimeoutMs ?? 30_000,
+      maxTokens: config.groupChatDispositionMaxTokens ?? 1_024,
+      historyMaxBytes: config.groupChatDispositionHistoryMaxBytes ?? 65_536,
+      resolveConfiguredModel: connection => models.resolveGroupChatDispositionModel(connection),
+    })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
       voiceRuntime,
@@ -1003,6 +1022,10 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       emitter,
       interactionStore: new ByClawInteractionStore(redis),
       sessionMetadata,
+      sessionOpening: (command, firstSession, signal) => ctx.serial('byclaw/session-opening', {
+        command, firstSession, signal, host: sessionHost,
+        resolveModel: () => models.resolve(`group-chat-disposition:${userCode}:${command.header.sessionId}`),
+      }),
       rootSetup: (agentCtx, agent, binding) => {
         if (binding.kind === 'main') mainRoots.add(agent)
         if (isSuperAssistant(agent) && groupCoordination.get(String(agent.id)) === undefined) superAssistantPolicy.bind(agentCtx, agent)

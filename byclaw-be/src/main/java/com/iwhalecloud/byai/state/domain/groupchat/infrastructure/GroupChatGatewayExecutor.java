@@ -367,6 +367,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         }
         Map<String, Object> groupChat = new HashMap<>();
         groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
+        // 透传当前执行标识，供 Gateway 关联本次群聊执行。
+        groupChat.put("executionId", execution.getExecutionId());
         groupChat.put("conversationKey", String.valueOf(execution.getGroupSessionId()));
         groupChat.put("beforeMessageId", String.valueOf(boundary));
         groupChat.put("contextToken", tokenService.issue(execution.getGroupSessionId(), context.sessionId,
@@ -413,13 +415,22 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
             GroupChatSessionContextFileService.TaskHandoffHistory handoff = contextFileService.prepareTaskHandoffHistory(
                 initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
             groupHistory = handoff.groupHistory();
-            decorated = decorateText(content, text -> promptBuilder.appendTaskHandoffHistory(text, handoff));
+            decorated = decorateText(content, text -> {
+                // 保留追加上下文前的用户正文，附件载荷同样只取 text。
+                groupChat.put("originalContent", text);
+                return promptBuilder.appendTaskHandoffHistory(text, handoff);
+            });
         }
         else {
             groupHistory = contextFileService.prepareGroupHistory(
                 initiator.getUserCode(), historyRequest, context.traceId, context.userMessageId);
-            decorated = decorateText(content, text -> promptBuilder.appendGroupHistory(text, groupHistory));
+            decorated = decorateText(content, text -> {
+                groupChat.put("originalContent", text);
+                return promptBuilder.appendGroupHistory(text, groupHistory);
+            });
         }
+        // 与提示词引用同一文件，避免 Gateway 和 Agent 使用不同的历史路径。
+        groupChat.put("groupHistoryPath", groupHistory.agentPath());
         if (groupHistory.snapshot() != null) gatewayParams.put("groupContextSnapshot", groupHistory.snapshot());
         boolean runningDispatch = Objects.equals(execution.getTraceId(), context.traceId)
             && "RUNNING".equals(execution.getStatus());

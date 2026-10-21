@@ -268,13 +268,9 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['101'] });
-    expect(mockUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: '201',
-        sessionId: '101',
-      }),
-      { isAssign: true }
-    );
+    // runningStatus alone is not proof that an answer exists. A failed worker can leave
+    // this Redis marker behind, so an empty assistant placeholder must not be rendered.
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
     expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
       type: 'TASK_PLAN_GET',
       clientRequestId: 'client-1',
@@ -283,6 +279,48 @@ describe('hooks/useChat/index', () => {
       traceId: 'trace-1',
       laneId: undefined,
     });
+  });
+
+  it('does not render a default assistant placeholder for stale running state after resume failure', async () => {
+    mockMessageList = [
+      {
+        messageId: 'previous-answer',
+        msgId: 'previous-answer',
+        fromBeyond: true,
+        messageState: IMessageState.Done,
+        sessionId: '101',
+        finalContent: 'RESUMED',
+      },
+    ];
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '101',
+        running: true,
+        traceId: 'failed-resume-trace',
+        clientRequestId: 'failed-resume-client',
+        modelAnswerMessageId: 'empty-answer',
+        userMessageId: 'resume-message',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue(null);
+
+    renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'empty-answer',
+        fromBeyond: true,
+        text: '',
+      }),
+      expect.anything()
+    );
   });
 
   it('requests the latest task plan after websocket reconnect', async () => {

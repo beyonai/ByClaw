@@ -8,7 +8,8 @@
   前端通过现有带登录凭证的请求客户端，将已经下载的文件副本提交至
   `POST /byaiService/file-preview/legacy-office`，服务端返回 `application/pdf`。
 - 原文件不覆盖、不改名、不落库。预览页顶部下载按钮仍使用原始 Blob；关闭或切换文件会取消转换请求并回收预览 URL。
-- `pdf`、`docx`、`xls`、`xlsx`、`pptx` 保留原渲染路径，不请求转换接口。
+- 微信、钉钉内置浏览器中的 `pdf` 使用现有 `@js-preview/pdf` Canvas 渲染，避免 Blob PDF 在 iframe 中触发下载；其它浏览器仍使用原生 iframe 预览。两种方式都保留原文件下载。
+- `docx`、`xls`、`xlsx`、`pptx` 保留原渲染路径，不请求转换接口。
 - `csv`、`tsv`：默认显示按行列排列的表格，可切换源码。第一行作为普通数据保留，不猜测表头。
   支持 UTF-8 BOM、CRLF、带引号的分隔符、转义双引号、单元格内换行和空单元格。
   单元格以 React 文本渲染，不执行 HTML 或公式。

@@ -128,7 +128,7 @@ public class MailAccountProjectionService {
         var owner = lease.orElseThrow();
         String phase = "validation";
         try {
-            Path target = workspaceService.resolveProjectionFile(userId, PROJECTION_PATH);
+            Path target = workspaceService.resolveLocalProjectionFile(userId, PROJECTION_PATH);
             ParentIdentity identity = validatePrivateParent(userId, target);
             phase = "secure-filesystem";
             try (AnchoredDirectory directory = fileOperations.openDirectory(target.getParent(), identity)) {
@@ -491,7 +491,7 @@ public class MailAccountProjectionService {
 
     private ParentIdentity validatePrivateParent(Long userId, Path target) {
         try {
-            Path expected = workspaceService.resolveProjectionFile(userId, PROJECTION_PATH);
+            Path expected = workspaceService.resolveLocalProjectionFile(userId, PROJECTION_PATH);
             if (!expected.equals(target)) throw new IOException("Projection target changed");
             Path parent = target.getParent();
             BasicFileAttributes attributes = Files.readAttributes(

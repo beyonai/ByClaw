@@ -46,6 +46,9 @@ class ConnectorCredentialWorkspaceServiceTest {
     void setUp() {
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, tempDir.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
     }
 
     @Test
@@ -118,6 +121,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Path configuredRoot = tempDir.resolve("missing/../trusted-root");
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, configuredRoot.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
         stubValidUserAndBucket();
 
         ConnectorCredentialWorkspaceService.ConnectorCliWorkspace workspace = service.resolve(USER_ID, "github");
@@ -136,6 +142,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Files.createSymbolicLink(configuredLink, realRoot);
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, configuredLink.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
         stubValidUserAndBucket();
 
         ConnectorCredentialWorkspaceService.ConnectorCliWorkspace workspace = service.resolve(USER_ID, "github");
@@ -185,6 +194,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Path storageRoot = tempDir.resolve("bucket-validation-root");
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, storageRoot.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
         when(loginApplicationService.getLoginInfo(USER_ID)).thenReturn(loginInfo("user001"));
         when(userBucketNamingService.buildUserBucketName("user001"))
             .thenReturn("../escape", "a", "UPPER-bucket", "a".repeat(64));
@@ -238,6 +250,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Files.setPosixFilePermissions(providerHome, openPermissions);
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, storageRoot.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
         stubValidUserAndBucket();
 
         service.resolve(USER_ID, "github");
@@ -265,6 +280,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Files.writeString(storageFile, "not a directory");
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, storageFile.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
 
         assertThatThrownBy(() -> service.resolve(USER_ID, "github"))
             .isInstanceOf(IllegalStateException.class);
@@ -291,6 +309,9 @@ class ConnectorCredentialWorkspaceServiceTest {
         Files.createSymbolicLink(link, outside);
         service = new ConnectorCredentialWorkspaceService(
             loginApplicationService, userBucketNamingService, storageRoot.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
 
         assertThatThrownBy(() -> service.resolve(USER_ID, "github"))
             .isInstanceOf(IllegalStateException.class);

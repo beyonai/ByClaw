@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 import java.io.ByteArrayInputStream;
 import java.sql.Connection;
@@ -107,19 +108,25 @@ class FilesApplicationServiceTest {
         assertThat(response.getContentAsByteArray()).isEqualTo(content);
         assertThat(response.getHeader("Content-Disposition"))
             .contains(URLEncoder.encode("image(4).png", StandardCharsets.UTF_8));
+        verify(commonFileStorage, times(1)).read(any());
     }
 
     @Test
-    void downloadReadsRawObjectPathWhenItExists() throws Exception {
+    void downloadFallsBackToLegacySessionPathInSameBucket() throws Exception {
         byte[] content = "image-bytes".getBytes(StandardCharsets.UTF_8);
         when(filesService.findById(20079507L)).thenReturn(sessionFiles(20079507L));
-        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(content));
+        doThrow(new IllegalStateException("UserFS path missing")).when(commonFileStorage).read(any());
+        doReturn(new ByteArrayInputStream(content)).when(commonFileStorage)
+            .read(argThat(legacySessionLocation(WhaleAgentStorageService.SHARE_TYPE_PUBLIC)));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
         filesApplicationService.download(response, 20079507L);
 
         assertThat(response.getContentAsByteArray()).isEqualTo(content);
-        verify(commonFileStorage, times(1)).read(any());
+        var reads = inOrder(commonFileStorage);
+        reads.verify(commonFileStorage).read(argThat(userFsLocation(WhaleAgentStorageService.SHARE_TYPE_PUBLIC)));
+        reads.verify(commonFileStorage).read(argThat(legacySessionLocation(WhaleAgentStorageService.SHARE_TYPE_PUBLIC)));
+        reads.verifyNoMoreInteractions();
     }
 
     @Test
@@ -132,6 +139,18 @@ class FilesApplicationServiceTest {
         filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH);
 
         assertThat(response.getContentAsByteArray()).isEqualTo(content);
+    }
+
+    @Test
+    void previewRendersPdfInlineWithoutChangingOtherFileDownloads() {
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filesApplicationService.preview(response, "minio", BUCKET_NAME, "/.sessions/20079447/report.PDF");
+
+        assertThat(response.getContentType()).isEqualTo("application/pdf");
+        assertThat(response.getHeader("Content-Disposition"))
+            .startsWith("inline;filename=report.PDF");
     }
 
     @Test
@@ -152,6 +171,11 @@ class FilesApplicationServiceTest {
         return location -> BUCKET_NAME.equals(location.getBucketOrRoot())
             && (ByClawUserWorkspacePaths.USER_FS_OBJECT_KEY_ROOT_PREFIX + SESSION_FILE_PATH).equals(location.getPath())
             && shareType.equals(location.getShareType());
+    }
+
+    private static ArgumentMatcher<StorageLocation> legacySessionLocation(String shareType) {
+        return location -> BUCKET_NAME.equals(location.getBucketOrRoot())
+            && SESSION_FILE_PATH.equals(location.getPath()) && shareType.equals(location.getShareType());
     }
 
     private static Files sessionFiles(Long fileId) {
