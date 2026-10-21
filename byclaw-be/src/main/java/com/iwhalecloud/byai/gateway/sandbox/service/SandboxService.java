@@ -1507,6 +1507,7 @@ public class SandboxService {
                 records.stream().map(this::sandboxRef).collect(Collectors.toList()));
 
             for (SsSandboxRecord record : records) {
+                if (skipForeignSandbox(record, report)) continue;
                 try {
                     String releaseReason = RELEASE_REASON_AUTO_IDLE_TIMEOUT;
                     DshActivity activity = dshActivityFor(record);
@@ -1798,6 +1799,7 @@ public class SandboxService {
                 records.stream().map(this::sandboxRef).collect(Collectors.toList()));
 
             for (SsSandboxRecord record : records) {
+                if (skipForeignSandbox(record, report)) continue;
                 if (AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())
                     && (record.getLastAccessTime() == null
                     || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis)
@@ -2088,8 +2090,16 @@ public class SandboxService {
         return remoteBySandboxId;
     }
 
+    private boolean skipForeignSandbox(SsSandboxRecord record, SandboxLifecycleJobReport report) {
+        if (!sandboxLifecycleFacade.isForeignSandbox(record.getSandboxId())) return false;
+        report.addSkippedSandbox(sandboxRef(record));
+        LOGGER.debug("跳过其他执行引擎的沙箱记录：{}", sandboxRef(record));
+        return true;
+    }
+
     private void reconcileRecordFromRemoteMap(SsSandboxRecord record, SandboxRuntimeInstance remoteInstance,
         SandboxLifecycleJobReport report) {
+        if (skipForeignSandbox(record, report)) return;
         if (remoteInstance != null && !StringUtils.equals(record.getSandboxId(), remoteInstance.getSandboxId())) {
             report.addFailedSandbox(sandboxRef(record));
             LOGGER.warn("沙箱一致性检测发现sandboxId不一致，保留当前状态：{}，remoteSandboxId={}，remoteState={}",
@@ -2325,6 +2335,9 @@ public class SandboxService {
      */
     private void doRemoveSandbox(SsSandboxRecord record, String releaseReason) {
         if (platformRemote()) { platformGateway().service("remove-record",platformGateway().params("record",record,"reason",releaseReason));return; }
+        if (sandboxLifecycleFacade.isForeignSandbox(record.getSandboxId())) {
+            throw new IllegalStateException("Sandbox belongs to another execution engine");
+        }
         Date now = new Date();
         int marked = sandboxRecordMapper.markReleasing(record.getId(), releaseReason, now, record.getLockVersion());
         if (marked == 0 && STATUS_RUNNING.equals(record.getStatus())) {
