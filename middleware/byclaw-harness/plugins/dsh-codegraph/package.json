@@ -37,7 +37,7 @@
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@types/node": "24.13.3",
