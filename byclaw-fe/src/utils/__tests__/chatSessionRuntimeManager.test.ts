@@ -259,6 +259,42 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
+  it('accepts a lower revision from a newer runtime instance after sandbox restart', () => {
+    chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'dsh',
+      traceId: 'trace-1',
+      runtimeInstanceId: 'sandbox-old',
+      status: 'waiting_user',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 1,
+      revision: 19,
+      changedAt: 2000,
+    });
+
+    const applied = chatSessionRuntimeManager.applySessionRuntime({
+      sessionId: 's1',
+      source: 'dsh',
+      traceId: 'trace-1',
+      runtimeInstanceId: 'sandbox-new',
+      status: 'idle',
+      activeAgentCount: 0,
+      activeChildCount: 0,
+      waitingInteractionCount: 0,
+      revision: 2,
+      changedAt: 3000,
+    });
+
+    expect(applied).toBe(true);
+    expect(chatSessionRuntimeManager.isSessionWaitingForUserInput('s1')).toBe(false);
+    expect(chatSessionRuntimeManager.getSessionRuntime('s1')).toMatchObject({
+      runtimeInstanceId: 'sandbox-new',
+      status: 'idle',
+      revision: 2,
+    });
+  });
+
   it('keeps aggregate team activity running while the captain can accept input', () => {
     chatSessionRuntimeManager.register({ clientRequestId: 'local-1', sessionId: 's1', traceId: 'trace-1' });
     chatSessionRuntimeManager.applySessionRuntime({

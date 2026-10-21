@@ -345,6 +345,7 @@ export function sessionRuntimeProjection(
         active_agent_count: runtime.activeAgentCount,
         active_child_count: runtime.activeChildCount,
         waiting_interaction_count: runtime.waitingInteractionCount,
+        runtime_instance_id: runtime.runtimeInstanceId,
         runtime_revision: runtime.revision,
         runtime_changed_at: runtime.changedAt,
       },

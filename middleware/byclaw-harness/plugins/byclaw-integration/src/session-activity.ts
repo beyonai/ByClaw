@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto'
+
 export type ByClawSessionRuntimeStatus = 'running' | 'waiting_user' | 'idle' | 'failed' | 'cancelled'
 
 export interface ByClawSessionRuntimeSnapshot {
+  runtimeInstanceId: string
   status: ByClawSessionRuntimeStatus
   rootActive: boolean
   acceptingInput: boolean
@@ -27,6 +30,7 @@ export class ByClawSessionActivityTracker {
   constructor(
     private readonly rootSessionId: string,
     private readonly now: () => number = Date.now,
+    private readonly runtimeInstanceId: string = randomUUID(),
   ) {}
 
   observeAgentStatus(sessionId: string, running: boolean): ByClawSessionRuntimeSnapshot | undefined {
@@ -86,6 +90,7 @@ export class ByClawSessionActivityTracker {
       if (this.signature === signature) return undefined
       this.signature = signature
       return this.remember({
+        runtimeInstanceId: this.runtimeInstanceId,
         status: 'cancelled', rootActive: false, acceptingInput: true,
         activeAgentCount: 0, activeChildCount: 0, waitingInteractionCount: 0,
         revision: ++this.revision, changedAt: this.now(),
@@ -114,6 +119,7 @@ export class ByClawSessionActivityTracker {
     this.signature = signature
     this.revision += 1
     return this.remember({
+      runtimeInstanceId: this.runtimeInstanceId,
       status,
       rootActive,
       acceptingInput,

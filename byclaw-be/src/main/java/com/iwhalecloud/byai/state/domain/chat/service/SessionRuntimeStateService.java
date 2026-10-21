@@ -112,6 +112,7 @@ public class SessionRuntimeStateService {
         state.setSessionId(sessionId);
         state.setTraceId(dataJson.getString("trace_id"));
         state.setSource(metadata.getString("event_source"));
+        state.setRuntimeInstanceId(metadata.getString("runtime_instance_id"));
         state.setStatus(metadata.getString("session_status"));
         state.setRootActive(metadata.getBoolean("root_active"));
         state.setAcceptingInput(metadata.getBoolean("accepting_input"));
@@ -139,7 +140,12 @@ public class SessionRuntimeStateService {
         }
         if (Objects.equals(current.getSource(), incoming.getSource())
             && Objects.equals(current.getTraceId(), incoming.getTraceId())) {
-            return current.getRevision() == null || incoming.getRevision() > current.getRevision();
+            if (Objects.equals(current.getRuntimeInstanceId(), incoming.getRuntimeInstanceId())) {
+                return current.getRevision() == null || incoming.getRevision() > current.getRevision();
+            }
+            // A recreated sandbox starts its in-memory revision at one. Runtime generations are ordered by
+            // their event timestamp, while revisions continue to reject reordering within one generation.
+            return current.getChangedAt() == null || incoming.getChangedAt() >= current.getChangedAt();
         }
         return current.getChangedAt() == null || incoming.getChangedAt() >= current.getChangedAt();
     }
