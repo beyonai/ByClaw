@@ -13,7 +13,7 @@ import { normalizeByClawSessionId, type ByClawSessionHost } from './session-exte
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
 
 type Decision = { kind: 'CHAT' } | { kind: 'TASK'; taskName: string; ackText?: string }
-type Disposition = Decision & { schemaVersion: '1'; dispatchId: string }
+type Disposition = Decision & { schemaVersion: '1'; dispatchId: unknown }
 
 /** Deployment limits for the auxiliary classification request. */
 export interface GroupChatDispositionOptions {
@@ -119,7 +119,7 @@ async function existing(path: string): Promise<boolean> {
   }
   try {
     const data = object(JSON.parse(text))
-    if (data?.schemaVersion !== '1' || typeof data.dispatchId !== 'string' || !data.dispatchId.trim()) throw new Error('Invalid disposition metadata')
+    if (data?.schemaVersion !== '1' || data.dispatchId === undefined) throw new Error('Invalid disposition metadata')
     const { schemaVersion, dispatchId, ...result } = data
     storedDecision(result)
     return true
@@ -196,7 +196,6 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
         }
         // Claim the first opening before the model call, including requests without group metadata.
         if (!await publish(marker, { schemaVersion: '1' }, shutdown.signal, opened) || dispatchId === undefined || !enabled) return
-        if (typeof dispatchId !== 'string' || !dispatchId.trim()) throw new Error('groupChat.executionId 必须是非空字符串。')
         const signal = AbortSignal.any([shutdown.signal, AbortSignal.timeout(options.timeoutMs)])
         let text = ''
         try {

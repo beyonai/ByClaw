@@ -2,6 +2,13 @@
 # 仅覆盖需要变更的键，其余继承仓库内默认 searx/settings.yml（use_default_settings 合并）
 use_default_settings: true
 
+engines:
+  # This runtime uses direct connections and does not configure a Tor proxy.
+  - name: ahmia
+    inactive: true
+  - name: torch
+    inactive: true
+
 outgoing:
   # 引擎默认请求超时（默认 3s 过紧，放宽到 10s）
   request_timeout: 10.0
