@@ -67,9 +67,14 @@ and are `ENOENT` otherwise, so a model-only answer never waits for a sandbox.
 Before the model runs, a turn also resolves its session directory and probes
 for files (git roots, session Skills). While B is down the facade answers
 those itself: path resolution only normalizes, queued directories are empty
-directories, everything else is absent, and `executable` lookups resolve on
-this host (same image build). The trade-off: until a session's first tool
-call, its prompt sees no files of the user tree.
+directories with nothing inside, `.git` and instruction-file probes
+(`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
+directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
+`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, and `executable`
+lookups resolve on this host (same image build). What tools do (stat, list,
+read, write of real paths; processes) still goes to B and starts it. The
+trade-off: until a session's first tool call, its prompt sees no
+session-local Skills and no instruction files from the user tree.
 After a failed launch the `byclaw-be` backend waits before trying again
 (1 s, doubling to 30 s) and reports the cause instead of calling BE on every
 operation.
