@@ -273,6 +273,10 @@ DSH and plugins compile during image build; runtime executes the compiled CLI. B
 
 Before Worker readiness, Integration synchronizes authorized employees, teams, models and Skill associations. Business Skill version checks, downloads and parsing happen when the current employee queries registry list/snapshot/get, including tools and prompt catalog assembly. Each lookup checks versions; missing, incomplete or changed caches are atomically replaced. Unchanged versions reuse disk content and concurrent requests coalesce. Authorization and associations are rechecked after loading; stale generations cannot republish results.
 
+Generated dependency caches (`profiles/node_modules` and the web profile's `.dsh-module-fallback`) stay with the image and are repaired on local container storage. NAS holds links to the current image. Canonical module paths avoid repeated NAS traversal while retaining integrity checks, missing-link repair and user package precedence. The web `cordis.patch.yml`, sessions, credentials and business resources retain their existing persistence paths. No new `.env` setting is required; an unsupported DSH release or source layout fails the build explicitly.
+
+Resource projection validates the previous catalog and copies only retained user templates and unknown files. ByClaw templates are regenerated from current authorization, avoiding a full copy followed by deletion. The existing generation lock, rollback, revocation cleanup and Skill version checks remain. A separate `session-metadata-ready` log distinguishes metadata recovery from builtin Skill loading.
+
 Builtin Skills remain local. Scoped group employees are prepared when invoked. `allowSkillSyncFailure` controls skipping a failed Skill versus rejecting the lookup; later calls may retry. First Skill use carries network latency, and Worker readiness does not mean every Skill is warm.
 
 Builds default to `NPM_REGISTRY=https://registry.npmmirror.com`. WeCom/Lark CLIs use an independent `connector-tools` cache stage. Lark binary downloads try npmmirror before GitHub and retain upstream SHA-256 verification; plugin edits do not invalidate this stage.

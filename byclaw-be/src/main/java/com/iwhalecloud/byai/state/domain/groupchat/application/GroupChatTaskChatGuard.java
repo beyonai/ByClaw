@@ -43,8 +43,10 @@ public class GroupChatTaskChatGuard {
             }
             return null;
         }
-        Long turnId = "ACTIVE".equals(task.getStatus()) ? taskService.startTurn(sessionId) : null;
+        // 新输入沿用普通聊天准入；任务轮次只跟踪最新回答，不以旧 RUNNING 状态额外拦截。
+        Long turnId = taskService.startTurn(sessionId);
         if (turnId == null) {
+            // 权限检查之后仍可能发布或取消，数据库更新必须再次校验任务生命周期。
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.newTurnDenied"));
         }
         return turnId;

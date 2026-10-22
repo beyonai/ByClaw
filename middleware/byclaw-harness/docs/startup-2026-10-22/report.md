@@ -113,3 +113,50 @@ sequenceDiagram
 Podman 实测：调整后 npm 包安装 2 秒；单独复测飞书二进制下载、校验和安装为 **2.106 秒**。这两项计时边界不同，不能把相加值当作 Docker 整层耗时；原整步 npm 安装日志为约 2 分钟。
 
 真实 Skill 脚本：`plugins/byclaw-integration/scripts/lazy-skills-live-verify.mjs`，仅对 seeded `byclaw-startup-redis` 开放；在编译好的 DSH 工作区运行，并设置 `DSH_ROOT`（默认当前目录）及测试后端 `BYCLAW_DSH_BASE_URL`。它读取真实版本/下载接口，但不会执行 Skill 中的任意业务脚本、发消息或调用付费模型。完整原生会话链使用 `current-dsh-e2e.mjs` 的模拟模型输出，以免引入模型费用和随机性。
+
+
+## 第二轮：ACS 部署后观察与进一步优化
+
+实测对象 `byclaw-5b15977d612f1976d9f7dcf95cf5ada6`，2026-10-22 北京时间，1 CPU / 2 GiB。只读查询，未重启或修改实例。镜像 D0.6.0，digest `bf61008bd10d9b0488823b0e4117d91a3aa372282986d9c60490d461d1947507`，已命中缓存。
+
+| 阶段 | 时间 | 从 Pod 创建累计 |
+|---|---|---:|
+| Pod 创建 | 15:44:18 | 0 s |
+| 缓存命中 / NAS attach | 15:44:22 / 23 | 4 / 5 s |
+| 主容器启动 | 15:44:30 | 12 s |
+| CLI 开始 | 15:44:31.994 | 13.994 s |
+| integration 激活 | 15:44:48.703 | 30.703 s |
+| 内置 Skill 就绪（此前包含元数据恢复） | 15:44:50.657 | 32.657 s |
+| staging 就绪 | 15:44:53.605 | 35.605 s |
+| 模板生成 / 发布完成 | 15:44:54.258 / 55.148 | 36.258 / 37.148 s |
+| Worker ready | 15:44:55.457 | **37.457 s** |
+| Web ready | 15:44:56.564 | **38.564 s** |
+
+Pod 创建时间为秒级精度。CLI→integration **16.709 s**；integration→Worker **6.754 s**（插件内计时约 6.756 s），两段相加，不能混淆。第二段中投影计时 4.459 s、staging 2.915 s。Kubernetes Ready 在 15:44:49、platform 启动成功在 15:44:50.166，均早于 Worker。当前观测仍未达到 30 s。上一 ACS 样本 Worker 57.698 s、Web 60.092 s，本次分别缩短 35.1%、35.8%，仅代表两次样本。
+
+启动时一次 Redis connect ETIMEDOUT 后恢复；就绪后的一个 Skill 下载 HTTP 400 属于独立问题，不能宣传所有线上 Skill 已通过。platform 同时出现的 NAS_FILE_NOT_FOUND 经堆栈确认是独立文件读取请求。
+
+### 本轮代码
+
+1. 修正受管模块目录的链接方向：保留镜像内安装依赖，将 NAS 上的共享 fallback 及 web 的 `.dsh-module-fallback` 指向容器本地。用户 patch、会话、凭据和业务资源保持原持久化路径。
+2. 构建时对固定版本 `dsh-app-boot@0.1.5-rc.2` 做精确源码适配并重新编译。模块修复使用 canonical path，保留完整依赖遍历、缺失/过期链接修复、包优先级和打包运行模式。版本或源码形状漂移会使构建失败，不会静默跳过。源码入口与编译入口使用同一实现。
+3. integration staging 先校验旧目录，按原删除函数的精确文件名排除即将重建的托管模板，只复制其余文件。保留用户模板、未知文件、子目录和符号链接；目录碰撞或无效 agent JSON 仍拒绝发布。代际锁、发布回滚、撤权及 Skill 缓存规则不变。
+4. 新增 `session-metadata-ready` 阶段日志。旧 `builtin-skills-ready` 的约 1.955 s 包含此前的元数据恢复，不能全部归因于内置 Skill 读取。
+
+### 已完成验证与边界
+
+- 真实模块目录迁移、重复准备、用户 patch/凭据保留通过。
+- 上游 profile 模块解析 **40 项通过**，包括 packaged 模式；编译产物测试确认缺失链接仍修复，用户包保留，NAS 路径调用有界。旧镜像在同一断言下失败，修复后通过。
+- AgentTeams、integration TypeScript 构建通过；模板 staging 的撤权、用户文件保留、目录碰撞与失败代际保护通过。
+- catalog/Skill 缓存、懒加载版本检查与撤权、Skill runtime **25 项**、冷启动资源容错通过；真实编译 CLI 创建、FIFO、Skill 调用、落盘、第二进程冷恢复通过（mock 模型，无付费推理）。
+- 两份 Dockerfile 静态布局检查通过。依用户最新指示，**停止完整镜像构建，不以完整镜像验证作为本轮提交前置条件**。最终合并代码的完整镜像与 ACS 启动时间尚未验证。
+
+定向实验使用第一轮完整镜像作对照，候选镜像仅覆盖 app-boot 编译产物和入口脚本；两者使用隔离 Redis、1 CPU / 2 GiB，agent router 开启。为选定同步文件调用加入 5 ms 模拟延迟，CLI→integration 从 **15.744 s 到 8.639 s**，缩短 45.1%。此实验**不包含 integration 的 6.76 s 优化**，也不是 ACS 新实测。初始探针统计 NAS 前缀调用 1,570→363（不含 symlinkSync 目标路径）；提交的诊断工具已补齐 symlinkSync 目标分类，因此重跑计数口径会更完整。
+
+integration 的隔离 staging 夹具包含 60 个托管员工模板、6 个托管团队模板及用户文件：旧实现复制两个整目录，新实现只复制 5 个保留入口，未复制托管模板。一次本地记录 stage-ready 154→113 ms，仅证明本地夹具收益，不用于预测 NAS 上的 2.915 s 将降到多少。
+
+### 用户部署后的复测口径
+
+构建并更新 D0.6.0 后，分别测量：Pod→CLI、CLI→activate、activate→session-metadata-ready→builtin-skills-ready、投影 stage-ready→templates-prepared→published、Worker ready、Web ready。以 Pod→Worker/Web 作为 30 s 验收依据，不使用 Pod TCP Ready 或 platform RUNNING 代替。
+
+复用同一用户 NAS 测量旧模板存在时的启动，并补一个空模板目录样本；固定 1 CPU / 2 GiB、同一镜像缓存状态与 agent router 配置。无需新增 `.env` 参数。可选隔离诊断：`startup-podman-benchmark.py --profile-startup-fs --nas-delay-ms 5 --agent-router-enabled`（另给原脚本要求的 image/env-file 参数）。仅用于测试，禁止把诊断预加载配置带入生产。

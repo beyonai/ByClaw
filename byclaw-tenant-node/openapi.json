@@ -3266,6 +3266,152 @@
         }
       }
     },
+    "/internal/v1/group-chats/{id}/welcome": {
+      "post": {
+        "summary": "CLAIM_WELCOME",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "description": "规范十进制 signed bigint ID；禁止 JS Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["sessionId", "requestId", "operation", "data"],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}$"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": ["CLAIM_WELCOME"]
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": ["sessionId", "memberId", "granted", "handledAt"],
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,18}$"
+                        },
+                        "memberId": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,18}$"
+                        },
+                        "granted": {
+                          "type": "boolean"
+                        },
+                        "handledAt": {
+                          "type": "integer",
+                          "format": "int64",
+                          "nullable": true,
+                          "description": "Unix milliseconds for the winning request; null when denied. This is eligibility handling, not proof of exposure."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCommand"
+              }
+            }
+          }
+        },
+        "description": "Atomically handles personal welcome eligibility for the authenticated membership. Empty payload. Only granted=true displays a card; this does not write a group message or change read state. Existing memberships are handled by migration. Leaving and rejoining creates new eligibility."
+      }
+    },
     "/internal/v1/group-chats/{id}/messages": {
       "post": {
         "summary": "SEND_GROUP_MESSAGE",
@@ -7871,6 +8017,7 @@
               "ACK_DISSOLUTION",
               "UPDATE_SETTINGS",
               "READ_STATE",
+              "CLAIM_WELCOME",
               "CHECKPOINT_PUBLICATION",
               "CANCEL_TASK",
               "CREATE_INVITATION",

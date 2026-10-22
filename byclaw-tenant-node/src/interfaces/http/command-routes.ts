@@ -30,6 +30,7 @@ export function commandRoutes(
     ["POST", "/group-chats/:id/dissolution-ack", "ACK_DISSOLUTION"],
     ["PATCH", "/group-chats/:id/settings", "UPDATE_SETTINGS"],
     ["PATCH", "/group-chats/:id/read-state", "READ_STATE"],
+    ["POST", "/group-chats/:id/welcome", "CLAIM_WELCOME"],
     ["PATCH", "/group-chats/:id/members/me/nickname", "SET_NICKNAME"],
     ["POST", "/group-chats/:id/direct-sessions", "CREATE_DIRECT_SESSION"],
     ["POST", "/group-chats/:id/invitations", "CREATE_INVITATION"],

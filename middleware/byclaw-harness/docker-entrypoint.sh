@@ -73,17 +73,16 @@ if [[ ! -e "${persistent_profile}/cordis.patch.yml" ]]; then
     cp "${managed_profile}/cordis.patch.yml" "${persistent_profile}/cordis.patch.yml"
 fi
 
-# DSH heals installation dependencies into the persistent fallback. Packages
-# imported from the managed profile must see that same directory at their
-# natural ESM ancestor path under /opt.
-persistent_fallback="${dsh_home}/profiles/node_modules"
-if [[ -L "${persistent_fallback}" || ( -e "${persistent_fallback}" && ! -d "${persistent_fallback}" ) ]]; then
-    rm -rf -- "${persistent_fallback}"
-fi
-mkdir -p "${persistent_fallback}"
+# Generated dependency links belong to this image generation, not the user's
+# NAS. Preserve the build-time installation fallback and heal profile-only links
+# locally. User patches and all business data still live in DSH_HOME.
+mkdir -p "${managed_home}/profiles/node_modules" "${managed_profile}/.dsh-module-fallback/node_modules"
 link_managed_directory \
-    "${persistent_fallback}" \
-    "${managed_home}/profiles/node_modules"
+    "${managed_home}/profiles/node_modules" \
+    "${dsh_home}/profiles/node_modules"
+link_managed_directory \
+    "${managed_profile}/.dsh-module-fallback" \
+    "${persistent_profile}/.dsh-module-fallback"
 
 if [[ -d "${managed_profile}/node_modules" ]]; then
     link_managed_directory \

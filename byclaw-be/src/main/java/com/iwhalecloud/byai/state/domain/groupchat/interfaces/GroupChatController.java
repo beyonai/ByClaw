@@ -39,6 +39,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatWelcomeService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatWelcomeResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageAckService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageSearchService;
@@ -71,6 +73,8 @@ public class GroupChatController {
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
     private final GroupChatMessageAckService ackService;
+    @Autowired
+    private GroupChatWelcomeService welcomeService;
     @Autowired
     private GroupChatMessageSearchService messageSearchService;
     @Autowired
@@ -135,6 +139,12 @@ public class GroupChatController {
         @RequestParam(defaultValue = "20") Integer pageSize,
         @RequestParam(required = false) Long enterpriseId) {
         return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize, enterpriseId));
+    }
+
+    /** 个人引导显式申请，不在详情读取、后台预取或已读更新时消耗资格。 */
+    @PostMapping("/{sessionId}/welcome")
+    public ResponseUtil<GroupChatWelcomeResponse> claimWelcome(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(welcomeService.claim(sessionId));
     }
 
     /** 只把前端已实际展示的群消息推进为已读位置。 */
