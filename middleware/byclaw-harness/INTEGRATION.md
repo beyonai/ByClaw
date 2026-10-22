@@ -98,3 +98,27 @@ node middleware/byclaw-harness/scripts/startup-client-modules-verify.mjs
 `browser-supervisor-verify.py` 在 supervisor 确认重连完成后才结束恢复测试，
 不会把 daemon/status 的调用计数当成就绪信号。构建失败会保留实际错误检查；
 无需关闭该校验或调整 byCLI 版本。[竞态原因与验证记录](docs/startup-2026-10-22/build-supervisor-race.md)。
+
+
+### 持久目录解析与首用浏览器初始化
+
+镜像启动仍保留 supervisor 管理私密 FD、首用 browser/byCLI 激活和子进程回收；
+`on-demand` 模式不再提前创建/锁定 NAS 浏览器 profile，首次调用时才取得独占锁。
+日志增加 `startup phase=prepared` 和 `startup phase=cli-spawned`，可区分 CLI 之前的准备开销。
+
+编译 CLI 自动加载镜像内的 `startup-module-resolver.cjs`：只在 entrypoint 管理的两个
+`node_modules` 链接布局匹配时启用。普通包解析改用对应的本地镜像目录，保留 Node
+exports/conditions、包优先级、相对模块和自定义祖先目录回退；不改变持久配置和业务数据路径。
+Typert 的 manifest 解析在构建时补丁并编译；client source map 按已有字节快照缓存序列化结果。
+两个 Dockerfile 均包含新产物，不需要补充运行环境配置，也不需要修改只读上游 DSH 源码。
+
+新增验证入口（在 `middleware/byclaw-harness` 目录执行，`DSH_ROOT` 指向测试/构建工作区）：
+
+```bash
+node --test scripts/startup-module-resolver.test.cjs scripts/startup-extra-patches.test.mjs
+node scripts/startup-client-modules-verify.mjs --maps-optimized --oracle
+node scripts/startup-typert-verify.mjs
+python3 scripts/browser-supervisor-verify.py
+```
+
+完整结果见[启动优化与验收边界](docs/startup-2026-10-22/startup-extreme-report.md)。

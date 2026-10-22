@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 const oracle = process.argv.includes('--oracle')
+const mapsOptimized = process.argv.includes('--maps-optimized')
 const snapshots = []
 const workspace = resolve(process.env.DSH_ROOT ?? '/workspace')
 const { Context } = await import(pathToFileURL(join(workspace, 'vendor/cordis/lib/index.js')))
@@ -26,6 +27,15 @@ context.provide('loader', { *entries() { for (const name of names) yield { optio
 context.provide('webServer', { port: 0, register: () => () => {}, tapIndex: () => () => {} })
 const original = Buffer.prototype.toString
 let conversions = 0
+let mapSerializations = 0
+const stringify = JSON.stringify
+JSON.stringify = function (value, ...args) {
+  const maps = value?.sections?.map(section => section.map) ?? [value]
+  for (const map of maps) {
+    if (map?.sourcesContent?.some(content => typeof content === 'string' && content.includes('中文😀'))) mapSerializations++
+  }
+  return stringify.call(this, value, ...args)
+}
 Buffer.prototype.toString = function (...args) { if (this.length === Buffer.byteLength(source)) conversions++; return original.apply(this, args) }
 const get = (service, url, method = 'GET') => service.fetchBundle(new Request(`http://fixture${url}`, { method }))
 async function snapshot(service, url) {
@@ -38,6 +48,7 @@ try {
   const file = pkg(names[0], source)
   const registry = new ClientModuleRegistry(context)
   if (!oracle) assert.equal(conversions, 1, 'each unchanged bundle should be decoded once across batch and single responses')
+  if (mapsOptimized) assert.equal(mapSerializations, 1, 'serialize a large unchanged map only once')
   const first = registry.graph().batches[0].url
   if (oracle) await snapshot(registry, first)
   const firstBody = await get(registry, first).text()
@@ -50,6 +61,7 @@ try {
   context.emit('internal/plugin', { entry: { options: { name: names[1] } } })
   await new Promise(resolve => setImmediate(resolve))
   if (!oracle) assert.equal(conversions, decoded, 'unrelated plugin arrival must not decode unchanged bundles again')
+  if (mapsOptimized) assert.equal(mapSerializations, 1, 'new plugins must reuse unchanged map serialization')
   const second = registry.graph().batches[0].url
   if (oracle) await snapshot(registry, second)
   assert.notEqual(second, first)
@@ -83,6 +95,7 @@ try {
   if (oracle) console.log(JSON.stringify(snapshots))
   console.log('compiled client registry: decode reuse, offsets, HMR/map-only invalidation, removal, prior generation and HTTP contracts passed')
 } finally {
+  JSON.stringify = stringify
   Buffer.prototype.toString = original
   rmSync(root, { recursive: true, force: true })
 }

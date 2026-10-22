@@ -723,11 +723,15 @@ def run_nested_orphan_cleanup(root: Path) -> None:
 
 
 def run_lazy_activation(root: Path) -> None:
-    command, env, path, browser_record, dsh_record = fixture(root, bycli=True, viewer="shared-novnc")
+    profile = root / "lazy-profile"
+    command, env, path, browser_record, dsh_record = fixture(
+        root, bycli=True, viewer="shared-novnc", browser_profile=profile
+    )
     env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
     process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         wait_for(dsh_record, process)
+        assert not profile.exists(), "browser profile was accessed before first use"
         assert not browser_record.exists(), "browser started before the first browser request"
         assert not (root / "bycli.json").exists(), "byCLI started before first use"
         assert path.stat().st_mode & 0o777 == 0o600
@@ -740,6 +744,8 @@ def run_lazy_activation(root: Path) -> None:
         wait_for(Path(str(path) + ".activated"), process)
         assert json.loads(browser_record.read_text())["digest"] == json.loads(dsh_record.read_text())["digest"]
         assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+        assert profile.is_dir()
+        assert json.loads(browser_record.read_text())["profileExclusive"] == "true"
     finally:
         process.terminate()
         process.communicate(timeout=5)
@@ -747,14 +753,68 @@ def run_lazy_activation(root: Path) -> None:
     assert not Path(str(path) + ".activated").exists()
 
 
+def run_lazy_profile_conflict(root: Path) -> None:
+    profile = root / "shared-profile"
+    first_root, second_root = root / "first", root / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_command, first_env, _, first_browser, first_dsh = fixture(
+        first_root, browser_profile=profile,
+    )
+    first = subprocess.Popen(
+        first_command, env=first_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    second = None
+    try:
+        wait_for(first_browser, first)
+        wait_for(first_dsh, first)
+        command, env, path, browser_record, dsh_record = fixture(
+            second_root, bycli=True, viewer="shared-novnc", browser_profile=profile,
+        )
+        env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+        second = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        wait_for(dsh_record, second)
+        assert not browser_record.exists()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+            try:
+                assert client.recv(1) == b""
+            except ConnectionResetError:
+                pass
+        _, stderr = second.communicate(timeout=5)
+        assert second.returncode == 1, stderr
+        assert "browser-supervisor-profile-in-use" in stderr
+        assert not browser_record.exists(), "conflicting profile must not start another browser"
+        assert not (second_root / "bycli.json").exists(), "lock must precede daemon restart"
+        assert first.poll() is None, "the profile owner must remain running"
+    finally:
+        for process in [second, first]:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=5)
+
+
 def run_lazy_unused_exit(root: Path) -> None:
-    command, env, path, browser_record, _ = fixture(root, dsh_mode="exit7", bycli=True)
+    profile = root / "unused-profile"
+    command, env, path, browser_record, _ = fixture(
+        root, dsh_mode="exit7", bycli=True, browser_profile=profile
+    )
     env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
     result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
     assert result.returncode == 7, result
     assert not browser_record.exists()
     assert not (root / "bycli.json").exists()
+    assert not profile.exists(), "unused browser must not create a persistent profile"
     assert not path.exists()
+    timings = {}
+    for line in result.stderr.splitlines():
+        for phase in ["prepared", "cli-spawned"]:
+            marker = f"startup phase={phase}; elapsedMs="
+            if marker in line:
+                timings[phase] = int(line.split(marker, 1)[1])
+    assert 0 <= timings["prepared"] <= timings["cli-spawned"], result.stderr
 
 def main() -> None:
     # macOS has a short AF_UNIX path limit; keep the fixture root compact.
@@ -763,6 +823,7 @@ def main() -> None:
         for name, check in [
             ("lazy-activation", run_lazy_activation),
             ("lazy-unused-exit", run_lazy_unused_exit),
+            ("lazy-profile-conflict", run_lazy_profile_conflict),
             ("exit", run_exit_propagation),
             ("signal", run_signal_forwarding),
             ("profile-exclusive-lock", run_profile_exclusive_lock),
