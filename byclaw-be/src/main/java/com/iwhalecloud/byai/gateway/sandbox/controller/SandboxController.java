@@ -117,6 +117,9 @@ public class SandboxController {
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
 
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory runtimeInventory;
+
     @Value("${server.servlet.context-path:}")
     private String contextPath;
 
@@ -446,38 +449,52 @@ public class SandboxController {
             return ResponseUtil.fail(I18nUtil.get("sandbox.pageInvalid"));
         }
 
-        enterpriseId = userResourceEnterpriseScope(enterpriseId);
+        // Business managers share the administrative USER inventory. Mutations still enforce enterprise scope.
+        if (!CurrentUserHolder.isPlatformManager() && !CurrentUserHolder.isBusinessAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
+        }
         if (!CurrentUserHolder.isPlatformManager() && !"USER".equals(ownerScope)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.userScope.required");
         }
 
-        int offset = (pageIndex - 1) * pageSize;
-        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, ownerScope, enterpriseId,
-                offset, pageSize).stream()
-            .map(record -> {
+        Map<String, String> inventory = runtimeInventory.current();
+        final String requestedStatus = status;
+        List<String> sandboxIds = inventory.entrySet().stream()
+            .filter(entry -> requestedStatus == null || requestedStatus.equals(entry.getValue()))
+            .map(Map.Entry::getKey).collect(Collectors.toList());
+        Map<String, Object> query = new HashMap<>();
+        query.put("keyword", keyword);
+        query.put("ownerScope", ownerScope);
+        query.put("enterpriseId", enterpriseId);
+        query.put("offset", (pageIndex - 1) * pageSize);
+        query.put("pageSize", pageSize);
+        query.put("sandboxIds", sandboxIds);
+        List<SandboxRecordView> list = sandboxIds.isEmpty() ? new java.util.ArrayList<>() :
+            sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
+                // Display the live runtime state; this projection never updates the persisted lifecycle record.
+                record.setStatus(inventory.get(record.getSandboxId()));
                 SandboxRecordView view = sandboxService.buildRecordView(record);
-                if (view != null && "TENANT".equals(record.getOwnerScope())
-                    && ("RUNNING".equals(record.getStatus()) || "FAILED".equals(record.getStatus()))) {
-                    view.setProviderStatus(tenantSandboxService.providerStatus(record));
+                if (view != null) {
+                    view.setStatus(record.getStatus());
+                    view.setProviderStatus(record.getStatus());
                 }
                 return view;
-            })
-            .collect(Collectors.toList());
+            }).collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
         String webBaseUrl = list.stream().anyMatch(record -> "openclaw".equals(record.getSandboxType()))
             ? byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL) : null;
         list.forEach(record -> {
             if (!"openclaw".equals(record.getSandboxType())) return;
-            String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
-                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
-            if (StringUtils.isNotBlank(webBaseUrl)) {
-                record.setEndpoint(OpenClawUiProxyPaths.toProxyUrl(rawEndpoint, webBaseUrl, contextPath));
-            } else {
-                record.setEndpoint(rawEndpoint);
+            Map<String, String> endpoints = SandboxEndpointRecordSupport.parseInstanceEndpoints(record.getEndpoint());
+            String rawEndpoint = endpoints.get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+            if (StringUtils.isNotBlank(webBaseUrl) && StringUtils.isNotBlank(rawEndpoint)) {
+                endpoints.put(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE,
+                    OpenClawUiProxyPaths.toProxyUrl(rawEndpoint, webBaseUrl, contextPath));
             }
+            record.setEndpoint(SandboxEndpointRecordSupport.toStorageValue(endpoints, record.getEndpoint()));
         });
-        int total = sandboxRecordMapper.countByCondition(keyword, status, ownerScope, enterpriseId);
+        int total = sandboxIds.isEmpty() ? 0 : sandboxRecordMapper.countInventory(query);
         int totalPage = (total + pageSize - 1) / pageSize;
 
         Map<String, Object> result = new HashMap<>();

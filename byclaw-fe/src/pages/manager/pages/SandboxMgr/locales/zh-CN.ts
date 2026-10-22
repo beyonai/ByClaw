@@ -1,4 +1,5 @@
 export default {
+  'sandboxMgr.endpoint.more': '更多',
   // 搜索
   'sandboxMgr.search.placeholder': '搜索用户编码、访问地址、会话ID',
 
@@ -253,7 +254,7 @@ export default {
   'sandboxMgr.tenant.restartNodeDescription': '数据节点将使用当前配置的镜像重建，数据库沙箱保持运行。',
   'sandboxMgr.tenant.restartAccepted': '重启请求已提交，请刷新查看进度',
   'sandboxMgr.tenant.actionFailed': '操作失败，请稍后重试',
-  'sandboxMgr.tenant.recordRunning': '记录运行中',
+  'sandboxMgr.tenant.recordRunning': '运行中',
   'sandboxMgr.tenant.providerAbnormal': '沙箱异常',
   'sandboxMgr.tenant.providerUnknown': '状态未核实',
 };

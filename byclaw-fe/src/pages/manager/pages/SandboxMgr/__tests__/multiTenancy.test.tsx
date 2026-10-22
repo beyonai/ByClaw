@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { listTenants } from '@/pages/manager/service/TenantMgr';
 import SandboxMgr from '../index';
@@ -132,4 +132,32 @@ test.each([
     render(<SandboxMgr />);
   });
   expect(Boolean(screen.queryByRole('tab', { name: '恢复任务' }))).toBe(visible);
+});
+
+test('running endpoints show named links and expand the complete list without navigating JSON', async () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 1,
+          ownerScope: 'USER',
+          sandboxType: 'byclaw-dsh',
+          status: 'RUNNING',
+          endpoint: JSON.stringify({
+            openclaw: 'https://sandbox.example/chat',
+            vnc: 'https://sandbox.example/vnc',
+            bycli: 'https://sandbox.example/cli',
+          }),
+        },
+      ],
+    })
+  );
+  expect(screen.getByRole('link', { name: 'openclaw' })).toHaveAttribute('href', 'https://sandbox.example/chat');
+  expect(screen.getByRole('link', { name: 'vnc' })).toHaveAttribute('href', 'https://sandbox.example/vnc');
+  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.endpoint.more/ }));
+  expect(await screen.findByRole('link', { name: 'bycli' })).toHaveAttribute('href', 'https://sandbox.example/cli');
+  expect(screen.queryByText(/\{"openclaw"/)).not.toBeInTheDocument();
 });
