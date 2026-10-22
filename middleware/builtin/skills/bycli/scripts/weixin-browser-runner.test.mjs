@@ -391,6 +391,65 @@ test('empty unknown process failure becomes a diagnosable non-authentication res
   assert.equal(error.details.durationMs, 321);
 });
 
+test('progress-only output cannot hide a killed command or create an authentication gate', async t => {
+  const directory = await stateDir(t);
+  const result = normalizeCommandResult({ exitCode: 1, stdout: '', stderr: 'processing 25%\n',
+    timedOut: true, signal: 'SIGTERM', durationMs: 930000 });
+  assert.equal(JSON.parse(result.stderr).error.code, 'COMMAND_TIMEOUT_UNCERTAIN');
+  const outcome = await runWeixinBrowser({ stateDir: directory, argv: channelsCommand('video-publish'),
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }), ensureBridge: async () => ready,
+    execute: async () => result });
+  assert.equal(outcome.phase, 'initial'); assert.deepEqual(await readdir(directory), []);
+});
+
+test('progress before a final structured verification error still pauses the authentication gate', async t => {
+  let attempts = 0;
+  const outcome = await runWeixinBrowser({ stateDir: await stateDir(t), argv: channelsCommand('video-publish'),
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }), ensureBridge: async () => ready,
+    execute: async () => { attempts++; return normalizeCommandResult({ exitCode: 77, stdout: '',
+      stderr: `processing 25%\n${JSON.stringify({ ok: false, error: { code: 'AUTH_REQUIRED', exitCode: 77 } }, null, 2)}\n` }); } });
+  assert.equal(outcome.phase, 'waiting-confirmation'); assert.equal(attempts, 1);
+});
+
+test('runner CLI streams progress before completion without duplicating stderr or corrupting JSON stdout', async t => {
+  const root = await stateDir(t, 'weixin-stream-'), bin = join(root, 'bin'), release = join(root, 'release');
+  await mkdir(bin);
+  const script = join(bin, 'bycli');
+  await writeFile(script, `#!${process.execPath}
+const { existsSync } = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'list') console.log(JSON.stringify([{site:'weixin-channels',name:'video-publish',browser:true,access:'write',domain:'channels.weixin.qq.com'}]));
+else if (args[0] === 'doctor') {}
+else if (args[0] === 'daemon') console.log('Daemon: running\\nExtension: connected');
+else {
+  process.stderr.write('upload progress 25%\\n');
+  const timer = setInterval(() => { if (existsSync(${JSON.stringify(release)})) { clearInterval(timer); console.log('{"status":"prepared","submitted":false}'); } }, 10);
+}
+`);
+  await chmod(script, 0o700);
+  const child = spawn(process.execPath, [new URL('./weixin-browser-runner.mjs', import.meta.url).pathname,
+    '--state-dir', join(root, 'gate'), '--', ...channelsCommand('video-publish')], {
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, BYCLI_CONFIG_DIR: join(root, 'config') }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  let stdout = '', stderr = '', exited = false;
+  const completed = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => { exited = true; resolve(code); }); });
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`progress was buffered: ${stderr}`)), 5000);
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+      if (stderr.includes('upload progress 25%\n')) { clearTimeout(timer); resolve(); }
+    });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+  assert.equal(exited, false); assert.equal(stdout, '');
+  await writeFile(release, 'continue');
+  assert.equal(await completed, 0, stderr);
+  assert.deepEqual(JSON.parse(stdout), { status: 'prepared', submitted: false });
+  assert.equal(stderr, 'upload progress 25%\n');
+});
+
 test('initial browser command runs capability check, bridge, then command', async (t) => {
   const events = [];
   const outcome = await runWeixinBrowser({
