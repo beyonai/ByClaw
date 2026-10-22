@@ -57,6 +57,8 @@ import {
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
 import RecoveryPanel from './RecoveryPanel';
+import EndpointLinks from './EndpointLinks';
+import { primarySandboxEndpoint } from './endpointUtils';
 import styles from './index.module.less';
 
 const { Option } = Select;
@@ -681,25 +683,6 @@ const SandboxMgr = () => {
     },
     [dispatch, intl, loadData, pageInfo, keyword, status]
   );
-
-  const handleView = useCallback((endpoint: string) => {
-    // openclaw 控制台把 gatewayUrl/token 持久化在同源共享的 localStorage(openclaw.control.settings.v1)。
-    // 整页代理下所有 sandbox 同源，仅靠 URL 的 token 不够：若不显式覆盖 gatewayUrl，
-    // 第二次打开会复用上一次残留的 gatewayUrl，连到上一个 sandbox（端口串台）。
-    // 这里在打开 URL 上补上本 endpoint 对应的 gatewayUrl（ws(s)://当前host/代理前缀），强制覆盖残留。
-    try {
-      const url = new URL(endpoint, window.location.origin);
-      // 代理前缀：endpoint 路径去掉末尾的 /chat，即 /byaiService/openclaw-ui/{ip}/{port}
-      const proxyPrefix = url.pathname.replace(/\/chat$/, '');
-      // gatewayUrl 与 endpoint 同 host/同源，仅协议换成 ws(s)，避免与 endpoint 的 host 不一致。
-      const wsProto = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      const gatewayUrl = `${wsProto}//${url.host}${proxyPrefix}`;
-      url.searchParams.set('gatewayUrl', gatewayUrl);
-      window.open(url.toString(), '_blank');
-    } catch {
-      window.open(endpoint, '_blank');
-    }
-  }, []);
 
   const canReleaseSandbox = useCallback(
     (record: SsSandboxRecord) => record.ownerScope !== 'TENANT' && RELEASABLE_STATUSES.includes(record.status),
@@ -1466,13 +1449,9 @@ const SandboxMgr = () => {
       align: 'center' as const,
       width: 260,
       ellipsis: true,
-      render: (value: string, record: SsSandboxRecord) => {
-        if (record.ownerScope === 'TENANT') return renderEllipsisText(value);
-        if (record.status === 'RUNNING' && value) {
-          return <Typography.Link onClick={() => handleView(value)}>{value}</Typography.Link>;
-        }
-        return <Typography.Text disabled>{value || '-'}</Typography.Text>;
-      },
+      render: (value: string, record: SsSandboxRecord) => (
+        <EndpointLinks value={value} sandboxType={record.sandboxType} running={record.status === 'RUNNING'} />
+      ),
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
@@ -1653,8 +1632,10 @@ const SandboxMgr = () => {
                 size="small"
                 type="link"
                 icon={<EyeOutlined />}
-                onClick={() => handleView(record.endpoint)}
-                disabled={!record.endpoint}
+                href={primarySandboxEndpoint(record.endpoint, record.sandboxType)}
+                target="_blank"
+                rel="noopener noreferrer"
+                disabled={!primarySandboxEndpoint(record.endpoint, record.sandboxType)}
               >
                 {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
               </Button>

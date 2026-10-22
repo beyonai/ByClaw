@@ -243,6 +243,11 @@ public interface SsSandboxRecordMapper {
                          @Param("ownerScope") String ownerScope,
                          @Param("enterpriseId") Long enterpriseId);
 
+    /** Inventory IDs are supplied by the active runtime, never by the browser. */
+    List<SsSandboxRecord> selectInventoryPage(java.util.Map<String, Object> query);
+
+    int countInventory(java.util.Map<String, Object> query);
+
     int countEnterpriseUserSandbox(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
     /**
