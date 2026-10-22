@@ -268,6 +268,9 @@ COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
+# Shared DSH host launcher (many users, one process); run it instead of the
+# entrypoint: `node scripts/byclaw-multi-host.mjs`. Inert for ordinary sandboxes.
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-multi-host.mjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py
