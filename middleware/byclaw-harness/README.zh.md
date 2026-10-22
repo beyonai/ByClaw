@@ -218,7 +218,7 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 
 ## 验证与启动
 
-插件面向 DSH `0.2.1-rc.2`，即 `Dockerfile.base` 固定的版本（`DSH_REF`）；peer 依赖固定为该版本。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
+插件面向 DSH `0.2.1-rc.2`，即 `Dockerfile.base` 固定的版本（`DSH_REF`）；peer 依赖固定为该版本。因此业务镜像（`Dockerfile`、`Dockerfile.extensions`）必须用本分支 `Dockerfile.base` 构建出的基础镜像，通过 `--build-arg BASE_IMAGE=` 传入；用旧基础镜像（DSH 0.1.x，标签 `2026.9.8`）会在 plugin-builder 阶段提前报错，因为缺少 0.2.1 的工作区包（如 `@deepseek-ai/dsh-agent-preset-registry`）。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
 
 当前运行时端到端检查会使用独立的 `DSH_HOME` 和本地确定性模型适配器，两次启动官方 headless profile，验证 FIFO 后续任务、实时输出、模板配置、会话落盘与冷恢复，无需 Redis 或 API Key。先构建插件，再执行：
 

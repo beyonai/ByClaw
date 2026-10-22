@@ -216,7 +216,7 @@ Each plugin README owns the detailed field semantics, failure conditions, and li
 
 ## Verification and startup
 
-The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
+The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
 
 The current-runtime end-to-end check launches the official headless profile twice with an isolated `DSH_HOME` and a deterministic local model adapter. It checks FIFO prompts, live output, template configuration, session persistence, and cold resume without Redis or API keys. Build the plugins first, then run:
 

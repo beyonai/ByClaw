@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # Build the reusable image first:
-#   docker build -f middleware/byclaw-harness/Dockerfile.base -t byclaw/dsh-base:latest .
+#   docker build -f middleware/byclaw-harness/Dockerfile.base -t byclaw/dsh-base:0.2.1-rc.2 .
 # Then build this business-extension image:
 #   docker build -f middleware/byclaw-harness/Dockerfile.extensions -t byclaw/dsh:latest .
-ARG BASE_IMAGE=10.10.168.203:9080/byclaw/dsh-base:2026.9.8
+# The base must come from this branch's Dockerfile.base (DSH 0.2.1-rc.2): the
+# plugins depend on 0.2.1 workspace packages that older bases do not contain.
+ARG BASE_IMAGE=byclaw/dsh-base:0.2.1-rc.2
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 
@@ -31,6 +33,13 @@ COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/s
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 
 WORKDIR /workspace
+
+# Fail early, with the reason, when BASE_IMAGE carries another DSH release.
+RUN set -eu; \
+    dsh_version="$(jq -er '.version' apps/cli/package.json)"; \
+    case "${dsh_version}" in 0.2.1*) ;; *) \
+        echo "BASE_IMAGE carries DSH ${dsh_version}; build it from this branch's Dockerfile.base (DSH 0.2.1-rc.2) and pass --build-arg BASE_IMAGE=<that image>" >&2; exit 1;; \
+    esac
 
 # Mount the plugins into the base image's workspace and carry every plugin's
 # own build-script decisions up to this root, approvals and denials alike —
