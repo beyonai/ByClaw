@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.interfaces.controller.digitemploy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.i18n.I18nLocaleResolver;
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
@@ -19,11 +22,15 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.infrastructure.exception.OAuth2ExceptionHandler;
+import com.iwhalecloud.byai.state.aspect.ManageLogAspect;
+import com.iwhalecloud.byai.state.common.filter.GlobalI18nFilter;
+import com.iwhalecloud.byai.state.domain.log.service.ManageLogService;
 import com.iwhalecloud.byai.state.infrastructure.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -37,6 +44,8 @@ class DigitalEmployeeRobotConfigControllerTest extends I18nTestSupport {
 
     private DigitalEmployeeApplicationService service;
 
+    private ManageLogService manageLogService;
+
     private MockMvc mvc;
 
     @BeforeEach
@@ -44,8 +53,18 @@ class DigitalEmployeeRobotConfigControllerTest extends I18nTestSupport {
         service = mock(DigitalEmployeeApplicationService.class);
         DigitalEmployeeController controller = new DigitalEmployeeController();
         ReflectionTestUtils.setField(controller, "digitalEmployeeApplicationService", service);
-        // 验证控制器局部处理优先于两个通用异常处理器，保留可操作的业务错误文案。
-        mvc = MockMvcBuilders.standaloneSetup(controller)
+
+        // 保存接口经过管理日志切面，必须覆盖异常经过切面后仍能进入本地化处理的真实链路。
+        manageLogService = mock(ManageLogService.class);
+        ManageLogAspect manageLogAspect = new ManageLogAspect();
+        ReflectionTestUtils.setField(manageLogAspect, "manageLogService", manageLogService);
+        AspectJProxyFactory proxyFactory = new AspectJProxyFactory(controller);
+        proxyFactory.setProxyTargetClass(true);
+        proxyFactory.addAspect(manageLogAspect);
+        DigitalEmployeeController proxiedController = proxyFactory.getProxy();
+        mvc = MockMvcBuilders.standaloneSetup(proxiedController)
+            .addFilters(new GlobalI18nFilter())
+            .setLocaleResolver(new I18nLocaleResolver())
             .setControllerAdvice(new GlobalExceptionHandler(), new OAuth2ExceptionHandler())
             .build();
     }
@@ -71,6 +90,7 @@ class DigitalEmployeeRobotConfigControllerTest extends I18nTestSupport {
 
         assertValidationResponse("updateDigitalEmployee", language, expected);
         assertValidationResponse("saveDigitalEmployee", language, expected);
+        verify(manageLogService, times(2)).saveManageLog(any());
     }
 
     @Test
@@ -79,23 +99,29 @@ class DigitalEmployeeRobotConfigControllerTest extends I18nTestSupport {
             new DingtalkRobotConfigValidationException("internal diagnostic: clientSecret=private-value"));
 
         assertValidationResponse("updateDigitalEmployee", "zh-CN", "钉钉机器人配置无效，请检查配置后重试");
+        verify(manageLogService).saveManageLog(any());
     }
 
     @Test
-    void unexpectedErrorsStillUseTheGeneralExceptionHandler() throws Exception {
+    void otherErrorsKeepExistingManagementLogFailureResponse() throws Exception {
         when(service.updateDigitalEmployee(any())).thenThrow(new IllegalStateException("unexpected failure"));
 
         mvc.perform(post("/digitalEmployeeController/updateDigitalEmployee")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"resourceId\":2}"))
-            .andExpect(status().isInternalServerError());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(-1))
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.msg").value("unexpected failure"));
+        verify(manageLogService).saveManageLog(any());
     }
 
     private void assertValidationResponse(String endpoint, String language, String expected) throws Exception {
         mvc.perform(post("/digitalEmployeeController/" + endpoint)
+                .header("language", language)
                 .locale(Locale.forLanguageTag(language))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"resourceId\":2}"))
+                .content("{\"resourceId\":2,\"language\":\"" + language + "\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(-1))
             .andExpect(jsonPath("$.success").value(false))

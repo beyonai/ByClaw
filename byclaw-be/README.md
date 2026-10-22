@@ -829,3 +829,7 @@ HTTP(S) origins/paths, and still forwards the authenticated user's current share
 token. It is not a request parameter and does not modify user endpoint records.
 
 Management audit records redact credential fields and authorization header values from both request and response JSON. API response payloads are unchanged.
+
+`AiModelService.getModel` reads enabled model details from Redis first. On a cache miss,
+it queries the model table by ID and returns the same `ModelDto` representation for an
+enabled model and restores its Redis entry. Missing, disabled, or invalid IDs return `null`.

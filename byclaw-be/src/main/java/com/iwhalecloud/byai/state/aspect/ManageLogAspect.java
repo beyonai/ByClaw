@@ -10,6 +10,7 @@ import java.util.List;
 import com.iwhalecloud.byai.manager.entity.log.ManageLog;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.util.IpUtil;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
 import com.iwhalecloud.byai.state.domain.log.service.ManageLogService;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -65,6 +66,10 @@ public class ManageLogAspect {
 
         catch (Throwable e) {
             logger.error(e.getMessage(), e);
+            // 保留机器人校验异常类型，让控制器按请求语言输出业务提示及已绑定的数字员工名称。
+            if (e instanceof DingtalkRobotConfigValidationException validationException) {
+                throw validationException;
+            }
             throw new BaseRuntimeException(e.getMessage());
         }
         finally {
