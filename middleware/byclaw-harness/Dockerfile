@@ -346,6 +346,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-server 
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
     && test -x /usr/sbin/sshd \
     && python3 -m pip install --no-cache-dir websockets \
+    && python3 -m pip check \
     && python3 -c 'import websockets'
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 # WebSocket bridge to sshd for runtimes behind an HTTP ingress (BYCLAW_TOOL_ENV_WS_PORT).
