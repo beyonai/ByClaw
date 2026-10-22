@@ -54,16 +54,6 @@ export function isColdRecoveryBlockingTurn(
     && turn.rootMessageId === recovery.rootMessageId
 }
 
-export async function releaseColdRecoveryBlockingTurn(
-  turn: { rootMessageId: string; setStreamFinished(finished: boolean): void } | undefined,
-  cancel: (messageId: string) => Promise<void>,
-): Promise<boolean> {
-  if (turn === undefined) return false
-  turn.setStreamFinished(true)
-  await cancel(turn.rootMessageId)
-  return true
-}
-
 /** A rendered interaction must survive the process abort that accompanies sandbox release. */
 export function shouldRetainInteractionAfterAskFailure(options: {
   requestEmitted: boolean
@@ -226,15 +216,29 @@ export class ByClawInteractionStore {
   ): Promise<ByClawInteractionRecord | undefined> {
     const indexKey = sessionIndexKey(this.prefix, sessionId, userCode)
     const interactionIds = await this.redis.zrange(indexKey, 0, -1)
+    console.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] REDIS_SCAN_ANSWERED session=${sessionId} candidates=${interactionIds.length} question_ids=${questions?.map(question => question.id).join(',') ?? '-'}`,
+    )
     for (const interactionId of interactionIds) {
       if (questions !== undefined) {
         const candidate = await this.get(interactionId)
         if (candidate === undefined || candidate.questions.length !== questions.length
-          || candidate.questions.some((question, index) => question.id !== questions[index]?.id)) continue
+          || candidate.questions.some((question, index) => question.id !== questions[index]?.id)) {
+          console.info(
+            `[ASK_USER_QUESTION_RECOVERY_TRACE] REDIS_SKIP_ANSWERED interaction=${interactionId} status=${candidate?.status ?? 'missing'} stored_question_ids=${candidate?.questions.map(question => question.id).join(',') ?? '-'} requested_question_ids=${questions.map(question => question.id).join(',')}`,
+          )
+          continue
+        }
       }
       const record = await this.consume(interactionId, sessionId, userCode)
-      if (record !== undefined) return record
+      if (record !== undefined) {
+        console.info(
+          `[ASK_USER_QUESTION_RECOVERY_TRACE] REDIS_CONSUMED_ANSWERED interaction=${interactionId} session=${sessionId}`,
+        )
+        return record
+      }
     }
+    console.info(`[ASK_USER_QUESTION_RECOVERY_TRACE] REDIS_NO_ANSWERED_MATCH session=${sessionId}`)
     return
   }
 

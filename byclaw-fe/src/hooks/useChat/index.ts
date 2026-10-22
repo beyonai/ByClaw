@@ -42,6 +42,7 @@ import {
   applyProjectedRootState,
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
+  hasChatStreamContext,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -1044,7 +1045,7 @@ function useChat(props: IProps) {
         if (!traceId) {
           return false;
         }
-        isContinuingRunningTrace = true;
+        isContinuingRunningTrace = hasChatStreamContext({ sessionId, traceId });
         if (!payload.traceId) {
           set(payload, 'traceId', traceId);
         }
@@ -1056,6 +1057,21 @@ function useChat(props: IProps) {
       }
     }
     const isColdResume = isResumeChat && !isContinuingRunningTrace;
+    if (isResumeChat) {
+      console.info(
+        '[ASK_USER_QUESTION_RESUME_TRACE]',
+        JSON.stringify({
+          stage: 'resume_classified',
+          sessionId,
+          traceId: payload.traceId,
+          llmMessageId: payload.llmMessageId,
+          sessionRunning: chatSessionRuntimeManager.isSessionRunning(sessionId),
+          hasStreamContext: hasChatStreamContext({ sessionId, traceId: payload.traceId }),
+          isContinuingRunningTrace,
+          isColdResume,
+        })
+      );
+    }
 
     await checkSessionStateBeforeSendQuery();
 
@@ -1124,6 +1140,19 @@ function useChat(props: IProps) {
             item.fromBeyond &&
             item.queryMsgId === inheritQryMsgId &&
             (!llmMessageId || `${item.messageId}` === `${llmMessageId}`)
+        );
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_target_resolved',
+            sessionId,
+            traceId: payload.traceId,
+            inheritQryMsgId,
+            llmMessageId,
+            found: Boolean(resumeTargetAnswer),
+            answerMsgId: resumeTargetAnswer?.msgId,
+            answerMessageId: resumeTargetAnswer?.messageId,
+          })
         );
       }
     }
@@ -1425,6 +1454,25 @@ function useChat(props: IProps) {
         flowHandler,
         updateMessage,
       });
+      if (isResumeChat) {
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_context_registered',
+            sessionId,
+            traceId: payload.traceId,
+            clientRequestId: entry.lane.clientRequestId,
+            answerMsgId: nextAnswerMsg.msgId,
+            answerMessageId: nextAnswerMsg.messageId,
+            isColdResume,
+            contextFoundAfterRegister: hasChatStreamContext({
+              clientRequestId: entry.lane.clientRequestId,
+              sessionId,
+              traceId: payload.traceId,
+            }),
+          })
+        );
+      }
     });
 
     return { cancel };

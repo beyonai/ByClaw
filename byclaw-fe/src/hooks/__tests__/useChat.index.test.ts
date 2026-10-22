@@ -207,6 +207,17 @@ describe('hooks/useChat/index', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    // Sandbox release can leave the session runtime marked as running even
+    // after appStreamResponse removed the original stream context.
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'completed-original-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
     mockUpdateMessage.mockClear();
 
     await act(async () => {
