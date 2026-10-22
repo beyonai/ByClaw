@@ -112,9 +112,9 @@ public class GroupChatPublicationUploader {
             }
             String name = source.substring(source.lastIndexOf('/') + 1);
             MultipartFile file = new PublicationFile(temporary, name, Files.size(temporary));
-            // 发布文件即使与目标目录中的文件同名，也交由上传服务处理，避免静默跳过。
+            // 发布附件保留原始文件，显式关闭 ZIP 解压；同名冲突仍交由上传服务处理。
             UploadResult uploaded = datasets.uploadFiles(new MultipartFile[] {file}, cloudResourceId, directory,
-                name, false, false, false, Map.of());
+                name, false, false, false, false, null, Map.of());
             if (uploaded == null || uploaded.getUploadItems() == null || uploaded.getUploadItems().isEmpty()
                 || (uploaded.getFailedItems() != null && !uploaded.getFailedItems().isEmpty())) {
                 throw new IllegalStateException(I18nUtil.get("groupchat.publication.uploadFailed", source));
