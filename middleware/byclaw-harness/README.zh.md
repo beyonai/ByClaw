@@ -216,6 +216,17 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 - [ByClaw Integration 配置与架构](./plugins/byclaw-integration/README.zh.md#配置)
 - [Browser Use 工具、隔离、Docker 与 noVNC](./plugins/dsh-browser-use/README.zh.md)
 
+## 共享 DSH 宿主
+
+`scripts/byclaw-multi-host.mjs` 用一个进程服务多个用户（每用户一个 DSH 上下文，7300 端口同时提供管理 API 和 `/u/{user}/` 网关；BE 用 `byclaw.sandbox.shared-dsh-host.*` 指向它）。镜像已自带启动器，用入口脚本的 `multi-host` 模式启动，无论容器以 root 还是普通用户启动，它都会以 DSH 用户（`byclaw`）运行：
+
+```sh
+docker run -d --name byclaw-multi-host --env-file host.env \
+  -v /data/byclaw-multi-host:/data/multi-host byclaw/dsh:<tag> multi-host
+```
+
+环境变量见启动器文件头部注释。以非 root 用户直接跑镜像默认的 `web` 入口会报 "root entrypoint required for private browser runtime"，那个模式是给单用户沙箱用的。
+
 ## 验证与启动
 
 插件面向 DSH `0.2.1-rc.2`，即 `Dockerfile.base` 固定的版本（`DSH_REF`）；peer 依赖固定为该版本。因此业务镜像（`Dockerfile`、`Dockerfile.extensions`）必须用本分支 `Dockerfile.base` 构建出的基础镜像，通过 `--build-arg BASE_IMAGE=` 传入；用旧基础镜像（DSH 0.1.x，标签 `2026.9.8`）会在 plugin-builder 阶段提前报错，因为缺少 0.2.1 的工作区包（如 `@deepseek-ai/dsh-agent-preset-registry`）。面向 0.1.5 的模块路径源码补丁（`scripts/prepare-dsh-local-modules.mjs`）不再应用：DSH 0.2.1 自己已把模块目录解析为规范路径。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。

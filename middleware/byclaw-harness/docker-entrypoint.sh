@@ -7,6 +7,19 @@ if [[ "${1:-}" == tools ]]; then
     exec /usr/local/bin/byclaw-tool-env-sshd
 fi
 
+# Shared DSH host: one process serving many users (scripts/byclaw-multi-host.mjs).
+# It runs as the DSH user; each user context owns its own browser runtime, so
+# the root browser supervisor below is not involved.
+if [[ "${1:-}" == multi-host ]]; then
+    shift
+    launcher=/workspace/scripts/byclaw-multi-host.mjs
+    if ((EUID == 0)); then
+        exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
+            env HOME=/home/byclaw node --import tsx/esm "${launcher}" "$@"
+    fi
+    exec node --import tsx/esm "${launcher}" "$@"
+fi
+
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then
     if ((EUID != 0)); then
         printf 'byclaw-dsh: root entrypoint required for private browser runtime\n' >&2

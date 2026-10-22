@@ -214,6 +214,23 @@ Each plugin README owns the detailed field semantics, failure conditions, and li
 - [ByClaw Integration configuration and architecture](./plugins/byclaw-integration/README.zh.md#配置)
 - [Browser Use tool, isolation, Docker, and noVNC](./plugins/dsh-browser-use/README.md)
 
+## Shared DSH host
+
+`scripts/byclaw-multi-host.mjs` serves many users from one process (one DSH
+context per user, admin API and `/u/{user}/` web gateway on port 7300; BE's
+`byclaw.sandbox.shared-dsh-host.*` settings point at it). The image carries the
+launcher; start it through the entrypoint's `multi-host` mode, which runs it as
+the DSH user (`byclaw`) whether the container starts as root or not:
+
+```sh
+docker run -d --name byclaw-multi-host --env-file host.env \
+  -v /data/byclaw-multi-host:/data/multi-host byclaw/dsh:<tag> multi-host
+```
+
+The launcher's header comment lists its environment variables. Running the
+image's default `web` entrypoint as a non-root user fails with "root entrypoint
+required for private browser runtime"; that mode is for per-user sandboxes.
+
 ## Verification and startup
 
 The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
