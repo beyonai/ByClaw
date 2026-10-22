@@ -6,10 +6,18 @@ import {
   webStartupValues,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, rewriteLocation, upstreamHeaders, userPublicUrl, UserRegistry, webPrefix,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, rewriteLocation, toolEnvUserToken, upstreamHeaders, userPublicUrl,
+  UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
-const spec = { sandboxId: 'sbx-1', toolEnvTemplate: '{"baseUrl":"http://os","volumes":["/data/{user}"]}', toolEnvIdleMs: 1000, publicUrl: 'http://127.0.0.1/' }
+const spec = {
+  sandboxId: 'sbx-1', env: { BEYOND_TOKEN: 'jwt-u1' }, toolEnvBackend: 'opensandbox',
+  toolEnvTemplate: '{"baseUrl":"http://os","volumes":["/data/{user}"]}', toolEnvBe: undefined, toolEnvIdleMs: 1000, publicUrl: 'http://127.0.0.1/',
+}
+const beSpec = {
+  ...spec, toolEnvBackend: 'byclaw-be',
+  toolEnvBe: { baseUrl: 'http://be:8086/byaiService', systemCode: '', serviceKey: 'byclaw-dsh-tools5', sshInstance: 'ssh', hostTemplate: '', publishKeys: true, readyTimeoutMs: 180000, requestTimeoutMs: 180000 },
+}
 
 // --- overlays ---------------------------------------------------------------
 
@@ -26,8 +34,23 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-tool-env'].config.keep, 1)
   assert.deepEqual(byId['byclaw-tool-env'].config.openSandbox, { baseUrl: 'http://os', volumes: ['/data/u1'] })
   assert.equal(byId['byclaw-tool-env'].config.alias, 'byclaw-tool-env-u1')
+  assert.equal(byId['byclaw-tool-env'].config.backend, 'opensandbox')
+  assert.equal(byId['byclaw-tool-env'].config.byclawBe, undefined)
   // Rows missing from the composition produce no overlay.
   assert.equal(byId['byclaw-dsh'], undefined)
+})
+
+test('byclaw-be tool environments get the host settings plus the user and the PUT token', () => {
+  const entries = [{ id: 'byclaw-tool-env', name: '@byclaw/dsh-tool-env', config: { keep: 1 } }]
+  const [row] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', beSpec)
+  assert.equal(row.config.backend, 'byclaw-be')
+  assert.equal(row.config.openSandbox, undefined)
+  assert.deepEqual(row.config.byclawBe, { ...beSpec.toolEnvBe, userCode: 'u1', token: 'jwt-u1' })
+  assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
+  // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
+  assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
+  assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)
+  assert.equal(toolEnvUserToken({ BEYOND_TOKEN: ' t ' }, 'u1'), 't')
 })
 
 test('webStartup values match the hosted listener', () => {
@@ -103,6 +126,28 @@ test('host config refuses to start without a token', () => {
   assert.equal(userPublicUrl(undefined, 'a'), 'http://127.0.0.1/')
   assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_USERS: '../x' }), /invalid/)
   assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_PORT: 'x' }), /PORT/)
+  assert.equal(config.toolEnvBackend, 'opensandbox')
+  assert.equal(config.toolEnvBe, undefined)
+})
+
+test('host config selects the byclaw-be tool-environment backend with the plugin\'s names and defaults', () => {
+  assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_DSH_TOOL_ENV: 'static' }), /BYCLAW_DSH_TOOL_ENV/)
+  assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_DSH_TOOL_ENV: 'byclaw-be' }), /BYCLAW_TOOL_ENV_BE_BASE_URL/)
+  const config = readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_DSH_TOOL_ENV: 'byclaw-be', BYAI_SERVICE_BASE_URL: 'http://be:8086/byaiService' })
+  assert.equal(config.toolEnvBackend, 'byclaw-be')
+  assert.deepEqual(config.toolEnvBe, {
+    baseUrl: 'http://be:8086/byaiService', systemCode: '', serviceKey: 'byclaw-dsh-tools', sshInstance: 'ssh', hostTemplate: 'sandbox-{id}',
+    publishKeys: false, readyTimeoutMs: 180000, requestTimeoutMs: 180000,
+  })
+  assert.deepEqual(readToolEnvBeConfig({
+    BYCLAW_TOOL_ENV_BE_BASE_URL: 'http://be/byaiService', BYCLAW_DSH_BASE_URL: 'http://other', BYCLAW_TOOL_ENV_SYSTEM_CODE: 'BYAI',
+    BYCLAW_TOOL_ENV_SERVICE_KEY: 'byclaw-dsh-tools5', BYCLAW_TOOL_ENV_SSH_INSTANCE: 'bridge', BYCLAW_TOOL_ENV_HOST_TEMPLATE: '',
+    BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS: '1', BYCLAW_TOOL_ENV_READY_TIMEOUT_MS: '60000', BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS: '30000',
+  }), {
+    baseUrl: 'http://be/byaiService', systemCode: 'BYAI', serviceKey: 'byclaw-dsh-tools5', sshInstance: 'bridge', hostTemplate: '',
+    publishKeys: true, readyTimeoutMs: 60000, requestTimeoutMs: 30000,
+  })
+  assert.throws(() => readToolEnvBeConfig({ BYCLAW_DSH_BASE_URL: 'http://be', BYCLAW_TOOL_ENV_READY_TIMEOUT_MS: 'soon' }), /READY_TIMEOUT/)
 })
 
 // --- routing / tokens / headers ----------------------------------------------

@@ -28,6 +28,8 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
 - `opensandbox`：A 直接调 OpenSandbox 创建、暂停、恢复 B，OpenSandbox 的 key 在 A 手里。
 - `byclaw-be`：A 以用户身份调 ByClaw BE 的 `POST /sandbox/launchByUserCode`，让 BE 按 `sandbox_service_spec` 里 `serviceKey`（默认 `byclaw-dsh-tools`）的规格创建或复用 B，再从返回的 `instanceEndpoints.ssh` 取 B 的 sshd 地址（规格里把 22 端口声明为 `tcp`）。A 只用 BE 注入给它的 `USER_CODE` 和 `BEYOND_TOKEN`，不再持有 OpenSandbox 的 key。返回地址连不上时，A 会 `removeSandbox` 一次再重新 launch。
   - B 只能经 HTTP 入口访问时（如 ACS 前面的 ALB，地址形如 `http://alb-…/kruise/<沙箱>/<端口>/…?token=`），SSH 走 WebSocket 隧道：B 设置 `BYCLAW_TOOL_ENV_WS_PORT` 后同时起 sshd 和 `ws-bridge.py`，规格里把该端口声明为 http 的 `ssh` 实例；A 把返回的 `http(s)://` 地址原样当桥地址，用 `ws-proxy.mjs` 作 ProxyCommand，host key 照样固定。`static` 后端用 `BYCLAW_TOOL_ENV_WS_URL` 指定桥地址。
+  - A 挂不到 B 的卷时（共享 DSH 宿主在沙箱集群外），设 `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1`：A 每次 launch 前把自己的公钥和 B 的主机密钥（base64）存成用户的个人参数 `BYCLAW_TOOL_ENV_AUTHORIZED_KEY`、`BYCLAW_TOOL_ENV_HOST_KEY`（已有且未变则跳过），B 的规格 env 用 `${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}`、`${envVars.BYCLAW_TOOL_ENV_HOST_KEY}` 引用，不再需要密钥卷。
+  - 共享宿主（`scripts/byclaw-multi-host.mjs`）设 `BYCLAW_DSH_TOOL_ENV=byclaw-be` 后，每个用户上下文用 BE PUT 时带来的 `BEYOND_TOKEN` 走这个后端。
   - 暂不做：空闲暂停/恢复（BE 没有 pause 接口），以及 A 释放时回收 B。两项都另行处理。
   - 已接受的现状：`launchByUserCode` 会把 `serviceKey` 记为用户首选规格；它按 body 里的 `userCode` 切换用户上下文。
 

@@ -18,6 +18,8 @@ class FakeByClawBe {
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  /** The user's private parameters, as BE stores them: values never read back whole. */
+  readonly privateParams = new Map<string, { paramId: number; value: string }>()
   private next = 1
   server!: Server
 
@@ -38,10 +40,25 @@ class FakeByClawBe {
     let raw = ''
     for await (const chunk of request) raw += String(chunk)
     const path = request.url ?? ''
-    // A GET is the backend probing a bridge behind BE's ingress; any HTTP answer means "up".
+    const token = request.headers['beyond-token'] as string | undefined
+    if (request.method === 'GET' && path.startsWith('/byaiService/userPrivateParam/list?')) {
+      this.calls.push({ path, body: {}, token, systemCode: request.headers['system-code'] as string | undefined })
+      const keyword = new URL(path, 'http://be').searchParams.get('keyword') ?? ''
+      const list = [...this.privateParams.entries()].filter(([key]) => key.includes(keyword))
+        .map(([key, item]) => ({ paramId: item.paramId, key, hasValue: item.value !== '', valueLast4: item.value.slice(-4), enabled: true }))
+      return { code: 0, msg: 'success', data: { list, total: list.length } }
+    }
+    // Any other GET is the backend probing a bridge behind BE's ingress; any HTTP answer means "up".
     if (request.method !== 'POST') return { code: -1, msg: `no such ingress ${path}`, data: null }
     const body = JSON.parse(raw) as Record<string, unknown>
-    this.calls.push({ path, body, token: request.headers['beyond-token'] as string | undefined, systemCode: request.headers['system-code'] as string | undefined })
+    this.calls.push({ path, body, token, systemCode: request.headers['system-code'] as string | undefined })
+    if (path === '/byaiService/userPrivateParam/save') {
+      const key = String(body['key'])
+      const existing = this.privateParams.get(key)
+      if (body['paramId'] === undefined && existing !== undefined) return { code: -1, msg: `参数键已存在: ${key}`, data: null }
+      this.privateParams.set(key, { paramId: existing?.paramId ?? 100 + this.privateParams.size, value: String(body['value']) })
+      return { code: 0, msg: 'success', data: null }
+    }
     const user = String(body['userCode'])
     if (path === '/byaiService/sandbox/launchByUserCode') {
       if (this.launchFailure !== undefined) return { code: -1, msg: this.launchFailure, data: null }
@@ -92,7 +109,7 @@ describe('ByClawBeBackend', () => {
     identity = new ToolEnvIdentity(join(dir, 'state'))
     config = {
       baseUrl: `${baseUrl}/`, userCode: 'u1', token: 'jwt-u1', systemCode: '', serviceKey: 'byclaw-dsh-tools',
-      sshInstance: 'ssh', hostTemplate: '', port: 22, readyTimeoutMs: 1500, requestTimeoutMs: 5000,
+      sshInstance: 'ssh', hostTemplate: '', port: 22, publishKeys: false, readyTimeoutMs: 1500, requestTimeoutMs: 5000,
     }
     logs.length = 0
   })
@@ -117,6 +134,42 @@ describe('ByClawBeBackend', () => {
     await backend.ensure()
     expect(fake.records.size).toBe(1)
     await backend.dispose()
+  })
+
+  it('publishes the keys as the user\'s private parameters before the launch, once per value', async () => {
+    const backend = new ByClawBeBackend({ ...config, publishKeys: true }, identity, message => logs.push(message))
+    await backend.ensure()
+    expect(fake.calls.map(call => call.path)).toEqual([
+      '/byaiService/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50',
+      '/byaiService/userPrivateParam/save', '/byaiService/userPrivateParam/save',
+      '/byaiService/sandbox/launchByUserCode',
+    ])
+    expect(fake.calls.every(call => call.token === 'jwt-u1')).toBe(true)
+    const keys = await identity.keys()
+    // What B's sshd script reads from its environment: the public key line and the base64 host key.
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_AUTHORIZED_KEY')?.value).toBe(keys.authorizedKey)
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
+    expect(fake.calls[1]?.body).toMatchObject({ key: 'BYCLAW_TOOL_ENV_AUTHORIZED_KEY', enabled: true })
+    expect(fake.calls[1]?.body['paramId']).toBeUndefined()
+    expect(logs.slice(0, 2)).toEqual(['stored private parameter BYCLAW_TOOL_ENV_AUTHORIZED_KEY for u1', 'stored private parameter BYCLAW_TOOL_ENV_HOST_KEY for u1'])
+
+    // A later runtime with the same state finds its values already there and does not rewrite them.
+    fake.calls.length = 0
+    await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
+    expect(fake.calls.map(call => call.path)).toEqual(['/byaiService/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50', '/byaiService/sandbox/launchByUserCode'])
+
+    // A stale value is replaced in place, by paramId, since keys are unique per user.
+    fake.privateParams.set('BYCLAW_TOOL_ENV_HOST_KEY', { paramId: 101, value: 'old-value' })
+    fake.calls.length = 0
+    await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
+    expect(fake.calls[1]?.body).toMatchObject({ paramId: 101, key: 'BYCLAW_TOOL_ENV_HOST_KEY' })
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
+  })
+
+  it('does not touch private parameters unless asked to', async () => {
+    await new ByClawBeBackend(config, identity, () => {}).ensure()
+    expect(fake.calls.map(call => call.path)).toEqual(['/byaiService/sandbox/launchByUserCode'])
+    expect(fake.privateParams.size).toBe(0)
   })
 
   it('sends system-code only when configured', async () => {

@@ -40,7 +40,14 @@
  *   BYCLAW_MULTI_HOST_COOKIE_SECURE `1` marks gateway cookies Secure; otherwise only when X-Forwarded-Proto is https.
  *   BYCLAW_MANAGED_PROFILE         managed web profile (default /opt/byclaw/dsh-managed/profiles/web).
  *   BYCLAW_DSH_INSTALL_ANCHOR      DSH install anchor (default /workspace/apps/cli/package.json).
- *   BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE  JSON OpenSandbox config for B; `{user}` is replaced by the user code.
+ *   BYCLAW_DSH_TOOL_ENV            who creates B: `opensandbox` (default) or `byclaw-be`.
+ *   BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE  `opensandbox`: JSON OpenSandbox config for B; `{user}` is replaced by the user code.
+ *   BYCLAW_TOOL_ENV_BE_BASE_URL    `byclaw-be`: BE origin with path prefix (falls back to BYCLAW_DSH_BASE_URL,
+ *                                  then BYAI_SERVICE_BASE_URL). BE creates B as the user with the BEYOND_TOKEN
+ *                                  the PUT `env` carries; the other BYCLAW_TOOL_ENV_* settings of the byclaw-be
+ *                                  backend (SERVICE_KEY, SSH_INSTANCE, HOST_TEMPLATE, SYSTEM_CODE,
+ *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
+ *                                  plugin's cordis.patch.yml.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
@@ -89,8 +96,9 @@ export const RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then ret
  * Per-plugin, per-user config additions, merged over the composed row config
  * (Loader patches replace a row's config wholesale, so the overlay restates the
  * composed config plus these keys). Row id -> (user, home, spec) => additions.
- * `spec` carries the per-PUT and host values: { sandboxId, toolEnvTemplate,
- * toolEnvIdleMs, publicUrl }. Rows absent from the composition are skipped.
+ * `spec` carries the per-PUT and host values: { sandboxId, env, toolEnvBackend,
+ * toolEnvTemplate, toolEnvBe, toolEnvIdleMs, publicUrl }. Rows absent from the
+ * composition are skipped.
  * To enable a plugin from DISABLED_UNTIL_MULTI_USER, add its row here and
  * delete its entry there.
  */
@@ -139,14 +147,24 @@ export const USER_ROW_OVERLAYS = {
   'devflow-iron-rules': () => ({ workspaceOnToolEnvironment: true, projectRoot: '/by' }),
   'dsh-codegraph': (user, home) => ({ workspaceOnToolEnvironment: true, stateDir: join(home, 'codegraph') }),
   'byclaw-tool-env': (user, home, spec) => ({
-    backend: 'opensandbox',
+    backend: spec.toolEnvBackend ?? 'opensandbox',
     stateDir: join(home, 'byclaw-tool-env'),
     alias: `byclaw-tool-env-${user}`,
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
-    openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', user)),
+    ...(spec.toolEnvBackend === 'byclaw-be'
+      // BE creates B as the user: the token is the one BE handed this context in the PUT.
+      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
+      : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', user)) }),
   }),
+}
+
+/** The user's BE token from the PUT `env`; the byclaw-be backend cannot create B without it. */
+export function toolEnvUserToken(env, user) {
+  const token = env?.BEYOND_TOKEN?.trim()
+  if (!token) throw new Error(`byclaw-be tool environment for ${user} needs BEYOND_TOKEN in the PUT env`)
+  return token
 }
 
 /**
@@ -220,7 +238,7 @@ export function disabledRule(row, lists = [DISABLED_BY_DESIGN, DISABLED_UNTIL_MU
  * @param entries - composed Loader rows ({ id, name, config }).
  * @param user - validated user code.
  * @param home - the user's DSH home.
- * @param spec - { sandboxId, toolEnvTemplate, toolEnvIdleMs, publicUrl }.
+ * @param spec - { sandboxId, env, toolEnvBackend, toolEnvTemplate, toolEnvBe, toolEnvIdleMs, publicUrl }.
  * @param tables - override tables (tests).
  */
 export function composeUserOverlays(entries, user, home, spec, tables = {}) {
@@ -304,8 +322,11 @@ export function readHostConfig(env) {
     publicBase.hash = ''
     if (!publicBase.pathname.endsWith('/')) publicBase.pathname += '/'
   }
+  const toolEnvBackend = env.BYCLAW_DSH_TOOL_ENV || 'opensandbox'
+  if (toolEnvBackend !== 'opensandbox' && toolEnvBackend !== 'byclaw-be') throw new Error(`BYCLAW_DSH_TOOL_ENV ${toolEnvBackend} is not opensandbox or byclaw-be`)
   const toolEnvTemplate = env.BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE ?? '{}'
   JSON.parse(toolEnvTemplate.replaceAll('{user}', 'probe'))
+  const toolEnvBe = toolEnvBackend === 'byclaw-be' ? readToolEnvBeConfig(env) : undefined
   return {
     token,
     port,
@@ -318,8 +339,34 @@ export function readHostConfig(env) {
     secureCookies: env.BYCLAW_MULTI_HOST_COOKIE_SECURE === '1',
     managedProfile: env.BYCLAW_MANAGED_PROFILE ?? '/opt/byclaw/dsh-managed/profiles/web',
     installAnchor: env.BYCLAW_DSH_INSTALL_ANCHOR ?? '/workspace/apps/cli/package.json',
+    toolEnvBackend,
     toolEnvTemplate,
+    toolEnvBe,
     toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
+  }
+}
+
+/**
+ * The byclaw-be backend's host-wide settings, same names and defaults as the
+ * plugin's cordis.patch.yml; user code and token are added per context.
+ */
+export function readToolEnvBeConfig(env) {
+  const baseUrl = (env.BYCLAW_TOOL_ENV_BE_BASE_URL || env.BYCLAW_DSH_BASE_URL || env.BYAI_SERVICE_BASE_URL || '').trim()
+  if (!baseUrl) throw new Error('BYCLAW_DSH_TOOL_ENV=byclaw-be needs BYCLAW_TOOL_ENV_BE_BASE_URL (or BYCLAW_DSH_BASE_URL / BYAI_SERVICE_BASE_URL)')
+  const timeout = (name, fallback) => {
+    const value = Number(env[name] || fallback)
+    if (!Number.isInteger(value) || value < 1) throw new Error(`${name} ${env[name]} is invalid`)
+    return value
+  }
+  return {
+    baseUrl,
+    systemCode: env.BYCLAW_TOOL_ENV_SYSTEM_CODE ?? '',
+    serviceKey: env.BYCLAW_TOOL_ENV_SERVICE_KEY || 'byclaw-dsh-tools',
+    sshInstance: env.BYCLAW_TOOL_ENV_SSH_INSTANCE || 'ssh',
+    hostTemplate: env.BYCLAW_TOOL_ENV_HOST_TEMPLATE ?? 'sandbox-{id}',
+    publishKeys: env.BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS === '1',
+    readyTimeoutMs: timeout('BYCLAW_TOOL_ENV_READY_TIMEOUT_MS', 180000),
+    requestTimeoutMs: timeout('BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS', 180000),
   }
 }
 
@@ -979,7 +1026,10 @@ async function bootUserContext(config, user, request, hooks) {
   }
   const spec = {
     sandboxId: request.sandboxId,
+    env: request.env,
+    toolEnvBackend: config.toolEnvBackend,
     toolEnvTemplate: config.toolEnvTemplate,
+    toolEnvBe: config.toolEnvBe,
     toolEnvIdleMs: config.toolEnvIdleMs,
     publicUrl: userPublicUrl(config.publicBase, user),
   }

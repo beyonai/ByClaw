@@ -61,7 +61,7 @@ digests from its own installation, and the helper refuses a mismatch.
 |---|---|---|---|
 | `static` | nobody: a fixed sshd (development, tests) | no | start sshd with them |
 | `opensandbox` | A, through the OpenSandbox API with a key held in A | yes | B's create request |
-| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | not yet | A's state directory, mounted into B |
+| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | not yet | A's state directory, mounted into B; or the user's BE private parameters (`publishKeys`) |
 
 ### `byclaw-be`
 
@@ -100,6 +100,23 @@ layout and are deployment-specific:
       "mountPath": "/etc/byclaw-tool-env", "readOnly": true }
   ]
 }
+```
+
+When A cannot share a volume with B (a shared DSH host outside the sandbox
+cluster), set `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` instead of the key mount.
+Before each launch A stores its authorized key and B's host key as the user's
+private parameters (`POST /userPrivateParam/save`, keys
+`BYCLAW_TOOL_ENV_AUTHORIZED_KEY` and `BYCLAW_TOOL_ENV_HOST_KEY`, the host key
+base64-encoded as B's sshd script expects), skipping values already there.
+The B spec forwards them with the spec's private-parameter placeholders and
+needs no key volume:
+
+```json
+  "env": {
+    "BYCLAW_TOOL_ENV_PORT": "22",
+    "BYCLAW_TOOL_ENV_AUTHORIZED_KEY": "${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}",
+    "BYCLAW_TOOL_ENV_HOST_KEY": "${envVars.BYCLAW_TOOL_ENV_HOST_KEY}"
+  }
 ```
 
 A `tcp` port makes BE resolve the sandbox-network address
@@ -144,6 +161,7 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_HOST_TEMPLATE` | `byclaw-be`: B's host name from its sandbox id when BE returns no address for the ssh port (default `sandbox-{id}`, Docker DNS; empty disables) |
 | `BYCLAW_TOOL_ENV_WS_PORT` | On B: also serve the WebSocket bridge to sshd on this port |
 | `BYCLAW_TOOL_ENV_SYSTEM_CODE` | `byclaw-be`: optional `system-code` header |
+| `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS` | `byclaw-be`: `1` stores the keys as the user's BE private parameters before each launch, for B specs that take them from `${envVars.…}` instead of a key mount |
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
@@ -198,8 +216,11 @@ out of the global spec: it would reach every A.
   `/proc/meminfo` and cgroup, not B's.
 - With `opensandbox`, B's host name relies on Docker DNS for the OpenSandbox
   Docker runtime (`hostTemplate`); `byclaw-be` uses the address BE resolves.
-- The shared DSH host (`scripts/byclaw-multi-host.mjs`) still configures the
-  `opensandbox` backend per user context.
+- The shared DSH host (`scripts/byclaw-multi-host.mjs`) configures the
+  `opensandbox` backend per user context unless `BYCLAW_DSH_TOOL_ENV=byclaw-be`
+  is set on the host; then each context uses the `BEYOND_TOKEN` BE passed in
+  its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
+  host cannot mount the user's volume.
 
 ## Follow-ups (`byclaw-be`, deliberately not done yet)
 

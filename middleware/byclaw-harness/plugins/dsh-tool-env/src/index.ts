@@ -103,6 +103,7 @@ export class ToolEnv extends ToolEnvConnection {
       serviceKey: schema.string().default('byclaw-dsh-tools'),
       sshInstance: schema.string().default('ssh'),
       hostTemplate: schema.string().default('sandbox-{id}'),
+      publishKeys: schema.boolean().default(false),
       readyTimeoutMs: schema.natural().default(180_000),
       // A launch may create B and wait for its endpoints on the BE side.
       requestTimeoutMs: schema.natural().default(180_000),

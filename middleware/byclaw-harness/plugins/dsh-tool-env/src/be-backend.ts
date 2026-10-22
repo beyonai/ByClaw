@@ -17,7 +17,7 @@
  * pausing/resuming an idle B, and releasing B when A goes away.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
-import type { ToolEnvIdentity } from './identity.ts'
+import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
 
 export interface ByClawBeBackendConfig {
   /** BE origin including its path prefix, the same value the byclaw-dsh plugin uses. */
@@ -44,7 +44,20 @@ export interface ByClawBeBackendConfig {
   readyTimeoutMs: number
   /** Per-request deadline; a launch may create B and wait for its endpoints. */
   requestTimeoutMs: number
+  /**
+   * Hand B its keys through BE instead of a shared directory: before each launch
+   * A stores its authorized key and B's host key as the user's private
+   * parameters (`BYCLAW_TOOL_ENV_AUTHORIZED_KEY`, `BYCLAW_TOOL_ENV_HOST_KEY`),
+   * which the B spec forwards with `${envVars.…}` placeholders. For runtimes
+   * where A cannot mount the user's volume (a shared host outside the cluster).
+   */
+  publishKeys: boolean
 }
+
+/** Private parameter names the B spec forwards into B's environment. */
+export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KEY', host: 'BYCLAW_TOOL_ENV_HOST_KEY' } as const
+
+interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
 interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
@@ -71,7 +84,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   private async ensureOnce(): Promise<ToolEnvEndpoint> {
     // B's sshd reads the keys from A's state directory, so they must exist before B starts.
-    await this.identity.keys()
+    const keys = await this.identity.keys()
+    if (this.config.publishKeys) await this.publishKeys(keys)
     const first = await this.launch()
     try {
       await waitForEndpoint(first, this.config.readyTimeoutMs)
@@ -121,22 +135,46 @@ export class ByClawBeBackend implements ToolEnvBackend {
     }
   }
 
+  /**
+   * Store the keys B must start with as the user's private parameters. Values are
+   * write-only in BE's API (only the last four characters read back), so an
+   * unchanged value is recognised by that suffix and left alone.
+   */
+  private async publishKeys(keys: ToolEnvKeys): Promise<void> {
+    const wanted: Record<string, string> = {
+      [PUBLISHED_KEY_PARAMS.authorized]: keys.authorizedKey,
+      [PUBLISHED_KEY_PARAMS.host]: Buffer.from(keys.hostPrivateKey).toString('base64'),
+    }
+    const listed = await this.call('/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50', undefined, 'GET') as { list?: PrivateParam[] } | undefined
+    const existing = new Map((listed?.list ?? []).filter(item => typeof item.key === 'string').map(item => [item.key as string, item]))
+    for (const [key, value] of Object.entries(wanted)) {
+      const current = existing.get(key)
+      if (current?.hasValue === true && current.valueLast4 === value.slice(-4)) continue
+      await this.call('/userPrivateParam/save', {
+        ...(current?.paramId === undefined ? {} : { paramId: current.paramId }),
+        key, value, enabled: true, description: 'ByClaw tool environment key (managed by the DSH runtime)',
+      })
+      this.log(`${current === undefined ? 'stored' : 'updated'} private parameter ${key} for ${this.config.userCode}`)
+    }
+  }
+
   private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {
     const raw = endpoints?.[this.config.sshInstance]
     return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
   }
 
-  private async call(path: string, body: Record<string, unknown>): Promise<unknown> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'beyond-token': this.config.token }
+  private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST'): Promise<unknown> {
+    const headers: Record<string, string> = { 'beyond-token': this.config.token }
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (this.config.systemCode !== '') headers['system-code'] = this.config.systemCode
     const response = await fetch(`${this.config.baseUrl.replace(/\/+$/u, '')}${path}`, {
-      method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+      method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(this.config.requestTimeoutMs),
     })
     const text = await response.text()
-    if (!response.ok) throw new Error(`ByClaw BE POST ${path} -> ${String(response.status)} ${text.slice(0, 300)}`)
+    if (!response.ok) throw new Error(`ByClaw BE ${method} ${path} -> ${String(response.status)} ${text.slice(0, 300)}`)
     let envelope: Envelope
-    try { envelope = JSON.parse(text) as Envelope } catch { throw new Error(`ByClaw BE POST ${path} returned no JSON: ${text.slice(0, 300)}`) }
-    if (envelope.code !== SUCCESS) throw new Error(`ByClaw BE POST ${path} failed: ${envelope.msg ?? `code ${String(envelope.code)}`}`)
+    try { envelope = JSON.parse(text) as Envelope } catch { throw new Error(`ByClaw BE ${method} ${path} returned no JSON: ${text.slice(0, 300)}`) }
+    if (envelope.code !== SUCCESS) throw new Error(`ByClaw BE ${method} ${path} failed: ${envelope.msg ?? `code ${String(envelope.code)}`}`)
     return envelope.data
   }
 
