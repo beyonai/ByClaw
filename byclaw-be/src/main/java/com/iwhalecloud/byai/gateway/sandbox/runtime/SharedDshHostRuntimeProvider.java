@@ -8,6 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -27,23 +31,72 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
  * same value as the {@code BYAI_WORKER_ID} a per-user DSH container reports activity under, so idle
  * reclaim, reconcile and release find it without changes. Records whose id differs (per-user sandboxes
  * started before the host was configured) keep going to the regular runtime until they are released.</p>
+ *
+ * <p>Which users get a shared context is decided per launch by {@code sharedUsers}: the system parameter
+ * {@value #USERS_PARAM} lists their user codes ({@link #userFilter(Supplier)}); absent, blank or {@code *}
+ * means every {@code byclaw-dsh} user, as before. Other users' {@code byclaw-dsh} sandboxes stay on the
+ * regular runtime. A running record keeps its runtime either way until it is released.</p>
  */
 public class SharedDshHostRuntimeProvider implements SandboxRuntimeProvider {
 
     private static final Logger log = LoggerFactory.getLogger(SharedDshHostRuntimeProvider.class);
 
     static final String METADATA_SHARED_HOST = "sharedDshHost";
+    /** System parameter: user codes that run on the shared host; absent, blank or {@code *} = everyone. */
+    public static final String USERS_PARAM = "BYCLAW_SHARED_DSH_HOST_USERS";
+    private static final Pattern USER_LIST_SEPARATOR = Pattern.compile("[,;\\s]+");
     private static final String METADATA_GATEWAY_TOKEN = "gateway_token";
     private static final String SANDBOX_TYPE = SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
 
     private final SandboxRuntimeProvider delegate;
     private final SharedDshHostClient client;
     private final String webBaseUrl;
+    private final Predicate<String> sharedUsers;
 
+    /** Every {@code byclaw-dsh} user runs on the shared host. */
     public SharedDshHostRuntimeProvider(SandboxRuntimeProvider delegate, SharedDshHostClient client, String webBaseUrl) {
+        this(delegate, client, webBaseUrl, userCode -> true);
+    }
+
+    /**
+     * @param sharedUsers decides per user code whether a new {@code byclaw-dsh} sandbox becomes a shared
+     *                    context (true) or goes to the regular runtime (false)
+     */
+    public SharedDshHostRuntimeProvider(SandboxRuntimeProvider delegate, SharedDshHostClient client, String webBaseUrl,
+                                        Predicate<String> sharedUsers) {
         this.delegate = delegate;
         this.client = client;
         this.webBaseUrl = StringUtils.removeEnd(StringUtils.trimToEmpty(webBaseUrl), "/");
+        this.sharedUsers = sharedUsers;
+    }
+
+    /**
+     * User filter backed by the {@value #USERS_PARAM} system parameter, read on every decision so an
+     * administrator's change applies to the next launch. Unreadable configuration keeps the default
+     * (everyone) and is logged.
+     */
+    public static Predicate<String> userFilter(Supplier<String> configuredUsers) {
+        return userCode -> {
+            String value;
+            try {
+                value = configuredUsers.get();
+            }
+            catch (RuntimeException e) {
+                log.warn("读取系统参数 {} 失败，按全部用户使用共享 DSH 宿主处理：{}", USERS_PARAM, e.getMessage());
+                return true;
+            }
+            return allowsUser(value, userCode);
+        };
+    }
+
+    /** {@code null}, blank or {@code *} allows everyone; otherwise the comma/semicolon/space separated list. */
+    static boolean allowsUser(String configuredUsers, String userCode) {
+        String value = StringUtils.trimToEmpty(configuredUsers);
+        if (value.isEmpty() || "*".equals(value)) {
+            return true;
+        }
+        Set<String> users = Set.of(USER_LIST_SEPARATOR.split(value));
+        return users.contains(StringUtils.trimToEmpty(userCode));
     }
 
     /** Sandbox id of a user's shared context; equals the worker id BE injects as {@code BYAI_WORKER_ID}. */
@@ -60,7 +113,7 @@ public class SharedDshHostRuntimeProvider implements SandboxRuntimeProvider {
     public Optional<SandboxRuntimeInstance> findReusable(String userCode, String sandboxType) {
         // PUT is idempotent and is the only call that returns the web token, so a running context is
         // "reused" by create().
-        return isDsh(sandboxType) ? Optional.empty() : delegate.findReusable(userCode, sandboxType);
+        return routesToHost(userCode, sandboxType) ? Optional.empty() : delegate.findReusable(userCode, sandboxType);
     }
 
     @Override
@@ -69,7 +122,7 @@ public class SharedDshHostRuntimeProvider implements SandboxRuntimeProvider {
                                          String userCode,
                                          String sandboxType,
                                          String idempotencyKey) {
-        if (!isDsh(sandboxType)) {
+        if (!routesToHost(userCode, sandboxType)) {
             return delegate.create(request, spec, userCode, sandboxType, idempotencyKey);
         }
         String sandboxId = sharedSandboxId(userCode);
@@ -228,5 +281,10 @@ public class SharedDshHostRuntimeProvider implements SandboxRuntimeProvider {
 
     private static boolean isDsh(String sandboxType) {
         return SANDBOX_TYPE.equals(sandboxType);
+    }
+
+    /** New {@code byclaw-dsh} sandboxes of listed users become shared contexts; others use the delegate. */
+    private boolean routesToHost(String userCode, String sandboxType) {
+        return isDsh(sandboxType) && sharedUsers.test(StringUtils.trimToEmpty(userCode));
     }
 }

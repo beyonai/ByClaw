@@ -66,3 +66,11 @@ mvn -B -f byclaw-be/pom.xml \
 ```bash
 mvn -B -f byclaw-be/pom.xml verify
 ```
+
+## Shared DSH Host User List
+
+配置了 `byclaw.sandbox.shared-dsh-host.base-url` 后，`byclaw-dsh` 沙箱默认全部作为共享 DSH 宿主上的用户上下文运行。
+系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`（`byai_system_config`，逗号、分号或空白分隔的 userCode）可以把范围限定到部分用户：
+名单内用户走共享宿主，其他用户仍按用户单独启动 `byclaw-dsh` 沙箱。参数不存在、为空或为 `*` 时保持全部走共享宿主。
+每次启动时读取，改参数后下一次启动即生效；已在运行的记录沿用原来的运行时直到释放。决策点只有
+`SharedDshHostRuntimeProvider` 的 `findReusable` 和 `create`，释放、心跳和 reconcile 按记录的 sandbox id 区分。

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.config;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +24,7 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.GenericSandboxSpecProcessor;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.SandboxWorkspaceBootstrapInitializer;
 import com.iwhalecloud.byai.manager.domain.connector.provider.lark.LarkAuthorizationProperties;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 @Configuration
 @EnableConfigurationProperties({SandboxProperties.class, LarkAuthorizationProperties.class})
@@ -48,7 +50,8 @@ public class SandboxAutoConfiguration {
         FeignWhaleAgentService feignWhaleAgentService,
         OpenSandboxClient openSandboxClient,
         @Value("${file.storage.type:minio}") String storageType,
-        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway) {
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway,
+        ObjectProvider<ByaiSystemConfigService> systemConfigService) {
         SandboxRuntimeProvider provider;
         if (StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
@@ -58,7 +61,12 @@ public class SandboxAutoConfiguration {
         SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
         if (sharedDshHost != null && sharedDshHost.isEnabled()) {
             provider = new SharedDshHostRuntimeProvider(provider, new SharedDshHostClient(sharedDshHost),
-                StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()));
+                StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
+                SharedDshHostRuntimeProvider.userFilter(() -> {
+                    ByaiSystemConfigService service = systemConfigService.getIfAvailable();
+                    return service == null ? null
+                        : service.getDcSystemConfigValueByCode(SharedDshHostRuntimeProvider.USERS_PARAM);
+                }));
         }
         return com.iwhalecloud.byai.gateway.sandbox.platform.PlatformInterfaceRouting.create(SandboxLifecycleFacade.class,
             new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider), platformGateway, true);

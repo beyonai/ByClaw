@@ -16,6 +16,8 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +93,48 @@ class SharedDshHostRuntimeProviderTest {
 
         assertThatThrownBy(() -> provider.create(new CreateSandboxRequest(), null, "u1", DSH, "idem"))
             .hasMessageContaining("503");
+    }
+
+    @Test
+    void unlistedDshUsersStayOnTheRegularRuntime() {
+        Predicate<String> listed = Set.of("u1")::contains;
+        SharedDshHostRuntimeProvider filtered = new SharedDshHostRuntimeProvider(delegate, client, "https://dsh.example.com", listed);
+        CreateSandboxRequest request = new CreateSandboxRequest();
+        SandboxRuntimeInstance perUser = SandboxRuntimeInstance.builder().sandboxId("os-2").build();
+        when(delegate.create(request, null, "u2", DSH, "idem")).thenReturn(perUser);
+        when(delegate.findReusable("u2", DSH)).thenReturn(Optional.of(perUser));
+        when(client.ensureUser(eq("u1"), eq("byclaw-dsh-u1"), any())).thenReturn(ready("u1", "/u/u1/", "wt"));
+
+        assertThat(filtered.create(request, null, "u2", DSH, "idem")).isSameAs(perUser);
+        assertThat(filtered.findReusable("u2", DSH)).contains(perUser);
+        assertThat(filtered.create(request, null, "u1", DSH, "idem").getSandboxId()).isEqualTo("byclaw-dsh-u1");
+        assertThat(filtered.findReusable("u1", DSH)).isEmpty();
+
+        verify(client, never()).ensureUser(eq("u2"), anyString(), any());
+        verify(delegate, never()).create(any(), any(), eq("u1"), any(), any());
+        // Lifecycle of an existing per-user record is unchanged for a listed user too.
+        SandboxInfo perUserRecord = info("u1", DSH, "os-9");
+        filtered.remove("u1", DSH, perUserRecord);
+        verify(delegate).remove("u1", DSH, perUserRecord);
+    }
+
+    @Test
+    void userFilterReadsTheSystemParameterOnEveryDecision() {
+        String[] value = {null};
+        Predicate<String> filter = SharedDshHostRuntimeProvider.userFilter(() -> value[0]);
+        assertThat(filter.test("anyone")).as("absent parameter").isTrue();
+        value[0] = "  ";
+        assertThat(filter.test("anyone")).as("blank parameter").isTrue();
+        value[0] = "*";
+        assertThat(filter.test("anyone")).as("wildcard").isTrue();
+        value[0] = "u1, 0027016840;u3 u4";
+        assertThat(filter.test("u1")).isTrue();
+        assertThat(filter.test("0027016840")).isTrue();
+        assertThat(filter.test("u4")).isTrue();
+        assertThat(filter.test("u2")).isFalse();
+        assertThat(filter.test("")).isFalse();
+        Predicate<String> failing = SharedDshHostRuntimeProvider.userFilter(() -> { throw new IllegalStateException("redis down"); });
+        assertThat(failing.test("u2")).as("unreadable parameter keeps the default").isTrue();
     }
 
     @Test
