@@ -39,7 +39,8 @@ RUN set -eux; \
     cd /workspace/packages/ssh/ssh; \
     TRACE_OUT=/tmp/tool-env-resolved.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs; \
     test -s /tmp/tool-env-resolved.txt; \
-    su -s /bin/sh byclaw -c "cd /tmp && node --input-type=module -e \"await import('${profile_ssh}/lib/helper.js')\" </dev/null"; \
+    su -s /bin/sh byclaw -c "cd ${profile_ssh} && TRACE_OUT=/tmp/tool-env-resolved-user.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs" </dev/null; \
+    test -s /tmp/tool-env-resolved-user.txt; \
     test -x /usr/sbin/sshd; \
     python3 -c 'import websockets'; \
     rm -rf /tmp/* /var/tmp/* /etc/ssh/ssh_host_*
