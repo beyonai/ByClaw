@@ -1140,9 +1140,13 @@ public class SandboxService {
 
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
         if (platformRemote()) {
+            // The platform's by-user heartbeat touches every running record of the user, the
+            // shared-host record included, in its own transaction. Call it before this
+            // process locks that record, or the two wait on each other until the JDBC
+            // socket timeout and every later heartbeat queues behind the abandoned lock.
+            boolean platform = Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
             boolean host = hostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)
                 && heartbeatRunningSandboxType(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
-            boolean platform = Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
             return host || platform;
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
