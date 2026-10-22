@@ -164,6 +164,50 @@ class DigitalEmployeeRedisConfigSyncTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"ok", "missing", "redis-failure"})
+    void employeeSnapshotIsPublishedOnlyAfterRelatedAgentSnapshot(String mode) {
+        var syncing = spy(service);
+        var details = new DigitalEmployeeDetailsDTO(); details.setResourceId(9L);
+        doReturn(details).when(syncing).findDetailsById(any());
+        var employeeExt = new SsResExtDigEmployee(); employeeExt.setResourceId(9L);
+        when(ssResExtDigEmployeeService.findById(9L)).thenReturn(employeeExt);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(500L); resource.setResourceBizType("AGENT"); resource.setResourceStatus(2);
+        resource.setOwnerType("enterprise"); resource.setSystemCode("BYAI"); resource.setResourceCode("external");
+        resource.setThirdSyncRevision(1L); resource.setUseAuthControlled(true);
+        var relation = new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail();
+        relation.setResourceId(9L); relation.setRelResourceId(500L);
+        var resources = mock(SsResourceService.class);
+        when(resources.findByIdList(java.util.List.of(500L))).thenReturn(java.util.List.of(resource));
+        ReflectionTestUtils.setField(syncing, "ssResourceService", resources);
+        var relations = mock(SsResourceRelDetailService.class);
+        when(relations.findByResourceId(9L)).thenReturn(java.util.List.of(relation));
+        ReflectionTestUtils.setField(syncing, "ssResourceRelDetailService", relations);
+        var agents = mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService.class);
+        var agent = new com.iwhalecloud.byai.manager.entity.resource.SsResExtAgent();
+        agent.setTargetContent("missing".equals(mode) ? null : "{\"resourceId\":\"500\"}");
+        when(agents.findById(500L)).thenReturn(agent);
+        ReflectionTestUtils.setField(syncing, "ssResExtAgentService", agents);
+        var storage = mock(ResourceArtifactStorageService.class);
+        when(storage.existsResourceJsonByBizType("AGENT", 500L)).thenReturn(true);
+        ReflectionTestUtils.setField(syncing, "resourceArtifactStorageService", storage);
+        ReflectionTestUtils.setField(syncing, "ssResourceArtifactService", mock(SsResourceArtifactService.class));
+        if ("redis-failure".equals(mode)) org.mockito.Mockito.doThrow(new IllegalStateException("redis"))
+            .when(valueOperations).set(eq("AGENT_500"), any(String.class));
+        assertThat(syncing.synOpenClawWorkSpace(9L)).isEqualTo("ok".equals(mode));
+        if ("ok".equals(mode)) {
+            var order = org.mockito.Mockito.inOrder(valueOperations);
+            order.verify(valueOperations).set(eq("AGENT_500"), any(String.class));
+            var json = ArgumentCaptor.forClass(String.class);
+            order.verify(valueOperations).set(eq(DigEmployeeRedisKeys.configJsonKey(9L)), json.capture());
+            assertThat(com.alibaba.fastjson2.JSON.parseObject(json.getValue()).getJSONArray("controlledResources")
+                .getJSONObject(0).getBooleanValue("requiresExplicitUse")).isTrue();
+        } else {
+            verify(valueOperations, never()).set(eq(DigEmployeeRedisKeys.configJsonKey(9L)), any(String.class));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void publicationSyncReadsUncommittedVersionAndRollsBackArtifactWithEmployee(boolean existing,
         @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {

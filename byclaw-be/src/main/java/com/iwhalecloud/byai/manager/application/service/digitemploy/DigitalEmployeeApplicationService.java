@@ -2730,6 +2730,8 @@ public class DigitalEmployeeApplicationService {
                 policy.put("resourceBizType", resource.getResourceBizType());
                 policy.put("createBy", resource.getCreateBy() == null ? "" : String.valueOf(resource.getCreateBy()));
                 policy.put("active", Objects.equals(resource.getResourceStatus(), 2));
+                policy.put("requiresExplicitUse", com.iwhalecloud.byai.manager.application.service.resource
+                    .EnterpriseResourceSyncContext.isSynchronizedCapability(resource));
                 controlled.add(policy);
             }
         }
@@ -2772,13 +2774,13 @@ public class DigitalEmployeeApplicationService {
                 "dig-employee-sync");
         }
 
-        boolean redisSyncSucceeded = this.syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
-
+        // 先补齐依赖快照，再发布员工快照，避免提前向运行端暴露不可调用的关联。
         // 数字员工自己的 JSON 同步完成后,再检查并补齐其关联资源的标准 JSON 产物.
         // 这样可以确保前端保存/更新数字员工后,关联的 toolkit / mcp / agent / kg_* / view / object
         // 也都能在开放资源目录中按标准命名被下游读取到.
         this.syncMissingRelatedResourceJsons(resourceId);
-        syncRelatedResourceConfigJsonsToRedisQuietly(resourceId);
+        this.syncRelatedResourceConfigJsonsToRedis(resourceId, true);
+        boolean redisSyncSucceeded = this.syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
 
         logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
             resourceId, resourceDir, fileName);
@@ -2842,7 +2844,16 @@ public class DigitalEmployeeApplicationService {
      * 将数字员工关联资源的标准 JSON 同步至 Redis(与 MinIO 产物同内容,键名为 {@code {BIZTYPE}_{resourceId}}). 每次数字员工开放目录同步后执行,不依赖 MinIO 是否缺失.
      */
     public void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
-        if (digEmployeeResourceId == null) {
+        try {
+            this.syncRelatedResourceConfigJsonsToRedis(digEmployeeResourceId, false);
+        } catch (Exception e) {
+            logger.error("同步数字员工关联资源配置到Redis失败, digEmployeeResourceId={}", digEmployeeResourceId, e);
+        }
+    }
+
+    private void syncRelatedResourceConfigJsonsToRedis(Long digEmployeeResourceId, boolean strict) {
+        if (digEmployeeRedisSyncProperties == null || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()
+            || digEmployeeResourceId == null) {
             return;
         }
         List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
@@ -2861,21 +2872,13 @@ public class DigitalEmployeeApplicationService {
         logger.debug("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
-            this.syncSingleRelatedResourceConfigJsonToRedisQuietly(digEmployeeResourceId, relResource);
-        }
-    }
-
-    /**
-     * syncSingleRelatedResourceConfigJsonToRedisQuietly。
-     */
-    private void syncSingleRelatedResourceConfigJsonToRedisQuietly(Long digEmployeeResourceId, SsResource relResource) {
-        try {
-            this.syncSingleRelatedResourceConfigJsonToRedis(digEmployeeResourceId, relResource);
-        } catch (Exception e) {
-            logger.error(
-                "同步数字员工关联资源配置到Redis失败,不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}, reason={}",
-                digEmployeeResourceId, relResource == null ? null : relResource.getResourceId(),
-                relResource == null ? null : relResource.getResourceBizType(), e.getMessage(), e);
+            try {
+                this.syncSingleRelatedResourceConfigJsonToRedis(digEmployeeResourceId, relResource);
+            } catch (RuntimeException e) {
+                if (strict) throw e;
+                logger.error("同步关联资源运行配置失败, digEmployeeResourceId={}, relResourceId={}",
+                    digEmployeeResourceId, relResource.getResourceId(), e);
+            }
         }
     }
 
@@ -2893,6 +2896,9 @@ public class DigitalEmployeeApplicationService {
         Long relResourceId = relResource.getResourceId();
         String targetContent = this.loadRelatedResourceTargetContent(resourceBizType, relResourceId);
         if (StringUtils.isBlank(targetContent)) {
+            if (!ResourceBizTypeEnum.SKILL.name().equals(resourceBizType)) {
+                throw new IllegalStateException("关联资源运行配置缺失, resourceId=" + relResourceId);
+            }
             logger.warn(
                 "数字员工关联资源targetContent为空,跳过Redis同步, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);

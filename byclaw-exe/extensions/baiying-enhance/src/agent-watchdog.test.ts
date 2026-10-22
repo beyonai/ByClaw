@@ -21,6 +21,10 @@ import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-r
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 
+// These tests provide an in-memory Redis store; do not load the optional ioredis runtime.
+vi.mock("./redis-json-store.js", () => ({ getSharedRedisJsonStore: vi.fn() }));
+vi.mock("./backend-service-discovery.js", () => ({ discoverBackendBaseUrl: vi.fn() }));
+
 const execFileAsync = promisify(execFile);
 
 /** Fixed JSON string so SHA-256 is stable across runs. */
@@ -816,6 +820,85 @@ describe("createAgentWatchdog", () => {
         await wd.stop();
 
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes tool snapshots on resource association, description and permission changes with unchanged native policy", async () => {
+        vi.stubEnv("USER_CODE", "tool-user");
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-resource-tools-"));
+        const id = "10000455";
+        const agentId = `${MANAGED_AGENT_PREFIX}${id}`;
+        const raw = {
+            resourceId: id, resourceName: "Demo", integrationType: "NONE", relTools: ["read"],
+            controlledResources: [{ resourceId: "500", resourceBizType: "AGENT", createBy: "1", active: true }],
+            relResourceList: [] as any[],
+        };
+        const resource = {
+            resourceId: "500", resourceName: "Published agent", resourceBizType: "AGENT",
+            resourceCode: "published", resourceDesc: "Original capability", resourceStatus: 2,
+        };
+        const entries = new Map<string, RedisJsonPayload>();
+        const update = () => entries.set(id, payloadFromContent(`DIG_EMPLOYEE_${id}`, JSON.stringify(raw)));
+        update();
+        const store = createMemoryRedisJsonStore(entries);
+        let rights: Record<string, string> = { "500": "AGENT" };
+        store.getStringByKey = vi.fn(async () => "2");
+        store.getHashByKey = vi.fn(async () => rights);
+        let cfg: any = { agents: { list: [{ id: "main", name: "Main" }] }, models: { providers: {} } };
+        const writeConfigFile = vi.fn(async (next: any) => { cfg = next; });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig.mockImplementation(() => cfg);
+        const registry = new AgentRegistryState();
+        const wd = createAgentWatchdogBase({
+            api, registry, redisJsonStore: store,
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set([id]) },
+            absoluteDir: dir, contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: { workspaceAutoSeed: false, workspaceSkillAutoEnable: false, mainWorkspaceAgentsAutoSeed: false },
+            debounceMs: 60_000,
+        });
+        const signature = () => cfg.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature;
+        try {
+            await wd.start();
+            await wd.__flushNow!();
+            const nativePolicy = JSON.stringify(registry.get(agentId)?.listEntry.tools);
+            let previous = signature();
+            cfg.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature = "legacy-snapshot";
+            await wd.__flushNow!();
+            expect(signature()).toBe(previous);
+            for (const next of [
+                resource,
+                { ...resource, resourceName: "Renamed agent" },
+                { ...resource, resourceDesc: "New capability" },
+                { ...resource, param: { authorization: "fixture-secret" } },
+            ]) {
+                raw.relResourceList = [next]; update();
+                await wd.__flushNow!();
+                expect(signature()).not.toBe(previous);
+                expect(signature()).not.toContain("fixture-secret");
+                expect(registry.get(agentId)?.associatedResources?.[0]?.resourceName).toBe(next.resourceName);
+                expect(JSON.stringify(registry.get(agentId)?.listEntry.tools)).toBe(nativePolicy);
+                previous = signature();
+            }
+            rights = {};
+            await wd.__flushNow!({ fullWorkspaceReseed: true });
+            expect(registry.get(agentId)?.associatedResources ?? []).toHaveLength(0);
+            expect(signature()).not.toBe(previous);
+            previous = signature();
+            rights = { "500": "AGENT" };
+            await wd.__flushNow!({ fullWorkspaceReseed: true });
+            expect(registry.get(agentId)?.associatedResources).toHaveLength(1);
+            expect(signature()).not.toBe(previous);
+            previous = signature();
+            raw.relResourceList = []; update();
+            await wd.__flushNow!();
+            expect(registry.get(agentId)?.associatedResources ?? []).toHaveLength(0);
+            expect(signature()).not.toBe(previous);
+            const writes = writeConfigFile.mock.calls.length;
+            await wd.__flushNow!();
+            expect(writeConfigFile).toHaveBeenCalledTimes(writes);
+        } finally {
+            await wd.stop();
+        }
     });
 
     it("touches skills reload marker when relTools changes the managed agent tool policy", async () => {

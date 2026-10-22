@@ -284,3 +284,9 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 模型同步为未配置的 `agents.defaults.compaction.timeoutSeconds` 写入 **300 秒**默认值，保留管理员已有的显式配置。它控制整轮摘要流程，与 Provider 的请求超时独立。压缩默认沿用会话模型；本次不自动更换专用压缩模型，也不修改 OpenClaw 核心代码。
 
 发布时需同时更新 `baiying-enhance` 和 `byai-channel` 插件，完成模型同步和配置热加载。验收应检查运行时窗口与平台配置一致、摘要请求实际携带关闭思考参数，并使用受控长会话验证恢复；仅通过单元测试或构建不能证明原线上长会话已经恢复。百应侧最多 3 次恢复及 10 分钟总上限详见 `../byai-channel/README.md`。
+
+### 关联工具的热刷新
+
+数字员工的 `relResourceList` 通过 `baiying_call` 暴露给模型。关联资源增删、名称/描述/调用配置变化，
+以及授权过滤导致的可用资源变化，均参与工具快照刷新判断；即使原生 `relTools` 不变，也会更新内部 reload 标记。
+该标记仅存储调用元数据的摘要，不写入原始凭据。启动时也会核对上次保存的摘要，以更新已有会话的工具快照。

@@ -28,6 +28,23 @@ class EnterpriseResourceSyncContextTest {
         assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
     }
 
+    @Test void callableSyncIdentityDoesNotIncludeOrdinaryResourcesOrKnowledgeContainers() {
+        for (String type : java.util.List.of("AGENT", "TOOLKIT", "MCP", "SKILL")) {
+            var resource = resource(10L, "external"); resource.setResourceBizType(type);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+            resource.setThirdSyncRevision(1L);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isTrue();
+            resource.setOwnerType("personal");
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+            resource.setOwnerType("enterprise"); resource.setResourceCode(null);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+        }
+        for (String type : java.util.List.of("DIG_EMPLOYEE", "KG_CLOUD", "KG_DOC")) {
+            var resource = resource(10L, "external"); resource.setResourceBizType(type); resource.setThirdSyncRevision(1L);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+        }
+    }
+
     @BeforeEach void login() {
         var login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);

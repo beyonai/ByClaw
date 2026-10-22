@@ -88,6 +88,48 @@ import org.mockito.InOrder;
 class AuthApplicationServiceTest {
 
     @Test
+    void synchronizedToolsUseExplicitGrantsConsistentlyAndKeepRevocationAndTenantIsolation() {
+        for (String bizType : List.of("AGENT", "TOOLKIT", "MCP")) {
+            for (Long tenant : java.util.Arrays.asList(null, 1L, 2L)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setResourceBizType(bizType); resource.setComAcctId(tenant); resource.setCreateBy(3L);
+                var grants = new ArrayList<PrivilegeGrant>();
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType(bizType); grant.setGrantType(GrantType.FORCE_USE); grants.add(grant);
+                var service = newExplicitUserPermissionService(grants);
+                prepareOperationPermissionQueries(service, resource);
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isTrue();
+                grant.setGrantType(GrantType.ALLOW_VIEW);
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantType(GrantType.FORCE_USE); grant.setExpDate(new java.util.Date(0));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setExpDate(null); grant.setStatusCd("P");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setEffDate(null); grant.setGrantToType(Color.BLACK);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantToType(Color.RED); resource.setResourceStatus(3);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                resource.setResourceStatus(2); grants.clear(); login.setUserCode("adminvip");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isFalse();
+                grants.add(grant); login.setUserCode("user3");
+                resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+                assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+            }
+        }
+    }
+
+    @Test
     void synchronizedSkillUsesEffectiveExplicitGrantsInBothRuntimeAndListDespiteEnterpriseMetadata() {
         for (Long tenant : java.util.Arrays.asList(null, 0L, 1L, 2L)) {
             for (String type : List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_MANAGE)) {

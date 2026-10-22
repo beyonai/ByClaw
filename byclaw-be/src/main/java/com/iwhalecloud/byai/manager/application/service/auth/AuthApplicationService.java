@@ -1626,8 +1626,8 @@ public class AuthApplicationService {
      * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
      */
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
-        boolean synchronizedSkill = EnterpriseResourceSyncContext.isSynchronizedSkill(ssResource);
-        if (!synchronizedSkill && !EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(ssResource)
+        boolean synchronizedCapability = EnterpriseResourceSyncContext.isSynchronizedCapability(ssResource);
+        if (!synchronizedCapability && !EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(ssResource)
             && ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
             && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
@@ -1639,7 +1639,7 @@ public class AuthApplicationService {
                 && !Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) || userId == null) {
             return false;
         }
-        if (!synchronizedSkill && (userId.equals(ssResource.getCreateBy())
+        if (!synchronizedCapability && (userId.equals(ssResource.getCreateBy())
             || (userId.equals(CurrentUserHolder.getCurrentUserId())
             && isCurrentUserBoundDefaultPersonalResource(ssResource)))) {
             return true;
@@ -1685,11 +1685,11 @@ public class AuthApplicationService {
     /** Independent viewing grants expose metadata only and never enter the resource-use Redis set. */
     public boolean hasResourceViewPermission(SsResource resource) {
         if (resource == null || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) return false;
-        boolean synchronizedSkill = EnterpriseResourceSyncContext.isSynchronizedSkill(resource);
-        if (!synchronizedSkill && (Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled()))
+        boolean synchronizedCapability = EnterpriseResourceSyncContext.isSynchronizedCapability(resource);
+        if (!synchronizedCapability && (Boolean.TRUE.equals(resource.getViewAuthControlled()) || Boolean.TRUE.equals(resource.getUseAuthControlled()))
             && !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         if (hasResourceAccessPermission(resource)) return true;
-        if (!synchronizedSkill) {
+        if (!synchronizedCapability) {
             if (isCurrentUserGlobalResourceManager() && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return true;
             if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType());
             if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
@@ -1704,8 +1704,8 @@ public class AuthApplicationService {
     }
 
     public boolean hasResourceAccessPermission(SsResource ssResource) {
-        // Synced skills use explicit grants for content access, including when bookkeeping enterprise metadata differs.
-        if (EnterpriseResourceSyncContext.isSynchronizedSkill(ssResource)) return hasResourceUsePermission(ssResource);
+        // Synced capabilities use explicit grants for content access, including when bookkeeping enterprise metadata differs.
+        if (EnterpriseResourceSyncContext.isSynchronizedCapability(ssResource)) return hasResourceUsePermission(ssResource);
         if (ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled())
             || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
@@ -3767,9 +3767,9 @@ public class AuthApplicationService {
                 managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds,
                 innerSkillResourceIds, employeePublishPermissions.getOrDefault(resource.getResourceId(), false)));
             ResourceOperationPermissionsVo permission = result.get(resource.getResourceId());
-            boolean synchronizedSkill = EnterpriseResourceSyncContext.isSynchronizedSkill(resource);
+            boolean synchronizedCapability = EnterpriseResourceSyncContext.isSynchronizedCapability(resource);
             boolean visible = !Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())
-                && (synchronizedSkill
+                && (synchronizedCapability
                     ? permission.isHasUsePermission() || viewPrivilegeIds.contains(resource.getResourceId())
                     : (permission.isCanViewDetail()
                     || !Boolean.TRUE.equals(resource.getViewAuthControlled()) && "enterprise".equals(resource.getOwnerType())
@@ -3814,7 +3814,7 @@ public class AuthApplicationService {
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
         vo.setUseApplyPending(useApplyPending);
-        vo.setCanViewDetail(!isResourceRemoved && (EnterpriseResourceSyncContext.isSynchronizedSkill(ssResource)
+        vo.setCanViewDetail(!isResourceRemoved && (EnterpriseResourceSyncContext.isSynchronizedCapability(ssResource)
             ? hasUsePermission : canManage || hasUsePermission));
 
 
@@ -3905,8 +3905,8 @@ public class AuthApplicationService {
 
     private boolean hasResourceUsePermission(SsResource ssResource, Long currentUserId, Set<Long> managePrivilegeIds,
                                              Set<Long> useBlacklistedIds, Set<Long> usePermittedIds) {
-        boolean synchronizedSkill = EnterpriseResourceSyncContext.isSynchronizedSkill(ssResource);
-        if (!synchronizedSkill && ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
+        boolean synchronizedCapability = EnterpriseResourceSyncContext.isSynchronizedCapability(ssResource);
+        if (!synchronizedCapability && ssResource != null && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
 
         if (ssResource == null || ssResource.getResourceId() == null
@@ -3919,7 +3919,7 @@ public class AuthApplicationService {
             return false;
         }
         Long resourceId = ssResource.getResourceId();
-        if (!synchronizedSkill && (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource))) {
+        if (!synchronizedCapability && (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource))) {
             return true;
         }
         // 与单条查询一致：有效显式管理授权可用于使用，adminvip 身份兜底不计入此集合。
@@ -4033,7 +4033,7 @@ public class AuthApplicationService {
         vo.setHasManagePermission(canManage);
         vo.setHasUsePermission(hasUsePermission);
         vo.setUseApplyPending(useApplyPending);
-        vo.setCanViewDetail(!isResourceRemoved && (EnterpriseResourceSyncContext.isSynchronizedSkill(ssResource)
+        vo.setCanViewDetail(!isResourceRemoved && (EnterpriseResourceSyncContext.isSynchronizedCapability(ssResource)
             ? hasUsePermission : canManage || hasUsePermission));
         vo.setHasViewPermission(!isResourceRemoved && hasResourceViewPermission(ssResource));
         vo.setCanViewBasicInfo(vo.isHasViewPermission());

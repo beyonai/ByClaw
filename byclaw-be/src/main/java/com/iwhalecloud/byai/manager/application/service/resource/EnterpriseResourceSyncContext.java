@@ -48,8 +48,14 @@ public final class EnterpriseResourceSyncContext {
 
     /** Persisted sync revisions are assigned by completeImport, never inferred from client-supplied ownership. */
     public static boolean isSynchronizedSkill(SsResource resource) {
+        return isSynchronizedCapability(resource) && "SKILL".equals(resource.getResourceBizType());
+    }
+
+    /** Only imported callable capabilities use source-system grants across bookkeeping enterprise IDs. */
+    public static boolean isSynchronizedCapability(SsResource resource) {
         return resource != null && resource.getResourceId() != null
-            && "enterprise".equals(resource.getOwnerType()) && "SKILL".equals(resource.getResourceBizType())
+            && "enterprise".equals(resource.getOwnerType())
+            && StringUtils.equalsAny(resource.getResourceBizType(), "SKILL", "AGENT", "TOOLKIT", "MCP")
             && resource.getThirdSyncRevision() != null && resource.getThirdSyncRevision() > 0
             && StringUtils.isNotBlank(resource.getSystemCode()) && StringUtils.isNotBlank(resource.getResourceCode());
     }

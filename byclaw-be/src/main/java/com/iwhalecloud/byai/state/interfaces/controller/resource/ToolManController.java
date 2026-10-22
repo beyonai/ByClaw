@@ -1881,8 +1881,7 @@ public class ToolManController {
         if (resource == null && identity.matches("[0-9]+")) resource = ssResourceService.findByIdOrCode(null, identity);
         boolean controlled = resource != null && (Boolean.TRUE.equals(resource.getUseAuthControlled())
             || Boolean.TRUE.equals(resource.getViewAuthControlled()));
-        boolean allowed = !controlled || Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
-            && authApplicationService.hasResourceUsePermission(resource);
+        boolean allowed = !controlled || authApplicationService.hasResourceUsePermission(resource);
         return ResponseUtil.success(Map.of("controlled", controlled, "allowed", allowed));
     }
 

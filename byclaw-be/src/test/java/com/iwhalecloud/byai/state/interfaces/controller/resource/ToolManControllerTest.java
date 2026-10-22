@@ -13,6 +13,46 @@ import org.springframework.mock.web.MockHttpSession;
 class ToolManControllerTest {
 
     @Test
+    void runtimeUseCheckUsesAuthoritativeGrantPolicyForSynchronizedAndOrdinaryResources() {
+        var login = new LoginInfo(); login.setUserId(3L); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        var resources = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var grant = new com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant();
+        grant.setGrantObjId(10L); grant.setGrantObjType("AGENT"); grant.setGrantType("FORCE_USE");
+        grant.setGrantToObjType("USER"); grant.setGrantToObjId(3L); grant.setGrantToType("RED"); grant.setStatusCd("A");
+        var grants = new java.util.ArrayList<>(java.util.List.of(grant));
+        var auth = new com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService() {
+            @Override public java.util.List<com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant> listAuthPrivilegeGrant(
+                String type, java.util.List<String> types, String subject, Long user, java.util.List<String> privileges) {
+                return grants;
+            }
+        };
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(10L); resource.setOwnerType("enterprise"); resource.setResourceStatus(2);
+        resource.setSystemCode("BYAI"); resource.setResourceCode("external"); resource.setThirdSyncRevision(1L);
+        resource.setUseAuthControlled(true); resource.setViewAuthControlled(true);
+        org.mockito.Mockito.when(resources.findById(10L)).thenReturn(resource);
+        var controller = new ToolManController();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "authApplicationService", auth);
+        for (String type : java.util.List.of("AGENT", "TOOLKIT", "MCP", "SKILL")) {
+            resource.setResourceBizType(type); grant.setGrantObjType(type);
+            for (Long tenant : java.util.Arrays.asList(null, 1L, 2L)) {
+                resource.setComAcctId(tenant);
+                assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData())
+                    .containsEntry("controlled", true).containsEntry("allowed", true);
+            }
+            grant.setGrantType("ALLOW_VIEW");
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+            grant.setGrantType("FORCE_USE"); grants.clear();
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+            grants.add(grant);
+        }
+        resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+    }
+
+    @Test
     void resourceSyncJobUsesAuthenticatedJobIdentityWithoutEnterpriseMatching() {
         var controller = new ToolManController();
         var sync = org.mockito.Mockito.mock(

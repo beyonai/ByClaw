@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
@@ -80,7 +81,16 @@ public class DigitalEmployeeRuntimeRefreshService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    registeredRequests.values().forEach(DigitalEmployeeRuntimeRefreshService.this::refreshNow);
+                    RuntimeException failure = null;
+                    for (RuntimeRefreshRequest pending : registeredRequests.values()) {
+                        try {
+                            refreshNow(pending);
+                        } catch (RuntimeException e) {
+                            if (failure == null) failure = e;
+                            else failure.addSuppressed(e);
+                        }
+                    }
+                    if (failure != null) throw failure;
                 }
 
                 @Override
@@ -96,24 +106,21 @@ public class DigitalEmployeeRuntimeRefreshService {
 
     private void refreshNow(RuntimeRefreshRequest request) {
         Long digitalEmployeeId = request.digitalEmployeeId();
-        try {
-            boolean redisSyncSucceeded = postCommitRefreshExecutor.refresh(digitalEmployeeId, request.inputDto());
-            if (!redisSyncSucceeded) {
-                if (request.eventType() == DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED) {
-                    logger.warn("数字员工技能运行态刷新未完成，跳过技能变更通知, digitalEmployeeId={}", digitalEmployeeId);
+        Exception failure = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                if (postCommitRefreshExecutor.refresh(digitalEmployeeId, request.inputDto())) {
+                    digEmployeeChangeEventPublisher.publishNowQuietly(request.eventType(), digitalEmployeeId, request.source());
                     return;
                 }
-                // 数字员工编辑原本在事务提交后始终发送 UPDATED；同步失败时保留这一既有事件语义，
-                // 避免影响权限刷新及其他订阅方，同时日志明确记录快照同步异常。
-                logger.warn("数字员工运行态刷新未完成，继续发送原有更新通知, digitalEmployeeId={}, eventType={}",
-                    digitalEmployeeId, request.eventType());
+                failure = new IllegalStateException("数字员工及关联资源运行态同步未完成");
+            } catch (Exception e) {
+                failure = e;
             }
-            digEmployeeChangeEventPublisher.publishNowQuietly(request.eventType(), digitalEmployeeId, request.source());
+            logger.warn("数字员工运行态刷新失败, digitalEmployeeId={}, attempt={}", digitalEmployeeId, attempt, failure);
         }
-        catch (Exception e) {
-            logger.error("数字员工运行态刷新失败，跳过变更通知, digitalEmployeeId={}, eventType={}, reason={}", digitalEmployeeId,
-                request.eventType(), e.getMessage(), e);
-        }
+        // The association transaction has already committed. Tell the caller to retry instead of announcing stale data.
+        throw new BaseException("配置已保存，但运行配置同步失败，请重试保存；数字员工ID=" + digitalEmployeeId, failure);
     }
 
     private static RuntimeRefreshRequest mergeRequest(RuntimeRefreshRequest existing, RuntimeRefreshRequest incoming) {
