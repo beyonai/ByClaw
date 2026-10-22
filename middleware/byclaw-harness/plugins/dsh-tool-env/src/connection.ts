@@ -16,6 +16,7 @@ import type { SshStreamEndpoint } from '@deepseek-ai/dsh-ssh/schemas'
 import type { z } from 'zod'
 import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
+import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -43,6 +44,7 @@ export class ToolEnvConnection extends Service {
   private idleTimer: NodeJS.Timeout | undefined
   private closed = false
   private pausing: Promise<void> | undefined
+  private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
 
   constructor(
     ctx: Context,
@@ -57,6 +59,21 @@ export class ToolEnvConnection extends Service {
   /** Helper identity of the current lease; awaiting it leases the tool environment. */
   get ready(): Promise<Hello> {
     return this.lease().then(lease => lease.connection.ready)
+  }
+
+  /** Whether B is connected right now; `false` never starts it. */
+  get connected(): boolean {
+    return this.live !== undefined && !isBroken(this.live.connection)
+  }
+
+  /**
+   * Run `operation` on B now if it is connected, otherwise once it connects, before
+   * the first operation of that connection is served. Deferred work with the same
+   * key is replaced, so repeated writes to one path cost one write.
+   */
+  async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
+    if (this.connected) { await operation(); return }
+    this.deferred.defer(key, operation)
   }
 
   /** Remote PTC launch; static, so PTC can be configured before the tool environment exists. */
@@ -104,6 +121,8 @@ export class ToolEnvConnection extends Service {
   private lease(): Promise<Lease> {
     if (this.closed) return Promise.reject(new Error('Tool environment connection is closed'))
     if (this.live !== undefined && isBroken(this.live.connection)) void this.drop(this.live)
+    // Deferred work runs inside open() and uses this facade itself: it must see the live lease, not wait for open().
+    if (this.live !== undefined) return Promise.resolve(this.live)
     const pending = this.current ??= this.open()
     pending.catch(() => { if (this.current === pending) this.current = undefined })
     return pending
@@ -121,6 +140,11 @@ export class ToolEnvConnection extends Service {
     if (this.closed) { lease.fiber.dispose(); throw new Error('Tool environment connection is closed') }
     this.live = lease
     this.ctx.logger('byclaw-tool-env').info(`tool environment connected: ${endpoint.hostName}:${String(endpoint.port)}`)
+    // Everything a context queued for B while B was down (session directories, projections) lands before any tool runs.
+    if (this.deferred.size > 0) {
+      this.ctx.logger('byclaw-tool-env').info(`running ${String(this.deferred.size)} deferred operation(s) on the tool environment`)
+      await this.deferred.run()
+    }
     return lease
   }
 

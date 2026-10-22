@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/
 import { join } from 'node:path'
 import { AskAgentCommand, HistoryProvider, MessageHeader } from '@byclaw/by-framework'
 import { createFakeToolEnvironment } from './tool-environment-fakes.mjs'
-import { mediaArtifactIo, toolEnvironmentFiles } from '../src/tool-environment-files.ts'
+import { lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from '../src/tool-environment-files.ts'
 import { ByClawVoiceRuntime } from '../src/voice-runtime.ts'
 import { createVoiceHttpHandler } from '../src/voice-http.ts'
 import { saveMediaArtifact, saveWordTimingArtifact } from '../src/media-generation/artifacts.ts'
@@ -197,6 +197,31 @@ try {
   check(shared.workerHistory === 'none' && shared.dshHome === '/data/u/dsh-home', 'shared-host values are accepted')
   assert.throws(() => Config({ workerHistory: 'redis' })); checks += 1
 
+  // Lazy access: nothing a context does before its first tool call may start B.
+  {
+    const deferred = new Map()
+    const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }
+    const lazy = lazyToolEnvironmentFiles(environment, toolEnvironmentFiles(b.ctx))
+    const lazyRoot = join(byRoot, 'lazy')
+    const before = b.calls.subprocess.length
+    await lazy.ensureDirectory(join(lazyRoot, 'dir'))
+    await lazy.writeText(join(lazyRoot, 'note.txt'), 'first')
+    await lazy.writeText(join(lazyRoot, 'note.txt'), 'second')
+    check(b.calls.subprocess.length === before, 'while B is down, directory creation and writes do not reach B')
+    check(deferred.size === 2, 'one deferred operation per path, the latest write winning')
+    check(await lazy.readText(join(lazyRoot, 'note.txt')) === 'second', 'a pending write is readable from this host meanwhile')
+    check((await lazy.lstat(join(lazyRoot, 'note.txt')))?.type === 'file', 'a pending write stats as a file')
+    check((await lazy.listDir(join(lazyRoot, 'dir'))).length === 0, 'a pending directory lists as empty')
+    await assert.rejects(lazy.readText(join(lazyRoot, 'unknown.txt')), { code: 'ENOENT' }); checks += 1
+    await assert.rejects(lazy.listDir(join(byRoot, '.sessions')), { code: 'ENOENT' }); checks += 1
+    environment.connected = true
+    for (const operation of deferred.values()) await operation()
+    check((await readFile(b.toHost(join(lazyRoot, 'note.txt')), 'utf8')) === 'second', 'deferred writes land on B once it connects, latest content only')
+    check((await stat(b.toHost(join(lazyRoot, 'dir')))).isDirectory(), 'deferred directories are created on B once it connects')
+    check((await lazy.listDir(join(byRoot, '.sessions'))).some(entry => entry.name === 's1'), 'with B connected reads go to B')
+    environment.connected = false
+    check((await lazy.listDir(join(byRoot, '.sessions'))).some(entry => entry.name === 's1'), 'after B pauses, the last listing read from B is still served')
+  }
   check(b.calls.fs.every(([, path]) => typeof path !== 'string' || !path.startsWith(b.host)), 'the tool environment only ever saw its own paths')
   console.log(`tool-environment verification passed (${String(checks)} checks): user-tree I/O via ctx.fs/ctx.subprocess, configurable roots, dshHome, worker history`)
 } finally { await b.dispose() }

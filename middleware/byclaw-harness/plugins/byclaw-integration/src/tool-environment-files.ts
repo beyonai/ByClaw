@@ -82,6 +82,101 @@ const WRITE_EXCLUSIVE = 'umask 077 && mkdir -p -- "$(dirname -- "$1")" && set -C
 const WRITE_REPLACE = 'umask 077 && mkdir -p -- "$(dirname -- "$1")" && t="$1.$2.tmp" && '
   + 'if cat > "$t"; then mv -f -- "$t" "$1"; else rm -f -- "$t"; exit 1; fi'
 
+/**
+ * The reconnecting tool-environment facade (`ctx.ssh` from dsh-tool-env), where present.
+ * `connected` never starts B; `whenConnected` runs work now or once B connects.
+ */
+export interface LazyToolEnvironment {
+  readonly connected: boolean
+  whenConnected(key: string, operation: () => Promise<void>): Promise<void>
+}
+
+export function lazyToolEnvironment(ctx: Pick<Context, 'get'>): LazyToolEnvironment | undefined {
+  const ssh = ctx.get('ssh') as Partial<LazyToolEnvironment> | undefined
+  return ssh !== undefined && typeof ssh.whenConnected === 'function' && typeof ssh.connected === 'boolean'
+    ? ssh as LazyToolEnvironment : undefined
+}
+
+/**
+ * File access that never starts B. Only a tool call starts the tool environment,
+ * so a context's boot and a turn's start must not touch B: writes and directory
+ * creation are handed to the facade to run once B connects (latest write per
+ * path wins); reads come from B when it is connected, otherwise from what this
+ * host last read or wrote there, and are `ENOENT` when it has neither.
+ */
+export function lazyToolEnvironmentFiles(environment: LazyToolEnvironment, files: ToolEnvironmentFiles): ToolEnvironmentFiles {
+  const texts = new Map<string, string>()
+  const listings = new Map<string, Array<{ name: string; type: 'file' | 'directory' | 'other' }>>()
+  const entries = new Map<string, { type: ToolEnvironmentEntryType; size?: number } | undefined>()
+  const forget = (path: string): void => {
+    texts.delete(path); entries.delete(path); listings.delete(path)
+    const parent = path.slice(0, Math.max(path.lastIndexOf('/'), 0)) || '/'
+    listings.delete(parent)
+  }
+  const absent = (path: string): Error => coded(`ENOENT: no such file or directory, ${path} (tool environment not started)`, 'ENOENT')
+  return {
+    async realpath(path) {
+      if (environment.connected) return files.realpath(path)
+      if (texts.has(path) || listings.has(path)) return path
+      throw absent(path)
+    },
+    async lstat(path) {
+      if (environment.connected) {
+        const entry = await files.lstat(path)
+        entries.set(path, entry)
+        return entry
+      }
+      if (entries.has(path)) return entries.get(path)
+      if (texts.has(path)) return { type: 'file' }
+      if (listings.has(path)) return { type: 'directory' }
+      return undefined
+    },
+    async ensureDirectory(path) {
+      listings.set(path, listings.get(path) ?? [])
+      await environment.whenConnected(`mkdir:${path}`, () => files.ensureDirectory(path))
+    },
+    async readText(path) {
+      if (environment.connected) {
+        const text = await files.readText(path)
+        texts.set(path, text)
+        return text
+      }
+      const cached = texts.get(path)
+      if (cached === undefined) throw absent(path)
+      return cached
+    },
+    async readBytes(path, maxBytes) {
+      if (environment.connected) return files.readBytes(path, maxBytes)
+      const cached = texts.get(path)
+      if (cached === undefined) throw absent(path)
+      return Buffer.from(cached, 'utf8').subarray(0, maxBytes)
+    },
+    async listDir(path) {
+      if (environment.connected) {
+        const listing = await files.listDir(path)
+        listings.set(path, listing)
+        return listing
+      }
+      const cached = listings.get(path)
+      if (cached === undefined) throw absent(path)
+      return cached
+    },
+    async writeText(path, content, options = {}) {
+      forget(path)
+      texts.set(path, content)
+      await environment.whenConnected(`write:${path}`, () => files.writeText(path, content, options))
+    },
+    async writeBytes(path, bytes, options = {}) {
+      forget(path)
+      await environment.whenConnected(`write:${path}`, () => files.writeBytes(path, bytes, options))
+    },
+    async remove(path) {
+      forget(path)
+      await environment.whenConnected(`write:${path}`, () => files.remove(path))
+    },
+  }
+}
+
 /** Build tool-environment file access from a context; providers are looked up per call. */
 export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironmentFiles {
   const fs = (): ToolEnvironmentFileSystem => {

@@ -38,7 +38,7 @@ import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
-import { toolEnvironmentFiles } from './tool-environment-files.ts'
+import { lazyToolEnvironment, lazyToolEnvironmentFiles, toolEnvironmentFiles } from './tool-environment-files.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
 import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
@@ -560,7 +560,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ...localE2eStorageRoot === undefined ? {} : { localE2eStorageRoot },
   })
   // With a tool environment the user tree exists only there; never touch it through this host's `node:fs`.
-  const userFiles = config.workspaceOnToolEnvironment ? toolEnvironmentFiles(ctx) : undefined
+  // ...and nothing a context does before its first tool call may start B: boot-time projections and
+  // session directories wait in the tool-environment facade until B connects for a tool.
+  const lazyEnvironment = config.workspaceOnToolEnvironment ? lazyToolEnvironment(ctx) : undefined
+  const userFiles = config.workspaceOnToolEnvironment
+    ? (lazyEnvironment === undefined ? toolEnvironmentFiles(ctx) : lazyToolEnvironmentFiles(lazyEnvironment, toolEnvironmentFiles(ctx)))
+    : undefined
   const agentSkillRoot = config.agentSkillRoot?.trim()
     ? resolve(config.agentSkillRoot.trim())
     : userFiles === undefined ? AGENT_SKILLS_ROOT : agentSkillRootFor(byRoot)
@@ -1180,6 +1185,16 @@ async function activate(ctx: Context, config: Config): Promise<void> {
 
 /** `mkdir -p` through the context's subprocess provider, i.e. on the tool environment. */
 async function ensureRemoteDirectory(ctx: Context, path: string): Promise<void> {
+  const environment = lazyToolEnvironment(ctx)
+  if (environment !== undefined && !environment.connected) {
+    // A turn may begin without B; the directory exists by the time a tool needs it.
+    await environment.whenConnected(`mkdir:${path}`, () => ensureRemoteDirectoryNow(ctx, path))
+    return
+  }
+  await ensureRemoteDirectoryNow(ctx, path)
+}
+
+async function ensureRemoteDirectoryNow(ctx: Context, path: string): Promise<void> {
   const subprocess = ctx.get('subprocess') as { spawn(spec: unknown): { done: Promise<{ exitCode: number | null }>; collected: { stderr?: { readFrom(offset: number): { text: string } } } } } | undefined
   if (subprocess === undefined) throw new Error('byclaw-dsh: no subprocess provider to create the session directory')
   const handle = subprocess.spawn({

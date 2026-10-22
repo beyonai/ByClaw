@@ -55,6 +55,19 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
 A and B must run the **same image**: A computes the helper and PTC bootstrap
 digests from its own installation, and the helper refuses a mismatch.
 
+## When B starts
+
+Only a tool call starts B. A context's boot (resource projection, Skill views,
+media projections) and the start of a turn (the session directory) do not: the
+connection facade (`ctx.ssh`) exposes `connected` and `whenConnected(key, op)`,
+and the integration plugin hands B-bound writes and directory creation to it,
+so they run once B connects for a tool, before that tool runs. Reads of the
+user tree while B is down come from what this host last read or wrote there
+and are `ENOENT` otherwise, so a model-only answer never waits for a sandbox.
+After a failed launch the `byclaw-be` backend waits before trying again
+(1 s, doubling to 30 s) and reports the cause instead of calling BE on every
+operation.
+
 ## Backends
 
 | `BYCLAW_DSH_TOOL_ENV` | Who creates B | Idle pause | Where the keys come from |
