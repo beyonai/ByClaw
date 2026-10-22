@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -118,6 +119,12 @@ public class DigitalEmployeeGovernanceService {
     public boolean canAdministerOfficial(SsResource resource) {
         return isOfficialCopy(resource) && !isProtected(resource) && isAdministrator()
             && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
+    }
+
+    /** 企业副本下架后允许创建者或管理员注销；仅有管理授权不获得注销资格。 */
+    public boolean canDeleteOfficial(SsResource resource) {
+        return canMaintainOfficial(resource)
+            && Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
     }
 
     public static void requireEnterpriseCreationAllowed(String ownerType) {

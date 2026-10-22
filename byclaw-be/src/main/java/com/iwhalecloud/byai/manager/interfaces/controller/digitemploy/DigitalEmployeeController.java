@@ -9,6 +9,7 @@ import java.util.Map;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.gateway.channels.service.ChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.ChannelServiceFactory;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
@@ -27,6 +28,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -69,6 +71,13 @@ public class DigitalEmployeeController {
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+
+    /** 配置校验属于可修正的业务错误，在本控制器处理，避免被通用异常处理器替换为系统错误。 */
+    @ExceptionHandler(DingtalkRobotConfigValidationException.class)
+    public ResponseUtil<Void> handleDingtalkRobotConfigValidation(DingtalkRobotConfigValidationException exception) {
+        logger.warn("DingTalk robot configuration rejected: {}", exception.getMessage());
+        return ResponseUtil.fail(I18nUtil.get(exception.getMessageKey(), exception.getMessageArguments()));
+    }
 
     /**
      * 查询列表

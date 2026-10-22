@@ -8,6 +8,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationResources.Dependency;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
@@ -20,6 +23,7 @@ import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeePublicationRequest;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -35,6 +39,8 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Separate candidate and live versions. Every transition is serialized and revision checked.
@@ -61,6 +67,8 @@ public class EmployeePublicationApplicationService {
     private final SequenceService sequence;
     private final TransactionTemplate transaction;
     private final DigEmployeeChangeEventPublisher events;
+    private final DingtalkRobotConfigService robotConfigService;
+    private final RobotChannelRegistryCoordinator robotChannels;
 
     public Map<String, Boolean> capabilities() {
         boolean enabled = governance.publicationEnabled();
@@ -211,7 +219,12 @@ public class EmployeePublicationApplicationService {
                 target = publications.lockResource(target.getResourceId(), tenant);
                 requireUpdateTarget(target, sourceId, tenant);
             }
-            DigitalEmployeeDTO snapshot = sanitize(readConfiguration(resourceId), target == null ? requested : target);
+            DigitalEmployeeDTO configuration = readConfiguration(resourceId);
+            if (fromPersonalUpdate) {
+                // 从个人员工发起更新时沿用企业副本自己的机器人，不能带入个人凭证或清空企业绑定。
+                configuration.setMachineChannel(readConfiguration(target.getResourceId()).getMachineChannel());
+            }
+            DigitalEmployeeDTO snapshot = sanitize(configuration, target == null ? requested : target);
             // 更新沿用 B 的名称，个人名称修改不会自动重命名企业副本。
             if (fromPersonalUpdate) snapshot.setResourceName(target.getResourceName());
             DigitalEmployeePublication publication = new DigitalEmployeePublication();
@@ -472,6 +485,9 @@ public class EmployeePublicationApplicationService {
                 reviewStamp(publication, request.getComment());
                 advance(publication);
                 auth.invalidateResourceAuthorizationCachesAfterCommit(official.getResourceId(), "DIG_EMPLOYEE");
+                if (!fresh) {
+                    refreshRobotChannelsAfterCommit(official.getResourceId());
+                }
                 events.publishAfterCommitOrNow(fresh ? DigEmployeeChangeEventType.DIG_EMPLOYEE_CREATED : DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, official.getResourceId());
                 return view(publication);
             });
@@ -553,6 +569,9 @@ public class EmployeePublicationApplicationService {
         requireEmployee(basis);
         if (!Objects.equals(basis.getResourceStatus(), 2)) throw new BaseException("employee.publication.sourceEmployeeInactive");
         DigitalEmployeeDTO snapshot = sanitize(JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class), basis);
+        if (DigitalEmployeeGovernanceService.isOfficialCopy(basis)) {
+            validateRobotConfiguration(snapshot, basis);
+        }
         if (publication.getOfficialId() == null) {
             snapshot.setResourceName(EmployeePublicationNames.enterpriseName(snapshot.getResourceName(), publication.getEmployeeName()));
             publication.setEmployeeName(snapshot.getResourceName());
@@ -571,7 +590,7 @@ public class EmployeePublicationApplicationService {
         if ("FROM_THIRD".equals(input.getCreateType()) || (StringUtils.isNotBlank(input.getAgentDevType()) && !"byai".equals(input.getAgentDevType()))) throw new BaseException("employee.publication.thirdPartyDenied");
         JSONObject raw = (JSONObject) JSON.toJSON(input);
         JSONObject safe = new JSONObject();
-        // Explicit transferable fields. Personal channels, memory, credentials, URLs and runtime mirrors are excluded.
+        // Explicit transferable fields. Personal channels, memory, URLs and runtime mirrors are excluded.
         for (String key : List.of("resourceName", "resourceDesc", "avatar", "sample", "tags", "catalogId", "agentType",
             "prologue", "ability", "constraints", "faqs", "roleAttributes", "processingFlow", "personalityDimensions", "wordPreferences",
             "sentenceAndTone", "terminal", "coreCompetencies", "corePersonaDefinition", "advancedSettings", "ttsModelId", "relIds", "relSkills",
@@ -584,7 +603,9 @@ public class EmployeePublicationApplicationService {
         result.setCreateType("FROM_MANUALLY");
         result.setIntegrationType("NONE");
         result.setHomeType("default");
-        result.setMachineChannel("[]");
+        // 仅企业副本更新允许维护渠道；首次发布仍不携带个人机器人及其凭证。
+        result.setMachineChannel(DigitalEmployeeGovernanceService.isOfficialCopy(basis)
+            ? StringUtils.defaultIfBlank(input.getMachineChannel(), "[]") : "[]");
         result.setOpenSuperHelper("N");
         result.setSkills("[]");
         if (StringUtils.isNotBlank(result.getPrologue())) {
@@ -604,6 +625,46 @@ public class EmployeePublicationApplicationService {
         if (result.getRelTools() == null) result.setRelTools(List.of());
         if (result.getRelResourceInfoList() == null) result.setRelResourceInfoList(List.of());
         return result;
+    }
+
+    /** 审核前复用渠道格式及占用校验，只检查候选配置，不启动连接或修改在用绑定。 */
+    private void validateRobotConfiguration(DigitalEmployeeDTO snapshot, SsResource basis) {
+        ResourceExtDigEmployeeDto candidate = new ResourceExtDigEmployeeDto();
+        BeanUtils.copyProperties(basis, candidate);
+        SsResExtDigEmployee extension = new SsResExtDigEmployee();
+        extension.setResourceId(basis.getResourceId());
+        extension.setMachineChannel(snapshot.getMachineChannel());
+        candidate.setSsResExtDigEmployee(extension);
+        try {
+            robotConfigService.validateAndBuildRobotConfigs(candidate);
+        } catch (DingtalkRobotConfigValidationException error) {
+            throw new BaseException(I18nUtil.get(error.getMessageKey(), error.getMessageArguments()));
+        }
+    }
+
+    /** 所有渠道均在提交完成后刷新，避免审核回滚时提前切换飞书等外部连接。 */
+    private void refreshRobotChannelsAfterCommit(Long resourceId) {
+        Runnable refresh = () -> {
+            try {
+                robotChannels.refreshForResource(resourceId);
+            } catch (RuntimeException error) {
+                // 数据已经提交，连接刷新失败不能把已发布申请误报为发布失败。
+                log.error("刷新已发布员工机器人连接失败，resourceId={}", resourceId, error);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    // 同步回调已清理，渠道注册器不会再向已经完成的事务追加 afterCommit 回调。
+                    if (status == STATUS_COMMITTED) {
+                        refresh.run();
+                    }
+                }
+            });
+        } else {
+            refresh.run();
+        }
     }
 
     private Detail view(DigitalEmployeePublication publication) {

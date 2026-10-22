@@ -641,6 +641,8 @@ const ConfigForm = (props) => {
   });
   const formOwnerType = Form.useWatch('ownerType', { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
+  // 企业副本的机器人可随更新申请维护；首次发布仍不复制个人渠道凭证。
+  const showRobotConfiguration = !publicationMode || effectiveOwnerType === 'enterprise';
   const [bundledSkillTab, setBundledSkillTab] = useState('personal');
   // 企业员工只能配置企业技能，表单归属变化时也不能保留个人查询范围。
   const bundledSkillOwnerType = effectiveOwnerType === 'enterprise' ? 'enterprise' : bundledSkillTab;
@@ -984,8 +986,10 @@ const ConfigForm = (props) => {
         return [...prev, nextItem];
       });
       setRobotEditingIndex(null);
+      // 机器人使用独立状态，需主动标记修改，确保更新申请先保存再提交。
+      onValuesChange?.();
     },
-    [robotEditingIndex, setRobotConfigs]
+    [onValuesChange, robotEditingIndex, setRobotConfigs]
   );
 
   const handleRobotModalOpenChange = useCallback((nextOpen) => {
@@ -2974,7 +2978,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置机器人 */}
-              {!publicationMode && robotChannelOptions.length > 0 && (
+              {showRobotConfiguration && robotChannelOptions.length > 0 && (
                 <div className={styles.robotSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -3017,7 +3021,11 @@ const ConfigForm = (props) => {
                           </div>
                           <div className={classnames(styles.skillActions, styles.marginLeftAuto)}>
                             {isReadOnly ? (
-                              <EyeOutlined
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EyeOutlined />}
+                                aria-label={intl.formatMessage({ id: 'common.view' })}
                                 onClick={() => {
                                   setRobotEditingIndex(index);
                                   setRobotItem(item);
@@ -3026,19 +3034,27 @@ const ConfigForm = (props) => {
                               />
                             ) : (
                               <Space>
-                                <FormOutlined
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<FormOutlined />}
+                                  aria-label={intl.formatMessage({ id: 'common.edit' })}
                                   onClick={() => {
                                     setRobotEditingIndex(index);
                                     setRobotItem(item);
                                     setRobotModalOpen(true);
                                   }}
                                 />
-                                <AntdIcon
-                                  type="icon-a-Deleteshanchu"
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<AntdIcon type="icon-a-Deleteshanchu" />}
+                                  aria-label={intl.formatMessage({ id: 'common.delete' })}
                                   onClick={() => {
                                     setRobotConfigs((prev) =>
                                       prev.filter((it, currentIndex) => currentIndex !== index)
                                     );
+                                    onValuesChange?.();
                                   }}
                                 />
                               </Space>
@@ -3731,7 +3747,7 @@ const ConfigForm = (props) => {
         onConfirm={handleToolSelectorConfirm}
       />
       <RobotModal
-        open={robotModalOpen}
+        open={showRobotConfiguration && !isEmployeeGroup && robotModalOpen}
         setOpen={handleRobotModalOpenChange}
         onOk={handleRobotModalOk}
         robotChannelLabelMap={robotChannelLabelMap}
