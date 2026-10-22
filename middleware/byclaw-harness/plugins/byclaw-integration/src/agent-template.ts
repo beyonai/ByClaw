@@ -1,5 +1,7 @@
 /** Durable, transport-neutral agent templates synchronized from ByClaw. */
 
+import type { ByClawSkillRef } from './types.ts'
+import { mapConcurrent } from './startup-concurrency.ts'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
@@ -12,6 +14,8 @@ export const DSH_AGENT_TEMPLATE_VERSION = 'dsh.agent-template/v1' as const
 export interface DshAgentTemplateSkill {
   code: string
   path: string
+  /** Authorized association only; fetch and version-check when this agent queries Skills. */
+  ref?: ByClawSkillRef
 }
 
 /** One member reference carried by an expert-team leader template. */
@@ -146,10 +150,6 @@ export async function listAgentTemplates(catalogDir: string): Promise<DshAgentTe
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   }
-  const templates: DshAgentTemplate[] = []
-  for (const name of names) {
-    const template = await readAgentTemplate(catalogDir, name.slice(0, -5))
-    if (template !== undefined) templates.push(template)
-  }
-  return templates
+  const templates = await mapConcurrent(names, 8, name => readAgentTemplate(catalogDir, name.slice(0, -5)))
+  return templates.filter((template): template is DshAgentTemplate => template !== undefined)
 }

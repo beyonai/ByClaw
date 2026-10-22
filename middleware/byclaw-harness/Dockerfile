@@ -97,6 +97,28 @@ RUN set -eux; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
+# Fixed connector tools have an independent cache, unaffected by plugin edits.
+FROM ${BASE_IMAGE} AS connector-tools
+USER root
+ARG NPM_REGISTRY
+ENV npm_config_registry=${NPM_REGISTRY}
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.85
+COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
+# Shared connector Skills need these executables in the final image. Keep their
+# versions aligned with OpenClaw and check access as the DSH runtime user.
+RUN set -eu; \
+    npm install --global --ignore-scripts --no-audit --no-fund --update-notifier=false "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    node /tmp/lark-mirror-first.mjs "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
+    node "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
+    wecom_version="$(wecom-cli --version)"; \
+    test "${wecom_version}" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    lark_version="$(lark-cli --version)"; \
+    test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    su -s /bin/sh byclaw -c 'wecom-cli --help >/dev/null && lark-cli --help >/dev/null'; \
+    npm cache clean --force
+
+
 # --- Final runtime: pristine DSH base + packaged plugins + builtin payload ---
 FROM ${BASE_IMAGE} AS runtime
 
@@ -114,10 +136,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && r
 
 ARG BYCLI_VERSION=2.1.72
 ARG BYCLI_EXTENSION_VERSION=2.1.27
-ARG WECOM_CLI_VERSION=0.1.9
-ARG LARKSUITE_CLI_VERSION=1.0.85
 
 ENV DSH_HOME=/home/byclaw/.dsh \
+    BYCLAW_DSH_CLI_ENTRY=apps/cli/lib/bin.js \
     BYCLAW_DSH_MANAGED_HOME=/opt/byclaw/dsh-managed \
     BYCLAW_BROWSER_SOCKET=/run/byclaw-browser/browserd.sock \
     BYCLAW_BROWSER_DOWNLOAD_ROOT=/run/byclaw-browser/downloads \
@@ -125,6 +146,7 @@ ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_BROWSER_IDLE_MS=30000 \
     BYCLI_BROWSER_IDLE_TIMEOUT=900 \
     BYCLI_BRIDGE_BOOTSTRAP_SCRIPT=/opt/byclaw/builtin/skills/bycli/scripts/bridge-bootstrap.mjs \
+    BYCLAW_BROWSER_STARTUP=on-demand \
     BYCLAW_BROWSER_VIEWER=shared-novnc \
     BYCLAW_BROWSER_USER_DATA_DIR=/home/byclaw/.dsh/browser/user-data \
     BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension \
@@ -207,7 +229,7 @@ RUN set -eux; \
         bundle_count=$((bundle_count + 1)); \
     done <"${BYCLAW_DSH_MANAGED_HOME}/plugins/.bundle-names"; \
     test "${bundle_count}" -gt 0; \
-    DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" pnpm dsh --profile web --dump-config >/tmp/dsh-web-config.yml; \
+    DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" node apps/cli/lib/bin.js --profile web --dump-config >/tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+logger-console[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+byclaw-dsh[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+devflow-artifact-gate[[:space:]]*$' /tmp/dsh-web-config.yml; \
@@ -245,6 +267,8 @@ RUN python -m pip install --no-cache-dir \
 # not part of the copied skill payload or the generic DSH base.
 COPY middleware/byclaw-harness/scripts/install-search-runtime.sh middleware/byclaw-harness/scripts/searxng-cli-constraints.txt /tmp/byclaw-search-runtime/
 COPY middleware/byclaw-harness/scripts/searxng-cli/ /tmp/byclaw-search-runtime/searxng-cli/
+# Optional mounted wheelhouse; versions remain constrained by the lock-derived file.
+ARG SEARXNG_WHEELHOUSE
 RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
         /tmp/byclaw-search-runtime/searxng-cli/searxng_pack_settings.yml \
         /tmp/byclaw-search-runtime/searxng-cli-constraints.txt \
@@ -252,16 +276,10 @@ RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
     && su -s /bin/sh byclaw -c 'searxng-cli --list-engines >/dev/null' \
     && rm -rf /tmp/byclaw-search-runtime
 
-# Shared connector Skills need these executables in the final image. Keep their
-# versions aligned with OpenClaw and check access as the DSH runtime user.
-RUN set -eu; \
-    npm install --global "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
-    wecom_version="$(wecom-cli --version)"; \
-    test "${wecom_version}" = "wecom-cli ${WECOM_CLI_VERSION}"; \
-    lark_version="$(lark-cli --version)"; \
-    test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
-    su -s /bin/sh byclaw -c 'wecom-cli --help >/dev/null && lark-cli --help >/dev/null'; \
-    npm cache clean --force
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@wecom/ /opt/nvm/current/lib/node_modules/@wecom/
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/nvm/current/lib/node_modules/@larksuite/
+RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli \
+    && ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli
 
 RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
     && test "$(bycli --version)" = "${BYCLI_VERSION}" \
@@ -296,7 +314,8 @@ RUN set -eux; \
         BYCLAW_TEST_SECRET_HELPER=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/secret-fd.js \
         python3 /tmp/docker-entrypoint-fd-verify.py; \
     rm -f /tmp/browser-download-permissions-verify.py \
-        /tmp/browser-supervisor-verify.py /tmp/docker-entrypoint-fd-verify.py
+        /tmp/browser-supervisor-verify.py /tmp/docker-entrypoint-fd-verify.py; \
+    chown -R byclaw:byclaw /home/byclaw/.dsh
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc

@@ -161,7 +161,9 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 | `BYCLAW_DSH_BUSY_ENTER` | 可选；需启用 Bash provider bundle | 繁忙时 Enter 默认行为：`queue`（默认，排队发送）或 `steer`（插话发送）；已保存的界面设置优先，修改后重启 DSH |
 | `BYCLAW_BROWSER_VIEWER` | 可选；Docker Browser Use | Docker 默认 `shared-novnc`，常驻一个持久 Chromium/VNC 桌面；`none` 为无头共享模式；`novnc` 保留旧的每会话独立桌面 |
 | `BYCLAW_BROWSER_IDLE_MS` | 可选；Docker Browser Use | `none` 模式最后一个 Context 关闭后的 Chromium 保温时间；`shared-novnc` 随 browserd 常驻 |
-| `BYCLAW_BYCLI_ENABLED` | 可选；Docker Browser Use | 默认 `true`；在 `shared-novnc` 下启动前强制等待 byCLI 扩展连接，并在运行期监控和自愈桥接 |
+| `BYCLAW_BYCLI_ENABLED` | 可选；Docker Browser Use | 默认 `true`；首次使用浏览器时等待扩展连接，之后监控和自愈桥接 |
+| `BYCLAW_BROWSER_STARTUP` | 可选；Docker Browser Use | 镜像默认 `on-demand`，首次调用再启动浏览器与 byCLI；`eager` 恢复启动前等待 |
+| `BYCLAW_DSH_CLI_ENTRY` | 可选；容器入口 | 默认 `apps/cli/lib/bin.js`，直接运行构建产物；源码回归可设 `apps/cli/src/bin.ts` |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Redis 动态模型模式必需 | 解密 ByClaw 模型鉴权；只保存在进程环境中 |
 | `BYCLAW_LLM_IDLE_TIME` | 可选 | 动态模型连接空闲超时秒数，默认 `600` |
 
@@ -238,7 +240,7 @@ dsh --profile web --dump-config
 dsh web --host 0.0.0.0 --no-open
 ```
 
-`--dump-config` 应显示 `agent-teams`、`byclaw-dsh`、`better-sidebar`、`dsh-diff-viewer`、`codegraph-mcp`、`dsh-codegraph`、`byclaw-lan-web-startup`、`byclaw-bash-provider`、`byclaw-browser-use`，以及从 `devflow` 到 `devflow-ui` 的 Devflow 运行项。Browser Use 只向模型暴露一个有状态的 `browser` 工具，私有租约与 capability 不进入模型上下文。Integration 启动时会先完成 Redis 订阅和一次阻塞式资源同步，再上线 Worker。
+`--dump-config` 应显示 `agent-teams`、`byclaw-dsh`、`better-sidebar`、`dsh-diff-viewer`、`codegraph-mcp`、`dsh-codegraph`、`byclaw-lan-web-startup`、`byclaw-bash-provider`、`byclaw-browser-use`，以及从 `devflow` 到 `devflow-ui` 的 Devflow 运行项。Browser Use 只向模型暴露一个有状态的 `browser` 工具，私有租约与 capability 不进入模型上下文。Integration 先完成 Redis 订阅、授权资料与 Skill 关联索引同步，再上线 Worker；业务 Skill 的版本检查和内容下载在查询时执行。
 
 Browser Use 包含真实 Chromium E2E、每会话桌面管理器及 noVNC 路由测试。`novnc` 模式下每个活跃 session 拥有独立 Chromium/X display/VNC 目标，8081 按可选 `sessionId` 路由；省略时默认选择最近创建且仍存活的 session。开发主机没有 Docker CLI，完整镜像和 Linux VNC 联调需在 Docker/CI 执行。`Dockerfile.base` 已包含 Xvfb/x11vnc/noVNC，必须先重建基础镜像再构建业务镜像。
 
@@ -255,3 +257,17 @@ CodeGraph 运行态检查要求使用 `plugins/dsh-codegraph/package.json` 声�
 ## 开发
 
 所有维护插件都从 DSH 根工作区执行验证。修改后运行覆盖对应包的最小命令；文档和包级行为应与包元数据、服务注入列表和 bundle patch 保持一致。
+
+### 启动与 Skill 懒加载
+
+镜像构建阶段编译 DSH 和全部插件，运行时直接执行编译后的 CLI。浏览器、桌面和 byCLI 桥接默认在首次私有 browser 请求或受管 byCLI 浏览器命令时激活；首次请求等待激活完成，后续复用。
+
+Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill 关联索引。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，刷新后的旧代际结果不能重新发布。
+
+内置 Skill 仍从镜像本地加载；专家团临时作用域员工在实际调用时准备。`allowSkillSyncFailure` 决定单个 Skill 失败时跳过还是拒绝查询，之后可重试。首次 Skill 查询承担网络耗时，Worker ready 不代表所有 Skill 已预热。
+
+构建默认使用 `NPM_REGISTRY=https://registry.npmmirror.com`。企业微信/飞书 CLI 在独立 `connector-tools` 阶段缓存；飞书二进制改为阿里镜像优先、GitHub 兜底，仍执行官方 SHA-256 校验。插件变更不会使这个下载阶段失效。
+
+[启动优化实测、复测步骤与验收边界](docs/startup-2026-10-22/report.md)
+
+`SEARXNG_WHEELHOUSE` 只是可选的构建参数，不需要写进 `.env`。正常构建无需增加参数或挂载，仍使用原来的清华/PyPI 在线安装路径。仅显式传入该参数并挂载 wheel 目录时启用离线安装；目录缺包会报错，不会偷偷切换版本。该参数不写入运行时 ENV，镜像启动不依赖构建机器上的 wheel 目录。

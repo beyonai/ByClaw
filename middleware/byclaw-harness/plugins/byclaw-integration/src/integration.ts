@@ -1,5 +1,6 @@
 /** Projection from authorized ByClaw resources to reusable DSH templates. */
 
+import { mapConcurrent } from './startup-concurrency.ts'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -240,6 +241,8 @@ export async function projectByClawResourcesToTemplates(options: {
   resolveModel?: (bindingId: string, modelId?: string) => Promise<ProjectedByClawModelSelection>
   generationLease?: GenerationLease
   projectionConcurrency?: number
+  deferSkillSync?: boolean
+  onPhase?: (phase: string, elapsedMs: number) => void
   allowSkillSyncFailure?: boolean
   skillSyncTimeoutMs?: number
   skillSyncAttempts?: number
@@ -250,6 +253,8 @@ export async function projectByClawResourcesToTemplates(options: {
   /** Prepare a complete in-memory Skill view from the atomically updated cache; commit it after template publication. */
   prepareSkillGeneration?: (templates: readonly DshAgentTemplate[], skillRoot: string) => Promise<() => void>
 }): Promise<ProjectedByClawTemplates> {
+  const startedAt = performance.now()
+  const phase = (name: string): void => options.onPhase?.(name, Math.round(performance.now() - startedAt))
   const liveAgentTemplates = join(resolve(options.agentTemplateDir), 'templates')
   const liveTeamTemplates = join(resolve(options.teamCatalogDir), 'templates')
   const liveSkillCache = resolve(options.cacheRoot)
@@ -287,6 +292,7 @@ export async function projectByClawResourcesToTemplates(options: {
       }
     }
 
+    phase('stage-ready')
     const direct = new Set(options.resources.directEmployeeIds)
     const employeesById = new Map(options.resources.employees.map(employee => [employee.id, employee]))
     const resolvedGroupRuntimes = await Promise.all(
@@ -322,6 +328,7 @@ export async function projectByClawResourcesToTemplates(options: {
       ))
       return false
     })
+    phase('groups-ready')
     const candidateEmployeeIdSet = new Set([
       ...options.resources.directEmployeeIds,
       ...candidateGroups.flatMap(group => (
@@ -371,6 +378,7 @@ export async function projectByClawResourcesToTemplates(options: {
     ])
     const acceptedEmployees = candidateEmployees.filter(employee => acceptedEmployeeIdSet.has(employee.id))
     const acceptedEmployeeIds = acceptedEmployees.map(employee => employee.id)
+    phase('models-ready')
     const skillRefs = new Map(
       acceptedEmployees.flatMap(employee => employee.skills.map(ref => [ref.code, ref])),
     )
@@ -385,7 +393,9 @@ export async function projectByClawResourcesToTemplates(options: {
       attempts: options.skillSyncAttempts,
       retryDelayMs: options.skillSyncRetryDelayMs,
     }))
-    const synchronizedSkills = await Promise.all([...skillRefs.values()].map(skill => limit(async () => {
+    const synchronizedSkills = options.deferSkillSync
+      ? [...skillRefs.values()].map(skill => [skill.code, byClawSkillCacheDir(liveSkillCache, skill.code)] as const)
+      : await Promise.all([...skillRefs.values()].map(skill => limit(async () => {
       try {
         const livePath = resolve(await sync(skill, liveSkillCache))
         const expectedLivePath = byClawSkillCacheDir(liveSkillCache, skill.code)
@@ -402,6 +412,7 @@ export async function projectByClawResourcesToTemplates(options: {
     for (const synchronized of synchronizedSkills) {
       if (synchronized !== undefined) skillPaths.set(synchronized[0], synchronized[1])
     }
+    phase(options.deferSkillSync ? 'skill-index-ready' : 'skills-synchronized')
     const agents: DshAgentTemplate[] = []
     for (const employee of acceptedEmployees) {
       const template: DshAgentTemplate = {
@@ -413,7 +424,7 @@ export async function projectByClawResourcesToTemplates(options: {
         persona: employeePersona(employee),
         skills: employee.skills.flatMap(skill => {
           const path = skillPaths.get(skill.code)
-          return path === undefined ? [] : [{ code: skill.code, path }]
+          return path === undefined ? [] : [{ code: skill.code, path, ...(options.deferSkillSync ? { ref: skill } : {}) }]
         }),
         source: {
           system: 'byclaw',
@@ -427,7 +438,6 @@ export async function projectByClawResourcesToTemplates(options: {
           directlyAuthorized: direct.has(employee.id),
         },
       }
-      await writeAgentTemplate(stagedAgentCatalog, template)
       agents.push(template)
     }
 
@@ -486,10 +496,11 @@ export async function projectByClawResourcesToTemplates(options: {
           })),
         },
       }
-      await writeAgentTemplate(stagedAgentCatalog, template)
       agents.push(template)
     }
+    await mapConcurrent(agents, projectionConcurrency, template => writeAgentTemplate(stagedAgentCatalog, template))
     const publishSkills = await options.prepareSkillGeneration?.(agents, liveSkillCache)
+    phase('templates-prepared')
     await publishDirectories([
       { prepared: stagedTeamTemplates, target: liveTeamTemplates },
       { prepared: stagedAgentTemplates, target: liveAgentTemplates },
@@ -498,6 +509,7 @@ export async function projectByClawResourcesToTemplates(options: {
     // Keep Skills referenced by the previous template generation available until
     // the new files and in-memory view have both been committed.
     await removeRevokedSkills(liveSkillCache, retainedSkillCodes)
+    phase('published')
     return {
       agents,
       teamAdapters,
