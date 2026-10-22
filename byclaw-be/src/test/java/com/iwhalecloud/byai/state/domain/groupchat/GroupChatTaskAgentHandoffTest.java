@@ -15,6 +15,8 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -95,12 +97,25 @@ class GroupChatTaskAgentHandoffTest {
         verify(lifecycle, never()).startTurn(60L);
     }
 
-    @Test
-    void terminalTaskAndConcurrentTurnAreRejected() {
-        task.setStatus("PUBLISHED");
+    @ParameterizedTest
+    @ValueSource(strings = {"PUBLISHED", "CANCELLED"})
+    void terminalTaskCannotStartAnotherTurn(String status) {
+        task.setStatus(status);
         assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
         verify(lifecycle, never()).startTurn(60L);
-        task.setStatus("ACTIVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RUNNING", "WAITING_USER", "FAILED"})
+    void activeTaskDoesNotAddARunningStatusGate(String turnStatus) {
+        task.setTurnStatus(turnStatus);
+        assertThat(guard.beforeTurn(60L, 41L, null)).isEqualTo(101L);
+        // 普通发送流程决定是否接收输入，群任务不另查 Redis 运行态作为准入条件。
+        verify(running, never()).getRunning(60L);
+    }
+
+    @Test
+    void taskEndingDuringTurnRegistrationIsRejected() {
         when(lifecycle.startTurn(60L)).thenReturn((Long) null);
         assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
     }

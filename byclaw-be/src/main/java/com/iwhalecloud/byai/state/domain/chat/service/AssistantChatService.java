@@ -179,8 +179,8 @@ public class AssistantChatService {
     @WithSpan(value = "chat", inheritContext = false)
     public void chat(AssistantChatDto assistantChatDto, OutputStream outputStream, LoginInfo userInfo)
         throws IOException {
-        Long groupTaskTurnId = null;
         boolean groupTaskStarted = false;
+        if (assistantChatDto != null) assistantChatDto.setGroupTaskTurnId(null);
         Span span = Span.current();
         if (assistantChatDto != null && span != null && assistantChatDto.getSessionId() != null) {
             span.setAttribute("sessionId", assistantChatDto.getSessionId());
@@ -239,13 +239,6 @@ public class AssistantChatService {
                 }
             }
 
-            // 在解析实际执行 Agent 后校验接续权限，再原子占用任务 turn。
-            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
-            groupTaskTurnId = TenantRequestContextHolder.get() == null && taskGuard != null && assistantChatDto != null
-                ? taskGuard.beforeTurn(assistantChatDto.getSessionId(), assistantChatDto.getAgentId(),
-                    assistantChatDto.getTraceId()) : null;
-            assistantChatDto.setGroupTaskTurnId(groupTaskTurnId);
-
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
@@ -256,7 +249,9 @@ public class AssistantChatService {
             handleGeneralException(e, outputStream);
         } finally {
             // Asynchronous request return is not turn completion; only release a failed startup here.
-            if (groupTaskTurnId != null && !groupTaskStarted && assistantChatDto != null) {
+            // 参数准备通过普通聊天准入后才登记任务轮次；被原流程拒绝时没有占位需要释放。
+            Long groupTaskTurnId = assistantChatDto == null ? null : assistantChatDto.getGroupTaskTurnId();
+            if (groupTaskTurnId != null && !groupTaskStarted) {
                 GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
                 if (taskGuard != null) {
                     taskGuard.failTurnStart(assistantChatDto.getSessionId(), groupTaskTurnId);

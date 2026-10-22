@@ -176,6 +176,16 @@ public class ScriptService extends AbstractChatProcess {
 
         resolveRunningTraceState(ctx);
 
+        // 先沿用普通聊天准入，再替换任务轮次；被拒绝的新输入不能覆盖仍在执行的旧轮次。
+        // 群内派发及 CHAT_CONTINUATION 已有服务端 turn，继续使用原独立路径。
+        if (ctx.tenantContext == null && ctx.existingUserMessage == null && groupChatTaskGuardProvider != null) {
+            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+            if (taskGuard != null) {
+                ctx.assistantChatDto.setGroupTaskTurnId(taskGuard.beforeTurn(ctx.sessionId,
+                    ctx.assistantChatDto.getAgentId(), ctx.assistantChatDto.getTraceId()));
+            }
+        }
+
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }

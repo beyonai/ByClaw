@@ -364,6 +364,7 @@ public class GroupChatTaskService {
         ByaiGroupChatTask task = taskMapper.selectById(taskId);
         if (task == null) return null;
         Long turnId = sequenceService.nextVal();
+        // 只要求任务仍为 ACTIVE；替换轮次标识后，旧 trace 的迟到回调不能结束本轮。
         if (taskMapper.claimTurn(taskId, turnId, new Date()) != 1) {
             return null;
         }
