@@ -77,6 +77,14 @@ export function shouldRetainInteractionAfterAskFailure(options: {
   return options.requestEmitted && options.signalAborted
 }
 
+/** Keep the projected waiting-user state aligned with a durable interaction that survives shutdown. */
+export function shouldReleaseWaitingInteractionAfterAsk(options: {
+  requestEmitted: boolean
+  signalAborted: boolean
+}): boolean {
+  return !shouldRetainInteractionAfterAskFailure(options)
+}
+
 const ANSWER_SCRIPT = `-- BYCLAW_INTERACTION_ANSWER
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end

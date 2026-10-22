@@ -9,6 +9,7 @@ import {
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
   shouldRetainInteractionAfterAskFailure,
+  shouldReleaseWaitingInteractionAfterAsk,
 } from '../src/interaction-recovery.ts'
 
 assert.equal(
@@ -179,6 +180,16 @@ assert.equal(
   shouldRetainInteractionAfterAskFailure({ requestEmitted: false, signalAborted: false }),
   false,
   'a request that was never emitted must be cleaned up',
+)
+assert.equal(
+  shouldReleaseWaitingInteractionAfterAsk({ requestEmitted: true, signalAborted: true }),
+  false,
+  'a rendered durable interaction must keep the session projected as waiting_user after sandbox shutdown',
+)
+assert.equal(
+  shouldReleaseWaitingInteractionAfterAsk({ requestEmitted: true, signalAborted: false }),
+  true,
+  'a normally completed interaction must clear the projected waiting-user state',
 )
 
 console.log('interaction recovery verification passed')

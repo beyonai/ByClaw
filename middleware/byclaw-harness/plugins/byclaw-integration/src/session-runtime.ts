@@ -110,6 +110,7 @@ import {
   interactionAgentSessionId,
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
+  shouldReleaseWaitingInteractionAfterAsk,
   type ByClawInteractionStore,
 } from './interaction-recovery.ts'
 
@@ -2161,6 +2162,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
               `[ASK_USER_QUESTION_RECOVERY_TRACE] TOOL_ENTER session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId} question_ids=${questions.map(question => question.id).join(',')}`,
             )
             this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, true))
+            let requestEmitted = false
             try {
               const result = await this.questions.ask({
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
@@ -2202,6 +2204,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                     contentType: card.contentType,
                   },
                 )
+                requestEmitted = true
                 },
                 signal: exec.signal,
               })
@@ -2217,7 +2220,17 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                 })),
               }
             } finally {
-              this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, false))
+              const releaseWaitingInteraction = shouldReleaseWaitingInteractionAfterAsk({
+                requestEmitted,
+                signalAborted: exec.signal?.aborted === true,
+              })
+              if (releaseWaitingInteraction) {
+                this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, false))
+              } else {
+                this.ctx.logger.info(
+                  `[ASK_USER_QUESTION_RECOVERY_TRACE] WAITING_STATE_RETAINED session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId}`,
+                )
+              }
             }
           },
         }))
