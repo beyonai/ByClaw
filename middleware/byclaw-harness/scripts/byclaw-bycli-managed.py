@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -19,6 +20,20 @@ def main():
     enabled = os.environ.get('BYCLAW_BROWSER_JEV_ENABLED', '').strip().lower() in ('true', '1', 'yes', 'on')
     # Supervisor/bridge health must remain available while automation owns the browser.
     exempt = not args or args[0] in ('daemon', 'doctor', '--help', '-h', '--version', '-V', 'list')
+    if not exempt and os.environ.get('BYCLAW_BROWSER_STARTUP') == 'on-demand':
+        path = os.environ.get('BYCLAW_BROWSER_SOCKET', '/run/byclaw-browser/browserd.sock')
+        ready = Path(path + '.activated')
+        if not ready.exists():
+            # Connect to the private listener; supervisor owns browser/byCLI startup.
+            with socket.socket(socket.AF_UNIX) as trigger:
+                trigger.settimeout(3)
+                trigger.connect(path)
+            deadline = time.monotonic() + 120
+            while not ready.exists():
+                if time.monotonic() >= deadline or not Path(path).exists():
+                    print('browser-activation-failed', file=sys.stderr)
+                    return 69
+                time.sleep(0.05)
     command = ['/opt/nvm/current/bin/node', str(entry), *args]
     if not enabled or exempt:
         os.execv(command[0], command)

@@ -42,6 +42,7 @@ import {
   applyProjectedRootState,
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
+  hasChatStreamContext,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -1044,20 +1045,32 @@ function useChat(props: IProps) {
         if (!traceId) {
           return false;
         }
-        isContinuingRunningTrace = true;
+        isContinuingRunningTrace = hasChatStreamContext({ sessionId, traceId });
         if (!payload.traceId) {
           set(payload, 'traceId', traceId);
         }
       }
     }
-    // Resume always continues the answer identified by traceId/llmMessageId.
-    // A sandbox release clears the browser's running registry, but must not
-    // turn the interaction response into a new default-employee chat turn.
     if (isResumeChat) {
       if (!payload.traceId) {
         return false;
       }
-      isContinuingRunningTrace = true;
+    }
+    const isColdResume = isResumeChat && !isContinuingRunningTrace;
+    if (isResumeChat) {
+      console.info(
+        '[ASK_USER_QUESTION_RESUME_TRACE]',
+        JSON.stringify({
+          stage: 'resume_classified',
+          sessionId,
+          traceId: payload.traceId,
+          llmMessageId: payload.llmMessageId,
+          sessionRunning: chatSessionRuntimeManager.isSessionRunning(sessionId),
+          hasStreamContext: hasChatStreamContext({ sessionId, traceId: payload.traceId }),
+          isContinuingRunningTrace,
+          isColdResume,
+        })
+      );
     }
 
     await checkSessionStateBeforeSendQuery();
@@ -1088,6 +1101,7 @@ function useChat(props: IProps) {
     let _queryQuestion = queryQuestion;
     let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
+    let resumeTargetAnswer: IMessage | undefined;
 
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
@@ -1118,6 +1132,28 @@ function useChat(props: IProps) {
           set(msgOpt, 'queryMsg.fileList', files);
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
+      }
+      if (isColdResume) {
+        const llmMessageId = get(restPayload, 'llmMessageId');
+        resumeTargetAnswer = messageListRef.current.find(
+          (item) =>
+            item.fromBeyond &&
+            item.queryMsgId === inheritQryMsgId &&
+            (!llmMessageId || `${item.messageId}` === `${llmMessageId}`)
+        );
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_target_resolved',
+            sessionId,
+            traceId: payload.traceId,
+            inheritQryMsgId,
+            llmMessageId,
+            found: Boolean(resumeTargetAnswer),
+            answerMsgId: resumeTargetAnswer?.msgId,
+            answerMessageId: resumeTargetAnswer?.messageId,
+          })
+        );
       }
     }
 
@@ -1209,26 +1245,28 @@ function useChat(props: IProps) {
         })
         : [
           (() => {
-            const answerMsg = createMessage({
-              text: '',
-              fromBeyond: true,
-              messageState: IMessageState.Query,
-              queryMsgId: newQueryMsg.msgId,
-              agentId: _agentId,
-              sessionId,
-              agentType: _agentType,
-              agentCode: singleInlineAgent?.agentCode || undefined,
-              agentName: singleInlineAgent?.agentName || undefined,
-              resourceList: singleInlineAgent ? digitalEmployeeResources : undefined,
-              metadata: _agentId
-                ? JSON.stringify({
+            const answerMsg =
+                resumeTargetAnswer ||
+                createMessage({
+                  text: '',
+                  fromBeyond: true,
+                  messageState: IMessageState.Query,
+                  queryMsgId: newQueryMsg.msgId,
                   agentId: _agentId,
+                  sessionId,
+                  agentType: _agentType,
                   agentCode: singleInlineAgent?.agentCode || undefined,
                   agentName: singleInlineAgent?.agentName || undefined,
-                })
-                : '',
-              ...get(msgOpt, 'answerMsg', {}),
-            });
+                  resourceList: singleInlineAgent ? digitalEmployeeResources : undefined,
+                  metadata: _agentId
+                    ? JSON.stringify({
+                      agentId: _agentId,
+                      agentCode: singleInlineAgent?.agentCode || undefined,
+                      agentName: singleInlineAgent?.agentName || undefined,
+                    })
+                    : '',
+                  ...get(msgOpt, 'answerMsg', {}),
+                });
             return {
               answerMsg,
               lane: {
@@ -1403,7 +1441,7 @@ function useChat(props: IProps) {
 
     // 更新回答消息
     laneEntries.forEach((entry) => {
-      const nextAnswerMsg = updateMessage(entry.answerMsg, { isAssign: true });
+      const nextAnswerMsg = isColdResume ? entry.answerMsg : updateMessage(entry.answerMsg, { isAssign: true });
       entry.answerMsg = nextAnswerMsg;
       registerPendingChatContext({
         clientRequestId: entry.lane.clientRequestId,
@@ -1416,6 +1454,25 @@ function useChat(props: IProps) {
         flowHandler,
         updateMessage,
       });
+      if (isResumeChat) {
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_context_registered',
+            sessionId,
+            traceId: payload.traceId,
+            clientRequestId: entry.lane.clientRequestId,
+            answerMsgId: nextAnswerMsg.msgId,
+            answerMessageId: nextAnswerMsg.messageId,
+            isColdResume,
+            contextFoundAfterRegister: hasChatStreamContext({
+              clientRequestId: entry.lane.clientRequestId,
+              sessionId,
+              traceId: payload.traceId,
+            }),
+          })
+        );
+      }
     });
 
     return { cancel };

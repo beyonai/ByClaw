@@ -79,11 +79,16 @@ if [[ ! -e "${persistent_profile}/cordis.patch.yml" ]]; then
     cp "${managed_profile}/cordis.patch.yml" "${persistent_profile}/cordis.patch.yml"
 fi
 
-# Packages imported from the managed profile resolve DSH installation peers
-# through the image-built ${managed_home}/profiles/node_modules, their natural
-# ESM ancestor under /opt (see link-dsh-installation-peers.mjs). DSH 0.2
-# resolves those peers in memory and no longer heals a persistent fallback, so
-# that directory stays image-owned.
+# Generated dependency links belong to this image generation, not the user's
+# NAS. Preserve the build-time installation fallback and heal profile-only links
+# locally. User patches and all business data still live in DSH_HOME.
+mkdir -p "${managed_home}/profiles/node_modules" "${managed_profile}/.dsh-module-fallback/node_modules"
+link_managed_directory \
+    "${managed_home}/profiles/node_modules" \
+    "${dsh_home}/profiles/node_modules"
+link_managed_directory \
+    "${managed_profile}/.dsh-module-fallback" \
+    "${persistent_profile}/.dsh-module-fallback"
 
 if [[ -d "${managed_profile}/node_modules" ]]; then
     link_managed_directory \
@@ -120,7 +125,8 @@ fi
 
 # The sandbox launcher may omit --host. Bind web to the container interface by
 # default while preserving any explicit host supplied by the caller.
-node_imports=(--import tsx/esm)
+# Extra Node preloads for the CLI; the TypeScript loader is added only for a .ts entry.
+node_imports=()
 if [[ "$1" == web ]]; then
     web_host=''
     web_port=3080
@@ -157,4 +163,9 @@ fi
 
 # Keep the supervisor-provided secret descriptor alive until the browser plugin
 # consumes it. pnpm/bash wrappers may close inherited descriptors before Node.
-exec node "${node_imports[@]}" "${BYCLAW_DSH_CLI_ENTRY:-apps/cli/src/bin.ts}" "$@"
+cli_entry="${BYCLAW_DSH_CLI_ENTRY:-apps/cli/lib/bin.js}"
+printf 'byclaw-dsh: starting CLI at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+case "${cli_entry}" in
+    *.ts) exec node --import tsx/esm "${node_imports[@]}" "${cli_entry}" "$@" ;;
+    *) exec node "${node_imports[@]}" "${cli_entry}" "$@" ;;
+esac

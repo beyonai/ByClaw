@@ -269,6 +269,8 @@ Redis 模型的 `instanceParam.connectTimeoutSec` 只限制 TCP/TLS 建立连接
 
 ### 协助请求、等待用户与任务摘要
 
+异步协助的运行结果必须携带协助子会话 ID，等待器仅在匹配该子会话的结束通知、且团长本轮结束后收口。原生调用通过结果元数据关联；DSH PTC 调用通过结果文本中的 `Assistance session` 行关联（该事件不携带展示元数据）。团队台账保留不应要求模型删除团队。页面回归：向数字员工组发送“叫你的成员出来打声招呼”，分别验证任务卡出现即进入、以及等待交付后再首次进入；两种情况下都应在协助返回和团长答复后恢复发送按钮，`runningStatus` 和 `runningSnapshot` 均返回 `running: false`，且不再反复出现内部巡检。本地等待器测试不替代页面验收。
+
 `group_request_assistance` 的团队请求以原 `taskId/attemptId/requesterId`、规范化缺口目标和真实用户输入 revision 关联。revision 来自 ByClaw 用户消息 ID；模型工具参数、普通提及、员工结果回流和自动恢复轮次不能生成新 revision。相同请求完成后直接返回持久结果，不再暂停等待一个不存在的新回调。单 @ 员工还没有 TeamTask 时使用私有运行目录中的 DIRECT 协助账本，固定请求与团长子会话 ID；`group_resolve_assistance` 将实际结果写回原请求。进程重启也恢复同一请求与子会话，不另建平台任务。
 
 团长返回团队协助时可以传 `assistance_status=blocked` 及 `blocking_reason=missing_user_input/outside_scope/no_progress`，内容说明用户必须补充什么。任务进入显式等待用户；相同输入下不能用 start、reassign、claim、替代任务或模型删除团队来重启这个阻塞。外部 Worker 的 WAITING_USER 同样写入此状态，并取消外部悬挂执行，不按执行故障自动重试。真正的新用户输入到达后，团长可以返回补充资料继续原 attempt，或明确重派。不同的合法缺口可以依次协作，例如先取得脚本，再请求素材；没有新增协作轮数或总规模上限。请求哈希负责结构化相同请求的幂等，无法判定任意改写措辞是否语义相同；真实缺料、范围外能力和无进展仍须返回明确 blocker。
@@ -333,3 +335,16 @@ INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；�
 连接器迁移约定：旧 `options.defaultVoice` 在没有显式 `voice`/`speaker` 时映射为默认音色；原 OpenAI 图片显式 Authorization 和火山 TTS 显式 X-Api-Key / X-Api-Resource-Id 保留优先级。新插件将 `readTimeoutSeconds` 作为整个生成调用的总时间预算，最多 30 分钟（更大配置归一到 30 分钟）；不再分别应用旧连接器的 connectTimeoutSeconds / readTimeoutSeconds，也不采用 maxRetryCount 自动重试，避免重复计费。
 
 语音交互：`byclaw-asr` 使用系统启用的全局默认 `ASR` 模型，在主 Agent 接收输入之前固定识别 MP3，保留 `voiceInteraction` 标记并将识别结果作为 `userInput`。SDK/前端的 `VOICE` 消息携带后端已验证归属的音频，原始音频保存在 `session_root/asr/`；重复消息复用识别缓存。by-framework 1.6.0 要求 wire content 非空，纯语音桥接使用 `[语音消息]` 占位，识别后替换成真实文本。正常文字回复之后，运行时使用现有 TTS 默认模型合成口语摘要，保存到 `session_root/tts/` 并追加可播放的受管制品链接；TTS 失败仍保留完整文字回复。手动转写由登录后的后端代理至 `POST /api/byclaw/asr/transcribe`，用户浏览器不持有供应商密钥。协议与接口约束见 `../byclaw-asr/README.md`。
+
+### 启动与 Skill 懒加载
+
+镜像构建阶段编译 DSH 和全部插件，运行时直接执行编译后的 CLI。浏览器、桌面和 byCLI 桥接默认在首次私有 browser 请求或受管 byCLI 浏览器命令时激活；首次请求等待激活完成，后续复用。
+
+Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill 关联索引。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，刷新后的旧代际结果不能重新发布。
+
+内置 Skill 仍从镜像本地加载；专家团临时作用域员工在实际调用时准备。`allowSkillSyncFailure` 决定单个 Skill 失败时跳过还是拒绝查询，之后可重试。首次 Skill 查询承担网络耗时，Worker ready 不代表所有 Skill 已预热。
+
+
+### 2026-10-22 冷启动投影优化
+
+模板 staging 保留原目录校验与文件命名规则，只复制用户模板、未知文件和子目录；本代际会重新生成的 ByClaw 模板不再先复制后删除。原代际锁、双目录发布回滚、撤权清理及 Skill 懒加载/版本检查不变。`session-metadata-ready` 日志将会话元数据恢复从内置 Skill 加载区间中单独标出。新增 `template-staging-verify.mjs` 覆盖撤权、用户文件保留、目录碰撞拒绝与失败时保留旧代际。

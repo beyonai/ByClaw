@@ -42,7 +42,6 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -62,7 +61,6 @@ import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 
 import java.util.*;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -76,7 +74,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -107,8 +104,8 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
 
     private DatasetApplicationService service;
 
-    @BeforeAll
-    static void initI18n() {
+    @BeforeEach
+    void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
         var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
         bundle.setBasename("i18n/messages");
@@ -133,10 +130,6 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
             "resource.lifecycle.status.invalid", "dataset.creator.immutable", "dataset.file.exists")) {
             messageSource.addMessage(key, TEST_LOCALE, key);
         }
-        ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
-        org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
-            .thenReturn(messageSource);
-        ReflectionTestUtils.setField(ApplicationContextUtil.class, "applicationContext", applicationContext);
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
     }
 
@@ -448,6 +441,78 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         assertThat(captor.getValue().getOverwrite()).isFalse();
         assertThat(result.getSummary().getSucceeded()).isEqualTo(1);
         assertThat(result.getSummary().getFailed()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, 12})
+    void fileCountChecksReadAccessAndMapsResourceCode(long count) {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        var qaResult = new com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult();
+        qaResult.setFileCount(count);
+        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
+        response.setResultCode("0");
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+
+        assertThat(service.fileCount(request).getFileCount()).isEqualTo(count);
+        var captor = ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount.class);
+        verify(feignPythonBuildService).fileCount(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+    }
+
+    @Test
+    void fileCountRejectsUnreadableAndMissingResourcesBeforeCallingQa() {
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @Test
+    void fileCountDoesNotTurnProviderFailureIntoZero() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
+        response.setResultCode("-1");
+        response.setResultMsg("knowledge base not found: personal-kb");
+        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(BaseException.class)
+            .hasMessageContaining("knowledge base not found: personal-kb");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rawZipUsesFullFilePathAndForwardsMetadataInBothUploadVariants(boolean direct) throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        var response = new PythonBuildResponse<KbImportResult>();
+        response.setResultCode("0");
+        when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(response);
+        MockMultipartFile[] files = {new MockMultipartFile("files", "raw.zip", "application/zip", new byte[]{1, 2, 3})};
+        if (direct) {
+            service.uploadFilesDirect(files, 100L, "/docs/", null, false, false, false, false,
+                "{\"owner\":\"HR\"}", Map.of());
+        } else {
+            service.uploadFiles(files, 100L, "/docs/", null, false, false, false, false,
+                "{\"owner\":\"HR\"}", Map.of());
+        }
+        var captor = ArgumentCaptor.forClass(KbFileImport.class);
+        verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), any());
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/docs/raw.zip");
+        assertThat(captor.getValue().getExtractZip()).isFalse();
+        assertThat(captor.getValue().getMetadata()).isEqualTo("{\"owner\":\"HR\"}");
+        assertThat(captor.getValue().getMultipartFile()).isSameAs(files[0]);
     }
 
     @Test
@@ -1174,8 +1239,10 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         when(feignPythonBuildService.updateKnowledgeItem(any(), any())).thenReturn(response);
         service.uploadFiles(new MockMultipartFile[]{new MockMultipartFile("files", "old.md", "text/markdown", new byte[]{1})},
-            100L, "/reports/", "", false, true, false, Map.of());
-        verify(feignPythonBuildService).updateKnowledgeItem(any(), any());
+            100L, "/reports/", "", false, true, false, null, "{\"owner\":\"HR\"}", Map.of());
+        var update = ArgumentCaptor.forClass(KbFileUpdate.class);
+        verify(feignPythonBuildService).updateKnowledgeItem(update.capture(), any());
+        assertThat(update.getValue().getMetadata()).isEqualTo("{\"owner\":\"HR\"}");
         verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
         verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
     }

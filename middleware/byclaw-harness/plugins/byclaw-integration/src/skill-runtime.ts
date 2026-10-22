@@ -1,4 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 /** Plugin-owned per-agent Skill views and atomically published ByClaw generations. */
+import { mapConcurrent } from './startup-concurrency.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -218,8 +220,11 @@ async function readAgentWorkspaceView(
 
 /** Bind agent identities to current template resources while retaining the standard DSH catalog/tool. */
 export class ByClawSkillRuntime {
+  private readonly originalCalls = new AsyncLocalStorage<boolean>()
   private readonly bindings = new WeakMap<object, Binding>()
   private generations = new Map<string, View>()
+  private deferred = new Map<string, { template: DshAgentTemplate; root: string; options: ByClawSkillPreparationOptions }>()
+  private readonly loading = new Map<string, Promise<void>>()
   private readonly projectedMembers = new Set<string>()
   private readonly disposers: Array<() => void> = []
   private readonly reportedWorkspaceErrors = new Set<string>()
@@ -231,6 +236,7 @@ export class ByClawSkillRuntime {
     private readonly reportWorkspaceError: (path: string, error: unknown) => void,
     private readonly workspaceSkills: WorkspaceSkillReader = hostWorkspaceSkills,
     private readonly dshHome?: string,
+    private readonly resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>,
   ) {}
 
   /** Load deployment Skills once and install lifecycle-owned registry adapters. */
@@ -242,16 +248,20 @@ export class ByClawSkillRuntime {
     files?: ToolEnvironmentFiles
     /** This context's DSH home for group-member Skill copies; defaults to `DSH_HOME`. */
     dshHome?: string
+    /** Lazily resolve a template's associated Skills on first lookup (startup keeps only references). */
+    resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>
   } = {}): Promise<ByClawSkillRuntime> {
     const root = resolveBuiltinSkillDir(options.builtinSkillDir)
-    const definitions: SkillDefinition[] = []
-    for (const entry of (await readdir(root, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+    const entries = (await readdir(root, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory() || entry.isSymbolicLink()).sort((a, b) => a.name.localeCompare(b.name))
+    const loaded = await mapConcurrent(entries, 8, async entry => {
       const path = join(root, entry.name, 'SKILL.md')
-      try { definitions.push(await readDefinition(path, path)) } catch (error: unknown) {
+      try { return await readDefinition(path, path) } catch (error: unknown) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        return undefined
       }
-    }
+    })
+    const definitions = loaded.filter((definition): definition is SkillDefinition => definition !== undefined)
     if (new Set(definitions.map(s => s.name)).size !== definitions.length) throw new Error('duplicate builtin Skill names')
     const runtime = new ByClawSkillRuntime(
       viewOf(definitions),
@@ -259,6 +269,7 @@ export class ByClawSkillRuntime {
       (path, error) => ctx.logger.error(`[byclaw-dsh] Invalid agent workspace Skill ${path}; skipping: ${String(error)}`),
       options.files === undefined ? hostWorkspaceSkills : toolEnvironmentWorkspaceSkills(options.files),
       options.dshHome,
+      options.resolveDeferredTemplate,
     )
     runtime.installAdapters(ctx)
     return runtime
@@ -298,9 +309,28 @@ export class ByClawSkillRuntime {
     liveRoot: string,
     options: ByClawSkillPreparationOptions = {},
   ): Promise<() => void> {
+    const deferred = new Map<string, { template: DshAgentTemplate; root: string; options: ByClawSkillPreparationOptions }>()
+    const immediate = templates.filter(template => {
+      if (!template.skills.some(skill => skill.ref !== undefined)) return true
+      if (this.resolveDeferredTemplate === undefined) throw new Error('ByClaw deferred Skill loader is unavailable')
+      deferred.set(template.id, { template, root: liveRoot, options })
+      return false
+    })
+    const next = await this.readViews(immediate, stagedRoot, liveRoot, options)
+    for (const id of deferred.keys()) next.set(id, this.builtins)
+    return () => { if (!this.disposed) {
+      for (const agentId of this.projectedMembers) revokeMemberSkillRoots(agentId)
+      this.generations = next
+      this.deferred = deferred
+      this.loading.clear()
+    } }
+  }
+
+  private async readViews(templates: readonly DshAgentTemplate[], stagedRoot: string, liveRoot: string,
+    options: ByClawSkillPreparationOptions): Promise<Map<string, View>> {
     const next = new Map<string, View>()
-    const loaded = new Map<string, { definition: SkillDefinition; originalName?: string } | { error: unknown }>()
-    for (const template of templates) {
+    const loaded = new Map<string, Promise<{ definition: SkillDefinition; originalName?: string } | { error: unknown }>>()
+    const views = await mapConcurrent(templates, 8, async template => {
       const merged = new Map(this.builtins.definitions)
       const associated = new Set<string>()
       for (const source of template.skills) {
@@ -308,22 +338,22 @@ export class ByClawSkillRuntime {
         if (suffix === '' || suffix === '..' || suffix.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(suffix)) {
           throw new Error(`Skill ${source.code} is outside the ByClaw generation cache`)
         }
-        let loadedSkill = loaded.get(source.path)
-        if (loadedSkill === undefined) {
-          try {
-            let originalName: string | undefined
-            const definition = await readDefinition(
-              join(stagedRoot, suffix, 'SKILL.md'),
-              join(source.path, 'SKILL.md'),
-              source.code,
-              name => { originalName = name },
-            )
-            loadedSkill = { definition, originalName }
-          } catch (error: unknown) {
-            loadedSkill = { error }
-          }
-          loaded.set(source.path, loadedSkill)
+        const key = JSON.stringify([source.path, source.code])
+        let pending = loaded.get(key)
+        if (pending === undefined) {
+          pending = (async () => {
+            try {
+              let originalName: string | undefined
+              const definition = await readDefinition(
+                join(stagedRoot, suffix, 'SKILL.md'), join(source.path, 'SKILL.md'), source.code,
+                name => { originalName = name },
+              )
+              return { definition, originalName }
+            } catch (error: unknown) { return { error } }
+          })()
+          loaded.set(key, pending)
         }
+        const loadedSkill = await pending
         if ('error' in loadedSkill) {
           options.onSkillError?.({ templateId: template.id, code: source.code, path: source.path, error: loadedSkill.error })
           if (options.allowSkillFailure !== true) throw loadedSkill.error
@@ -383,13 +413,27 @@ export class ByClawSkillRuntime {
       } catch (error: unknown) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
-      next.set(template.id, viewOf(merged.values()))
-    }
-    return () => { if (!this.disposed) {
-      // Publication is synchronous: revoke earlier projections before any future tool call.
-      for (const agentId of this.projectedMembers) revokeMemberSkillRoots(agentId)
-      this.generations = next
-    } }
+      return [template.id, viewOf(merged.values())] as const
+    })
+    for (const [id, view] of views) next.set(id, view)
+    return next
+  }
+
+  private async loadDeferred(templateId: string): Promise<void> {
+    const generation = this.deferred
+    const entry = generation.get(templateId)
+    if (entry === undefined) return
+    const pending = this.loading.get(templateId)
+    if (pending !== undefined) return pending
+    const operation = (async () => {
+      const template = await this.resolveDeferredTemplate!(entry.template)
+      const views = await this.readViews([template], entry.root, entry.root, entry.options)
+      if (this.disposed) throw new Error('ByClaw Skill runtime is disposed')
+      if (this.deferred !== generation) throw new Error('ByClaw Skill authorization generation changed during loading; retry lookup')
+      this.generations.set(templateId, views.get(templateId) ?? this.builtins)
+    })()
+    this.loading.set(templateId, operation)
+    try { await operation } finally { if (this.loading.get(templateId) === operation) this.loading.delete(templateId) }
   }
 
   /** Remove all adapters and listeners; repeated disposal is harmless. */
@@ -398,6 +442,8 @@ export class ByClawSkillRuntime {
     this.disposed = true
     for (const dispose of this.disposers.splice(0).reverse()) dispose()
     this.generations.clear()
+    this.deferred.clear()
+    this.loading.clear()
     for (const agentId of this.projectedMembers) revokeMemberSkillRoots(agentId)
     this.projectedMembers.clear()
   }
@@ -410,7 +456,8 @@ export class ByClawSkillRuntime {
     return binding === undefined ? undefined : this.generations.get(binding.templateId) ?? this.builtins
   }
 
-  private async effectiveView(binding?: Binding): Promise<View> {
+  private async effectiveView(binding?: Binding, refresh = true): Promise<View> {
+    if (refresh && !this.originalCalls.getStore() && binding !== undefined) await this.loadDeferred(binding.templateId)
     const base = this.forBinding(binding) ?? this.builtins
     if (binding === undefined) return base
     const workspace = await readAgentWorkspaceView(this.agentSkillRoot, binding.agentId, (path, error) => {
@@ -440,7 +487,7 @@ export class ByClawSkillRuntime {
       if (agent === undefined || groupScope(ctx, String(agent.id))?.role !== 'member') return view
       const definitions = await Promise.all([...view.definitions.values()].map(definition => projectMemberSkill(String(agent.id), definition, view.digest, runtime.dshHome)))
       if (runtime.disposed) throw new Error('ByClaw Skill runtime is disposed')
-      const current = await runtime.effectiveView(runtime.bindingForScope(scope))
+      const current = await runtime.effectiveView(runtime.bindingForScope(scope), false)
       if (current.digest !== view.digest) return present(current, scope)
       setActiveMemberSkillRoots(String(agent.id), definitions.flatMap(definition => definition.resourceBase === undefined ? [] : [definition.resourceBase.path]), runtime.dshHome)
       runtime.projectedMembers.add(String(agent.id))
@@ -451,13 +498,13 @@ export class ByClawSkillRuntime {
       async list(options = {}) {
         options.signal?.throwIfAborted()
         const view = await runtime.effectiveView(runtime.bindingForScope(options.scope))
-        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? await visibleSummaries(view, options.scope) : mergeSummaries(await original.list.call(this, options), view)
+        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? await visibleSummaries(view, options.scope) : mergeSummaries(await runtime.originalCalls.run(true, () => original.list.call(this, options)), view)
       },
       async snapshot(options = {}) {
         options.signal?.throwIfAborted()
         const view = await runtime.effectiveView(runtime.bindingForScope(options.scope))
         if (groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member') return { skills: await visibleSummaries(view, options.scope), complete: true }
-        const snapshot = await original.snapshot.call(this, options)
+        const snapshot = await runtime.originalCalls.run(true, () => original.snapshot.call(this, options))
         return { ...snapshot, skills: mergeSummaries(snapshot.skills, view) }
       },
       async get(name, options = {}) {
@@ -466,7 +513,7 @@ export class ByClawSkillRuntime {
         const view = await runtime.effectiveView(binding)
         const owned = (await present(view, options.scope)).definitions.get(name)
         if (owned !== undefined) return runtime.withAgentRuntimeEnvironment(owned, binding)
-        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? undefined : original.get.call(this, name, options)
+        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? undefined : runtime.originalCalls.run(true, () => original.get.call(this, name, options))
       },
     }
     this.disposers.push(ctx.effect(() => {
@@ -497,7 +544,7 @@ export class ByClawSkillRuntime {
           : 'Skill resources changed. Reload any Skill before relying on its earlier instructions. Only the current available skill catalog applies.' }],
       })] }
     }))
-    this.disposers.push(ctx.effect(() => () => { this.disposed = true; this.generations.clear(); for (const agentId of this.projectedMembers) revokeMemberSkillRoots(agentId); this.projectedMembers.clear() }, 'byclaw-skills:lifecycle'))
+    this.disposers.push(ctx.effect(() => () => { this.disposed = true; this.generations.clear(); this.deferred.clear(); this.loading.clear(); for (const agentId of this.projectedMembers) revokeMemberSkillRoots(agentId); this.projectedMembers.clear() }, 'byclaw-skills:lifecycle'))
   }
 
   private lastRevision(agent: Agent): string | undefined {

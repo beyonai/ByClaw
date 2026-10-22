@@ -21,6 +21,8 @@ class SsSandboxRecordScopeTest {
         parameters.put("ownerScope", ownerScope);
         parameters.put("enterpriseId", enterpriseId);
         parameters.put("id", 7L);
+        parameters.put("sandboxId", "sandbox-1");
+        parameters.put("status", "RUNNING");
         parameters.put("offset", 0);
         parameters.put("pageSize", 20);
         return configuration.getMappedStatement(SsSandboxRecordMapper.class.getName() + "." + statement)
@@ -42,5 +44,11 @@ class SsSandboxRecordScopeTest {
         assertThat(sql("selectByPage", "USER", null)).doesNotContain("tenant_user_membership");
         assertThat(sql("selectByPage", "TENANT", 123L))
             .contains("enterprise_id = ?").doesNotContain("tenant_user_membership");
+    }
+
+    @Test
+    void selectBySandboxIdAndStatusLooksUpTheLatestUserRecord() throws Exception {
+        assertThat(sql("selectBySandboxIdAndStatus", "USER", null))
+            .contains("owner_scope = 'USER'", "sandbox_id = ?", "status = ?", "ORDER BY create_time DESC", "LIMIT 1");
     }
 }

@@ -140,7 +140,7 @@ export function normalizeCommandResult(result) {
   const exitCode = Number(result?.exitCode);
   const stdout = String(result?.stdout || '');
   const stderr = String(result?.stderr || '');
-  if (exitCode === 0 || (!result?.timedOut && (stdout.trim() || stderr.trim()))) return result;
+  if (!result?.timedOut && (exitCode === 0 || stdout.trim() || errorCode(result))) return result;
 
   const timedOut = result?.timedOut === true;
   return internalError({
@@ -160,13 +160,17 @@ export function normalizeCommandResult(result) {
   });
 }
 
-async function executeArgv(argv) {
+async function executeArgv(argv, onProgress) {
   const result = await runCommand(
     argv[0],
     argv.slice(1),
     commandExecutionTimeoutMs(argv),
+    { onStderr: onProgress },
   );
-  return normalizeCommandResult(result);
+  const normalized = normalizeCommandResult(result);
+  // Synthesized timeout/unknown-result errors have not been streamed and must
+  // still be printed. Buffered stdout is always emitted exactly once at exit.
+  return { ...normalized, stderrStreamed: !!onProgress && normalized === result };
 }
 
 export async function loadRuntimeCapability(commandName, site = 'weixin') {
@@ -221,12 +225,14 @@ export async function runWeixinBrowser({
   argv,
   verificationConfirmed = false,
   selectedMode = null,
-  execute = executeArgv,
+  execute,
+  onProgress,
   loadCapability = loadRuntimeCapability,
   ensureBridge = ensureBridgeDefault,
   gate = runGate,
 } = {}) {
   validateInvocation(stateDir, argv);
+  const executeCommand = execute ?? (commandArgv => executeArgv(commandArgv, onProgress));
   if (selectedMode !== null && selectedMode !== 'browser') {
     throw new Error('selectedMode must be browser when provided');
   }
@@ -236,7 +242,7 @@ export async function runWeixinBrowser({
     argv,
     verificationConfirmed,
     execute: async (commandArgv, context) => {
-      if (context.attemptKind === 'confirmed-rerun') return execute(commandArgv);
+      if (context.attemptKind === 'confirmed-rerun') return executeCommand(commandArgv);
 
       let capability;
       try {
@@ -261,7 +267,7 @@ export async function runWeixinBrowser({
       const preflight = await ensureBridge({ budget });
       if (!preflight?.ok) return bridgeError(preflight, false);
 
-      const initial = await execute(commandArgv);
+      const initial = await executeCommand(commandArgv);
       if (!isBrowserConnect(initial)) return initial;
 
       const recovered = await ensureBridge({ budget });
@@ -277,7 +283,7 @@ export async function runWeixinBrowser({
         });
       }
 
-      const rerun = await execute(commandArgv);
+      const rerun = await executeCommand(commandArgv);
       if (!isBrowserConnect(rerun)) return rerun;
       return internalError({
         exitCode: 69,
@@ -321,10 +327,11 @@ async function main() {
     argv: options.command,
     verificationConfirmed: options.verificationConfirmed,
     selectedMode: options.selectedMode,
+    onProgress: chunk => process.stderr.write(chunk),
   });
   if (result.executed) {
     process.stdout.write(result.stdout || '');
-    process.stderr.write(result.stderr || '');
+    if (!result.stderrStreamed) process.stderr.write(result.stderr || '');
   } else {
     process.stderr.write(`${JSON.stringify(blockedCliPayload(result), null, 2)}\n`);
   }

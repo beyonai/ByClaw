@@ -181,7 +181,7 @@ describe('hooks/useChat/index', () => {
     });
   });
 
-  it('does not create a default-employee placeholder when resuming after sandbox state was lost', async () => {
+  it('rebinds a cold resume to the existing answer after the original stream was completed', async () => {
     mockMessageList = [
       {
         msgId: 'query-client',
@@ -207,24 +207,44 @@ describe('hooks/useChat/index', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    // Sandbox release can leave the session runtime marked as running even
+    // after appStreamResponse removed the original stream context.
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'completed-original-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
     mockUpdateMessage.mockClear();
 
     await act(async () => {
-      await result.current.sendQuery({
-        queryQuestion: '苹果',
-        inheritQryMsgId: 'query-client',
-        payload: {
-          actionType: 'RESUME',
-          traceId: 'trace-1',
-          llmMessageId: '201',
-          sourceAgentType: 'BYCLAW_DSH_u1',
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
         },
-        msgOpt: { answerMsg: { messageState: IMessageState.Query } },
-      });
+        { onlyQuery: true }
+      );
     });
 
     expect(mockUpdateMessage).not.toHaveBeenCalled();
     expect(mockSend).toHaveBeenCalledTimes(1);
+    const resumeClientRequestId = mockSend.mock.calls[0]?.[1]?.clientRequestId;
+    expect(resumeClientRequestId).toBeTruthy();
+    expect(chatSessionRuntimeManager.getByClientRequest(resumeClientRequestId)).toMatchObject({
+      sessionId: '101',
+      answerMessageId: 'answer-client',
+    });
   });
 
   it('waits for session messages before restoring running messages', async () => {

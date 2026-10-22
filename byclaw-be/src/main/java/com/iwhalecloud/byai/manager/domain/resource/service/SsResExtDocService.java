@@ -170,12 +170,14 @@ public class SsResExtDocService {
             "delete_kb", "逻辑删除知识库。"));
         resourceService.add(buildKgDocService(qADomainName, "修改知识库", "POST", "/api/v1/knowledgeBases/update",
             "update_kb", "修改知识库名称或描述。"));
+        resourceService.add(buildKgDocService(qADomainName, "统计知识库文件数量", "POST",
+            "/api/v1/knowledgeBases/fileCount", "fileCount", "统计所有层级的未删除文件数量，不包括目录。"));
         resourceService
             .add(buildKgDocService(qADomainName, "写入文件到知识库", "POST", "/api/v1/write-file", "write_raw", "将原始文件写入知识库。"));
         resourceService.add(buildKgDocService(qADomainName, "写入索引到知识库", "POST", "/api/v1/write-index", "write_index",
             "将构建好的索引信息和对应的 markdown 副本写入知识库。"));
         resourceService.add(buildKgDocService(qADomainName, "导入知识库文件", "POST", "/api/v1/knowledgeItems/import",
-            "import_item", "支持单文件与 zip 包批量导入。"));
+            "import_item", "支持任意类型文件、ZIP 默认解压导入、extractZip=false 原样保存和 metadata 基础元数据。"));
         resourceService.add(buildKgDocService(qADomainName, "删除知识库文档", "POST", "/api/v1/knowledgeItems/delete",
             "delete_item", "逻辑删除知识库中的单个文档。"));
         resourceService.add(buildKgDocService(qADomainName, "移动知识库文件或目录", "POST",

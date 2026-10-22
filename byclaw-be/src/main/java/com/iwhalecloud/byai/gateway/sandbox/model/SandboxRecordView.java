@@ -24,6 +24,6 @@ public class SandboxRecordView extends SsSandboxRecord {
 
     private List<String> workerAgentTypes;
 
-    /** Fresh OpenSandbox observation for tenant records; null for user records or historical tenant records. */
+    /** Fresh observation from the currently selected runtime; independent of the stored lifecycle status. */
     private String providerStatus;
 }

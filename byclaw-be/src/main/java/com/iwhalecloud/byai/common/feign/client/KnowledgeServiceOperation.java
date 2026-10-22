@@ -19,6 +19,7 @@ public enum KnowledgeServiceOperation {
     CREATE_KB("createKb", "/api/v1/knowledgeBases/create"),
     DELETE_KB("deleteKb", "/api/v1/knowledgeBases/delete"),
     UPDATE_KB("updateKb", "/api/v1/knowledgeBases/update"),
+    FILE_COUNT("fileCount", "/api/v1/knowledgeBases/fileCount"),
     CREATE_DIR("createDir", "/api/v1/directories/create"),
     EDIT_DIR("editDir", "/api/v1/directories/update"),
     LIST_DIR("listDir", "/api/v1/listDir"),

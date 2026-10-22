@@ -46,6 +46,10 @@ public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
     int advanceReadCursor(@Param("memberId") Long memberId, @Param("messageId") Long messageId,
         @Param("readTime") java.util.Date readTime);
 
+    /** 条件更新本次成员关系，跨浏览器只能成功一次，不修改消息已读状态。 */
+    int claimWelcome(@Param("memberId") Long memberId, @Param("sessionId") Long sessionId,
+        @Param("userId") Long userId, @Param("handledAt") java.util.Date handledAt);
+
     /**
      * 根据成员对象ID和时间范围查询会话成员列表
      *

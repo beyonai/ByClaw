@@ -29,6 +29,8 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequ
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
@@ -311,8 +313,15 @@ public class DatasetController {
     }
 
     /**
-     * 按 QA glob 单层通配规则匹配文件或目录。
+     * 统计指定知识库所有层级的未删除文件数量。
      */
+    @PostMapping("/knowledgeBases/fileCount")
+    public ResponseUtil<KnowledgeFileCountResult> fileCount(@Valid @RequestBody KnowledgeFileCountRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.fileCount(request));
+    }
+
+    /** 按 QA glob 单层通配规则匹配文件或目录。 */
     @PostMapping("/glob")
     public ResponseUtil<List<DirAndFileVo>> globKnowledgeItems(@Valid @RequestBody KnowledgeGlobRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
@@ -371,13 +380,15 @@ public class DatasetController {
                                                   @RequestPart(value = "fileDescription", required = false) String fileDescription,
                                                   @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
                                                   @RequestPart(value = "overwrite", required = false) String overwrite,
-                                                  @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate) {
+                                                  @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate,
+                                                  @RequestPart(value = "extractZip", required = false) String extractZip,
+                                                  @RequestPart(value = "metadata", required = false) String metadata) {
         try {
             Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
                 fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
-                Boolean.parseBoolean(skipIfDuplicate), headers);
+                Boolean.parseBoolean(skipIfDuplicate), parseOptionalBoolean(extractZip), metadata, headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         } catch (Exception e) {
             logger.error(e.getMessage(), e);

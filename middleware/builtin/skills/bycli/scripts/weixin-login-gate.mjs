@@ -129,7 +129,13 @@ function parseJson(value) {
 }
 
 function structuredErrorCode(value) {
-  const parsed = parseJson(value);
+  // The CLI writes progress to stderr before its final JSON error. Classify
+  // only a complete trailing error document, never words inside progress logs.
+  let parsed = parseJson(value);
+  if (!parsed && typeof value === 'string') {
+    const start = value.lastIndexOf('\n{');
+    if (start >= 0) parsed = parseJson(value.slice(start + 1));
+  }
   const code = parsed?.error?.code;
   return typeof code === 'string' && code.trim() ? code.trim().toUpperCase() : null;
 }

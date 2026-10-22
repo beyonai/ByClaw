@@ -27,6 +27,7 @@ import {
   GatewayDataEmitter,
   createRedis,
 } from '@byclaw/by-framework'
+import { createLazyByClawSkillLoader } from './lazy-skills.ts'
 import { parseByClawDigitalEmployee } from './resources.ts'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -520,6 +521,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 /** Activate resource synchronization and the by-framework Worker. */
 async function activate(ctx: Context, config: Config): Promise<void> {
+  const startupStarted = performance.now()
+  const startupPhase = (phase: string): void => {
+    ctx.logger.info(`[byclaw-dsh] startup phase=${phase}; elapsedMs=${Math.round(performance.now() - startupStarted)}`)
+  }
+  startupPhase('activate')
   const webAuthToken = resolveByClawWebAuthToken(process.env)
   if (webAuthToken !== undefined) {
     ctx.inject(['connection'], (connectionCtx) => {
@@ -568,14 +574,27 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const projectionConcurrency = resolveByClawProjectionConcurrency(config.projectionConcurrency)
 
   const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
+  startupPhase('session-metadata-ready')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
+  const lazySkills = createLazyByClawSkillLoader({
+    loadResources: () => loadAuthorizedByClawResources({ redis, userCode, baseUrl,
+      snapshotConcurrency: config.snapshotConcurrency ?? 8, excludedResourceIds: deletedResourceIds }),
+    baseUrl: () => baseUrl, cacheRoot: skillCacheDir, concurrency: projectionConcurrency,
+    allowFailure: config.allowSkillSyncFailure ?? true,
+    timeoutMs: config.skillSyncTimeoutMs ?? 60_000,
+    attempts: config.skillSyncAttempts ?? 3,
+    retryDelayMs: config.skillSyncRetryDelayMs ?? 250,
+    onError: (ref, error) => ctx.logger.error(`[byclaw-dsh] Lazy Skill ${ref.code} sync failed: ${startupErrorDetail(error)}`),
+  })
   const skillRuntime = await ByClawSkillRuntime.install(ctx, {
     builtinSkillDir: config.builtinSkillDir,
     agentSkillRoot,
     ...(userFiles === undefined ? {} : { files: userFiles }),
     ...(dshHome === undefined ? {} : { dshHome }),
+    resolveDeferredTemplate: template => lazySkills.resolve(template),
   })
+  startupPhase('builtin-skills-ready')
   const disposeAgentShellEnv = ctx.shellEnv.register({
     name: 'byclaw-agent-identity',
     variables: {
@@ -603,20 +622,6 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ctx.logger.warn(
       `[byclaw-dsh] Skill ${code} name ${originalName} adapted for ${templateId}; using runtime name ${runtimeName}`,
     )
-  }
-  try {
-    (await skillRuntime.prepareGeneration(
-      await listAgentTemplates(agentTemplateDir),
-      skillCacheDir,
-      skillCacheDir,
-      {
-        allowSkillFailure,
-        onSkillError: reportSkillPreparationError,
-        onSkillRename: reportSkillPreparationRename,
-      },
-    ))()
-  } catch (error: unknown) {
-    ctx.logger.warn(`[byclaw-dsh] local Skill generation unavailable; waiting for resource synchronization: ${startupErrorDetail(error)}`)
   }
   let closeRuntime = async (): Promise<void> => {
     await Promise.all([generationLease.close(), sessionMetadata.close()])
@@ -666,6 +671,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     await settle(disposition === undefined ? undefined : () => disposition?.close() ?? Promise.resolve())
     await settle(sessions === undefined ? undefined : () => sessions?.close() ?? Promise.resolve())
     await settle(sandboxBusy === undefined ? undefined : () => sandboxBusy?.close() ?? Promise.resolve())
+    await settle(() => lazySkills.close())
     await settle(() => redis.quit())
     if (failures.length > 0) throw new AggregateError(failures, 'byclaw-dsh resource disposal failed')
   }
@@ -693,6 +699,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         baseUrl,
         generationLease,
         projectionConcurrency,
+        deferSkillSync: true,
+        onPhase: (phase, elapsedMs) => ctx.logger.info(`[byclaw-dsh] projection reason=${resourceLogValue(reason)}; phase=${phase}; elapsedMs=${elapsedMs}`),
         allowSkillSyncFailure: config.allowSkillSyncFailure ?? true,
         skillSyncTimeoutMs: config.skillSyncTimeoutMs ?? 60_000,
         skillSyncAttempts: config.skillSyncAttempts ?? 3,
@@ -793,11 +801,31 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         resourceIds: [],
       },
     }
+    const startupFallback = resources
     resources = await synchronizeByClawResourcesAtStartup({
       synchronize: () => synchronize('cold-start'),
       fallback: resources,
       logger: ctx.logger,
     })
+    // Restore cached views only on startup sync failure. A successful sync has already
+    // prepared and published the complete authorized generation; do not read it twice.
+    if (resources === startupFallback) {
+      try {
+        (await skillRuntime.prepareGeneration(
+          await listAgentTemplates(agentTemplateDir),
+          skillCacheDir,
+          skillCacheDir,
+          {
+            allowSkillFailure,
+            onSkillError: reportSkillPreparationError,
+            onSkillRename: reportSkillPreparationRename,
+          },
+        ))()
+      } catch (error: unknown) {
+        ctx.logger.warn(`[byclaw-dsh] local Skill generation unavailable; waiting for resource synchronization: ${startupErrorDetail(error)}`)
+      }
+    }
+    startupPhase('resources-ready')
     if (lastResourceInventory === '') {
       lastResourceInventory = byClawResourceInventoryLines(resources, { reason: 'state' }).join('\n')
     }
@@ -1131,7 +1159,9 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       sessions,
       maxConcurrency: config.maxConcurrency ?? 8,
     })
+    startupPhase('worker-start')
     await worker.start(id)
+    startupPhase('worker-ready')
 
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 

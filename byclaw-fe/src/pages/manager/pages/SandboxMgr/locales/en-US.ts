@@ -1,4 +1,5 @@
 export default {
+  'sandboxMgr.endpoint.more': 'More',
   // Search
   'sandboxMgr.search.placeholder': 'Search by user code, endpoint, chat ID',
 
@@ -263,7 +264,7 @@ export default {
     'The data node will be rebuilt from the configured image; the database stays running.',
   'sandboxMgr.tenant.restartAccepted': 'Restart requested. Refresh to check progress.',
   'sandboxMgr.tenant.actionFailed': 'Operation failed. Please try again.',
-  'sandboxMgr.tenant.recordRunning': 'Recorded as running',
+  'sandboxMgr.tenant.recordRunning': 'Running',
   'sandboxMgr.tenant.providerAbnormal': 'Sandbox unhealthy',
   'sandboxMgr.tenant.providerUnknown': 'Status unverified',
 };

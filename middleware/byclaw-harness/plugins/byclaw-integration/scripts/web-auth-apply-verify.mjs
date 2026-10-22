@@ -35,6 +35,8 @@ try {
     effect(factory) { rootEffects.push(factory()) },
     tools: { guard(check) { searchGuard = check; return () => { searchGuard = undefined } } },
     logger: {
+      // Startup phases log at info level before the userCode check.
+      info() {},
       error(message) { errors.push(message) },
     },
     inject(services, callback) {
