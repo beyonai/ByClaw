@@ -83,6 +83,60 @@ failedTemplateGate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 
 assert.equal(failedTemplateGate.waiting, false, 'failed template dispatch must not wait for a nonexistent child')
 failedTemplateGate.dispose()
 
+// A running assistance result must bind the exact child before its settled notice.
+// Native results carry block metadata; pinned DSH PTC results carry only text.
+for (const dispatch of ['native', 'ptc']) {
+  for (const settledBeforeResult of [false, true]) {
+    const gate = new ByClawAsyncTeamGate()
+    const settle = (id) => gate.observe({ type: 'user/message', data: {
+      source: { kind: 'subagent-settled', senderSessionId: id }, content: [],
+    } })
+    const end = () => gate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    gate.observe({ type: dispatch === 'native' ? 'tool/call' : 'tool/ptc-dispatch-start', data: {
+      name: 'group_request_assistance', callId: 'assist', subCallId: 'assist',
+    } })
+    if (settledBeforeResult) settle('helper')
+    const content = [{ type: 'text', text: 'Assistance status: running\nAssistance session: helper\nAssistance request is pending; its result resumes this task.' }]
+    gate.observe(dispatch === 'native' ? { type: 'tool/result', data: {
+      message: { content: [{ type: 'tool-result', toolCallId: 'assist',
+        meta: { byclaw_assistance_status: 'running', instance_session_id: 'helper' }, content,
+      }] },
+    } } : { type: 'tool/ptc-dispatch', data: {
+      name: 'group_request_assistance', subCallId: 'assist', isError: false, content,
+    } })
+    if (!settledBeforeResult) {
+      settle('unrelated')
+      end()
+      assert.equal(gate.waiting, true, 'unrelated settlement must not release assistance')
+      settle('helper')
+      assert.equal(gate.waiting, true, 'matching assistance still waits for captain completion')
+    }
+    end()
+    assert.equal(gate.waiting, false, `${dispatch}: matching assistance and captain must complete`)
+    gate.dispose()
+  }
+}
+
+// A persisted blocked assistance response closes this execution, not the task.
+for (const dispatch of ['native', 'ptc']) {
+  const gate = new ByClawAsyncTeamGate()
+  gate.observe({ type: dispatch === 'native' ? 'tool/call' : 'tool/ptc-dispatch-start', data: {
+    name: 'group_request_assistance', callId: 'blocked', subCallId: 'blocked',
+  } })
+  const content = [{ type: 'text', text: 'Assistance status: blocked\nWaiting for user input (missing_user_input): confirmation required.' }]
+  gate.observe(dispatch === 'native' ? { type: 'tool/result', data: {
+    message: { content: [{ type: 'tool-result', toolCallId: 'blocked', content,
+      meta: { byclaw_assistance_status: 'blocked' },
+    }] },
+  } } : { type: 'tool/ptc-dispatch', data: {
+    name: 'group_request_assistance', subCallId: 'blocked', isError: false, content,
+  } })
+  assert.equal(gate.waiting, true, 'blocked assistance waits for the parent to explain required input')
+  gate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  assert.equal(gate.waiting, false, 'blocked assistance must stop execution after the parent response')
+  gate.dispose()
+}
+
 const staleAnswerGate = new ByClawAsyncTeamGate(1000, 20)
 startTeamGate(staleAnswerGate)
 captainAnswer(staleAnswerGate, '过早答复')

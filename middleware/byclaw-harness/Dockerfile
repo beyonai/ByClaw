@@ -100,9 +100,12 @@ RUN set -eux; \
 # Keep generated module reconciliation on canonical local paths. The original
 # dependency closure, stale-link repair and packaged-executable semantics remain.
 COPY middleware/byclaw-harness/scripts/prepare-dsh-local-modules.mjs /tmp/prepare-dsh-local-modules.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-client-modules.mjs /tmp/prepare-dsh-client-modules.mjs
 RUN node /tmp/prepare-dsh-local-modules.mjs /workspace \
-    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json \
-    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot
+    && node /tmp/prepare-dsh-client-modules.mjs /workspace \
+    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json packages/client/modules/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE client --filter packages/client/modules
 
 
 # Fixed connector tools have an independent cache, unaffected by plugin edits.
@@ -142,7 +145,7 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.72
+ARG BYCLI_VERSION=2.1.73
 ARG BYCLI_EXTENSION_VERSION=2.1.27
 
 ENV DSH_HOME=/home/byclaw/.dsh \
@@ -177,6 +180,8 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /opt/byclaw/plugins/ /opt/bycla
 # The compiled CLI and explicit source rollback use the same module resolver.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/src/ /workspace/packages/client/modules/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/lib/ /workspace/packages/client/modules/lib/
 # Keep source aliases (tsx) and ordinary package imports on the same core build.
 # The two packed core packages also enter the profile's existing local overrides.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/src/ /workspace/packages/core/agent/src/

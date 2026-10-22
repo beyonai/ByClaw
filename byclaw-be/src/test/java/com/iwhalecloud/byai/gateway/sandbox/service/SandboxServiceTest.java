@@ -651,6 +651,19 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void findRecordIdBySandboxIdAndStatus_returnsMatchedRecordId() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(9L);
+        when(sandboxRecordMapper.selectBySandboxIdAndStatus("sandbox-9", "RUNNING")).thenReturn(record);
+
+        assertThat(sandboxService.findRecordIdBySandboxIdAndStatus("sandbox-9", "RUNNING")).isEqualTo(9L);
+        assertThat(sandboxService.findRecordIdBySandboxIdAndStatus("missing", "RUNNING")).isNull();
+    }
+
+    @Test
     void removeSandboxById_recordsManualReleaseReasonWithCurrentOperator() {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();

@@ -683,6 +683,17 @@
         LIMIT 1
     </select>
 
+    <!-- 根据沙箱实例ID和状态反查最新一条个人沙箱记录 -->
+    <select id="selectBySandboxIdAndStatus" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'USER'
+          AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+          AND status = #{status,jdbcType=VARCHAR}
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
     <!-- 更新自动释放状态 -->
     <update id="updateAutoRelease">
         UPDATE ss_sandbox_record
@@ -697,5 +708,53 @@
         WHERE id = #{id,jdbcType=BIGINT}
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
+
+
+    <!-- Management current inventory: filter before paging and use the same predicate for totals. -->
+    <sql id="CurrentInventoryFilter">
+        <where>
+            <choose>
+                <when test="sandboxIds != null and sandboxIds.size() > 0">
+                    AND sandbox_id IN
+                    <foreach collection="sandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>
+                </when>
+                <otherwise>AND 1 = 0</otherwise>
+            </choose>
+            AND NOT EXISTS (SELECT 1 FROM ss_sandbox_record newer
+                WHERE newer.sandbox_id = ss_sandbox_record.sandbox_id AND newer.id > ss_sandbox_record.id)
+            <if test="ownerScope != 'ALL'">
+                AND owner_scope = #{ownerScope}
+            </if>
+            <if test="enterpriseId != null">
+                <choose>
+                    <when test="ownerScope == 'USER'">AND <include refid="UserEnterpriseScope" /></when>
+                    <otherwise>AND enterprise_id = #{enterpriseId}</otherwise>
+                </choose>
+            </if>
+
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    user_code LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    <if test="ownerScope == 'TENANT'">
+                        OR EXISTS (SELECT 1 FROM byai.po_enterprise_info e
+                            WHERE e.enterprise_id = ss_sandbox_record.enterprise_id
+                              AND LOWER(e.com_acct_name) LIKE CONCAT('%', LOWER(#{keyword,jdbcType=VARCHAR}), '%'))
+                    </if>
+                )
+            </if>
+        </where>
+    </sql>
+    <select id="selectInventoryPage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM ss_sandbox_record
+        <include refid="CurrentInventoryFilter" />
+        ORDER BY id DESC LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+    <select id="countInventory" resultType="int">
+        SELECT COUNT(*) FROM ss_sandbox_record
+        <include refid="CurrentInventoryFilter" />
+    </select>
 
 </mapper>

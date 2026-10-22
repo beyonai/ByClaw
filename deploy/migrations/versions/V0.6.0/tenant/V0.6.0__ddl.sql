@@ -75,7 +75,7 @@ CREATE INDEX idx_forward_item_message ON byai.byai_group_chat_forward_item (ente
 
 -- 租户结构迁移只接受 DDL；两条 ALTER 由 Node 的同一迁移事务执行。
 -- 临时默认值标记存量成员，移除后新入群关系默认 NULL，不产生公共消息或修改已读状态。
-ALTER TABLE byai.byai_session_member ADD COLUMN IF NOT EXISTS welcome_handled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE byai.byai_session_member ADD COLUMN welcome_handled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE byai.byai_session_member ALTER COLUMN welcome_handled_at DROP DEFAULT;
 
 COMMENT ON COLUMN byai.byai_session_member.welcome_handled_at IS '本次成员关系的个人欢迎资格处理时间，NULL 表示未处理；包含存量迁移跳过，不代表实际曝光';

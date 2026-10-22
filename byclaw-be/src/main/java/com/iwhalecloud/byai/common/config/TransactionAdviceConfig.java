@@ -185,6 +185,14 @@ public class TransactionAdviceConfig {
                     // The Node callback must see the PENDING audit row while initialize waits for its result.
                     return notSurpportedTx;
                 }
+                // Provider observation contains remote failures and has no database writes. Suspend caller
+                // transactions so a handled provider/logging failure cannot turn the list into rollback-only.
+                if (targetClass != null
+                    && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
+                        .equals(ClassUtils.getUserClass(targetClass).getName())
+                    && "providerStatus".equals(method.getName())) {
+                    return notSurpportedTx;
+                }
                 if (targetClass != null
                     && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
                         .equals(ClassUtils.getUserClass(targetClass).getName())

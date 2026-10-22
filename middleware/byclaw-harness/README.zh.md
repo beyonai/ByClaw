@@ -272,6 +272,8 @@ Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill
 
 构建默认使用 `NPM_REGISTRY=https://registry.npmmirror.com`。企业微信/飞书 CLI 在独立 `connector-tools` 阶段缓存；飞书二进制改为阿里镜像优先、GitHub 兜底，仍执行官方 SHA-256 校验。插件变更不会使这个下载阶段失效。
 
-[启动优化实测、复测步骤与验收边界](docs/startup-2026-10-22/report.md)
+Web 插件组成图现在复用未变化的 JS/source map 产物，插件新增时不重复解码所有旧 bundle；内容或 map 更新仍使缓存失效。构建阶段编译固定版本的 client-modules，运行时不新增编译步骤。
+
+[CLI → integration 新一轮对照：本地 6.30 → 4.36 秒，ACS 待复测](docs/startup-2026-10-22/client-composition-report.md) · [此前启动优化记录](docs/startup-2026-10-22/report.md)
 
 `SEARXNG_WHEELHOUSE` 只是可选的构建参数，不需要写进 `.env`。正常构建无需增加参数或挂载，仍使用原来的清华/PyPI 在线安装路径。仅显式传入该参数并挂载 wheel 目录时启用离线安装；目录缺包会报错，不会偷偷切换版本。该参数不写入运行时 ENV，镜像启动不依赖构建机器上的 wheel 目录。

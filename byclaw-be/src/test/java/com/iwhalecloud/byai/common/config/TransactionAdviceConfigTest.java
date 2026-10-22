@@ -25,6 +25,40 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
+    void tenantProviderObservationDoesNotJoinOrPoisonTheCallerTransaction() {
+        var ds = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+            "jdbc:h2:mem:tenantObservation;DB_CLOSE_DELAY=-1", "sa", "");
+        var manager = new DataSourceTransactionManager(ds);
+        var config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", manager);
+        var client = mock(com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient.class);
+        org.mockito.Mockito.when(client.getSandboxIfExists("tenant-id")).thenAnswer(inv -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            // Downstream failure is contained by providerStatus, even within a real caller transaction.
+            new org.springframework.transaction.support.TransactionTemplate(manager).execute(status -> {
+                throw new IllegalStateException("provider unavailable");
+            });
+            return null;
+        });
+        var service = new com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService(
+            mock(com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade.class), client,
+            mock(com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository.class),
+            mock(com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper.class),
+            new com.fasterxml.jackson.databind.ObjectMapper(), "db", "/tmp", "node", "redis", "6379", "0",
+            "default", "", "http://be", "", "host");
+        var factory = new ProxyFactory(service);
+        factory.addAdvice(config.getAdvisor());
+        var proxy = (com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService) factory.getProxy();
+        var record = new com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord();
+        record.setSandboxId("tenant-id");
+        new org.springframework.transaction.support.TransactionTemplate(manager).execute(status -> {
+            assertThat(proxy.providerStatus(record)).isEqualTo("UNKNOWN");
+            assertThat(status.isRollbackOnly()).isFalse();
+            return null;
+        });
+    }
+
+    @Test
     void forwardingTransportSuspendsAnActualCallerTransaction() {
         var ds=new org.springframework.jdbc.datasource.DriverManagerDataSource("jdbc:h2:mem:forwardAdvice;DB_CLOSE_DELAY=-1","sa","");
         var manager=new DataSourceTransactionManager(ds);var config=new TransactionAdviceConfig();ReflectionTestUtils.setField(config,"transactionManager",manager);

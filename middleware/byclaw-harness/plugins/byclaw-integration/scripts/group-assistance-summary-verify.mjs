@@ -241,6 +241,24 @@ try {
   await assert.rejects(()=>definitions.get('byclaw_instantiate_template').execute({template_id:'byclaw-employee-helper',task:'bypass'},{agent:directParent,signal}),/scoped AgentTeams task ledger/)
   const requestTool=definitions.get('group_request_assistance')
   const started=await requestTool.execute({objective:'find script'},directExec)
+  const rendered=requestTool.output.render({},started)
+  const presentationMeta=requestTool.output.presentationMeta({},started)
+  assert.equal(presentationMeta.instance_session_id,started.instance_session_id,'native assistance must expose the child session')
+  assert.ok(rendered.some(block=>block.type==='text'&&block.text.includes(`\nAssistance session: ${started.instance_session_id}\n`)),'PTC assistance must expose the child session in rendered text')
+  for(const mode of ['native','ptc']){
+    const gate=new ByClawAsyncTeamGate()
+    gate.observe({type:mode==='native'?'tool/call':'tool/ptc-dispatch-start',data:{name:'group_request_assistance',callId:'live',subCallId:'live'}})
+    gate.observe(mode==='native'
+      ?{type:'tool/result',data:{message:{content:[{type:'tool-result',toolCallId:'live',content:rendered,meta:presentationMeta}]}}}
+      :{type:'tool/ptc-dispatch',data:{name:'group_request_assistance',subCallId:'live',isError:false,content:rendered}})
+    gate.observe({type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
+    assert.equal(gate.waiting,true,`${mode}: pending assistance must retain the command`)
+    gate.observe({type:'user/message',data:{source:{kind:'subagent-settled',senderSessionId:started.instance_session_id},content:[]}})
+    assert.equal(gate.waiting,true,`${mode}: child settlement must wait for the final parent turn`)
+    gate.observe({type:'turn/end',data:{turn:2,reason:{kind:'completed'}}})
+    assert.equal(gate.waiting,false,`${mode}: real assistance output must release the completed command`)
+    gate.dispose()
+  }
   await definitions.get('group_resolve_assistance').execute({status:'completed',result:'actual script'},{agent:agents.get(started.instance_session_id),signal})
   const same=await requestTool.execute({objective:'find script'},directExec)
   assert.equal(same.status,'completed');assert.equal(same.result,'actual script');assert.equal(starts,1);assert.equal(concludes,1,'synchronous result must not conclude and wait forever')
@@ -254,17 +272,18 @@ try {
   const resumed=await requestTool.execute({objective:'recover original'},{...directExec,agent:coldParent})
   assert.equal(resumed.request_id,cold.record.id);assert.equal(resumed.instance_session_id,cold.record.childId);assert.equal(starts,3)
 
-  // Both native and Code Mode cached returns settle the async gate with no child report.
-  for (const status of ['completed','blocked']) for (const mode of ['native','code']) {
+  // Both native and PTC cached returns settle the async gate with no child report.
+  for (const status of ['completed','blocked']) for (const mode of ['native','ptc']) {
     const gate=new ByClawAsyncTeamGate(1000,5)
     gate.observe({type:'turn/start',data:{turn:1}})
     if(mode==='native'){
       gate.observe({type:'tool/call',data:{name:'group_request_assistance',callId:'cached'}})
       gate.observe({type:'tool/result',data:{message:{content:[{type:'tool-result',toolCallId:'cached',content:[{type:'text',text:`Assistance status: ${status}\nactual return`}],meta:{byclaw_assistance_status:status}}]}}})
     }else{
-      gate.observe({type:'tool/code-dispatch-start',data:{name:'group_request_assistance',subCallId:'cached'}})
-      gate.observe({type:'tool/code-dispatch',data:{name:'group_request_assistance',subCallId:'cached',isError:false,content:[{type:'text',text:`Assistance status: ${status}\nactual return`}]}})
+      gate.observe({type:'tool/ptc-dispatch-start',data:{name:'group_request_assistance',subCallId:'cached'}})
+      gate.observe({type:'tool/ptc-dispatch',data:{name:'group_request_assistance',subCallId:'cached',isError:false,content:[{type:'text',text:`Assistance status: ${status}\nactual return`}]}})
     }
+    assert.equal(gate.waiting,true,`${mode} ${status} must wait for the parent response`)
     gate.observe({type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
     assert.equal(gate.waiting,false,`${mode} ${status} must settle without a new child`)
   }

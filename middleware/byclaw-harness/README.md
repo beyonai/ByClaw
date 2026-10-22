@@ -281,6 +281,8 @@ Builtin Skills remain local. Scoped group employees are prepared when invoked. `
 
 Builds default to `NPM_REGISTRY=https://registry.npmmirror.com`. WeCom/Lark CLIs use an independent `connector-tools` cache stage. Lark binary downloads try npmmirror before GitHub and retain upstream SHA-256 verification; plugin edits do not invalidate this stage.
 
-[Startup benchmark, validation and limits](docs/startup-2026-10-22/report.md)
+The Web module graph reuses unchanged JS/source-map artifacts; adding a plugin no longer decodes every previous bundle again. Bundle or map changes invalidate the cache. The pinned client-modules package is rebuilt inside the image builder, with no new runtime compilation step.
+
+[CLI → integration comparison: local 6.30 → 4.36 seconds; ACS retest pending](docs/startup-2026-10-22/client-composition-report.md) · [Earlier startup validation](docs/startup-2026-10-22/report.md)
 
 `SEARXNG_WHEELHOUSE` is an optional build argument, not an `.env` requirement. Ordinary builds need no extra argument or mount and retain the original Tsinghua/PyPI online installation. Offline installation is enabled only when a wheel directory is explicitly supplied and mounted; missing packages fail rather than changing pinned versions. The argument is not persisted as a runtime ENV, and the image does not depend on the build host wheel directory at startup.
