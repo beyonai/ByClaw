@@ -43,8 +43,11 @@ export class ByClawDshCommandHandler {
     if (command instanceof ResumeCommand) {
       const resumed = await this.sessions.resume(command, context)
       if (!resumed) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
-      context.setStreamFinished(true)
       const recovered = typeof resumed === 'boolean' ? undefined : resumed
+      // A hot Resume completes the original suspended request, whose stream owns
+      // its terminal event. Cold recovery runs the reconstructed turn inside this
+      // request, so GatewayWorker must still emit APP_STREAM_RESPONSE for it.
+      if (recovered === undefined) context.setStreamFinished(true)
       return new AgentTaskResult({
         status: AgentState.COMPLETED,
         content: recovered?.finalAnswer ?? '',
