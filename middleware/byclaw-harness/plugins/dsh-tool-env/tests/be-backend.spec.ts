@@ -164,6 +164,18 @@ describe('ByClawBeBackend', () => {
     await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
     expect(fake.calls[1]?.body).toMatchObject({ paramId: 101, key: 'BYCLAW_TOOL_ENV_HOST_KEY' })
     expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
+
+    // BE's last four characters cannot tell one OpenSSH key from another of the same kind
+    // (every base64 private key ends alike): a runtime whose state never published writes
+    // its own values over a look-alike left by another runtime.
+    const lookAlike = Buffer.from(keys.hostPrivateKey).toString('base64').replace(/^..../u, 'XXXX')
+    fake.privateParams.set('BYCLAW_TOOL_ENV_HOST_KEY', { paramId: 101, value: lookAlike })
+    await rm(join(dir, 'state', 'published-keys.json'))
+    fake.calls.length = 0
+    await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
+    expect(fake.calls.map(call => call.path).filter(path => path.endsWith('/save'))).toHaveLength(2)
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
+    await access(join(dir, 'state', 'published-keys.json'))
   })
 
   it('does not touch private parameters unless asked to', async () => {

@@ -17,6 +17,9 @@
  * pausing/resuming an idle B, and releasing B when A goes away.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
+import { createHash } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
 
 export interface ByClawBeBackendConfig {
@@ -137,25 +140,32 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   /**
    * Store the keys B must start with as the user's private parameters. Values are
-   * write-only in BE's API (only the last four characters read back), so an
-   * unchanged value is recognised by that suffix and left alone.
+   * write-only in BE's API (only the last four characters read back), and that
+   * suffix is the same for every OpenSSH key of a kind, so this runtime also
+   * remembers what it published: a value is left alone only when BE holds one
+   * and the state directory records this exact pair as published.
    */
   private async publishKeys(keys: ToolEnvKeys): Promise<void> {
     const wanted: Record<string, string> = {
       [PUBLISHED_KEY_PARAMS.authorized]: keys.authorizedKey,
       [PUBLISHED_KEY_PARAMS.host]: Buffer.from(keys.hostPrivateKey).toString('base64'),
     }
+    const marker = join(this.identity.directory, 'published-keys.json')
+    const fingerprint = createHash('sha256').update(JSON.stringify(wanted)).digest('hex')
+    let published = ''
+    try { published = (JSON.parse(await readFile(marker, 'utf8')) as { fingerprint?: string }).fingerprint ?? '' } catch { /* never published from this state */ }
     const listed = await this.call('/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50', undefined, 'GET') as { list?: PrivateParam[] } | undefined
     const existing = new Map((listed?.list ?? []).filter(item => typeof item.key === 'string').map(item => [item.key as string, item]))
     for (const [key, value] of Object.entries(wanted)) {
       const current = existing.get(key)
-      if (current?.hasValue === true && current.valueLast4 === value.slice(-4)) continue
+      if (published === fingerprint && current?.hasValue === true && current.valueLast4 === value.slice(-4)) continue
       await this.call('/userPrivateParam/save', {
         ...(current?.paramId === undefined ? {} : { paramId: current.paramId }),
         key, value, enabled: true, description: 'ByClaw tool environment key (managed by the DSH runtime)',
       })
       this.log(`${current === undefined ? 'stored' : 'updated'} private parameter ${key} for ${this.config.userCode}`)
     }
+    if (published !== fingerprint) await writeFile(marker, JSON.stringify({ fingerprint, at: new Date().toISOString() }), { mode: 0o600 })
   }
 
   private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {

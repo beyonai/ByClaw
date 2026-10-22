@@ -32,7 +32,7 @@ export class ToolEnvIdentity {
   private readonly knownHosts: string
   private readonly clientConfig: string
 
-  constructor(private readonly directory: string, alias = 'byclaw-tool-env', private readonly user = 'byclaw') {
+  constructor(readonly directory: string, alias = 'byclaw-tool-env', private readonly user = 'byclaw') {
     this.alias = alias
     this.clientKey = join(directory, 'client_ed25519')
     this.hostKey = join(directory, 'host_ed25519')
