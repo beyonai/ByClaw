@@ -124,4 +124,9 @@ fi
 
 # Keep the supervisor-provided secret descriptor alive until the browser plugin
 # consumes it. pnpm/bash wrappers may close inherited descriptors before Node.
-exec node --import tsx/esm "${BYCLAW_DSH_CLI_ENTRY:-apps/cli/src/bin.ts}" "$@"
+cli_entry="${BYCLAW_DSH_CLI_ENTRY:-apps/cli/lib/bin.js}"
+printf 'byclaw-dsh: starting CLI at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+case "${cli_entry}" in
+    *.ts) exec node --import tsx/esm "${cli_entry}" "$@" ;;
+    *) exec node "${cli_entry}" "$@" ;;
+esac

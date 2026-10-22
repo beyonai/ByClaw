@@ -1,0 +1,106 @@
+{
+  "platform": "Podman Linux amd64 on Apple Silicon (Rosetta)",
+  "cpu": 1,
+  "memoryGiB": 2,
+  "imageId": "9277501003b22fc6946f0e1aedacb096bd9b2ca25f003c443fd77f69f5539f76",
+  "compiledOnDemand": [
+    {
+      "trial": 1,
+      "mode": "compiled-on-demand",
+      "phases": {
+        "managed-links": 0.952,
+        "cli": 1.042,
+        "integration-start": 8.1,
+        "builtin-skills": 9.855,
+        "projection-stage-ready": 10.049,
+        "projection-groups-ready": 10.29,
+        "projection-models-ready": 10.384,
+        "projection-skill-index-ready": 10.385,
+        "projection-templates-prepared": 10.595,
+        "projection-published": 10.603,
+        "resources": 10.687,
+        "worker": 10.751,
+        "web": 10.9
+      },
+      "readySeconds": 10.9,
+      "httpResponded": true,
+      "httpStatus": "200",
+      "resourceSyncFailed": false,
+      "skillSyncErrors": 0
+    },
+    {
+      "trial": 2,
+      "mode": "compiled-on-demand",
+      "phases": {
+        "managed-links": 0.936,
+        "cli": 1.021,
+        "integration-start": 7.664,
+        "builtin-skills": 9.385,
+        "projection-stage-ready": 9.577,
+        "projection-groups-ready": 9.783,
+        "projection-models-ready": 9.872,
+        "projection-skill-index-ready": 9.873,
+        "projection-templates-prepared": 10.094,
+        "projection-published": 10.165,
+        "resources": 10.182,
+        "worker": 10.259,
+        "web": 10.388
+      },
+      "readySeconds": 10.388,
+      "httpResponded": true,
+      "httpStatus": "200",
+      "resourceSyncFailed": false,
+      "skillSyncErrors": 0
+    },
+    {
+      "trial": 3,
+      "mode": "compiled-on-demand",
+      "phases": {
+        "managed-links": 0.938,
+        "cli": 1.025,
+        "integration-start": 7.663,
+        "builtin-skills": 9.298,
+        "projection-stage-ready": 9.481,
+        "projection-groups-ready": 9.703,
+        "projection-models-ready": 9.795,
+        "projection-skill-index-ready": 9.795,
+        "projection-templates-prepared": 9.999,
+        "projection-published": 10.001,
+        "resources": 10.095,
+        "worker": 10.184,
+        "web": 10.313
+      },
+      "readySeconds": 10.313,
+      "httpResponded": true,
+      "httpStatus": "200",
+      "resourceSyncFailed": false,
+      "skillSyncErrors": 0
+    }
+  ],
+  "sourceEagerControl": {
+    "trial": 1,
+    "mode": "source-eager",
+    "phases": {
+      "managed-links": 0.97,
+      "cli": 15.891,
+      "integration-start": 30.303,
+      "builtin-skills": 30.365,
+      "projection-stage-ready": 30.453,
+      "projection-groups-ready": 30.654,
+      "projection-models-ready": 30.71,
+      "projection-skill-index-ready": 30.711,
+      "projection-templates-prepared": 30.877,
+      "projection-published": 30.899,
+      "resources": 30.913,
+      "worker": 31.008,
+      "web": 31.866
+    },
+    "readySeconds": 31.866,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0
+  },
+  "browserFirstUseSeconds": 14.441,
+  "larkBinaryInstallSeconds": 2.106
+}

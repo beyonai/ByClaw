@@ -29,7 +29,7 @@ afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await 
 async function skill(root: string, code: string, description: string, body = 'Original body', name = code) {
   const path = join(root, code)
   await mkdir(path, { recursive: true })
-  await writeFile(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n${body}`)
+  await writeFile(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description === '' ? '""' : description}\n---\n${body}`)
   return { code, path }
 }
 function template(id: string, skills: DshAgentTemplate['skills']): DshAgentTemplate {
@@ -50,7 +50,7 @@ function agent(id: string, header: Partial<Session['header']> = {}): Agent {
     send() {}, followup() {}, steer() {}, cancel() {}, whenIdle: () => Promise.resolve(),
   } as unknown as Agent
 }
-async function fixture() {
+async function fixture(options: { resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'byclaw-skills-test-'))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const builtin = join(root, 'builtin')
@@ -68,6 +68,7 @@ async function fixture() {
   await ctx.plugin(toolSkill)
   const { ByClawSkillRuntime } = await import('../src/skill-runtime.ts')
   const runtime = await ByClawSkillRuntime.install(ctx, {
+    ...options,
     builtinSkillDir: builtin,
     agentSkillRoot: join(root, 'agent-skills'),
   })
@@ -643,4 +644,44 @@ it.each(['create', 'resume'] as const)('binds AgentTeams %s children to the real
   expect((await f.ctx.skills.list({ scope: child })).map(s => s.name)).not.toContain('other-employee')
   await scope.dispose()
   expect(f.runtime.agentId(child)).toBeUndefined()
+})
+
+
+it('defers associated Skill I/O until lookup, coalesces concurrent lookups and rechecks on later reads', async () => {
+  let loads = 0
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    loads++
+    await new Promise(resolve => setTimeout(resolve, 10))
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  const deferred = { ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }
+  ;(await f.runtime.prepareGeneration([deferred], f.cache, f.cache))()
+  expect(loads).toBe(0)
+  await Promise.all([f.ctx.skills.list({ scope: f.a }), f.ctx.skills.get('html-artifact', { scope: f.a })])
+  expect(loads).toBe(1)
+  await f.ctx.skills.get('html-artifact', { scope: f.a })
+  expect(loads).toBe(2)
+})
+
+it('does not publish an in-flight lazy Skill after its authorization generation is replaced', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    entered(); await gate
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  ;(await f.runtime.prepareGeneration([{ ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }], f.cache, f.cache))()
+  const lookup = f.ctx.skills.get('html-artifact', { scope: f.a })
+  const rejected = expect(lookup).rejects.toThrow('generation changed')
+  await started
+  ;(await f.runtime.prepareGeneration([], f.cache, f.cache))()
+  release()
+  await rejected
+  expect(f.runtime.entries('byclaw-employee-1').some(x => x.path === f.html.path)).toBe(false)
 })
