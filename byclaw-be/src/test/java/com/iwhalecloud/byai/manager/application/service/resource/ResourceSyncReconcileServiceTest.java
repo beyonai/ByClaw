@@ -179,12 +179,25 @@ class ResourceSyncReconcileServiceTest {
         verify(relations, never()).removeById(any(java.io.Serializable.class));
     }
 
-    @Test void privateEmployeesAndSuperAssistantsRemainIneligible() {
+    @Test void authorizedPersonalDefaultEmployeeReceivesTheSynchronizedSkill() {
         when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
         employee.setOwnerType("personal");
         mutate(Set.of(5L));
+        assertThat(sources.activeUsers()).containsExactly(5L);
+    }
+
+    @Test void unauthorizedPersonalDefaultEmployeeRemainsIneligible() {
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        employee.setOwnerType("personal");
+        var auth = (AuthApplicationService) ReflectionTestUtils.getField(service, "auth");
+        when(auth.hasResourceUsePermission(employee, 5L)).thenReturn(false);
+        mutate(Set.of(5L));
         assertThat(sources.activeUsers()).isEmpty();
-        employee.setOwnerType("enterprise"); employee.setWorkerAgentType("BY_SUPER");
+    }
+
+    @Test void superAssistantsRemainIneligible() {
+        when(defaults.defaultEmployeesForUpdate(5L)).thenReturn(List.of(20L));
+        employee.setOwnerType("personal"); employee.setWorkerAgentType("BY_SUPER");
         mutate(Set.of(5L));
         assertThat(sources.activeUsers()).isEmpty();
         verify(relations, never()).save(any());

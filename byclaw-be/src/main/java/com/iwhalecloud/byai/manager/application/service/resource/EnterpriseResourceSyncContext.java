@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.manager.dto.resource.EnterpriseResourceSyncRequest;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.apache.commons.lang3.StringUtils;
 
 /** Only authenticated synchronization establishes these exceptions, each bound to a specific resource. */
 public final class EnterpriseResourceSyncContext {
@@ -43,6 +44,14 @@ public final class EnterpriseResourceSyncContext {
     public static boolean skipsUseEnterpriseCheck(SsResource resource) {
         return resource != null && USE_RESOURCE.get() != null
             && Objects.equals(USE_RESOURCE.get(), resource.getResourceId());
+    }
+
+    /** Persisted sync revisions are assigned by completeImport, never inferred from client-supplied ownership. */
+    public static boolean isSynchronizedSkill(SsResource resource) {
+        return resource != null && resource.getResourceId() != null
+            && "enterprise".equals(resource.getOwnerType()) && "SKILL".equals(resource.getResourceBizType())
+            && resource.getThirdSyncRevision() != null && resource.getThirdSyncRevision() > 0
+            && StringUtils.isNotBlank(resource.getSystemCode()) && StringUtils.isNotBlank(resource.getResourceCode());
     }
 
     private record ImportIdentity(boolean trusted, String systemCode, String resourceBizType, String resourceCode) { }

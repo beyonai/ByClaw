@@ -248,12 +248,12 @@ export async function scanPluginSkillNames(): Promise<string[]> {
   return scanSkillRootNames(resolvePluginSkillsDir());
 }
 
-function resolveSkillNamesFromPluginRoot(rawSkills: unknown[], pluginSkills: ScannedSkill[]): string[] {
-  if (pluginSkills.length === 0) {
+function resolveSkillNamesFromRoots(rawSkills: unknown[], installedSkills: ScannedSkill[]): string[] {
+  if (installedSkills.length === 0) {
     return mergeSkillNames(rawSkills);
   }
   const lookup = new Map<string, string>();
-  for (const skill of pluginSkills) {
+  for (const skill of installedSkills) {
     lookup.set(skill.dirName, skill.skillName);
     lookup.set(skill.skillName, skill.skillName);
   }
@@ -276,11 +276,13 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     ? await scanWorkspaceSkillNames(resolveAgentWorkspaceDir(params.api, params.mainParentAgentId))
     : [];
   const pluginSkills = await scanSkillRoot(resolvePluginSkillsDir());
+  const hubSkills = await scanSkillRoot(path.join(resolveStateDir(), SKILLS_DIR_NAME));
 
   const out: T[] = [];
   for (const agent of params.managed) {
     const workspaceDir = resolveAgentWorkspaceDir(params.api, agent.agentId);
-    const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
+    // Hub packages retain their resource code as the directory, but OpenClaw filters by frontmatter name.
+    const baseSkills = resolveSkillNamesFromRoots(agent.listEntry.skills ?? [], [...pluginSkills, ...hubSkills]);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
     const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
@@ -308,6 +310,7 @@ export function watchWorkspaceSkillDirs(params: {
     dirs.add(path.join(resolveAgentWorkspaceDir(params.api, params.mainParentAgentId), SKILLS_DIR_NAME));
   }
   dirs.add(resolvePluginSkillsDir());
+  dirs.add(path.join(resolveStateDir(), SKILLS_DIR_NAME));
   for (const agent of params.managed) {
     dirs.add(path.join(resolveAgentWorkspaceDir(params.api, agent.agentId), SKILLS_DIR_NAME));
   }

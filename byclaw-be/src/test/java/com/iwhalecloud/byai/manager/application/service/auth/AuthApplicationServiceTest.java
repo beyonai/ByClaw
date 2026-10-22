@@ -88,6 +88,112 @@ import org.mockito.InOrder;
 class AuthApplicationServiceTest {
 
     @Test
+    void synchronizedSkillUsesEffectiveExplicitGrantsInBothRuntimeAndListDespiteEnterpriseMetadata() {
+        for (Long tenant : java.util.Arrays.asList(null, 0L, 1L, 2L)) {
+            for (String type : List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_MANAGE)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setComAcctId(tenant);
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType("SKILL"); grant.setGrantType(type);
+                var service = newExplicitUserPermissionService(List.of(grant));
+                prepareOperationPermissionQueries(service, resource);
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                var row = service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L);
+                assertThat(row.isHasUsePermission()).isTrue();
+                assertThat(row.isHasViewPermission()).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void synchronizedSkillViewOnlyGrantNeverAllowsContentAccess() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grant.setGrantType(GrantType.ALLOW_VIEW);
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceViewPermission(resource)).isTrue();
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        for (var permission : List.of(service.queryResourceOperationPermissions(607L),
+            service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L))) {
+            assertThat(permission.isHasViewPermission()).isTrue();
+            assertThat(permission.isHasUsePermission()).isFalse();
+            assertThat(permission.isCanViewDetail()).isFalse();
+        }
+    }
+
+    @Test
+    void synchronizedSkillRevocationExpiryAndOffShelfCannotBeBypassedByCreatorOrAdmin() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setCreateBy(3L); resource.setComAcctId(1L);
+        var grants = new ArrayList<PrivilegeGrant>();
+        var service = newExplicitUserPermissionService(grants);
+        prepareOperationPermissionQueries(service, resource);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grants.add(grant);
+        assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+        grant.setExpDate(new java.util.Date(0));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setExpDate(null); grant.setStatusCd("P");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setEffDate(null); resource.setResourceStatus(3);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        resource.setResourceStatus(2);
+        grants.clear();
+        login.setUserCode("adminvip");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void synchronizedSkillUseBlacklistStillOverridesUseGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var allow = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        var deny = useGrant(607L, 3L, GrantToObjType.USER, Color.BLACK, "A");
+        allow.setGrantObjType("SKILL"); deny.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(allow, deny));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void ordinaryControlledSkillStillRequiresMatchingEnterpriseEvenWithExplicitGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setThirdSyncRevision(null);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.hasResourceViewPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    private SsResource synchronizedSkillResource() {
+        var resource = enterpriseResource(607L, 1L);
+        resource.setResourceBizType("SKILL"); resource.setResourceCode("external-skill");
+        resource.setSystemCode("BYAI"); resource.setThirdSyncRevision(1L);
+        resource.setComAcctId(null); resource.setUseAuthControlled(true); resource.setViewAuthControlled(true);
+        return resource;
+    }
+
+    @Test
     void synchronizationUseCheckKeepsGrantRequirementsAndRestoresOrdinaryEnterpriseIsolation() {
         var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
         var resource = enterpriseResource(607L, 1L);

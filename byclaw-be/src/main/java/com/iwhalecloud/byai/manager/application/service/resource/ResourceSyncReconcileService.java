@@ -197,7 +197,6 @@ public class ResourceSyncReconcileService {
 
     private boolean eligible(SsResource employee, SsResource resource, Long userId) {
         if (employee == null || !"DIG_EMPLOYEE".equals(employee.getResourceBizType())
-            || !"enterprise".equals(employee.getOwnerType())
             || !Objects.equals(employee.getResourceStatus(), 2) || !Objects.equals(resource.getResourceStatus(), 2)
             || "BY_SUPER".equals(employee.getWorkerAgentType())
             || employee.getResourceCode() != null && employee.getResourceCode().endsWith("_main")) return false;

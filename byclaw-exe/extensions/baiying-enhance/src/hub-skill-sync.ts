@@ -218,6 +218,11 @@ async function fetchHubSkillVersion(params: {
   }
   const parsed = parseVersionResponse(parseJsonBody(bodyText));
   if (!parsed) {
+    const json = parseJsonBody(bodyText);
+    if (json && typeof json === "object" && !Array.isArray(json) && !responseSucceeded(json)) {
+      const failure = json as Record<string, unknown>;
+      throw new Error(`version request rejected code=${String(failure.code)}: ${String(failure.msg ?? failure.message ?? "unknown error")}`);
+    }
     throw new Error(`version response missing data.version: ${bodyText.slice(0, 200)}`);
   }
   return parsed;
@@ -463,7 +468,7 @@ export async function syncHubSkillsForManagedAgents(params: {
         params.logger?.warn?.(
           `baiying-enhance: hub skill sync failed skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        break;
+        continue;
       }
     }
   }

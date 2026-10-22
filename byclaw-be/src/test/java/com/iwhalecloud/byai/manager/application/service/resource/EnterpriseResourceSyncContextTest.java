@@ -10,6 +10,24 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class EnterpriseResourceSyncContextTest {
+    @Test void runtimeSkillIdentityRequiresPersistedRevisionAndCompleteEnterpriseSkillIdentity() {
+        var skill = resource(10L, "external-skill");
+        skill.setResourceBizType("SKILL");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setThirdSyncRevision(1L);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isTrue();
+        skill.setOwnerType("personal");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setOwnerType("enterprise"); skill.setResourceBizType("TOOLKIT");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setResourceBizType("SKILL"); skill.setSystemCode(null);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setSystemCode("BYAI"); skill.setResourceCode("");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setResourceCode("external-skill"); skill.setThirdSyncRevision(0L);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+    }
+
     @BeforeEach void login() {
         var login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);
