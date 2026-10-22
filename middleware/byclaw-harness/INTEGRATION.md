@@ -92,3 +92,9 @@ node middleware/byclaw-harness/scripts/startup-client-modules-verify.mjs
 原版与候选都可附加 `--oracle` 输出脱敏夹具的四代 JS/map 摘要，用于字节等价对照；
 该模式不执行性能计数断言，正常验证必须再运行不带此参数的命令。
 [完整结果及 ACS 验收边界](docs/startup-2026-10-22/client-composition-report.md)。
+
+### 构建末尾的 Browser Bridge 检查
+
+`browser-supervisor-verify.py` 在 supervisor 确认重连完成后才结束恢复测试，
+不会把 daemon/status 的调用计数当成就绪信号。构建失败会保留实际错误检查；
+无需关闭该校验或调整 byCLI 版本。[竞态原因与验证记录](docs/startup-2026-10-22/build-supervisor-race.md)。
