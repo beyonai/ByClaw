@@ -17,6 +17,8 @@ import type { z } from 'zod'
 import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
+import { resolveLocalExecutable } from './local-executable.ts'
+import { answerWhileDown } from './pending-directories.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -61,6 +63,19 @@ export class ToolEnvConnection extends Service {
     return this.lease().then(lease => lease.connection.ready)
   }
 
+  /**
+   * Only a tool call is meant to start B. When an operation arrives while B is
+   * down and no start is in flight, name it: this is the line to read when B
+   * starts earlier than expected.
+   */
+  private noteStartReason(method: string, params: unknown): void {
+    if (this.connected || this.current !== undefined || this.closed) return
+    const detail = params !== null && typeof params === 'object' ? params as Record<string, unknown> : {}
+    const target = detail['target'] as { displayPath?: string } | undefined
+    const where = target?.displayPath ?? detail['path'] ?? detail['cwd'] ?? (Array.isArray(detail['argv']) ? (detail['argv'] as unknown[])[0] : undefined) ?? detail['endpoint'] ?? ''
+    this.ctx.logger('byclaw-tool-env').info(`tool environment start requested by ${method} ${typeof where === 'string' ? where : JSON.stringify(where)}`)
+  }
+
   /** Whether B is connected right now; `false` never starts it. */
   get connected(): boolean {
     return this.live !== undefined && !isBroken(this.live.connection)
@@ -82,11 +97,27 @@ export class ToolEnvConnection extends Service {
   }
 
   async request<T>(method: string, params: unknown, result: z.ZodType<T>, signal?: AbortSignal, wait = false): Promise<T> {
+    // Preparing a turn's shell asks where `bash` lives; that must not start B. Same image build, same answer.
+    if (method === 'executable' && !this.connected && this.current === undefined && !this.closed) {
+      const input = params as { command?: unknown; env?: Readonly<Record<string, string | null>> }
+      if (typeof input.command === 'string') {
+        const local = await resolveLocalExecutable(input.command, input.env)
+        if (local !== undefined) return result.parse(local)
+      }
+    }
+    // A turn resolves its session directory and probes for files (git roots, cwd) before the model
+    // runs; answer those without B: queued directories are empty directories, the rest is absent.
+    if (!this.connected && this.current === undefined && !this.closed) {
+      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories())
+      if (answer !== undefined) return result.parse(answer)
+    }
+    this.noteStartReason(method, params)
     const scrubbed = scrubEnvironment(params)
     return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
   }
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
+    this.noteStartReason('stream', endpoint)
     const socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal)
     this.streams.add(socket)
     this.touch()

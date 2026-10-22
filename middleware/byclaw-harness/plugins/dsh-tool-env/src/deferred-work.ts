@@ -11,6 +11,11 @@ export class DeferredToolEnvironmentWork {
 
   get size(): number { return this.pending.size }
 
+  /** Directories queued for creation (`mkdir:<path>` keys), in queue order. */
+  pendingDirectories(): string[] {
+    return [...this.pending.keys()].filter(key => key.startsWith('mkdir:')).map(key => key.slice('mkdir:'.length))
+  }
+
   /** Remember `operation` under `key`, replacing an earlier operation with the same key. */
   defer(key: string, operation: () => Promise<void>): void {
     this.pending.delete(key)
