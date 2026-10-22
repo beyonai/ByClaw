@@ -39,6 +39,7 @@
           systemCode: !!js "process.env.BYCLAW_TOOL_ENV_SYSTEM_CODE || ''"
           serviceKey: !!js "process.env.BYCLAW_TOOL_ENV_SERVICE_KEY || 'byclaw-dsh-tools'"
           sshInstance: !!js "process.env.BYCLAW_TOOL_ENV_SSH_INSTANCE || 'ssh'"
+          hostTemplate: !!js "process.env.BYCLAW_TOOL_ENV_HOST_TEMPLATE ?? 'sandbox-{id}'"
           readyTimeoutMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_READY_TIMEOUT_MS || 180000)"
           requestTimeoutMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS || 180000)"
 

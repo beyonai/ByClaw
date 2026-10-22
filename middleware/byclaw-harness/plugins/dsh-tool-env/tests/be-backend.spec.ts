@@ -90,7 +90,7 @@ describe('ByClawBeBackend', () => {
     identity = new ToolEnvIdentity(join(dir, 'state'))
     config = {
       baseUrl: `${baseUrl}/`, userCode: 'u1', token: 'jwt-u1', systemCode: '', serviceKey: 'byclaw-dsh-tools',
-      sshInstance: 'ssh', port: 22, readyTimeoutMs: 1500, requestTimeoutMs: 5000,
+      sshInstance: 'ssh', hostTemplate: '', port: 22, readyTimeoutMs: 1500, requestTimeoutMs: 5000,
     }
     logs.length = 0
   })
@@ -149,10 +149,18 @@ describe('ByClawBeBackend', () => {
     expect(logs.some(line => line.includes('unreachable'))).toBe(true)
   })
 
-  it('fails when the spec declares no ssh endpoint', async () => {
+  it('fails when the spec declares no ssh endpoint and no host template is set', async () => {
     fake.nextEndpoints = { openclaw: 'http://127.0.0.1:9/' }
     const backend = new ByClawBeBackend(config, identity, () => {})
     await expect(backend.ensure()).rejects.toThrow(/no "ssh" endpoint for sandbox type byclaw-dsh-tools/u)
+  })
+
+  it('derives B\'s host from the sandbox id when BE returns an ingress path for the ssh port', async () => {
+    // Older BE/OpenSandbox builds render a tcp port as an HTTP proxy path.
+    fake.nextEndpoints = { ssh: '/v1/sandboxes/sb1/proxy/22?token=abc' }
+    const backend = new ByClawBeBackend({ ...config, hostTemplate: '127.0.0.1', port }, identity, message => logs.push(message))
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(logs[0]).toMatch(/no tcp address for "ssh"; using host template 127\.0\.0\.1/u)
   })
 
   it('surfaces BE failures with their message', async () => {
@@ -177,6 +185,9 @@ describe('parseEndpoint', () => {
     expect(parseEndpoint('tcp://[fd00::5]:22/', 22)).toEqual({ hostName: 'fd00::5', port: 22 })
     expect(parseEndpoint('[fd00::5]', 22)).toEqual({ hostName: 'fd00::5', port: 22 })
     expect(parseEndpoint('sandbox-abc', 2022)).toEqual({ hostName: 'sandbox-abc', port: 2022 })
-    expect(parseEndpoint('http://host:8080/v1/sandboxes/x/proxy/22', 22)).toEqual({ hostName: 'host', port: 8080 })
+    expect(parseEndpoint('tcp://10.0.0.5:22?token=abc', 22)).toEqual({ hostName: '10.0.0.5', port: 22 })
+    for (const notSsh of ['/v1/sandboxes/x/proxy/22?token=abc', 'http://host:8080/v1/sandboxes/x/proxy/22', 'https://host/', '', '  ']) {
+      expect(parseEndpoint(notSsh, 22), notSsh).toBeUndefined()
+    }
   })
 })

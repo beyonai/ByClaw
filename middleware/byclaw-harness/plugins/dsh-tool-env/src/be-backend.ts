@@ -28,7 +28,13 @@ export interface ByClawBeBackendConfig {
   serviceKey: string
   /** Key in `instanceEndpoints` that carries B's sshd address. */
   sshInstance: string
-  /** Port used when the endpoint carries none. */
+  /**
+   * B's host name from its sandbox id (`{id}`), used when BE reports no plain
+   * `tcp://host:port` for the ssh port: older BE or OpenSandbox builds return an
+   * HTTP ingress path there. Empty disables the fallback.
+   */
+  hostTemplate: string
+  /** Port used when the endpoint carries none and for the host-template fallback. */
   port: number
   /** Deadline for B's sshd to accept connections after BE reports it. */
   readyTimeoutMs: number
@@ -80,18 +86,24 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private async launch(): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
     const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }) as LaunchData | undefined
+    let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
       const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === serviceKey)
-      const entry = ofType.find(candidate => candidate.sandboxId === data?.sandboxId) ?? ofType[0]
+      const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
+      sandboxId ??= entry?.sandboxId
       endpoint = this.sshEndpoint(entry?.instanceEndpoints)
     }
-    if (endpoint === undefined) {
-      throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${serviceKey}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}"`)
+    if (endpoint === undefined && this.config.hostTemplate !== '' && sandboxId !== undefined && sandboxId !== '') {
+      endpoint = { hostName: this.config.hostTemplate.replaceAll('{id}', sandboxId), port: this.config.port }
+      this.log(`ByClaw BE reported no tcp address for "${sshInstance}"; using host template ${endpoint.hostName}:${String(endpoint.port)}`)
     }
-    this.log(`tool environment ${data?.sandboxId ?? '(unknown id)'} from ByClaw BE: ${endpoint.hostName}:${String(endpoint.port)}`)
+    if (endpoint === undefined) {
+      throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${serviceKey}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
+    }
+    this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${endpoint.hostName}:${String(endpoint.port)}`)
     return endpoint
   }
 
@@ -107,7 +119,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {
     const raw = endpoints?.[this.config.sshInstance]
-    return typeof raw === 'string' && raw.trim() !== '' ? parseEndpoint(raw, this.config.port) : undefined
+    return typeof raw === 'string' ? parseEndpoint(raw, this.config.port) : undefined
   }
 
   private async call(path: string, body: Record<string, unknown>): Promise<unknown> {
@@ -133,10 +145,17 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
 /**
  * Endpoint as BE renders a `tcp` port: `tcp://host:port`; also accepts
- * `host:port`, `[v6]:port` and a bare host (then `defaultPort`). Any path is ignored.
+ * `host:port`, `[v6]:port` and a bare host (then `defaultPort`). A query or path
+ * suffix is ignored. An HTTP ingress path (`/v1/sandboxes/...`) or any non-tcp
+ * URL is not an sshd address and yields `undefined`.
  */
-export function parseEndpoint(raw: string, defaultPort: number): ToolEnvEndpoint {
-  const value = raw.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//iu, '').replace(/[/?#].*$/u, '')
+export function parseEndpoint(raw: string, defaultPort: number): ToolEnvEndpoint | undefined {
+  const trimmed = raw.trim()
+  if (trimmed === '' || trimmed.startsWith('/')) return undefined
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//iu.exec(trimmed)?.[1]
+  if (scheme !== undefined && scheme.toLowerCase() !== 'tcp') return undefined
+  const value = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//iu, '').replace(/[/?#].*$/u, '')
+  if (value === '') return undefined
   const bracketed = /^\[([^\]]+)\](?::(\d+))?$/u.exec(value)
   if (bracketed?.[1] !== undefined) return { hostName: bracketed[1], port: bracketed[2] === undefined ? defaultPort : Number(bracketed[2]) }
   const colon = value.lastIndexOf(':')

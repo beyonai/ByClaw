@@ -105,6 +105,10 @@ layout and are deployment-specific:
 A `tcp` port makes BE resolve the sandbox-network address
 (`?resolve_internal=true`), which is what `tcp://host:22` in `instanceEndpoints`
 carries; HTTP ports would come back as BE ingress paths and are of no use here.
+BE builds before that resolver, or OpenSandbox servers without
+`resolve_internal`, return an ingress path for the tcp port too; A then falls
+back to `BYCLAW_TOOL_ENV_HOST_TEMPLATE` (`sandbox-{id}`, the Docker runtime's
+container name) with `BYCLAW_TOOL_ENV_PORT`.
 B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 `serviceKey` as the user's preferred sandbox spec, and that it acts for the
 `userCode` in its body; both are accepted as they are.
@@ -118,6 +122,7 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_BE_BASE_URL` | `byclaw-be`: BE origin with path prefix; falls back to `BYCLAW_DSH_BASE_URL`, then `BYAI_SERVICE_BASE_URL` |
 | `BYCLAW_TOOL_ENV_SERVICE_KEY` | `byclaw-be`: B's `service_key` (default `byclaw-dsh-tools`) |
 | `BYCLAW_TOOL_ENV_SSH_INSTANCE` | `byclaw-be`: `instanceEndpoints` key of B's sshd (default `ssh`) |
+| `BYCLAW_TOOL_ENV_HOST_TEMPLATE` | `byclaw-be`: B's host name from its sandbox id when BE returns no `tcp://` address (default `sandbox-{id}`, Docker DNS; empty disables) |
 | `BYCLAW_TOOL_ENV_SYSTEM_CODE` | `byclaw-be`: optional `system-code` header |
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
