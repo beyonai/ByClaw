@@ -482,8 +482,8 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
         request_id: { type: 'string', required: true }, instance_session_id: { type: 'string', required: true }, status: { type: 'string', required: true },
         reused: { type: 'boolean', required: true }, result: { type: 'string' }, blocking_reason: { type: 'string' },
       } },
-      render: (_args, value) => [{ type: 'text', text: `Assistance status: ${value.status}\n` + (value.status === 'completed' ? `Reused assistance ${value.request_id} for this same task: ${value.result ?? ''}` : value.status === 'blocked' ? `Waiting for user input (${value.blocking_reason ?? 'missing_user_input'}): ${value.result ?? ''}. Explain the required input to the user; do not dispatch again.` : `Assistance ${value.request_id} is pending; its result resumes this task.`) }],
-      presentationMeta: (_args, value) => ({ byclaw_assistance_status: value.status }),
+      render: (_args, value) => [{ type: 'text', text: `Assistance status: ${value.status}\nAssistance session: ${value.instance_session_id}\n` + (value.status === 'completed' ? `Reused assistance ${value.request_id} for this same task: ${value.result ?? ''}` : value.status === 'blocked' ? `Waiting for user input (${value.blocking_reason ?? 'missing_user_input'}): ${value.result ?? ''}. Explain the required input to the user; do not dispatch again.` : `Assistance ${value.request_id} is pending; its result resumes this task.`) }],
+      presentationMeta: (_args, value) => ({ byclaw_assistance_status: value.status, instance_session_id: value.instance_session_id }),
     },
     async execute(args, exec) {
       const parent = exec.agent

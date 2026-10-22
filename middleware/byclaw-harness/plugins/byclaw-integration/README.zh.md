@@ -269,6 +269,8 @@ Redis 模型的 `instanceParam.connectTimeoutSec` 只限制 TCP/TLS 建立连接
 
 ### 协助请求、等待用户与任务摘要
 
+异步协助的运行结果必须携带协助子会话 ID，等待器仅在匹配该子会话的结束通知、且团长本轮结束后收口。原生调用通过结果元数据关联；DSH PTC 调用通过结果文本中的 `Assistance session` 行关联（该事件不携带展示元数据）。团队台账保留不应要求模型删除团队。页面回归：向数字员工组发送“叫你的成员出来打声招呼”，分别验证任务卡出现即进入、以及等待交付后再首次进入；两种情况下都应在协助返回和团长答复后恢复发送按钮，`runningStatus` 和 `runningSnapshot` 均返回 `running: false`，且不再反复出现内部巡检。本地等待器测试不替代页面验收。
+
 `group_request_assistance` 的团队请求以原 `taskId/attemptId/requesterId`、规范化缺口目标和真实用户输入 revision 关联。revision 来自 ByClaw 用户消息 ID；模型工具参数、普通提及、员工结果回流和自动恢复轮次不能生成新 revision。相同请求完成后直接返回持久结果，不再暂停等待一个不存在的新回调。单 @ 员工还没有 TeamTask 时使用私有运行目录中的 DIRECT 协助账本，固定请求与团长子会话 ID；`group_resolve_assistance` 将实际结果写回原请求。进程重启也恢复同一请求与子会话，不另建平台任务。
 
 团长返回团队协助时可以传 `assistance_status=blocked` 及 `blocking_reason=missing_user_input/outside_scope/no_progress`，内容说明用户必须补充什么。任务进入显式等待用户；相同输入下不能用 start、reassign、claim、替代任务或模型删除团队来重启这个阻塞。外部 Worker 的 WAITING_USER 同样写入此状态，并取消外部悬挂执行，不按执行故障自动重试。真正的新用户输入到达后，团长可以返回补充资料继续原 attempt，或明确重派。不同的合法缺口可以依次协作，例如先取得脚本，再请求素材；没有新增协作轮数或总规模上限。请求哈希负责结构化相同请求的幂等，无法判定任意改写措辞是否语义相同；真实缺料、范围外能力和无进展仍须返回明确 blocker。

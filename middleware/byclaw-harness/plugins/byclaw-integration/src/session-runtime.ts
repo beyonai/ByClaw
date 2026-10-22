@@ -1189,7 +1189,9 @@ export class ByClawAsyncTeamGate {
       if (result.isError === true || event.data.error !== undefined || assistanceReturned) this.templateReported = true
       else {
         const meta = event.data.meta
-        const childId = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta['instance_session_id'] : undefined
+        const childId = (meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta['instance_session_id'] : undefined)
+          ?? (result as unknown as { meta?: Record<string, unknown> }).meta?.['instance_session_id']
+          ?? /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
         if (typeof childId === 'string' && childId !== '') {
           this.templateSessionId = childId
           this.templateReported = this.templateSettledSessions.has(childId)
@@ -1199,7 +1201,16 @@ export class ByClawAsyncTeamGate {
       return
     }
     if (event.type === 'tool/ptc-dispatch' && this.templateCallId === event.data.subCallId) {
-      if (event.data.isError || (this.templateCallIsAssistance && /^Assistance status: (completed|blocked)\b/u.test(contentText(event.data.content)))) this.templateReported = true
+      const text = contentText(event.data.content)
+      if (event.data.isError || (this.templateCallIsAssistance && /^Assistance status: (completed|blocked)\b/u.test(text))) this.templateReported = true
+      else if (this.templateCallIsAssistance) {
+        // PTC dispatch events do not carry presentation metadata in DSH rc.2.
+        const childId = /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
+        if (childId !== undefined) {
+          this.templateSessionId = childId
+          this.templateReported = this.templateSettledSessions.has(childId)
+        }
+      }
       this.templateCallId = undefined
       return
     }
