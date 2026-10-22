@@ -6,11 +6,15 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.Robot
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DingtalkRobotConfigServiceTest {
 
@@ -91,10 +95,48 @@ class DingtalkRobotConfigServiceTest {
         DingtalkRobotChannelConfig owned = service.validateAndBuildRobotConfigs(employee(7L, validConfig())).get(0);
         service.replaceRobotConfigsForResource(7L, List.of(owned));
 
-        assertThatThrownBy(() -> service.validateAndBuildRobotConfigs(employee(8L, validConfig())))
-                .isInstanceOf(DingtalkRobotConfigValidationException.class)
-                .hasMessageContaining("ROBOT_CODE_OWNED_BY_ANOTHER_RESOURCE");
+        DingtalkRobotConfigValidationException exception = assertThrows(DingtalkRobotConfigValidationException.class,
+                () -> service.validateAndBuildRobotConfigs(employee(8L, validConfig())));
+
+        assertThat(exception).hasMessageContaining("ROBOT_CODE_OWNED_BY_ANOTHER_RESOURCE");
+        assertThat(exception.getMessageKey()).isEqualTo("dingtalk.robot.config.ownedByNamedEmployee");
+        assertThat(exception.getMessageArguments()).containsExactly("Agent 7");
         assertThat(service.getRobotConfig("robot-1").getResourceId()).isEqualTo(7L);
+    }
+
+    @Test
+    void strictValidationFindsOwnerNameWhenConflictedRobotIsExcludedFromRuntimeMapping() {
+        service.refreshRobotConfigs(List.of(employee(7L, validConfig()), employee(8L, validConfig())));
+
+        DingtalkRobotConfigValidationException exception = assertThrows(DingtalkRobotConfigValidationException.class,
+                () -> service.validateAndBuildRobotConfigs(employee(7L, validConfig())));
+
+        assertThat(exception.getMessageArguments()).containsExactly("Agent 8");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t"})
+    void strictValidationOmitsParenthesesWhenOwnerNameIsMissing(String ownerName) {
+        ResourceExtDigEmployeeDto owner = employee(7L, validConfig());
+        owner.setResourceName(ownerName);
+        service.refreshRobotConfigs(List.of(owner));
+
+        DingtalkRobotConfigValidationException exception = assertThrows(DingtalkRobotConfigValidationException.class,
+                () -> service.validateAndBuildRobotConfigs(employee(8L, validConfig())));
+
+        assertThat(exception.getMessageKey()).isEqualTo("dingtalk.robot.config.ownedByAnotherEmployee");
+        assertThat(exception.getMessageArguments()).isEmpty();
+    }
+
+    @Test
+    void strictValidationAllowsEditingTheCurrentOwnersRobot() {
+        ResourceExtDigEmployeeDto owner = employee(7L, validConfig());
+        service.refreshRobotConfigs(List.of(owner));
+
+        assertThat(service.validateAndBuildRobotConfigs(owner))
+                .extracting(DingtalkRobotChannelConfig::getRobotCode)
+                .containsExactly("robot-1");
     }
 
     private ResourceExtDigEmployeeDto employee(Long resourceId, String machineChannel) {

@@ -272,4 +272,56 @@ describe('digital employee publication entry', () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(openEmployeePublication).not.toHaveBeenCalled();
   });
+
+  // 创建者与管理员的资格由后端统一计算，菜单收到 canDelete 后应能完成确认和注销回调。
+  it.each([
+    ['zh-CN', '注销员工', '确定注销该员工吗？', '确定'],
+    ['en-US', 'Deregister employee', 'Deregister this employee?', 'Confirm'],
+  ])('deletes an authorized enterprise copy after confirmation in %s', async (locale, label, prompt, confirm) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
+    const onDeleteData = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          resourceStatus: 3,
+          officialPublication: true,
+          canDelete: true,
+        }}
+        actionConfig={{ onDeleteData, enableDigitalEmployeeDelete: true }}
+      />
+    );
+
+    fireEvent.click(screen.getByText(label));
+    expect(await screen.findByText(prompt)).toBeInTheDocument();
+    expect(onDeleteData).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: confirm }));
+    await waitFor(() => expect(onDeleteData).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    { canDelete: false, resourceStatus: 3 },
+    { canDelete: undefined, resourceStatus: 3 },
+    { canDelete: false, resourceStatus: 2 },
+    { canDelete: true, resourceStatus: -1 },
+  ])('hides enterprise copy deletion for permissions/status %j', ({ canDelete, resourceStatus }) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          canDelete,
+          resourceStatus,
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          officialPublication: true,
+          hasManagePermission: true,
+        }}
+        actionConfig={{ enableDigitalEmployeeDelete: true }}
+      />
+    );
+
+    expect(screen.queryByTestId('resource-menu-deleteData')).not.toBeInTheDocument();
+  });
 });

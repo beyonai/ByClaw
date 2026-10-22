@@ -391,6 +391,7 @@ export default {
   'digitalEmployeeMgr.clientSecretTooltip': 'DingTalk App -> Credentials & Basic Info -> Client Secret',
   'digitalEmployeeMgr.robotCodeLabel': 'robotCode',
   'digitalEmployeeMgr.robotCodeTooltip': 'DingTalk App -> Robot -> Copy RobotCode',
+  'digitalEmployeeMgr.robotCodeBindingHint': 'Each robot can be bound to only one digital employee',
   'digitalEmployeeMgr.aiCardIdLabel': 'AICardId',
   'digitalEmployeeMgr.aiCardIdTooltip':
     'DingTalk App -> Open API -> Card Platform -> Template List -> Copy Template ID',

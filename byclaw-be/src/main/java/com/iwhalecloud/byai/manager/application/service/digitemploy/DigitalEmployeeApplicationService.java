@@ -2193,9 +2193,9 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         this.validateDigitalEmployeeManagePermission(ssResource);
-        // 官方副本注销仍仅允许官方管理员，授权和上下架的管理权限不能代替注销资格。
+        // 与菜单共用注销资格：同企业创建者或管理员可注销已下架副本，管理授权不能代替创建者身份。
         if (employeeGovernance != null && DigitalEmployeeGovernanceService.isOfficialCopy(ssResource)
-            && !employeeGovernance.canAdministerOfficial(ssResource)) {
+            && !employeeGovernance.canDeleteOfficial(ssResource)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
         // 保留可辨认的删除记录并释放原名称;按状态判断,避免重复删除时叠加后缀.

@@ -388,6 +388,7 @@ export default {
   'digitalEmployeeMgr.clientSecretTooltip': '钉钉应用 -> 凭证与基础信息 -> Client Secret',
   'digitalEmployeeMgr.robotCodeLabel': 'robotCode',
   'digitalEmployeeMgr.robotCodeTooltip': '钉钉应用 -> 机器人 -> 复制 RobotCode',
+  'digitalEmployeeMgr.robotCodeBindingHint': '同一机器人仅可绑定一个数字员工',
   'digitalEmployeeMgr.aiCardIdLabel': 'AICardId',
   'digitalEmployeeMgr.aiCardIdTooltip': '钉钉应用 -> 开放能力 -> 卡片平台 -> 模板列表 -> 复制 模板Id',
   'digitalEmployeeMgr.feishuAppIdRequired': '请输入 appId',

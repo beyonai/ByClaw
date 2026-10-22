@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Input, Form, Tabs, Tooltip } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
+import { Form, Input, Modal, Tabs, Tooltip, Typography } from 'antd';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
-import styles from './index.module.less';
 import {
   getReusableRobotConfigValues,
   getRobotConfigIdentityValue,
@@ -11,6 +10,7 @@ import {
   normalizeRobotConfig,
   RobotConfig,
 } from '../robotConfig';
+import styles from './index.module.less';
 
 const LabelWithTooltip = ({ label, tooltip }: { label: string; tooltip: string }) => (
   <span>
@@ -36,6 +36,9 @@ const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.replace(
 function RobotModal(props: IProps) {
   const { open, setOpen, onOk, robotChannelLabelMap, item, isReadOnly } = props;
   const intl = useIntl();
+
+  // 输入编码时也向读屏用户说明绑定限制，每个弹窗使用独立的描述 ID。
+  const robotCodeHintId = useId();
   const hasIdentity = Boolean(getRobotConfigIdentityValue(item) || item.appId);
   const [form] = Form.useForm<RobotConfig>();
   const channelTabs = useMemo(() => {
@@ -168,15 +171,28 @@ function RobotModal(props: IProps) {
       </Form.Item>
       <Form.Item
         label={
-          <LabelWithTooltip
-            label={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeLabel' })}
-            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeTooltip' })}
-          />
+          <span className={styles.robotCodeLabel}>
+            <LabelWithTooltip
+              label={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeLabel' })}
+              tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeTooltip' })}
+            />
+            <Typography.Text
+              id={robotCodeHintId}
+              className={styles.robotCodeHint}
+              type="secondary"
+            >
+              {intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeBindingHint' })}
+            </Typography.Text>
+          </span>
         }
         name="robotCode"
         rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeRequired' }) }]}
       >
-        <Input className={styles.robotFieldControl} placeholder="" />
+        <Input
+          aria-describedby={robotCodeHintId}
+          className={styles.robotFieldControl}
+          placeholder=""
+        />
       </Form.Item>
       <Form.Item
         label={

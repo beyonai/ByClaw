@@ -4080,7 +4080,7 @@ public class AuthApplicationService {
             vo.setCanUseAuth(canManage);
             vo.setCanOffShelf(canManage && Objects.equals(resource.getResourceStatus(), 2));
             vo.setCanOnShelf(canManage && Objects.equals(resource.getResourceStatus(), 3));
-            vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
+            vo.setCanDelete(employeeGovernance.canDeleteOfficial(resource));
         }
         // 停用按 adminvip 创建者身份隐藏“管理授权”的规则，保留原代码供追溯。
         // if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)
