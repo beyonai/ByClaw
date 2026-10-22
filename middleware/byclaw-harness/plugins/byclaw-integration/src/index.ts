@@ -527,6 +527,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const projectionConcurrency = resolveByClawProjectionConcurrency(config.projectionConcurrency)
 
   const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
+  startupPhase('session-metadata-ready')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
   const lazySkills = createLazyByClawSkillLoader({

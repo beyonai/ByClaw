@@ -278,3 +278,8 @@ DSH and plugins compile during image build; runtime executes the compiled CLI. B
 Before Worker readiness, Integration synchronizes authorized employees, teams, models and Skill associations. Business Skill version checks, downloads and parsing happen when the current employee queries registry list/snapshot/get, including tools and prompt catalog assembly. Each lookup checks versions; missing, incomplete or changed caches are atomically replaced. Unchanged versions reuse disk content and concurrent requests coalesce. Authorization and associations are rechecked after loading; stale generations cannot republish results.
 
 Builtin Skills remain local. Scoped group employees are prepared when invoked. `allowSkillSyncFailure` controls skipping a failed Skill versus rejecting the lookup; later calls may retry. First Skill use carries network latency, and Worker readiness does not mean every Skill is warm.
+
+
+### 2026-10-22 cold-start projection optimization
+
+Template staging retains catalog validation and filename rules, copying only user templates, unknown files and subdirectories. ByClaw templates regenerated in the new generation are no longer copied and then deleted. The generation lock, publication rollback, revocation cleanup and lazy Skill version checks remain unchanged. `session-metadata-ready` separates session metadata recovery from builtin Skill initialization. `template-staging-verify.mjs` covers revocation, user-file preservation, directory collision rejection and retaining the previous generation on failure.

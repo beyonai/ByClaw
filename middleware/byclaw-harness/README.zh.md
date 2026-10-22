@@ -264,6 +264,10 @@ CodeGraph 运行态检查要求使用 `plugins/dsh-codegraph/package.json` 声�
 
 Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill 关联索引。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，刷新后的旧代际结果不能重新发布。
 
+依赖缓存（`profiles/node_modules`、web 的 `.dsh-module-fallback`）由镜像提供并在容器本地修复，NAS 上只保留指向当前镜像的链接。模块解析先转换为真实路径，避免每个依赖反复穿过 NAS；完整性检查、缺失链接修复和用户包优先级仍保留。web 的 `cordis.patch.yml`、会话、凭据和业务资源继续按原路径持久化。无需新增 `.env` 配置；基础 DSH 版本或源码结构不匹配时构建会明确失败，避免静默套用补丁。
+
+资源投影先校验旧目录，只复制需要保留的用户模板及未知文件；ByClaw 托管模板按当前授权重新生成，避免“整目录复制后再删除”的重复 NAS IO。发布仍在原代际锁下完成，保留失败回滚、撤权清理和 Skill 版本检查。启动日志单独记录 `session-metadata-ready`，区分元数据恢复与内置 Skill 加载。
+
 内置 Skill 仍从镜像本地加载；专家团临时作用域员工在实际调用时准备。`allowSkillSyncFailure` 决定单个 Skill 失败时跳过还是拒绝查询，之后可重试。首次 Skill 查询承担网络耗时，Worker ready 不代表所有 Skill 已预热。
 
 构建默认使用 `NPM_REGISTRY=https://registry.npmmirror.com`。企业微信/飞书 CLI 在独立 `connector-tools` 阶段缓存；飞书二进制改为阿里镜像优先、GitHub 兜底，仍执行官方 SHA-256 校验。插件变更不会使这个下载阶段失效。

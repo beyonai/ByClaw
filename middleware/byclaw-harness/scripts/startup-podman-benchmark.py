@@ -16,7 +16,12 @@ def main():
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--base-url', help='Explicit test-only backend override; leaves the supplied env file unchanged')
     parser.add_argument('--source-eager', action='store_true')
+    parser.add_argument('--profile-startup-fs', action='store_true', help='Instrument selected synchronous filesystem calls until integration activates')
+    parser.add_argument('--nas-delay-ms', type=float, default=0, help='Synthetic delay per .dsh-path call, only with --profile-startup-fs (0–20 ms)')
+    parser.add_argument('--agent-router-enabled', action='store_true', help='Explicitly enable agent routing to match the ACS configuration')
     args = parser.parse_args()
+    if not 0 <= args.nas_delay_ms <= 20 or (args.nas_delay_ms and not args.profile_startup_fs):
+        parser.error('--nas-delay-ms requires --profile-startup-fs and a value between 0 and 20')
     private = pathlib.Path(tempfile.mkdtemp(prefix='byclaw-startup-logs-'))
     results = []
     for trial in range(1, args.runs+1):
@@ -32,6 +37,15 @@ def main():
                    args.image, 'web', '--port', '8080', '--no-open']
         if args.base_url:
             command[command.index(args.image):command.index(args.image)] = ['-e', 'BYCLAW_DSH_BASE_URL='+args.base_url]
+        extra = []
+        if args.agent_router_enabled:
+            extra += ['-e', 'BYCLAW_AGENT_ROUTER_ENABLED=true']
+        if args.profile_startup_fs:
+            preload = pathlib.Path(__file__).resolve().with_name('startup-fs-profile.cjs')
+            extra += ['-v', f'{preload}:/tmp/startup-fs-profile.cjs:ro',
+                      '-e', 'NODE_OPTIONS=--require=/tmp/startup-fs-profile.cjs',
+                      '-e', f'PROFILE_NAS_DELAY_MS={args.nas_delay_ms}']
+        command[command.index(args.image):command.index(args.image)] = extra
         start = time.monotonic()
         process = subprocess.Popen(['podman', 'machine', 'ssh', shlex.join(['sudo', 'podman', *command])],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -48,8 +62,10 @@ def main():
                         line, buffer = buffer.split(b'\n', 1)
                         text = line.decode(errors='replace'); lines.append(text)
                         elapsed = round(time.monotonic()-start, 3)
+                        if text.startswith('[startup-profile] '):
+                            result['filesystemProfile'] = json.loads(text.split(' ', 1)[1])
                         for marker, phase in [('linked image-managed plugins', 'managed-links'), ('starting CLI', 'cli'),
-                                              ('startup phase=activate;', 'integration-start'), ('phase=builtin-skills-ready', 'builtin-skills'), ('phase=resources-ready', 'resources'),
+                                              ('startup phase=activate;', 'integration-start'), ('phase=session-metadata-ready', 'session-metadata'), ('phase=builtin-skills-ready', 'builtin-skills'), ('phase=resources-ready', 'resources'),
                                               ('phase=worker-ready', 'worker'), ('dsh web:', 'web')]:
                             if marker in text and phase not in result['phases']: result['phases'][phase] = elapsed
                         if 'projection reason=cold-start;' in text:

@@ -5,14 +5,14 @@ import { randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
-  deleteTeamTemplate,
+  teamTemplateFileName,
   listTeamTemplates,
   writeTeamTemplate,
   type ExpertTeamTemplate,
   type ExpertTemplateMember,
 } from '@byclaw/dsh-agent-teams/catalog'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
-import { deleteAgentTemplate, listAgentTemplates, writeAgentTemplate, type DshAgentTemplate } from './agent-template.ts'
+import { agentTemplateFileName, listAgentTemplates, writeAgentTemplate, type DshAgentTemplate } from './agent-template.ts'
 import { privateGenerationRoot } from './generation-paths.ts'
 import { loadByClawExpertGroupRuntime, type AuthorizedByClawResources } from './catalog.ts'
 import type { GenerationLease } from './generation-lease.ts'
@@ -51,13 +51,26 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
-async function copyDirectory(source: string, target: string): Promise<void> {
-  try {
-    await cp(source, target, { recursive: true, force: true })
-  } catch (error: unknown) {
-    if (!isMissing(error)) throw error
-    await mkdir(target, { recursive: true })
+/** Copy only entries the previous generation would retain. Managed templates
+ * are regenerated below; copying and then deleting them doubles NAS IO.
+ * Unknown files, invalid team JSON, directories and symlinks retain cp semantics.
+ */
+async function copyRetainedEntries(source: string, target: string, excluded: ReadonlySet<string>, concurrency: number): Promise<void> {
+  await mkdir(target, { recursive: true })
+  let entries
+  try { entries = await readdir(source, { withFileTypes: true }) } catch (error: unknown) {
+    if (isMissing(error)) return
+    throw error
   }
+  // The former unlink pass rejected a directory at an excluded filename.
+  // Preserve that failure instead of silently discarding an unrelated subtree.
+  for (const entry of entries) {
+    if (excluded.has(entry.name) && !entry.isFile() && !entry.isSymbolicLink()) {
+      throw new Error(`Refusing to replace non-file template entry: ${join(source, entry.name)}`)
+    }
+  }
+  await mapConcurrent(entries.filter(entry => !excluded.has(entry.name)), concurrency,
+    entry => cp(join(source, entry.name), join(target, entry.name), { recursive: true, force: true }))
 }
 
 async function createStageDirectories(prefixes: readonly string[]): Promise<string[]> {
@@ -279,18 +292,21 @@ export async function projectByClawResourcesToTemplates(options: {
   const stagedAgentTemplates = join(stagedAgentCatalog, 'templates')
   const stagedTeamTemplates = join(stagedTeamCatalog, 'templates')
   const project = async (): Promise<ProjectedByClawTemplates> => {
-    await Promise.all([
-      copyDirectory(liveAgentTemplates, stagedAgentTemplates),
-      copyDirectory(liveTeamTemplates, stagedTeamTemplates),
+    // Read/validate the live generation while holding the same publication
+    // lease. Compute the exact filenames the old delete pass would remove.
+    const [previousAgents, previousTeams] = await Promise.all([
+      listAgentTemplates(options.agentTemplateDir),
+      listTeamTemplates(options.teamCatalogDir),
     ])
-    for (const template of await listAgentTemplates(stagedAgentCatalog)) {
-      if (template.source.system === 'byclaw') await deleteAgentTemplate(stagedAgentCatalog, template.id)
-    }
-    for (const template of await listTeamTemplates(stagedTeamCatalog)) {
-      if (template.id.startsWith('byclaw-team-') || template.id.startsWith('byclaw-group-')) {
-        await deleteTeamTemplate(stagedTeamCatalog, template.id)
-      }
-    }
+    const excludedAgents = new Set(previousAgents.filter(template => template.source.system === 'byclaw')
+      .map(template => agentTemplateFileName(template.id)))
+    const excludedTeams = new Set(previousTeams
+      .filter(template => template.id.startsWith('byclaw-team-') || template.id.startsWith('byclaw-group-'))
+      .map(template => teamTemplateFileName(template.id)))
+    await Promise.all([
+      copyRetainedEntries(liveAgentTemplates, stagedAgentTemplates, excludedAgents, projectionConcurrency),
+      copyRetainedEntries(liveTeamTemplates, stagedTeamTemplates, excludedTeams, projectionConcurrency),
+    ])
 
     phase('stage-ready')
     const direct = new Set(options.resources.directEmployeeIds)

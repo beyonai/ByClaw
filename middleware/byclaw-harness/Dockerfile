@@ -97,6 +97,14 @@ RUN set -eux; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
+# Keep generated module reconciliation on canonical local paths. The original
+# dependency closure, stale-link repair and packaged-executable semantics remain.
+COPY middleware/byclaw-harness/scripts/prepare-dsh-local-modules.mjs /tmp/prepare-dsh-local-modules.mjs
+RUN node /tmp/prepare-dsh-local-modules.mjs /workspace \
+    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot
+
+
 # Fixed connector tools have an independent cache, unaffected by plugin edits.
 FROM ${BASE_IMAGE} AS connector-tools
 USER root
@@ -166,6 +174,9 @@ USER byclaw
 WORKDIR /workspace
 
 COPY --from=plugin-builder --chown=byclaw:byclaw /opt/byclaw/plugins/ /opt/byclaw/dsh-managed/plugins/
+# The compiled CLI and explicit source rollback use the same module resolver.
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
 # Keep source aliases (tsx) and ordinary package imports on the same core build.
 # The two packed core packages also enter the profile's existing local overrides.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/src/ /workspace/packages/core/agent/src/

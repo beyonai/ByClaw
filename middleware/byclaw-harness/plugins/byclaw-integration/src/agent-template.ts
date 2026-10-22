@@ -70,8 +70,13 @@ function safeId(id: string): string {
   return normalized
 }
 
+/** Exact filename used by publication and revocation, also used when staging. */
+export function agentTemplateFileName(id: string): string {
+  return `${safeId(id)}.json`
+}
+
 function templatePath(catalogDir: string, id: string): string {
-  return join(catalogDir, 'templates', `${safeId(id)}.json`)
+  return join(catalogDir, 'templates', agentTemplateFileName(id))
 }
 
 function assertTemplate(value: unknown): DshAgentTemplate {

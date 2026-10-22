@@ -71,6 +71,11 @@ function templatesDir(catalogDir: string): string {
   return join(catalogDir, 'templates')
 }
 
+/** Exact filename shared by publication, revocation and generation staging. */
+export function teamTemplateFileName(id: string): string {
+  return `${sanitizeKey(id)}.json`
+}
+
 function instancesDir(catalogDir: string): string {
   return join(catalogDir, 'instances')
 }
@@ -162,14 +167,14 @@ export async function writeTeamTemplate(
 }
 
 export async function readTeamTemplate(catalogDir: string, id: string): Promise<ExpertTeamTemplate | undefined> {
-  const value = await readJson(join(templatesDir(catalogDir), `${sanitizeKey(id)}.json`)).catch(() => undefined)
+  const value = await readJson(join(templatesDir(catalogDir), teamTemplateFileName(id))).catch(() => undefined)
   return isTemplate(value) ? value : undefined
 }
 
 /** Delete one exact reusable team template when its source catalog revokes it. */
 export async function deleteTeamTemplate(catalogDir: string, id: string): Promise<void> {
   try {
-    await unlink(join(templatesDir(catalogDir), `${sanitizeKey(id)}.json`))
+    await unlink(join(templatesDir(catalogDir), teamTemplateFileName(id)))
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
