@@ -23,7 +23,7 @@ jest.mock('@/components/MessageList/components/FileRender/components/IconRender'
 ));
 
 jest.mock('@/components/MessageList/components/FileRender', () => ({
-  PREVIEWABLE: ['xlsx'],
+  PREVIEWABLE: ['xlsx', 'html'],
 }));
 
 jest.mock('@/components/MessageList/components/FileRender/components/Previewer/index.module.less', () => ({
@@ -92,5 +92,23 @@ describe('Markdown ATag file actions', () => {
 
     expect(screen.getByText('report.xlsx')).toBeInTheDocument();
     expect(screen.queryByTestId('file-icon')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    '/byaiService/commonFile/preview?filePath=%2Fby%2F.sessions%2F101%2Freport.html',
+    '/commonFile/preview?filePath=/.sessions/101/report.html',
+    `${window.location.origin}/byaiService/commonFile/preview?filePath=%2F.sessions%2F101%2Freport.html`,
+  ])('leaves rewritten managed preview links to the message artifact renderer: %s', (href) => {
+    render(<ATag domNode={{ name: 'a', attribs: { href }, children: [{ type: 'text', data: 'report.html' }] }} />);
+    expect(screen.getByText('report.html')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-icon')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    'https://example.com/byaiService/commonFile/preview?filePath=%2F.sessions%2F101%2Freport.html',
+    '/byaiService/commonFile/preview?bucketName=other-user&filePath=%2F.sessions%2F101%2Freport.html',
+  ])('keeps remote and explicit-bucket download links available: %s', (href) => {
+    render(<ATag domNode={{ name: 'a', attribs: { href }, children: [{ type: 'text', data: 'report.html' }] }} />);
+    expect(screen.getByTestId('file-icon')).toBeInTheDocument();
   });
 });

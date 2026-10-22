@@ -7,7 +7,7 @@ import { ChatFileArtifact, downloadChatFileArtifact, resolveChatFileArtifacts } 
 import { IMessageState } from '@/constants/message';
 import type { IFile } from '@/typescript/file';
 import type { IMessage } from '@/typescript/message';
-import { extractChatFileArtifactPaths } from '@/utils/chatFileArtifact';
+import { extractChatFileArtifactPaths, getChatFileArtifactPath } from '@/utils/chatFileArtifact';
 
 const resolveCache = new Map<string, Promise<ChatFileArtifact[]>>();
 
@@ -38,8 +38,8 @@ const getExistingFileKeys = (message: IMessage) => {
   message.fileList?.forEach((item) => {
     const path = item.queryFile?.filePath || item.queryFile?.fileUrl || item.downloadUrl;
     const fileName = item.queryFile?.fileName || item.file?.name;
-    if (path) keys.add(`path:${path}`);
-    if (fileName) keys.add(`name:${fileName}`);
+    if (path) keys.add(`path:${getChatFileArtifactPath(path) || path}`);
+    else if (fileName) keys.add(`name:${fileName}`);
   });
   return keys;
 };
@@ -88,12 +88,14 @@ function ReplyFileArtifacts({
     if (!resolvedSessionId) return [];
     const existingKeys = getExistingFileKeys(message);
     return artifacts
-      .filter(
-        (artifact) =>
-          !existingKeys.has(`path:${artifact.path}`) &&
-          !existingKeys.has(`path:${artifact.sourcePath}`) &&
-          !existingKeys.has(`name:${artifact.fileName}`)
-      )
+      .filter((artifact) => {
+        const keys = [artifact.path, artifact.sourcePath]
+          .filter(Boolean)
+          .map((path) => `path:${getChatFileArtifactPath(path) || path}`);
+        if (existingKeys.has(`name:${artifact.fileName}`) || keys.some((key) => existingKeys.has(key))) return false;
+        keys.forEach((key) => existingKeys.add(key));
+        return true;
+      })
       .map<IFile>((artifact) => ({
         uid: `reply-artifact:${artifact.path}`,
         status: 'done',
