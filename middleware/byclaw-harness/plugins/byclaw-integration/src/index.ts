@@ -35,13 +35,15 @@ import { defaultCatalogDir } from '@byclaw/dsh-agent-teams/catalog'
 import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
-import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
+import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate, type DshAgentTemplate } from './agent-template.ts'
 import {
   ByClawSkillRuntime,
   type ByClawSkillPreparationError,
   type ByClawSkillPreparationRename,
 } from './skill-runtime.ts'
 import { loadResourceSnapshot, loadAuthorizedByClawResources, type AuthorizedByClawResources } from './catalog.ts'
+import { ByClawSkillLoader } from './skill-loader.ts'
+import { timed } from './operation-timing.ts'
 import { ByClawGenerationLease } from './generation-lease.ts'
 import {
   defaultByClawSkillCache,
@@ -205,6 +207,8 @@ export interface Config {
   skillSyncTimeoutMs?: number
   skillSyncAttempts?: number
   skillSyncRetryDelayMs?: number
+  skillRefreshMs?: number
+  skillFirstUseTimeoutMs?: number
   /** Timeout for history loading and background first-session group-chat classification. */
   groupChatDispositionTimeoutMs?: number
   /** Output token budget for the auxiliary TASK/CHAT classification. */
@@ -243,6 +247,8 @@ export const Config: z<Config> = z.object({
   skillSyncTimeoutMs: z.natural().min(1).default(60_000),
   skillSyncAttempts: z.natural().min(1).default(3),
   skillSyncRetryDelayMs: z.natural().default(250),
+  skillRefreshMs: z.natural().min(1).default(300_000),
+  skillFirstUseTimeoutMs: z.natural().min(1).default(60_000),
   groupChatDispositionTimeoutMs: z.natural().min(1).default(30_000),
   groupChatDispositionMaxTokens: z.natural().min(1).default(1_024),
   groupChatDispositionHistoryMaxBytes: z.natural().min(1).default(65_536),
@@ -428,7 +434,9 @@ function byClawResourceInventoryLines(
     for (const skill of [...employee.skills].sort((left, right) => left.code.localeCompare(right.code))) {
       const status = !activeEmployeeIds.has(employee.id)
         ? 'not-loaded'
-        : skippedSkillCodes.has(skill.code) ? 'skipped' : 'ready'
+        : skippedSkillCodes.has(skill.code) ? 'skipped'
+          : diagnostics.cachedSkillCodes === undefined ? 'ready'
+            : diagnostics.cachedSkillCodes.has(skill.code) ? 'cached' : 'pending'
       lines.push(
         `[byclaw-dsh] Resource dependency: type=SKILL; owner=${resourceLogValue(employee.id)}; code=${resourceLogValue(skill.code)}; status=${status}`,
       )
@@ -448,6 +456,7 @@ function byClawResourceInventoryLines(
 export interface ByClawResourceInventoryDiagnostics {
   reason?: string
   skippedSkillCodes?: ReadonlySet<string>
+  cachedSkillCodes?: ReadonlySet<string>
   employeeModels?: Readonly<Record<string, ProjectedByClawModelSelection>>
   employeeModelErrors?: ReadonlyMap<string, string>
   discoveredEmployees?: AuthorizedByClawResources['employees']
@@ -598,6 +607,30 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const refreshChannel = config.refreshChannel ?? 'byai:pub:dig_employee_change'
   let models: ByClawDynamicModelRuntime
   let resources: AuthorizedByClawResources
+  let skillAuthority: AuthorizedByClawResources | undefined
+  let skillTemplates = new Map<string, DshAgentTemplate>()
+  let lastProjectionSignature = ''
+  let lastProjectionComplete = false
+  const skillLoader = new ByClawSkillLoader({
+    cacheRoot: skillCacheDir, concurrency: projectionConcurrency,
+    refreshMs: config.skillRefreshMs, waitTimeoutMs: config.skillFirstUseTimeoutMs,
+    timeoutMs: config.skillSyncTimeoutMs, attempts: config.skillSyncAttempts,
+    retryDelayMs: config.skillSyncRetryDelayMs,
+    log: message => ctx.logger.info(message),
+  })
+  skillRuntime.setDeferredResolver(async (templateId, signal) => {
+    const authority = skillAuthority
+    const employee = authority?.employees.find(candidate => `byclaw-employee-${candidate.id}` === templateId)
+    if (employee === undefined) throw new Error(`Digital employee ${templateId} is no longer authorized`)
+    const skills = await skillLoader.ensure(employee.skills, signal)
+    const authorize = (): void => {
+      if (skillAuthority !== authority) throw new Error('Skill authorization changed during preparation; retry the request')
+    }
+    const template = skillTemplates.get(templateId)
+    authorize()
+    if (template === undefined) throw new Error(`Digital employee ${templateId} is unavailable`)
+    return { template: { ...template, skills }, cacheRoot: skillCacheDir, authorize }
+  }, { renameDuplicateSkills: allowSkillFailure, onSkillRename: reportSkillPreparationRename })
   let sessions: ByClawDshSessionRuntime | undefined
   let disposition: ReturnType<typeof installGroupChatDisposition> | undefined
   let worker: ByClawDshWorkerRuntime | undefined
@@ -619,6 +652,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       try { await operation() } catch (error: unknown) { failures.push(error) }
     }
     await settle(resourceWatch === undefined ? undefined : () => resourceWatch?.close() ?? Promise.resolve())
+    await settle(() => skillLoader.close())
     await settle(() => generationLease.close())
     await settle(() => sessionMetadata.close())
     await settle(() => refresh)
@@ -635,7 +669,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     const operation = refresh.then(async () => {
       const skippedSkillCodes = new Set<string>()
       const employeeModelErrors = new Map<string, string>()
-      const next = await loadAuthorizedByClawResources({
+      const next = await timed(message => ctx.logger.info(message), `stage=resource-snapshot reason=${reason}`, () => loadAuthorizedByClawResources({
         redis,
         userCode,
         baseUrl,
@@ -644,8 +678,30 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         onResourceLoadError: (resourceId, error) => {
           ctx.logger.error(`[byclaw-dsh] Resource ${resourceId} load failed; skipping this resource: ${startupErrorDetail(error)}`)
         },
-      })
-      const projection = await projectByClawResourcesToTemplates({
+      }))
+      const signature = JSON.stringify([baseUrl, next.authorization.userId, next.authorization.resourceIds,
+        next.employees, next.groups, next.directEmployeeIds])
+      // Authoritative associations take effect before any slow model/group projection.
+      const authorityChanged = skillAuthority === undefined || signature !== lastProjectionSignature
+      if (authorityChanged) {
+        skillAuthority = undefined
+        skillRuntime.invalidateDeferred()
+      }
+      try {
+        await skillLoader.reconcile({ principal: `${userCode}:${next.authorization.userId}`, baseUrl,
+          headers: next.authHeaders }, next.employees.flatMap(employee => employee.skills), reason === 'resource-change')
+      } catch (error) {
+        skillAuthority = undefined
+        skillRuntime.invalidateDeferred()
+        throw error
+      }
+      if (authorityChanged) skillAuthority = next
+      resourceWatch?.updateWatchedResources(new Set(next.watchedResourceIds))
+      if (reason === 'on-demand' && lastProjectionComplete && signature === lastProjectionSignature) {
+        resources = { ...resources, authHeaders: next.authHeaders, authorization: next.authorization }
+        return resources
+      }
+      const projection = await timed(message => ctx.logger.info(message), `stage=template-projection reason=${reason}`, () => projectByClawResourcesToTemplates({
         resources: next,
         agentTemplateDir,
         teamCatalogDir: catalogDir,
@@ -653,6 +709,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         baseUrl,
         generationLease,
         projectionConcurrency,
+        cachedSkill: ref => skillLoader.cached(ref),
         allowSkillSyncFailure: config.allowSkillSyncFailure ?? true,
         skillSyncTimeoutMs: config.skillSyncTimeoutMs ?? 60_000,
         skillSyncAttempts: config.skillSyncAttempts ?? 3,
@@ -672,20 +729,29 @@ async function activate(ctx: Context, config: Config): Promise<void> {
           ctx.logger.error(`[byclaw-dsh] Expert group ${groupId} projection failed; skipping this group: ${startupErrorDetail(error)}`)
         },
         resolveModel: (bindingId, modelId) => models.resolve(bindingId, modelId),
-        prepareSkillGeneration: (templates, stagedRoot) => skillRuntime.prepareGeneration(
-          templates,
-          stagedRoot,
-          skillCacheDir,
-          {
-            allowSkillFailure,
-            onSkillError: (error) => {
-              skippedSkillCodes.add(error.code)
-              reportSkillPreparationError(error)
+        prepareSkillGeneration: async (templates, stagedRoot) => {
+          const publish = await skillRuntime.prepareGeneration(
+            templates,
+            stagedRoot,
+            skillCacheDir,
+            {
+              allowSkillFailure,
+              onSkillError: (error) => {
+                skippedSkillCodes.add(error.code)
+                reportSkillPreparationError(error)
+              },
+              onSkillRename: reportSkillPreparationRename,
             },
-            onSkillRename: reportSkillPreparationRename,
-          },
-        ),
-      })
+          )
+          return () => {
+            skillTemplates = new Map(templates.map(template => [template.id, template]))
+            publish()
+          }
+        },
+      }))
+      lastProjectionSignature = signature
+      lastProjectionComplete = projection.acceptedEmployeeIds.length === next.employees.length
+        && projection.acceptedGroupIds.length === next.groups.length
       const acceptedEmployeeIds = new Set(projection.acceptedEmployeeIds)
       const acceptedGroupIds = new Set(projection.acceptedGroupIds)
       resources = {
@@ -693,9 +759,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         employees: next.employees.filter(employee => acceptedEmployeeIds.has(employee.id)),
         groups: next.groups.filter(group => acceptedGroupIds.has(group.id)),
       }
+      const cachedSkillCodes = new Set(resources.employees.flatMap(employee => employee.skills)
+        .filter(ref => skillLoader.cached(ref) !== undefined).map(ref => ref.code))
       const inventory = byClawResourceInventoryLines(resources, {
         reason,
         skippedSkillCodes,
+        cachedSkillCodes,
         employeeModels: projection.employeeModels,
         employeeModelErrors,
         discoveredEmployees: next.employees,
@@ -703,6 +772,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       const inventorySignature = byClawResourceInventoryLines(resources, {
         reason: 'state',
         skippedSkillCodes,
+        cachedSkillCodes,
         employeeModels: projection.employeeModels,
         employeeModelErrors,
         discoveredEmployees: next.employees,
@@ -1091,6 +1161,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     })
     await worker.start(id)
     logStage('worker-start')
+    skillLoader.start()
 
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 

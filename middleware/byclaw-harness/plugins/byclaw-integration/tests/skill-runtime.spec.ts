@@ -644,3 +644,104 @@ it.each(['create', 'resume'] as const)('binds AgentTeams %s children to the real
   await scope.dispose()
   expect(f.runtime.agentId(child)).toBeUndefined()
 })
+
+it('defers required Skills until the bound employee is used and leaves other agents available', async () => {
+  const f = await fixture()
+  const deferred = f.templates.map(value => ({ ...value, deferredSkills: true, skills: [] }))
+  ;(await f.runtime.prepareGeneration(deferred, f.cache, f.cache))()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const requested: string[] = []
+  f.runtime.setDeferredResolver(async id => {
+    requested.push(id)
+    await gate
+    return { template: f.templates.find(value => value.id === id)!, cacheRoot: f.cache }
+  })
+  const pending = f.ctx.skills.list({ scope: f.a })
+  await Promise.resolve()
+  expect(requested).toEqual(['byclaw-employee-1'])
+  expect((await f.ctx.skills.list({ scope: f.main })).map(value => value.name)).toContain('builtin-help')
+  release()
+  const names = (await pending).map(value => value.name)
+  expect(names).toContain('html-artifact')
+  expect(names).not.toContain('other-employee')
+  expect(requested).not.toContain('byclaw-employee-2')
+})
+
+it('blocks the first step if required deferred Skills fail instead of silently running with a partial catalog', async () => {
+  const f = await fixture()
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true, skills: [] })), f.cache, f.cache))()
+  f.runtime.setDeferredResolver(async () => { throw new Error('Required Skill download failed') })
+  await expect(f.propose(f.a)).rejects.toThrow('Required Skill download failed')
+  await expect(f.ctx.skills.snapshot({ scope: f.a })).rejects.toThrow('Required Skill download failed')
+})
+
+it('rejects invalid deferred Skill content and recovers on a later valid version', async () => {
+  const f = await fixture()
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true, skills: [] })), f.cache, f.cache))()
+  const broken = await skill(f.cache, 'broken-version', 'Broken', '', 'INVALID_NAME')
+  let selected = { ...f.templates[0]!, skills: [broken] }
+  f.runtime.setDeferredResolver(async () => ({ template: selected, cacheRoot: f.cache }))
+  await expect(f.propose(f.a)).rejects.toThrow('invalid Skill name/description')
+  selected = f.templates[0]!
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toContain('Bound HTML body')
+})
+
+it('loads a newly published immutable version and denies cached instructions after authorization revocation', async () => {
+  const f = await fixture()
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true, skills: [] })), f.cache, f.cache))()
+  let selected = f.templates[0]!, authorized = true
+  f.runtime.setDeferredResolver(async () => {
+    if (!authorized) throw new Error('Employee revoked')
+    return { template: selected, cacheRoot: f.cache }
+  })
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toContain('Bound HTML body')
+  const updated = await skill(f.cache, 'next-version', 'Updated', 'Updated instructions', 'html-artifact')
+  selected = { ...selected, skills: [updated] }
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toContain('Updated instructions')
+  authorized = false
+  ;(await f.runtime.prepareGeneration([], f.cache, f.cache))()
+  await expect(f.ctx.skills.get('html-artifact', { scope: f.a })).rejects.toThrow('Employee revoked')
+})
+
+it('checks authorization again after reading deferred Skill bodies', async () => {
+  const f = await fixture()
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true })), f.cache, f.cache))()
+  f.runtime.setDeferredResolver(async () => ({ template: f.templates[0]!, cacheRoot: f.cache,
+    authorize: () => { throw new Error('Authorization changed during preparation') } }))
+  await expect(f.ctx.skills.get('html-artifact', { scope: f.a })).rejects.toThrow('Authorization changed during preparation')
+})
+
+it('retains duplicate-name compatibility and skips malformed local workspace Skills during deferred loading', async () => {
+  const f = await fixture()
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true })), f.cache, f.cache))()
+  const duplicate = await skill(f.cache, 'second-code', 'Other HTML', 'Second body', 'html-artifact')
+  const workspace = join(f.root, 'agent-skills', 'workspace-baiying-agent-byclaw-employee-1', 'skills')
+  await skill(workspace, 'broken-local', 'Invalid', '', 'INVALID')
+  f.runtime.setDeferredResolver(async () => ({
+    template: { ...f.templates[0]!, skills: [f.html, duplicate] }, cacheRoot: f.cache,
+  }), { renameDuplicateSkills: true })
+  const entries = await f.ctx.skills.list({ scope: f.a })
+  expect(entries.map(value => value.name)).toContain('html-artifact-second-code')
+  expect(entries.map(value => value.name)).not.toContain('INVALID')
+})
+
+it('projects only each group member’s deferred Skills and immediately revokes old resource roots', async () => {
+  const f = await fixture()
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(f.root, 'dsh-home')
+  cleanups.push(() => { if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome })
+  f.ctx.provide('byclawGroupCoordination', { get: (id: string) => ['a', 'b'].includes(id) ? { role: 'member' } : undefined } as never)
+  ;(await f.runtime.prepareGeneration(f.templates.map(value => ({ ...value, deferredSkills: true })), f.cache, f.cache))()
+  f.runtime.setDeferredResolver(async id => ({ template: f.templates.find(value => value.id === id)!, cacheRoot: f.cache }))
+  const a = await f.ctx.skills.list({ scope: f.a }), b = await f.ctx.skills.list({ scope: f.b })
+  expect(a.map(value => value.name)).toEqual(['builtin-help', 'html-artifact'])
+  expect(b.map(value => value.name)).toEqual(['builtin-help', 'other-employee'])
+  expect(a.find(value => value.name === 'html-artifact')?.resourceBase?.path).not.toBe(f.html.path)
+  expect(a[0]?.resourceBase?.path).not.toBe(b[0]?.resourceBase?.path)
+  const { activeMemberSkillRoots } = await import('../src/group-skill-resources.ts')
+  expect(activeMemberSkillRoots('a')).toHaveLength(2)
+  f.runtime.invalidateDeferred()
+  expect(activeMemberSkillRoots('a')).toEqual([])
+  expect(activeMemberSkillRoots('b')).toEqual([])
+})

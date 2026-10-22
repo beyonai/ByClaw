@@ -72,9 +72,24 @@ Redis 的 `notify-keyspace-events` 支持时，授权监听会订阅当前 Hash 
 
 info 日志会记录监听频道、keyspace／poll 模式、授权信号、资源 ID／type／`changedAt`、被忽略的旧事件或未授权事件、入队批次数量和刷新完成；不会记录授权请求头、Redis 凭据、资源正文、Prompt 或 Skill 内容。
 
-每次刷新都会在快照实时目录前取得独占代际协调器，暂存完整一代 Skill、数字员工模板、专家团模板和 AgentTeams 适配器，并持续持有协调器直至发布、回滚和备份清理完成。模板实例化、基于模板的 AgentTeams 创建和模板列表读取使用共享准入，AgentTeams 模板保存使用独占准入。因此，并发调用方只能使用完整的上一代或完整的新一代数据，发布后获准的保存操作会保留无关模板。卸载期间，协调器拒绝新准入，排空已准入操作和刷新任务，关闭 Worker、会话与 Redis 资源，最后移除服务。刷新成功后删除已撤销授权的 ByClaw 自有产物，同时保留无关文件；刷新失败时保留最后一代完整数据。首次启动的资源同步失败会记录 error，但 Worker 仍会注册，后续资源刷新入口会继续重试。
+普通授权目录刷新先准备数字员工、专家团模板和 AgentTeams 适配器，只在发布时取得独占代际协调器；发布时重新合并实时目录，保留准备期间保存的无关模板。远程 Skill 下载不持有协调器。模板实例化和目录读取继续使用共享准入。卸载时停止后台任务并取消下载，再排空已准入操作，关闭 Worker、会话与 Redis。首次资源刷新失败仍记录 error 并允许 Worker 注册，后续监听和调用可重试；明确撤权会立即使旧 Skill 关联和成员资源视图失效。
 
-Skill 同步先读取远端版本；本地 `code + version` 一致时直接复用缓存，签名下载 URL 的刷新不会触发重复下载。只有版本变化才下载 ZIP；超时、限流和服务端 5xx 会有限重试。默认采用降级语义：单个 Skill 最终失败时记录 error、从本代员工/成员模板中跳过该 Skill，并继续启动 Worker。默认联调 profile 还会把投影并发限制为 `2`，把单次超时设为 15 秒且不重试，避免冷启动并发下载压满 Hub。显式设置 `allowSkillSyncFailure=false` 时会拒绝发布本次暂存代并保留上一代缓存，但 Worker 仍会使用可用资源继续启动。
+启动先读取 Redis 授权、资源元数据及本地 Skill 缓存，不等待远程 Skill 版本检查或 ZIP 下载。Worker 上线后启动后台同步；员工首次查询技能目录、加载正文或进入执行步骤时，只等待自己的缺失技能，默认总等待上限 60 秒（包含排队）。同一技能的并发请求共享下载任务，首次使用优先于排队的预热任务。已有同源缓存立即可用，后台更新失败保留旧版本；缺失或格式错误的必要技能会使该员工本次调用失败，不会静默遗漏技能继续执行。取消一个调用不取消其他调用共享的下载；插件卸载、撤权或来源变更会取消对应任务。
+
+缓存位于 `skillCacheDir/.versions/<来源哈希>/<版本哈希>/<skillCode>`，来源包含用户、后端、Skill ID/type/code 和版本接口，轮换凭据及签名下载地址不会单独导致重新下载。`current.json` 只在完整下载、解压和原子写入成功后更新。旧扁平缓存缺少来源信息，升级后首次会重新校验并下载；新缓存可跨重启复用。旧版本保留以供正在执行的 Agent 使用，不会自动回收；需要清理时应先停用插件，再清理缓存，后续按需重新下载。
+
+相关配置填写在 `byclaw-dsh` 插件配置中：
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `projectionConcurrency` | `8` | 元数据投影并发及独立的 Skill 下载队列并发上限；环境变量 `BYCLAW_DSH_PROJECTION_CONCURRENCY` 可覆盖 |
+| `skillRefreshMs` | `300000` | 后台版本检查间隔 |
+| `skillFirstUseTimeoutMs` | `60000` | 单次员工调用等待缺失技能的总上限 |
+| `skillSyncTimeoutMs` | `60000` | 单次版本/下载请求超时；随包 profile 为 `15000` |
+| `skillSyncAttempts` | `3` | 请求尝试次数；随包 profile 为 `1` |
+| `skillSyncRetryDelayMs` | `250` | 重试等待基数；随包 profile 为 `0` |
+
+`allowSkillSyncFailure` 继续控制旧同步路径的容错与同名 Skill 兼容，不会让按需加载遗漏必要技能。主目录查询和路由仍重新读取授权；元数据不变时跳过重复模板投影，均不等待远程 Skill 同步。
 
 数字员工 Persona 投影遵循 ByClaw 的指令归一化规则：`relPrompt` 优先于 `corePersonaDefinition`，嵌套 JSON 提示记录保留标题，`ability`、`processingFlow` 和 `coreCompetencies` 分别形成独立章节，并在单数字员工与专家团成员提示词中各渲染一次。专家团团长模板先加入不可被覆盖的 DSH 与 AgentTeams 编排、附件、失败处理和结算规则，再追加经授权的 `resolve-runtime` 业务提示词。刷新还会移除遗留的 `byclaw-group-*` AgentTeams 适配器，同时保留无关模板。
 
@@ -82,7 +97,7 @@ Skill 同步先读取远端版本；本地 `code + version` 一致时直接复�
 
 运行中的数字员工（直达根 Agent、委派模板和 AgentTeams 成员）保留完整的 DSH 原生目录，包括全局、项目、用户、preset 以及插件注册的 bundled Skills，并在其上叠加 **部署内置 Skills + 当前 Redis 关联 Skills**。普通主 Agent 保留原有目录并加入部署内置 Skills。内置目录按 `builtinSkillDir` → `BYCLAW_SKILLS_DIR` → 仓库 `builtin/skills` 解析，只读取一级技能目录中的 `SKILL.md`；Dockerfile 已设置 `/opt/byclaw/builtin/skills`。支持多行 YAML 和标准 invocation 标记。同名时员工关联资源覆盖部署内置资源，部署内置资源覆盖 DSH 原生条目。
 
-Watch 收到员工或关联技能更新后，先准备完整内存覆盖层，再与文件代次一起发布。已有 Agent 绑定员工模板 ID，下一次目录查询或正文加载使用新代次，无需重建会话。明确的空 `relSkills`（包括字符串 `"[]"`）撤销全部关联；若此前覆盖了同名 DSH Skill，则重新显露底层原生条目，部署内置 Skill 与原生 Skill 都继续可用。准备或发布失败保留上一代；允许单 Skill 下载失败的降级规则仍如上文所述。正文变化但元数据未变时，额外的 `byclaw-skill-revision` 提示要求重新加载正文，它不承载技能目录。内置文件在插件启动时读取，部署更新后应重启插件。
+Watch 收到员工或关联技能更新后，先发布关联元数据并触发后台版本检查。已有 Agent 按模板 ID 解析当前授权与缓存，下一次目录查询或正文加载读取当前可用版本，无需重建会话。明确的空 `relSkills`（包括字符串 `"[]"`）立即撤销全部关联，重新显露被覆盖的原生 Skill；员工整体撤权后，其旧会话的技能加载会报错。后台检查默认每 5 分钟一次，资源变更信号会提前触发。更新期间可短暂使用同一授权来源的旧版本，正文变化后 `byclaw-skill-revision` 要求重新加载。内置文件仍在插件启动时读取。任务私有的专家团临时目录保留原同步流程。
 
 这控制的是运行时 Skill 目录和标准加载入口，不是文件系统沙箱。已发出的模型请求与历史消息不会被删除；新的目录及标准加载反映撤销状态，版本变更提示要求不再依赖旧正文。冷态历史会话尚未激活时，Web 技能选择菜单可能仍显示 preset 目录；恢复 Agent 后，实际模型上下文使用上述员工视图。
 
@@ -184,7 +199,7 @@ FILE_STORAGE_LOCAL_PATH=/absolute/path/to/byclaw-file
     memberMaxDepth: 2
 ```
 
-常用可选项包括 `catalogDir`、`agentTemplateDir`、`skillCacheDir`、`builtinSkillDir`、`workspace`、`workerId`、`maxConcurrency`、`refreshChannel`、`subagentProvider`、`agentPreset`，以及在 Redis 模式中用作降级、在本地模式中作为必填运行模型的 `provider`/`model`。资源同步调优项包括 `snapshotConcurrency`（默认 `8`）、`projectionConcurrency`（`8`）、`authorizationPollMs`（`5000`）、`authorizationPollOnlyMs`（`2000`）、`authorizationMissingGraceMs`（`15000`）和 `resourceDebounceMs`（`250`）；`projectionConcurrency` 限制单次代次中 Skill、员工模型和专家团运行配置请求的合计并发数，运行时可用正整数环境变量 `BYCLAW_DSH_PROJECTION_CONCURRENCY` 覆盖。Skill 同步会对每个缓存目录单独执行原子替换，不再为每个代次复制完整持久化缓存；Agent 与专家团模板目录仍按完整代次原子发布，撤销的 Skill 只会在新模板和运行时 Skill 视图均提交后删除。每个 ByClaw 根会话都会显式挂载 `agentPreset`，默认值为 `standard`；根 Agent 与委派 Agent 获得该 preset 实际组合的编码工具，数字员工的 Skill 目录按前述内置与关联资源规则裁剪。CodeGraph 等运行能力由各自已安装插件注册，ByClaw Integration 不再声明或扫描这些能力。
+常用可选项包括 `catalogDir`、`agentTemplateDir`、`skillCacheDir`、`builtinSkillDir`、`workspace`、`workerId`、`maxConcurrency`、`refreshChannel`、`subagentProvider`、`agentPreset`，以及在 Redis 模式中用作降级、在本地模式中作为必填运行模型的 `provider`/`model`。资源同步调优项包括 `snapshotConcurrency`（默认 `8`）、`projectionConcurrency`（`8`）、`authorizationPollMs`（`5000`）、`authorizationPollOnlyMs`（`2000`）、`authorizationMissingGraceMs`（`15000`）和 `resourceDebounceMs`（`250`）；`projectionConcurrency` 分别限制元数据投影和独立后台 Skill 队列的并发数，运行时可用正整数环境变量 `BYCLAW_DSH_PROJECTION_CONCURRENCY` 覆盖。Skill 使用来源隔离的不可变版本目录；Agent 与专家团模板目录仍按完整代次原子发布。每个 ByClaw 根会话都会显式挂载 `agentPreset`，默认值为 `standard`；根 Agent 与委派 Agent 获得该 preset 实际组合的编码工具，数字员工的 Skill 目录按前述内置与关联资源规则裁剪。CodeGraph 等运行能力由各自已安装插件注册，ByClaw Integration 不再声明或扫描这些能力。
 
 `agentTypes` 可覆盖 Worker 实际消费的完整 AgentType 列表。缺省时仍注册 `BYCLAW_DSH` 与 `BYCLAW_DSH_<userCode>`。临时替换默认超级助手 Worker 时，以 ByClaw BE 实际报出的目标类型为准；当前默认超级助手入口使用 `['BY_SUPER']`。单一且完全相同的 AgentType 列表会沿用 by-framework 为原 Worker 派生的消费组，避免创建新消费组重放历史消息。接管前必须确认原 Worker 已停止或通过 `WorkerManager.suspendWorker` 暂停，回切时先停止 DSH 再恢复原 Worker。
 
@@ -337,3 +352,5 @@ INFO 日志 `[byclaw-startup] integration stage=<阶段> durationMs=<毫秒>` �
 连接器迁移约定：旧 `options.defaultVoice` 在没有显式 `voice`/`speaker` 时映射为默认音色；原 OpenAI 图片显式 Authorization 和火山 TTS 显式 X-Api-Key / X-Api-Resource-Id 保留优先级。新插件将 `readTimeoutSeconds` 作为整个生成调用的总时间预算，最多 30 分钟（更大配置归一到 30 分钟）；不再分别应用旧连接器的 connectTimeoutSeconds / readTimeoutSeconds，也不采用 maxRetryCount 自动重试，避免重复计费。
 
 语音交互：`byclaw-asr` 使用系统启用的全局默认 `ASR` 模型，在主 Agent 接收输入之前固定识别 MP3，保留 `voiceInteraction` 标记并将识别结果作为 `userInput`。SDK/前端的 `VOICE` 消息携带后端已验证归属的音频，原始音频保存在 `session_root/asr/`；重复消息复用识别缓存。by-framework 1.6.0 要求 wire content 非空，纯语音桥接使用 `[语音消息]` 占位，识别后替换成真实文本。正常文字回复之后，运行时使用现有 TTS 默认模型合成口语摘要，保存到 `session_root/tts/` 并追加可播放的受管制品链接；TTS 失败仍保留完整文字回复。手动转写由登录后的后端代理至 `POST /api/byclaw/asr/transcribe`，用户浏览器不持有供应商密钥。协议与接口约束见 `../byclaw-asr/README.md`。
+
+远程 Skill 的 `version-check`、`download`、`extract`、`cache-publish`，以及资源快照和模板投影，会记录 `status=begin/end/failed durationMs=...`，可从最后一个 `begin` 定位正在等待的阶段。`[byclaw-skills] cache ready=N pending=M` 表示缓存情况；资源清单中 `cached` 只表示已有本地版本，`pending` 表示首次调用还需等待。这些日志不输出凭据、下载 URL 或 Skill 正文。

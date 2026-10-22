@@ -1,6 +1,8 @@
 /** Safe ByClaw Hub Skill download cache, adapted from baiying-enhance. */
 
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { timed } from './operation-timing.ts'
 import { createWriteStream } from 'node:fs'
 import { privateGenerationRoot } from './generation-paths.ts'
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -44,15 +46,17 @@ async function retrySkillRequest<T>(options: {
   attempts: number
   retryDelayMs: number
   operation: () => Promise<T>
+  signal?: AbortSignal
 }): Promise<T> {
   let lastError: unknown
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    options.signal?.throwIfAborted()
     try {
       return await options.operation()
     } catch (error: unknown) {
       lastError = error
       if (attempt === options.attempts || !retryableSkillRequestError(error)) throw error
-      await delay(options.retryDelayMs * attempt)
+      await delay(options.retryDelayMs * attempt, undefined, { signal: options.signal })
     }
   }
   throw lastError
@@ -257,11 +261,18 @@ export async function syncByClawSkill(options: {
   timeoutMs?: number
   attempts?: number
   retryDelayMs?: number
+  /** Version directories are immutable and may remain referenced by active Agents. */
+  versioned?: boolean
+  signal?: AbortSignal
+  log?: (message: string) => void
 }): Promise<string> {
   const fetchImpl = options.fetchImpl ?? fetch
   const timeoutMs = options.timeoutMs ?? DEFAULT_BYCLAW_SKILL_SYNC_TIMEOUT_MS
   const attempts = options.attempts ?? DEFAULT_BYCLAW_SKILL_SYNC_ATTEMPTS
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_BYCLAW_SKILL_SYNC_RETRY_DELAY_MS
+  const requestSignal = (): AbortSignal => options.signal === undefined
+    ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
+  const label = `skill=${JSON.stringify(options.ref.code)}`
   if (!Number.isInteger(attempts) || attempts < 1) throw new Error('ByClaw Skill sync attempts must be a positive integer')
   if (!Number.isInteger(retryDelayMs) || retryDelayMs < 0) {
     throw new Error('ByClaw Skill sync retryDelayMs must be a non-negative integer')
@@ -269,18 +280,19 @@ export async function syncByClawSkill(options: {
   const versionUrl = byClawSkillUrl(options.baseUrl, options.ref.versionUrl)
   let version: { version: string; downloadUrl?: string }
   try {
-    version = await retrySkillRequest({ attempts, retryDelayMs, operation: async () => (
+    version = await timed(options.log, `${label} stage=version-check`, () => retrySkillRequest({ attempts, retryDelayMs, signal: options.signal, operation: async () => (
       responseVersion(await fetchImpl(versionUrl, {
         headers: options.headers,
         redirect: 'manual',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestSignal(),
       }))
-    ) })
+    ) }))
   } catch (error: unknown) {
     throw new Error(`ByClaw Skill ${options.ref.code} version request failed: ${String(error)}`, { cause: error })
   }
   const downloadUrl = byClawSkillUrl(options.baseUrl, version.downloadUrl ?? options.ref.downloadUrl)
-  const targetDir = byClawSkillCacheDir(options.cacheRoot, options.ref.code)
+  const targetDir = byClawSkillCacheDir(options.versioned
+    ? join(options.cacheRoot, createHash('sha256').update(version.version).digest('hex')) : options.cacheRoot, options.ref.code)
   const cached = await readCachedByClawSkill(targetDir)
   // Hub download URLs may be short-lived signed URLs. The version is the
   // immutable content identity; a refreshed signature must not force every
@@ -293,21 +305,24 @@ export async function syncByClawSkill(options: {
     const extractDir = join(scratch, 'extract')
     await mkdir(extractDir, { recursive: true })
     try {
-      await retrySkillRequest({ attempts, retryDelayMs, operation: async () => {
+      await timed(options.log, `${label} stage=download`, () => retrySkillRequest({ attempts, retryDelayMs, signal: options.signal, operation: async () => {
         const response = await fetchImpl(downloadUrl, {
           headers: options.headers,
           redirect: 'manual',
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: requestSignal(),
         })
         if (!response.ok) throw new ByClawSkillHttpError(response.status)
         if (response.body === null) throw new Error('ByClaw Skill download response omitted its body')
         await pipeline(Readable.fromWeb(response.body as never), createWriteStream(zipPath))
-      } })
+      } }))
     } catch (error: unknown) {
       throw new Error(`ByClaw Skill ${options.ref.code} download failed: ${String(error)}`, { cause: error })
     }
-    const entries = await validateZip(zipPath)
-    await extractZip(zipPath, extractDir, entries)
+    options.signal?.throwIfAborted()
+    await timed(options.log, `${label} stage=extract`, async () => {
+      const entries = await validateZip(zipPath)
+      await extractZip(zipPath, extractDir, entries)
+    })
     let sourceDir = extractDir
     try {
       await readFile(join(sourceDir, 'SKILL.md'), 'utf8')
@@ -322,11 +337,12 @@ export async function syncByClawSkill(options: {
       if (roots.length !== 1) throw new Error('ByClaw Skill ZIP must contain exactly one SKILL.md root')
       sourceDir = roots[0] as string
     }
-    await writeCachedByClawSkill({
+    options.signal?.throwIfAborted()
+    await timed(options.log, `${label} stage=cache-publish`, () => writeCachedByClawSkill({
       sourceDir,
       targetDir,
       metadata: { code: options.ref.code, version: version.version, downloadUrl, versionUrl },
-    })
+    }))
     return targetDir
   } finally {
     await ensureOwnerWritableTree(scratch)

@@ -32,6 +32,8 @@ export interface DshAgentTemplate {
   description: string
   persona: string
   skills: DshAgentTemplateSkill[]
+  /** Required Skill associations are resolved at first use by the authorized runtime. */
+  deferredSkills?: boolean
   source: {
     system: 'byclaw'
     resourceId: string
@@ -80,6 +82,7 @@ function assertTemplate(value: unknown): DshAgentTemplate {
     || typeof candidate.description !== 'string'
     || typeof candidate.persona !== 'string'
     || !Array.isArray(candidate.skills)
+    || (candidate.deferredSkills !== undefined && typeof candidate.deferredSkills !== 'boolean')
     || typeof candidate.source !== 'object'
     || candidate.source === null) {
     throw new Error('invalid agent template fields')

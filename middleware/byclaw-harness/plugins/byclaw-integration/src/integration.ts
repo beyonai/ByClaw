@@ -235,6 +235,8 @@ export async function projectByClawResourcesToTemplates(options: {
   teamCatalogDir: string
   cacheRoot: string
   baseUrl: string
+  /** Local immutable cache lookup; missing Skills are deferred to the bound Agent. */
+  cachedSkill?: (ref: ByClawSkillRef) => string | undefined
   syncSkill?: (ref: ByClawSkillRef, cacheRoot?: string) => Promise<string>
   resolveGroupRuntime?: (groupId: string) => Promise<ByClawExpertGroupRuntime>
   resolveModel?: (bindingId: string, modelId?: string) => Promise<ProjectedByClawModelSelection>
@@ -273,7 +275,7 @@ export async function projectByClawResourcesToTemplates(options: {
   const stagedTeamCatalog = join(teamStageRoot, 'catalog')
   const stagedAgentTemplates = join(stagedAgentCatalog, 'templates')
   const stagedTeamTemplates = join(stagedTeamCatalog, 'templates')
-  const project = async (): Promise<ProjectedByClawTemplates> => {
+  const seedStage = async (): Promise<void> => {
     await Promise.all([
       copyDirectory(liveAgentTemplates, stagedAgentTemplates),
       copyDirectory(liveTeamTemplates, stagedTeamTemplates),
@@ -286,7 +288,9 @@ export async function projectByClawResourcesToTemplates(options: {
         await deleteTeamTemplate(stagedTeamCatalog, template.id)
       }
     }
-
+  }
+  const project = async (): Promise<ProjectedByClawTemplates> => {
+    if (options.cachedSkill === undefined) await seedStage()
     const direct = new Set(options.resources.directEmployeeIds)
     const employeesById = new Map(options.resources.employees.map(employee => [employee.id, employee]))
     const resolvedGroupRuntimes = await Promise.all(
@@ -387,9 +391,14 @@ export async function projectByClawResourcesToTemplates(options: {
     }))
     const synchronizedSkills = await Promise.all([...skillRefs.values()].map(skill => limit(async () => {
       try {
-        const livePath = resolve(await sync(skill, liveSkillCache))
+        const path = options.cachedSkill === undefined ? await sync(skill, liveSkillCache) : options.cachedSkill(skill)
+        if (path === undefined) return undefined
+        const livePath = resolve(path)
         const expectedLivePath = byClawSkillCacheDir(liveSkillCache, skill.code)
-        if (livePath !== expectedLivePath) {
+        const versionSuffix = relative(join(liveSkillCache, '.versions'), livePath)
+        const versionedPath = /^[a-f0-9]{64}[/\\][a-f0-9]{64}[/\\][^/\\]+$/u.test(versionSuffix)
+          && basename(livePath) === basename(expectedLivePath)
+        if (options.cachedSkill === undefined ? livePath !== expectedLivePath : !versionedPath) {
           throw new Error(`ByClaw Skill synchronizer published outside its cache: ${livePath}`)
         }
         return [skill.code, livePath] as const
@@ -408,6 +417,7 @@ export async function projectByClawResourcesToTemplates(options: {
         schemaVersion: 'dsh.agent-template/v1',
         id: `byclaw-employee-${employee.id}`,
         kind: 'agent',
+        ...options.cachedSkill === undefined ? {} : { deferredSkills: true },
         name: employee.name,
         description: employee.description || employee.capabilities,
         persona: employeePersona(employee),
@@ -490,14 +500,26 @@ export async function projectByClawResourcesToTemplates(options: {
       agents.push(template)
     }
     const publishSkills = await options.prepareSkillGeneration?.(agents, liveSkillCache)
-    await publishDirectories([
-      { prepared: stagedTeamTemplates, target: liveTeamTemplates },
-      { prepared: stagedAgentTemplates, target: liveAgentTemplates },
-    ])
-    publishSkills?.()
-    // Keep Skills referenced by the previous template generation available until
-    // the new files and in-memory view have both been committed.
-    await removeRevokedSkills(liveSkillCache, retainedSkillCodes)
+    const publish = async (): Promise<void> => {
+      if (options.cachedSkill !== undefined) {
+        // Rebase on the live catalog while holding the write lease, so saves
+        // made during background preparation are not overwritten.
+        await seedStage()
+        for (const template of agents) await writeAgentTemplate(stagedAgentCatalog, template)
+        for (const adapter of teamAdapters) await writeTeamTemplate(stagedTeamCatalog, adapter)
+      }
+      await publishDirectories([
+        { prepared: stagedTeamTemplates, target: liveTeamTemplates },
+        { prepared: stagedAgentTemplates, target: liveAgentTemplates },
+      ])
+      publishSkills?.()
+      // Immutable versions may still be referenced by active Agents. Legacy caches
+      // are cleaned only by the legacy synchronizer under its full write lease.
+      if (options.cachedSkill === undefined) await removeRevokedSkills(liveSkillCache, retainedSkillCodes)
+    }
+    if (options.cachedSkill !== undefined && options.generationLease !== undefined) {
+      await options.generationLease.write(options.teamCatalogDir, publish)
+    } else await publish()
     return {
       agents,
       teamAdapters,
@@ -512,7 +534,7 @@ export async function projectByClawResourcesToTemplates(options: {
     }
   }
   try {
-    if (options.generationLease === undefined) return await project()
+    if (options.generationLease === undefined || options.cachedSkill !== undefined) return await project()
     return await options.generationLease.write(options.teamCatalogDir, project)
   } finally {
     await Promise.all([

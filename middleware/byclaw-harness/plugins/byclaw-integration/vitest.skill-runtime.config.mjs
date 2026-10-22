@@ -32,5 +32,5 @@ export default {
       return { code: result.outputText, map: result.sourceMapText }
     },
   }],
-  test: { include: ['tests/skill-runtime.spec.ts'], environment: 'node' },
+  test: { include: ['tests/skill-runtime.spec.ts', 'tests/skill-loading.spec.ts'], environment: 'node' },
 }
