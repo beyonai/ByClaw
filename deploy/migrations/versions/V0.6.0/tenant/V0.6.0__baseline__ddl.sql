@@ -362,7 +362,8 @@ CREATE TABLE byai.byai_session_member (
     mem_name character varying,
     request_count bigint,
     last_read_message_id bigint,
-    last_read_time timestamp without time zone
+    last_read_time timestamp without time zone,
+    welcome_handled_at timestamp without time zone
 );
 
 CREATE TABLE byai.byai_session_workspace (

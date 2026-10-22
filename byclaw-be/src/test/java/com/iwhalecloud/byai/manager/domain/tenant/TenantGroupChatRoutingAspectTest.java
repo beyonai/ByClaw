@@ -316,6 +316,45 @@ class TenantGroupChatRoutingAspectTest {
         verifyNoInteractions(files, legacy, memberships);
     }
 
+    @Test
+    void welcomeClaimUsesOnlyTheCurrentTenantNode() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        var data = new ObjectMapper().valueToTree(Map.of("sessionId", "30", "memberId", "9007199254740993",
+            "granted", true, "handledAt", 1000L));
+        when(node.command(context, "POST", "/internal/v1/group-chats/30/welcome", "30", "CLAIM_WELCOME",
+            new TenantNodeModels.EmptyPayload())).thenReturn(new TenantNodeModels.CommandResult(
+                "30", "request", "CLAIM_WELCOME", null, null, null, null, data));
+        ProceedingJoinPoint invocation = call("claimWelcome", 30L);
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(invocation);
+
+        assertThat(response.getData()).isEqualTo(data);
+        verify(invocation, never()).proceed();
+        verifyNoInteractions(legacy, memberships);
+    }
+
+    @Test
+    void missingWelcomeResultDoesNotFallBackToSharedDatabase() throws Throwable {
+        TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221076L, "MEMBER"));
+        ProceedingJoinPoint invocation = call("claimWelcome", 30L);
+
+        assertThatThrownBy(() -> aspect.route(invocation))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+        verify(invocation, never()).proceed();
+        verifyNoInteractions(legacy, memberships);
+    }
+
+    @Test
+    void welcomeClaimWithoutTenantContextUsesTheAuthorizedLegacyController() throws Throwable {
+        ProceedingJoinPoint invocation = call("claimWelcome", 30L);
+        when(invocation.proceed()).thenReturn("legacy-result");
+
+        assertThat(aspect.route(invocation)).isEqualTo("legacy-result");
+        verifyNoInteractions(node);
+    }
+
     private ProceedingJoinPoint call(String method, Object... args) {
         ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
         MethodSignature signature = mock(MethodSignature.class);

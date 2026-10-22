@@ -34,6 +34,35 @@ function setup(ready = true) {
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("routes welcome claims and rejects a different group, tenant or actor", async () => {
+    const { app, execute } = setup();
+    const payload = command({ operation: "CLAIM_WELCOME", payload: {} });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/welcome",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledWith(payload);
+    // 逐个请求验证身份边界，确认失败请求不会进入业务写入。
+    for (const invalid of [
+      { url: "/internal/v1/group-chats/31/welcome", headers },
+      {
+        url: "/internal/v1/group-chats/30/welcome",
+        headers: { ...headers, "x-actor-user-id": "21" },
+      },
+      {
+        url: "/internal/v1/group-chats/30/welcome",
+        headers: { ...headers, "x-enterprise-id": "11" },
+      },
+    ]) {
+      const denied = await app.inject({ method: "POST", payload, ...invalid });
+      expect(denied.statusCode).toBeGreaterThanOrEqual(400);
+    }
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("routes recall undo and rejects a mismatched message path", async () => {
     const s = setup();
     const payload = command({

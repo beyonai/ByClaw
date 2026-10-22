@@ -151,6 +151,24 @@
           AND (last_read_message_id IS NULL OR last_read_message_id &lt; #{messageId})
     </update>
 
+    <!-- 欢迎资格由此条件更新独占维护，不加入通用成员读写映射，避免被普通成员保存覆盖。 -->
+    <!-- 按当前成员主键更新，退群后的旧请求不能影响重入的新记录。 -->
+    <update id="claimWelcome">
+        UPDATE byai_session_member
+        SET welcome_handled_at = #{handledAt}
+        WHERE byai_session_member_id = #{memberId}
+          AND session_id = #{sessionId}
+          AND mem_obj_type = 'USER'
+          AND mem_obj_id = #{userId}
+          AND welcome_handled_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM byai_session
+              WHERE session_id = #{sessionId}
+                AND session_type = 'hs_as'
+                AND COALESCE(state, 'ACTIVE') NOT IN ('GROUP_DISSOLVED', 'CLOSED')
+          )
+    </update>
+
     <!-- 根据成员对象ID和时间范围查询会话成员列表 -->
     <select id="findByMemObjIdAndTimeRange" resultMap="BaseResultMap">
         select
