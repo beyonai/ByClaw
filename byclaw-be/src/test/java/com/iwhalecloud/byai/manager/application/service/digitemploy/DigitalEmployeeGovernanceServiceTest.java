@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.context.MessageSource;
@@ -122,7 +123,45 @@ class DigitalEmployeeGovernanceServiceTest {
         permissions = officialPermissions(resource, Set.of());
         assertThat(permissions.isCanOnShelf()).isTrue();
         assertThat(permissions.isCanOffShelf()).isFalse();
-        assertThat(permissions.isCanDelete()).isFalse();
+        assertThat(permissions.isCanDelete()).isTrue();
+    }
+
+    /** 菜单权限与接口共用注销资格，放行创建者后仍保留状态、企业及受保护资源边界。 */
+    @ParameterizedTest
+    @CsvSource({
+        "author, 2, 3, 1, true",
+        "adminvip, 7, 3, 1, true",
+        "PLAT_MAN, 7, 3, 1, true",
+        "USER, 7, 3, 1, false",
+        "ORG_MAN, 7, 3, 1, false",
+        "BUSINESS_MAN, 7, 3, 1, false",
+        "PLAT_DEVOPS, 7, 3, 1, false",
+        "author, 2, 0, 1, false",
+        "author, 2, 2, 1, false",
+        "author, 2, -1, 1, false",
+        "adminvip, 7, 0, 1, false",
+        "adminvip, 7, 2, 1, false",
+        "adminvip, 7, -1, 1, false",
+        "PLAT_MAN, 7, 0, 1, false",
+        "PLAT_MAN, 7, 2, 1, false",
+        "PLAT_MAN, 7, -1, 1, false",
+        "author, 2, 3, 99, false",
+        "adminvip, 7, 3, 99, false",
+        "PLAT_MAN, 7, 3, 99, false",
+        "PLAT_MAN, 1, 3, 1, false",
+        "adminvip, 1, 3, 1, true"
+    })
+    void officialDeletionPermissionsMatchCreatorAdministratorAndLifecycleRules(
+        String identity, Long creatorId, int status, Long tenantId, boolean allowed) {
+        EmployeePublicationApplicationServiceTest.login(identity, 2L, List.of(identity));
+        SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, creatorId);
+        resource.setOwnerType("enterprise");
+        resource.setPublicationSourceId(9L);
+        resource.setResourceStatus(status);
+        resource.setComAcctId(tenantId);
+
+        assertThat(governance.canDeleteOfficial(resource)).isEqualTo(allowed);
+        assertThat(officialPermissions(resource, Set.of()).isCanDelete()).isEqualTo(allowed);
     }
 
     /** 官方副本单条接口与列表批量计算均认可有效管理授权，并保留黑名单优先级。 */
@@ -147,6 +186,12 @@ class DigitalEmployeeGovernanceServiceTest {
         assertThat(permissions.isCanUseAuth()).isTrue();
         assertThat(permissions.isCanOffShelf()).isTrue();
         assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
+
+        resource.setResourceStatus(3);
+        permissions = officialPermissions(resource, Set.of(10L));
+        assertThat(permissions.isCanOnShelf()).isTrue();
+        assertThat(permissions.isCanDelete()).isFalse();
+        resource.setResourceStatus(2);
 
         var deny = new com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant();
         deny.setGrantObjId(10L);

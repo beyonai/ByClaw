@@ -1,8 +1,12 @@
 import { act, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, Form } from 'antd';
+import { useState } from 'react';
+
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
+
 import ConfigForm from '..';
 import { isSuperAssistant } from '../../resourceConfiguration';
+import type { RobotConfig } from '../robotConfig';
 
 // 此处验证资源配置行为，禁用弹窗动画，避免在入场准备阶段判断可见性。
 const render = (ui: Parameters<typeof renderComponent>[0]) =>
@@ -70,7 +74,40 @@ jest.mock('../MemoryConfigModal', () => () => null);
 jest.mock('../AbilityBoundaryModal', () => () => null);
 jest.mock('../AbilityExampleModal', () => () => null);
 jest.mock('../ToolSelectorModal', () => () => null);
-jest.mock('../RobotModal', () => () => null);
+jest.mock('../RobotModal', () => {
+  return function MockRobotModal({
+    open,
+    item,
+    isReadOnly,
+    onOk,
+  }: {
+    open: boolean;
+    item: RobotConfig;
+    isReadOnly: boolean;
+    onOk: (item: RobotConfig) => void;
+  }) {
+    if (!open) return null;
+    return (
+      <div role="dialog" aria-label="Robot editor">
+        <span>{item.clientId}</span>
+        <button
+          type="button"
+          disabled={isReadOnly}
+          onClick={() =>
+            onOk({
+              channel: 'DingTalk',
+              clientId: item.clientId ? 'edited-client' : 'added-client',
+              clientSecret: 'test-secret',
+              robotCode: 'test-robot',
+            })
+          }
+        >
+          Save robot
+        </button>
+      </div>
+    );
+  };
+});
 jest.mock('../../EmployeeGroupMembers', () => () => <div>Configure Group Members</div>);
 
 // 完整配置表单保留真实 antd 交互，全量并行运行时为渲染和多次切换预留时间。
@@ -94,8 +131,29 @@ const knowledge = [
 ];
 let editorForm: ReturnType<typeof Form.useForm>[0];
 
-function Editor({ employee, canConfigureResources, agentType = '001', scrollWithPage = false }: any) {
+type EditorProps = {
+  employee: { ownerType: string; resourceCode: string };
+  canConfigureResources?: boolean;
+  agentType?: string;
+  scrollWithPage?: boolean;
+  publicationMode?: boolean;
+  isReadOnly?: boolean;
+  initialRobotConfigs?: RobotConfig[];
+  onValuesChange?: () => void;
+};
+
+function Editor({
+  employee,
+  canConfigureResources,
+  agentType = '001',
+  scrollWithPage = false,
+  publicationMode = false,
+  isReadOnly = false,
+  initialRobotConfigs = [],
+  onValuesChange,
+}: EditorProps) {
   const [form] = Form.useForm();
+  const [robotConfigs, setRobotConfigs] = useState(initialRobotConfigs);
   editorForm = form;
   return (
     <ConfigForm
@@ -103,6 +161,11 @@ function Editor({ employee, canConfigureResources, agentType = '001', scrollWith
       agentType={agentType}
       employeeType={agentType}
       ownerType={employee.ownerType}
+      publicationMode={publicationMode}
+      isReadOnly={isReadOnly}
+      robotConfigs={robotConfigs}
+      setRobotConfigs={setRobotConfigs}
+      onValuesChange={onValuesChange}
       scrollWithPage={scrollWithPage}
       canConfigureResources={canConfigureResources ?? !isSuperAssistant(employee)}
       form={form}
@@ -137,6 +200,70 @@ describe('employee editor resource configuration entries', () => {
   beforeEach(() => {
     mockShowBaseList.mockClear();
     mockUpdateResource.mockReset();
+  });
+
+  it.each([
+    { roleName: 'ordinary creator requiring review', publicationMode: true },
+    { roleName: 'adminvip editing directly', publicationMode: false },
+  ])(
+    'allows $roleName to add, edit and remove an enterprise robot and marks every change unsaved',
+    async ({ publicationMode }) => {
+      const onValuesChange = jest.fn();
+      render(
+        <Editor
+          employee={{ ownerType: 'enterprise', resourceCode: 'official-employee-1' }}
+          publicationMode={publicationMode}
+          onValuesChange={onValuesChange}
+        />
+      );
+      await screen.findByText('employeeDetail.robotConfig.title');
+      fireEvent.click(screen.getByRole('button', { name: /employeeDetail.robotConfig.add/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save robot' }));
+      expect(screen.getByText(/clientId: added-client/)).toBeVisible();
+      expect(onValuesChange).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'common.edit' }));
+      expect(within(screen.getByRole('dialog', { name: 'Robot editor' })).getByText('added-client')).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Save robot' }));
+      expect(screen.queryByText(/clientId: added-client/)).not.toBeInTheDocument();
+      expect(screen.getByText(/clientId: edited-client/)).toBeVisible();
+      expect(screen.getAllByRole('button', { name: 'common.edit' })).toHaveLength(1);
+      expect(onValuesChange).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+      expect(screen.queryByText(/clientId: edited-client/)).not.toBeInTheDocument();
+      expect(onValuesChange).toHaveBeenCalledTimes(3);
+    },
+    multiStepFormTimeout
+  );
+
+  it('keeps enterprise robot details visible but prevents changes in a read-only publication', async () => {
+    const onValuesChange = jest.fn();
+    render(
+      <Editor
+        employee={{ ownerType: 'enterprise', resourceCode: 'official-employee-1' }}
+        publicationMode
+        isReadOnly
+        initialRobotConfigs={[{ channel: 'DingTalk', clientId: 'existing-client' }]}
+        onValuesChange={onValuesChange}
+      />
+    );
+    await screen.findByText(/clientId: existing-client/);
+    expect(screen.queryByRole('button', { name: /employeeDetail.robotConfig.add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.delete' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.view' }));
+    expect(screen.getByRole('button', { name: 'Save robot' })).toBeDisabled();
+    expect(onValuesChange).not.toHaveBeenCalled();
+  });
+
+  it('hides personal robot credentials during first publication while retaining ordinary personal editing', async () => {
+    const employee = { ownerType: 'personal', resourceCode: 'alice_helper' };
+    const { rerender } = render(<Editor employee={employee} />);
+    await screen.findByText('employeeDetail.robotConfig.title');
+
+    rerender(<Editor employee={employee} publicationMode />);
+    expect(screen.queryByText('employeeDetail.robotConfig.title')).not.toBeInTheDocument();
   });
 
   it('hides extra model selectors and their toggle while preserving saved model values', async () => {
