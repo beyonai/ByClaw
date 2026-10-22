@@ -16,8 +16,7 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.OpenSandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostClient;
-import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostLifecycle;
-import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostRuntimeProvider;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.StandardSandboxLifecycleService;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.WhaleAgentSandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.service.EnvTemplateRenderer;
@@ -60,49 +59,55 @@ public class SandboxAutoConfiguration {
         } else {
             provider = new OpenSandboxRuntimeProvider(openSandboxClient, properties);
         }
-        SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
-        if (sharedDshHost != null && sharedDshHost.isEnabled()) {
-            provider = sharedDshHostProvider(provider, sharedDshHost, systemConfigService);
-        }
         return com.iwhalecloud.byai.gateway.sandbox.platform.PlatformInterfaceRouting.create(SandboxLifecycleFacade.class,
             new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider), platformGateway, true);
     }
 
     /**
-     * The shared DSH host's own lifecycle for platform-remote mode: the facade above forwards everything to the
-     * platform there, so {@code SandboxService} uses this one for listed users' {@code byclaw-dsh} sandboxes.
-     * Absent unless {@code byclaw.sandbox.shared-dsh-host.base-url} is set.
+     * The resident (shared) DSH host's user contexts, in both execution modes. Absent unless
+     * {@code byclaw.sandbox.shared-dsh-host.base-url} is set. A context starts with the environment a
+     * {@code byclaw-dsh} sandbox would get, rendered here from the spec; the factory is resolved lazily
+     * because it depends on {@code SandboxService}, which depends on this bean.
      */
     @Bean
     @ConditionalOnProperty(prefix = "byclaw.sandbox.shared-dsh-host", name = "base-url")
-    public SharedDshHostLifecycle sharedDshHostLifecycle(
+    public SharedDshHostContexts sharedDshHostContexts(
         SandboxProperties properties,
-        StringRedisTemplate stringRedisTemplate,
         GenericSandboxSpecProcessor specProcessor,
         SandboxServiceSpecRepository sandboxServiceSpecRepository,
-        OpenSandboxClient openSandboxClient,
+        ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchContextFactory> launchContextFactory,
         ObjectProvider<ByaiSystemConfigService> systemConfigService) {
         SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
-        SharedDshHostRuntimeProvider provider = sharedDshHostProvider(
-            new OpenSandboxRuntimeProvider(openSandboxClient, properties), sharedDshHost, systemConfigService);
-        return new SharedDshHostLifecycle(
-            new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider),
-            sharedUserFilter(systemConfigService));
-    }
-
-    private static SharedDshHostRuntimeProvider sharedDshHostProvider(SandboxRuntimeProvider delegate,
-                                                                      SandboxProperties.SharedDshHostConfig sharedDshHost,
-                                                                      ObjectProvider<ByaiSystemConfigService> systemConfigService) {
-        return new SharedDshHostRuntimeProvider(delegate, new SharedDshHostClient(sharedDshHost),
-            StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
-            sharedUserFilter(systemConfigService));
-    }
-
-    private static java.util.function.Predicate<String> sharedUserFilter(ObjectProvider<ByaiSystemConfigService> systemConfigService) {
-        return SharedDshHostRuntimeProvider.userFilter(() -> {
-            ByaiSystemConfigService service = systemConfigService.getIfAvailable();
-            return service == null ? null : service.getDcSystemConfigValueByCode(SharedDshHostRuntimeProvider.USERS_PARAM);
+        String dshType = com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
+        java.util.function.Function<String, java.util.Map<String, String>> launchEnv = userCode -> {
+            com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchContext context = launchContextFactory.getObject()
+                .buildContext(userCode, com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting.DEFAULT_RESOURCE_ID, dshType);
+            com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec spec = sandboxServiceSpecRepository
+                .findByServiceKey(context.getSandboxType())
+                .orElseThrow(() -> new IllegalStateException("Unknown sandbox service key: " + context.getSandboxType()));
+            java.util.Map<String, String> env = new java.util.LinkedHashMap<>();
+            java.util.Map<String, String> rendered = specProcessor
+                .buildCreateRequest(userCode, context.getSandboxType(), context.getEnvs(), context.getUserInfo(), spec).getEnv();
+            if (rendered != null) env.putAll(rendered);
+            // Same system keys the standard lifecycle carries over from the launch environment.
+            for (String key : new String[] {"BYAI_SERVICE_BASE_URL", "BYAI_WORKER_ID"}) {
+                String value = context.getEnvs() == null ? null : context.getEnvs().get(key);
+                if (StringUtils.isNotBlank(value)) env.put(key, value);
+            }
+            env.putIfAbsent("BYAI_WORKER_ID", SharedDshHostContexts.sharedSandboxId(userCode));
+            return env;
+        };
+        java.util.concurrent.ExecutorService prewarm = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "shared-dsh-host-prewarm");
+            thread.setDaemon(true);
+            return thread;
         });
+        return new SharedDshHostContexts(new SharedDshHostClient(sharedDshHost),
+            StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
+            SharedDshHostContexts.userFilter(() -> {
+                ByaiSystemConfigService service = systemConfigService.getIfAvailable();
+                return service == null ? null : service.getDcSystemConfigValueByCode(SharedDshHostContexts.USERS_PARAM);
+            }), launchEnv, prewarm);
     }
 
     @Bean

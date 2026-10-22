@@ -84,18 +84,20 @@ mvn -B -f byclaw-be/pom.xml \
 mvn -B -f byclaw-be/pom.xml verify
 ```
 
-## Shared DSH Host User List
+## 常驻（共享）DSH 宿主
 
-配置了 `byclaw.sandbox.shared-dsh-host.base-url` 后，`byclaw-dsh` 沙箱默认全部作为共享 DSH 宿主上的用户上下文运行。
-系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`（`byai_system_config`，逗号、分号或空白分隔的 userCode）可以把范围限定到部分用户：
-名单内用户走共享宿主，其他用户仍按用户单独启动 `byclaw-dsh` 沙箱。参数不存在、为空或为 `*` 时保持全部走共享宿主。
-每次启动时读取，改参数后下一次启动即生效；已在运行的记录沿用原来的运行时直到释放。决策点只有
-`SharedDshHostRuntimeProvider` 的 `findReusable` 和 `create`，释放、心跳和 reconcile 按记录的 sandbox id 区分。
+配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 后，系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`
+（`byai_system_config`，逗号、分号或空白分隔的 userCode；不存在、为空或 `*` 表示全部用户）名单内用户的 `byclaw-dsh`
+不再是沙箱：它是常驻宿主进程里的一个用户上下文，BE 不为它写 `ss_sandbox_record`，也不做启动/探测/复用。
 
-### 平台远程模式
+- 启动（登录自启动、问答前的 worker 就绪检查、`launchByUserCode`）= 对宿主做一次幂等的 `PUT /v1/users/{user}`，
+  带上 `byclaw-dsh` 规格渲染后的环境；上下文已在时毫秒返回，不在时由宿主加载后返回。问答仍经 Gateway worker 注册转发，
+  宿主重启后下一次请求会重新 PUT，不会出现指向失效上下文的记录。
+- 释放（`removeSandbox` 不带 resourceId、类型为 `byclaw-dsh` 或不指定）= 宿主 `DELETE`；其他类型照旧走平台或本地。
+- 查询（`sandboxInfo`）把宿主上的上下文作为一条 `byclaw-dsh` 条目并入结果（宿主 `GET`），不读记录。
+- 心跳/续约/空闲回收对这类上下文不做任何事：宿主按自己的空闲规则回收。
+- 工具沙箱（B）由宿主上的运行时在第一次工具调用时经 `launchByUserCode` 按工具规格（`enabled=0`）启动；
+  这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。B 目前不自动释放。
 
-沙箱工作转发给平台服务（`PlatformRemoteGateway` 远程模式）时，平台不认识共享宿主。`SandboxService` 在转发之前先判断：
-名单内用户的 `byclaw-dsh` 启动走 `SharedDshHostLifecycle`（`SandboxAutoConfiguration#sharedDshHostLifecycle`，
-同一个 `SharedDshHostRuntimeProvider`，但不经远程路由），记录写入共用的 `ss_sandbox_record`；sandbox id 为
-`byclaw-dsh-<userCode>` 的记录在本进程释放、心跳、续约，并并入 `sandboxInfo` 的结果。其余用户和类型仍全部转发平台。
-平台按 `SandboxRuntimeOwnership` 把这类 id 视为外部引擎的记录而跳过维护。
+决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
+两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。

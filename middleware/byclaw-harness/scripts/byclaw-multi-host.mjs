@@ -620,6 +620,12 @@ export class UserRegistry {
     return { userCode: user, status: entry.status, ...entry.error === undefined ? {} : { error: entry.error } }
   }
 
+  /** The web token of a running context, for callers that only read (GET) and never boot. */
+  webToken(user) {
+    const entry = this.#entries.get(user)
+    return entry?.status === 'ready' ? entry.webToken : undefined
+  }
+
   list() { return [...this.#entries.values()].map(entry => ({ userCode: entry.user, status: entry.status })) }
 
   /** Users whose Redis claim must stay alive. */
@@ -826,7 +832,10 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
       return sendJson(res, 200, { ok: true, hostId, users: registry.list() })
     }
     const user = route.user
-    if (req.method === 'GET') return sendJson(res, 200, { ...registry.describe(user), hostId })
+    if (req.method === 'GET') {
+      const token = registry.webToken(user)
+      return sendJson(res, 200, { ...registry.describe(user), hostId, ...token === undefined ? {} : { webPath: webPrefix(user, basePath), webToken: token } })
+    }
     if (req.method === 'DELETE') {
       await registry.remove(user)
       return sendJson(res, 200, { userCode: user, status: 'absent', hostId })

@@ -236,6 +236,8 @@ test('concurrent ensures share one boot', async () => {
   assert.equal(boots, 1)
   assert.deepEqual(claims, ['u1'])
   assert.equal(registry.describe('u1').status, 'ready')
+  assert.equal(typeof registry.webToken('u1'), 'string')
+  assert.equal(registry.webToken('nobody'), undefined)
   assert.equal(await registry.ensure('u1', { sandboxId: 's', env: {} }), a)
   assert.equal(boots, 1)
   assert.match(a.webToken, /^[A-Za-z0-9_-]{43}$/)

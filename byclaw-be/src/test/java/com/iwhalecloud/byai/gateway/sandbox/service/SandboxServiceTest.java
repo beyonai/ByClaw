@@ -9,7 +9,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostLifecycle;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostClient;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts;
 import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway;
 import org.springframework.beans.factory.ObjectProvider;
 import java.util.Set;
@@ -1301,108 +1302,112 @@ class SandboxServiceTest extends I18nTestSupport {
         return record;
     }
 
-    @Test
-    void remoteMode_listedUserDshLaunchStaysOnTheSharedHost() {
-        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
-        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
-        SandboxLifecycleFacade platformFacade = mock(SandboxLifecycleFacade.class);
-        SandboxLifecycleFacade hostFacade = mock(SandboxLifecycleFacade.class);
-        SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
-        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
-        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", platformFacade);
-        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", mock(SandboxMetadataCache.class));
-        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService",
-            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class));
-        ReflectionTestUtils.setField(sandboxService, "sharedDshHostLifecycle",
-            new SharedDshHostLifecycle(hostFacade, Set.of("user001")::contains));
-        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
-
-        SandboxLaunchContext launchContext = new SandboxLaunchContext(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
-            Map.of("USER_CODE", "user001"), Map.of(), "gateway-token");
-        when(contextFactory.buildContext(eq("user001"), any(), eq(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)))
-            .thenReturn(launchContext);
-        doAnswer(invocation -> {
-            SsSandboxRecord record = invocation.getArgument(0);
-            record.setId(99L);
-            return 1;
-        }).when(recordMapper).insert(any(SsSandboxRecord.class));
-        SandboxLaunchData hosted = new SandboxLaunchData();
-        hosted.setSandboxId("byclaw-dsh-user001");
-        hosted.setEndpoint("https://dsh.example.com/u/user001/");
-        hosted.setGatewayToken("wt");
-        when(hostFacade.launchSandbox(any())).thenReturn(SandboxResponse.success(hosted));
-        when(recordMapper.updateLaunchSuccess(eq(99L), eq("byclaw-dsh-user001"), any(), any(), any(), any(), any(),
-            any(), any(), eq(0))).thenReturn(1);
-
-        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
-            redis.when(() -> RedisUtil.lock(anyString(), anyString(), anyLong())).thenReturn(true);
-
-            SandboxLaunchData result = sandboxService.launchSandboxWithServiceKey("user001",
-                SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
-
-            assertThat(result).isNotNull();
-            assertThat(result.getSandboxId()).isEqualTo("byclaw-dsh-user001");
-        }
-        verify(hostFacade).launchSandbox(any());
-        verify(platformFacade, never()).launchSandbox(any());
-        verify(gateway, never()).service(eq("launch"), any());
+    private static SharedDshHostContexts contexts(String... users) {
+        SharedDshHostClient client = mock(SharedDshHostClient.class);
+        SharedDshHostClient.UserContext ready = new SharedDshHostClient.UserContext();
+        ready.setStatus(SharedDshHostClient.UserContext.STATUS_READY);
+        ready.setWebToken("wt");
+        ready.setWebPath("/u/user001/");
+        when(client.ensureUser(any(), any(), any())).thenReturn(ready);
+        when(client.getUser(any())).thenReturn(ready);
+        return new SharedDshHostContexts(client, "https://dsh.example.com", Set.of(users)::contains,
+            user -> Map.of("USER_CODE", user), Runnable::run);
     }
 
     @Test
-    void remoteMode_unlistedUserDshLaunchGoesToThePlatform() {
+    void residentHost_listedUserDshLaunchIsAnIdempotentPutWithoutARecord() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
         SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
-        SandboxLifecycleFacade hostFacade = mock(SandboxLifecycleFacade.class);
+        SandboxLifecycleFacade facade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", facade);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+
+        SandboxLaunchData result = sandboxService.launchSandboxWithServiceKey("user001",
+            SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+
+        assertThat(result.getSandboxId()).isEqualTo("byclaw-dsh-user001");
+        assertThat(result.getEndpoint()).isEqualTo("https://dsh.example.com/u/user001/chat?token=wt");
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+        verify(facade, never()).launchSandbox(any());
+        verify(gateway, never()).service(eq("launch"), any());
+
+        // Chat readiness restarts go the same way, with the worker wait the caller asked for.
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(contextFactory.resolveRouting(null, "user001")).thenReturn(routing);
+        assertThat(sandboxService.restartSandboxForTargetWithoutWait("user001", null, "BYCLAW_DSH_user001").getSandboxId())
+            .isEqualTo("byclaw-dsh-user001");
+        verify(gateway, never()).service(eq("restart"), any());
+    }
+
+    @Test
+    void residentHost_unlistedUsersAndOtherTypesKeepTheirRuntime() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
-        ReflectionTestUtils.setField(sandboxService, "sharedDshHostLifecycle",
-            new SharedDshHostLifecycle(hostFacade, Set.of("user001")::contains));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
         PlatformRemoteGateway gateway = remoteGateway(sandboxService);
 
         sandboxService.launchSandboxWithServiceKey("user002", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        sandboxService.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools");
 
-        verify(gateway).service(eq("launch"), any());
-        verify(hostFacade, never()).launchSandbox(any());
+        verify(gateway, times(2)).service(eq("launch"), any());
         verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
     }
 
     @Test
-    void remoteMode_removeOfAListedUsersDshIsNotForwardedToThePlatform() {
-        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+    void residentHost_removeIsADeleteOnTheHostAndNothingElseForThatType() {
+        SharedDshHostContexts contexts = contexts("user001");
+        SharedDshHostClient client = (SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client");
         SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
-        ReflectionTestUtils.setField(sandboxService, "sharedDshHostLifecycle",
-            new SharedDshHostLifecycle(mock(SandboxLifecycleFacade.class), Set.of("user001")::contains));
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", mock(SsSandboxRecordMapper.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts);
         PlatformRemoteGateway gateway = remoteGateway(sandboxService);
-        when(recordMapper.selectRunningByUserAndSandboxType("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE))
-            .thenReturn(List.of());
 
         sandboxService.removeSandbox("user001", null, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        verify(client).deleteUser("user001");
         verify(gateway, never()).service(eq("remove"), any());
 
-        // Other users and other types still belong to the platform.
+        // No type given: the host context goes, and the user's other sandboxes are still the platform's.
+        sandboxService.removeSandbox("user001", null, null);
+        verify(client, times(2)).deleteUser("user001");
+        verify(gateway, times(1)).service(eq("remove"), any());
+
         sandboxService.removeSandbox("user002", null, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
         sandboxService.removeSandbox("user001", null, "openclaw");
-        verify(gateway, times(2)).service(eq("remove"), any());
+        verify(client, times(2)).deleteUser(any());
+        verify(gateway, times(3)).service(eq("remove"), any());
     }
 
     @Test
-    void remoteMode_sandboxInfoMergesTheHostContextIntoThePlatformsView() {
-        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+    void residentHost_sandboxInfoListsTheContextFromTheHostInsteadOfRecords() {
         SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
-        ReflectionTestUtils.setField(sandboxService, "sharedDshHostLifecycle",
-            new SharedDshHostLifecycle(mock(SandboxLifecycleFacade.class), Set.of("user001")::contains));
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", mock(SsSandboxRecordMapper.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
         PlatformRemoteGateway gateway = remoteGateway(sandboxService);
         SandboxInfo platformInfo = SandboxInfo.builder().userCode("user001").sandboxType("openclaw").sandboxId("os-1").build();
-        when(gateway.convert(any(), any(java.lang.reflect.Type.class))).thenReturn(List.of(platformInfo));
-        when(recordMapper.selectRunningByUserAndSandboxType("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE))
-            .thenReturn(List.of(hostRecord("user001")));
+        SandboxInfo stale = SandboxInfo.builder().userCode("user001").sandboxType("byclaw-dsh").sandboxId("old-record").build();
+        when(gateway.convert(any(), any(java.lang.reflect.Type.class))).thenReturn(List.of(platformInfo, stale));
 
         List<SandboxInfo> infos = sandboxService.sandboxInfo("user001");
 
         assertThat(infos).extracting(SandboxInfo::getSandboxId).containsExactly("os-1", "byclaw-dsh-user001");
-        // The record's endpoint carries the web token the host issued.
-        assertThat(infos.get(1).getEndpoints()).singleElement().asString().startsWith("https://dsh.example.com/u/user001/");
+        assertThat(infos.get(1).getEndpoints()).containsExactly("https://dsh.example.com/u/user001/chat?token=wt");
+    }
+
+    @Test
+    void residentHost_heartbeatsNeedNoRecordForTheContext() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        remoteGateway(sandboxService);
+
+        assertThat(sandboxService.heartbeatDshSandbox("user001")).isTrue();
+        verify(recordMapper, never()).selectRunningByUserAndSandboxType(any(), any());
     }
 }
