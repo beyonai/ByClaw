@@ -109,6 +109,7 @@ import {
   buildRecoveredAskPayload,
   interactionAgentSessionId,
   isColdRecoveryBlockingTurn,
+  releaseColdRecoveryBlockingTurn,
   type ByClawInteractionStore,
 } from './interaction-recovery.ts'
 
@@ -1697,13 +1698,17 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }, recoveryIdentity))
     if (blockingTurn !== undefined) {
       this.ctx.logger.info(
-        `[ASK_USER_QUESTION_RECOVERY_TRACE] HANDOFF_TO_RECLAIMED interaction=${recoveredInteractionId} session=${command.header.sessionId} message=${command.header.messageId}`,
+        `[ASK_USER_QUESTION_RECOVERY_TRACE] RELEASE_RECLAIMED interaction=${recoveredInteractionId} session=${command.header.sessionId} message=${command.header.messageId}`,
       )
-      // The reclaimed ASK_AGENT owns the original Gateway execution. Leave the
-      // durable record ANSWERED: its next ask_user_question call consumes that
-      // answer and continues the sole outer execution without terminal races.
-      return true
     }
+    // A replayed ASK_AGENT may already be waiting on a newly-created interaction,
+    // while the browser submits the old card's interaction. It cannot safely own
+    // that answer. Suppress its terminal frame, cancel it, then reconstruct the
+    // continuation from the exact interaction submitted by RESUME.
+    await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
+      rootMessageId: blockingTurn.rootMessageId,
+      setStreamFinished: finished => blockingTurn.context.setStreamFinished(finished),
+    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'))
     const record = await this.options.interactionStore.consume(
       recoveredInteractionId,
       normalizeByClawSessionId(command.header.sessionId),

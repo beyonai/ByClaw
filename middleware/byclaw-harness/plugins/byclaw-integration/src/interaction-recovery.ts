@@ -54,6 +54,17 @@ export function isColdRecoveryBlockingTurn(
     && turn.rootMessageId === recovery.rootMessageId
 }
 
+/** Stop an orphan replay before the cold Resume reconstructs the sole visible continuation. */
+export async function releaseColdRecoveryBlockingTurn(
+  turn: { rootMessageId: string; setStreamFinished(finished: boolean): void } | undefined,
+  cancel: (messageId: string) => Promise<void>,
+): Promise<boolean> {
+  if (turn === undefined) return false
+  turn.setStreamFinished(true)
+  await cancel(turn.rootMessageId)
+  return true
+}
+
 /** A rendered interaction must survive the process abort that accompanies sandbox release. */
 export function shouldRetainInteractionAfterAskFailure(options: {
   requestEmitted: boolean
