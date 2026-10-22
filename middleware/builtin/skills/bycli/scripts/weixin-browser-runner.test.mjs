@@ -214,7 +214,7 @@ test('Channels submit bridge failure never automatically replays the write', asy
   assert.deepEqual(await readdir(directory), []); // Recovery approval is separate from authentication state.
 });
 
-test('Channels unknown submission is retained and verification cannot replay it', async (t) => {
+test('Channels explicit replay reaches the adapter journal instead of a second Gate deduplication', async (t) => {
   const directory = await stateDir(t);
   const argv = [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'submit', '--execute', '--user-confirmed'];
   const outcome = await runWeixinBrowser({
@@ -224,13 +224,14 @@ test('Channels unknown submission is retained and verification cannot replay it'
     execute: async () => success('[{"status":"submit_unknown","submitted":true}]'),
   });
   assert.equal(JSON.parse(outcome.stdout)[0].status, 'submit_unknown');
-  const blocked = await runWeixinBrowser({
+  const replay = await runWeixinBrowser({
     stateDir: directory, argv, verificationConfirmed: true,
-    loadCapability: async () => assert.fail('finalized write must not discover capabilities'),
-    ensureBridge: async () => assert.fail('finalized write must not observe the bridge'),
-    execute: async () => assert.fail('verification must not authorize write replay'),
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => success('[{"status":"submit_unknown","submitted":true}]'),
   });
-  assert.equal(blocked.code, 'OPERATION_ALREADY_FINALIZED');
+  assert.equal(replay.executed, true);
+  assert.equal(JSON.parse(replay.stdout)[0].submitted, true);
 });
 
 test('Channels video stats retries a recovered bridge once', async (t) => {
@@ -780,3 +781,10 @@ exit 2
   assert.equal(stateFiles.length, 1);
   assert.equal(JSON.parse(await readFile(join(gateState, stateFiles[0]), 'utf8')).phase, 'complete');
 });
+
+for (const code of ['UPLOAD_NOT_STARTED', 'UPLOAD_RESULT_UNKNOWN']) {
+  test(`preserves the typed ${code} error instead of wrapping it as an unclassified process failure`, () => {
+    const original = { exitCode: 1, stdout: '', stderr: `ok: false\nerror:\n  code: ${code}\n  message: native upload result\n` };
+    assert.equal(normalizeCommandResult(original), original);
+  });
+}

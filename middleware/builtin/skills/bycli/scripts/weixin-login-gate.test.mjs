@@ -115,9 +115,9 @@ for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail', 'vid
       { argv, attemptKind: 'confirmed-rerun' },
     ]);
     const replay = await runGate({ stateDir, argv, verificationConfirmed: true, execute });
-    assert.equal(replay.executed, false);
-    assert.equal(replay.code, 'OPERATION_ALREADY_FINALIZED');
-    assert.equal(attempts.length, 2);
+    assert.equal(replay.executed, true);
+    assert.equal(attempts.length, 3);
+    assert.equal(attempts[2].attemptKind, 'initial');
   });
 }
 
@@ -191,10 +191,13 @@ for (const exitCode of [75, 77]) {
       stateDir,
       argv: channelsCommand(),
       verificationConfirmed: true,
-      execute: async () => assert.fail('ordinary timeout must not allow a login rerun'),
+      execute: async (_argv, context) => {
+        assert.equal(context.attemptKind, 'initial');
+        return result(0);
+      },
     });
-    assert.equal(retry.code, 'OPERATION_ALREADY_FINALIZED');
-    assert.equal(retry.requiresUserAction, false);
+    assert.equal(retry.executed, true);
+    assert.equal(retry.phase, 'complete');
   });
 }
 
@@ -787,3 +790,17 @@ process.stdout.write(JSON.stringify({ ok: true, records: [] }) + '\\n');
   assert.equal(payload.error.requiresUserAction, false);
   assert.doesNotMatch(replay.stderr, /AUTH_REQUIRED/);
 });
+
+
+for (const mode of ['prepare', 'resume', 'submit']) {
+  for (const code of [null, 'ARGUMENT', 'UNKNOWN', 'COMMAND_EXEC_UNCERTAIN']) {
+    test(`Channels ${mode} delegates replay after ${code || 'success'} to the operation journal`, async t => {
+      const stateDir = await channelsStateDir(t);
+      const argv = ['bycli', 'weixin-channels', 'video-publish', '--operation', '/tmp/op.json', '--mode', mode, '--execute'];
+      let calls = 0;
+      const execute = async () => { calls++; return result(code ? 1 : 0, code); };
+      for (let n = 0; n < 2; n++) assert.equal((await runGate({ stateDir, argv, execute })).executed, true);
+      assert.equal(calls, 2);
+    });
+  }
+}

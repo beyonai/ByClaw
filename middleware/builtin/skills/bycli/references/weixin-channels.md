@@ -55,7 +55,7 @@ node "${BYCLI_SKILL_DIR}/scripts/weixin-browser-runner.mjs" \
 
 `prepared` 表示草稿已保存、重开核对且可提交；`draft_saved` 表示已保存但还不能提交；`draft_save_unknown` 不允许盲目重存。`submitted` 只说明页面提示提交成功；`submit_unknown` 或 `submitted=true` 后不能再点击发表。`requires_user_action` 须结合 submitted 区分提交前后。只有精确远端匹配后才报告后台 `published`，公开 URL 是否可访问须另外核实。
 
-支持新等待逻辑的 CLI 将 `--timeout` 用作整次浏览器操作预算，所有阶段共用截止时间，Runner 在其外预留 30 秒退出余量。按钮响应、草稿回执/页面加载、上传/处理/封面预览的无进展上限分别为 5、30、60 秒；无可观察进展不证明平台失败，也不授权重复写入。operation 的 `wait`、`wait_error` 保留阶段与最后状态，可通过本地 `video-status --operation` 读取。实际能力以安装版本及命令帮助为准，不能假设旧 CLI 已有此语义。
+支持新等待逻辑的 CLI 将 `--timeout` 用作整次浏览器操作预算，所有阶段共用截止时间，Runner 在其外预留 30 秒退出余量。每 15 秒报告阶段与进度；上传/转码按总预算等待，封面初次加载按下述有界重开规则恢复。没有进展不证明平台失败，也不授权重复写入。operation 的 `wait`、`wait_error` 保留阶段与最后状态，可通过本地 `video-status --operation` 读取。实际能力以安装版本及命令帮助为准，不能假设旧 CLI 已有此语义。
 
 Runner 实时转发命令 stderr，stdout 只在结束时输出完整结果。CLI 的阶段和 15 秒心跳可直接在终端看到；不要使用 `2>&1 | tail`，它会再次缓存进度。需要保存结果时使用 `-f json > '<结果.json>'`，stderr 留在终端。浏览器调用尚未返回时心跳仅表示进程仍在等待最后已知阶段，不证明网页正在前进；超时或不确定写结果继续遵守原有 STOP 与防重规则。
 
@@ -99,3 +99,22 @@ node "${BYCLI_SKILL_DIR}/scripts/weixin-browser-runner.mjs" \
 若原记录停在 `cover.phase=opening`，新版帮助支持时可用 `--mode resume --resume-cover-opening horizontal|vertical` 原地续接。Adapter 必须核对原草稿、描述、AI 标注、两张卡片和原图片哈希，并确认该角色尚未上传、无已选自定义图片、未确认或保存；只继续原弹窗中尚未尝试的上传，不重开弹窗或重传视频。`upload_unknown`、`confirm_unknown` 和卡片变化均不适用；不能通过换目录或清理 Gate 重放已终结命令。
 
 原编辑页标识已失效时，且原记录能证明当前仍为 `opening`、两角色都未上传/确认/保存，新版帮助支持时可同时加 `--reopen-saved-draft`。Adapter 按原草稿 ID 与描述重开，核对默认两张卡片身份和原图片哈希后再配置封面；不会新建草稿或重新上传视频。任何已完成封面、未知上传/确认或保存尝试都会拒绝此恢复。
+
+## 运行指纹与恢复证据
+
+新版 CLI/扩展的版本线分别维护，不能比较补丁号判断是否落后。`doctor --json` 的 `extensionBuildVerified` 才表示当前执行的脚本与安装包一致；同版本不同 build ID 须由托管浏览器所有者重载。缺少指纹表示尚未核验，不能直接断言缓存正在运行。可用 `doctor --diagnostics '<新目录>'` 保存不含 Cookie、页面正文和媒体的诊断材料。Agent 不删除 ScriptCache、不清整个 profile、不杀托管进程。
+
+登录、导航、初始化失败不创建新 operation；完成登录后原样 prepare。编辑器就绪后、首次注入前才落盘。已有发布操作保留同一 operation：
+
+- `upload_not_started` / `upload.effect=none` 表示有明确的未注入回执；核对空编辑页和原文件哈希后可显式 `retry-upload`。卡片没变、FileList 为空本身都不是重传许可。
+- `processing`、`preparation_unknown` 或上传 `unknown` 先只读检查，再 `resume`/`recover`；不重新 prepare 新操作。超时不等于平台拒绝，阶段、最后观察和下一步在 `wait`、`wait_error`、`next_action`。
+- 双封面独立记进度。`resume` 保留未完成封面的原页并跳过已完成角色。仅明确记录未注入的失败可加 `--retry-cover-upload horizontal|vertical`，每个失败角色只消费一次重试。缩略图出现但 `custom_source_selected=false` 时不能确认，也不能自行再上传。
+- 保存或提交未知时只读对账。延迟的草稿回执可继续读取；没有精确草稿身份则人工定位/显式采用，不重复保存。提交仍须展示已核验草稿并获得单独确认。
+
+新实现将统计查询与发布编辑页分开管理；`video-status --inspect-editor` 保留发布租约。Gate 的完成态不阻止再次只读复核，也不代替 operation 的上传/保存防重；Gate 只管认证重试预算，包含 submit 在内的发布防重统一由 operation 负责。成功、参数错误或页面失效均不能让 Gate 永久封住后续显式核对/恢复。已保存且无未保存封面的草稿可按精确草稿 ID 重开，不依赖旧页面 ID；未保存内容仍须原页。诊断指纹/上传能力警告不作为通用健康失败，具体动作检查自身能力。实际能力以安装版本的帮助和指纹为准。旧 CLI 不具备这些恢复入口时不要直接改 journal 解锁。
+
+`browser <session> bind` 返回的是当前绑定的 `page`，明确接管时使用此返回值；不要假设绑定前的 open ID 仍可用。修复后的 `adapter eject` 会把共享依赖封装在本适配器目录，保留基线版本；升级后需检查用户覆盖是否仍遮住官方修复。
+
+封面初次加载时，预览或编辑入口 20 秒仍不可用，CLI 会核对原草稿 ID、描述和无封面副作用的状态，最多重开同一草稿 3 次，仍共用整次 timeout；不重传视频、不新建草稿。已上传/确认任一封面、出现未记录弹窗或卡片变化时不刷新，以保留未保存内容。两张默认封面均加载后才记录初始身份，不把空对象当基线。
+
+原生文件注入返回成功后，页面可能立即消费或替换 input；即时 FileList 为空只标记 `file_list_verified=false`，不自动重传，也不单独判定平台失败。`uploaded=true` 表示原生注入已返回成功，`files` 为注入文件数、`file_names` 为当时观察到的名称；封面仍须通过自定义图片、裁剪器绑定、确认和卡片身份核验后才能保存。
