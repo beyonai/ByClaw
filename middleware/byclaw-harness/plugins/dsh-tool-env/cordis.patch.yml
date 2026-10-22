@@ -28,6 +28,7 @@
         idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 600000)"
         host: !!js "process.env.BYCLAW_TOOL_ENV_HOST || '127.0.0.1'"
         port: !!js "Number(process.env.BYCLAW_TOOL_ENV_PORT || 22)"
+        wsUrl: !!js "process.env.BYCLAW_TOOL_ENV_WS_URL || ''"
         openSandbox: !!js "JSON.parse(process.env.BYCLAW_TOOL_ENV_OPENSANDBOX || '{}')"
         # `byclaw-be`: BE creates B from its own spec as this user. USER_CODE and
         # BEYOND_TOKEN are what BE already injects into A; the base URL is the one

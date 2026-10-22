@@ -10,6 +10,9 @@
 #                                   read-only, holding `client_ed25519.pub` and
 #                                   `host_ed25519` (default /etc/byclaw-tool-env)
 #   BYCLAW_TOOL_ENV_PORT            listen port (default 22)
+#   BYCLAW_TOOL_ENV_WS_PORT         also serve a WebSocket bridge to sshd on this port
+#                                   (scripts/ws-bridge.py), for runtimes behind an HTTP
+#                                   ingress; unset = sshd only
 #   BYCLAW_TOOL_ENV_USER            login user (default byclaw)
 #   BYCLAW_TOOL_ENV_RUN_DIR         config/key directory (default /run/byclaw-tool-env)
 # sshd only accepts that key for that user, allows the Unix-socket forwarding
@@ -29,6 +32,8 @@ port="${BYCLAW_TOOL_ENV_PORT:-22}"
 user="${BYCLAW_TOOL_ENV_USER:-byclaw}"
 run_dir="${BYCLAW_TOOL_ENV_RUN_DIR:-/run/byclaw-tool-env}"
 sshd="${BYCLAW_TOOL_ENV_SSHD:-/usr/sbin/sshd}"
+ws_port="${BYCLAW_TOOL_ENV_WS_PORT:-}"
+ws_bridge="${BYCLAW_TOOL_ENV_WS_BRIDGE:-/usr/local/bin/byclaw-tool-env-ws-bridge}"
 
 umask 077
 mkdir -p "${run_dir}" /run/sshd
@@ -79,4 +84,14 @@ EOF
 # The host key and authorized key never need to stay in the environment of
 # anything sshd starts.
 unset BYCLAW_TOOL_ENV_HOST_KEY BYCLAW_TOOL_ENV_AUTHORIZED_KEY
-exec "${sshd}" -D -e -f "${run_dir}/sshd_config"
+if [ -z "${ws_port}" ]; then
+    exec "${sshd}" -D -e -f "${run_dir}/sshd_config"
+fi
+# Bridge mode: sshd in the background, the bridge as the container's main process so
+# the sandbox ends when either side is gone.
+"${sshd}" -D -e -f "${run_dir}/sshd_config" &
+sshd_pid=$!
+trap 'kill "${sshd_pid}" 2>/dev/null' EXIT INT TERM
+python3 "${ws_bridge}" --listen "${ws_port}" --target "127.0.0.1:${port}" &
+bridge_pid=$!
+wait "${bridge_pid}"

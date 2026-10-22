@@ -3,16 +3,20 @@
  *
  * A asks BE, as the user, for the sandbox of service key `serviceKey`
  * (`POST /sandbox/launchByUserCode`: get-or-create per user and sandbox type)
- * and reads B's sshd address from the `instanceEndpoints` entry that the B spec
- * declares with `protocol: tcp`. BE holds the OpenSandbox credential and the
- * spec (image, volumes, limits); A only carries the user's own Beyond-Token,
- * which BE already hands it. The SSH keys reach B through A's state directory,
- * which the B spec mounts read-only (see scripts/tool-env-sshd.sh).
+ * and reads B's sshd address from the `instanceEndpoints` entry named
+ * `sshInstance`. A `tcp://host:port` value (spec port with `protocol: tcp`) is
+ * dialled directly; an `http(s)://` or `ws(s)://` value, or a BE ingress path,
+ * is B's WebSocket bridge to sshd (spec port declared as http, B started with
+ * `BYCLAW_TOOL_ENV_WS_PORT`), which ssh reaches through `scripts/ws-proxy.mjs`.
+ * BE holds the OpenSandbox credential and the spec (image, volumes, limits); A
+ * only carries the user's own Beyond-Token, which BE already hands it. The SSH
+ * keys reach B through A's state directory, which the B spec mounts read-only
+ * (see scripts/tool-env-sshd.sh).
  *
  * Not implemented for this backend yet, by decision (README "Follow-ups"):
  * pausing/resuming an idle B, and releasing B when A goes away.
  */
-import { waitForPort, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
+import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
 
 export interface ByClawBeBackendConfig {
@@ -70,15 +74,15 @@ export class ByClawBeBackend implements ToolEnvBackend {
     await this.identity.keys()
     const first = await this.launch()
     try {
-      await waitForPort(first, this.config.readyTimeoutMs)
+      await waitForEndpoint(first, this.config.readyTimeoutMs)
       return first
     } catch (error) {
       // BE answers from its own record, which can outlive the remote sandbox.
       // Release that record once and launch again before giving up.
-      this.log(`tool environment at ${first.hostName}:${String(first.port)} is unreachable (${message(error)}); releasing it and launching again`)
+      this.log(`tool environment at ${describe(first)} is unreachable (${message(error)}); releasing it and launching again`)
       await this.remove()
       const second = await this.launch()
-      await waitForPort(second, this.config.readyTimeoutMs)
+      await waitForEndpoint(second, this.config.readyTimeoutMs)
       return second
     }
   }
@@ -103,7 +107,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     if (endpoint === undefined) {
       throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${serviceKey}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
-    this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${endpoint.hostName}:${String(endpoint.port)}`)
+    this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     return endpoint
   }
 
@@ -119,7 +123,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {
     const raw = endpoints?.[this.config.sshInstance]
-    return typeof raw === 'string' ? parseEndpoint(raw, this.config.port) : undefined
+    return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
   }
 
   private async call(path: string, body: Record<string, unknown>): Promise<unknown> {
@@ -144,16 +148,26 @@ export class ByClawBeBackend implements ToolEnvBackend {
 }
 
 /**
- * Endpoint as BE renders a `tcp` port: `tcp://host:port`; also accepts
- * `host:port`, `[v6]:port` and a bare host (then `defaultPort`). A query or path
- * suffix is ignored. An HTTP ingress path (`/v1/sandboxes/...`) or any non-tcp
- * URL is not an sshd address and yields `undefined`.
+ * B's sshd endpoint from one `instanceEndpoints` value.
+ *
+ * - `tcp://host:port`, `host:port`, `[v6]:port` or a bare host (then `defaultPort`):
+ *   dial sshd directly. A query or path suffix is ignored.
+ * - `ws(s)://…` or `http(s)://…`: B's WebSocket bridge to sshd, used verbatim
+ *   (http becomes ws), query string included: ingress tokens travel there.
+ * - `/v1/sandboxes/…` (a BE ingress path): the bridge behind BE, `baseUrl` + path.
+ * - Empty: `undefined`.
  */
-export function parseEndpoint(raw: string, defaultPort: number): ToolEnvEndpoint | undefined {
+export function parseEndpoint(raw: string, defaultPort: number, baseUrl = ''): ToolEnvEndpoint | undefined {
   const trimmed = raw.trim()
-  if (trimmed === '' || trimmed.startsWith('/')) return undefined
-  const scheme = /^([a-z][a-z0-9+.-]*):\/\//iu.exec(trimmed)?.[1]
-  if (scheme !== undefined && scheme.toLowerCase() !== 'tcp') return undefined
+  if (trimmed === '') return undefined
+  if (trimmed.startsWith('/')) {
+    const base = baseUrl.trim().replace(/\/+$/u, '')
+    return base === '' ? undefined : bridge(`${base}${trimmed}`, defaultPort)
+  }
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//iu.exec(trimmed)?.[1]?.toLowerCase()
+  if (scheme !== undefined && scheme !== 'tcp') {
+    return ['ws', 'wss', 'http', 'https'].includes(scheme) ? bridge(trimmed, defaultPort) : undefined
+  }
   const value = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//iu, '').replace(/[/?#].*$/u, '')
   if (value === '') return undefined
   const bracketed = /^\[([^\]]+)\](?::(\d+))?$/u.exec(value)
@@ -161,6 +175,17 @@ export function parseEndpoint(raw: string, defaultPort: number): ToolEnvEndpoint
   const colon = value.lastIndexOf(':')
   if (colon > 0 && /^\d+$/u.test(value.slice(colon + 1))) return { hostName: value.slice(0, colon), port: Number(value.slice(colon + 1)) }
   return { hostName: value, port: defaultPort }
+}
+
+function bridge(url: string, defaultPort: number): ToolEnvEndpoint | undefined {
+  let parsed: URL
+  try { parsed = new URL(url.replace(/^http(s?):\/\//iu, 'ws$1://')) } catch { return undefined }
+  const port = parsed.port !== '' ? Number(parsed.port) : parsed.protocol === 'wss:' ? 443 : defaultPort
+  return { hostName: parsed.hostname, port, websocket: parsed.toString() }
+}
+
+function describe(endpoint: ToolEnvEndpoint): string {
+  return endpoint.websocket === undefined ? `${endpoint.hostName}:${String(endpoint.port)}` : `bridge ${maskUrl(endpoint.websocket)}`
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }

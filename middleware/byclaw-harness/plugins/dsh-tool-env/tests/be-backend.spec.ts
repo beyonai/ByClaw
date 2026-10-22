@@ -37,8 +37,10 @@ class FakeByClawBe {
   private async handle(request: IncomingMessage): Promise<unknown> {
     let raw = ''
     for await (const chunk of request) raw += String(chunk)
-    const body = JSON.parse(raw) as Record<string, unknown>
     const path = request.url ?? ''
+    // A GET is the backend probing a bridge behind BE's ingress; any HTTP answer means "up".
+    if (request.method !== 'POST') return { code: -1, msg: `no such ingress ${path}`, data: null }
+    const body = JSON.parse(raw) as Record<string, unknown>
     this.calls.push({ path, body, token: request.headers['beyond-token'] as string | undefined, systemCode: request.headers['system-code'] as string | undefined })
     const user = String(body['userCode'])
     if (path === '/byaiService/sandbox/launchByUserCode') {
@@ -155,12 +157,31 @@ describe('ByClawBeBackend', () => {
     await expect(backend.ensure()).rejects.toThrow(/no "ssh" endpoint for sandbox type byclaw-dsh-tools/u)
   })
 
-  it('derives B\'s host from the sandbox id when BE returns an ingress path for the ssh port', async () => {
-    // Older BE/OpenSandbox builds render a tcp port as an HTTP proxy path.
-    fake.nextEndpoints = { ssh: '/v1/sandboxes/sb1/proxy/22?token=abc' }
+  it('derives B\'s host from the sandbox id when BE returns no address for the ssh port', async () => {
+    fake.nextEndpoints = { openclaw: 'http://127.0.0.1:9/' }
     const backend = new ByClawBeBackend({ ...config, hostTemplate: '127.0.0.1', port }, identity, message => logs.push(message))
     expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
     expect(logs[0]).toMatch(/no tcp address for "ssh"; using host template 127\.0\.0\.1/u)
+  })
+
+  it('treats an http endpoint for the ssh port as B\'s WebSocket bridge and waits for it over HTTP', async () => {
+    // An ingress-only runtime (e.g. an ALB in front of the sandbox) exposes the bridge as an http URL with a token.
+    const bridge = createServer((request, response) => { response.writeHead(426, { Upgrade: 'websocket' }); response.end() })
+    await new Promise<void>(resolve => bridge.listen(0, '127.0.0.1', resolve))
+    const bridgePort = (bridge.address() as { port: number }).port
+    try {
+      fake.nextEndpoints = { ssh: `http://127.0.0.1:${String(bridgePort)}/kruise/sb1/8022/?token=abc` }
+      const backend = new ByClawBeBackend(config, identity, message => logs.push(message))
+      expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port: bridgePort, websocket: `ws://127.0.0.1:${String(bridgePort)}/kruise/sb1/8022/?token=abc` })
+      expect(logs[0]).toBe('tool environment sb1 from ByClaw BE: bridge ws://127.0.0.1:' + String(bridgePort) + '/kruise/sb1/8022/?…')
+    } finally { await new Promise<void>(resolve => bridge.close(() => resolve())) }
+  })
+
+  it('resolves a BE ingress path for the ssh port against the BE base URL', async () => {
+    fake.nextEndpoints = { ssh: '/v1/sandboxes/sb1/proxy/8022?token=abc' }
+    const backend = new ByClawBeBackend({ ...config, readyTimeoutMs: 300 }, identity, () => {})
+    // The fake BE answers HTTP on that path (any status), which counts as the bridge being up.
+    expect(await backend.ensure()).toMatchObject({ websocket: `${config.baseUrl.replace(/\/+$/u, '').replace(/^http/u, 'ws')}/v1/sandboxes/sb1/proxy/8022?token=abc` })
   })
 
   it('surfaces BE failures with their message', async () => {
@@ -186,8 +207,14 @@ describe('parseEndpoint', () => {
     expect(parseEndpoint('[fd00::5]', 22)).toEqual({ hostName: 'fd00::5', port: 22 })
     expect(parseEndpoint('sandbox-abc', 2022)).toEqual({ hostName: 'sandbox-abc', port: 2022 })
     expect(parseEndpoint('tcp://10.0.0.5:22?token=abc', 22)).toEqual({ hostName: '10.0.0.5', port: 22 })
-    for (const notSsh of ['/v1/sandboxes/x/proxy/22?token=abc', 'http://host:8080/v1/sandboxes/x/proxy/22', 'https://host/', '', '  ']) {
-      expect(parseEndpoint(notSsh, 22), notSsh).toBeUndefined()
+    expect(parseEndpoint('http://alb.example.com/kruise/sb/8022/?token=t', 22))
+      .toEqual({ hostName: 'alb.example.com', port: 22, websocket: 'ws://alb.example.com/kruise/sb/8022/?token=t' })
+    expect(parseEndpoint('https://alb.example.com:8443/x', 22)).toEqual({ hostName: 'alb.example.com', port: 8443, websocket: 'wss://alb.example.com:8443/x' })
+    expect(parseEndpoint('wss://alb.example.com/x', 22)).toEqual({ hostName: 'alb.example.com', port: 443, websocket: 'wss://alb.example.com/x' })
+    expect(parseEndpoint('/v1/sandboxes/x/proxy/8022?token=t', 22, 'http://be:8086/byaiService/'))
+      .toEqual({ hostName: 'be', port: 8086, websocket: 'ws://be:8086/byaiService/v1/sandboxes/x/proxy/8022?token=t' })
+    for (const unusable of ['/v1/sandboxes/x/proxy/22?token=abc', 'ftp://host/', '', '  ']) {
+      expect(parseEndpoint(unusable, 22), unusable).toBeUndefined()
     }
   })
 })

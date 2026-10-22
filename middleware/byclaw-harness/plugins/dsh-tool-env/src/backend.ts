@@ -12,10 +12,15 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
 
-/** Network coordinates of B's sshd as seen from A. */
+/**
+ * How A reaches B's sshd: a TCP address, or a WebSocket bridge in B that forwards
+ * to sshd (`websocket`), for sandboxes exposed only through an HTTP ingress.
+ */
 export interface ToolEnvEndpoint {
   hostName: string
   port: number
+  /** `ws://` or `wss://` URL of B's bridge; ssh then runs through `scripts/ws-proxy.mjs`. */
+  websocket?: string
 }
 
 /** Lifecycle owner for B. */
@@ -28,13 +33,13 @@ export interface ToolEnvBackend {
   dispose(): Promise<void>
 }
 
-/** Fixed sshd endpoint; pause is a no-op. */
+/** Fixed sshd endpoint (TCP or WebSocket bridge); pause is a no-op. */
 export class StaticBackend implements ToolEnvBackend {
   constructor(private readonly endpoint: ToolEnvEndpoint, private readonly identity: ToolEnvIdentity) {}
 
   async ensure(): Promise<ToolEnvEndpoint> {
     await this.identity.keys()
-    await waitForPort(this.endpoint, 30_000)
+    await waitForEndpoint(this.endpoint, 30_000)
     return this.endpoint
   }
 
@@ -233,6 +238,39 @@ function state(detail: SandboxDetail): string { return (detail.status?.state ?? 
 function isState(detail: SandboxDetail, wanted: string): boolean { return state(detail) === wanted }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 function sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)) }
+
+/** Wait until B's sshd (or its WebSocket bridge) accepts connections. */
+export async function waitForEndpoint(endpoint: ToolEnvEndpoint, timeoutMs: number): Promise<void> {
+  if (endpoint.websocket === undefined) { await waitForPort(endpoint, timeoutMs); return }
+  await waitForHttp(endpoint.websocket, timeoutMs)
+}
+
+/**
+ * Wait until the bridge answers HTTP at all. A plain GET to a WebSocket server is
+ * refused with an HTTP status (426, 400 ...), which is the readiness signal; only a
+ * transport failure (refused, reset, DNS, ingress 502/503/504) keeps waiting.
+ */
+export async function waitForHttp(websocketUrl: string, timeoutMs: number): Promise<void> {
+  const url = websocketUrl.replace(/^ws(s?):\/\//iu, 'http$1://')
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    let ready = false
+    try {
+      const response = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(5000) })
+      await response.body?.cancel()
+      ready = ![502, 503, 504].includes(response.status)
+    } catch { /* not reachable yet */ }
+    if (ready) return
+    if (Date.now() > deadline) throw new Error(`tool environment bridge ${maskUrl(websocketUrl)} is not reachable`)
+    await sleep(500)
+  }
+}
+
+/** URL without a query string: gateway tokens travel in it. */
+export function maskUrl(url: string): string {
+  const cut = url.indexOf('?')
+  return cut === -1 ? url : `${url.slice(0, cut)}?…`
+}
 
 /** Wait until a TCP connect to the endpoint succeeds. */
 export async function waitForPort(endpoint: ToolEnvEndpoint, timeoutMs: number): Promise<void> {

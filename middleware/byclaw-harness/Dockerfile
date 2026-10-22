@@ -311,10 +311,12 @@ RUN set -eux; \
 # `byclaw-dsh-entrypoint tools` runs this sshd for DSH's SSH helper. The
 # package's generated host keys are removed; B serves the key its runtime (A)
 # hands it at creation.
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server python3 python3-websockets \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
     && test -x /usr/sbin/sshd
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
+# WebSocket bridge to sshd for runtimes behind an HTTP ingress (BYCLAW_TOOL_ENV_WS_PORT).
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc

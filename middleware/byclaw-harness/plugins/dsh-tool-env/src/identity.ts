@@ -10,6 +10,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { ToolEnvEndpoint } from './backend.ts'
 
@@ -55,6 +56,8 @@ export class ToolEnvIdentity {
   /**
    * Point the alias at the current endpoint. SshConnection invokes plain `ssh <alias>`,
    * so the alias lives in the user's OpenSSH configuration through one Include line.
+   * A WebSocket bridge endpoint adds a ProxyCommand (scripts/ws-proxy.mjs, run by this
+   * Node); HostKeyAlias keeps the pinned host key in force either way.
    */
   async writeClientConfig(endpoint: ToolEnvEndpoint): Promise<void> {
     await this.keys()
@@ -62,6 +65,7 @@ export class ToolEnvIdentity {
       `Host ${this.alias}`,
       `  HostName ${endpoint.hostName}`,
       `  Port ${String(endpoint.port)}`,
+      ...(endpoint.websocket === undefined ? [] : [`  ProxyCommand ${quote(process.execPath)} ${quote(WS_PROXY)} ${quote(endpoint.websocket)}`]),
       `  User ${this.user}`,
       `  IdentityFile ${this.clientKey}`,
       '  IdentitiesOnly yes',
@@ -74,6 +78,14 @@ export class ToolEnvIdentity {
     ].join('\n'), 0o600)
     await includeInUserConfig(this.clientConfig)
   }
+}
+
+/** Shipped with the package: `scripts/ws-proxy.mjs` next to `lib/` (or `src/` under test). */
+const WS_PROXY = fileURLToPath(new URL('../scripts/ws-proxy.mjs', import.meta.url))
+
+/** ssh_config ProxyCommand is split by the shell; keep each argument one word. */
+function quote(value: string): string {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 
 async function ensureKey(path: string): Promise<void> {

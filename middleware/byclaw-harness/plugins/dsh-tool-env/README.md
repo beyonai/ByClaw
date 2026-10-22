@@ -104,11 +104,30 @@ layout and are deployment-specific:
 
 A `tcp` port makes BE resolve the sandbox-network address
 (`?resolve_internal=true`), which is what `tcp://host:22` in `instanceEndpoints`
-carries; HTTP ports would come back as BE ingress paths and are of no use here.
-BE builds before that resolver, or OpenSandbox servers without
-`resolve_internal`, return an ingress path for the tcp port too; A then falls
-back to `BYCLAW_TOOL_ENV_HOST_TEMPLATE` (`sandbox-{id}`, the Docker runtime's
-container name) with `BYCLAW_TOOL_ENV_PORT`.
+carries. BE builds before that resolver, or OpenSandbox servers without
+`resolve_internal`, return nothing usable for the tcp port; A then falls back to
+`BYCLAW_TOOL_ENV_HOST_TEMPLATE` (`sandbox-{id}`, the Docker runtime's container
+name) with `BYCLAW_TOOL_ENV_PORT`.
+
+### Runtimes behind an HTTP ingress (WebSocket transport)
+
+Where B is reachable only through an HTTP ingress (an ALB in front of an ACS or
+Kubernetes runtime, addresses like `http://alb-…/kruise/<sandbox>/<port>/…?token=…`),
+raw SSH cannot pass. B then also serves a WebSocket bridge to its sshd
+(`scripts/ws-bridge.py`, started by `tool-env-sshd.sh` when
+`BYCLAW_TOOL_ENV_WS_PORT` is set; the image needs `python3-websockets`), and A's
+ssh goes through `scripts/ws-proxy.mjs` as its `ProxyCommand`. The host key stays
+pinned (`HostKeyAlias`). Declare the bridge port as the ssh instance:
+
+```json
+"ports": [{ "port": 8022, "instance": "ssh", "protocol": "http" }],
+"env": { "BYCLAW_TOOL_ENV_PORT": "22", "BYCLAW_TOOL_ENV_WS_PORT": "8022" }
+```
+
+An `http(s)://` or `ws(s)://` value in `instanceEndpoints.ssh` is used verbatim
+as the bridge URL, query string (ingress token) included; a BE ingress path is
+resolved against the BE base URL. The `static` backend accepts the same through
+`BYCLAW_TOOL_ENV_WS_URL`. The ingress must pass WebSocket upgrades on that path.
 B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 `serviceKey` as the user's preferred sandbox spec, and that it acts for the
 `userCode` in its body; both are accepted as they are.
@@ -122,12 +141,14 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_BE_BASE_URL` | `byclaw-be`: BE origin with path prefix; falls back to `BYCLAW_DSH_BASE_URL`, then `BYAI_SERVICE_BASE_URL` |
 | `BYCLAW_TOOL_ENV_SERVICE_KEY` | `byclaw-be`: B's `service_key` (default `byclaw-dsh-tools`) |
 | `BYCLAW_TOOL_ENV_SSH_INSTANCE` | `byclaw-be`: `instanceEndpoints` key of B's sshd (default `ssh`) |
-| `BYCLAW_TOOL_ENV_HOST_TEMPLATE` | `byclaw-be`: B's host name from its sandbox id when BE returns no `tcp://` address (default `sandbox-{id}`, Docker DNS; empty disables) |
+| `BYCLAW_TOOL_ENV_HOST_TEMPLATE` | `byclaw-be`: B's host name from its sandbox id when BE returns no address for the ssh port (default `sandbox-{id}`, Docker DNS; empty disables) |
+| `BYCLAW_TOOL_ENV_WS_PORT` | On B: also serve the WebSocket bridge to sshd on this port |
 | `BYCLAW_TOOL_ENV_SYSTEM_CODE` | `byclaw-be`: optional `system-code` header |
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
 | `BYCLAW_TOOL_ENV_HOST`, `BYCLAW_TOOL_ENV_PORT` | `static` backend sshd endpoint |
+| `BYCLAW_TOOL_ENV_WS_URL` | `static` backend: B's WebSocket bridge URL instead of a TCP endpoint |
 | `BYCLAW_TOOL_ENV_WORKSPACE` | remote default workspace (default `/by`) |
 | `BYCLAW_TOOL_ENV_PERMISSION_MODE` | permission mode in split mode (default `danger-full-access`) |
 

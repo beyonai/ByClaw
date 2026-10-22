@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
-import { ByClawBeBackend, type ByClawBeBackendConfig } from './be-backend.ts'
+import { ByClawBeBackend, parseEndpoint, type ByClawBeBackendConfig } from './be-backend.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
 export { ToolEnvConnection } from './connection.ts'
-export { OpenSandboxBackend, StaticBackend, waitForPort } from './backend.ts'
+export { OpenSandboxBackend, StaticBackend, waitForEndpoint, waitForHttp, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
 export { ToolEnvIdentity } from './identity.ts'
 export { ByClawBeBackend, parseEndpoint } from './be-backend.ts'
@@ -42,9 +42,10 @@ export interface Config {
   idleMs: number
   requestTimeoutMs: number
   leaseMs: number
-  /** `static` backend endpoint. */
+  /** `static` backend endpoint; `wsUrl` (ws/wss/http/https) makes it a WebSocket bridge to sshd. */
   host: string
   port: number
+  wsUrl: string
   /** `opensandbox` backend settings. */
   openSandbox: {
     baseUrl: string
@@ -80,6 +81,7 @@ export class ToolEnv extends ToolEnvConnection {
     leaseMs: schema.natural().default(30_000),
     host: schema.string().default('127.0.0.1'),
     port: schema.natural().default(22),
+    wsUrl: schema.string().default(''),
     openSandbox: schema.object({
       baseUrl: schema.string().default(''),
       apiKey: schema.string().default(''),
@@ -128,7 +130,11 @@ export class ToolEnv extends ToolEnvConnection {
 }
 
 function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): ToolEnvBackend {
-  if (config.backend === 'static') return new StaticBackend({ hostName: config.host, port: config.port }, identity)
+  if (config.backend === 'static') {
+    const endpoint = config.wsUrl === '' ? undefined : parseEndpoint(config.wsUrl, config.port)
+    if (config.wsUrl !== '' && endpoint?.websocket === undefined) throw new Error('byclaw-tool-env: wsUrl must be a ws://, wss://, http:// or https:// URL')
+    return new StaticBackend(endpoint ?? { hostName: config.host, port: config.port }, identity)
+  }
   // Named explicitly: the default name derives from the class ("tool-env"), which the console filter silences.
   const logger = ctx.logger('byclaw-tool-env')
   if (config.backend === 'byclaw-be') {
