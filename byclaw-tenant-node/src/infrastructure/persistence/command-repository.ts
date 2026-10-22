@@ -3,6 +3,7 @@ import type { ConnectionManager } from "../../application/connection-manager.js"
 import type { TenantCommand } from "../../application/command.js";
 import type { CommandTransaction, CommandTransactions } from "../../application/command-service.js";
 import type { SqlSession } from "../../application/database-ports.js";
+import claimWelcome from "./claimWelcome.js";
 import { CommandContext } from "./command-context.js";
 import { first } from "./sql-utils.js";
 import { joinGroup } from "./group-join.js";
@@ -49,6 +50,7 @@ const handlers = {
   DISSOLVE_GROUP: groupSettings,
   ACK_DISSOLUTION: groupSettings,
   READ_STATE: readState,
+  CLAIM_WELCOME: claimWelcome,
   CREATE_TASK: createTask,
   CLAIM_TASK: claimTask,
   UPDATE_TASK: changeTask,

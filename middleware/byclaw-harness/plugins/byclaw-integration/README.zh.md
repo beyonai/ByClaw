@@ -333,3 +333,16 @@ INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；�
 连接器迁移约定：旧 `options.defaultVoice` 在没有显式 `voice`/`speaker` 时映射为默认音色；原 OpenAI 图片显式 Authorization 和火山 TTS 显式 X-Api-Key / X-Api-Resource-Id 保留优先级。新插件将 `readTimeoutSeconds` 作为整个生成调用的总时间预算，最多 30 分钟（更大配置归一到 30 分钟）；不再分别应用旧连接器的 connectTimeoutSeconds / readTimeoutSeconds，也不采用 maxRetryCount 自动重试，避免重复计费。
 
 语音交互：`byclaw-asr` 使用系统启用的全局默认 `ASR` 模型，在主 Agent 接收输入之前固定识别 MP3，保留 `voiceInteraction` 标记并将识别结果作为 `userInput`。SDK/前端的 `VOICE` 消息携带后端已验证归属的音频，原始音频保存在 `session_root/asr/`；重复消息复用识别缓存。by-framework 1.6.0 要求 wire content 非空，纯语音桥接使用 `[语音消息]` 占位，识别后替换成真实文本。正常文字回复之后，运行时使用现有 TTS 默认模型合成口语摘要，保存到 `session_root/tts/` 并追加可播放的受管制品链接；TTS 失败仍保留完整文字回复。手动转写由登录后的后端代理至 `POST /api/byclaw/asr/transcribe`，用户浏览器不持有供应商密钥。协议与接口约束见 `../byclaw-asr/README.md`。
+
+### 启动与 Skill 懒加载
+
+镜像构建阶段编译 DSH 和全部插件，运行时直接执行编译后的 CLI。浏览器、桌面和 byCLI 桥接默认在首次私有 browser 请求或受管 byCLI 浏览器命令时激活；首次请求等待激活完成，后续复用。
+
+Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill 关联索引。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，刷新后的旧代际结果不能重新发布。
+
+内置 Skill 仍从镜像本地加载；专家团临时作用域员工在实际调用时准备。`allowSkillSyncFailure` 决定单个 Skill 失败时跳过还是拒绝查询，之后可重试。首次 Skill 查询承担网络耗时，Worker ready 不代表所有 Skill 已预热。
+
+
+### 2026-10-22 冷启动投影优化
+
+模板 staging 保留原目录校验与文件命名规则，只复制用户模板、未知文件和子目录；本代际会重新生成的 ByClaw 模板不再先复制后删除。原代际锁、双目录发布回滚、撤权清理及 Skill 懒加载/版本检查不变。`session-metadata-ready` 日志将会话元数据恢复从内置 Skill 加载区间中单独标出。新增 `template-staging-verify.mjs` 覆盖撤权、用户文件保留、目录碰撞拒绝与失败时保留旧代际。

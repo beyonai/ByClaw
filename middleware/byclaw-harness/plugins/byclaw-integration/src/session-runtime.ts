@@ -1667,6 +1667,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const resumed = structured !== undefined
       ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
       : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command))
+    this.ctx.logger.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] RESUME_MATCH session=${command.header.sessionId} message=${command.header.messageId} interaction=${structured?.interactionId ?? interactionId(command) ?? '-'} mode=${resumed === false ? 'unmatched' : resumed}`,
+    )
     if (resumed) {
       const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
@@ -1683,16 +1686,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     if (resumed !== 'cold') return resumed !== false
     const recoveredInteractionId = structured?.interactionId ?? interactionId(command)
     if (recoveredInteractionId === undefined || context === undefined || this.options.interactionStore === undefined) return false
-    const record = await this.options.interactionStore.consume(
-      recoveredInteractionId,
-      normalizeByClawSessionId(command.header.sessionId),
-      command.header.userCode,
-    )
-    if (record?.answer === undefined) return false
-    const recovered = buildRecoveredAskPayload(record)
-    this.ctx.logger.info(
-      `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
-    )
     const recoveryIdentity = {
       contextSessionId: normalizeByClawSessionId(command.header.sessionId),
       userCode: command.header.userCode,
@@ -1705,21 +1698,27 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }, recoveryIdentity))
     if (blockingTurn !== undefined) {
       this.ctx.logger.info(
-        `[byclaw-dsh] cancelling reclaimed ask before cold recovery (session=${command.header.sessionId}, message=${command.header.messageId})`,
+        `[ASK_USER_QUESTION_RECOVERY_TRACE] RELEASE_RECLAIMED interaction=${recoveredInteractionId} session=${command.header.sessionId} message=${command.header.messageId}`,
       )
     }
-    // GatewayWorker may reclaim the orphaned ASK_AGENT before this RESUME arrives.
-    // Suppress that replay's terminal frame, then release the per-session queue
-    // so the answer follow-up can become the sole visible continuation.
-    const releasedBlockingTurn = await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
+    // A replayed ASK_AGENT may already be waiting on a newly-created interaction,
+    // while the browser submits the old card's interaction. It cannot safely own
+    // that answer. Suppress its terminal frame, cancel it, then reconstruct the
+    // continuation from the exact interaction submitted by RESUME.
+    await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
       rootMessageId: blockingTurn.rootMessageId,
       setStreamFinished: finished => blockingTurn.context.setStreamFinished(finished),
     }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'))
-    if (releasedBlockingTurn) {
-      this.ctx.logger.info(
-        `[byclaw-dsh] reclaimed ask released; continuing cold recovery (session=${command.header.sessionId}, message=${command.header.messageId})`,
-      )
-    }
+    const record = await this.options.interactionStore.consume(
+      recoveredInteractionId,
+      normalizeByClawSessionId(command.header.sessionId),
+      command.header.userCode,
+    )
+    if (record?.answer === undefined) return false
+    const recovered = buildRecoveredAskPayload(record)
+    this.ctx.logger.info(
+      `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
+    )
     const recoveryCommand = new AskAgentCommand(
       command.header,
       recovered.text,
@@ -1933,9 +1932,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         : (() => {
             rootAgent.followup(createUserMessage({ content: [{ type: 'text', text: directTarget.text }], source: { kind: 'user' } }))
             return rootAgent
-          })()
+      })()
       this.messageAgents.set(command.header.messageId, agent)
       await agent.whenIdle()
+      this.ctx.logger.info(
+        `[ASK_USER_QUESTION_RECOVERY_TRACE] AGENT_IDLE session=${command.header.sessionId} message=${command.header.messageId} dsh_session=${agent.id} status=${agent.status}`,
+      )
       await turn.forwarding
       await waitForAsyncTurnCompletion(agent, turn.teamGate, async () => {
         await turn.forwarding
@@ -1953,6 +1955,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         throw new Error(`DSH turn failed: ${failure}`)
       }
       const finalAnswer = turn.finalAnswerTracker?.value
+      this.ctx.logger.info(
+        `[ASK_USER_QUESTION_RECOVERY_TRACE] TURN_RESULT session=${command.header.sessionId} message=${command.header.messageId} answer_chars=${turn.answer.length} final_answer=${finalAnswer === undefined ? 'absent' : 'present'}`,
+      )
       return {
         answer: turn.answer || this.lastAssistantText(agent),
         ...finalAnswer === undefined ? {} : { finalAnswer },
@@ -2134,6 +2139,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             const durableAgentSessionId = exec.agent === undefined
               ? active.rootSessionId
               : interactionAgentSessionId(exec.agent)
+            this.ctx.logger.info(
+              `[ASK_USER_QUESTION_RECOVERY_TRACE] TOOL_ENTER session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId} question_ids=${questions.map(question => question.id).join(',')}`,
+            )
             this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, true))
             try {
               const result = await this.questions.ask({
@@ -2179,6 +2187,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                 },
                 signal: exec.signal,
               })
+              this.ctx.logger.info(
+                `[ASK_USER_QUESTION_RECOVERY_TRACE] TOOL_ANSWER_RESOLVED session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId}`,
+              )
               return {
                 answers: result.answers.map(answer => ({
                   id: answer.id,

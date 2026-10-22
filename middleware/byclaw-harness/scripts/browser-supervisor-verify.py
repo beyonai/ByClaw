@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -57,9 +58,14 @@ if os.environ.get("FAKE_BROWSER_MODE") == "no-socket":
     signal.signal(signal.SIGTERM, stop_without_socket)
     signal.signal(signal.SIGINT, stop_without_socket)
     while True: time.sleep(.05)
-sock = socket.socket(socket.AF_UNIX)
-sock.bind(os.environ["BYCLAW_BROWSER_SOCKET"])
-sock.listen(4)
+if os.environ.get("BYCLAW_BROWSER_LISTEN_FD"):
+    sock = socket.socket(fileno=int(os.environ["BYCLAW_BROWSER_LISTEN_FD"]))
+else:
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(os.environ["BYCLAW_BROWSER_SOCKET"])
+    sock.listen(4)
+if os.environ.get("BYCLAW_BROWSER_READY_FILE"):
+    open(os.environ["BYCLAW_BROWSER_READY_FILE"], "w").close()
 def stop(signum, _frame):
     with open(os.environ["FAKE_BROWSER_SIGNAL"], "w") as output:
         output.write(str(signum))
@@ -275,6 +281,9 @@ def fixture(
     dsh_record = directory / "dsh.json"
     env = {
         **os.environ,
+        # Eager fixtures must not inherit the production image's on-demand default.
+        # The dedicated lazy tests below opt in explicitly.
+        "BYCLAW_BROWSER_STARTUP": "eager",
         "FAKE_BROWSER_RECORD": str(browser_record),
         "FAKE_BROWSER_SIGNAL": str(directory / "browser.signal"),
         "FAKE_DSH_RECORD": str(dsh_record),
@@ -698,11 +707,48 @@ def run_nested_orphan_cleanup(root: Path) -> None:
                 pass
 
 
+
+def run_lazy_activation(root: Path) -> None:
+    command, env, path, browser_record, dsh_record = fixture(root, bycli=True, viewer="shared-novnc")
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not browser_record.exists(), "browser started before the first browser request"
+        assert not (root / "bycli.json").exists(), "byCLI started before first use"
+        assert path.stat().st_mode & 0o777 == 0o600
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+            # The original connection must survive activation, without reconnecting.
+            assert client.recv(1) == b""
+        wait_for(browser_record, process)
+        wait_for(Path(str(path) + ".activated"), process)
+        assert json.loads(browser_record.read_text())["digest"] == json.loads(dsh_record.read_text())["digest"]
+        assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+    assert not path.exists()
+    assert not Path(str(path) + ".activated").exists()
+
+
+def run_lazy_unused_exit(root: Path) -> None:
+    command, env, path, browser_record, _ = fixture(root, dsh_mode="exit7", bycli=True)
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert not browser_record.exists()
+    assert not (root / "bycli.json").exists()
+    assert not path.exists()
+
 def main() -> None:
     # macOS has a short AF_UNIX path limit; keep the fixture root compact.
     with tempfile.TemporaryDirectory(prefix="bsv-", dir="/tmp") as temporary:
         base = Path(temporary)
         for name, check in [
+            ("lazy-activation", run_lazy_activation),
+            ("lazy-unused-exit", run_lazy_unused_exit),
             ("exit", run_exit_propagation),
             ("signal", run_signal_forwarding),
             ("profile-exclusive-lock", run_profile_exclusive_lock),

@@ -73,3 +73,10 @@ CREATE INDEX idx_forward_request_recovery ON byai_group_chat_forward_request (en
 CREATE INDEX idx_forward_target_recovery ON byai_group_chat_forward_target (enterprise_id, state, lease_until);
 CREATE INDEX idx_forward_target_delivery ON byai_group_chat_forward_target (enterprise_id, pending_delivery, target_id);
 CREATE INDEX idx_forward_item_message ON byai_group_chat_forward_item (enterprise_id, bound_message_id, ordinal);
+
+-- 欢迎卡是个人入群引导：新增列时将存量关系标记为已处理，避免老成员换浏览器再次收到欢迎。
+-- 临时默认值只用于这次结构迁移；随后立即移除，新成员默认 NULL，禁止在每次启动时重复回填。
+ALTER TABLE byai.byai_session_member ADD COLUMN welcome_handled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE byai.byai_session_member ALTER COLUMN welcome_handled_at DROP DEFAULT;
+
+COMMENT ON COLUMN byai.byai_session_member.welcome_handled_at IS '本次成员关系的个人欢迎资格处理时间，NULL 表示未处理；包含存量迁移跳过，不代表实际曝光';

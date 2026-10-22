@@ -44,6 +44,9 @@ export class ByClawDshCommandHandler {
       const resumed = await this.sessions.resume(command, context)
       if (!resumed) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
       const recovered = typeof resumed === 'boolean' ? undefined : resumed
+      console.info(
+        `[ASK_USER_QUESTION_RECOVERY_TRACE] RESUME_DISPATCH_RESULT session=${command.header.sessionId} message=${command.header.messageId} mode=${recovered === undefined ? 'handoff' : 'reconstructed'} final_answer=${recovered?.finalAnswer === undefined ? 'absent' : 'present'}`,
+      )
       // A hot Resume completes the original suspended request, whose stream owns
       // its terminal event. Cold recovery runs the reconstructed turn inside this
       // request, so GatewayWorker must still emit APP_STREAM_RESPONSE for it.
@@ -65,6 +68,9 @@ export class ByClawDshCommandHandler {
       if (context.isCancelRequested?.()) throw new TaskCancelledError('ByClaw task cancelled')
       throw error
     }
+    console.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] ASK_DISPATCH_RESULT session=${command.header.sessionId} message=${command.header.messageId} final_answer=${result.finalAnswer === undefined ? 'absent' : 'present'}`,
+    )
     return new AgentTaskResult({
       status: AgentState.COMPLETED,
       // GatewayWorker owns finalAnswer emission; legacy output remains process data.

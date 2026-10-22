@@ -24,8 +24,17 @@ jest.mock('@/components/MessageList/lazyHandler', () => {
   const Text = ({ messageListItem }: { messageListItem: IMessageListItem }) => (
     <div>{`${messageListItem.content.substance}`}</div>
   );
-  return { __esModule: true, default: { lazyComp: () => Text } };
+  return {
+    __esModule: true,
+    default: {
+      lazyComp: (type: string | number) =>
+        `${type}` === '3016' ? jest.requireActual('@/components/MessagesComp/FileChanges').default : Text,
+    },
+  };
 });
+
+// 本组只验证文件卡片在最终正文到达后保留，弹窗请求由 FileChanges 的独立测试覆盖。
+jest.mock('@/components/MessagesComp/FileChanges/ChangedFileDiffModal', () => () => null);
 
 jest.mock('@/components/MessageList/components/MsgRenderer', () => ({
   __esModule: true,
@@ -51,6 +60,18 @@ const message = (fields: Partial<IMessage> = {}): IMessage => ({
   thinkList: [item(1, '思考片段', SSEMessageType.thinkText)],
   messageList: [item(2, '过程答复')],
   ...fields,
+});
+
+const fileChanges = (seq: number): IMessageListItem => ({
+  ...item(seq, '', SSEMessageType.fileChanges),
+  content: {
+    substance: JSON.stringify({
+      type: 'file_changes',
+      version: 2,
+      sessionId: 'session-1',
+      files: [{ uuid: 'file-1', path: 'README.md', changeType: 'modified', additions: 1, deletions: 0 }],
+    }),
+  },
 });
 
 describe('MsgRendererV2 final answer presentation', () => {
@@ -153,6 +174,69 @@ describe('MsgRendererV2 final answer presentation', () => {
     expect(screen.queryByText('最终')).not.toBeInTheDocument();
     expect(screen.queryByText('答复')).not.toBeInTheDocument();
     expect(screen.getByText('最终答复')).toBeInTheDocument();
+  });
+
+  it('deduplicates a streamed final answer followed by a real file changes card', async () => {
+    const msg = message({ thinkList: [], messageList: [item(1, '最终答复'), fileChanges(2)] });
+    const view = render(<MsgRendererV2 msg={msg} updateMessage={(value) => value} />);
+    const card = screen.getByRole('region', { name: '文件变动' });
+    expect(screen.getAllByText('最终答复')).toHaveLength(1);
+    expect(screen.getByText('最终答复').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    view.rerender(<MsgRendererV2 msg={{ ...msg, finalContent: '最终答复' }} updateMessage={(value) => value} />);
+
+    expect(screen.getAllByText('最终答复')).toHaveLength(1);
+    const finalCard = await screen.findByRole('region', { name: '文件变动' });
+    expect(
+      screen.getByText('最终答复').compareDocumentPosition(finalCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: /README\.md/ })).toBeInTheDocument();
+    expect(msg.messageList).toHaveLength(2);
+  });
+
+  it('deduplicates adjacent historical answer fragments while retaining the real file changes card', async () => {
+    render(
+      <MsgRendererV2
+        msg={message({
+          messageState: IMessageState.Done,
+          text: '最终答复',
+          finalContent: '最终答复',
+          thinkList: [],
+          messageList: [item(1, '最终'), item(2, '答复'), fileChanges(3)],
+        })}
+        updateMessage={(value) => value}
+      />
+    );
+
+    expect(screen.queryByText('最终')).not.toBeInTheDocument();
+    expect(screen.queryByText('答复')).not.toBeInTheDocument();
+    expect(screen.getAllByText('最终答复')).toHaveLength(1);
+    const card = await screen.findByRole('region', { name: '文件变动' });
+    expect(card).toBeInTheDocument();
+    expect(screen.getByText('最终答复').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('button', { name: /README\.md/ })).toBeInTheDocument();
+  });
+
+  it('keeps the final body and its file card together while toggling a multi-round process', async () => {
+    render(
+      <MsgRendererV2
+        msg={message({
+          finalContent: '最终答复',
+          thinkList: [item(1, '开始分析', SSEMessageType.thinkText), item(3, '继续分析', SSEMessageType.thinkText)],
+          messageList: [item(2, '过程答复'), item(4, '最终答复'), fileChanges(5)],
+        })}
+        updateMessage={(value) => value}
+      />
+    );
+    const card = await screen.findByRole('region', { name: '文件变动' });
+    const summary = screen.getByRole('button', { name: '任务已结束' });
+    expect(summary).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('最终答复').parentElement).toContainElement(card);
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(summary);
+    expect(screen.getByRole('region', { name: '文件变动' })).toBe(card);
+    expect(screen.getAllByText('最终答复')).toHaveLength(1);
   });
 
   it('keeps nonmatching text, middle repetitions and structured cards in the process', () => {

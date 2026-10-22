@@ -500,6 +500,19 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
   }
 
   const context = findChatStreamContext(parsed.rawMessage, parsed.res, parsed.eventName);
+  console.info(
+    '[ASK_USER_QUESTION_RESUME_TRACE]',
+    JSON.stringify({
+      stage: 'stream_event_received',
+      eventName: parsed.eventName,
+      clientRequestId: parsed.clientRequestId,
+      sessionId: getChatStreamSessionId(parsed.rawMessage, parsed.res),
+      traceId: getParsedTraceId(parsed),
+      matchedContextClientRequestId: context?.clientRequestId,
+      matchedAnswerMsgId: context?.answerMsg.msgId,
+      matchedAnswerMessageId: context?.answerMsg.messageId,
+    })
+  );
   if (!context) {
     if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'missing_context');
     const messageSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);

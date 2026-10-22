@@ -145,6 +145,13 @@ public class TenantGroupChatRoutingAspect {
             case "messageContext": return read(context, requirePath(path) + "/messages/" + id(args[1]) + "/context");
             case "messages": return read(context, topicPath(requirePath(path) + "/topics/" + id(args[1])
                 + "/messages", args[2], args[3]));
+            case "claimWelcome": {
+                // 欢迎状态属于租户内的成员关系；不得回退到共享库或借用已读游标。
+                var result = node.command(context, "POST", requirePath(path) + "/welcome", sessionId,
+                    "CLAIM_WELCOME", new TenantNodeModels.EmptyPayload());
+                if (result == null || result.data() == null) throw unsupported();
+                return ResponseUtil.successResponse(result.data());
+            }
             case "markRead": {
                 GroupChatReadStateRequest request = (GroupChatReadStateRequest) args[1];
                 if (request == null || request.getLastReadMessageId() == null || request.getLastReadMessageId() <= 0) {

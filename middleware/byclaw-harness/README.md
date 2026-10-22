@@ -159,7 +159,9 @@ The DSH launcher reads `.env` from its launch working directory. An already expo
 | `BYCLAW_DSH_BUSY_ENTER` | Optional; Bash provider bundle | Busy Enter default: `queue` (default) or `steer`; saved UI preferences take precedence; restart DSH after changing |
 | `BYCLAW_BROWSER_VIEWER` | Optional; Docker Browser Use | `shared-novnc` (Docker default) keeps one persistent Chromium/VNC desktop; `none` is headless shared mode; `novnc` retains legacy per-session desktops |
 | `BYCLAW_BROWSER_IDLE_MS` | Optional; Docker Browser Use | Chromium warm-idle window after the last Context closes in `none` mode; `shared-novnc` remains alive for the browserd process lifetime |
-| `BYCLAW_BYCLI_ENABLED` | Optional; Docker Browser Use | Defaults to `true`; in `shared-novnc`, gates startup on extension connectivity and monitors/repairs the bridge at runtime |
+| `BYCLAW_BYCLI_ENABLED` | Optional; Docker Browser Use | Defaults to `true`; waits for extension connectivity on first browser use and monitors/repairs the bridge at runtime |
+| `BYCLAW_BROWSER_STARTUP` | Optional; Docker Browser Use | Images default to `on-demand`; first use starts Chromium and byCLI. `eager` restores startup gating |
+| `BYCLAW_DSH_CLI_ENTRY` | Optional; container entrypoint | Defaults to compiled `apps/cli/lib/bin.js`; `apps/cli/src/bin.ts` is available for source-path regression comparisons |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Required for Redis dynamic-model mode | Decrypts ByClaw model authorization and remains process-only |
 | `BYCLAW_LLM_IDLE_TIME` | Optional | Dynamic-model idle timeout in seconds; defaults to `600` |
 
@@ -264,3 +266,21 @@ and full-text collection to verify network access and the collection pipeline.
 ## Development
 
 All maintained plugins participate in verification from the DSH root workspace. Run the smallest command covering the affected package after each change. Documentation and package behavior must stay aligned with package metadata, injected-service lists, and bundle patches.
+
+### Startup and lazy Skills
+
+DSH and plugins compile during image build; runtime executes the compiled CLI. Browser, desktop and byCLI bridge activation is deferred until the first private browser request or managed byCLI browser command. That request waits for activation; later calls reuse the browser.
+
+Before Worker readiness, Integration synchronizes authorized employees, teams, models and Skill associations. Business Skill version checks, downloads and parsing happen when the current employee queries registry list/snapshot/get, including tools and prompt catalog assembly. Each lookup checks versions; missing, incomplete or changed caches are atomically replaced. Unchanged versions reuse disk content and concurrent requests coalesce. Authorization and associations are rechecked after loading; stale generations cannot republish results.
+
+Generated dependency caches (`profiles/node_modules` and the web profile's `.dsh-module-fallback`) stay with the image and are repaired on local container storage. NAS holds links to the current image. Canonical module paths avoid repeated NAS traversal while retaining integrity checks, missing-link repair and user package precedence. The web `cordis.patch.yml`, sessions, credentials and business resources retain their existing persistence paths. No new `.env` setting is required; an unsupported DSH release or source layout fails the build explicitly.
+
+Resource projection validates the previous catalog and copies only retained user templates and unknown files. ByClaw templates are regenerated from current authorization, avoiding a full copy followed by deletion. The existing generation lock, rollback, revocation cleanup and Skill version checks remain. A separate `session-metadata-ready` log distinguishes metadata recovery from builtin Skill loading.
+
+Builtin Skills remain local. Scoped group employees are prepared when invoked. `allowSkillSyncFailure` controls skipping a failed Skill versus rejecting the lookup; later calls may retry. First Skill use carries network latency, and Worker readiness does not mean every Skill is warm.
+
+Builds default to `NPM_REGISTRY=https://registry.npmmirror.com`. WeCom/Lark CLIs use an independent `connector-tools` cache stage. Lark binary downloads try npmmirror before GitHub and retain upstream SHA-256 verification; plugin edits do not invalidate this stage.
+
+[Startup benchmark, validation and limits](docs/startup-2026-10-22/report.md)
+
+`SEARXNG_WHEELHOUSE` is an optional build argument, not an `.env` requirement. Ordinary builds need no extra argument or mount and retain the original Tsinghua/PyPI online installation. Offline installation is enabled only when a wheel directory is explicitly supplied and mounted; missing packages fail rather than changing pinned versions. The argument is not persisted as a runtime ENV, and the image does not depend on the build host wheel directory at startup.

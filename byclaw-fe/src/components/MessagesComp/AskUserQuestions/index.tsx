@@ -20,6 +20,7 @@ import Md from '@/components/Preview/Md';
 import { updateMessageStructById } from '@/service/message';
 import styles from './index.module.less';
 import { IMessageState } from '@/constants/message';
+import { buildDshInteractionResumePayload, isDshInteractionResume } from './resumePayload';
 
 type IAskUserQuestion = {
   question: string;
@@ -471,9 +472,14 @@ export function AskUserQuestions(props: IProps) {
             onClick={async () => {
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
               const resumeRoute = getUserInteractionResumeRoute(resumeMetadata);
+              const isDshResume = isDshInteractionResume(
+                sourceAgentType,
+                resumeRoute.interactionId,
+                resumeRoute.parentRunId
+              );
               const missingRouteFields = [
                 !resumeRoute.interactionId ? 'interaction_id' : undefined,
-                !resumeRoute.parentRunId ? 'parent_run_id' : undefined,
+                !isDshResume && !resumeRoute.parentRunId ? 'parent_run_id' : undefined,
               ].filter(Boolean);
               if (missingRouteFields.length > 0) {
                 console.error('[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE', {
@@ -529,6 +535,9 @@ export function AskUserQuestions(props: IProps) {
                 traceId: messageInfo.traceId,
                 sourceAgentType,
                 resumeMessageId,
+                ...(isDshResume
+                  ? buildDshInteractionResumePayload(resumeRoute.interactionId, submittedAnswers, questions)
+                  : {}),
               };
               if (resumeMetadata !== undefined) {
                 payload.metadata = resumeMetadata;
