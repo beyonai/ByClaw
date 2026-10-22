@@ -91,3 +91,11 @@ mvn -B -f byclaw-be/pom.xml verify
 名单内用户走共享宿主，其他用户仍按用户单独启动 `byclaw-dsh` 沙箱。参数不存在、为空或为 `*` 时保持全部走共享宿主。
 每次启动时读取，改参数后下一次启动即生效；已在运行的记录沿用原来的运行时直到释放。决策点只有
 `SharedDshHostRuntimeProvider` 的 `findReusable` 和 `create`，释放、心跳和 reconcile 按记录的 sandbox id 区分。
+
+### 平台远程模式
+
+沙箱工作转发给平台服务（`PlatformRemoteGateway` 远程模式）时，平台不认识共享宿主。`SandboxService` 在转发之前先判断：
+名单内用户的 `byclaw-dsh` 启动走 `SharedDshHostLifecycle`（`SandboxAutoConfiguration#sharedDshHostLifecycle`，
+同一个 `SharedDshHostRuntimeProvider`，但不经远程路由），记录写入共用的 `ss_sandbox_record`；sandbox id 为
+`byclaw-dsh-<userCode>` 的记录在本进程释放、心跳、续约，并并入 `sandboxInfo` 的结果。其余用户和类型仍全部转发平台。
+平台按 `SandboxRuntimeOwnership` 把这类 id 视为外部引擎的记录而跳过维护。

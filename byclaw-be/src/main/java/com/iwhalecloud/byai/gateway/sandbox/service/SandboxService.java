@@ -87,6 +87,31 @@ public class SandboxService {
     private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway() { return platformGatewayProvider.getObject(); }
     private boolean platformRemote() { return platformGatewayProvider != null && platformGateway().isRemote(); }
 
+    /**
+     * 平台远程模式下仍由本进程托管的共享 DSH 宿主（SandboxAutoConfiguration#sharedDshHostLifecycle）。
+     * 名单内用户的 byclaw-dsh 启动、释放、心跳、续约和查询在这里完成，不转发平台；其余照旧转发。
+     */
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostLifecycle sharedDshHostLifecycle;
+
+    /** 远程模式下该用户的这类沙箱由共享宿主承载（新启动按名单决定）。 */
+    private boolean hostRoutes(String userCode, String sandboxType) {
+        return platformRemote() && sharedDshHostLifecycle != null && sharedDshHostLifecycle.routes(userCode, sandboxType);
+    }
+
+    /** 远程模式下该记录是共享宿主上下文（按 sandboxId 判断，不看名单）。 */
+    private boolean hostOwns(SsSandboxRecord record) {
+        return platformRemote() && sharedDshHostLifecycle != null && sharedDshHostLifecycle.owns(record);
+    }
+
+    private SandboxLifecycleFacade lifecycleFor(String userCode, String sandboxType) {
+        return hostRoutes(userCode, sandboxType) ? sharedDshHostLifecycle.facade() : sandboxLifecycleFacade;
+    }
+
+    private SandboxLifecycleFacade lifecycleFor(SsSandboxRecord record) {
+        return hostOwns(record) ? sharedDshHostLifecycle.facade() : sandboxLifecycleFacade;
+    }
+
 
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
@@ -431,7 +456,8 @@ public class SandboxService {
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget,
         SandboxLaunchRouting resolvedRouting) {
-        if (platformRemote()) {
+        if (platformRemote() && !hostRoutes(userCode, (resolvedRouting != null ? resolvedRouting
+                : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode)).getSandboxType())) {
             Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
                 "targetAgentType", targetAgentType, "serviceType", serviceType,
                 "waitForWorkerReady", waitForWorkerReady, "recoveryTarget", recoveryTarget);
@@ -525,7 +551,7 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
+        if (platformRemote() && !hostRoutes(userCode, routing.getSandboxType())) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -618,8 +644,8 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     public SandboxLaunchData launchSandboxAwait(String userCode, Long resourceId) {
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        if (platformRemote() && !hostRoutes(userCode, routing.getSandboxType())) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         if (sharedDshHost(userCode, routing) != null) {
             // 共享宿主没有每用户沙箱 endpoint 可等待；消息经宿主 worker 处理。
             return new SandboxLaunchData();
@@ -831,7 +857,7 @@ public class SandboxService {
 
         LOGGER.info("调用生命周期服务启动沙箱，记录：{}，envKeys：{}", sandboxRef(record),
             launchContext.getEnvs() == null ? List.of() : launchContext.getEnvs().keySet());
-        SandboxResponse<SandboxLaunchData> response = sandboxLifecycleFacade.launchSandbox(request);
+        SandboxResponse<SandboxLaunchData> response = lifecycleFor(userCode, launchContext.getSandboxType()).launchSandbox(request);
 
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String errorMsg = response != null ? StringUtils.defaultIfBlank(response.getMessage(), I18nUtil.get("sandbox.start.failed")) : I18nUtil.get("service.response.empty");
@@ -1063,7 +1089,7 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxType(String userCode, String sandboxType) {
-        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode,"sandboxType",sandboxType)));
+        if (platformRemote() && !hostRoutes(userCode, sandboxType)) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode,"sandboxType",sandboxType)));
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("running-state 心跳失败：无法获取用户编码");
             return false;
@@ -1113,7 +1139,12 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
-        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
+        if (platformRemote()) {
+            boolean host = hostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)
+                && heartbeatRunningSandboxType(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+            boolean platform = Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
+            return host || platform;
+        }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {
             LOGGER.debug("心跳跳过：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
@@ -1235,7 +1266,7 @@ public class SandboxService {
      * @return 最新沙箱信息；未命中运行中沙箱时返回 null
      */
     public SandboxInfo renewSandbox(String userCode, Long resourceId) {
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("renew",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxInfo.class);
+        if (platformRemote() && !hostRoutes(userCode, sandboxLaunchContextFactory.resolveRouting(resourceId, userCode).getSandboxType())) return platformGateway().convert(platformGateway().service("renew",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxInfo.class);
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("沙箱续约失败：无法获取用户编码，资源ID：{}", resourceId);
             return null;
@@ -1263,7 +1294,7 @@ public class SandboxService {
 
         LOGGER.info("开始手动续约沙箱：{}，remoteExpiresAt：{}，timeoutSeconds：{}", sandboxRef(touchedRecord),
             remoteExpiresAt, touchedRecord.getTimeoutSeconds());
-        SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
+        SandboxResponse<Void> response = lifecycleFor(touchedRecord).renewSandbox(info);
         if (response == null || !response.isSuccess()) {
             String errorMsg = response != null ? response.getMessage() : I18nUtil.get("service.response.empty");
             LOGGER.warn("沙箱手动续约失败：{}，原因：{}", sandboxRef(touchedRecord), errorMsg);
@@ -1287,7 +1318,11 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
-        if (platformRemote()) return (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+        if (platformRemote()) {
+            @SuppressWarnings("unchecked")
+            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+            return mergeHostSandboxInfo(userCode, remote);
+        }
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
@@ -1319,7 +1354,12 @@ public class SandboxService {
      * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
-        if (platformRemote()) { platformGateway().service("remove",platformGateway().params("userCode",userCode,"resourceId",resourceId,"sandboxType",requestedSandboxType));return; }
+        if (platformRemote()) {
+            if (!removeHostContexts(userCode, requestedSandboxType)) {
+                platformGateway().service("remove",platformGateway().params("userCode",userCode,"resourceId",resourceId,"sandboxType",requestedSandboxType));
+            }
+            return;
+        }
         String releaseReason = manualReleaseReason(userCode);
         String sandboxType = StringUtils.trimToNull(requestedSandboxType);
         List<Long> effectiveResourceIds = new ArrayList<>();
@@ -1356,7 +1396,7 @@ public class SandboxService {
     }
 
     public void removeSandboxById(Long id) {
-        if (platformRemote()) { platformGateway().service("remove-id",platformGateway().params("id",id));return; }
+        if (platformRemote() && !hostOwns(id == null ? null : sandboxRecordMapper.selectById(id))) { platformGateway().service("remove-id",platformGateway().params("id",id));return; }
         if (id == null) {
             throw new BdpRuntimeException("sandbox record id is required");
         }
@@ -2401,8 +2441,8 @@ public class SandboxService {
      * @param record 沙箱记录
      */
     private void doRemoveSandbox(SsSandboxRecord record, String releaseReason) {
-        if (platformRemote()) { platformGateway().service("remove-record",platformGateway().params("record",record,"reason",releaseReason));return; }
-        if (sandboxLifecycleFacade.isForeignSandbox(record.getSandboxId())) {
+        if (platformRemote() && !hostOwns(record)) { platformGateway().service("remove-record",platformGateway().params("record",record,"reason",releaseReason));return; }
+        if (lifecycleFor(record).isForeignSandbox(record.getSandboxId())) {
             throw new IllegalStateException("Sandbox belongs to another execution engine");
         }
         Date now = new Date();
@@ -2420,7 +2460,7 @@ public class SandboxService {
             LOGGER.info("开始释放沙箱：{}，releaseReason：{}", sandboxRef(record), releaseReason);
             String lockKey = SANDBOX_LAUNCH_LOCK_PREFIX + record.getUserCode() + ":" + record.getSandboxType() + ":" + record.getResourceId();
             RedisUtil.del(lockKey);
-            SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
+            SandboxResponse<Void> response = lifecycleFor(record).removeSandbox(toSandboxInfo(record));
             if (response == null || !response.isSuccess()) {
                 LOGGER.warn("远程释放沙箱返回失败：{}，原因：{}", sandboxRef(record),
                     response != null ? response.getMessage() : "响应为空");
@@ -2450,7 +2490,7 @@ public class SandboxService {
     }
 
     private boolean markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
-        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("remove-starting",platformGateway().params("record",record,"reason",releaseReason)));
+        if (platformRemote() && !hostOwns(record)) return Boolean.TRUE.equals(platformGateway().service("remove-starting",platformGateway().params("record",record,"reason",releaseReason)));
         Date now = new Date();
         int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now,
             record.getLockVersion());
@@ -3122,4 +3162,48 @@ public class SandboxService {
     }
 
 
+
+    /**
+     * 远程模式：释放该用户在共享宿主上的 byclaw-dsh 上下文。仅当调用方明确要释放名单内用户的 byclaw-dsh 时返回 true，
+     * 表示不必再转发平台；其他类型（或未指定类型时的其余记录）仍由平台释放。
+     */
+    private boolean removeHostContexts(String userCode, String requestedSandboxType) {
+        String sandboxType = StringUtils.trimToNull(requestedSandboxType);
+        if (sharedDshHostLifecycle == null || StringUtils.isBlank(userCode)
+            || (sandboxType != null && !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(sandboxType))) {
+            return false;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
+            SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        String releaseReason = manualReleaseReason(userCode);
+        if (records != null) {
+            for (SsSandboxRecord record : records) {
+                if (hostOwns(record)) {
+                    doRemoveSandbox(record, releaseReason);
+                }
+            }
+        }
+        return sandboxType != null && hostRoutes(userCode, sandboxType);
+    }
+
+    /** 远程模式：平台看不见（或按外部引擎跳过的）共享宿主上下文并入查询结果。 */
+    private List<SandboxInfo> mergeHostSandboxInfo(String userCode, List<SandboxInfo> remote) {
+        if (sharedDshHostLifecycle == null || StringUtils.isBlank(userCode)) {
+            return remote;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
+            SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        List<SandboxInfo> host = records == null ? List.of() : records.stream()
+            .filter(this::hostOwns).map(this::toSandboxInfo).collect(Collectors.toList());
+        if (host.isEmpty()) {
+            return remote;
+        }
+        java.util.Set<String> hostIds = host.stream().map(SandboxInfo::getSandboxId).collect(Collectors.toSet());
+        List<SandboxInfo> merged = new ArrayList<>();
+        if (remote != null) {
+            remote.stream().filter(info -> info != null && !hostIds.contains(info.getSandboxId())).forEach(merged::add);
+        }
+        merged.addAll(host);
+        return merged;
+    }
 }

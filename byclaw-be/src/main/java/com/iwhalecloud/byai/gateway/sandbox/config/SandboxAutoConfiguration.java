@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.config;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +16,7 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.OpenSandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostClient;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostLifecycle;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.StandardSandboxLifecycleService;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.WhaleAgentSandboxRuntimeProvider;
@@ -60,16 +62,47 @@ public class SandboxAutoConfiguration {
         }
         SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
         if (sharedDshHost != null && sharedDshHost.isEnabled()) {
-            provider = new SharedDshHostRuntimeProvider(provider, new SharedDshHostClient(sharedDshHost),
-                StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
-                SharedDshHostRuntimeProvider.userFilter(() -> {
-                    ByaiSystemConfigService service = systemConfigService.getIfAvailable();
-                    return service == null ? null
-                        : service.getDcSystemConfigValueByCode(SharedDshHostRuntimeProvider.USERS_PARAM);
-                }));
+            provider = sharedDshHostProvider(provider, sharedDshHost, systemConfigService);
         }
         return com.iwhalecloud.byai.gateway.sandbox.platform.PlatformInterfaceRouting.create(SandboxLifecycleFacade.class,
             new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider), platformGateway, true);
+    }
+
+    /**
+     * The shared DSH host's own lifecycle for platform-remote mode: the facade above forwards everything to the
+     * platform there, so {@code SandboxService} uses this one for listed users' {@code byclaw-dsh} sandboxes.
+     * Absent unless {@code byclaw.sandbox.shared-dsh-host.base-url} is set.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "byclaw.sandbox.shared-dsh-host", name = "base-url")
+    public SharedDshHostLifecycle sharedDshHostLifecycle(
+        SandboxProperties properties,
+        StringRedisTemplate stringRedisTemplate,
+        GenericSandboxSpecProcessor specProcessor,
+        SandboxServiceSpecRepository sandboxServiceSpecRepository,
+        OpenSandboxClient openSandboxClient,
+        ObjectProvider<ByaiSystemConfigService> systemConfigService) {
+        SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
+        SharedDshHostRuntimeProvider provider = sharedDshHostProvider(
+            new OpenSandboxRuntimeProvider(openSandboxClient, properties), sharedDshHost, systemConfigService);
+        return new SharedDshHostLifecycle(
+            new StandardSandboxLifecycleService(properties, stringRedisTemplate, sandboxServiceSpecRepository, specProcessor, provider),
+            sharedUserFilter(systemConfigService));
+    }
+
+    private static SharedDshHostRuntimeProvider sharedDshHostProvider(SandboxRuntimeProvider delegate,
+                                                                      SandboxProperties.SharedDshHostConfig sharedDshHost,
+                                                                      ObjectProvider<ByaiSystemConfigService> systemConfigService) {
+        return new SharedDshHostRuntimeProvider(delegate, new SharedDshHostClient(sharedDshHost),
+            StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
+            sharedUserFilter(systemConfigService));
+    }
+
+    private static java.util.function.Predicate<String> sharedUserFilter(ObjectProvider<ByaiSystemConfigService> systemConfigService) {
+        return SharedDshHostRuntimeProvider.userFilter(() -> {
+            ByaiSystemConfigService service = systemConfigService.getIfAvailable();
+            return service == null ? null : service.getDcSystemConfigValueByCode(SharedDshHostRuntimeProvider.USERS_PARAM);
+        });
     }
 
     @Bean
