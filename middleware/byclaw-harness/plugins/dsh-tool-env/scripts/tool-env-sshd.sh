@@ -19,6 +19,12 @@
 #                                   ingress; unset = sshd only
 #   BYCLAW_TOOL_ENV_USER            login user (default byclaw)
 #   BYCLAW_TOOL_ENV_RUN_DIR         config/key directory (default /run/byclaw-tool-env)
+#   BYCLAW_TOOL_ENV_SESSION_ENV     NAME=VALUE lines the image recorded at build time
+#                                   (default /etc/byclaw-tool-env.session-env); they and
+#                                   this process's own environment (minus the keys and
+#                                   shell bookkeeping) reach every SSH session through
+#                                   sshd's SetEnv, so commands on B see the image's PATH
+#                                   and BYCLAW_* settings like they would on A
 # sshd only accepts that key for that user, allows the Unix-socket forwarding
 # DSH streams need, and nothing else: no passwords, root, reverse or agent forwarding.
 set -eu
@@ -64,7 +70,28 @@ if [ "$(id -u)" = 0 ] && getent shadow "${user}" | cut -d: -f2 | grep -q '^!'; t
     usermod -p '*' "${user}"
 fi
 
+# Session environment: the recorded image environment, then this process's (the
+# runtime's spec env, e.g. USER_CODE and TZ, overrides the image's).
+session_env="${BYCLAW_TOOL_ENV_SESSION_ENV:-/etc/byclaw-tool-env.session-env}"
+{ [ -r "${session_env}" ] && cat "${session_env}"; env; } | python3 -c '
+import re, sys
+skip = re.compile(r"^(BYCLAW_TOOL_ENV_|HOME$|HOSTNAME$|PWD$|OLDPWD$|SHLVL$|_$|USER$|LOGNAME$|SHELL$|TERM$|SSH_)")
+values = {}
+for line in sys.stdin.read().split("\n"):
+    name, sep, value = line.partition("=")
+    if sep == "" or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name) or skip.match(name): continue
+    values[name] = value
+# sshd honours the first SetEnv directive only, so all variables go on one line.
+tokens = []
+for name, value in values.items():
+    escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+    tokens.append("\"%s=%s\"" % (name, escaped))
+if tokens: print("SetEnv " + " ".join(tokens))
+' >"${run_dir}/session_env.conf"
+chmod 0644 "${run_dir}/session_env.conf"
+
 cat >"${run_dir}/sshd_config" <<EOF
+Include ${run_dir}/session_env.conf
 Port ${port}
 ListenAddress 0.0.0.0
 HostKey ${run_dir}/host_ed25519_key

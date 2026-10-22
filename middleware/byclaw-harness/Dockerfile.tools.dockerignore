@@ -1,6 +1,5 @@
 # Repository-root build context; the tool environment image needs only these files.
 **
-!middleware/byclaw-harness/docker-entrypoint.sh
 !middleware/byclaw-harness/plugins/dsh-tool-env/docker/
 !middleware/byclaw-harness/plugins/dsh-tool-env/docker/**
 !middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh

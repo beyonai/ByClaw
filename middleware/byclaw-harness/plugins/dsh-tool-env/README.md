@@ -233,12 +233,16 @@ out of the global spec: it would reach every A.
 
 ## Building B's image
 
-`middleware/byclaw-harness/Dockerfile.tools` builds the tool-environment image
-from the harness (A) image: a small Debian with sshd and the WebSocket bridge,
-plus Node, DSH's SSH helper, the PTC bootstrap and their dependency closure
-copied from A at the same paths (`docker/collect-closure.sh` traces them with
-Node's own resolver inside A). A checks the helper and bootstrap by digest, so
-B is built from the very A image it serves, right after it:
+B runs the user's commands, so it needs A's toolchain: system packages,
+Python and Node CLIs, the builtin skills. `middleware/byclaw-harness/Dockerfile.tools`
+therefore starts from the harness (A) image and removes only what A's runtime
+alone uses: A's DSH installation except the SSH helper closure
+(`docker/collect-closure.sh` traces it with Node's own resolver inside A), the
+Playwright browser, and build caches; the result is flattened into one layer.
+A's image environment is recorded in `/etc/byclaw-tool-env.session-env`, and
+B's sshd hands it (plus B's own spec env) to every session, so commands see the
+same `PATH` and `BYCLAW_*` settings as on A. A checks the helper and bootstrap
+by digest, so B is built from the very A image it serves, right after it:
 
 ```sh
 docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
@@ -246,7 +250,7 @@ docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_I
 ```
 
 The A image itself also serves as B (`byclaw-dsh-entrypoint tools`); the
-separate image only saves the pull (about 600 MB instead of several GB).
+separate image only saves the pull.
 
 ## Tests
 

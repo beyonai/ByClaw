@@ -1,83 +1,62 @@
 # Tool environment (B) image of the opt-in split deployment (plugins/dsh-tool-env):
-# sshd, the WebSocket bridge, and DSH's SSH helper and PTC bootstrap with their
-# dependency closure, taken from the harness (A) image at the same paths. A
-# verifies the helper and bootstrap by digest, so build B from the very A image
-# it will serve, right after that image:
+# the harness (A) image minus what only A's runtime uses, flattened into one
+# layer. B runs the user's commands, so it keeps A's whole toolchain (system
+# packages, Python CLIs, Node CLIs, builtin skills); it drops A's own DSH
+# installation except the SSH helper closure (which A verifies by digest), the
+# Playwright browser (the browser runs on A) and build caches. Build it from the
+# very A image it will serve, right after that image:
 #   docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
 # Build context is the repository root, like the other harness Dockerfiles.
 ARG HARNESS_IMAGE=byclaw/dsh:latest
-ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 
-# --- Closure: computed inside A by Node's own resolver, so it matches A's build ---
-FROM ${HARNESS_IMAGE} AS closure
+# --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---
+FROM ${HARNESS_IMAGE} AS trimmed
 USER root
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
 RUN set -eux; \
     bash /tmp/tool-env-docker/collect-closure.sh /tmp/tool-env-closure.tar; \
-    # A launches the helper on B with its own `process.execPath`: keep Node at that path.
-    node_dir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"; \
-    printf '%s\n' "${node_dir}" >/tmp/tool-env-node-dir; \
-    cp "${node_dir}/bin/node" /tmp/tool-env-node
-
-
-# --- Runtime: small Debian with sshd; Node and the closure from A ---
-FROM python:3.12-slim-trixie AS tools
-ARG APT_MIRROR
-ARG PIP_INDEX_URL
-
-# openssh-server and the Python `websockets` module (for the bridge) are what B
-# serves; git/curl/jq/procps/unzip/less/file are what the user's commands expect.
-# systemd, sudo, chrony, fuse3 and iptables are the system components the
-# Alibaba Cloud Agent Sandbox runtime requires of its images.
-RUN set -eux; \
-    sed -i -E -e "s|https?://deb.debian.org|${APT_MIRROR}|g" -e "s|https?://security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-        openssh-server bash git curl ca-certificates procps less file jq unzip \
-        systemd systemd-sysv sudo chrony fuse3 iptables; \
-    rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*; \
-    pip install --no-cache-dir -i "${PIP_INDEX_URL}" websockets; \
-    groupadd --gid 1001 byclaw; \
-    useradd --uid 1001 --gid byclaw --create-home --shell /bin/bash byclaw; \
-    usermod -p '*' byclaw; \
-    echo 'byclaw ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/byclaw; \
-    install -d -m 0755 -o byclaw -g byclaw /by /home/byclaw/.dsh /home/byclaw/.dsh/agent-templates; \
-    install -d -m 0755 -o root -g root /run/sshd
-
-COPY --from=closure /tmp/tool-env-node /tmp/tool-env-node-dir /tmp/tool-env-closure.tar /tmp/
-COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-hook.mjs middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-main.mjs /tmp/tool-env-check/
-RUN set -eux; \
-    node_dir="$(cat /tmp/tool-env-node-dir)"; \
-    install -D -m 0755 /tmp/tool-env-node "${node_dir}/bin/node"; \
-    mkdir -p /opt/nvm; \
-    ln -s "${node_dir}" /opt/nvm/current; \
-    ln -s "${node_dir}/bin/node" /usr/local/bin/node; \
+    # A's image environment (PATH, BYCLAW_* settings) for every SSH session on B; see tool-env-sshd.sh.
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env; \
+    # Runtime-only parts of A.
+    rm -rf /ms-playwright /root/.local /root/.cache /root/.npm /home/byclaw/.cache /home/byclaw/.npm; \
+    # A's DSH installation: keep only the helper's closure, at the same paths.
+    rm -rf /workspace; \
     mkdir -p /workspace; \
     tar -xf /tmp/tool-env-closure.tar -C /; \
     chown -R root:root /workspace; \
-    # A resolves dsh-ssh through its managed web profile; B serves the helper at that path too.
-    mkdir -p /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai; \
-    ln -s /workspace/packages/ssh/ssh /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh; \
-    # Everything the helper imports must resolve here as it did in A.
+    # A launches the helper by its managed-profile path, whose own copy depended on
+    # the removed installation; serve the closure's copy (same content, same digest) there.
+    profile_ssh=/opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh; \
+    cmp "${profile_ssh}/lib/helper.js" /workspace/packages/ssh/ssh/lib/helper.js; \
+    rm -rf "${profile_ssh}"; \
+    ln -s /workspace/packages/ssh/ssh "${profile_ssh}"; \
+    # Everything the helper imports must still resolve, from both paths, as the login user.
     cd /workspace/packages/ssh/ssh; \
-    TRACE_OUT=/tmp/tool-env-check/resolved.txt TRACE_HOOK=/tmp/tool-env-check/trace-hook.mjs node /tmp/tool-env-check/trace-main.mjs; \
-    test -s /tmp/tool-env-check/resolved.txt; \
-    rm -rf /tmp/tool-env-node /tmp/tool-env-node-dir /tmp/tool-env-closure.tar /tmp/tool-env-check
+    TRACE_OUT=/tmp/tool-env-resolved.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs; \
+    test -s /tmp/tool-env-resolved.txt; \
+    su -s /bin/sh byclaw -c "cd /tmp && node --input-type=module -e \"await import('${profile_ssh}/lib/helper.js')\" </dev/null"; \
+    test -x /usr/sbin/sshd; \
+    python3 -c 'import websockets'; \
+    rm -rf /tmp/* /var/tmp/* /etc/ssh/ssh_host_*
 
-COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
-COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
-# The same entrypoint as A; only its `tools` mode applies here.
-COPY --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
 
+# --- One layer: pulls stay proportional to what B contains ---
+FROM scratch AS tools
+COPY --from=trimmed / /
+# The image configuration does not survive the flattening; these mirror A.
 ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_DATA_ROOT=/by \
+    BYCLAW_RUNTIME_HOME=/opt/byclaw/builtin \
+    BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    PATH=/opt/nvm/current/bin:/usr/local/bin:$PATH
-
+    PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /by
+# The same entrypoint as A; only its `tools` mode applies here.
 ENTRYPOINT ["/usr/local/bin/byclaw-dsh-entrypoint"]
 CMD ["tools"]
