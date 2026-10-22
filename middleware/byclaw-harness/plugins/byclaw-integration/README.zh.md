@@ -318,6 +318,10 @@ INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；�
 
 超级助手先调用 `byclaw_route_task(task)` 获取 Jev 返回的 `template_id`，再用该 ID 和相同任务调用 `byclaw_instantiate_template`。启动时仅校验当前 Agent 最近一次成功选择，不再重新调用 Jev；选择只能使用一次，失败或重启后需重新选人。
 
+### 启动耗时日志
+
+INFO 日志 `[byclaw-startup] integration stage=<阶段> durationMs=<毫秒>` 记录配置、会话存储、Skill 运行时、本地 Skill 读取、Redis、后端发现、资源同步、资源监听与 Worker 启动各阶段耗时；`integration totalMs=<毫秒>` 记录本插件整体初始化耗时。需要重新构建业务镜像才能包含新增日志。这些指标不包含镜像拉取、容器创建和 DSH 插件加载前的耗时。
+
 ### 文生图与文本转语音插件
 
 `byclaw-image` 与 `byclaw-tts` 通过 `byclaw/session-setup` 绑定当前用户的会话工具，使用与 byclaw-context 相同的 workspace registry 读取 `session_root`。图片固定保存到 `session_root/image/`，语音固定保存到 `session_root/tts/`。工具输入不接受路径、端点或凭据。

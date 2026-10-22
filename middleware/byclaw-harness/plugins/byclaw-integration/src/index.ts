@@ -29,6 +29,7 @@ import {
 } from '@byclaw/by-framework'
 import { parseByClawDigitalEmployee } from './resources.ts'
 import { hostname } from 'node:os'
+import { performance } from 'node:perf_hooks'
 import { join, resolve } from 'node:path'
 import { defaultCatalogDir } from '@byclaw/dsh-agent-teams/catalog'
 import { ByClawExternalWorkerAdapter } from './group-worker.ts'
@@ -466,6 +467,7 @@ export function logByClawResourceInventory(
 /** Activate the integration without allowing setup failures to terminate the DSH host. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   if (config.enabled !== true) return
+  const started = performance.now()
   // Install before synchronization: degraded ByClaw startup must not expose
   // DSH's default search as a connector-authorization bypass.
   ctx.effect(
@@ -476,11 +478,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     await activate(ctx, config)
   } catch (error: unknown) {
     ctx.logger.error(`[byclaw-dsh] integration startup failed; plugin disabled while DSH continues: ${startupErrorDetail(error)}`)
+  } finally {
+    try { ctx.logger.info?.(`[byclaw-startup] integration totalMs=${(performance.now() - started).toFixed(1)}`) } catch { /* Diagnostics only. */ }
   }
 }
 
 /** Activate resource synchronization and the by-framework Worker. */
 async function activate(ctx: Context, config: Config): Promise<void> {
+  let stageStarted = performance.now()
+  const logStage = (stage: string): void => {
+    const now = performance.now()
+    try { ctx.logger.info?.(`[byclaw-startup] integration stage=${stage} durationMs=${(now - stageStarted).toFixed(1)}`) } catch { /* Diagnostics only. */ }
+    stageStarted = now
+  }
   const webAuthToken = resolveByClawWebAuthToken(process.env)
   if (webAuthToken !== undefined) {
     ctx.inject(['connection'], (connectionCtx) => {
@@ -519,11 +529,14 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   if (modelRouting.enabled && !redisModelsEnabled) throw new Error('ByClaw model routing requires BYCLAW_REDIS_MODEL_ENABLED=true')
   if (modelRouting.enabled) assertDshModelRoutingRuntime(ctx.get('agentLoop'))
   const projectionConcurrency = resolveByClawProjectionConcurrency(config.projectionConcurrency)
+  logStage('configuration')
 
   const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
+  logStage('session-metadata')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
   const skillRuntime = await ByClawSkillRuntime.install(ctx, { builtinSkillDir: config.builtinSkillDir })
+  logStage('skill-runtime-install')
   const disposeAgentShellEnv = ctx.shellEnv.register({
     name: 'byclaw-agent-identity',
     variables: {
@@ -538,6 +551,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     },
   } satisfies BashEnvContributor)
   const allowSkillFailure = config.allowSkillSyncFailure ?? true
+  logStage('shell-environment-registration')
   const reportSkillPreparationError = ({ templateId, code, error }: ByClawSkillPreparationError): void => {
     const action = allowSkillFailure ? 'continuing without this Skill' : 'rejecting this staged generation'
     ctx.logger.error(`[byclaw-dsh] Skill ${code} preparation failed for ${templateId}; ${action}: ${startupErrorDetail(error)}`)
@@ -566,6 +580,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   } catch (error: unknown) {
     ctx.logger.warn(`[byclaw-dsh] local Skill generation unavailable; waiting for resource synchronization: ${startupErrorDetail(error)}`)
   }
+  logStage('local-skill-generation')
   let closeRuntime = async (): Promise<void> => {
     await Promise.all([generationLease.close(), sessionMetadata.close()])
   }
@@ -710,9 +725,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       ctx.logger.error(`[byclaw-dsh] resource refresh failed; retaining last-good templates and Skills: ${startupErrorDetail(error)}`)
     }
   }
+  logStage('resource-runtime-setup')
   try {
     await redis.ping()
+    logStage('redis-ping')
     baseUrl = await resolveByClawBaseUrl(config.baseUrl, process.env, redis, ctx.logger)
+    logStage('backend-discovery')
     models = new ByClawDynamicModelRuntime(ctx, redis, {
       provider: config.provider,
       model: config.model,
@@ -726,6 +744,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       ctx.effect(() => () => modelRoutingBinding?.dispose())
     }
 
+    logStage('model-runtime-and-routing')
     resources = {
       employees: [],
       groups: [],
@@ -746,6 +765,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     if (lastResourceInventory === '') {
       lastResourceInventory = byClawResourceInventoryLines(resources, { reason: 'state' }).join('\n')
     }
+    logStage('cold-start-resource-sync')
     resourceWatch = new ByClawResourceWatch({
       redis,
       userCode,
@@ -776,6 +796,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     })
     resourceWatch.updateWatchedResources(new Set(resources.watchedResourceIds))
     await resourceWatch.start(resources.authorization.authKey === '' ? undefined : resources.authorization)
+    logStage('resource-watch')
 
     const scopedEmployees = new Map<string, Map<string, AuthorizedByClawResources['employees'][number]>>()
     let scopedLoads = Promise.resolve()
@@ -967,6 +988,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       }))
     }
 
+    logStage('group-and-template-registration')
     const agentTypes = resolveWorkerAgentTypes(config.agentTypes, userCode)
     const sourceAgentType = agentTypes[0] as string
     const emitter = new GatewayDataEmitter(redis)
@@ -1044,6 +1066,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       templateRuntime,
       onActivityChange: () => sandboxBusy?.activityChanged(),
     })
+    logStage('session-runtime')
     sandboxBusy = new ByClawDshSandboxBusyPublisher({
       redis,
       userCode,
@@ -1067,6 +1090,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       maxConcurrency: config.maxConcurrency ?? 8,
     })
     await worker.start(id)
+    logStage('worker-start')
 
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 
