@@ -87,6 +87,35 @@ describe('hooks/useSseSender/util', () => {
     });
   });
 
+  it('drops the DSH cold-resume acknowledgement from live and historical reasoning', () => {
+    expect(
+      reasoningLogHandler(
+        {
+          contentType: SSEMessageType.thinkTitle,
+          sourceAgentType: 'BYCLAW_DSH_0027029322',
+          choices: [{ delta: { content: 'RESUMED' } }],
+        },
+        'reasoningLogDelta'
+      )
+    ).toEqual({});
+  });
+
+  it('keeps ordinary reasoning titles that happen to say RESUMED', () => {
+    const result = reasoningLogHandler(
+      {
+        contentType: SSEMessageType.thinkTitle,
+        sourceAgentType: 'OTHER_AGENT',
+        choices: [{ delta: { content: 'RESUMED' } }],
+      },
+      'reasoningLogDelta'
+    );
+
+    expect(result.message).toMatchObject({
+      contentType: SSEMessageType.thinkTitle,
+      content: { substance: 'RESUMED' },
+    });
+  });
+
   it('builds resource completion ids payloads', () => {
     expect(resComIdsHandler('res-1', SSEMessageType.text)).toEqual({
       contentType: SSEMessageType.text,

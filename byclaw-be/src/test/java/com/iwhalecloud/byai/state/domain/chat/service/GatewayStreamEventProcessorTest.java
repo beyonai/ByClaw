@@ -79,6 +79,30 @@ class GatewayStreamEventProcessorTest extends I18nTestSupport {
     }
 
     @Test
+    void shouldIgnoreEvent_dropsDshResumeProtocolAcknowledgement() {
+        JSONObject payload = new JSONObject();
+        payload.put("contentType", "3003");
+        payload.put("choices", JSON.parseArray("[{\"delta\":{\"content\":\"RESUMED\"}}]"));
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("source_agent_type", "BYCLAW_DSH_0027029322");
+        dataJson.put("data", payload.toJSONString());
+
+        assertThat(processor.shouldIgnoreEvent(null, SseResponseEventEnum.reasoningLogDelta, dataJson)).isTrue();
+    }
+
+    @Test
+    void shouldIgnoreEvent_keepsOrdinaryResumeText() {
+        JSONObject payload = new JSONObject();
+        payload.put("contentType", "3003");
+        payload.put("choices", JSON.parseArray("[{\"delta\":{\"content\":\"RESUMED\"}}]"));
+        JSONObject dataJson = new JSONObject();
+        dataJson.put("source_agent_type", "OTHER_AGENT");
+        dataJson.put("data", payload.toJSONString());
+
+        assertThat(processor.shouldIgnoreEvent(null, SseResponseEventEnum.reasoningLogDelta, dataJson)).isFalse();
+    }
+
+    @Test
     void buildEventData_preservesLaneMetadataFromGatewayMetadata() {
         ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
         ctx.setSessionId(3L);

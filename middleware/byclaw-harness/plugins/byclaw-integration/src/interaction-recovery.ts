@@ -58,11 +58,15 @@ export function isColdRecoveryBlockingTurn(
 export async function releaseColdRecoveryBlockingTurn(
   turn: { rootMessageId: string; setStreamFinished(finished: boolean): void } | undefined,
   cancel: (messageId: string) => Promise<void>,
+  resume: { setStreamFinished(finished: boolean): void },
 ): Promise<boolean> {
-  if (turn === undefined) return false
-  turn.setStreamFinished(true)
-  await cancel(turn.rootMessageId)
-  return true
+  if (turn !== undefined) {
+    turn.setStreamFinished(true)
+    await cancel(turn.rootMessageId)
+  }
+  // The reconstructed turn starts immediately after this helper returns.
+  resume.setStreamFinished(false)
+  return turn !== undefined
 }
 
 /** A rendered interaction must survive the process abort that accompanies sandbox release. */
@@ -71,6 +75,14 @@ export function shouldRetainInteractionAfterAskFailure(options: {
   signalAborted: boolean
 }): boolean {
   return options.requestEmitted && options.signalAborted
+}
+
+/** Keep the projected waiting-user state aligned with a durable interaction that survives shutdown. */
+export function shouldReleaseWaitingInteractionAfterAsk(options: {
+  requestEmitted: boolean
+  signalAborted: boolean
+}): boolean {
+  return !shouldRetainInteractionAfterAskFailure(options)
 }
 
 const ANSWER_SCRIPT = `-- BYCLAW_INTERACTION_ANSWER

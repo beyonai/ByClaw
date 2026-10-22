@@ -73,3 +73,52 @@ peer 依赖的实际链接及 `Context` 声明合并，并检查重复执行与�
 依赖和缓存。同步前先检查本目录的 ByClaw 定制改动，保留本说明，并更新这里记录的来源提交。
 
 共享资源后续应同步到 `middleware/builtin`，不要覆盖兼容符号链接。
+
+### Web 插件组成图启动优化
+
+业务镜像执行 `prepare-dsh-client-modules.mjs`，仅支持固定的 DSH `0.1.5-rc.2`，
+然后执行 `tsc -b packages/client/modules/tsconfig.json` 和
+`tsdown --env.DSH_BUILD_FACE client --filter packages/client/modules`。
+该包的 host 阶段会跳过构建，因此必须使用 client 阶段同时产出 Node 与浏览器端文件。
+两个 Dockerfile 都复制最新 `src`/`lib`。无需调整运行 `.env`。
+
+在已有编译工作区中执行验证（`DSH_ROOT` 指向该工作区）：
+
+```bash
+node --test middleware/byclaw-harness/scripts/startup-client-patch.test.mjs
+node middleware/byclaw-harness/scripts/startup-client-modules-verify.mjs
+```
+
+原版与候选都可附加 `--oracle` 输出脱敏夹具的四代 JS/map 摘要，用于字节等价对照；
+该模式不执行性能计数断言，正常验证必须再运行不带此参数的命令。
+[完整结果及 ACS 验收边界](docs/startup-2026-10-22/client-composition-report.md)。
+
+### 构建末尾的 Browser Bridge 检查
+
+`browser-supervisor-verify.py` 在 supervisor 确认重连完成后才结束恢复测试，
+不会把 daemon/status 的调用计数当成就绪信号。构建失败会保留实际错误检查；
+无需关闭该校验或调整 byCLI 版本。[竞态原因与验证记录](docs/startup-2026-10-22/build-supervisor-race.md)。
+
+
+### 持久目录解析与首用浏览器初始化
+
+镜像启动仍保留 supervisor 管理私密 FD、首用 browser/byCLI 激活和子进程回收；
+`on-demand` 模式不再提前创建/锁定 NAS 浏览器 profile，首次调用时才取得独占锁。
+日志增加 `startup phase=prepared` 和 `startup phase=cli-spawned`，可区分 CLI 之前的准备开销。
+
+编译 CLI 自动加载镜像内的 `startup-module-resolver.cjs`：只在 entrypoint 管理的两个
+`node_modules` 链接布局匹配时启用。普通包解析改用对应的本地镜像目录，保留 Node
+exports/conditions、包优先级、相对模块和自定义祖先目录回退；不改变持久配置和业务数据路径。
+Typert 的 manifest 解析在构建时补丁并编译；client source map 按已有字节快照缓存序列化结果。
+两个 Dockerfile 均包含新产物，不需要补充运行环境配置，也不需要修改只读上游 DSH 源码。
+
+新增验证入口（在 `middleware/byclaw-harness` 目录执行，`DSH_ROOT` 指向测试/构建工作区）：
+
+```bash
+node --test scripts/startup-module-resolver.test.cjs scripts/startup-extra-patches.test.mjs
+node scripts/startup-client-modules-verify.mjs --maps-optimized --oracle
+node scripts/startup-typert-verify.mjs
+python3 scripts/browser-supervisor-verify.py
+```
+
+完整结果见[启动优化与验收边界](docs/startup-2026-10-22/startup-extreme-report.md)。

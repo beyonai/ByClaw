@@ -25,10 +25,9 @@ if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]
         printf 'byclaw-dsh: root entrypoint required for private browser runtime\n' >&2
         exit 1
     fi
-    install -d -m 0700 -o byclaw -g byclaw /run/byclaw-browser
-    install -d -m 0700 -o byclaw -g byclaw /run/byclaw-browser/downloads
-    install -d -m 0700 -o byclaw -g byclaw /run/byclaw-browser/screenshots
-    install -d -m 0700 -o byclaw -g byclaw /run/byclaw-browser/sessions
+    install -d -m 0700 -o byclaw -g byclaw \
+        /run/byclaw-browser /run/byclaw-browser/downloads \
+        /run/byclaw-browser/screenshots /run/byclaw-browser/sessions
     exec /usr/local/bin/byclaw-browser-supervisor \
         --browser-user byclaw \
         --dsh-user byclaw \
@@ -180,5 +179,7 @@ cli_entry="${BYCLAW_DSH_CLI_ENTRY:-apps/cli/lib/bin.js}"
 printf 'byclaw-dsh: starting CLI at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 case "${cli_entry}" in
     *.ts) exec node --import tsx/esm "${node_imports[@]}" "${cli_entry}" "$@" ;;
+    apps/cli/lib/bin.js|*/apps/cli/lib/bin.js)
+        exec node --require /usr/local/lib/byclaw/startup-module-resolver.cjs "${node_imports[@]}" "${cli_entry}" "$@" ;;
     *) exec node "${node_imports[@]}" "${cli_entry}" "$@" ;;
 esac

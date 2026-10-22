@@ -111,6 +111,7 @@ import {
   interactionAgentSessionId,
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
+  shouldReleaseWaitingInteractionAfterAsk,
   type ByClawInteractionStore,
 } from './interaction-recovery.ts'
 
@@ -1734,7 +1735,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
       rootMessageId: blockingTurn.rootMessageId,
       setStreamFinished: finished => blockingTurn.context.setStreamFinished(finished),
-    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'))
+    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'), context)
+    // The reclaimed ASK and RESUME share the same message identity in Gateway.
+    // Re-open the RESUME stream before running the reconstructed turn; resetting
+    // it in Worker after resume() returns is too late because all deltas have
+    // already been forwarded by then.
+    this.ctx.logger.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] RECONSTRUCT_STREAM_OPEN session=${command.header.sessionId} message=${command.header.messageId}`,
+    )
     const record = await this.options.interactionStore.consume(
       recoveredInteractionId,
       normalizeByClawSessionId(command.header.sessionId),
@@ -2169,6 +2177,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
               `[ASK_USER_QUESTION_RECOVERY_TRACE] TOOL_ENTER session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId} question_ids=${questions.map(question => question.id).join(',')}`,
             )
             this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, true))
+            let requestEmitted = false
             try {
               const result = await this.questions.ask({
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
@@ -2210,6 +2219,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                     contentType: card.contentType,
                   },
                 )
+                requestEmitted = true
                 },
                 signal: exec.signal,
               })
@@ -2225,7 +2235,17 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                 })),
               }
             } finally {
-              this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, false))
+              const releaseWaitingInteraction = shouldReleaseWaitingInteractionAfterAsk({
+                requestEmitted,
+                signalAborted: exec.signal?.aborted === true,
+              })
+              if (releaseWaitingInteraction) {
+                this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, false))
+              } else {
+                this.ctx.logger.info(
+                  `[ASK_USER_QUESTION_RECOVERY_TRACE] WAITING_STATE_RETAINED session=${active.context.sessionId} message=${active.rootMessageId} dsh_session=${durableAgentSessionId}`,
+                )
+              }
             }
           },
         }))

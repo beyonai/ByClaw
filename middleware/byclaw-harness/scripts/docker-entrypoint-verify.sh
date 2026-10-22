@@ -19,8 +19,8 @@ mkdir -p \
   "${managed_home}/skills/devflow" \
   "${dsh_home}/plugins/stale" \
   "${dsh_home}/profiles/web" \
-  "${dsh_home}/profiles/web/.dsh-module-fallback/node_modules/runtime-package" \
-  "${dsh_home}/profiles/node_modules/peer-package" \
+  "${managed_home}/profiles/web/.dsh-module-fallback/node_modules/runtime-package" \
+  "${managed_home}/profiles/node_modules/peer-package" \
   "${dsh_home}/skills/stale" \
   "${dsh_home}/storages" \
   "${dsh_home}/agent-teams" \
@@ -43,8 +43,7 @@ printf '%s\n' 'stale-plugin' >"${dsh_home}/plugins/stale/version"
 printf '%s\n' 'stale-profile' >"${dsh_home}/profiles/web/package.json"
 printf '%s\n' 'stale-file' >"${dsh_home}/profiles/web/stale-file"
 printf '%s\n' 'user-patch' >"${dsh_home}/profiles/web/cordis.patch.yml"
-printf '%s\n' 'runtime-fallback' >"${dsh_home}/profiles/web/.dsh-module-fallback/node_modules/runtime-package/version"
-printf '%s\n' 'stale-fallback' >"${dsh_home}/profiles/node_modules/peer-package/version"
+printf '%s\n' 'runtime-fallback' >"${managed_home}/profiles/web/.dsh-module-fallback/node_modules/runtime-package/version"
 cat >"${managed_home}/profiles/node_modules/peer-package/package.json" <<'EOF'
 {"name":"peer-package","type":"module","exports":"./index.js"}
 EOF
@@ -106,10 +105,8 @@ test "$(cat "${dsh_home}/profiles/web/cordis.patch.yml")" = 'user-patch'
 test ! -e "${dsh_home}/profiles/web/stale-file"
 test "$(cat "${dsh_home}/profiles/web/.dsh-module-fallback/node_modules/runtime-package/version")" = 'runtime-fallback'
 test "$(readlink "${dsh_home}/profiles/web/node_modules")" = "${managed_home}/profiles/web/node_modules"
-# Installation peers come from the image-built managed fallback; a fallback
-# left in the volume by an older image is neither linked nor rewritten.
 test ! -L "${managed_home}/profiles/node_modules"
-test "$(cat "${dsh_home}/profiles/node_modules/peer-package/version")" = 'stale-fallback'
+test "$(readlink "${dsh_home}/profiles/node_modules")" = "${managed_home}/profiles/node_modules"
 test "$(node "${dsh_home}/profiles/web/node_modules/test-plugin/index.js")" = 'peer-resolution-ok'
 test "$(cat "${dsh_home}/skills/devflow/version")" = 'devflow-skill'
 test "$(cat "${dsh_home}/storages/session")" = 'session-data'

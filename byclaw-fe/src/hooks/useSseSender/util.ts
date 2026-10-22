@@ -7,6 +7,9 @@ import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessageListItem, IResComIdsListItem } from '@/typescript/message';
 import { isJSON } from '@/utils/json';
 
+const BYCLAW_DSH_AGENT_TYPE_PREFIX = 'BYCLAW_DSH';
+const DSH_RESUME_ACKNOWLEDGEMENT = 'RESUMED';
+
 const setOrderId = (sseDataObj: any, payload: any) => {
   const orderId = get(sseDataObj, 'orderId') || '';
   const parentOrderId = get(sseDataObj, 'parentOrderId') || '';
@@ -373,6 +376,19 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
     return {};
   }
 
+  const content = get(mySseDataObj, 'choices.0.delta.content', '');
+  const sourceAgentType = `${get(mySseDataObj, 'sourceAgentType', '')}`;
+  // GatewayWorker emits RESUMED as an internal resume acknowledgement. It is
+  // neither model reasoning nor user-facing content, but it shares the
+  // reasoningLogDelta/thinkTitle transport used by real thinking titles.
+  if (
+    `${contentType}` === `${SSEMessageType.thinkTitle}` &&
+    `${content}`.trim() === DSH_RESUME_ACKNOWLEDGEMENT &&
+    sourceAgentType.startsWith(BYCLAW_DSH_AGENT_TYPE_PREFIX)
+  ) {
+    return {};
+  }
+
   if (`${contentType}` === `${SSEMessageType.text}`) {
     set(mySseDataObj, 'contentType', `${SSEMessageType.thinkText}`);
   }
@@ -397,7 +413,6 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   let isDone = false;
   // 特殊处理json
   if (isTextContentType(contentType)) {
-    const content = get(mySseDataObj, 'choices.0.delta.content', '');
     isDone = isJSON(content);
   }
 

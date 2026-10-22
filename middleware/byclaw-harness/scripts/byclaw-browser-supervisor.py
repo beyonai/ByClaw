@@ -327,6 +327,7 @@ def normalized_returncode(returncode: int | None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    startup_started = time.monotonic()
     enable_child_subreaper()
     options = parse_args(sys.argv[1:] if argv is None else argv)
     browser_account = identity(options.browser_user)
@@ -411,25 +412,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if prepare_code != 0:
                 return normalized_returncode(prepare_code)
 
-        if viewer != "novnc":
-            dsh_home = Path(
-                base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh"))
-            )
-            configured_profile = base_environment.get(
-                "BYCLAW_BROWSER_USER_DATA_DIR", ""
-            ).strip()
-            browser_profile = (
-                Path(configured_profile)
-                if configured_profile
-                else dsh_home / "browser" / "user-data"
-            )
-            browser_profile_lock_fd = acquire_browser_profile_lock(
-                browser_profile,
-                base_environment,
-                browser_account,
-            )
-            base_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
-
+        sys.stderr.write(
+            "byclaw-browser-supervisor: startup phase=prepared; "
+            f"elapsedMs={round((time.monotonic() - startup_started) * 1000)}\n"
+        )
+        sys.stderr.flush()
         secret.extend(secrets.token_urlsafe(32).encode("ascii"))
         bycli_enabled = base_environment.get("BYCLAW_BYCLI_ENABLED", "false") in {
             "true",
@@ -458,6 +445,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         def start_browser() -> None:
             nonlocal browserd, activation_socket, monitor_bycli, browser_generation
+            nonlocal browser_profile_lock_fd
+            # The persistent profile may live on NAS. Lock it only at browser
+            # activation, before any daemon can access it; eager mode still gates DSH.
+            if viewer != "novnc":
+                dsh_home = Path(
+                    base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh"))
+                )
+                configured_profile = base_environment.get(
+                    "BYCLAW_BROWSER_USER_DATA_DIR", ""
+                ).strip()
+                browser_profile = (
+                    Path(configured_profile)
+                    if configured_profile
+                    else dsh_home / "browser" / "user-data"
+                )
+                browser_profile_lock_fd = acquire_browser_profile_lock(
+                    browser_profile,
+                    base_environment,
+                    browser_account,
+                )
+                base_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
+
             if bycli_enabled:
                 bycli_code = restart_bycli()
                 if received_signal:
@@ -541,6 +550,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             os.close(dsh_secret_fd)
         children.append(dsh)
+        sys.stderr.write(
+            "byclaw-browser-supervisor: startup phase=cli-spawned; "
+            f"elapsedMs={round((time.monotonic() - startup_started) * 1000)}\n"
+        )
+        sys.stderr.flush()
         if startup == "eager":
             secret[:] = b"\0" * len(secret)
         next_bycli_check = time.monotonic() + options.bycli_health_interval

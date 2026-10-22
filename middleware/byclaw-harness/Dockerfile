@@ -111,9 +111,11 @@ RUN set -eux; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
-# DSH 0.2.1 already resolves module directories to canonical paths
-# (app-boot profile-resolution/legacy-links.ts); the 0.1.5 source patch
-# scripts/prepare-dsh-local-modules.mjs is not applied to this base.
+# DSH 0.2.1 already resolves module directories to canonical paths and composes
+# client bundles once (app-boot profile-resolution, client/modules, typert/loader
+# at 0.2.1); the 0.1.5 source patches scripts/prepare-dsh-local-modules.mjs,
+# prepare-dsh-client-modules.mjs, prepare-dsh-client-maps.mjs and
+# prepare-dsh-typert-loader.mjs refuse any other release and are not applied here.
 
 
 # Fixed connector tools have an independent cache, unaffected by plugin edits.
@@ -153,7 +155,7 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.72
+ARG BYCLI_VERSION=2.1.73
 ARG BYCLI_EXTENSION_VERSION=2.1.27
 
 ENV DSH_HOME=/home/byclaw/.dsh \
@@ -188,6 +190,10 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /opt/byclaw/plugins/ /opt/bycla
 # The compiled CLI and explicit source rollback use the same module resolver.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/src/ /workspace/packages/client/modules/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/lib/ /workspace/packages/client/modules/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/src/ /workspace/packages/typert/loader/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/lib/ /workspace/packages/typert/loader/lib/
 # Keep source aliases (tsx) and ordinary package imports on the same core build.
 # The two packed core packages also enter the profile's existing local overrides.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/src/ /workspace/packages/core/agent/src/
@@ -271,6 +277,7 @@ COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /us
 # Shared DSH host launcher (many users, one process); run it instead of the
 # entrypoint: `node scripts/byclaw-multi-host.mjs`. Inert for ordinary sandboxes.
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-multi-host.mjs
+COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py
@@ -339,7 +346,7 @@ RUN set -eux; \
     python3 /tmp/browser-download-permissions-verify.py; \
     BYCLAW_TEST_SUPERVISOR=/usr/local/bin/byclaw-browser-supervisor \
         python3 /tmp/browser-supervisor-verify.py; \
-    BYCLAW_TEST_ENTRYPOINT=/usr/local/bin/byclaw-dsh-entrypoint \
+    BYCLAW_TEST_COMPILED_CLI=1 BYCLAW_TEST_ENTRYPOINT=/usr/local/bin/byclaw-dsh-entrypoint \
         BYCLAW_TEST_SECRET_HELPER=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/secret-fd.js \
         python3 /tmp/docker-entrypoint-fd-verify.py; \
     rm -f /tmp/browser-download-permissions-verify.py \

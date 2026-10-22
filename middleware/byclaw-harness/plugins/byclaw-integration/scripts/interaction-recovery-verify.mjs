@@ -9,6 +9,7 @@ import {
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
   shouldRetainInteractionAfterAskFailure,
+  shouldReleaseWaitingInteractionAfterAsk,
 } from '../src/interaction-recovery.ts'
 
 assert.equal(
@@ -31,11 +32,14 @@ const releaseEvents = []
 assert.equal(await releaseColdRecoveryBlockingTurn({
   rootMessageId: 'message-1',
   setStreamFinished(value) { releaseEvents.push(['stream', value]) },
-}, async messageId => { releaseEvents.push(['cancel', messageId]) }), true)
-assert.deepEqual(releaseEvents, [['stream', true], ['cancel', 'message-1']])
+}, async messageId => { releaseEvents.push(['cancel', messageId]) }, {
+  setStreamFinished(value) { releaseEvents.push(['resume-stream', value]) },
+}), true)
+assert.deepEqual(releaseEvents, [['stream', true], ['cancel', 'message-1'], ['resume-stream', false]])
 assert.equal(await releaseColdRecoveryBlockingTurn(undefined, async () => {
   throw new Error('missing blocking turn must not be cancelled')
-}), false)
+}, { setStreamFinished(value) { releaseEvents.push(['resume-without-blocker', value]) } }), false)
+assert.deepEqual(releaseEvents.at(-1), ['resume-without-blocker', false])
 
 class FakeRedis {
   strings = new Map()
@@ -176,6 +180,16 @@ assert.equal(
   shouldRetainInteractionAfterAskFailure({ requestEmitted: false, signalAborted: false }),
   false,
   'a request that was never emitted must be cleaned up',
+)
+assert.equal(
+  shouldReleaseWaitingInteractionAfterAsk({ requestEmitted: true, signalAborted: true }),
+  false,
+  'a rendered durable interaction must keep the session projected as waiting_user after sandbox shutdown',
+)
+assert.equal(
+  shouldReleaseWaitingInteractionAfterAsk({ requestEmitted: true, signalAborted: false }),
+  true,
+  'a normally completed interaction must clear the projected waiting-user state',
 )
 
 console.log('interaction recovery verification passed')

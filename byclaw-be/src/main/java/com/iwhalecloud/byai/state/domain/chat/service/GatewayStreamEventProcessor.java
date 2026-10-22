@@ -11,12 +11,14 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
@@ -31,6 +33,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class GatewayStreamEventProcessor {
+
+    private static final String DSH_RESUME_ACKNOWLEDGEMENT = "RESUMED";
 
     @Autowired
     private PythonSseService pythonSseService;
@@ -218,8 +222,31 @@ public class GatewayStreamEventProcessor {
 
     public boolean shouldIgnoreEvent(ChatProcessContext ctx, String eventType, JSONObject dataJson) {
         String sourceAgentType = dataJson.getString("source_agent_type");
+        if (isDshResumeAcknowledgement(eventType, dataJson, sourceAgentType)) {
+            log.info("过滤 DSH 内部恢复确认事件, sessionId: {}, traceId: {}, streamId: {}",
+                ctx == null ? null : ctx.sessionId, dataJson.getString("trace_id"), dataJson.getString("stream_id"));
+            return true;
+        }
         return !isTargetAgentType(ctx, sourceAgentType)
             && (SseResponseEventEnum.appStreamResponse.equals(eventType) || FinalAnswerContent.isFinalEvent(eventType));
+    }
+
+    private boolean isDshResumeAcknowledgement(String eventType, JSONObject dataJson, String sourceAgentType) {
+        if (!SseResponseEventEnum.reasoningLogDelta.equals(eventType)
+            || !StringUtils.startsWith(sourceAgentType, WorkerAgentType.BYCLAW_DSH.getCode()) || dataJson == null) {
+            return false;
+        }
+        try {
+            JSONObject payload = JSON.parseObject(dataJson.getString("data"));
+            return payload != null
+                && MessageContentTypeEnum.THINK_TITLE.getCode().equals(payload.getString("contentType"))
+                && DSH_RESUME_ACKNOWLEDGEMENT.equals(StringUtils.trim(
+                    payload.getJSONArray("choices").getJSONObject(0).getJSONObject("delta").getString("content")));
+        }
+        catch (RuntimeException ignored) {
+            // Malformed gateway payloads continue through the normal parser/error path.
+            return false;
+        }
     }
 
     public void enrichLaneMetadata(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata, JSONObject payload) {
