@@ -37,6 +37,7 @@ import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import ImageModelSelect from './ImageModelSelect';
+import getInitialQaModel from './getInitialQaModel';
 import { applyImageModelId, normalizeImageModelId } from './imageModelUtils';
 import { isSuperAssistant, preserveSuperAssistantResourceConfiguration } from './resourceConfiguration';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
@@ -1337,10 +1338,11 @@ const EmployeeDetail = ({ loading }) => {
           payload: { tagId: '3' },
           success: (res) => {
             if (!prologue?.modelInfo) {
-              setModelName(res?.[0]?.modelName ?? '');
+              const initialModel = getInitialQaModel(res);
+              setModelName(initialModel?.modelName ?? '');
               prologueRef.current.modelInfo = {
-                model: res?.[0]?.modelName,
-                modelId: res?.[0]?.modelId,
+                model: initialModel?.modelName,
+                modelId: initialModel?.modelId,
                 history: 6,
                 temperature: 0.1,
                 maxToken: 2000,
@@ -1355,11 +1357,12 @@ const EmployeeDetail = ({ loading }) => {
         type: 'employeeMgr/getModelList',
         payload: { tagId: '3' },
         success: (res) => {
-          setModelName(res?.[0]?.modelName ?? '');
+          const initialModel = getInitialQaModel(res);
+          setModelName(initialModel?.modelName ?? '');
           prologueRef.current = {
             modelInfo: {
-              model: res?.[0]?.modelName,
-              modelId: res?.[0]?.modelId,
+              model: initialModel?.modelName,
+              modelId: initialModel?.modelId,
               history: 6,
               temperature: 0.1,
               maxToken: 2000,

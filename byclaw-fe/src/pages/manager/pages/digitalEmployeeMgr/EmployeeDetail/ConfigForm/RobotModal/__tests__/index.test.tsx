@@ -35,8 +35,8 @@ describe('DingTalk robot binding hint', () => {
   });
 
   it.each([
-    { locale: 'zh-CN' as const, hint: '同一机器人仅可绑定一个数字员工' },
-    { locale: 'en-US' as const, hint: 'Each robot can be bound to only one digital employee' },
+    { locale: 'zh-CN' as const, hint: '同一机器人的robotCode仅可绑定一个数字员工' },
+    { locale: 'en-US' as const, hint: 'Each robotCode can be bound to only one digital employee' },
   ])('shows the binding restriction beside robotCode in $locale', ({ locale, hint }) => {
     mockLocale = locale;
     renderRobotModal({ channel: 'DingTalk' });
@@ -47,7 +47,7 @@ describe('DingTalk robot binding hint', () => {
 
   it('only shows the binding restriction on the DingTalk tab', () => {
     renderRobotModal();
-    const hint = '同一机器人仅可绑定一个数字员工';
+    const hint = '同一机器人的robotCode仅可绑定一个数字员工';
 
     expect(screen.getByText(hint)).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Feishu' }));
@@ -68,7 +68,7 @@ describe('DingTalk robot binding hint', () => {
     };
     renderRobotModal(item, onOk);
 
-    expect(screen.getByText('同一机器人仅可绑定一个数字员工')).toBeVisible();
+    expect(screen.getByText('同一机器人的robotCode仅可绑定一个数字员工')).toBeVisible();
     expect(screen.getByRole('textbox', { name: /robotCode/ })).toHaveValue('robot-1');
 
     // 弹窗使用 AntD 默认按钮文案，按角色定位以兼容默认中文按钮的空格排版。
