@@ -231,6 +231,23 @@ out of the global spec: it would reach every A.
   the DSH silent release only cover A's own sandbox type; B needs either an
   explicit `removeSandbox` on A's shutdown or its own heartbeat and reclaim rule.
 
+## Building B's image
+
+`middleware/byclaw-harness/Dockerfile.tools` builds the tool-environment image
+from the harness (A) image: a small Debian with sshd and the WebSocket bridge,
+plus Node, DSH's SSH helper, the PTC bootstrap and their dependency closure
+copied from A at the same paths (`docker/collect-closure.sh` traces them with
+Node's own resolver inside A). A checks the helper and bootstrap by digest, so
+B is built from the very A image it serves, right after it:
+
+```sh
+docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
+docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
+```
+
+The A image itself also serves as B (`byclaw-dsh-entrypoint tools`); the
+separate image only saves the pull (about 600 MB instead of several GB).
+
 ## Tests
 
 `pnpm test` covers the OpenSandbox lifecycle and the ByClaw BE launch, fallback

@@ -33,6 +33,6 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
   - 暂不做：空闲暂停/恢复（BE 没有 pause 接口），以及 A 释放时回收 B。两项都另行处理。
   - 已接受的现状：`launchByUserCode` 会把 `serviceKey` 记为用户首选规格；它按 body 里的 `userCode` 切换用户上下文。
 
-A 和 B 必须用**同一个镜像**，否则 helper 摘要校验会拒绝连接。
+A 和 B 必须用**同一次构建**的镜像，否则 helper 摘要校验会拒绝连接。B 的小镜像由 `middleware/byclaw-harness/Dockerfile.tools` 从 A 镜像构建（`--build-arg HARNESS_IMAGE=<A 镜像>`），A 镜像本身也能当 B 用（`tools` 模式）。
 
 配置项、限制说明见 [README.md](README.md)。

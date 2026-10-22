@@ -341,9 +341,12 @@ RUN set -eux; \
 # `byclaw-dsh-entrypoint tools` runs this sshd for DSH's SSH helper. The
 # package's generated host keys are removed; B serves the key its runtime (A)
 # hands it at creation.
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-server python3 python3-websockets \
+# The bridge runs on the image's own python3 (/usr/local/bin), so `websockets` is a pip package here.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
-    && test -x /usr/sbin/sshd
+    && test -x /usr/sbin/sshd \
+    && python3 -m pip install --no-cache-dir websockets \
+    && python3 -c 'import websockets'
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 # WebSocket bridge to sshd for runtimes behind an HTTP ingress (BYCLAW_TOOL_ENV_WS_PORT).
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
