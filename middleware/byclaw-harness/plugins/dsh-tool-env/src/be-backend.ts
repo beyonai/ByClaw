@@ -69,16 +69,46 @@ interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string;
 /** `ResponseUtil.SUCCESS` in ByClaw BE; failures are `-1` with `msg`. */
 const SUCCESS = 0
 
+/** Delay before the next launch attempt after a failure: doubles from the first value up to the cap. */
+export const LAUNCH_BACKOFF_MS = { first: 1000, max: 30_000 } as const
+
 export class ByClawBeBackend implements ToolEnvBackend {
   private operation: Promise<unknown> = Promise.resolve()
+  private backoffMs = 0
+  private nextAttemptAt = 0
+  private lastFailure = ''
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
     private readonly identity: ToolEnvIdentity,
     private readonly log: (message: string) => void,
+    private readonly now: () => number = Date.now,
   ) {}
 
-  ensure(): Promise<ToolEnvEndpoint> { return this.serial(() => this.ensureOnce()) }
+  /**
+   * Every operation that finds the connection down calls this, so a B that cannot
+   * start must not turn into a request to BE every few seconds: after a failure the
+   * next attempt waits, doubling up to {@link LAUNCH_BACKOFF_MS}; a success resets it.
+   */
+  ensure(): Promise<ToolEnvEndpoint> {
+    return this.serial(async () => {
+      const wait = this.nextAttemptAt - this.now()
+      if (wait > 0) {
+        throw new Error(`tool environment is not available (${this.lastFailure}); next launch attempt in ${String(Math.ceil(wait / 1000))} s`)
+      }
+      try {
+        const endpoint = await this.ensureOnce()
+        this.backoffMs = 0
+        return endpoint
+      } catch (error) {
+        this.backoffMs = Math.min(this.backoffMs === 0 ? LAUNCH_BACKOFF_MS.first : this.backoffMs * 2, LAUNCH_BACKOFF_MS.max)
+        this.nextAttemptAt = this.now() + this.backoffMs
+        this.lastFailure = message(error)
+        this.log(`tool environment launch failed (${this.lastFailure}); next attempt in ${String(this.backoffMs / 1000)} s`)
+        throw error
+      }
+    })
+  }
 
   /** Idle pause is not implemented for this backend yet; B keeps running. */
   async pause(): Promise<void> {}

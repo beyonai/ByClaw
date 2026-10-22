@@ -249,6 +249,33 @@ describe('ByClawBeBackend', () => {
     expect(await backend.ensure()).toMatchObject({ websocket: `${config.baseUrl.replace(/\/+$/u, '').replace(/^http/u, 'ws')}/v1/sandboxes/sb1/proxy/8022?token=abc` })
   })
 
+  it('backs off after a failed launch instead of calling BE on every operation', async () => {
+    let clock = 1_000_000
+    fake.launchFailure = '沙箱启动失败: Sandbox is being created'
+    const backend = new ByClawBeBackend(config, identity, message => logs.push(message), () => clock)
+    await expect(backend.ensure()).rejects.toThrow('Sandbox is being created')
+    expect(fake.calls).toHaveLength(1)
+    // Within the first second no request leaves A; the error names the cause and the wait.
+    clock += 500
+    await expect(backend.ensure()).rejects.toThrow(/not available \(.*Sandbox is being created.*\); next launch attempt in 1 s/u)
+    expect(fake.calls).toHaveLength(1)
+    // After the delay the launch is retried; the delay doubles while BE keeps failing.
+    clock += 600
+    await expect(backend.ensure()).rejects.toThrow('Sandbox is being created')
+    expect(fake.calls).toHaveLength(2)
+    clock += 1500
+    await expect(backend.ensure()).rejects.toThrow(/next launch attempt in 1 s/u)
+    expect(fake.calls).toHaveLength(2)
+    clock += 600
+    fake.launchFailure = undefined
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(fake.calls).toHaveLength(3)
+    expect(logs.filter(line => line.includes('next attempt in'))).toEqual([
+      'tool environment launch failed (ByClaw BE POST /sandbox/launchByUserCode failed: 沙箱启动失败: Sandbox is being created); next attempt in 1 s',
+      'tool environment launch failed (ByClaw BE POST /sandbox/launchByUserCode failed: 沙箱启动失败: Sandbox is being created); next attempt in 2 s',
+    ])
+  })
+
   it('surfaces BE failures with their message', async () => {
     fake.launchFailure = '沙箱启动失败: Unknown sandbox service key: byclaw-dsh-tools'
     const backend = new ByClawBeBackend(config, identity, () => {})
