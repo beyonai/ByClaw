@@ -3,6 +3,7 @@ import Markdown, { defaultUrlTransform } from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ss from './Md.module.less';
+import { stripMarkdownFrontMatter } from './stripMarkdownFrontMatter';
 
 interface MdPreviewProps {
   content?: string;
@@ -110,7 +111,7 @@ export default React.memo(function MdPreview({ content, resolveImage }: MdPrevie
   return (
     <section className={ss.md}>
       <Markdown remarkPlugins={[remarkGfm, remarkSoftBreaks]} components={components} urlTransform={urlTransform}>
-        {content}
+        {stripMarkdownFrontMatter(content)}
       </Markdown>
     </section>
   );

@@ -101,10 +101,14 @@ RUN set -eux; \
 # dependency closure, stale-link repair and packaged-executable semantics remain.
 COPY middleware/byclaw-harness/scripts/prepare-dsh-local-modules.mjs /tmp/prepare-dsh-local-modules.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-client-modules.mjs /tmp/prepare-dsh-client-modules.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-client-maps.mjs /tmp/prepare-dsh-client-maps.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-typert-loader.mjs /tmp/prepare-dsh-typert-loader.mjs
 RUN node /tmp/prepare-dsh-local-modules.mjs /workspace \
     && node /tmp/prepare-dsh-client-modules.mjs /workspace \
-    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json packages/client/modules/tsconfig.json \
-    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot \
+    && node /tmp/prepare-dsh-client-maps.mjs /workspace \
+    && node /tmp/prepare-dsh-typert-loader.mjs /workspace \
+    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json packages/client/modules/tsconfig.json packages/typert/loader/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot --filter packages/typert/loader \
     && pnpm exec tsdown --env.DSH_BUILD_FACE client --filter packages/client/modules
 
 
@@ -182,6 +186,8 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-bo
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/src/ /workspace/packages/client/modules/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/lib/ /workspace/packages/client/modules/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/src/ /workspace/packages/typert/loader/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/lib/ /workspace/packages/typert/loader/lib/
 # Keep source aliases (tsx) and ordinary package imports on the same core build.
 # The two packed core packages also enter the profile's existing local overrides.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/src/ /workspace/packages/core/agent/src/
@@ -258,6 +264,7 @@ RUN set -eux; \
 COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
+COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py
@@ -326,7 +333,7 @@ RUN set -eux; \
     python3 /tmp/browser-download-permissions-verify.py; \
     BYCLAW_TEST_SUPERVISOR=/usr/local/bin/byclaw-browser-supervisor \
         python3 /tmp/browser-supervisor-verify.py; \
-    BYCLAW_TEST_ENTRYPOINT=/usr/local/bin/byclaw-dsh-entrypoint \
+    BYCLAW_TEST_COMPILED_CLI=1 BYCLAW_TEST_ENTRYPOINT=/usr/local/bin/byclaw-dsh-entrypoint \
         BYCLAW_TEST_SECRET_HELPER=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/secret-fd.js \
         python3 /tmp/docker-entrypoint-fd-verify.py; \
     rm -f /tmp/browser-download-permissions-verify.py \

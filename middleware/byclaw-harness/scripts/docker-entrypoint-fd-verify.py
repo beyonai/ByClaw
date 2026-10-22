@@ -34,7 +34,18 @@ def main() -> None:
             })
         )
         (workspace / "node_modules" / "tsx" / "esm.mjs").write_text("")
-        cli = test_root / "fake-dsh-cli.mjs"
+        compiled = os.environ.get("BYCLAW_TEST_COMPILED_CLI") == "1"
+        cli = workspace / "apps/cli/lib/bin.js" if compiled else test_root / "fake-dsh-cli.mjs"
+        cli.parent.mkdir(parents=True, exist_ok=True)
+        (workspace / "package.json").write_text('{"type":"module"}')
+        if compiled:
+            # Exercise the real preload with the same image-owned links as production.
+            for suffix in ("profiles/web", "profiles"):
+                managed = test_root / "managed" / suffix / "node_modules"
+                managed.mkdir(parents=True, exist_ok=True)
+                persistent = test_root / "persistent" / suffix / "node_modules"
+                persistent.parent.mkdir(parents=True, exist_ok=True)
+                persistent.symlink_to(managed, target_is_directory=True)
         record = test_root / "record.json"
         cli.write_text(
             f"""import {{ spawnSync }} from 'node:child_process';
@@ -67,6 +78,8 @@ await import('node:fs').then(fs => fs.writeFileSync(process.env.BYCLAW_TEST_RECO
                     "BYCLAW_DSH_CLI_ENTRY": str(cli),
                     "BYCLAW_TEST_RECORD": str(record),
                     "DSH_ROOT": str(workspace),
+                    "DSH_HOME": str(test_root / "persistent"),
+                    "BYCLAW_DSH_MANAGED_HOME": str(test_root / "managed"),
                 },
                 pass_fds=(read_fd,),
                 text=True,
