@@ -113,6 +113,40 @@ afterEach(async () => {
 })
 
 describe('BrowserBrokerClient', () => {
+  it('waits for a late broker without replaying a submitted operation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'late-broker-'))
+    const socketPath = join(root, 'broker.sock')
+    const client = new BrowserBrokerClient({ socketPath, secret, connectTimeoutMs: 1_000 })
+    const server = createServer(socket => {
+      socket.once('data', frame => {
+        const request = JSON.parse(frame.toString())
+        socket.end(JSON.stringify({ type: 'ok', requestId: request.requestId, result: { ready: true } }) + '\n')
+      })
+    })
+    try {
+      const pending = client.status()
+      await new Promise(resolve => setTimeout(resolve, 75))
+      await new Promise<void>(resolve => server.listen(socketPath, resolve))
+      await expect(pending).resolves.toEqual({ ready: true })
+    } finally {
+      client.dispose()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds and cancels waiting for a missing broker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'missing-broker-'))
+    const client = new BrowserBrokerClient({ socketPath: join(root, 'missing'), secret, connectTimeoutMs: 100 })
+    try {
+      await expect(client.status()).rejects.toThrow('browser-broker-unavailable')
+      const controller = new AbortController()
+      const pending = expect(client.open(lease, {}, controller.signal)).rejects.toThrow('browser-broker-aborted')
+      controller.abort()
+      await pending
+    } finally { client.dispose(); await rm(root, { recursive: true, force: true }) }
+  })
+
   it('notifies subscribers when an established broker connection disconnects', async () => {
     const server = await createFixtureServer()
     const client = createClient(server.socketPath)

@@ -75,7 +75,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
 - 每次执行 raw browser 命令或 COOKIE/INTERCEPT/UI Adapter 命令前，先用 DSH `browser` 工具的 `status` 读取当前会话租约和已返回的所有权信息，并核对运行环境的托管 profile；不得把无会话租约解释为 Chromium 未运行。其他策略也以 structured help 的实际 `browser` 能力和所选执行路径为准。认证等待与微信 confirmed-rerun 不做这些预检，遵循其专属规则。
-- 浏览器桥接通过 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json` 统一观测：`doctor → daemon status`、有界等待与锁，不启动或停止 Chromium，也不重启 daemon。browserd 与 supervisor 是托管进程恢复的唯一所有者；Agent 不得复制恢复逻辑。微信初次执行与 `knowledge-collection acquire-douyin` 均由其 Runner 调用该入口，外层不得重复调用。
+- 浏览器桥接通过 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json` 统一准备和观测：托管 DSH 环境先请求运行时按需激活，再执行 `doctor → daemon status`、有界等待与锁；其他环境保持只观测。browserd 与 supervisor 是进程启动和恢复的唯一所有者，入口不直接启停进程；Agent 不得复制恢复逻辑。微信初次执行与 `knowledge-collection acquire-douyin` 均由其 Runner 调用该入口，外层不得重复调用。
 - 错误信息中的 profile 名称（包括随机 profile）不能单独证明它是用户桌面 Chrome。统一入口最终返回 `BRIDGE_UNAVAILABLE` 时报告 DSH 托管 Chromium、supervisor 与 byCLI 扩展的已知诊断；`BRIDGE_RECOVERY_BUSY` 表示其他调用占用观测锁，结束本次调用，不自行启动进程或循环重试。
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
@@ -255,7 +255,7 @@ DSH 的 browserd 与 supervisor 管理同一运行账号下的托管 Chromium、
 | 组件 | 归属 | 控制方式 |
 |------|------|---------|
 | Chromium 与持久化 profile | DSH browserd / supervisor | DSH `browser` 工具的 `status` 读取当前会话状态；进程启动、重连与退出由托管服务负责 |
-| byCLI Browser Bridge daemon (port 19825) | supervisor | 统一入口只执行 `doctor → daemon status` 并有界等待；不由 Agent 启停或重启 |
+| byCLI Browser Bridge daemon (port 19825) | browserd / supervisor | 首次使用时由托管服务启动；统一入口请求激活后执行 `doctor → daemon status`，不由 Agent 直接启停或重启 |
 | Browser tab lease (CDP target) | `surface + session + browser context` | raw browser 用 `bycli browser <sess> ...`；adapter 由命令自身管理 |
 | Extension 握手 | 两侧都需要 | `bycli doctor` 检查 |
 
@@ -267,7 +267,7 @@ node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json
 
 先用 DSH `browser` 工具的 `status` 确认当前会话租约、已返回的资源所有权信息和运行环境配置。`status` 未返回 profile、进程或所有权信息时如实记录未知，不猜测；无 lease 不等于全局 Chromium 停止。此处 DSH 工具仅用于托管状态和资源所有权，具体网页读取与操作仍由 byCLI 执行，不杜撰 `dsh browser` CLI。
 
-统一入口不创建、导航或检查任务 TAB，只串行执行 `doctor → daemon status`，在锁和超时预算内等待 supervisor 恢复连接。`actions` 记录本次实际动作而非建议；没有进程恢复动作不能声称已启动浏览器或重启 daemon。保留 Runner 的共享预算与终态保护，不把一次观测变成外层重新恢复的授权。
+统一入口不创建、导航或检查任务 TAB。配置了托管浏览器 Socket 时先请求服务按需激活，再串行执行 `doctor → daemon status`，在锁和超时预算内等待托管服务恢复连接。`actions` 中的 `request-runtime-activation` 只表示发出了激活请求，不能据此声称本次新建了浏览器或重启了 daemon；进程可能已就绪。保留 Runner 的共享预算与终态保护，不把一次观测变成外层重新恢复的授权。
 
 最终桥接结果为 `BRIDGE_READY` 且 `extensionState=connected` 才可继续允许的浏览器任务；仍须核对业务内容和结果。`BRIDGE_UNAVAILABLE` 或 `BRIDGE_RECOVERY_BUSY` 时报告已有诊断并结束本次调用，不另开 profile、不启动第二个 Chromium、不自行 restart daemon，也不再次执行统一入口。微信 confirmed-rerun 跳过桥接预检，保留原命令和已有 TAB，按其专属规则执行。
 

@@ -14,6 +14,32 @@ spec.loader.exec_module(managed)
 
 
 class LauncherTest(unittest.TestCase):
+    def test_business_command_activates_before_dispatch(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(managed.sys, 'argv', ['bycli', 'site', 'read']), \
+             patch.object(Path, 'read_text', return_value=json.dumps({'bin': 'cli.js'})), \
+             patch.object(managed, 'ensure_runtime') as ensure, \
+             patch.object(managed.os, 'execv', side_effect=SystemExit(0)) as execute:
+            with self.assertRaises(SystemExit):
+                managed.main()
+            ensure.assert_called_once_with(['site', 'read'])
+            execute.assert_called_once()
+
+    def test_failed_activation_never_executes_command(self):
+        with patch.object(managed.sys, 'argv', ['bycli', 'site', 'write']), \
+             patch.object(Path, 'read_text', return_value=json.dumps({'bin': 'cli.js'})), \
+             patch.object(managed, 'ensure_runtime', side_effect=RuntimeError('unavailable')), \
+             patch.object(managed.os, 'execv') as execute:
+            self.assertEqual(managed.main(), 75)
+            execute.assert_not_called()
+
+    def test_health_and_help_do_not_activate(self):
+        with patch.dict(os.environ, {'BYCLAW_BROWSER_ACTIVATION_SOCKET': '/private/activate'}), \
+             patch.object(managed.socket, 'socket') as connect:
+            for args in [['doctor'], ['daemon', 'status'], ['--help'], ['site', '--help'], ['list']]:
+                managed.ensure_runtime(args)
+            connect.assert_not_called()
+
     def test_disabled_and_health_commands_keep_original_execution(self):
         for flag, args in [('false', ['site', 'read']), ('true', ['doctor']), ('ON', ['daemon', 'start'])]:
             with self.subTest(flag=flag, args=args), patch.dict(os.environ, {'BYCLAW_BROWSER_JEV_ENABLED': flag}, clear=True), \

@@ -2,6 +2,7 @@ import type { BrowserGoalCommand } from './protocol.js'
 import type { GoalTicket } from './goal-control.js'
 import { randomUUID } from 'node:crypto'
 import { createConnection, type Socket } from 'node:net'
+import { setTimeout as delay } from 'node:timers/promises'
 import {
   BROWSER_BROKER_MAX_FRAME_BYTES,
   type BrowserAction,
@@ -21,6 +22,7 @@ export interface BrowserBrokerClientOptions {
   readonly socketPath: string
   readonly secret: string
   readonly requestId?: () => string
+  readonly connectTimeoutMs?: number
 }
 
 interface PendingRequest {
@@ -107,6 +109,7 @@ export class BrowserBrokerClient {
   readonly #socketPath: string
   readonly #secret: string
   readonly #requestId: () => string
+  readonly #connectTimeoutMs: number
   readonly #pending = new Map<string, PendingRequest>()
   readonly #disconnectListeners = new Set<() => void>()
   #socket: Socket | undefined
@@ -121,6 +124,8 @@ export class BrowserBrokerClient {
     this.#socketPath = options.socketPath
     this.#secret = options.secret
     this.#requestId = options.requestId ?? randomUUID
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? 0
+    if (!Number.isFinite(this.#connectTimeoutMs) || this.#connectTimeoutMs < 0) throw brokerError('browser-broker-invalid-timeout')
   }
 
   open(
@@ -210,7 +215,7 @@ export class BrowserBrokerClient {
       throw brokerError('browser-broker-frame-too-large')
     }
 
-    const socket = await this.#connect()
+    const socket = await this.#connectWhenReady(signal)
     if (signal?.aborted) throw brokerError('browser-broker-aborted')
     if (socket.destroyed) throw brokerError('browser-broker-connection-closed')
 
@@ -266,6 +271,20 @@ export class BrowserBrokerClient {
     const serialized = JSON.stringify(cancel)
     if (Buffer.byteLength(serialized, 'utf8') > BROWSER_BROKER_MAX_FRAME_BYTES) return
     socket.write(`${serialized}\n`)
+  }
+
+  async #connectWhenReady(signal?: AbortSignal): Promise<Socket> {
+    const deadline = Date.now() + this.#connectTimeoutMs
+    for (;;) {
+      if (signal?.aborted) throw brokerError('browser-broker-aborted')
+      try { return await this.#connect() }
+      catch (error) {
+        if (this.#disposed || Date.now() >= deadline || !(error instanceof BrowserBrokerError)
+          || !['browser-broker-unavailable', 'browser-broker-connection-error', 'browser-broker-connection-closed'].includes(error.code)) throw error
+        try { await delay(Math.min(50, Math.max(1, deadline - Date.now())), undefined, { signal }) }
+        catch { throw brokerError('browser-broker-aborted') }
+      }
+    }
   }
 
   #connect(): Promise<Socket> {

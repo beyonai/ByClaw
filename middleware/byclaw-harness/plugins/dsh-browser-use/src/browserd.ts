@@ -1,4 +1,6 @@
 import { closeOwnedBrowserServer } from './browser-close.js'
+import { startActivationServer } from './activation-server.js'
+import { BycliRuntime, type BycliRuntimeOptions } from './bycli-runtime.js'
 import { browserGoalEnabled } from './goal-config.js'
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { renameSync, writeFileSync } from 'node:fs'
@@ -1279,6 +1281,8 @@ export interface BrowserdOptions extends Omit<
   readonly desktopReadinessTimeoutMs?: number
   readonly desktopManager?: BrowserdDesktopManager
   readonly profileExclusive?: boolean
+  readonly activationSocketPath?: string
+  readonly bycli?: Omit<BycliRuntimeOptions, 'ensureBrowser'>
 }
 
 export interface BrowserdServer {
@@ -1414,6 +1418,9 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
   let sharedDesktop: SessionDesktop | undefined
   let runtime: BrowserRuntime | undefined
   let viewerGateway: ViewerGateway | undefined
+  let activationServer: Awaited<ReturnType<typeof startActivationServer>> | undefined
+  let bycli: BycliRuntime | undefined
+  const starting = new AbortController()
   const desktopScreen = options.desktopScreen ?? '1365x768x24'
   const windowSize = viewerMode === 'none' ? undefined : parseDesktopScreen(desktopScreen)
   if (viewerMode === 'novnc' || viewerMode === 'shared-novnc') {
@@ -1432,17 +1439,18 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
       onRouteClosed: sessionId => viewerGateway?.closeSession(sessionId),
     })
     try {
-      if (viewerMode === 'shared-novnc') {
-        sharedDesktop = await desktopManager.open(
-          'shared', 'browserd-shared', new AbortController().signal,
-        )
-      }
       viewerGateway = await startViewerGateway({
         host: options.viewerHost ?? '0.0.0.0',
         port: options.viewerPort ?? 8081,
         novncRoot: options.novncRoot,
         targetFor: sessionId => desktopManager?.targetFor(sessionId),
         defaultSessionId: () => desktopManager?.defaultSessionId(),
+        ...(viewerMode === 'shared-novnc' ? {
+          ensureStarted: async () => {
+            if (!runtime) throw new Error('browser-runtime-unavailable')
+            await runtime.start()
+          },
+        } : {}),
         ...(browserGoalEnabled(environment) ? {
           sharedGoalViewer: viewerMode === 'shared-novnc',
           goalState: () => runtime?.goalControl.state(),
@@ -1460,16 +1468,34 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
     }
   }
   try {
+    const driver = options.driver ?? new PlaywrightBrowserDriver(options.downloadRoot, options.profileExclusive === true)
     runtime = new BrowserRuntime({
       goalEnabled: browserGoalEnabled(),
-      driver: options.driver ?? new PlaywrightBrowserDriver(
-        options.downloadRoot,
-        options.profileExclusive === true,
-      ),
+      driver: viewerMode !== 'shared-novnc' ? driver : {
+        async launch(launchOptions) {
+          starting.signal.throwIfAborted()
+          // BrowserRuntime coalesces concurrent launch attempts. Desktop and Chrome
+          // are one lazy unit, reused by tools, noVNC and the byCLI extension.
+          try {
+            sharedDesktop ??= await desktopManager!.open('shared', 'browserd-shared', starting.signal)
+            const browser = await driver.launch({ ...launchOptions,
+              environment: sharedDesktop.environment,
+              windowSize: sharedDesktop.windowSize ?? windowSize,
+            })
+            sharedDesktop.publish()
+            return browser
+          } catch (error) {
+            process.stderr.write(`browserd: on-demand startup failed: ${formatBrowserdStartupError(error)}\n`)
+            await sharedDesktop?.close().catch(() => undefined)
+            sharedDesktop = undefined
+            throw error
+          }
+        },
+      },
       secret: options.secret,
       ...(options.executablePath ? { executablePath: options.executablePath } : {}),
       ...(viewerMode === 'shared-novnc'
-        ? { headless: false, browserEnvironment: sharedDesktop!.environment, keepBrowserAlive: true }
+        ? { headless: false, keepBrowserAlive: true }
         : options.headless !== undefined ? { headless: options.headless } : {}),
       ...(windowSize ? { windowSize: sharedDesktop?.windowSize ?? windowSize } : {}),
       ...(options.args?.length ? { args: options.args } : {}),
@@ -1486,11 +1512,19 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
       ...(options.onBrowserLifecycle ? { onBrowserLifecycle: options.onBrowserLifecycle } : {}),
       ...(viewerMode === 'novnc' && desktopManager ? { desktopManager } : {}),
     })
-    if (viewerMode === 'shared-novnc') {
-      await runtime.start()
-      sharedDesktop!.publish()
+    if (options.bycli) {
+      bycli = new BycliRuntime({ ...options.bycli, ensureBrowser: () => runtime!.start() })
+    }
+    if (options.activationSocketPath) {
+      activationServer = await startActivationServer(options.activationSocketPath, async () => {
+        if (!bycli) throw new Error('bycli-disabled')
+        await bycli.ensure()
+      })
     }
   } catch (error) {
+    starting.abort()
+    await activationServer?.close().catch(() => undefined)
+    await bycli?.close().catch(() => undefined)
     await viewerGateway?.close().catch(() => undefined)
     await runtime?.shutdown().catch(() => undefined)
     await desktopManager?.close().catch(() => undefined)
@@ -1793,6 +1827,9 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
     await chmod(options.socketPath, socketMode)
   } catch (error) {
     stopping = true
+    starting.abort()
+    await activationServer?.close().catch(() => undefined)
+    await bycli?.close().catch(() => undefined)
     for (const state of connections) {
       state.closed = true
       state.abortController.abort()
@@ -1817,6 +1854,9 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
       if (closePromise) return closePromise
       closePromise = (async () => {
         stopping = true
+        starting.abort()
+        await activationServer?.close().catch(() => undefined)
+        await bycli?.close().catch(() => undefined)
         const stoppedAccepting = new Promise<void>(resolve => {
           if (!server.listening) return resolve()
           server.close(() => resolve())
@@ -1925,6 +1965,20 @@ async function main(): Promise<void> {
   const server = await startBrowserd({
     socketPath,
     secret,
+    ...(process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET ? {
+      activationSocketPath: process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET,
+      bycli: {
+        enabled: readBoolean(process.env.BYCLAW_BYCLI_ENABLED) ?? false,
+        restartCommand: process.env.BYCLAW_BYCLI_DAEMON_COMMAND
+          ? [process.env.BYCLAW_BYCLI_DAEMON_COMMAND] : ['bycli', 'daemon', 'restart'],
+        statusCommand: process.env.BYCLAW_BYCLI_STATUS_COMMAND
+          ? [process.env.BYCLAW_BYCLI_STATUS_COMMAND] : ['bycli', 'daemon', 'status', '--json'],
+        timeoutMs: readPositiveInteger(process.env.BYCLAW_BROWSER_READY_TIMEOUT_MS) ?? 60_000,
+        commandTimeoutMs: readPositiveInteger(process.env.BYCLAW_BYCLI_COMMAND_TIMEOUT_MS) ?? 3_000,
+        healthIntervalMs: readPositiveInteger(process.env.BYCLAW_BYCLI_HEALTH_INTERVAL_MS) ?? 30_000,
+        log: (message: string) => process.stderr.write(`browserd: ${message}\n`),
+      },
+    } : {}),
     ...(process.env.BYCLAW_BROWSER_DOWNLOAD_ROOT ? { downloadRoot: process.env.BYCLAW_BROWSER_DOWNLOAD_ROOT } : {}),
     ...(process.env.BYCLAW_BROWSER_SCREENSHOT_ROOT ? { screenshotRoot: process.env.BYCLAW_BROWSER_SCREENSHOT_ROOT } : {}),
     ...(process.env.BYCLAW_BROWSER_EXECUTABLE_PATH ? { executablePath: process.env.BYCLAW_BROWSER_EXECUTABLE_PATH } : {}),

@@ -105,6 +105,52 @@ afterEach(async () => {
 })
 
 describe('shared noVNC browserd mode', () => {
+  async function fixture(driver = new FakeDriver(), desktopManager = new FakeDesktopManager()) {
+    const root = await mkdtemp(join(tmpdir(), 'bsv-'))
+    roots.push(root)
+    await writeFile(join(root, 'index.html'), 'viewer')
+    const server = await startBrowserd({ socketPath: join(root, 'browserd.sock'), secret,
+      driver, desktopManager, viewerMode: 'shared-novnc', viewerHost: '127.0.0.1',
+      viewerPort: 0, novncRoot: root, userDataDir: join(root, 'profile') })
+    servers.push(server)
+    const client = new BrowserBrokerClient({ socketPath: server.socketPath, secret })
+    clients.push(client)
+    return { server, client, driver, desktopManager }
+  }
+
+  it('launches once for concurrent first browser and viewer requests', async () => {
+    const { server, client, driver, desktopManager } = await fixture()
+    expect(driver.launches).toHaveLength(0)
+    await Promise.all([
+      client.open({ leaseId: 'first', capability: 'first-cap' }),
+      client.open({ leaseId: 'second', capability: 'second-cap' }),
+      fetch(`http://127.0.0.1:${server.viewerPort}/`),
+    ])
+    expect(driver.launches).toHaveLength(1)
+    expect(desktopManager.opened).toHaveLength(1)
+  })
+
+  it('keeps the broker available after a first launch failure and retries on use', async () => {
+    const driver = new FakeDriver()
+    const launch = driver.launch.bind(driver)
+    let fail = true
+    driver.launch = async options => { if (fail) throw new Error('Chrome unavailable'); return launch(options) }
+    const { server, client, desktopManager } = await fixture(driver)
+    const failed = await fetch(`http://127.0.0.1:${server.viewerPort}/`)
+    expect(failed.status).toBe(503)
+    fail = false
+    await client.open({ leaseId: 'retry', capability: 'retry-cap' })
+    expect(driver.launches).toHaveLength(1)
+    expect(desktopManager.opened).toHaveLength(2)
+  })
+
+  it('can shut down before first use without creating a desktop or browser', async () => {
+    const { server, driver, desktopManager } = await fixture()
+    await server.close()
+    expect(driver.launches).toHaveLength(0)
+    expect(desktopManager.opened).toHaveLength(0)
+  })
+
   it('keeps Browser tool and extension bridge in one VNC-visible persistent browser', async () => {
     const root = await mkdtemp(join(tmpdir(), 'browserd-shared-vnc-'))
     roots.push(root)
@@ -131,6 +177,11 @@ describe('shared noVNC browserd mode', () => {
     })
     servers.push(server)
 
+    expect(desktopManager.opened).toEqual([])
+    expect(driver.launches).toEqual([])
+    expect((await fetch(`http://127.0.0.1:${server.viewerPort}/`, { redirect: 'manual' }))
+      .headers.get('location')).toContain('sessionId=shared')
+
     expect(desktopManager.opened).toEqual([{ sessionId: 'shared', leaseId: 'browserd-shared' }])
     expect(driver.launches).toEqual([expect.objectContaining({
       headless: false,
@@ -143,9 +194,6 @@ describe('shared noVNC browserd mode', () => {
       ],
       ignoreDefaultArgs: ['--disable-extensions', '--no-startup-window'],
     })])
-    expect((await fetch(`http://127.0.0.1:${server.viewerPort}/`, { redirect: 'manual' }))
-      .headers.get('location')).toContain('sessionId=shared')
-
     const client = new BrowserBrokerClient({ socketPath: server.socketPath, secret })
     clients.push(client)
     const first = { leaseId: 'lease-a', capability: 'capability-a' }

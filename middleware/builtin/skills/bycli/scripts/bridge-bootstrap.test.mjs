@@ -77,6 +77,29 @@ test('healthy bridge performs only doctor followed by status without acquiring a
   runner.done();
 });
 
+test('managed runtime activates before health probes and fails closed when activation fails', async t => {
+  const previous = process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET;
+  process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET = '/private/browser.activate';
+  t.after(() => {
+    if (previous === undefined) delete process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET;
+    else process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET = previous;
+  });
+  const calls = [];
+  const result = await ensureBridge({ run: async (_command, args) => {
+    calls.push(args);
+    return args[0] === 'daemon' ? healthyStatus : ok();
+  } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [['--byclaw-ensure-runtime'], ['doctor'], ['daemon', 'status']]);
+  const failed = await ensureBridge({ run: async (_command, args) => {
+    assert.deepEqual(args, ['--byclaw-ensure-runtime']);
+    return fail(75);
+  } });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, 'RUNTIME_ACTIVATION_FAILED');
+  assert.equal(failed.checks, 0);
+});
+
 test('doctor failure still probes status and cannot claim ready from status alone', async t => {
   const runner = bridgeRunner([down(healthyStatus)]);
   const result = await ensureBridge({ run: runner.run, lockDir: await temporaryLock(t), healthWaitTimeoutMs: 0 });

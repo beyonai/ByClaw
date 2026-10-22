@@ -211,9 +211,8 @@ function finalReason({ status, doctor }) {
   return 'DAEMON_UNAVAILABLE';
 }
 
-// Runtime startup and reconnects belong to the DSH browser supervisor. This
-// entry point only serializes health waiting; it must not spend its callers'
-// legacy browser-start or daemon-restart budgets.
+// Managed DSH runtimes own startup/reconnects. Request activation through their
+// private launcher before health checks; other runtimes keep health-only behavior.
 export async function ensureBridge({
   run = runCommand,
   budget = createRecoveryBudget(),
@@ -257,6 +256,15 @@ export async function ensureBridge({
     ok, code, browserState, reason, actions, status, checks, budget,
     diagnostics: { recoveryOwner: 'supervisor', ...diagnostics },
   });
+
+  if (process.env.BYCLAW_BROWSER_ACTIVATION_SOCKET || process.env.BYCLAW_BROWSER_SOCKET) {
+    const timeout = Number(process.env.BYCLAW_BROWSER_READY_TIMEOUT_MS || 60_000) * 3;
+    actions.push('request-runtime-activation');
+    const activation = await run('bycli', ['--byclaw-ensure-runtime'], timeout);
+    if (exitCode(activation) !== 0 || activation?.timedOut) {
+      return result(false, 'BRIDGE_UNAVAILABLE', 'RUNTIME_ACTIVATION_FAILED');
+    }
+  }
 
   const initial = await doctorAndStatus();
   if (initial.healthy) return result(true, 'BRIDGE_READY', null);

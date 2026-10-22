@@ -113,7 +113,7 @@ Playwright 驱动使用原子 DOM 快照：一次浏览器内执行同步读取�
 | `BYCLAW_BROWSER_EXECUTABLE_PATH` | `/usr/local/bin/byclaw-playwright-chromium` | 基础镜像已有 Chromium。 |
 | `BYCLAW_BROWSER_USER_DATA_DIR` | `${DSH_HOME}/browser/user-data` | `shared-novnc` 与 `none` 的全局持久化 profile；所有 session 和 byCLI 共享登录态。 |
 | `BYCLAW_BROWSER_EXTENSIONS` | byCLI extension 目录 | 以系统路径分隔符分隔的 unpacked extension 目录；无效目录会告警并跳过。 |
-| `BYCLAW_BYCLI_ENABLED` | `true` | 由 Supervisor 启动并监控 byCLI daemon/extension 桥接。 |
+| `BYCLAW_BYCLI_ENABLED` | `true` | 首次使用时由 browserd 启动并监控 byCLI daemon/extension 桥接。 |
 | `BYCLAW_BROWSER_VIEWER` | `shared-novnc` | 单一持久浏览器与稳定 VNC；`none` 关闭 VNC；旧 `novnc` 为每会话独立桌面。 |
 | `BYCLAW_BROWSER_XVFB_SCREEN` | `1365x768x24` | Xvfb 尺寸/色深。 |
 | `BYCLAW_BROWSER_SESSION_RUNTIME_ROOT` | `/run/byclaw-browser/sessions` | 私有桌面运行根目录；`shared-novnc` 只创建一个进程级目录。 |
@@ -123,7 +123,11 @@ Playwright 驱动使用原子 DOM 快照：一次浏览器内执行同步读取�
 | `BYCLAW_BROWSER_VNC_WEB_PORT` | `8081` | 按 `sessionId` 路由的统一 noVNC 网关。 |
 | `BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS` | `0.0.0.0` | noVNC 网关地址；默认免鉴权，应限制在可信网络或外层代理后。 |
 
-root Supervisor 创建私有运行目录后，会先取得持久 Chromium profile 的排他咨询锁，再以 `byclaw` 用户依次启动 byCLI daemon 和 browserd。持锁期间，browserd 会在每次启动前清理非正常退出遗留的 Chromium singleton 文件；若另一个容器正在使用同一 profile，则第二个容器会直接失败，不会删除活动实例的文件。`shared-novnc` 下，只有 `bycli daemon status --json` 同时报告 `state=ready`、daemon `running`、extension `connected` 后才会启动 DSH。运行期每 30 秒被动检查一次；一次失败按瞬时抖动处理，连续两次失败会重启 daemon 并等待扩展重连，恢复超时则让容器非零退出，交给容器编排器重启。browserd 同时会在常驻 Chromium 意外断开后，以 0.5–5 秒退避自动重建同一持久 profile；启动失败日志会保留 Playwright 原始错误的单行限长摘要。随机 secret 仍通过两个独立继承 FD 分别一次性交付。
+root Supervisor 在准备 Profile 后立即以 `byclaw` 用户启动 DSH，不等待浏览器或 byCLI。browserd 只提前监听私有 Broker、激活 Socket 和 noVNC HTTP 入口；首次调用 `browser` 工具或打开 noVNC 时才创建 Xvfb、x11vnc、websockify 和 Chromium。并发首次请求共享一次启动，失败返回调用方，后续请求可以重试。首次启动后仍保留常驻共享浏览器及登录状态。
+
+byCLI 业务命令和 `bridge-bootstrap.mjs` 通过私有激活 Socket 请求浏览器就绪，再启动 daemon 并等待扩展连接。`doctor`、`daemon status`、帮助和版本查询不会激活浏览器。只有首次使用后才启用 Bridge 健康检查，断线后独立恢复；启动或恢复失败不终止 DSH。Supervisor 自动提供 `BYCLAW_BROWSER_ACTIVATION_SOCKET` 和 `BYCLAW_BROWSER_READY_TIMEOUT_MS`，部署时无需新增配置。激活 Socket 权限为 0600，只接受固定的 byCLI 激活请求，不接收任意命令或浏览器凭证。
+
+Supervisor 在启动 browserd 前取得持久 Chromium profile 的排他咨询锁；发生冲突时仅浏览器不可用，DSH 继续运行，不清理活动实例的 singleton 文件。browserd 退出后独立退避重启，Chromium 断开后仍由 BrowserRuntime 重建。随机 secret 通过独立继承 FD 交付，Supervisor 保留内存副本用于 browserd 重启，退出时清除。DSH 就绪不再代表浏览器和 Bridge 已就绪，浏览器首次调用需要计入启动时间。
 
 `shared-novnc` 使用稳定入口 `http://HOST:8081/?hideHeader=true&sessionId=shared`，省略 `sessionId` 会重定向到该地址；单个租约关闭不会拆除路由或桌面。Browser 工具通过 broker 操作该 Chromium 的持久 Context，byCLI 通过加载在同一 Chromium 中的扩展操作页面，所以两类工具的页面跳转、点击和输入都会显示在这个 VNC 桌面中；byCLI 不应另起浏览器或使用独立 profile。旧 `novnc` 仍按编码后的 DSH session ID 选择独立桌面。外层 Sandbox 代理需要 token 时可继续透传。browserd 默认不验证 token；任何能访问 8081 的客户端都能控制共享桌面，因此生产环境必须限制网络入口。
 
@@ -159,7 +163,7 @@ docker build -f Dockerfile \
   -t byclaw/dsh:2026.9.8 .
 ```
 
-业务镜像复用基础镜像固定版本的 Playwright Chromium，并内置 byCLI CLI 与 extension，不下载第二份浏览器。Docker 默认 `BYCLAW_BROWSER_VIEWER=shared-novnc`，browserd 启动时创建一套 X/VNC 和一个持久 Chromium；`none` 使用同一全局 profile 但不启动 VNC；旧 `novnc` 继续为每个活跃 session 启动独立临时桌面。
+业务镜像复用基础镜像固定版本的 Playwright Chromium，并内置 byCLI CLI 与 extension，不下载第二份浏览器。Docker 默认 `BYCLAW_BROWSER_VIEWER=shared-novnc`，首次使用浏览器时创建一套 X/VNC 和一个持久 Chromium；`none` 使用同一全局 profile 但不启动 VNC；旧 `novnc` 继续为每个活跃 session 启动独立临时桌面。
 
 Dockerfile 的 `EXPOSE 8081` 只声明端口，不会自动发布到宿主机。运行容器时需使用 `-p 8081:8081`，或让托管平台/Sandbox proxy 转发并鉴权该端口。容器内正常而宿主 TCP 超时属于部署层未发布，browserd 代码无法自行放通。
 

@@ -14,6 +14,8 @@ export interface ViewerTarget {
 }
 
 export interface ViewerGatewayOptions {
+  /** Prepare a shared desktop only when a user opens the viewer. */
+  readonly ensureStarted?: () => Promise<void>
   readonly host: string
   readonly port: number
   readonly novncRoot: string
@@ -142,6 +144,11 @@ export async function startViewerGateway(options: ViewerGatewayOptions): Promise
     const path = staticPath(options.novncRoot, url.pathname)
     if (!path) return reject(response, 400, 'browser-viewer-invalid-path')
     if (url.pathname === '/' || url.pathname.endsWith('/index.html')) {
+      if (request.method === 'GET' && options.ensureStarted) {
+        try { await options.ensureStarted() }
+        catch { return reject(response, 503, 'browser-viewer-start-failed') }
+        if (stopping || response.destroyed) return
+      }
       if (!url.searchParams.has('sessionId')) {
         const defaultSessionId = options.defaultSessionId?.()
         if (defaultSessionId) {
@@ -181,7 +188,7 @@ export async function startViewerGateway(options: ViewerGatewayOptions): Promise
     socket.once('close', () => sockets.delete(socket))
   })
 
-  server.on('upgrade', (request: IncomingMessage, client, head) => {
+  server.on('upgrade', async (request: IncomingMessage, client, head) => {
     if (stopping) return rejectUpgrade(client, 503, 'Service Unavailable')
     let url: URL
     try {
@@ -190,6 +197,11 @@ export async function startViewerGateway(options: ViewerGatewayOptions): Promise
       return rejectUpgrade(client, 400, 'Bad Request')
     }
     if (!url.pathname.endsWith('/websockify')) return rejectUpgrade(client, 404, 'Not Found')
+    if (options.ensureStarted) {
+      try { await options.ensureStarted() }
+      catch { return rejectUpgrade(client, 503, 'Service Unavailable') }
+      if (stopping || client.destroyed) return
+    }
     const explicitSession = url.searchParams.has('sessionId')
     const sessionId = explicitSession ? sessionIdFrom(url) : options.defaultSessionId?.()
     if (!sessionId) return rejectUpgrade(client, explicitSession ? 400 : 404, explicitSession ? 'Bad Request' : 'Not Found')

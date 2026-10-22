@@ -4,13 +4,11 @@ from __future__ import annotations
 import argparse
 import ctypes
 import fcntl
-import json
 import os
 from pathlib import Path
 import pwd
 import secrets
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -21,7 +19,6 @@ DEFAULT_BROWSERD_ENTRY = (
     "/opt/byclaw/dsh-managed/profiles/web/node_modules/"
     "@byclaw/dsh-browser-use/lib/browserd.js"
 )
-DEFAULT_BYCLI_DAEMON_COMMAND = "/opt/nvm/current/bin/bycli"
 PR_SET_CHILD_SUBREAPER = 36
 
 
@@ -184,7 +181,12 @@ def acquire_browser_profile_lock(
     account: pwd.struct_passwd,
 ) -> int:
     prepared = spawn(["mkdir", "-p", "--", str(path)], environment, account)
-    if prepared.wait() != 0:
+    try:
+        code = prepared.wait(timeout=5)
+    except subprocess.TimeoutExpired as error:
+        terminate(prepared, grace_seconds=0.2)
+        raise RuntimeError("browser-supervisor-profile-directory-timeout") from error
+    if code != 0:
         raise RuntimeError("browser-supervisor-profile-directory-failed")
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
@@ -193,81 +195,6 @@ def acquire_browser_profile_lock(
         os.close(descriptor)
         raise RuntimeError("browser-supervisor-profile-in-use") from error
     return descriptor
-
-
-def bycli_bridge_ready(
-    command: Sequence[str],
-    environment: dict[str, str],
-    account: pwd.struct_passwd,
-    timeout: float,
-) -> bool:
-    child_environment = dict(environment)
-    child_environment["HOME"] = account.pw_dir
-    child_environment["USER"] = account.pw_name
-    child_environment["LOGNAME"] = account.pw_name
-    try:
-        result = subprocess.run(
-            list(command),
-            env=child_environment,
-            close_fds=True,
-            preexec_fn=drop_privileges(account),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        payload = json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, TypeError):
-        return False
-    return bool(
-        isinstance(payload, dict)
-        and payload.get("state") == "ready"
-        and isinstance(payload.get("daemon"), dict)
-        and payload["daemon"].get("state") == "running"
-        and payload["daemon"].get("stale") is not True
-        and isinstance(payload.get("extension"), dict)
-        and payload["extension"].get("state") == "connected"
-    )
-
-
-def wait_for_bycli_bridge(
-    command: Sequence[str],
-    environment: dict[str, str],
-    account: pwd.struct_passwd,
-    browser_process: subprocess.Popen[bytes],
-    timeout: float,
-    command_timeout: float,
-) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        returncode = browser_process.poll()
-        if returncode is not None:
-            raise RuntimeError(f"browser-supervisor-browserd-exited:{returncode}")
-        remaining = deadline - time.monotonic()
-        if bycli_bridge_ready(
-            command, environment, account, min(command_timeout, max(remaining, 0.01))
-        ):
-            return
-        time.sleep(min(0.05, max(deadline - time.monotonic(), 0)))
-    raise RuntimeError("browser-supervisor-bycli-readiness-timeout")
-
-
-def report_bycli_status(message: str) -> None:
-    sys.stderr.write(f"byclaw-browser-supervisor: byCLI Browser Bridge {message}\n")
-    sys.stderr.flush()
-
-
-def read_browser_generation(path: Path) -> int | None:
-    try:
-        payload = json.loads(path.read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
-        return None
-    generation = payload.get("generation") if isinstance(payload, dict) else None
-    if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
-        return None
-    return generation
 
 
 def terminate(process: subprocess.Popen[bytes], grace_seconds: float = 3.0) -> None:
@@ -299,24 +226,6 @@ def terminate(process: subprocess.Popen[bytes], grace_seconds: float = 3.0) -> N
     process.wait()
 
 
-def wait_for_broker(
-    path: Path, process: subprocess.Popen[bytes], timeout: float
-) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        returncode = process.poll()
-        if returncode is not None:
-            raise RuntimeError(f"browser-supervisor-browserd-exited:{returncode}")
-        try:
-            with socket.socket(socket.AF_UNIX) as probe:
-                probe.settimeout(0.1)
-                probe.connect(str(path))
-            return
-        except (FileNotFoundError, ConnectionRefusedError, socket.timeout, OSError):
-            time.sleep(0.02)
-    raise RuntimeError("browser-supervisor-browserd-readiness-timeout")
-
-
 def normalized_returncode(returncode: int | None) -> int:
     if returncode is None:
         return 1
@@ -332,8 +241,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     dsh_account = identity(options.dsh_user)
     socket_path = Path(options.socket_path)
     viewer = os.environ.get("BYCLAW_BROWSER_VIEWER", "none")
-    if viewer not in {"none", "novnc", "shared-novnc"}:
-        raise RuntimeError("browser-supervisor-invalid-viewer")
 
     base_environment = dict(os.environ)
     base_environment.pop("BYCLAW_BROWSER_SECRET", None)
@@ -357,7 +264,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     base_environment["BYCLAW_BROWSER_GENERATION_FILE"] = str(
         browser_generation_path
     )
+    activation_path = Path(str(socket_path) + ".activate")
+    base_environment["BYCLAW_BROWSER_ACTIVATION_SOCKET"] = str(activation_path)
+    base_environment["BYCLAW_BROWSER_READY_TIMEOUT_MS"] = str(int(options.readiness_timeout * 1000))
+    base_environment["BYCLAW_BYCLI_COMMAND_TIMEOUT_MS"] = str(int(options.bycli_command_timeout * 1000))
+    base_environment["BYCLAW_BYCLI_HEALTH_INTERVAL_MS"] = str(int(options.bycli_health_interval * 1000))
+    if options.bycli_daemon_command:
+        base_environment["BYCLAW_BYCLI_DAEMON_COMMAND"] = options.bycli_daemon_command
+    if options.bycli_status_command:
+        base_environment["BYCLAW_BYCLI_STATUS_COMMAND"] = options.bycli_status_command
     socket_path.unlink(missing_ok=True)
+    activation_path.unlink(missing_ok=True)
     browser_generation_path.unlink(missing_ok=True)
 
     secret = bytearray()
@@ -402,92 +319,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if prepare_code != 0:
                 return normalized_returncode(prepare_code)
 
-        if viewer != "novnc":
-            dsh_home = Path(
-                base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh"))
-            )
-            configured_profile = base_environment.get(
-                "BYCLAW_BROWSER_USER_DATA_DIR", ""
-            ).strip()
-            browser_profile = (
-                Path(configured_profile)
-                if configured_profile
-                else dsh_home / "browser" / "user-data"
-            )
-            browser_profile_lock_fd = acquire_browser_profile_lock(
-                browser_profile,
-                base_environment,
-                browser_account,
-            )
-            base_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
-
         secret.extend(secrets.token_urlsafe(32).encode("ascii"))
-        bycli_enabled = base_environment.get("BYCLAW_BYCLI_ENABLED", "false") in {
-            "true",
-            "1",
-        }
-        bycli_command = (
-            [options.bycli_daemon_command]
-            if options.bycli_daemon_command
-            else [DEFAULT_BYCLI_DAEMON_COMMAND, "daemon", "restart"]
-        )
-        bycli_status_command = (
-            [options.bycli_status_command]
-            if options.bycli_status_command
-            else [DEFAULT_BYCLI_DAEMON_COMMAND, "daemon", "status", "--json"]
-        )
-
-        def restart_bycli() -> int:
-            process = spawn(bycli_command, base_environment, browser_account)
-            children.append(process)
-            code = process.wait()
-            children.remove(process)
-            return normalized_returncode(code)
-
-        if bycli_enabled:
-            bycli_code = restart_bycli()
-            if received_signal:
-                return 128 + received_signal
-            if bycli_code != 0:
-                return normalized_returncode(bycli_code)
-
-        browser_environment = dict(base_environment)
-        # Browserd owns DISPLAY lifecycle. Shared noVNC starts one headed
-        # process-lifetime browser; the other modes retain their existing
-        # headless default or per-lease headed override.
-        browser_environment["BYCLAW_BROWSER_HEADLESS"] = (
-            "false" if viewer == "shared-novnc" else "true"
-        )
-        browser_environment["BYCLAW_BROWSER_SOCKET_MODE"] = "0600"
-        browser_environment.pop("DISPLAY", None)
-        browser_secret_fd = secret_pipe(secret)
-        browser_environment["BYCLAW_BROWSER_SECRET_FD"] = str(browser_secret_fd)
-        browser_command = (
-            [options.browserd_command]
-            if options.browserd_command
-            else ["node", DEFAULT_BROWSERD_ENTRY]
-        )
-        try:
-            browserd = spawn(
-                browser_command, browser_environment, browser_account, browser_secret_fd
-            )
-        finally:
-            os.close(browser_secret_fd)
-        children.append(browserd)
-        wait_for_broker(socket_path, browserd, options.readiness_timeout)
-        monitor_bycli = bycli_enabled and viewer == "shared-novnc"
-        if monitor_bycli:
-            wait_for_bycli_bridge(
-                bycli_status_command,
-                base_environment,
-                browser_account,
-                browserd,
-                options.readiness_timeout,
-                options.bycli_command_timeout,
-            )
-            report_bycli_status("connected")
-        browser_generation = read_browser_generation(browser_generation_path)
-
         dsh_environment = dict(base_environment)
         dsh_environment["BYCLAW_BROWSER_OWNS_RUNTIME"] = "false"
         dsh_environment["BYCLAW_DSH_PREPARED"] = "1"
@@ -499,103 +331,65 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             os.close(dsh_secret_fd)
         children.append(dsh)
-        secret[:] = b"\0" * len(secret)
-        next_bycli_check = time.monotonic() + options.bycli_health_interval
-        consecutive_bycli_failures = 0
 
+        # Only the lightweight broker/viewer starts here. Chrome, desktop and
+        # byCLI are activated by first use inside browserd. DSH never waits for
+        # browser readiness, profile locking, bridge health or recovery.
+        browser_environment = dict(base_environment)
+        browser_environment["BYCLAW_BROWSER_HEADLESS"] = (
+            "false" if viewer == "shared-novnc" else "true"
+        )
+        browser_environment["BYCLAW_BROWSER_SOCKET_MODE"] = "0600"
+        browser_environment.pop("DISPLAY", None)
+        browser_command = ([options.browserd_command] if options.browserd_command
+                           else ["node", DEFAULT_BROWSERD_ENTRY])
+        next_browser_start = 0.0
+        restart_delay = 1.0
+        browser_started_at = 0.0
         while True:
             reap_adopted_children({child.pid for child in children})
             if received_signal:
-                for child in reversed(children):
-                    terminate(child)
                 return 128 + received_signal
             dsh_code = dsh.poll()
             if dsh_code is not None:
-                if browserd is not None:
-                    terminate(browserd)
                 return normalized_returncode(dsh_code)
-            browser_code = browserd.poll()
-            if browser_code is not None:
-                terminate(dsh)
-                return normalized_returncode(browser_code) or 1
-            now = time.monotonic()
-            latest_browser_generation = read_browser_generation(
-                browser_generation_path
-            )
-            if browser_generation is None and latest_browser_generation is not None:
-                browser_generation = latest_browser_generation
-            elif (
-                monitor_bycli
-                and latest_browser_generation is not None
-                and latest_browser_generation != browser_generation
-            ):
-                report_bycli_status(
-                    "browser generation changed "
-                    f"from {browser_generation} to {latest_browser_generation}; "
-                    "reconnecting"
-                )
-                browser_generation = latest_browser_generation
-                if restart_bycli() != 0:
-                    raise RuntimeError(
-                        "browser-supervisor-bycli-bridge-unrecoverable"
-                    )
+            if browserd is not None and browserd.poll() is not None:
+                # A crashed broker can leave Chrome/desktop children in its
+                # process group. Stop them before the next profile owner starts.
                 try:
-                    wait_for_bycli_bridge(
-                        bycli_status_command,
-                        base_environment,
-                        browser_account,
-                        browserd,
-                        options.readiness_timeout,
-                        options.bycli_command_timeout,
-                    )
-                except RuntimeError as error:
-                    if str(error).startswith("browser-supervisor-browserd-exited"):
-                        raise
-                    raise RuntimeError(
-                        "browser-supervisor-bycli-bridge-unrecoverable"
-                    ) from error
-                consecutive_bycli_failures = 0
-                next_bycli_check = (
-                    time.monotonic() + options.bycli_health_interval
-                )
-                report_bycli_status("reconnected")
-            if monitor_bycli and now >= next_bycli_check:
-                if bycli_bridge_ready(
-                    bycli_status_command,
-                    base_environment,
-                    browser_account,
-                    options.bycli_command_timeout,
-                ):
-                    if consecutive_bycli_failures > 0:
-                        report_bycli_status("reconnected")
-                    consecutive_bycli_failures = 0
-                else:
-                    consecutive_bycli_failures += 1
-                    if consecutive_bycli_failures == 1:
-                        report_bycli_status("disconnected; waiting for one retry")
-                    if consecutive_bycli_failures >= 2:
-                        if restart_bycli() != 0:
-                            raise RuntimeError(
-                                "browser-supervisor-bycli-bridge-unrecoverable"
-                            )
-                        try:
-                            wait_for_bycli_bridge(
-                                bycli_status_command,
-                                base_environment,
-                                browser_account,
-                                browserd,
-                                options.readiness_timeout,
-                                options.bycli_command_timeout,
-                            )
-                        except RuntimeError as error:
-                            if str(error).startswith("browser-supervisor-browserd-exited"):
-                                raise
-                            raise RuntimeError(
-                                "browser-supervisor-bycli-bridge-unrecoverable"
-                            ) from error
-                        consecutive_bycli_failures = 0
-                        report_bycli_status("reconnected")
-                next_bycli_check = time.monotonic() + options.bycli_health_interval
+                    os.killpg(browserd.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                children.remove(browserd)
+                browserd = None
+                if time.monotonic() - browser_started_at > 30:
+                    restart_delay = 1.0
+                next_browser_start = time.monotonic() + restart_delay
+                restart_delay = min(restart_delay * 2, 30.0)
+                sys.stderr.write("browser-supervisor: browserd exited; DSH remains available; retrying\n")
+            if browserd is None and time.monotonic() >= next_browser_start:
+                try:
+                    if viewer != "novnc" and browser_profile_lock_fd is None:
+                        dsh_home = Path(base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh")))
+                        configured = base_environment.get("BYCLAW_BROWSER_USER_DATA_DIR", "").strip()
+                        profile = Path(configured) if configured else dsh_home / "browser" / "user-data"
+                        browser_profile_lock_fd = acquire_browser_profile_lock(profile, base_environment, browser_account)
+                        browser_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
+                    socket_path.unlink(missing_ok=True)
+                    activation_path.unlink(missing_ok=True)
+                    browser_generation_path.unlink(missing_ok=True)
+                    browser_secret_fd = secret_pipe(secret)
+                    browser_environment["BYCLAW_BROWSER_SECRET_FD"] = str(browser_secret_fd)
+                    try:
+                        browserd = spawn(browser_command, browser_environment, browser_account, browser_secret_fd)
+                    finally:
+                        os.close(browser_secret_fd)
+                    children.append(browserd)
+                    browser_started_at = time.monotonic()
+                except (OSError, RuntimeError) as error:
+                    sys.stderr.write(f"browser-supervisor: browser unavailable ({error}); DSH remains available\n")
+                    next_browser_start = time.monotonic() + restart_delay
+                    restart_delay = min(restart_delay * 2, 30.0)
             time.sleep(0.02)
     except BaseException:
         for child in reversed(children):
@@ -611,6 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if browser_profile_lock_fd is not None:
             os.close(browser_profile_lock_fd)
         socket_path.unlink(missing_ok=True)
+        activation_path.unlink(missing_ok=True)
         browser_generation_path.unlink(missing_ok=True)
         for signum, handler in previous.items():
             signal.signal(signum, handler)

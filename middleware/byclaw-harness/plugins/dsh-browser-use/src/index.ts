@@ -545,7 +545,9 @@ export function apply(ctx: Context, config: Config): void {
   registerBrowserTool(
     ctx,
     config,
-    new BrowserBrokerClient({ socketPath, secret }),
+    new BrowserBrokerClient({ socketPath, secret,
+      connectTimeoutMs: Number(process.env.BYCLAW_BROWSER_READY_TIMEOUT_MS ?? 60_000),
+    }),
     { shutdownOnDispose: ownsRuntime, ...(browserGoalEnabled() ? { goal: {
       config: resolveGoalConfig(),
       artifactRoot: process.env.BYCLAW_BROWSER_GOAL_ARTIFACT_DIR ?? join(process.cwd(), '.byclaw-browser-artifacts'),
