@@ -111,12 +111,9 @@ RUN set -eux; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
-# Keep generated module reconciliation on canonical local paths. The original
-# dependency closure, stale-link repair and packaged-executable semantics remain.
-COPY middleware/byclaw-harness/scripts/prepare-dsh-local-modules.mjs /tmp/prepare-dsh-local-modules.mjs
-RUN node /tmp/prepare-dsh-local-modules.mjs /workspace \
-    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json \
-    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot
+# DSH 0.2.1 already resolves module directories to canonical paths
+# (app-boot profile-resolution/legacy-links.ts); the 0.1.5 source patch
+# scripts/prepare-dsh-local-modules.mjs is not applied to this base.
 
 
 # Fixed connector tools have an independent cache, unaffected by plugin edits.
