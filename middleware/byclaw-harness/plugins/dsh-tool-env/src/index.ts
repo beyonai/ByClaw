@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
+import { ByClawBeBackend, type ByClawBeBackendConfig } from './be-backend.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
@@ -21,11 +22,16 @@ export { ToolEnvConnection } from './connection.ts'
 export { OpenSandboxBackend, StaticBackend, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
 export { ToolEnvIdentity } from './identity.ts'
+export { ByClawBeBackend, parseEndpoint } from './be-backend.ts'
+export type { ByClawBeBackendConfig } from './be-backend.ts'
 
 /** Plugin configuration; the profile patch fills it from the environment. */
 export interface Config {
-  /** `static` dials a fixed sshd; `opensandbox` manages B through the host's OpenSandbox server. */
-  backend: 'static' | 'opensandbox'
+  /**
+   * `static` dials a fixed sshd; `opensandbox` manages B through the host's
+   * OpenSandbox server; `byclaw-be` asks ByClaw BE for the user's tool sandbox.
+   */
+  backend: 'static' | 'opensandbox' | 'byclaw-be'
   /** Directory in A's private DSH home holding keys, the client config and B's id. */
   stateDir: string
   /** OpenSSH host alias; unique per user context when one process serves several users. */
@@ -53,6 +59,8 @@ export interface Config {
     metadata: Record<string, string>
     volumes: OpenSandboxVolume[]
   }
+  /** `byclaw-be` backend settings. */
+  byclawBe: Omit<ByClawBeBackendConfig, 'port'>
 }
 
 const volume = schema.object({
@@ -63,7 +71,7 @@ const volume = schema.object({
 
 export class ToolEnv extends ToolEnvConnection {
   static Config: schema<Config> = schema.object({
-    backend: schema.union(['static', 'opensandbox']).required(),
+    backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
     stateDir: schema.string().required(),
     alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
@@ -85,6 +93,17 @@ export class ToolEnv extends ToolEnvConnection {
       metadata: schema.dict(schema.string()).default({}),
       volumes: schema.array(volume).default([]),
     }).default({} as Config['openSandbox']),
+    byclawBe: schema.object({
+      baseUrl: schema.string().default(''),
+      userCode: schema.string().default(''),
+      token: schema.string().default(''),
+      systemCode: schema.string().default(''),
+      serviceKey: schema.string().default('byclaw-dsh-tools'),
+      sshInstance: schema.string().default('ssh'),
+      readyTimeoutMs: schema.natural().default(180_000),
+      // A launch may create B and wait for its endpoints on the BE side.
+      requestTimeoutMs: schema.natural().default(180_000),
+    }).default({} as Config['byclawBe']),
   }) as schema<Config>
 
   constructor(ctx: Context, config: Config) {
@@ -109,12 +128,19 @@ export class ToolEnv extends ToolEnvConnection {
 
 function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): ToolEnvBackend {
   if (config.backend === 'static') return new StaticBackend({ hostName: config.host, port: config.port }, identity)
+  // Named explicitly: the default name derives from the class ("tool-env"), which the console filter silences.
+  const logger = ctx.logger('byclaw-tool-env')
+  if (config.backend === 'byclaw-be') {
+    const be = config.byclawBe
+    for (const key of ['baseUrl', 'userCode', 'token', 'serviceKey'] as const) {
+      if (be[key] === '') throw new Error(`byclaw-tool-env: byclawBe.${key} is required for the byclaw-be backend`)
+    }
+    return new ByClawBeBackend({ ...be, port: config.port }, identity, message => { logger.info(message) })
+  }
   const settings = config.openSandbox
   for (const key of ['baseUrl', 'apiKey', 'image'] as const) {
     if (settings[key] === '') throw new Error(`byclaw-tool-env: openSandbox.${key} is required for the opensandbox backend`)
   }
-  // Named explicitly: the default name derives from the class ("tool-env"), which the console filter silences.
-  const logger = ctx.logger('byclaw-tool-env')
   const backend: OpenSandboxBackendConfig = {
     ...settings, port: config.port, stateFile: join(config.stateDir, 'sandbox.json'),
   }

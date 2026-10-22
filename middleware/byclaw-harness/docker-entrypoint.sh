@@ -108,7 +108,7 @@ cd "${DSH_ROOT:-/workspace}"
 # container hosts that block user namespaces, where workspace-write would refuse
 # every command. An explicit DSH_PERMISSION_MODE still wins.
 case "${BYCLAW_DSH_TOOL_ENV:-}" in
-    static|opensandbox)
+    static|opensandbox|byclaw-be)
         export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-${BYCLAW_TOOL_ENV_PERMISSION_MODE:-danger-full-access}}"
         ;;
 esac

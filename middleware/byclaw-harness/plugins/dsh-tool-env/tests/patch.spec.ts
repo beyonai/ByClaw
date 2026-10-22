@@ -32,7 +32,7 @@ describe('cordis.patch.yml', () => {
 
   it('swaps the local providers for the SSH providers in split mode', async () => {
     const patch = await rows()
-    for (const backend of ['static', 'opensandbox']) {
+    for (const backend of ['static', 'opensandbox', 'byclaw-be']) {
       const env = { BYCLAW_DSH_TOOL_ENV: backend }
       expect(patch.filter(row => row.id !== undefined && disabled(row, env)).map(row => row.id)).toEqual(replaced)
       expect(patch.flatMap(row => row.insert ?? []).filter(row => !disabled(row, env)).map(row => row.id)).toEqual(added)

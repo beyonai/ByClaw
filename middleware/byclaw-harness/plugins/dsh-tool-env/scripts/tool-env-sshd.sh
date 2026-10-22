@@ -4,6 +4,11 @@
 # A starts B with:
 #   BYCLAW_TOOL_ENV_AUTHORIZED_KEY  OpenSSH public key line A logs in with
 #   BYCLAW_TOOL_ENV_HOST_KEY        base64 OpenSSH private host key A pins
+#   BYCLAW_TOOL_ENV_SEED_DIR        fallback for the two above when B is created
+#                                   by ByClaw BE from a spec, which cannot carry
+#                                   A's keys: A's tool-env state directory mounted
+#                                   read-only, holding `client_ed25519.pub` and
+#                                   `host_ed25519` (default /etc/byclaw-tool-env)
 #   BYCLAW_TOOL_ENV_PORT            listen port (default 22)
 #   BYCLAW_TOOL_ENV_USER            login user (default byclaw)
 #   BYCLAW_TOOL_ENV_RUN_DIR         config/key directory (default /run/byclaw-tool-env)
@@ -11,8 +16,15 @@
 # DSH streams need, and nothing else: no passwords, root, reverse or agent forwarding.
 set -eu
 
-: "${BYCLAW_TOOL_ENV_AUTHORIZED_KEY:?BYCLAW_TOOL_ENV_AUTHORIZED_KEY is required}"
-: "${BYCLAW_TOOL_ENV_HOST_KEY:?BYCLAW_TOOL_ENV_HOST_KEY is required}"
+seed_dir="${BYCLAW_TOOL_ENV_SEED_DIR:-/etc/byclaw-tool-env}"
+if [ -z "${BYCLAW_TOOL_ENV_AUTHORIZED_KEY:-}" ] && [ -r "${seed_dir}/client_ed25519.pub" ]; then
+    BYCLAW_TOOL_ENV_AUTHORIZED_KEY="$(cat "${seed_dir}/client_ed25519.pub")"
+fi
+if [ -z "${BYCLAW_TOOL_ENV_HOST_KEY:-}" ] && [ -r "${seed_dir}/host_ed25519" ]; then
+    BYCLAW_TOOL_ENV_HOST_KEY="$(base64 <"${seed_dir}/host_ed25519" | tr -d '\n')"
+fi
+: "${BYCLAW_TOOL_ENV_AUTHORIZED_KEY:?BYCLAW_TOOL_ENV_AUTHORIZED_KEY is required (or ${seed_dir}/client_ed25519.pub)}"
+: "${BYCLAW_TOOL_ENV_HOST_KEY:?BYCLAW_TOOL_ENV_HOST_KEY is required (or ${seed_dir}/host_ed25519)}"
 port="${BYCLAW_TOOL_ENV_PORT:-22}"
 user="${BYCLAW_TOOL_ENV_USER:-byclaw}"
 run_dir="${BYCLAW_TOOL_ENV_RUN_DIR:-/run/byclaw-tool-env}"

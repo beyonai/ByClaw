@@ -16,7 +16,7 @@
 | Diff Viewer | `@byclaw/dsh-diff-viewer` | 为 write/edit 工具提供可扩展的单栏或双栏可视化 diff | [README](./plugins/dsh-diff-viewer/README.md) |
 | CodeGraph | `@byclaw/dsh-codegraph` | 装配 CodeGraph MCP，并向根 Agent 与委派 Agent 注册使用策略 | [中文](./plugins/dsh-codegraph/README.zh.md) · [English](./plugins/dsh-codegraph/README.md) |
 | LAN Web | `@byclaw/dsh-lan-web` | 启用显式的 `dsh web --host 0.0.0.0` LAN 监听；ByClaw integration 可选关闭 Web token 鉴权 | [中文](./plugins/dsh-lan-web/README.zh.md) · [English](./plugins/dsh-lan-web/README.md) |
-| 工具执行环境 | `@byclaw/dsh-tool-env` | 可选：通过 SSH 把 DSH 的文件、进程、终端、PTC、沙箱放到单独的工具沙箱里运行，由 OpenSandbox 按需创建、暂停、恢复（`BYCLAW_DSH_TOOL_ENV`） | [中文](./plugins/dsh-tool-env/README.zh.md) · [English](./plugins/dsh-tool-env/README.md) |
+| 工具执行环境 | `@byclaw/dsh-tool-env` | 可选：通过 SSH 把 DSH 的文件、进程、终端、PTC、沙箱放到单独的工具沙箱里运行；工具沙箱由 OpenSandbox 直接管理，或经 ByClaw BE 的沙箱接口创建（`BYCLAW_DSH_TOOL_ENV`） | [中文](./plugins/dsh-tool-env/README.zh.md) · [English](./plugins/dsh-tool-env/README.md) |
 | Iron Rules | `@byclaw/dsh-iron-rules` | 把仓库携带的开发铁律送进模型上下文，并在产生代码改动的 turn 结束时运行各铁律的校验脚本 | [中文](./plugins/iron-rules/README.zh.md) · [English](./plugins/iron-rules/README.md) |
 | 环境变量透传 | `@byclaw/dsh-bash-provider` | 把宿主全部环境变量（包括凭据命名变量）透传给模型侧 Bash 命令；同时把符合条件的命令路由给 rtk（Rust Token Killer）压缩工具输出、节省 token | [中文](./plugins/dsh-bash-provider/README.zh.md) · [English](./plugins/dsh-bash-provider/README.md) |
 | Browser Use | `@byclaw/dsh-browser-use` | 提供一个有状态的 `browser` 工具；每个 session 单一 owner，并可启用完全独立的 Chromium/noVNC 桌面 | [中文](./plugins/dsh-browser-use/README.zh.md) · [English](./plugins/dsh-browser-use/README.md) |
