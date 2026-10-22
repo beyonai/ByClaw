@@ -109,6 +109,24 @@ class ConcurrentChatTurnsTest extends I18nTestSupport {
     }
 
     @Test
+    void coldResumeRebindsWebSocketContextAfterPreviousTerminalRemovedIt() {
+        outputs.removeContext("10");
+        followup.traceId = "background";
+        followup.concurrentGatewayTurn = false;
+        followup.continueRunningTrace = true;
+        followup.sendByFrameworkMsgOnly = true;
+        ChatStreamRuntimeCoordinator coordinator = coordinator(true);
+        doReturn(true).when(streams).startSessionListener("10", followup);
+
+        assertThat(coordinator.startIfNecessary(followup)).isTrue();
+
+        assertThat(followup.sendByFrameworkMsgOnly).isFalse();
+        assertThat(outputs.getContext("10", "background")).isSameAs(followup);
+        verify(streams).startSessionListener("10", followup);
+        verify(running).markRunning(followup);
+    }
+
+    @Test
     void remoteListenerUsesDurableTraceRegistrationWithoutASecondLocalConsumer() {
         ChatStreamRuntimeCoordinator coordinator = coordinator(false);
         assertThat(coordinator.startIfNecessary(followup)).isTrue();

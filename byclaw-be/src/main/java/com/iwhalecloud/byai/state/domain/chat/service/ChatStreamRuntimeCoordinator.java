@@ -50,7 +50,20 @@ public class ChatStreamRuntimeCoordinator {
         String sessionId = String.valueOf(ctx.sessionId);
 
         boolean alreadyRunning = isSessionAlreadyRunning(ctx.sessionId);
-        if (ctx.sendByFrameworkMsgOnly || (alreadyRunning && !ctx.concurrentGatewayTurn)) {
+        boolean missingContinuedTraceContext = ctx.sendByFrameworkMsgOnly
+            && ctx.continueRunningTrace
+            && outputStreamManager.getContext(sessionId, ctx.traceId) == null;
+        if (missingContinuedTraceContext) {
+            // The previous request may already have consumed appStreamResponse and removed
+            // its WebSocket context while DSH still reports the session as active. A cold
+            // RESUME needs a fresh context/listener binding for the same trace; otherwise
+            // the Gateway command runs successfully but every reconstructed event has no
+            // clientRequestId/channel to return to.
+            ctx.sendByFrameworkMsgOnly = false;
+            log.info("继续运行的 trace 缺少输出上下文，重新绑定本次请求, sessionId: {}, traceId: {}, clientRequestId: {}",
+                sessionId, ctx.traceId, ctx.clientRequestId);
+        }
+        else if (ctx.sendByFrameworkMsgOnly || (alreadyRunning && !ctx.concurrentGatewayTurn)) {
             ctx.sendByFrameworkMsgOnly = true;
             log.info("会话已有运行态，本次只发送 Gateway 消息, sessionId: {}, traceId: {}", sessionId, ctx.traceId);
             return false;
