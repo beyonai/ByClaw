@@ -120,15 +120,20 @@ Redis 有效时不使用上述回退值，也不会把环境变量配置写回 R
 
 当前模块依赖：
 
-- `by-qa[all]==0.4.2`
-- `by-framework==0.2.2.dev11`
+- `by-qa[all]==0.4.4.dev3`
+- `by-framework==0.2.2.dev15`
 
 建议使用 `uv` 管理依赖和运行环境。
+
+`0.4.4.dev3` 提供 `/api/v1/knowledgeBases/fileCount` 文件总数查询，并支持导入时
+`extractZip=false` 原样保存 ZIP、`metadata` 基础元数据。导入的标准路径
+`/api/v1/knowledgeItems/import` 与兼容路径 `/api/v1/knowledge-items/import`
+均从请求身份上下文注入 `userCode`，覆盖调用方提供的同名元数据。
 
 如果需要从本地 wheel 重新安装 `by-qa`，请使用 `uv pip` 指向当前项目虚拟环境：
 
 ```bash
-uv pip install --python .venv/bin/python --force-reinstall "./by_qa-0.4.2-py3-none-any.whl[all]"
+uv pip install --python .venv/bin/python --force-reinstall "./by_qa-0.4.4.dev3-py3-none-any.whl[all]"
 ```
 
 不要使用 `uv run pip install ...`。当前 `.venv` 默认不包含 `pip` 模块，`uv run pip` 可能会命中系统或 Conda 环境里的 `pip`，导致把 `by-qa` 及其依赖安装到已有 `open-webui`、`streamlit` 等工具共用的环境中，从而出现依赖冲突提示。

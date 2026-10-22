@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
@@ -53,6 +54,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
@@ -88,6 +90,7 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequ
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
@@ -660,13 +663,22 @@ public class DatasetApplicationService {
      * @param fileDescription 文件描述
      * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
      * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
-     * @param skipIfDuplicate 同路径同名文件存在时是否跳过
+     * @param skipIfDuplicate 是否按同库 checksum 判重；项目云盘同路径冲突时也用于跳过
      * @param headers 透传到 ByKC 的请求头
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
                                     String fileDescription, Boolean processFrontMatter, Boolean overwrite,
                                     boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
+        return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, overwrite,
+            skipIfDuplicate, null, null, headers);
+    }
+
+    /** 支持显式 ZIP 解压选项及文件、自动创建父目录的基础元数据。 */
+    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
+                                    String fileDescription, Boolean processFrontMatter, Boolean overwrite,
+                                    boolean skipIfDuplicate, Boolean extractZip, String metadata,
+                                    Map<String, String> headers) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetContentPermission(ssResource);
@@ -677,7 +689,8 @@ public class DatasetApplicationService {
         uploadResult.setResourceCode(ssResource.getResourceCode());
         uploadResult.setResourceName(ssResource.getResourceName());
 
-        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
+        List<String> uploadFileNames = Arrays.stream(files)
+            .filter(file -> !isZipUpload(file) || Boolean.FALSE.equals(extractZip))
             .map(MultipartFile::getOriginalFilename).toList();
         boolean projectCloud = "KG_CLOUD".equals(ssResource.getResourceBizType());
         Set<String> existingFilePaths = (projectCloud || Boolean.TRUE.equals(overwrite))
@@ -691,7 +704,7 @@ public class DatasetApplicationService {
             kbFileImport.setKnCode(ssResource.getResourceCode());
             kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
 
-            boolean zipUpload = isZipUpload(multipartFile);
+            boolean zipUpload = isZipUpload(multipartFile) && !Boolean.FALSE.equals(extractZip);
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (projectCloud && !zipUpload && existingFilePaths.contains(filePath)) {
@@ -703,7 +716,7 @@ public class DatasetApplicationService {
                 }
                 // 覆盖更新保留创建人，不再先删后建导致管理员覆盖时归属被更换。
                 KbFileUpdateResult updated = updateKnowledgeFile(resourceId, filePath, fileDescription,
-                    processFrontMatter, multipartFile, headers);
+                    processFrontMatter, metadata, multipartFile, headers);
                 boolean failed = updated.getData() != null && updated.getData().stream()
                     .anyMatch(item -> item != null && Boolean.FALSE.equals(item.getSuccess()));
                 if (failed) {
@@ -723,6 +736,8 @@ public class DatasetApplicationService {
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
             // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
             kbFileImport.setProcessFrontMatter(processFrontMatter);
+            kbFileImport.setExtractZip(extractZip);
+            kbFileImport.setMetadata(metadata);
             kbFileImport.setMultipartFile(multipartFile);
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
                 forwardedHeaders);
@@ -744,13 +759,22 @@ public class DatasetApplicationService {
      * @param fileDescription 文件描述
      * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
      * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
-     * @param skipIfDuplicate 同路径同名文件存在时是否跳过
+     * @param skipIfDuplicate 是否按同库 checksum 判重；项目云盘同路径冲突时也用于跳过
      * @param headers 透传到 ByKC 的请求头
      * @throws IOException 异常信息
      */
     public UploadResult uploadFilesDirect(MultipartFile[] files, Long resourceId, String directoryPath,
                                           String fileDescription, Boolean processFrontMatter, Boolean overwrite,
                                           boolean skipIfDuplicate, Map<String, String> headers) throws IOException {
+        return uploadFilesDirect(files, resourceId, directoryPath, fileDescription, processFrontMatter, overwrite,
+            skipIfDuplicate, null, null, headers);
+    }
+
+    /** 直接上传变体，保留显式 ZIP 解压选项及基础元数据。 */
+    public UploadResult uploadFilesDirect(MultipartFile[] files, Long resourceId, String directoryPath,
+                                          String fileDescription, Boolean processFrontMatter, Boolean overwrite,
+                                          boolean skipIfDuplicate, Boolean extractZip, String metadata,
+                                          Map<String, String> headers) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
@@ -761,7 +785,8 @@ public class DatasetApplicationService {
         uploadResult.setResourceCode(ssResource.getResourceCode());
         uploadResult.setResourceName(ssResource.getResourceName());
 
-        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
+        List<String> uploadFileNames = Arrays.stream(files)
+            .filter(file -> !isZipUpload(file) || Boolean.FALSE.equals(extractZip))
             .map(MultipartFile::getOriginalFilename).toList();
         Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
             ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
@@ -774,7 +799,7 @@ public class DatasetApplicationService {
             kbFileImport.setKnCode(ssResource.getResourceCode());
             kbFileImport.setSkipIfDuplicate(skipIfDuplicate);
 
-            boolean zipUpload = isZipUpload(multipartFile);
+            boolean zipUpload = isZipUpload(multipartFile) && !Boolean.FALSE.equals(extractZip);
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
             if (!zipUpload && existingFilePaths.contains(filePath)) {
@@ -786,6 +811,8 @@ public class DatasetApplicationService {
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
             // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
             kbFileImport.setProcessFrontMatter(processFrontMatter);
+            kbFileImport.setExtractZip(extractZip);
+            kbFileImport.setMetadata(metadata);
             kbFileImport.setMultipartFile(multipartFile);
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
                 forwardedHeaders);
@@ -1083,6 +1110,12 @@ public class DatasetApplicationService {
     public KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
                                                   Boolean processFrontMatter, MultipartFile fileContent,
                                                   Map<String, String> headers) {
+        return updateKnowledgeFile(resourceId, filePath, fileDescription, processFrontMatter, null, fileContent, headers);
+    }
+
+    private KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
+                                                   Boolean processFrontMatter, String metadata,
+                                                   MultipartFile fileContent, Map<String, String> headers) {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetItemPermission(ssResource, filePath);
         Map<String, String> forwardedHeaders = forwardKnowledgeHeaders(headers, resourceId);
@@ -1092,6 +1125,7 @@ public class DatasetApplicationService {
         kbFileUpdate.setFilePath(normalizeKnowledgeFilePath(filePath));
         kbFileUpdate.setFileDescription(fileDescription);
         kbFileUpdate.setProcessFrontMatter(processFrontMatter);
+        kbFileUpdate.setMetadata(metadata);
         kbFileUpdate.setMultipartFile(fileContent);
 
         PythonBuildResponse<KbFileUpdateResult> response = feignPythonBuildService.updateKnowledgeItem(kbFileUpdate,
@@ -1519,8 +1553,20 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 按 QA glob 单层通配规则匹配知识库文件或目录。
+     * 统计指定知识库所有层级的未删除文件数量。
      */
+    public KnowledgeFileCountResult fileCount(KnowledgeFileCountRequest request) {
+        SsResource resource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(resource);
+        KbKnowledgeFileCount qaRequest = new KbKnowledgeFileCount();
+        qaRequest.setKnCode(resource.getResourceCode());
+        PythonBuildResponse<KnowledgeFileCountResult> response =
+            feignPythonBuildService.fileCount(qaRequest, request.getResourceId());
+        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.fileCount"));
+        return response.getResultObject();
+    }
+
+    /** 按 QA glob 单层通配规则匹配知识库文件或目录。 */
     public List<DirAndFileVo> globKnowledgeItems(KnowledgeGlobRequest request) {
         SsResource ssResource = loadDatasetResource(request.getResourceId());
         validateDatasetReadablePermission(ssResource);

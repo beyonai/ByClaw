@@ -23,6 +23,9 @@ public class KbFileUpdate {
     /** 是否解析 Markdown YAML front matter；不传时由 QA 按默认 true 处理。 */
     private Boolean processFrontMatter;
 
+    /** 显式文件元数据，JSON object 字符串。 */
+    private String metadata;
+
     /** 更新后的文件二进制内容（multipart 中的 {@code fileContent} 部分），必填。 */
     private MultipartFile multipartFile;
 }

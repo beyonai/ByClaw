@@ -249,7 +249,7 @@
             "post": {
               "operationId": "uploadFile",
               "summary": "上传文档",
-              "description": "将文档上传到指定的知识库下面",
+              "description": "支持任意类型单文件及 ZIP 导入；ZIP 默认解压，extractZip=false 时原样保存。metadata 为文件和自动创建父目录的基础元数据，与 front matter 合并时同名字段以 front matter 为准。",
               "requestBody": {
                 "required": true,
                 "content": {
@@ -268,7 +268,7 @@
                         },
                         "filePath": {
                           "type": "string",
-                          "description": "单文件上传时为目标文件全路径；zip 上传时为目标目录路径（以\"/\"开头，不包括知识库名称）"
+                          "description": "普通文件及不解压 ZIP 为完整文件路径；解压 ZIP 为目标目录路径，以 / 开头，不包括知识库名称"
                         },
                         "fileDescription": {
                           "type": "string",
@@ -282,7 +282,21 @@
                         "fileContent": {
                           "type": "string",
                           "format": "binary",
-                          "description": "文件二进制内容；文件名以 .zip 结尾且为合法 zip 时触发批量上传"
+                          "description": "任意类型文件；extractZip 未传或为 true 且文件名以 .zip 结尾时校验 ZIP 并批量解压导入"
+                        },
+                        "extractZip": {
+                          "type": "boolean",
+                          "default": true,
+                          "description": "是否解压 ZIP；false 时保存原始字节"
+                        },
+                        "skipIfDuplicate": {
+                          "type": "boolean",
+                          "default": false,
+                          "description": "按同库文件 checksum 判重，重复时在逐项错误中返回已有路径"
+                        },
+                        "metadata": {
+                          "type": "string",
+                          "description": "JSON object 字符串，用于文件和本次自动创建父目录的基础元数据；不允许只读系统字段"
                         }
                       }
                     }
@@ -1381,6 +1395,159 @@
                                 "description": "当前环节"
                               }
                             }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "知识库文件数量",
+          "description": "同步统计知识库所有层级未删除文件数量",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/api/v1/knowledgeBases/fileCount": {
+            "post": {
+              "operationId": "fileCount",
+              "summary": "统计知识库文件数量",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "有效空库返回 0；统计所有层级未删除文件，不计目录，不按构建状态筛选",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "required": [
+                          "resultCode",
+                          "resultMsg",
+                          "resultObject"
+                        ],
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "required": [
+                              "fileCount"
+                            ],
+                            "properties": {
+                              "fileCount": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "422": {
+                  "description": "参数无效、知识库不存在或已删除",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "required": [
+                          "resultCode",
+                          "resultMsg",
+                          "resultObject"
+                        ],
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "503": {
+                  "description": "依赖未配置",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "required": [
+                          "resultCode",
+                          "resultMsg",
+                          "resultObject"
+                        ],
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "500": {
+                  "description": "未预期异常",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "required": [
+                          "resultCode",
+                          "resultMsg",
+                          "resultObject"
+                        ],
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object"
                           }
                         }
                       }

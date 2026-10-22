@@ -63,10 +63,10 @@ export function isDaemonHealthy(result) {
     && parseExtensionState(result) === 'connected';
 }
 
-export function runCommand(command, args, timeoutMs = BYCLI_TIMEOUT_MS) {
+export function runCommand(command, args, timeoutMs = BYCLI_TIMEOUT_MS, { onStderr } = {}) {
   const startedAt = Date.now();
   return new Promise((resolve) => {
-    execFile(command, args, {
+    const child = execFile(command, args, {
       timeout: timeoutMs,
       maxBuffer: 4 * 1024 * 1024,
       env: process.env,
@@ -80,6 +80,7 @@ export function runCommand(command, args, timeoutMs = BYCLI_TIMEOUT_MS) {
         durationMs: Date.now() - startedAt,
       });
     });
+    if (onStderr) child.stderr?.on('data', chunk => onStderr(chunk));
   });
 }
 

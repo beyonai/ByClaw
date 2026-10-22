@@ -51,6 +51,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
@@ -167,6 +169,13 @@ public class FeignPythonBuildService {
     }
 
 
+    /** 查询所有层级的未删除文件数量；resourceId 写入资源上下文请求头。 */
+    public PythonBuildResponse<KnowledgeFileCountResult> fileCount(KbKnowledgeFileCount request, Long resourceId) {
+        return post(KnowledgeServiceOperation.FILE_COUNT, request,
+            new TypeReference<PythonBuildResponse<KnowledgeFileCountResult>>() {
+            }, resourceId);
+    }
+
     /** 创建知识库目录；headers 透传门户请求头，无则传空 Map。 */
     public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate, Map<String, String> headers) {
         return post(KnowledgeServiceOperation.CREATE_DIR, kbDirectoryCreate,
@@ -224,6 +233,13 @@ public class FeignPythonBuildService {
                 formFields.put("processFrontMatter", String.valueOf(kbFileImport.getProcessFrontMatter()));
             }
 
+            if (kbFileImport.getExtractZip() != null) {
+                formFields.put("extractZip", String.valueOf(kbFileImport.getExtractZip()));
+            }
+            if (kbFileImport.getMetadata() != null) {
+                formFields.put("metadata", kbFileImport.getMetadata());
+            }
+
             String requestPath = resolvePath(kbFileImport, KnowledgeServiceOperation.UPLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileImport);
             if (endpoint.isDirectUrl()) {
@@ -261,6 +277,10 @@ public class FeignPythonBuildService {
             }
             if (kbFileUpdate.getProcessFrontMatter() != null) {
                 formFields.put("processFrontMatter", String.valueOf(kbFileUpdate.getProcessFrontMatter()));
+            }
+
+            if (kbFileUpdate.getMetadata() != null) {
+                formFields.put("metadata", kbFileUpdate.getMetadata());
             }
 
             String requestPath = resolvePath(kbFileUpdate, KnowledgeServiceOperation.UPDATE_FILE);
