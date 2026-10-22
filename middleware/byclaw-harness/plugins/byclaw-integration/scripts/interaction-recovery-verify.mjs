@@ -6,6 +6,8 @@ import {
   buildRecoveredAskPayload,
   interactionAgentSessionId,
   interactionRecordKey,
+  isColdRecoveryBlockingTurn,
+  releaseColdRecoveryBlockingTurn,
   shouldRetainInteractionAfterAskFailure,
 } from '../src/interaction-recovery.ts'
 
@@ -14,6 +16,26 @@ assert.equal(
   'real-dsh-session-id',
   'ask_user_question must persist the DSH session id rather than Agent.id',
 )
+
+const reclaimedTurn = {
+  contextSessionId: 'session-1',
+  userCode: 'user-1',
+  rootMessageId: 'message-1',
+}
+assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, reclaimedTurn), true)
+assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, rootMessageId: 'message-2' }), false)
+assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, contextSessionId: 'session-2' }), false)
+assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, userCode: 'user-2' }), false)
+
+const releaseEvents = []
+assert.equal(await releaseColdRecoveryBlockingTurn({
+  rootMessageId: 'message-1',
+  setStreamFinished(value) { releaseEvents.push(['stream', value]) },
+}, async messageId => { releaseEvents.push(['cancel', messageId]) }), true)
+assert.deepEqual(releaseEvents, [['stream', true], ['cancel', 'message-1']])
+assert.equal(await releaseColdRecoveryBlockingTurn(undefined, async () => {
+  throw new Error('missing blocking turn must not be cancelled')
+}), false)
 
 class FakeRedis {
   strings = new Map()

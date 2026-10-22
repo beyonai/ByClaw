@@ -38,6 +38,32 @@ export function interactionAgentSessionId(agent: { session: { id: unknown } }): 
   return String(agent.session.id)
 }
 
+interface ColdRecoveryTurnIdentity {
+  contextSessionId: string
+  userCode: string
+  rootMessageId: string
+}
+
+/** Match only the reclaimed command that would occupy the cold recovery queue. */
+export function isColdRecoveryBlockingTurn(
+  turn: ColdRecoveryTurnIdentity,
+  recovery: ColdRecoveryTurnIdentity,
+): boolean {
+  return turn.contextSessionId === recovery.contextSessionId
+    && turn.userCode === recovery.userCode
+    && turn.rootMessageId === recovery.rootMessageId
+}
+
+export async function releaseColdRecoveryBlockingTurn(
+  turn: { rootMessageId: string; setStreamFinished(finished: boolean): void } | undefined,
+  cancel: (messageId: string) => Promise<void>,
+): Promise<boolean> {
+  if (turn === undefined) return false
+  turn.setStreamFinished(true)
+  await cancel(turn.rootMessageId)
+  return true
+}
+
 /** A rendered interaction must survive the process abort that accompanies sandbox release. */
 export function shouldRetainInteractionAfterAskFailure(options: {
   requestEmitted: boolean

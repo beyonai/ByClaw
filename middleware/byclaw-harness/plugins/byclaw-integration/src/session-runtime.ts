@@ -105,7 +105,13 @@ import {
   terminalByClawModelError,
   type ByClawModelError,
 } from './model-error.ts'
-import { buildRecoveredAskPayload, interactionAgentSessionId, type ByClawInteractionStore } from './interaction-recovery.ts'
+import {
+  buildRecoveredAskPayload,
+  interactionAgentSessionId,
+  isColdRecoveryBlockingTurn,
+  releaseColdRecoveryBlockingTurn,
+  type ByClawInteractionStore,
+} from './interaction-recovery.ts'
 
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
@@ -1687,6 +1693,33 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.ctx.logger.info(
       `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
     )
+    const recoveryIdentity = {
+      contextSessionId: normalizeByClawSessionId(command.header.sessionId),
+      userCode: command.header.userCode,
+      rootMessageId: command.header.messageId,
+    }
+    const blockingTurn = [...this.active.values()].find(turn => isColdRecoveryBlockingTurn({
+      contextSessionId: normalizeByClawSessionId(turn.context.sessionId),
+      userCode: turn.userCode,
+      rootMessageId: turn.rootMessageId,
+    }, recoveryIdentity))
+    if (blockingTurn !== undefined) {
+      this.ctx.logger.info(
+        `[byclaw-dsh] cancelling reclaimed ask before cold recovery (session=${command.header.sessionId}, message=${command.header.messageId})`,
+      )
+    }
+    // GatewayWorker may reclaim the orphaned ASK_AGENT before this RESUME arrives.
+    // Suppress that replay's terminal frame, then release the per-session queue
+    // so the answer follow-up can become the sole visible continuation.
+    const releasedBlockingTurn = await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
+      rootMessageId: blockingTurn.rootMessageId,
+      setStreamFinished: finished => blockingTurn.context.setStreamFinished(finished),
+    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'))
+    if (releasedBlockingTurn) {
+      this.ctx.logger.info(
+        `[byclaw-dsh] reclaimed ask released; continuing cold recovery (session=${command.header.sessionId}, message=${command.header.messageId})`,
+      )
+    }
     const recoveryCommand = new AskAgentCommand(
       command.header,
       recovered.text,
