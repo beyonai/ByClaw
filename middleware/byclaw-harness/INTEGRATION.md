@@ -73,3 +73,22 @@ peer 依赖的实际链接及 `Context` 声明合并，并检查重复执行与�
 依赖和缓存。同步前先检查本目录的 ByClaw 定制改动，保留本说明，并更新这里记录的来源提交。
 
 共享资源后续应同步到 `middleware/builtin`，不要覆盖兼容符号链接。
+
+### Web 插件组成图启动优化
+
+业务镜像执行 `prepare-dsh-client-modules.mjs`，仅支持固定的 DSH `0.1.5-rc.2`，
+然后执行 `tsc -b packages/client/modules/tsconfig.json` 和
+`tsdown --env.DSH_BUILD_FACE client --filter packages/client/modules`。
+该包的 host 阶段会跳过构建，因此必须使用 client 阶段同时产出 Node 与浏览器端文件。
+两个 Dockerfile 都复制最新 `src`/`lib`。无需调整运行 `.env`。
+
+在已有编译工作区中执行验证（`DSH_ROOT` 指向该工作区）：
+
+```bash
+node --test middleware/byclaw-harness/scripts/startup-client-patch.test.mjs
+node middleware/byclaw-harness/scripts/startup-client-modules-verify.mjs
+```
+
+原版与候选都可附加 `--oracle` 输出脱敏夹具的四代 JS/map 摘要，用于字节等价对照；
+该模式不执行性能计数断言，正常验证必须再运行不带此参数的命令。
+[完整结果及 ACS 验收边界](docs/startup-2026-10-22/client-composition-report.md)。
