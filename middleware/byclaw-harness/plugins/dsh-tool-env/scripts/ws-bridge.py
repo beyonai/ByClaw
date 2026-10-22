@@ -7,8 +7,16 @@ Started by tool-env-sshd.sh when BYCLAW_TOOL_ENV_WS_PORT is set. Needs the
 `websockets` package (Debian: python3-websockets)."""
 import argparse
 import asyncio
+from http import HTTPStatus
 
 import websockets
+
+
+def process_request(connection, request):
+    """Plain HTTP (ingress health checks, A's readiness probe) gets 200; WebSocket upgrades proceed."""
+    if request.headers.get("Upgrade", "").lower() != "websocket":
+        return connection.respond(HTTPStatus.OK, "byclaw-tool-env bridge\n")
+    return None
 
 
 async def handle(ws):
@@ -36,7 +44,7 @@ async def handle(ws):
 
 
 async def main(listen: int):
-    async with websockets.serve(handle, '0.0.0.0', listen, max_size=None, ping_interval=20):
+    async with websockets.serve(handle, '0.0.0.0', listen, max_size=None, ping_interval=20, process_request=process_request):
         await asyncio.Future()
 
 

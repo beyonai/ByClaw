@@ -9,6 +9,10 @@
 #                                   A's keys: A's tool-env state directory mounted
 #                                   read-only, holding `client_ed25519.pub` and
 #                                   `host_ed25519` (default /etc/byclaw-tool-env)
+#   BYCLAW_TOOL_ENV_SEED_GENERATE   `1`: when the seed directory is writable and
+#                                   holds no keys yet, create both pairs there
+#                                   (A reads the same shared directory, so it
+#                                   picks them up); unset = keys must exist
 #   BYCLAW_TOOL_ENV_PORT            listen port (default 22)
 #   BYCLAW_TOOL_ENV_WS_PORT         also serve a WebSocket bridge to sshd on this port
 #                                   (scripts/ws-bridge.py), for runtimes behind an HTTP
@@ -20,6 +24,14 @@
 set -eu
 
 seed_dir="${BYCLAW_TOOL_ENV_SEED_DIR:-/etc/byclaw-tool-env}"
+if [ "${BYCLAW_TOOL_ENV_SEED_GENERATE:-}" = 1 ]; then
+    mkdir -p "${seed_dir}" && chmod 700 "${seed_dir}"
+    # Each pair only when neither the environment nor the seed directory provides it.
+    [ -n "${BYCLAW_TOOL_ENV_HOST_KEY:-}" ] || [ -s "${seed_dir}/host_ed25519" ] \
+        || ssh-keygen -q -t ed25519 -N '' -C byclaw-tool-env -f "${seed_dir}/host_ed25519"
+    [ -n "${BYCLAW_TOOL_ENV_AUTHORIZED_KEY:-}" ] || [ -s "${seed_dir}/client_ed25519" ] \
+        || ssh-keygen -q -t ed25519 -N '' -C byclaw-tool-env -f "${seed_dir}/client_ed25519"
+fi
 if [ -z "${BYCLAW_TOOL_ENV_AUTHORIZED_KEY:-}" ] && [ -r "${seed_dir}/client_ed25519.pub" ]; then
     BYCLAW_TOOL_ENV_AUTHORIZED_KEY="$(cat "${seed_dir}/client_ed25519.pub")"
 fi
@@ -35,6 +47,9 @@ sshd="${BYCLAW_TOOL_ENV_SSHD:-/usr/sbin/sshd}"
 ws_port="${BYCLAW_TOOL_ENV_WS_PORT:-}"
 ws_bridge="${BYCLAW_TOOL_ENV_WS_BRIDGE:-/usr/local/bin/byclaw-tool-env-ws-bridge}"
 
+# Startup diagnostics for runtimes that inject configuration in unexpected ways: variable names only.
+echo "byclaw-tool-env: sshd port ${port}, ws port ${ws_port:-off}, seed dir ${seed_dir}; env: $(env | cut -d= -f1 | grep -E '^BYCLAW_|^ENVD|^USER_CODE' | sort | tr '\n' ' ')" >&2
+[ -d /mnt/envd ] && echo "byclaw-tool-env: /mnt/envd: $(ls -A /mnt/envd 2>/dev/null | tr '\n' ' ')" >&2
 umask 077
 mkdir -p "${run_dir}" /run/sshd
 chmod 0755 "${run_dir}" /run/sshd
