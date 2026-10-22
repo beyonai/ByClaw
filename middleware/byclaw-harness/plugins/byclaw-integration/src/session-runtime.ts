@@ -1708,7 +1708,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     await releaseColdRecoveryBlockingTurn(blockingTurn === undefined ? undefined : {
       rootMessageId: blockingTurn.rootMessageId,
       setStreamFinished: finished => blockingTurn.context.setStreamFinished(finished),
-    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'))
+    }, messageId => this.cancel(messageId, 'Superseded by durable ask_user_question cold recovery'), context)
+    // The reclaimed ASK and RESUME share the same message identity in Gateway.
+    // Re-open the RESUME stream before running the reconstructed turn; resetting
+    // it in Worker after resume() returns is too late because all deltas have
+    // already been forwarded by then.
+    this.ctx.logger.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] RECONSTRUCT_STREAM_OPEN session=${command.header.sessionId} message=${command.header.messageId}`,
+    )
     const record = await this.options.interactionStore.consume(
       recoveredInteractionId,
       normalizeByClawSessionId(command.header.sessionId),

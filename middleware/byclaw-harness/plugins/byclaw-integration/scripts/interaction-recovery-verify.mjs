@@ -31,11 +31,14 @@ const releaseEvents = []
 assert.equal(await releaseColdRecoveryBlockingTurn({
   rootMessageId: 'message-1',
   setStreamFinished(value) { releaseEvents.push(['stream', value]) },
-}, async messageId => { releaseEvents.push(['cancel', messageId]) }), true)
-assert.deepEqual(releaseEvents, [['stream', true], ['cancel', 'message-1']])
+}, async messageId => { releaseEvents.push(['cancel', messageId]) }, {
+  setStreamFinished(value) { releaseEvents.push(['resume-stream', value]) },
+}), true)
+assert.deepEqual(releaseEvents, [['stream', true], ['cancel', 'message-1'], ['resume-stream', false]])
 assert.equal(await releaseColdRecoveryBlockingTurn(undefined, async () => {
   throw new Error('missing blocking turn must not be cancelled')
-}), false)
+}, { setStreamFinished(value) { releaseEvents.push(['resume-without-blocker', value]) } }), false)
+assert.deepEqual(releaseEvents.at(-1), ['resume-without-blocker', false])
 
 class FakeRedis {
   strings = new Map()

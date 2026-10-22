@@ -51,6 +51,7 @@ export class ByClawDshCommandHandler {
       // its terminal event. Cold recovery runs the reconstructed turn inside this
       // request, so GatewayWorker must still emit APP_STREAM_RESPONSE for it.
       if (recovered === undefined) context.setStreamFinished(true)
+      else context.setStreamFinished(false)
       return new AgentTaskResult({
         status: AgentState.COMPLETED,
         content: recovered?.finalAnswer ?? '',

@@ -773,7 +773,9 @@ await handler.process(new ResumeCommand(header, 'B', 'RESUMED', null, {
 }), resumeContext)
 if (calls[1]?.kind !== 'resume' || resumeContext.finished !== true) throw new Error('Resume was not correlated to DSH ask_user')
 
-const coldResumeContext = { sessionId: 'external-session', finished: false, setStreamFinished(value) { this.finished = value } }
+// The reclaimed ASK can leave the shared message stream marked finished before
+// the reconstructed RESUME returns its result. Cold recovery must clear it.
+const coldResumeContext = { sessionId: 'external-session', finished: true, setStreamFinished(value) { this.finished = value } }
 const recoveredHandler = new ByClawDshCommandHandler({
   async ask() { throw new Error('recovered Resume must not enter the handler Ask branch') },
   async resume(_command, context) {
