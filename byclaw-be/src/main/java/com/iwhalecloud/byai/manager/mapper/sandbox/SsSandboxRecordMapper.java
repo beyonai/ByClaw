@@ -259,6 +259,16 @@ public interface SsSandboxRecordMapper {
 
     SsSandboxRecord selectLatestBySandboxIdAnyUser(@Param("sandboxId") String sandboxId);
 
+    /**
+     * 根据沙箱实例ID和状态查询最新一条个人沙箱记录。
+     *
+     * @param sandboxId 沙箱实例ID
+     * @param status 沙箱状态
+     * @return 沙箱记录
+     */
+    SsSandboxRecord selectBySandboxIdAndStatus(@Param("sandboxId") String sandboxId,
+                                               @Param("status") String status);
+
     int updateAutoRelease(@Param("id") Long id,
                           @Param("autoRelease") Integer autoRelease,
                           @Param("lockVersion") Integer lockVersion);

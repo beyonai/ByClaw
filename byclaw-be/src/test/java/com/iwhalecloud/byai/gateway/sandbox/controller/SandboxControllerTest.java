@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.Date;
@@ -262,6 +263,59 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         assertThat(controller.removeSandboxById(Map.of("id", 7L)).getCode()).isEqualTo(ResponseUtil.SUCCESS);
         verify(service).updateSandboxById(7L, 1);
         verify(service).removeSandboxById(7L);
+        verify(service, never()).findRecordIdBySandboxIdAndStatus(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void removeSandboxById_prefersRecordIdWhenSandboxIdIsAlsoPresent() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(mapper.countEnterpriseUserSandbox(7L, 123L)).thenReturn(1);
+
+        assertThat(controller.removeSandboxById(Map.of("id", 7L, "sandboxId", "sandbox-other")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(service).removeSandboxById(7L);
+        verify(service, never()).findRecordIdBySandboxIdAndStatus(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void removeSandboxById_resolvesRunningRecordFromSandboxId() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(service.findRecordIdBySandboxIdAndStatus("sandbox-9", "RUNNING")).thenReturn(9L);
+        when(mapper.countEnterpriseUserSandbox(9L, 123L)).thenReturn(1);
+
+        assertThat(controller.removeSandboxById(Map.of("sandboxId", "sandbox-9")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(service).removeSandboxById(9L);
+    }
+
+    @Test
+    void removeSandboxById_requiresIdOrSandboxIdAndRejectsUnknownRunningSandbox() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+
+        assertThat(controller.removeSandboxById(Map.of()).getMsg()).isEqualTo("id or sandboxId is required");
+        assertThat(controller.removeSandboxById(Map.of("id", "abc", "sandboxId", "sandbox-9")).getMsg())
+            .isEqualTo("id must be a valid number");
+        when(service.findRecordIdBySandboxIdAndStatus("missing", "RUNNING")).thenReturn(null);
+        assertThat(controller.removeSandboxById(Map.of("sandboxId", "missing")).getMsg())
+            .isEqualTo("running sandbox record not found");
+        verify(service, never()).removeSandboxById(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

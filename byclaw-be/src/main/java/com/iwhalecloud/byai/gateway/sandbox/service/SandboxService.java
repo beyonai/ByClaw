@@ -1300,6 +1300,18 @@ public class SandboxService {
         }
     }
 
+    /**
+     * 根据沙箱实例ID和状态反查个人沙箱记录ID。
+     *
+     * @param sandboxId 沙箱实例ID
+     * @param status 沙箱状态
+     * @return 记录ID，未命中时返回 null
+     */
+    public Long findRecordIdBySandboxIdAndStatus(String sandboxId, String status) {
+        SsSandboxRecord record = sandboxRecordMapper.selectBySandboxIdAndStatus(sandboxId, status);
+        return record == null ? null : record.getId();
+    }
+
     public void removeSandboxById(Long id) {
         if (platformRemote()) { platformGateway().service("remove-id",platformGateway().params("id",id));return; }
         if (id == null) {

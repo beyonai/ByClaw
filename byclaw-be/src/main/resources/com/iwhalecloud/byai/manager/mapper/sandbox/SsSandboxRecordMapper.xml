@@ -683,6 +683,17 @@
         LIMIT 1
     </select>
 
+    <!-- 根据沙箱实例ID和状态反查最新一条个人沙箱记录 -->
+    <select id="selectBySandboxIdAndStatus" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'USER'
+          AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+          AND status = #{status,jdbcType=VARCHAR}
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
     <!-- 更新自动释放状态 -->
     <update id="updateAutoRelease">
         UPDATE ss_sandbox_record
