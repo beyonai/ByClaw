@@ -1,10 +1,12 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.UUID;
@@ -66,8 +68,6 @@ class GroupChatWelcomePersistenceTest {
     void migrationSkipsExistingMembersAndLeavesFutureMembersEligible(String script) throws Exception {
         applyWelcomeMigration(script);
         insertMember(41L, "USER", 20L);
-        // 重复应用欢迎字段迁移不能把迁移后加入的新成员误标为历史成员。
-        applyWelcomeMigration(script);
 
         assertThat(claim(40L, 30L, 21L)).isZero();
         assertThat(claim(41L, 30L, 20L)).isEqualTo(1);
@@ -81,6 +81,21 @@ class GroupChatWelcomePersistenceTest {
                 assertThat(result.getTimestamp("last_read_time").toLocalDateTime().getYear()).isEqualTo(2020);
             }
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"V0.6.0__ddl.sql", "tenant/V0.6.0__ddl.sql"})
+    void repeatedMigrationFailsWithoutConsumingNewMemberEligibility(String script) throws Exception {
+        applyWelcomeMigration(script);
+        insertMember(41L, "USER", 20L);
+
+        // 版本升级器负责跳过已提交版本；手工重放应在重复加列时失败，不能重新回填成员资格。
+        assertThatThrownBy(() -> applyWelcomeMigration(script)).isInstanceOf(SQLException.class);
+        insertMember(42L, "USER", 22L);
+
+        assertThat(claim(40L, 30L, 21L)).isZero();
+        assertThat(claim(41L, 30L, 20L)).isEqualTo(1);
+        assertThat(claim(42L, 30L, 22L)).isEqualTo(1);
     }
 
     @Test
