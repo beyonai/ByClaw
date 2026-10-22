@@ -8,15 +8,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.DirectSessionCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatNicknameRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatRecallUndoRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /** 群管理适配：持久化交给 Node，BE 保留停任务和成员事件推送。 */
 @Service
+@Slf4j
 public class TenantGroupManagementService {
     private final TenantGroupData data;
     private final ObjectMapper mapper;
@@ -81,6 +84,13 @@ public class TenantGroupManagementService {
                     "RECALL_MESSAGE", Map.of("messageId", messageId));
                 event = "MESSAGE_RECALLED";
             }
+            case "undoRecall" -> {
+                String messageId = args[1].toString();
+                result = data.write(tenant, "POST", "/messages/" + messageId + "/recall/undo", id,
+                    "UNDO_RECALL_MESSAGE", Map.of("messageId", messageId,
+                        "recalledAt", ((GroupChatRecallUndoRequest) args[2]).getRecalledAt()));
+                event = "MESSAGE_RECALL_UNDONE";
+            }
             case "directSession" -> {
                 return data.write(tenant, "POST", "/direct-sessions", id, "CREATE_DIRECT_SESSION",
                     Map.of("agentId", ((DirectSessionCreateRequest) args[1]).getAgentId().toString())).data();
@@ -106,8 +116,19 @@ public class TenantGroupManagementService {
         }
         if ("transferOwnership".equals(method)) notification.put("recipientUserId",
             ((GroupChatTransferOwnershipRequest) args[1]).getUserId().toString());
-        events.publishTenantMembers(tenant, notification, mapper.convertValue(before.path("members"), List.class));
+        // 重复恢复只返回成功状态，不重复广播；命令事务提交后才会走到此处。
+        if (!"undoRecall".equals(method) || result.data().path("changed").asBoolean()) {
+            try {
+                events.publishTenantMembers(tenant, notification, mapper.convertValue(before.path("members"), List.class));
+            }
+            catch (RuntimeException error) {
+                if (!"undoRecall".equals(method)) throw error;
+                // Node 已提交恢复，通知失败由客户端重新查询校准，不能把成功写入报告成失败。
+                log.warn("租户群消息恢复已提交但广播失败, sessionId={}, messageId={}", id,
+                    notification.getString("messageId"), error);
+            }
+        }
         if ("nickname".equals(method)) return result.data();
-        return "recall".equals(method) ? notification : null;
+        return "recall".equals(method) || "undoRecall".equals(method) ? notification : null;
     }
 }

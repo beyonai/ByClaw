@@ -71,6 +71,11 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
     }
 
     @Override
+    public boolean isForeignSandbox(String sandboxId) {
+        return runtimeProvider.isForeignSandbox(sandboxId);
+    }
+
+    @Override
     public SandboxResponse<SandboxLaunchData> launchSandbox(SandboxLaunchRequest request) {
         try {
             log.info("生命周期服务开始启动沙箱，provider={}，user={}，type={}",

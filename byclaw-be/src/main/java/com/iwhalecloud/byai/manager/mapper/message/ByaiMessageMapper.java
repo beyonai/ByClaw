@@ -34,6 +34,11 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
     int recallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
         @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt);
 
+    /** 原撤回身份、时间和有效窗口必须同时匹配，避免竞争更新恢复了错误的一次撤回。 */
+    int undoRecallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
+        @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt,
+        @Param("now") Date now, @Param("earliest") Date earliest, @Param("metadata") String metadata);
+
     Long selectLatestMessageId(@Param("sessionId") Long sessionId);
 
     /**

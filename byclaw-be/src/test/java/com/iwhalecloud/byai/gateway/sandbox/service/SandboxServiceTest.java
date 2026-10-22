@@ -625,6 +625,7 @@ class SandboxServiceTest extends I18nTestSupport {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", mock(SandboxLifecycleFacade.class));
 
         LoginInfo operator = new LoginInfo();
         operator.setUserCode("operator001");

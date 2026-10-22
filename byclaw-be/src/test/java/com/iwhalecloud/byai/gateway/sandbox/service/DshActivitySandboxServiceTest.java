@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
@@ -273,7 +274,8 @@ class DshActivitySandboxServiceTest extends I18nTestSupport {
         reported(activity("busy", 91_000L, 2));
         service.renewDueSandboxes();
 
-        verifyNoInteractions(lifecycle);
+        verify(lifecycle, times(3)).isForeignSandbox(record.getSandboxId());
+        verifyNoMoreInteractions(lifecycle);
     }
 
     @Test
@@ -404,7 +406,9 @@ class DshActivitySandboxServiceTest extends I18nTestSupport {
         service.cleanupExpiredSandboxes();
 
         verify(mapper).markReleasing(eq(7L), eq("release.auto.idle-timeout"), any(Date.class), anyInt());
-        verifyNoInteractions(store, listener, lifecycle);
+        verify(lifecycle, times(3)).isForeignSandbox(record.getSandboxId());
+        verifyNoMoreInteractions(lifecycle);
+        verifyNoInteractions(store, listener);
     }
 
     private SsSandboxRecord dshRecord(long createdAgoMillis) {

@@ -6,7 +6,13 @@ import type { SqlSession } from "../../application/database-ports.js";
 import { CommandContext } from "./command-context.js";
 import { first } from "./sql-utils.js";
 import { joinGroup } from "./group-join.js";
-import { createSession, changeSession, readState, recallMessage } from "./session-writer.js";
+import {
+  createSession,
+  changeSession,
+  readState,
+  recallMessage,
+  undoRecallMessage,
+} from "./session-writer.js";
 import { addMembers, removeMember, changeRole, groupSettings } from "./member-writer.js";
 import { publishTask } from "./task-publication.js";
 import { createTask, changeTask, claimTask } from "./task-writer.js";
@@ -50,6 +56,7 @@ const handlers = {
   SAVE_PENDING_PUBLICATION: changeTask,
   DELETE_PENDING_PUBLICATION: changeTask,
   RECALL_MESSAGE: recallMessage,
+  UNDO_RECALL_MESSAGE: undoRecallMessage,
   SEND_GROUP_MESSAGE: sendGroupMessage,
   UPDATE_FEEDBACK: updateFeedback,
   UPDATE_MESSAGE_STRUCTURE: updateMessageStructure,

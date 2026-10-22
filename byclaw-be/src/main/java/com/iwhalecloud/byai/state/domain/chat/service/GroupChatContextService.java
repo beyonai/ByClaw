@@ -144,6 +144,16 @@ public class GroupChatContextService {
         ordered.replaceAll(projection::display);
         boolean characterTruncated = trimToCharacterLimit(ordered, maxCharacters);
         List<GroupChatContextResponse.Message> messages = toMessages(ordered, null, projection);
+        if (characterTruncated && messages.size() == 1) {
+            GroupChatContextResponse.Message message = messages.get(0);
+            String content = message.getContent();
+            if (content.length() > maxCharacters) {
+                // 只裁剪安全投影后的响应正文，保留原始消息 ID 供下一页继续读取更早历史。
+                String notice = message.isRecalled() ? "" : "…（消息过长，已截断预览）";
+                message.setContent(content.substring(0, Math.max(0, maxCharacters - notice.length()))
+                    + notice.substring(0, Math.min(maxCharacters, notice.length())));
+            }
+        }
         if (!timeline) {
             // 引用独立查询，不能绕过 Agent 主查询的系统事件排除规则。
             messages.forEach(message -> {
@@ -167,7 +177,7 @@ public class GroupChatContextService {
 
         int omitted = Math.max(0, Math.toIntExact(Math.min(Integer.MAX_VALUE, totalCount - messages.size())));
         GroupChatContextResponse.Truncation truncation = new GroupChatContextResponse.Truncation();
-        truncation.setTruncated(omitted > 0);
+        truncation.setTruncated(omitted > 0 || characterTruncated);
         truncation.setOmittedMessageCount(omitted);
         if (characterTruncated) {
             truncation.setReason("character_limit");
@@ -227,12 +237,13 @@ public class GroupChatContextService {
             .mapToInt(String::length)
             .sum();
         boolean truncated = false;
-        while (!ordered.isEmpty() && characters > maxCharacters) {
+        // 最新消息单独超限时仍保留身份，正文在响应投影后裁剪，避免历史翻页丢失游标。
+        while (ordered.size() > 1 && characters > maxCharacters) {
             ByaiMessage removed = ordered.remove(0);
             characters -= StringUtils.defaultString(removed.getMessageContent()).length();
             truncated = true;
         }
-        return truncated;
+        return truncated || characters > maxCharacters;
     }
 
     /** 将已鉴权的公开群消息转换为统一的前端消息协议。 */

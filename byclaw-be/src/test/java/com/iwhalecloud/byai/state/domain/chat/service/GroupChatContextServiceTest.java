@@ -20,6 +20,9 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
@@ -529,6 +532,152 @@ class GroupChatContextServiceTest extends I18nTestSupport {
         assertThat(agent.getMessages()).singleElement().satisfies(message -> assertThat(message.getReplyTo()).isNull());
         assertThat(agent.getTruncation().getTruncated()).isFalse();
         assertThat(agent.getSnapshot().getLastIncludedMessageId()).isEqualTo("25");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "1, 0, …",
+        "3, 0, …（消",
+        "13, 0, …（消息过长，已截断预览）",
+        "14, 1, …（消息过长，已截断预览）",
+        "20000, 19987, …（消息过长，已截断预览）"
+    })
+    void oversizedOnlyMessageRetainsIdentityAndBoundedPreviewWithoutChangingSource(
+        int budget, int retainedCharacters, String ending) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(25000), 100L);
+        source.setTopicId(90L);
+        source.setMetadata("{\"clientRequestId\":\"request-100\"}");
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", budget));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.getTopicId()).isEqualTo("90");
+            assertThat(item.getClientRequestId()).isEqualTo("request-100");
+            assertThat(item.getContent()).isEqualTo("x".repeat(retainedCharacters) + ending);
+            assertThat(item.getContent()).hasSize(budget);
+        });
+        assertThat(response.getSnapshot().getLastIncludedMessageId()).isEqualTo("100");
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+        assertThat(response.getTruncation().getReason()).isEqualTo("character_limit");
+        assertThat(response.getTruncation().getOmittedMessageCount()).isZero();
+        assertThat(source.getMessageContent()).isEqualTo("x".repeat(25000));
+    }
+
+    @Test
+    void oversizedMessagesAllowPagingThroughEveryOlderMessageWithoutGapsOrRepeats() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage latest = message(100L, 1, "x".repeat(25000), 100L);
+        ByaiMessage middle = message(99L, 1, "y".repeat(25000), 99L);
+        ByaiMessage oldest = message(98L, 1, "older", 98L);
+        when(messageMapper.selectLatestMessageId(3L)).thenReturn(100L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(latest, middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(3L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 100L, 50)).thenReturn(List.of(middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 100L)).thenReturn(2L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 99L, 50)).thenReturn(List.of(oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 99L)).thenReturn(1L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 98L, 50)).thenReturn(List.of());
+
+        var first = service.loadTimeline(contextRequest(null, 20000));
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("100");
+        assertThat(first.getTruncation().getOmittedMessageCount()).isEqualTo(2);
+        // 前端把本页最早消息 ID 作为排他游标，下一页从被字符预算挡住的消息继续。
+        var second = service.loadTimeline(contextRequest(first.getMessages().get(0).getMessageId(), 20000));
+        assertThat(second.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("99");
+        assertThat(second.getTruncation().getOmittedMessageCount()).isEqualTo(1);
+        var third = service.loadTimeline(contextRequest(second.getMessages().get(0).getMessageId(), 20000));
+        assertThat(third.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("98");
+        assertThat(third.getTruncation().getTruncated()).isFalse();
+        assertThat(service.loadTimeline(contextRequest(third.getMessages().get(0).getMessageId(), 20000)).getMessages())
+            .isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {19999, 20000})
+    void messageWithinCharacterBudgetIsReturnedUnchanged(int length) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(length), 100L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", 20000));
+
+        assertThat(response.getMessages()).singleElement()
+            .satisfies(item -> assertThat(item.getContent()).isEqualTo(source.getMessageContent()));
+        assertThat(response.getTruncation().getTruncated()).isFalse();
+        assertThat(response.getTruncation().getReason()).isNull();
+    }
+
+    @Test
+    void characterBudgetKeepsRecentWholeMessagesAndPagesFromTheOldestReturnedId() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage latest = message(30L, 1, "newer", 30L);
+        ByaiMessage middle = message(20L, 1, "older", 20L);
+        ByaiMessage oldest = message(10L, 1, "x", 10L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 40L, 50)).thenReturn(List.of(latest, middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 40L)).thenReturn(3L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 20L, 50)).thenReturn(List.of(oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 20L)).thenReturn(1L);
+
+        var first = service.loadTimeline(contextRequest("40", 10));
+
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("20", "30");
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getContent).containsExactly("older", "newer");
+        assertThat(first.getSnapshot().getLastIncludedMessageId()).isEqualTo("30");
+        assertThat(first.getTruncation().getReason()).isEqualTo("character_limit");
+        var second = service.loadTimeline(contextRequest(first.getMessages().get(0).getMessageId(), 10));
+        assertThat(second.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("10");
+        assertThat(second.getTruncation().getTruncated()).isFalse();
+    }
+
+    @Test
+    void tinyCharacterBudgetKeepsRecalledIdentityWithoutExposingOriginalContent() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "secret".repeat(5000), 100L);
+        source.setRecalledAt(new Date());
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", 3));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.isRecalled()).isTrue();
+            assertThat(item.getContent()).hasSizeLessThanOrEqualTo(3).doesNotContain("secret");
+            assertThat(item.getAttachments()).isEmpty();
+        });
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+        assertThat(source.getMessageContent()).isEqualTo("secret".repeat(5000));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {20001, 25000})
+    void agentContextAlsoKeepsOversizedMessageIdentityAndPreview(int length) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(length), 100L);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countVisibleBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.load(contextRequest("101", 20000));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.getContent()).hasSize(20000).endsWith("…（消息过长，已截断预览）");
+        });
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+    }
+
+    private GroupChatContextRequest contextRequest(String beforeMessageId, int maxCharacters) {
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId(beforeMessageId);
+        request.setMaxMessages(50);
+        request.setMaxCharacters(maxCharacters);
+        return request;
     }
 
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {
