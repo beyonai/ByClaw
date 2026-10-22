@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageRecallService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatRecallUndoRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -81,6 +84,13 @@ public class GroupChatController {
         return ResponseUtil.successResponse(recallService.recall(sessionId, messageId));
     }
 
+    /** 撤回人可在两分钟内恢复原消息展示，不恢复已取消的执行和任务。 */
+    @PostMapping("/{sessionId}/messages/{messageId}/recall/undo")
+    public ResponseUtil<JSONObject> undoRecall(@PathVariable Long sessionId, @PathVariable Long messageId,
+        @Valid @RequestBody GroupChatRecallUndoRequest request) {
+        return ResponseUtil.successResponse(recallService.undoRecall(sessionId, messageId, request.getRecalledAt()));
+    }
+
     @GetMapping("/default-assistant")
     public ResponseUtil<List<GroupWorkAssistantResponse>> defaultAssistant() {
         return ResponseUtil.successResponse(groupWorkAssistantService.getDefaultAssistants());
@@ -106,7 +116,7 @@ public class GroupChatController {
     @PostMapping("/{sessionId}/messages/{messageId}/ack")
     public ResponseUtil<com.alibaba.fastjson.JSONObject> acknowledge(
         @PathVariable Long sessionId, @PathVariable Long messageId) {
-        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        if (ackService == null) throw new IllegalStateException(I18nUtil.get("groupchat.ack.unavailable"));
         return ResponseUtil.successResponse(ackService.acknowledge(sessionId, messageId));
     }
 
@@ -114,7 +124,7 @@ public class GroupChatController {
     @DeleteMapping("/{sessionId}/messages/{messageId}/ack")
     public ResponseUtil<com.alibaba.fastjson.JSONObject> unacknowledge(
         @PathVariable Long sessionId, @PathVariable Long messageId) {
-        if (ackService == null) throw new IllegalStateException("Group message acknowledgement is unavailable");
+        if (ackService == null) throw new IllegalStateException(I18nUtil.get("groupchat.ack.unavailable"));
         return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 

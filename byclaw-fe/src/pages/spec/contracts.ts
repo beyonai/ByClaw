@@ -1,3 +1,11 @@
+import {
+  E2E_RESULT_DIR_TREE_EN,
+  E2E_STATUS_JSON_EN,
+  E2E_SCRIPT_SKELETON_EN,
+  E2E_SUITE_CONTRACT_EN,
+  E2E_STATUS_ENUM_EN,
+} from './contractExamples.en-US';
+
 // 集成测试契约常量:平台按此约定读结果,脚本/用例集按此约定写产物。
 // 规范页与「新增用例集 / 关联环境」弹框共用这一份,避免两处文案漂移。
 // 端到端测试"结果目录与状态"契约:展示给写脚本的人看,平台按此约定读状态,脚本按此约定写状态。
@@ -113,3 +121,15 @@ export const E2E_SUITE_HARD_RULES = ['report', 'exitCode', 'artifact'] as const;
 // 编排层同理:原子写、failed 与 error 分开、异常也要留终态。
 // key 用于 i18n:projectSpace.detail.integration.spec.rule.<key>
 export const E2E_RUN_HARD_RULES = ['atomic', 'failedVsError', 'terminal'] as const;
+
+/** 示例含原始 JSON/Shell 花括号，不经过 ICU 插值；每次渲染按当前语言选择。 */
+export const getE2eContractExamples = (locale: string) => {
+  const english = locale.toLowerCase().startsWith('en');
+  return {
+    resultDirTree: english ? E2E_RESULT_DIR_TREE_EN : E2E_RESULT_DIR_TREE,
+    statusJson: english ? E2E_STATUS_JSON_EN : E2E_STATUS_JSON,
+    scriptSkeleton: english ? E2E_SCRIPT_SKELETON_EN : E2E_SCRIPT_SKELETON,
+    suiteContract: english ? E2E_SUITE_CONTRACT_EN : E2E_SUITE_CONTRACT,
+    statuses: english ? E2E_STATUS_ENUM_EN : E2E_STATUS_ENUM,
+  };
+};

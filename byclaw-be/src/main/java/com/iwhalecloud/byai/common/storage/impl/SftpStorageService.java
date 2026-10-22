@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -61,7 +62,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     @Override
     public FileMetadata put(StorageLocation location, InputStream inputStream, long size, String contentType) {
         if (inputStream == null) {
-            throw new IllegalArgumentException("SFTP upload input stream cannot be null");
+            throw new IllegalArgumentException(I18nUtil.get("storage.sftp.inputRequired"));
         }
         String remotePath = resolveObjectPath(location);
         ChannelSftp channelSftp = null;
@@ -88,7 +89,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
             logger.error("SFTP对象写入失败, bucketName={}, objectKey={}, remotePath={}",
                 location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
                 remotePath, e);
-            throw new BaseException("SFTP对象写入失败: " + remotePath, e);
+            throw new BaseException(I18nUtil.get("storage.sftp.writeFailed", remotePath), e);
         }
         finally {
             closeSftp(session, channelSftp);
@@ -127,7 +128,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
             logger.error("SFTP对象读取失败, bucketName={}, objectKey={}, remotePath={}",
                 location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
                 remotePath, e);
-            throw new BaseException("SFTP对象读取失败: " + remotePath, e);
+            throw new BaseException(I18nUtil.get("storage.sftp.readFailed", remotePath), e);
         }
     }
 
@@ -146,10 +147,10 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
             if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
                 return false;
             }
-            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+            throw new BaseException(I18nUtil.get("storage.sftp.lookupFailed", remotePath), e);
         }
         catch (Exception e) {
-            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+            throw new BaseException(I18nUtil.get("storage.sftp.lookupFailed", remotePath), e);
         }
         finally {
             closeSftp(session, channelSftp);
@@ -170,11 +171,11 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
         }
         catch (SftpException e) {
             if (e.id != ChannelSftp.SSH_FX_NO_SUCH_FILE) {
-                throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+                throw new BaseException(I18nUtil.get("storage.sftp.deleteFailed", remotePath), e);
             }
         }
         catch (Exception e) {
-            throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+            throw new BaseException(I18nUtil.get("storage.sftp.deleteFailed", remotePath), e);
         }
         finally {
             closeSftp(session, channelSftp);
@@ -356,11 +357,11 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
 
     private String resolveObjectPath(StorageLocation location) {
         if (location == null || StringUtils.isBlank(location.getBucketOrRoot())) {
-            throw new IllegalArgumentException("SFTP storage location bucket cannot be empty");
+            throw new IllegalArgumentException(I18nUtil.get("storage.sftp.bucketRequired"));
         }
         String root = stripTrailingSlashes(ftpConfig.getPath());
         if (StringUtils.isBlank(root)) {
-            throw new IllegalStateException("SFTP storage root is not configured");
+            throw new IllegalStateException(I18nUtil.get("storage.sftp.rootRequired"));
         }
         String bucketName = normalizeSafeRelativePath(location.getBucketOrRoot());
         String objectKey = normalizeSafeRelativePath(location.getPath());
@@ -376,11 +377,11 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         if (StringUtils.isBlank(normalized)) {
-            throw new IllegalArgumentException("SFTP storage path cannot be empty");
+            throw new IllegalArgumentException(I18nUtil.get("storage.sftp.pathRequired"));
         }
         for (String segment : normalized.split("/")) {
             if (StringUtils.isBlank(segment) || ".".equals(segment) || "..".equals(segment)) {
-                throw new IllegalArgumentException("SFTP storage path contains invalid segment");
+                throw new IllegalArgumentException(I18nUtil.get("storage.sftp.pathInvalid"));
             }
         }
         return normalized;
@@ -389,7 +390,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     private static String parentDirectory(String path) {
         int index = path.lastIndexOf('/');
         if (index <= 0) {
-            throw new IllegalArgumentException("SFTP target path must contain a parent directory");
+            throw new IllegalArgumentException(I18nUtil.get("storage.sftp.parentRequired"));
         }
         return path.substring(0, index);
     }

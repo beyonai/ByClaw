@@ -486,6 +486,30 @@ AgentTeams 子 Agent 或待响应交互会继续保持 busy。插件在忙闲切
 此修复需要同时更新 DSH 插件和后端，只有 Worker 注册心跳无法替代沙箱忙闲心跳。
 子任务结束后停止续活跃时间，沙箱按原有空闲超时规则释放；OpenClaw 心跳协议保持兼容。
 
+### DSH 活动 Stream 释放
+
+DSH 的 `plugins/dsh-idle-reporter` 插件每 30 秒及状态变化时向 `byclaw:dsh:sandbox:activity` 追加
+`busy | releasable` 快照（`sandboxId` 为 `BYAI_WORKER_ID`，即 `byclaw-dsh-<userCode>`，并带 `userCode`）。
+后端以消费者组 `byclaw_dsh_activity_group` 消费，按 workerId 把最新状态和记录时间（取 Stream ID 的毫秒部分，
+即 Redis 服务器时钟，多实例之间不受后端时钟偏差影响）写入 Redis Hash `byclaw:sandbox:dsh-activity:state`。
+只有在沙箱记录创建之后收到的上报才属于该记录，沙箱释放时清理该字段。
+
+对已上报的 USER、`auto_release=1` 的 `byclaw-dsh` 沙箱：
+
+- 前端（页面 REST 心跳、WebSocket 心跳）超过 `sandbox.idle.timeout.minutes` 未活动且最新状态为 `releasable`
+  时释放，原因 `release.dsh.releasable`；最新状态为 `busy` 时不释放，并继续远端续约；
+- 超过 `byclaw.sandbox.dsh-activity.silent-seconds`（默认 120 秒，即 4 个心跳周期，与 `dsh-max-age-seconds`
+  一致）未收到上报时释放（不看前端），原因 `release.dsh.silent`；下一条消息按原唤醒流程重新拉起。
+  本实例需连续正常消费 Stream 满该时长后才执行静默判断，后端重启或 Redis 故障恢复后不会批量误释放；
+- 静默释放的两道保险：同一容器的 `…worker:stats:dsh` busy 心跳仍在一个静默阈值内到达时不释放（容器活着，只是
+  上报插件出了问题；心跳时间记在 Redis Hash `byclaw:sandbox:dsh-activity:busy-heartbeat`）；一轮静默沙箱超过
+  `byclaw.sandbox.dsh-activity.silent-max-per-round`（默认 10）时整轮跳过并告警（更可能是容器到 Redis 的上报链路
+  整体中断）。被跳过的沙箱仍按前端空闲规则释放；
+- 旧的 `…worker:stats:dsh` busy 心跳不再刷新其访问时间。
+
+从未上报的沙箱（镜像不含该插件）完全沿用上面的旧规则。`byclaw.sandbox.dsh-activity.enabled=false`
+关闭整条链路，恢复原有行为。
+
 ### 环境要求
 
 - Java 21+

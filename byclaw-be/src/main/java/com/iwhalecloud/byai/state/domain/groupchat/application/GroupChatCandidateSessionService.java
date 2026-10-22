@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 
 import org.apache.commons.lang3.StringUtils;
@@ -45,7 +48,7 @@ public class GroupChatCandidateSessionService {
         ByaiSession group = sessionService.findById(groupSessionId);
         ByaiMessage source = messageMapper.selectByMessageId(sourceMessageId);
         if (group == null || source == null) {
-            throw new IllegalArgumentException("Group message is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.message.unavailable"));
         }
         Date now = new Date();
         Long sessionId = sequenceService.nextVal();
@@ -87,7 +90,11 @@ public class GroupChatCandidateSessionService {
         // 子会话保留原文中的成员占位符，必须同时保留完整资源列表供历史消息渲染。
         JSONObject sourceMetadata = StringUtils.isBlank(source.getMetadata())
             ? null : JSON.parseObject(source.getMetadata());
-        if (sourceMetadata != null && sourceMetadata.containsKey("resourceList")) {
+        if (ForwardRuntimeProjection.isSnapshotOnly(source.getMetadata())) {
+            metadata.put("forward", ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(source.getMetadata())));
+            metadata.put("resourceList", ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(source.getMetadata())));
+        }
+        else if (sourceMetadata != null && sourceMetadata.containsKey("resourceList")) {
             metadata.put("resourceList", sourceMetadata.get("resourceList"));
         }
         childMessage.setMetadata(metadata.toJSONString());
@@ -100,7 +107,7 @@ public class GroupChatCandidateSessionService {
     public void promote(Long sessionId, String taskName) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null) {
-            throw new IllegalArgumentException("Candidate session not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.candidateSession.notFound"));
         }
         session.setState("GROUP_TASK");
         session.setSessionName(taskName);

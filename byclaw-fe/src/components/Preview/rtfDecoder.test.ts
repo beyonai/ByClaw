@@ -14,9 +14,10 @@ describe('RTF real parser and isolated static output', () => {
     );
     expect(result.body.textContent).toContain('中文');
     expect(result.body.textContent).not.toContain('\\u20013');
-    expect(result.querySelector('[style*="font-weight: bold"]')).toHaveTextContent('Bold');
-    expect(result.querySelector('[style*="font-style: italic"]')).toHaveTextContent('Italic');
-    expect(result.querySelector('[style*="text-decoration: underline"]')).toHaveTextContent('Underline');
+    // DOMParser 的独立文档没有 defaultView；直接校验文本，保留样式与内容的联合断言。
+    expect(result.querySelector('[style*="font-weight: bold"]')?.textContent).toBe('Bold');
+    expect(result.querySelector('[style*="font-style: italic"]')?.textContent).toBe('Italic');
+    expect(result.querySelector('[style*="text-decoration: underline"]')?.textContent).toBe('Underline');
   });
 
   it('decodes ANSI Chinese bytes using the declared code page', async () => {

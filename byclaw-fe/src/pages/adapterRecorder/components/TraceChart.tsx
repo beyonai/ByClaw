@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // A/B 样本的 endpoint 聚合视图：展示差异，并关联排序后的候选。
 import { Empty, Tag, theme } from 'antd';
 import type { CaptureSample, NetworkEntry, RankCandidate } from '../types/recorder';
@@ -74,6 +75,7 @@ function aggregates(sampleA?: CaptureSample, sampleB?: CaptureSample, candidates
 }
 
 export default function TraceChart({ sampleA, sampleB, candidates, selectedId }: Props) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const data = aggregates(sampleA, sampleB, candidates).sort((left, right) => {
     const leftSelected = left.candidateIds.includes(selectedId ?? '') ? 1 : 0;
@@ -90,7 +92,13 @@ export default function TraceChart({ sampleA, sampleB, candidates, selectedId }:
       left.key.localeCompare(right.key)
     );
   });
-  if (!data.length) return <Empty description="暂无 A/B 样本数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  if (!data.length)
+    return (
+      <Empty
+        description={intl.formatMessage({ id: 'adapterRecorder.trace.noSamples' })}
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -115,15 +123,29 @@ export default function TraceChart({ sampleA, sampleB, candidates, selectedId }:
               <span style={{ color: token.colorTextTertiary, fontSize: 11, whiteSpace: 'nowrap' }}>{item.host}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              <Tag color={shared ? 'blue' : undefined}>{shared ? 'A/B 均出现' : item.a.length ? '仅 A' : '仅 B'}</Tag>
-              <Tag>
-                A {item.a.length} 次 · {averageDuration(item.a)} ms
+              <Tag color={shared ? 'blue' : undefined}>
+                {shared
+                  ? intl.formatMessage({ id: 'adapterRecorder.trace.both' })
+                  : item.a.length
+                    ? intl.formatMessage({ id: 'adapterRecorder.trace.onlyA' })
+                    : intl.formatMessage({ id: 'adapterRecorder.trace.onlyB' })}
               </Tag>
               <Tag>
-                B {item.b.length} 次 · {averageDuration(item.b)} ms
+                A {item.a.length}
+                {intl.formatMessage({ id: 'adapterRecorder.trace.callsSeparator' })}
+                {averageDuration(item.a)} ms
               </Tag>
-              {item.candidateIds.length > 0 && <Tag color="purple">候选</Tag>}
-              {isSelected && <Tag color="green">已选定</Tag>}
+              <Tag>
+                B {item.b.length}
+                {intl.formatMessage({ id: 'adapterRecorder.trace.callsSeparator' })}
+                {averageDuration(item.b)} ms
+              </Tag>
+              {item.candidateIds.length > 0 && (
+                <Tag color="purple">{intl.formatMessage({ id: 'adapterRecorder.candidate.label' })}</Tag>
+              )}
+              {isSelected && (
+                <Tag color="green">{intl.formatMessage({ id: 'adapterRecorder.candidate.selected' })}</Tag>
+              )}
             </div>
           </div>
         );

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import java.util.List;
@@ -17,7 +19,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class PhoneAccountRegistrationServiceTest {
+class PhoneAccountRegistrationServiceTest extends I18nTestSupport {
 
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final UserService users = mock(UserService.class);

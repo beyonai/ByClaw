@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
@@ -28,12 +29,12 @@ public class WorkgroupNameService {
         if (tenant != null && !RuntimeEnvironment.isDevelopment()) {
             if (!Long.valueOf(tenant.userId()).equals(creatorId)
                 || !Long.valueOf(tenant.enterpriseId()).equals(enterpriseId)) {
-                throw new IllegalArgumentException("Workgroup name scope does not match tenant context");
+                throw new IllegalArgumentException(I18nUtil.get("workgroup.name.scopeMismatch"));
             }
             NameCheck result = node.request(tenant, "POST", "/internal/v1/group-chats/name-check",
                 Map.of("name", name), new TypeReference<NameCheck>() { });
             if (result == null || result.exists() == null) {
-                throw new IllegalStateException("Tenant workgroup name check unavailable");
+                throw new IllegalStateException(I18nUtil.get("workgroup.name.checkUnavailable"));
             }
             return result.exists();
         }

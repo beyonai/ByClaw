@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-class ImaCredentialAuthorizationLifecycleTest {
+class ImaCredentialAuthorizationLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void akSkAuthorizationRejectsBusyAdmissionWithoutInvokingCliVerifier() {

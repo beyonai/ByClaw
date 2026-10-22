@@ -173,11 +173,20 @@ const getDigitalEmployeeResources = (resourceList?: RichInputResourceList) => {
   const uniqueMap = new Map<string, RichInputResourceList[number]>();
   (resourceList || []).forEach((item) => {
     if (`${item.resourceType}` !== ResourceTypeMap.digitalEmployee) return;
+    if (item.isInactiveAgentSelection) return;
     const resourceId = `${item.resourceId || item.resourceCode || item.id || ''}`;
     if (!resourceId || uniqueMap.has(resourceId)) return;
     uniqueMap.set(resourceId, item);
   });
-  return Array.from(uniqueMap.values());
+  return Array.from(uniqueMap.values()).slice(-1);
+};
+
+const limitToLatestDigitalEmployee = (resourceList?: RichInputResourceList) => {
+  if (!resourceList) return resourceList;
+  const [selectedEmployee] = getDigitalEmployeeResources(resourceList);
+  return resourceList.filter(
+    (item) => `${item.resourceType}` !== ResourceTypeMap.digitalEmployee || item === selectedEmployee
+  );
 };
 
 const getAgentLaneIdentity = (resource: RichInputResourceList[number]) => {
@@ -882,6 +891,7 @@ function useChat(props: IProps) {
               `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
             );
           });
+          const hasPersistedAnswer = Boolean(answerMsg);
 
           if (!answerMsg) {
             answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
@@ -889,7 +899,13 @@ function useChat(props: IProps) {
           answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
           chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
           restoreAnswerState(answerMsg);
-          answerMsg = updateMessage(answerMsg, { isAssign: true });
+          // runningStatus is a Redis lease, not proof that a visible answer exists. A worker
+          // failure can leave the lease behind without a snapshot or persisted answer. Keep
+          // the synthetic object only as the target for a later real stream event; publishing
+          // it here would render an empty default-assistant message after page refresh.
+          if (hasPersistedAnswer) {
+            answerMsg = updateMessage(answerMsg, { isAssign: true });
+          }
 
           const runtimeInfo =
             chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
@@ -1034,6 +1050,15 @@ function useChat(props: IProps) {
         }
       }
     }
+    // Resume always continues the answer identified by traceId/llmMessageId.
+    // A sandbox release clears the browser's running registry, but must not
+    // turn the interaction response into a new default-employee chat turn.
+    if (isResumeChat) {
+      if (!payload.traceId) {
+        return false;
+      }
+      isContinuingRunningTrace = true;
+    }
 
     await checkSessionStateBeforeSendQuery();
 
@@ -1096,6 +1121,7 @@ function useChat(props: IProps) {
       }
     }
 
+    resourceList = limitToLatestDigitalEmployee(resourceList);
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
@@ -1120,7 +1146,7 @@ function useChat(props: IProps) {
       ...get(msgOpt, 'queryMsg', {}),
     });
 
-    if (!onlyQuery) {
+    if (!onlyQuery && !isContinuingRunningTrace) {
       newQueryMsg = updateMessage(newQueryMsg, { isAssign: true });
     }
 

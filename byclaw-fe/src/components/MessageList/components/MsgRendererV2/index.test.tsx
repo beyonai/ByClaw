@@ -6,11 +6,14 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { CONNECTOR_AUTHORIZATION_REQUEST_EVENT } from '@/utils/connectorAuthorization';
 import MsgRendererV2 from './index';
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
 jest.mock('@umijs/max', () => ({
-  useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => (id === 'message.taskEnded' ? '任务已结束' : id),
-  }),
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
 }));
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+});
 
 jest.mock('@/components/Markdown', () => ({
   __esModule: true,
@@ -99,7 +102,8 @@ describe('MsgRendererV2 final answer presentation', () => {
 
       expect(screen.queryByRole('button', { name: '任务已结束' })).not.toBeInTheDocument();
       expect(screen.queryByRole('separator')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /thinkingProcess.done/ })).toBeInTheDocument();
+      // 本套件使用真实中文语言包，按钮名称还包含思考摘要和展开图标。
+      expect(screen.getByRole('button', { name: /已思考结束/ })).toHaveAttribute('aria-expanded', 'false');
       expect(screen.getByText('过程答复')).toBeInTheDocument();
       expect(screen.getAllByText('最终答复')).toHaveLength(1);
       expect(msg.messageList?.map(({ seq }) => seq)).toEqual([4, 3]);
@@ -299,5 +303,27 @@ describe('MsgRendererV2 final answer presentation', () => {
     );
 
     expect(screen.queryByRole('group', { name: '需要配置的连接器' })).not.toBeInTheDocument();
+  });
+  it('refreshes connector action labels when the locale changes with the same message arrays', () => {
+    const msg = message({
+      messageState: IMessageState.Error,
+      thinkList: [
+        {
+          ...item(1, '', SSEMessageType.toolCall),
+          content: {
+            substance: {
+              output: 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED connectorCode=image-generation-model;',
+              status: '_ERROR_',
+            },
+          },
+        },
+      ],
+    });
+    const view = render(<MsgRendererV2 msg={msg} updateMessage={(value) => value} />);
+    expect(screen.getByRole('button', { name: '配置文生图模型连接器' })).toBeInTheDocument();
+    mockLocale = 'en-US';
+    view.rerender(<MsgRendererV2 msg={msg} updateMessage={(value) => value} />);
+    expect(screen.getByRole('group', { name: 'Connectors requiring configuration' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Configure image generation model connector' })).toBeInTheDocument();
   });
 });

@@ -28,7 +28,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthoriz
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class ConnectorAuthorizationRevocationServiceTest {
+class ConnectorAuthorizationRevocationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final String USER_ID = "42";
     private static final Long CONNECTOR_ID = 9L;

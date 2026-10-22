@@ -409,7 +409,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         const errorMessage = typeof error === 'string' ? error : error?.message || error?.msg;
         if (errorMessage) {
           appModal.error({
-            title: '查询知识库目录失败',
+            title: intl.formatMessage({ id: 'ui.knowledge.directory.queryFailed' }),
             content: <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{errorMessage}</div>,
           });
         }
@@ -418,7 +418,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         });
       }
     },
-    [appModal, baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel, searchValue, setState]
+    [intl, appModal, baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel, searchValue, setState]
   );
 
   useEffect(() => {

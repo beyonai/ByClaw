@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
 import com.iwhalecloud.byai.manager.entity.resource.*;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class EmployeePublicationSkillServiceTest {
+class EmployeePublicationSkillServiceTest extends I18nTestSupport {
     SsResourceService resources = mock(SsResourceService.class);
     SsResourceMapper mapper = mock(SsResourceMapper.class);
     SsResExtSkillService skills = mock(SsResExtSkillService.class);

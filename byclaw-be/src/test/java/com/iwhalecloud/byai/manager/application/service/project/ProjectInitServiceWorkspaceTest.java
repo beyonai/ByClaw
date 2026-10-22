@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.project;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -26,7 +28,12 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 
-class ProjectInitServiceWorkspaceTest {
+class ProjectInitServiceWorkspaceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
 
     @TempDir
     Path tempDir;

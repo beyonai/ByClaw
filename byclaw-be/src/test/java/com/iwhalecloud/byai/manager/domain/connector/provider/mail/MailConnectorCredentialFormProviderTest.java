@@ -1,12 +1,14 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
 import com.iwhalecloud.byai.manager.dto.users.MailServerConfigDTO;
 
-class MailConnectorCredentialFormProviderTest {
+class MailConnectorCredentialFormProviderTest extends I18nTestSupport {
 
     @Test
     void verificationProducesIsolatedConfigurationWithoutWritingAnAccount() throws Exception {

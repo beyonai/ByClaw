@@ -55,10 +55,17 @@ describe('EPUB reader', () => {
     };
     (createPreviewWorker as jest.Mock).mockReturnValue(worker);
     rerender(<Epub data={blob()} />);
-    await screen.findByTitle('new');
+    // 书名和章节名可以相同，只定位阅读 iframe，避免命中 Select 的章节标题。
+    const isNewFrame = (title: string, element: Element | null) => title === 'new' && element?.tagName === 'IFRAME';
+    const frame = await screen.findByTitle(isNewFrame);
+    expect(frame.getAttribute('srcdoc')).toContain('<p>new</p>');
     await act(async () => resolve('<p>stale</p>'));
-    expect(screen.queryByTitle('old')).not.toBeInTheDocument();
-    expect(screen.getByTitle('new').getAttribute('srcdoc')).not.toContain('stale');
+    expect(
+      screen.queryByTitle((title, element) => title === 'old' && element?.tagName === 'IFRAME')
+    ).not.toBeInTheDocument();
+    expect(screen.getByTitle(isNewFrame)).toBe(frame);
+    expect(frame.getAttribute('srcdoc')).toContain('<p>new</p>');
+    expect(frame.getAttribute('srcdoc')).not.toContain('stale');
     expect(old.dispose).toHaveBeenCalled();
   });
   it('keeps navigation available after a damaged chapter', async () => {

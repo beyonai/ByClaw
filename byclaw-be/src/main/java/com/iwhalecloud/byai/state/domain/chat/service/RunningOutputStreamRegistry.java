@@ -277,6 +277,7 @@ public class RunningOutputStreamRegistry {
         }
         info.setRuntimeStatus(runtime.getStatus());
         info.setRuntimeSource(runtime.getSource());
+        info.setRuntimeInstanceId(runtime.getRuntimeInstanceId());
         info.setRootActive(runtime.getRootActive());
         info.setAcceptingInput(runtime.getAcceptingInput());
         info.setActiveAgentCount(runtime.getActiveAgentCount());

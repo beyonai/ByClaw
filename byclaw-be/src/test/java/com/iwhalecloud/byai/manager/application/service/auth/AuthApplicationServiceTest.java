@@ -1950,6 +1950,17 @@ class AuthApplicationServiceTest {
     }
 
     @Test
+    void forwardingResourceReadUsesExplicitActorAndStrictTenantWithoutAmbientDefaults() {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        SsResource resource = enterpriseResource(607L, 1L); resource.setComAcctId(10L);
+        LoginInfo ambient = loginInfo(2L); ambient.setEnterpriseId(11L); CurrentUserHolder.setLoginInfo(ambient);
+        assertThat(service.hasResourceForwardReadPermission(resource, 3L, 10L)).isTrue();
+        assertThat(service.hasResourceForwardReadPermission(resource, 3L, 11L)).isFalse();
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(2L);
+    }
+
+    @Test
     void hasResourceUsePermissionForUser_appliesDirectBlackOverDirectRedAndPreservesCurrentUser() {
         AuthApplicationService service = newExplicitUserPermissionService(List.of(
             useGrant(606L, 3L, GrantToObjType.USER, Color.RED, "A"),

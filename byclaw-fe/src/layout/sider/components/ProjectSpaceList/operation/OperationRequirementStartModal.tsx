@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import React, { useMemo } from 'react';
 import { message } from 'antd';
 import TaskTemplateModal, { type TaskTemplateApplyResult } from '@/components/TaskTemplateModal';
@@ -61,7 +62,7 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
 
   const handleApply = async (result: TaskTemplateApplyResult) => {
     if (defaultAssignee === undefined || defaultAssignee === null) {
-      message.error('当前项目暂无可用负责人，请先添加项目成员');
+      message.error(getIntl().formatMessage({ id: 'taskTemplate.noAssignees' }));
       return;
     }
 
@@ -94,7 +95,7 @@ const OperationRequirementStartModal: React.FC<OperationRequirementStartModalPro
       knowledgeOptions={knowledgeOptions}
       knowledgeOptionsOnly
       accountOptions={accountOptions}
-      applyText="确定并启动任务"
+      applyText={getIntl().formatMessage({ id: 'taskTemplate.confirmStart' })}
       applying={loading}
       onCancel={onCancel}
       onApply={handleApply}

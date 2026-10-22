@@ -45,7 +45,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 
 @ExtendWith(MockitoExtension.class)
-class DevloopOperationAccountAuthorizationTest {
+class DevloopOperationAccountAuthorizationTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final long CURRENT_USER_ID = 10L;
     private static final String CURRENT_USER_CODE = "user-10";

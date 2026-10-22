@@ -31,7 +31,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
 
-class SandboxBrowserNavigationServiceTest {
+class SandboxBrowserNavigationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final String USER_CODE = "user-1";
     private static final String SANDBOX_ID = "sandbox-1";
@@ -46,6 +46,7 @@ class SandboxBrowserNavigationServiceTest {
 
     @BeforeEach
     void setUp() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
         sandboxService = mock(SandboxService.class);
         runtimeResolver = mock(SandboxIngressRuntimeResolver.class);
         navigationService = new SandboxBrowserNavigationService(sandboxService, runtimeResolver);

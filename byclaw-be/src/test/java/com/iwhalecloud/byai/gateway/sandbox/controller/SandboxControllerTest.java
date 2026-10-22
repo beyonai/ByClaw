@@ -38,7 +38,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
-class SandboxControllerTest {
+class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @AfterEach
     void tearDown() {
@@ -209,7 +209,7 @@ class SandboxControllerTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
             Map.of("ownerScope", "USER", "enterpriseId", "456")))
             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-            .hasMessageContaining("enterprise access denied");
+            .hasMessageContaining("sandbox.enterprise.denied");
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
             Map.of("ownerScope", "TENANT")))
             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
@@ -231,7 +231,7 @@ class SandboxControllerTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.updateSandbox(
             Map.of("id", 7L, "autoRelease", 1)))
             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-            .hasMessageContaining("enterprise access denied");
+            .hasMessageContaining("sandbox.enterprise.denied");
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandboxById(Map.of("id", 7L)))
             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         verifyNoInteractions(service);

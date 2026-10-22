@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.linkpreview.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.google.common.net.InetAddresses;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -23,17 +25,17 @@ final class PublicUrlPolicy {
     private PublicUrlPolicy() {}
 
     static HttpUrl parse(String input) {
-        if (input == null || input.length() > 4096) throw new IllegalArgumentException("Invalid preview URL");
+        if (input == null || input.length() > 4096) throw new IllegalArgumentException(I18nUtil.get("linkpreview.urlInvalid"));
         HttpUrl url = HttpUrl.parse(input);
         if (url == null || !url.username().isEmpty() || !url.password().isEmpty()) {
-            throw new IllegalArgumentException("Invalid preview URL");
+            throw new IllegalArgumentException(I18nUtil.get("linkpreview.urlInvalid"));
         }
         String host = url.host();
         if (InetAddresses.isInetAddress(host)) {
-            if (!isPublic(InetAddresses.forString(host))) throw new IllegalArgumentException("Non-public preview URL");
+            if (!isPublic(InetAddresses.forString(host))) throw new IllegalArgumentException(I18nUtil.get("linkpreview.urlNotPublic"));
         } else if (!host.contains(".") || host.endsWith(".localhost") || host.endsWith(".local")
             || host.matches("[0-9.]+")) {
-            throw new IllegalArgumentException("Non-public preview URL");
+            throw new IllegalArgumentException(I18nUtil.get("linkpreview.urlNotPublic"));
         }
         return url.newBuilder().fragment(null).build();
     }

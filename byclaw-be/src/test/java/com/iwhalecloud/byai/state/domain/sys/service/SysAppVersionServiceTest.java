@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.sys.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -18,7 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class SysAppVersionServiceTest {
+class SysAppVersionServiceTest extends I18nTestSupport {
 
     private SysAppVersionMapper sysAppVersionMapper;
     private FileIngressService fileIngressService;
@@ -54,5 +56,21 @@ class SysAppVersionServiceTest {
         assertThat(response.getContentAsByteArray()).isEqualTo("package".getBytes(StandardCharsets.UTF_8));
         assertThat(response.getContentType()).isEqualTo("application/octet-stream");
         assertThat(response.getContentLengthLong()).isEqualTo(7L);
+    }
+
+    @Test
+    void missingPackageKeepsNotFoundStatusAndUsesRequestLocale() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.downloadPackage(404L, new MockHttpServletResponse()))
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class, error -> {
+                assertThat(error.getStatusCode().value()).isEqualTo(404);
+                assertThat(error.getReason()).isEqualTo("Package not found");
+            });
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.downloadPackage(404L, new MockHttpServletResponse()))
+            .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class, error -> {
+                assertThat(error.getStatusCode().value()).isEqualTo(404);
+                assertThat(error.getReason()).isEqualTo("安装包不存在");
+            });
     }
 }

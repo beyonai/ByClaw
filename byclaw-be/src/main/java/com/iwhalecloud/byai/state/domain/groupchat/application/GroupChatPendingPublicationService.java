@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
@@ -40,24 +42,24 @@ public class GroupChatPendingPublicationService {
         authorization.requireInitiator(taskId);
         ByaiGroupChatTask task = tasks.selectForUpdate(taskId);
         if (task == null || !"ACTIVE".equals(task.getStatus())) {
-            throw new IllegalArgumentException("Task is not active");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.inactive"));
         }
         Long expectedId = request == null ? null : request.getExpectedPendingPublicationId();
         if (expectedId != null) {
             if (expectedId <= 0) {
-                throw new IllegalArgumentException("Expected pending publication ID must be positive");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.idInvalid"));
             }
             // 与整体替换共用任务行锁，避免检查通过后被其他设备或 Agent 更新。
             ByaiGroupChatPendingPublication current = store.find(taskId);
             if (current == null || !expectedId.equals(current.getPendingPublicationId())) {
-                throw new IllegalArgumentException("Pending publication is outdated");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.outdated"));
             }
         }
         String text = request == null ? null : StringUtils.trimToNull(request.getText());
         List<String> paths = request == null || request.getSourcePaths() == null ? List.of()
             : request.getSourcePaths().stream().map(GroupChatPublicationUploader::validateSourcePath).distinct().toList();
         if (text == null && paths.isEmpty()) {
-            throw new IllegalArgumentException("Pending publication requires text or files");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.pendingContentRequired"));
         }
         ByaiGroupChatPendingPublication pending = new ByaiGroupChatPendingPublication();
         pending.setTaskSessionId(taskId);

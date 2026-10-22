@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -49,13 +50,14 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatTurnCoordinatorTest {
+class GroupChatTurnCoordinatorTest extends I18nTestSupport {
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper anchors = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final GroupChatCandidateSessionService candidates = mock(GroupChatCandidateSessionService.class);
     private GroupChatTurnCoordinator coordinator;
+    private GroupChatContextService contextService;
     private final Map<String, ByaiGroupChatExecution> anchorRows = new HashMap<>();
     private final Map<String, ByaiGroupChatTurn> turnRows = new HashMap<>();
 
@@ -89,7 +91,7 @@ class GroupChatTurnCoordinatorTest {
         when(resources.findById(anyLong())).thenAnswer(call -> { SsResource agent = new SsResource(); agent.setResourceName("Agent " + call.getArgument(0)); return agent; });
         PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        GroupChatContextService contextService = new GroupChatContextService(messages, mock(SessionService.class),
+        contextService = new GroupChatContextService(messages, mock(SessionService.class),
             resources);
         coordinator = new GroupChatTurnCoordinator(turns, anchors, tasks, messages, candidates, sequence, members,
             mock(SessionService.class), users, resources, mock(ChatRuntimeStateService.class),
@@ -108,8 +110,10 @@ class GroupChatTurnCoordinatorTest {
         verify(turns, never()).insert(any(ByaiGroupChatTurn.class));
     }
 
-    @Test
-    void coordinatedTaskIsCreatedBeforeFirstModelTurnAndCanOwnItsInitialDispatch() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {"zh-CN|协作任务", "en-US|Collaborative task"}, delimiter = '|')
+    void coordinatedTaskIsCreatedBeforeFirstModelTurnAndCanOwnItsInitialDispatch(String language, String title) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
         var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
         var taskService = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class);
         ReflectionTestUtils.setField(coordinator, "coordination", coordination);
@@ -117,7 +121,7 @@ class GroupChatTurnCoordinatorTest {
         when(coordination.findScope(anyLong())).thenReturn(null);
         ByaiGroupChatTurn turn = coordinator.enqueueCoordinatedUser(10L, 20L, null, 1L, 9L, List.of(2L, 3L));
         verify(coordination).resolveForExecution(10L, turn.getCandidateSessionId(), List.of(2L, 3L), 9L, "COORDINATED");
-        verify(taskService).promote(turn, "协作任务", null);
+        verify(taskService).promote(turn, title, null);
         assertEquals(1, turnRows.size());
         assertEquals(9L, turn.getTargetAgentId());
         var session = new com.iwhalecloud.byai.manager.entity.session.ByaiSession();
@@ -369,11 +373,18 @@ class GroupChatTurnCoordinatorTest {
 
     @Test
     void quotedMessageIncludesItsIdentityContentAndAttachmentsInTurnContext() {
+        UserService users = mock(UserService.class);
+        Users reporter = new Users();
+        reporter.setUserId(7L);
+        reporter.setUserName("Reporter");
+        when(users.findByIds(List.of(7L))).thenReturn(List.of(reporter));
+        ReflectionTestUtils.setField(contextService, "userService", users);
         ByaiMessage quoted = new ByaiMessage();
         quoted.setMessageId(21L);
         quoted.setSessionId(10L);
         quoted.setUsage(1);
-        quoted.setCreatorName("Reporter");
+        quoted.setCreatorId(7L);
+        quoted.setCreatorName("Stored reporter name");
         quoted.setMessageContent("Please review the report");
         quoted.setRelatedResources("{\"files\":[{\"fileId\":\"501\",\"fileName\":\"report.pdf\",\"fileUrl\":\"/files/report.pdf\"}]}");
         when(messages.selectByMessageId(21L)).thenReturn(quoted);
@@ -409,6 +420,32 @@ class GroupChatTurnCoordinatorTest {
         assertTrue(JSON.parseObject(context).getJSONObject("本次引用消息").getBooleanValue("recalled"));
         assertFalse(context.contains("private quoted text"));
         assertFalse(context.contains("secret.pdf"));
+    }
+
+
+    @Test
+    void activeSelectionSurvivesBesidePassiveSnapshot() {
+        ByaiMessage root = new ByaiMessage(); root.setMessageId(20L); root.setSessionId(10L); root.setUsage(1);
+        root.setMessageContent("{{opaque}} {{普通文本}}");
+        root.setMetadata("""
+            {"kind":"FORWARD_SINGLE","forward":{"resourceMode":"SNAPSHOT_ONLY","forwardId":"800","mode":"SINGLE","itemCount":1},
+             "resourceList":[{"id":"opaque","resourceType":"KG_DOC_FILE","resourceId":"/original/private","resourceName":"需求说明","resourceCode":"private-dataset","extData":"secret"}]}
+            """);
+        when(messages.selectByMessageId(20L)).thenReturn(root);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(root);
+        ByaiMessage current = new ByaiMessage(); current.setMessageId(21L); current.setSessionId(10L); current.setUsage(1);
+        current.setMessageContent("主动读取 {{KG_DOC_FILE_/original/private}}");
+        current.setMetadata("{\"resourceList\":[{\"id\":\"KG_DOC_FILE_/original/private\",\"resourceType\":\"KG_DOC_FILE\",\"resourceId\":\"/original/private\",\"resourceName\":\"主动资源\",\"resourceCode\":\"active-dataset\"}]}");
+        when(messages.selectByMessageId(21L)).thenReturn(current);
+        var result = coordinator.enqueueUser(10L, 21L, 20L, 1L, 2L);
+        var metadata = JSON.parseObject(result.getInputMetadata());
+        assertEquals(1, metadata.getJSONArray("resourceList").size());
+        assertEquals("active-dataset", metadata.getJSONArray("resourceList").getJSONObject(0).getString("resourceCode"));
+        assertFalse(metadata.containsKey("forward"));
+        assertTrue(result.getInputContent().contains("需求说明 {{普通文本}}"));
+        assertFalse(result.getInputContent().contains("private-dataset"));
+        assertFalse(JSON.parseObject(result.getInputContent()).getJSONObject("本次引用消息").toJSONString().contains("/original/private"));
+        assertEquals(current.getMessageContent(), JSON.parseObject(result.getInputContent()).getString("本次消息"));
     }
 
 }

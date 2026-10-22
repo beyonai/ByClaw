@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { cancelVoicePlayback, enqueueVoicePlayback, skipVoicePlayback } from '@/utils/voicePlayback';
 import { loadVoiceAudio, transcribeVoice } from '@/service/voice';
 import { getVoiceDurationSeconds, type VoiceMessage as VoiceData } from '@/utils/voice';
@@ -43,6 +44,7 @@ export default function VoiceMessage({
   autoPlay = false,
   autoTranscribe = false,
 }: Props) {
+  const intl = useIntl();
   const audioRef = useRef<HTMLAudioElement>(null);
   const sourceRef = useRef('');
   const blobRequestRef = useRef<Promise<Blob> | undefined>(undefined);
@@ -78,7 +80,7 @@ export default function VoiceMessage({
     if (!blobRequestRef.current) {
       if (loadAudio) blobRequestRef.current = loadAudio();
       else if (fileId !== undefined) blobRequestRef.current = loadVoiceAudio(fileId);
-      else throw new Error('语音来源不可用');
+      else throw new Error(intl.formatMessage({ id: 'voice.sourceUnavailable' }));
     }
     try {
       const blob = await blobRequestRef.current;
@@ -89,7 +91,7 @@ export default function VoiceMessage({
       blobRequestRef.current = undefined;
       throw error;
     }
-  }, [fileId, loadAudio]);
+  }, [fileId, loadAudio, intl]);
 
   useEffect(() => {
     if (voice.durationMs > 0) return;
@@ -173,7 +175,7 @@ export default function VoiceMessage({
       window.dispatchEvent(new CustomEvent(PLAY_EVENT, { detail: audio }));
       await audio.play();
     } catch {
-      if (aliveRef.current) message.error('语音播放失败，请重试');
+      if (aliveRef.current) message.error(intl.formatMessage({ id: 'voice.playFailed' }));
     } finally {
       if (aliveRef.current) setLoading(false);
     }
@@ -184,19 +186,21 @@ export default function VoiceMessage({
     transcribingRef.current = true;
     setTranscribing(true);
     try {
-      if (!transcribeAudio && fileId === undefined) throw new Error('语音来源不可用');
+      if (!transcribeAudio && fileId === undefined)
+        throw new Error(intl.formatMessage({ id: 'voice.sourceUnavailable' }));
       const result = transcribeAudio ? await transcribeAudio() : await transcribeVoice({ fileId: fileId!, sessionId });
       if (!aliveRef.current) return;
       const text = result.text?.trim();
       if (!text) {
-        message.info('未识别到语音内容');
+        message.info(intl.formatMessage({ id: 'voice.emptyTranscript' }));
         return;
       }
       setTranscript(text);
       setTranscriptExpanded(true);
       onTranscript?.(text);
     } catch (error) {
-      if (aliveRef.current) message.error(typeof error === 'string' ? error : '转文字失败，请重试');
+      if (aliveRef.current)
+        message.error(typeof error === 'string' ? error : intl.formatMessage({ id: 'voice.transcribeFailed' }));
     } finally {
       transcribingRef.current = false;
       if (aliveRef.current) setTranscribing(false);
@@ -212,7 +216,15 @@ export default function VoiceMessage({
   }, [autoTranscribe, transcript, variant]);
 
   const transcriptMenu = {
-    items: [{ key: 'transcript', label: transcriptExpanded ? '收起文字' : '语音转文字', disabled: transcribing }],
+    items: [
+      {
+        key: 'transcript',
+        label: transcriptExpanded
+          ? intl.formatMessage({ id: 'voice.collapseTranscript' })
+          : intl.formatMessage({ id: 'voice.transcribe' }),
+        disabled: transcribing,
+      },
+    ],
     onClick: () => {
       if (transcriptExpanded) setTranscriptExpanded(false);
       else if (transcript) setTranscriptExpanded(true);
@@ -224,13 +236,22 @@ export default function VoiceMessage({
       type="button"
       className={classNames(styles.bubble, { [styles.playing]: playing })}
       style={{ width: seconds ? Math.min(260, 112 + seconds * 2) : 112 }}
-      aria-label={`${playing ? '暂停' : '播放'}${label || (seconds ? `语音，${seconds}秒` : '语音')}`}
+      aria-label={intl.formatMessage(
+        { id: playing ? 'voice.pause' : 'voice.play' },
+        {
+          label:
+            label ||
+            (seconds
+              ? intl.formatMessage({ id: 'voice.audioDuration' }, { seconds })
+              : intl.formatMessage({ id: 'voice.audio' })),
+        }
+      )}
       aria-pressed={playing}
       onClick={togglePlay}
       disabled={loading}
     >
       <span className={styles.duration}>
-        {seconds ? `${seconds}″` : <LoadingOutlined aria-label="正在读取语音时长" />}
+        {seconds ? `${seconds}″` : <LoadingOutlined aria-label={intl.formatMessage({ id: 'voice.loadingDuration' })} />}
       </span>
       {loading ? (
         <LoadingOutlined />
@@ -260,7 +281,7 @@ export default function VoiceMessage({
               type="text"
               size="small"
               className={styles.menuButton}
-              aria-label="语音消息菜单"
+              aria-label={intl.formatMessage({ id: 'voice.menu' })}
               loading={transcribing}
               icon={<DownOutlined />}
             />

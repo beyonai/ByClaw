@@ -181,6 +181,52 @@ describe('hooks/useChat/index', () => {
     });
   });
 
+  it('does not create a default-employee placeholder when resuming after sandbox state was lost', async () => {
+    mockMessageList = [
+      {
+        msgId: 'query-client',
+        messageId: '101',
+        text: '原始问题',
+        agentType: 'agent',
+        sessionId: '101',
+      },
+      {
+        msgId: 'answer-client',
+        messageId: '201',
+        queryMsgId: 'query-client',
+        fromBeyond: true,
+        agentId: 'employee-42',
+        agentName: '当前数字员工',
+        messageState: IMessageState.Answer,
+        sessionId: '101',
+      },
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery({
+        queryQuestion: '苹果',
+        inheritQryMsgId: 'query-client',
+        payload: {
+          actionType: 'RESUME',
+          traceId: 'trace-1',
+          llmMessageId: '201',
+          sourceAgentType: 'BYCLAW_DSH_u1',
+        },
+        msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+      });
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
   it('waits for session messages before restoring running messages', async () => {
     let resolveSessionMessages!: () => void;
     const sessionMessagesPromise = new Promise<void>((resolve) => {
@@ -222,13 +268,9 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['101'] });
-    expect(mockUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: '201',
-        sessionId: '101',
-      }),
-      { isAssign: true }
-    );
+    // runningStatus alone is not proof that an answer exists. A failed worker can leave
+    // this Redis marker behind, so an empty assistant placeholder must not be rendered.
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
     expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
       type: 'TASK_PLAN_GET',
       clientRequestId: 'client-1',
@@ -237,6 +279,48 @@ describe('hooks/useChat/index', () => {
       traceId: 'trace-1',
       laneId: undefined,
     });
+  });
+
+  it('does not render a default assistant placeholder for stale running state after resume failure', async () => {
+    mockMessageList = [
+      {
+        messageId: 'previous-answer',
+        msgId: 'previous-answer',
+        fromBeyond: true,
+        messageState: IMessageState.Done,
+        sessionId: '101',
+        finalContent: 'RESUMED',
+      },
+    ];
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '101',
+        running: true,
+        traceId: 'failed-resume-trace',
+        clientRequestId: 'failed-resume-client',
+        modelAnswerMessageId: 'empty-answer',
+        userMessageId: 'resume-message',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue(null);
+
+    renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'empty-answer',
+        fromBeyond: true,
+        text: '',
+      }),
+      expect.anything()
+    );
   });
 
   it('requests the latest task plan after websocket reconnect', async () => {
@@ -837,7 +921,7 @@ describe('hooks/useChat/index', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {
+  it('limits programmatic multi-employee payloads to the latest employee', async () => {
     const { result } = renderHook(() =>
       useChat({
         sessionId: 's1',
@@ -869,34 +953,16 @@ describe('hooks/useChat/index', () => {
 
     expect(mockSend).toHaveBeenCalledTimes(1);
     const payload = mockSend.mock.calls[0]?.[1] as any;
-    expect(payload.multiAgent).toMatchObject({
-      mode: 'parallel',
-      lanes: [
-        {
-          agentId: '101',
-          agentCode: 'agent-a',
-          agentName: 'Agent A',
-          order: 0,
-        },
-        {
-          agentId: '102',
-          agentCode: 'agent-b',
-          agentName: 'Agent B',
-          order: 1,
-        },
-      ],
-    });
-    expect(payload.multiAgent.turnId).toBeTruthy();
-    expect(payload.extParams.multiAgent).toEqual(payload.multiAgent);
-    expect(payload.clientRequestId).toBe(payload.multiAgent.lanes[0].clientRequestId);
-    expect(payload.multiAgent.lanes[0].queryMessageId).toBe(payload.multiAgent.turnId);
-    expect(payload.multiAgent.lanes[0].answerMessageId).toBe(payload.multiAgent.lanes[0].laneId);
-    expect(payload.multiAgent.lanes[1].answerMessageId).toBe(payload.multiAgent.lanes[1].laneId);
+    expect(payload.multiAgent).toBeUndefined();
+    expect(payload.extParams.multiAgent).toBeUndefined();
+    expect(payload.agentId).toBe('102');
+    expect(payload.agentCode).toBeNull();
+    expect(payload.resourceList.map((item: any) => item.resourceId)).toEqual(['102']);
 
     const updatedMessages = mockUpdateMessage.mock.calls.map(([msg]) => msg);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(2);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(1);
     expect(updatedMessages.filter((msg) => !msg.fromBeyond)).toHaveLength(1);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['101', '102']);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['102']);
   });
 
   it('uses the single inline mentioned digital employee for the answer placeholder even when payload has an agentId', async () => {

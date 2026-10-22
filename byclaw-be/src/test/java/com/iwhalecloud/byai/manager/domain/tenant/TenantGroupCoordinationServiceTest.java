@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +43,7 @@ import com.alibaba.fastjson.JSONArray;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantGroupCoordinationServiceTest {
+class TenantGroupCoordinationServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final GroupWorkAssistantService assistants = mock(GroupWorkAssistantService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
@@ -60,6 +61,8 @@ class TenantGroupCoordinationServiceTest {
         when(memberRouting.withRoutes(any(), any())).thenAnswer(call -> call.getArgument(0));
         org.springframework.test.util.ReflectionTestUtils.setField(service, "memberRouting", memberRouting);
         service.configureHistory(files, new GroupChatDispatchPromptBuilder(), users);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "messageDisplayService",
+            new TenantGroupMessageDisplayService(users));
         Users user = new Users(); user.setUserId(20L); user.setUserCode("user-20");
         when(users.findById(20L)).thenReturn(user);
         MessageView input = new MessageView(); input.setMessageId("60"); input.setSessionId("50"); input.setUsage(1); input.setCreatorId("20");
@@ -75,6 +78,27 @@ class TenantGroupCoordinationServiceTest {
 
     @AfterEach
     void clear() { TenantRequestContextHolder.clear(); }
+
+    @Test
+    void agentSnapshotCompletesCurrentUserNamesBeforeConvertingTheNodeResponse() {
+        stored(scope("COORDINATED"), "90");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        Users sender = new Users();
+        sender.setUserId(9007199254740993L);
+        sender.setUserName("当前用户名");
+        when(users.findByIds(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(List.of(sender));
+        when(node.request(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/context"), any(), any()))
+            .thenReturn(Map.of("conversationKey", "30", "messages", List.of(Map.of(
+                "messageId", "8000000010000000200", "creatorId", "9007199254740993", "creatorName", "9007199254740993",
+                "usage", 1, "speaker", Map.of("type", "user", "userCode", "9007199254740993")))));
+
+        service.decorate(executionContext(request(90L)), "继续任务", new HashMap<>());
+
+        ArgumentCaptor<GroupChatContextResponse> snapshot = ArgumentCaptor.forClass(GroupChatContextResponse.class);
+        verify(files).prepareGroupSnapshot(eq("user-20"), any(), any(), any(), snapshot.capture());
+        assertThat(snapshot.getValue().getMessages().get(0).getSpeaker().getDisplayName()).isEqualTo("当前用户名");
+        verify(users).findByIds(org.mockito.ArgumentMatchers.anyCollection());
+    }
 
     @Test
     void replacesClientScopeWithStoredScope() {

@@ -18,6 +18,8 @@ import java.nio.file.StandardOpenOption;
 @Component
 public class SuperpowerInitializer {
 
+
+
     /**
      * .agents/skills/README.md 文件模板
      */

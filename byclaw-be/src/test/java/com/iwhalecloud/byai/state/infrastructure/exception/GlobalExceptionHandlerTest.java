@@ -63,6 +63,24 @@ class GlobalExceptionHandlerTest {
 
     @ParameterizedTest
     @CsvSource(value = {
+        "zh-CN|409|tenant.member.disabled|成员已停用，请先重新启用",
+        "en-US|409|tenant.member.disabled|disabled membership requires explicit re-enable",
+        "zh-CN|409|tenant.member.limit.reached|企业成员数量已达上限",
+        "en-US|409|tenant.member.limit.reached|tenant member limit reached",
+        "zh-CN|401|tenant.login.required|请先登录",
+        "en-US|401|tenant.login.required|Login required",
+        "zh-CN|409|tenant.not.ready|企业尚未就绪",
+        "en-US|409|tenant.not.ready|tenant is not ready",
+        "zh-CN|403|tenant.inviter.membership.required|邀请人必须是当前企业的有效成员",
+        "en-US|403|tenant.inviter.membership.required|inviter membership required",
+        "zh-CN|409|tenant.membership.unconfirmed|无法确认企业成员身份",
+        "en-US|409|tenant.membership.unconfirmed|tenant membership could not be confirmed",
+        "zh-CN|400|groupchat.files.page.size.invalid|pageSize 必须为 1 至 50",
+        "en-US|400|groupchat.files.page.size.invalid|pageSize must be between 1 and 50",
+        "zh-CN|400|groupchat.files.cursor.invalid|群聊文件分页游标无效",
+        "en-US|400|groupchat.files.cursor.invalid|Invalid group file cursor",
+        "zh-CN|403|tenant.task.owner.required|仅任务所有者可执行此操作",
+        "en-US|403|tenant.task.owner.required|tenant task owner required",
         "zh-CN|404|resource.favorite.unavailable|该资源不可收藏或已不可用",
         "en-US|404|resource.favorite.unavailable|This resource cannot be favorited or is unavailable",
         "zh-CN|400|resource.favorite.commercialOnly|收藏功能仅在商业版本中开放",
@@ -104,4 +122,27 @@ class GlobalExceptionHandlerTest {
             assertThat(response.getBody().getMsg()).isEqualTo("该资源不可收藏或已不可用");
         }
     }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        "zh-CN|403|tenant.admin.required|需要平台管理员权限",
+        "en-US|403|tenant.admin.required|platform administrator required",
+        "zh-CN|409|tenant.node.launch.incomplete|租户 Node 启动配置不完整",
+        "en-US|409|tenant.node.launch.incomplete|tenant Node launch configuration is incomplete",
+        "zh-CN|400|tenant.datasource.sql.confirmation|该 SQL 需要确认后执行",
+        "en-US|400|tenant.datasource.sql.confirmation|SQL requires confirmation",
+        "zh-CN|400|tenant.delete.nameMismatch|确认输入的租户名称不匹配",
+        "en-US|400|tenant.delete.nameMismatch|tenant name confirmation does not match",
+        "zh-CN|400|conversation.search.timeRange.invalid|开始时间不能晚于结束时间",
+        "en-US|400|conversation.search.timeRange.invalid|The start time cannot be later than the end time"
+    }, delimiter = '|')
+    void monthlyTenantAndSearchErrorsPreserveHttpStatusAndTranslateTheBody(
+        String language, int status, String key, String expected) {
+        LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        var response = handlerWithMessages().handleResponseStatusException(
+            new ResponseStatusException(HttpStatus.valueOf(status), key));
+        assertThat(response.getStatusCode().value()).isEqualTo(status);
+        assertThat(response.getBody().getMsg()).isEqualTo(expected);
+    }
+
 }

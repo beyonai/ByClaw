@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TenantGroupCoordinationService implements ChatGatewayRequestDecorator {
     @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageDisplayService messageDisplayService;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
 
     private final TenantNodeClient node;
@@ -74,7 +77,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         var resource = resources.findById(coordinatorId);
         if (resource == null || !Integer.valueOf(2).equals(resource.getResourceStatus())
             || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Group coordinator is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.group.coordinator.unavailable");
         }
         // Default membership is server-managed. Existing group users receive the same grant as new groups.
         if (bound == null && group.get("members") instanceof List<?> members) {
@@ -234,7 +237,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
     private Object appendContext(ChatProcessContext context, Map<?, ?> scope, Object content, Map<String, Object> gatewayParams,
         List<?> groupMembers) {
         if (context.userMessageId == null || context.traceId == null || contextFiles == null) {
-            throw new ChatTurnPreparationException("历史上下文身份不完整，请重试", null);
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.identityIncomplete"), null);
         }
         List<MessageView> inputs = node.request(context.tenantContext, "POST", "/internal/v1/assiman/getMessageByIds",
             new MessageIds(List.of(context.userMessageId)), new TypeReference<List<MessageView>>() { });
@@ -264,7 +267,9 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         Map<String, Object> raw = node.request(context.tenantContext, "POST", "/internal/v1/group-chats/" + groupId + "/context",
             Map.of("beforeMessageId", boundary, "maxMessages", 60, "maxCharacters", 30000, "agentContext", true),
             new TypeReference<Map<String, Object>>() { });
-        GroupChatContextResponse snapshot = historyMapper.convertValue(raw, GroupChatContextResponse.class);
+        // 内部上下文读取不经过公开接口切面，必须在 DTO 丢弃 creatorId 前补齐平台用户名。
+        GroupChatContextResponse snapshot = historyMapper.convertValue(
+            messageDisplayService == null ? raw : messageDisplayService.resolve(raw), GroupChatContextResponse.class);
         GroupChatContextRequest request = new GroupChatContextRequest();
         request.setConversationKey(groupId);
         request.setBeforeMessageId(boundary);
@@ -345,10 +350,10 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                 }
             }
         }
-        throw new ChatTurnPreparationException("群任务消息缺少正文，请重试", null);
+        throw new ChatTurnPreparationException(I18nUtil.get("groupchat.task.textMissing"), null);
     }
 
     private ResponseStatusException forbidden() {
-        return new ResponseStatusException(HttpStatus.FORBIDDEN, "Group task execution is outside its assigned scope");
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.group.task.scope");
     }
 }

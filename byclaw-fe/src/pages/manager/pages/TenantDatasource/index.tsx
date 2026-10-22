@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import { Alert, Button, Empty, Input, message, Modal, Select, Spin, Table, Tag, Tooltip } from 'antd';
 import {
   CaretDownOutlined,
@@ -39,10 +39,18 @@ const tableKey = (table: TenantTable) => `table:${table.schema}.${table.name}`;
 const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 function ResultGrid({ result, loading }: { result?: TenantQueryResult; loading?: boolean }) {
+  const intl = useIntl();
   if (loading) return <Spin className={styles.resultLoading} />;
-  if (!result) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="查询结果将在这里显示" />;
+  if (!result)
+    return (
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'tenant.datasource.empty' })} />
+    );
   if (!result.columns.length) {
-    return <div className={styles.success}>执行成功，影响 {result.affectedRows} 行。</div>;
+    return (
+      <div className={styles.success}>
+        {intl.formatMessage({ id: 'tenant.datasource.affectedSuccess' }, { count: result.affectedRows })}
+      </div>
+    );
   }
   return (
     <Table
@@ -63,6 +71,7 @@ function ResultGrid({ result, loading }: { result?: TenantQueryResult; loading?:
 }
 
 export default function TenantDatasource() {
+  const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const isPlatformAdmin = (userInfo?.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
   const requestEpoch = useRef(0);
@@ -144,7 +153,7 @@ export default function TenantDatasource() {
     } catch {
       if (requestEpoch.current !== epoch) return;
       setOpenTables((current) => current.map((tab) => (tab.key === key ? { ...tab, loading: false } : tab)));
-      message.error('数据表加载失败');
+      message.error(intl.formatMessage({ id: 'tenant.datasource.tableFailed' }));
     }
   };
 
@@ -178,9 +187,9 @@ export default function TenantDatasource() {
         setSqlResult(result);
         setExecutedSql(statementSql);
         setSqlElapsed(performance.now() - started);
-        message.success('SQL 执行成功');
+        message.success(intl.formatMessage({ id: 'tenant.datasource.sqlSuccess' }));
       } catch {
-        message.error('SQL 执行失败');
+        message.error(intl.formatMessage({ id: 'tenant.datasource.sqlFailed' }));
       } finally {
         if (requestEpoch.current === epoch) setRunningSql(false);
       }
@@ -190,16 +199,21 @@ export default function TenantDatasource() {
       return;
     }
     Modal.confirm({
-      title: '确认执行高危 SQL？',
+      title: intl.formatMessage({ id: 'tenant.datasource.confirmTitle' }),
       content: (
         <div>
-          <p>以下操作可能修改或删除「{selectedTenant?.enterpriseName || currentTenant}」的数据，执行后可能无法撤销。</p>
+          <p>
+            {intl.formatMessage(
+              { id: 'tenant.datasource.confirmWarning' },
+              { name: selectedTenant?.enterpriseName || currentTenant }
+            )}
+          </p>
           <pre className={styles.confirmSql}>{statementSql}</pre>
         </div>
       ),
-      okText: '确认执行',
+      okText: intl.formatMessage({ id: 'tenant.datasource.confirm' }),
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: intl.formatMessage({ id: 'tenant.cancel' }),
       onOk: execute,
     });
   };
@@ -215,28 +229,29 @@ export default function TenantDatasource() {
       setSqlResult(result);
       setSqlElapsed(performance.now() - started);
     } catch {
-      message.error('查询结果加载失败');
+      message.error(intl.formatMessage({ id: 'tenant.datasource.resultFailed' }));
     } finally {
       if (requestEpoch.current === epoch) setRunningSql(false);
     }
   };
 
-  if (!isPlatformAdmin) return <Alert type="warning" message="仅平台管理员可访问租户数据源。" />;
+  if (!isPlatformAdmin)
+    return <Alert type="warning" message={intl.formatMessage({ id: 'tenant.datasource.adminOnly' })} />;
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <div className={styles.eyebrow}>TENANT DATABASE</div>
-          <h1>租户数据源</h1>
-          <p>展开对象树浏览数据表，双击表名打开数据；SQL 查询在独立标签中运行。</p>
+          <div className={styles.eyebrow}>{intl.formatMessage({ id: 'tenant.datasource.eyebrow' })}</div>
+          <h1>{intl.formatMessage({ id: 'tenant.datasource.title' })}</h1>
+          <p>{intl.formatMessage({ id: 'tenant.datasource.description' })}</p>
         </div>
         <div className={styles.connection}>
           <DatabaseOutlined />
           <Select
             showSearch
             optionFilterProp="label"
-            placeholder="选择已开通的租户"
+            placeholder={intl.formatMessage({ id: 'tenant.datasource.selectReady' })}
             value={tenantId}
             onChange={(value) => void connect(value)}
             options={readyTenants.map((tenant) => ({
@@ -246,7 +261,7 @@ export default function TenantDatasource() {
             style={{ width: 280 }}
           />
           {tenantId && (
-            <Tooltip title="刷新对象树">
+            <Tooltip title={intl.formatMessage({ id: 'tenant.datasource.refreshTree' })}>
               <Button icon={<ReloadOutlined />} loading={loadingTables} onClick={() => void connect(tenantId)} />
             </Tooltip>
           )}
@@ -257,20 +272,27 @@ export default function TenantDatasource() {
         <aside className={styles.sidebar}>
           <div className={styles.sidebarTitle}>
             <DatabaseOutlined />
-            <span>数据库对象</span>
+            <span>{intl.formatMessage({ id: 'tenant.datasource.objects' })}</span>
             <Tag>{tables.length}</Tag>
           </div>
           <Input.Search
             allowClear
-            placeholder="搜索 schema / 表名"
+            placeholder={intl.formatMessage({ id: 'tenant.datasource.search' })}
             value={tableFilter}
             onChange={(event) => setTableFilter(event.target.value)}
           />
-          <div className={styles.objectTree} role="tree" aria-label="租户数据库对象">
+          <div
+            className={styles.objectTree}
+            role="tree"
+            aria-label={intl.formatMessage({ id: 'tenant.datasource.treeLabel' })}
+          >
             {loadingTables ? (
               <Spin className={styles.tableLoading} />
             ) : !tenantId ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择租户" />
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={intl.formatMessage({ id: 'tenant.datasource.select' })}
+              />
             ) : (
               <>
                 <button
@@ -315,7 +337,10 @@ export default function TenantDatasource() {
                                     aria-selected={selectedTableKey === key}
                                     key={key}
                                     className={selectedTableKey === key ? styles.treeTableSelected : styles.treeTable}
-                                    title={`${table.schema}.${table.name} · 双击打开`}
+                                    title={intl.formatMessage(
+                                      { id: 'tenant.datasource.openTable' },
+                                      { name: `${table.schema}.${table.name}` }
+                                    )}
                                     onClick={() => setSelectedTableKey(key)}
                                     onDoubleClick={() => openTable(table)}
                                   >
@@ -330,7 +355,10 @@ export default function TenantDatasource() {
                       );
                     })
                   ) : (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据表" />
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={intl.formatMessage({ id: 'tenant.datasource.noTables' })}
+                    />
                   ))}
               </>
             )}
@@ -346,14 +374,18 @@ export default function TenantDatasource() {
                 setActiveTab(SQL_TAB);
               }}
             >
-              在 SQL 查询中打开
+              {intl.formatMessage({ id: 'tenant.datasource.openSql' })}
             </Button>
           )}
-          <div className={styles.treeHint}>单击选中，双击表名打开数据</div>
+          <div className={styles.treeHint}>{intl.formatMessage({ id: 'tenant.datasource.treeHint' })}</div>
         </aside>
 
         <section className={styles.main}>
-          <div className={styles.tabBar} role="tablist" aria-label="数据库工作标签">
+          <div
+            className={styles.tabBar}
+            role="tablist"
+            aria-label={intl.formatMessage({ id: 'tenant.datasource.tabs' })}
+          >
             <button
               type="button"
               role="tab"
@@ -361,7 +393,8 @@ export default function TenantDatasource() {
               className={activeTab === SQL_TAB ? styles.tabActive : styles.tab}
               onClick={() => setActiveTab(SQL_TAB)}
             >
-              <CodeOutlined /> SQL 查询
+              <CodeOutlined />
+              {intl.formatMessage({ id: 'tenant.datasource.query' })}
             </button>
             {openTables.map((tab) => (
               <div key={tab.key} className={activeTab === tab.key ? styles.tabActive : styles.tab}>
@@ -377,7 +410,7 @@ export default function TenantDatasource() {
                 <button
                   type="button"
                   className={styles.closeTab}
-                  aria-label={`关闭 ${tab.table.name}`}
+                  aria-label={intl.formatMessage({ id: 'tenant.datasource.closeTable' }, { name: tab.table.name })}
                   onClick={() => closeTable(tab.key)}
                 >
                   <CloseOutlined />
@@ -385,7 +418,7 @@ export default function TenantDatasource() {
               </div>
             ))}
             {activeTab !== SQL_TAB && (
-              <Tooltip title="新建 SQL 查询">
+              <Tooltip title={intl.formatMessage({ id: 'tenant.datasource.newQuery' })}>
                 <button type="button" className={styles.newQuery} onClick={() => setActiveTab(SQL_TAB)}>
                   <PlusOutlined />
                 </button>
@@ -397,7 +430,8 @@ export default function TenantDatasource() {
             <>
               <div className={styles.editorHeader}>
                 <span>
-                  <CodeOutlined /> SQL 编辑器
+                  <CodeOutlined />
+                  {intl.formatMessage({ id: 'tenant.datasource.editor' })}
                 </span>
                 <Button
                   type="primary"
@@ -406,7 +440,7 @@ export default function TenantDatasource() {
                   loading={runningSql}
                   onClick={() => void runSql()}
                 >
-                  运行 SQL
+                  {intl.formatMessage({ id: 'tenant.datasource.run' })}
                 </Button>
               </div>
               <Input.TextArea
@@ -417,38 +451,43 @@ export default function TenantDatasource() {
                   setSqlResult(undefined);
                   setExecutedSql('');
                 }}
-                placeholder="输入一条 SQL 语句…"
+                placeholder={intl.formatMessage({ id: 'tenant.datasource.input' })}
                 spellCheck={false}
                 rows={7}
               />
               <div className={styles.resultHeader}>
-                <strong>查询结果</strong>
+                <strong>{intl.formatMessage({ id: 'tenant.datasource.results' })}</strong>
                 {sqlResult && (
                   <span>
                     {sqlResult.columns.length
-                      ? `第 ${sqlResult.page} 页 · ${sqlResult.rows.length} 行`
-                      : `影响 ${sqlResult.affectedRows} 行`}
+                      ? intl.formatMessage(
+                        { id: 'tenant.datasource.resultPage' },
+                        { page: sqlResult.page, count: sqlResult.rows.length }
+                      )
+                      : intl.formatMessage({ id: 'tenant.datasource.affected' }, { count: sqlResult.affectedRows })}
                     {sqlElapsed !== undefined ? ` · ${Math.round(sqlElapsed)} ms` : ''}
                   </span>
                 )}
               </div>
               <div className={styles.result}>
                 <ResultGrid result={sqlResult} loading={runningSql} />
-                {sqlResult?.truncated && <Alert type="warning" message="结果已截断，仅显示前 500 行。" />}
+                {sqlResult?.truncated && (
+                  <Alert type="warning" message={intl.formatMessage({ id: 'tenant.datasource.truncated' })} />
+                )}
                 {sqlResult && sqlResult.columns.length > 0 && !sqlResult.truncated && (
                   <div className={styles.pager}>
                     <Button
                       disabled={sqlResult.page <= 1 || runningSql}
                       onClick={() => void loadSqlPage(sqlResult.page - 1)}
                     >
-                      上一页
+                      {intl.formatMessage({ id: 'tenant.datasource.previous' })}
                     </Button>
-                    <span>每页最多 {PAGE_SIZE} 行</span>
+                    <span>{intl.formatMessage({ id: 'tenant.datasource.pageSize' }, { count: PAGE_SIZE })}</span>
                     <Button
                       disabled={!sqlResult.hasNextPage || runningSql}
                       onClick={() => void loadSqlPage(sqlResult.page + 1)}
                     >
-                      下一页
+                      {intl.formatMessage({ id: 'tenant.datasource.next' })}
                     </Button>
                   </div>
                 )}
@@ -465,14 +504,17 @@ export default function TenantDatasource() {
                   loading={selectedTab.loading}
                   onClick={() => void loadTable(selectedTab.table, selectedTab.page)}
                 >
-                  刷新数据
+                  {intl.formatMessage({ id: 'tenant.datasource.refreshData' })}
                 </Button>
               </div>
               <div className={styles.resultHeader}>
-                <strong>表数据</strong>
+                <strong>{intl.formatMessage({ id: 'tenant.datasource.tableData' })}</strong>
                 {selectedTab.result && (
                   <span>
-                    {selectedTab.result.rows.length} 行
+                    {intl.formatMessage(
+                      { id: 'tenant.datasource.rowCount' },
+                      { count: selectedTab.result.rows.length }
+                    )}
                     {selectedTab.elapsed !== undefined ? ` · ${Math.round(selectedTab.elapsed)} ms` : ''}
                   </span>
                 )}
@@ -485,16 +527,19 @@ export default function TenantDatasource() {
                       disabled={selectedTab.page <= 1 || selectedTab.loading}
                       onClick={() => void loadTable(selectedTab.table, selectedTab.page - 1)}
                     >
-                      上一页
+                      {intl.formatMessage({ id: 'tenant.datasource.previous' })}
                     </Button>
                     <span>
-                      第 {selectedTab.page} 页 · 每页最多 {PAGE_SIZE} 行
+                      {intl.formatMessage(
+                        { id: 'tenant.datasource.tablePage' },
+                        { page: selectedTab.page, count: PAGE_SIZE }
+                      )}
                     </span>
                     <Button
                       disabled={!selectedTab.result.hasNextPage || selectedTab.loading}
                       onClick={() => void loadTable(selectedTab.table, selectedTab.page + 1)}
                     >
-                      下一页
+                      {intl.formatMessage({ id: 'tenant.datasource.next' })}
                     </Button>
                   </div>
                 )}

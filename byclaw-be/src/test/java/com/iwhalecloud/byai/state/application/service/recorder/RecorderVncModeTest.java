@@ -13,7 +13,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-class RecorderVncModeTest {
+class RecorderVncModeTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void bindVncStartsProviderAndReturnsConfiguredVncUrl() {

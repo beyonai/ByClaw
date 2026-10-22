@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.capability;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -98,7 +100,7 @@ public class AgentCapabilityCardApplicationService {
 
     private void requireInput(AgentCapabilityCompileInput input) {
         if (input == null || input.getAgent() == null) {
-            throw new BaseException("Capability compile input is required");
+            throw new BaseException(I18nUtil.get("capability.input.required"));
         }
     }
 }

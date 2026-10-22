@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.taskplan;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -77,7 +79,7 @@ public class TaskPlanApplicationService {
             case "CREATE" -> create(request, userId, sessionId, messageId, sourceRuntime, sourceRunId);
             case "COMPLETE_CURRENT", "FAIL_CURRENT", "SKIP_CURRENT" ->
                 advanceCurrent(request, userId, sessionId, messageId, sourceRuntime, sourceRunId, action);
-            default -> throw commandError("INVALID_REQUEST", "unsupported action: " + request.getAction(), null);
+            default -> throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.actionUnsupported", request.getAction()), null);
         };
     }
 
@@ -91,14 +93,14 @@ public class TaskPlanApplicationService {
         String sourceRunId = requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
         ByaiAgentTaskPlan existing = findLatestActiveForSession(userId, sessionId, true);
         if (existing == null) {
-            throw commandError("VERSION_CONFLICT", "Concurrent task plan creation did not become visible", null);
+            throw commandError("VERSION_CONFLICT", I18nUtil.get("taskplan.concurrentCreation"), null);
         }
         String idempotencyKey = requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         boolean ownedExecution = isExecutionOwner(existing, messageId, sourceRuntime, sourceRunId);
         if (ownedExecution && Objects.equals(existing.getLastCommandId(), idempotencyKey)) {
             return new TaskPlanWriteResult(snapshot(existing), false);
         }
-        throw commandError("PLAN_ALREADY_EXISTS", "An active task plan already exists for this session",
+        throw commandError("PLAN_ALREADY_EXISTS", I18nUtil.get("taskplan.activeExists"),
             ownedExecution ? snapshot(existing) : null);
     }
 
@@ -247,7 +249,7 @@ public class TaskPlanApplicationService {
             .set(ByaiAgentTaskPlan::getUpdatedAt, now)
             .set(ByaiAgentTaskPlan::getCompletedAt, now));
         if (changed == 0) {
-            throw conflict("Active task plan changed while it was cancelled");
+            throw conflict(I18nUtil.get("taskplan.validation.cancelConflict"));
         }
         plan.setTasksPayload(tasksPayload);
         plan.setStatus("CANCELLED");
@@ -281,7 +283,7 @@ public class TaskPlanApplicationService {
                 userId, sessionId, messageId, sourceRuntime, sourceRunId, idempotencyKey, existing.getPlanId(),
                 existing.getVersion(), existing.getStatus(), existing.getMessageId(), existing.getSourceRuntime(),
                 existing.getSourceRunId(), existing.getLastCommandId(), ownedExecution);
-            throw commandError("PLAN_ALREADY_EXISTS", "An active task plan already exists for this session",
+            throw commandError("PLAN_ALREADY_EXISTS", I18nUtil.get("taskplan.activeExists"),
                 ownedExecution ? snapshot(existing) : null);
         }
 
@@ -379,7 +381,7 @@ public class TaskPlanApplicationService {
                 sessionActive == null ? null : sessionActive.getSourceRuntime(),
                 sessionActive == null ? null : sessionActive.getSourceRunId(),
                 sessionActive == null ? null : sessionActive.getLastCommandId());
-            throw commandError("PLAN_NOT_FOUND", "No active task plan exists for this execution",
+            throw commandError("PLAN_NOT_FOUND", I18nUtil.get("taskplan.noActivePlan"),
                 latest == null ? null : snapshot(latest));
         }
         if (Objects.equals(plan.getLastCommandId(), idempotencyKey)) {
@@ -393,12 +395,12 @@ public class TaskPlanApplicationService {
             .filter(task -> "IN_PROGRESS".equals(task.getStatus()))
             .findFirst()
             .orElseThrow(() -> commandError("INVALID_EXECUTION_ORDER",
-                "Active task plan has no current IN_PROGRESS task", current));
+                I18nUtil.get("taskplan.validation.noRunningTask"), current));
         String nextTaskStatus = switch (action) {
             case "COMPLETE_CURRENT" -> "COMPLETED";
             case "FAIL_CURRENT" -> "FAILED";
             case "SKIP_CURRENT" -> "SKIPPED";
-            default -> throw commandError("INVALID_REQUEST", "unsupported action: " + action, current);
+            default -> throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.actionUnsupported", action), current);
         };
         applyTaskStatus(running, nextTaskStatus, request.getStatusReason(), now);
         if ("COMPLETED".equals(nextTaskStatus) || "SKIPPED".equals(nextTaskStatus)) {
@@ -452,7 +454,7 @@ public class TaskPlanApplicationService {
             if (latest != null && Objects.equals(latest.getLastCommandId(), idempotencyKey)) {
                 return new TaskPlanWriteResult(snapshot(latest), false);
             }
-            throw commandError("VERSION_CONFLICT", "Task plan changed while it was being updated",
+            throw commandError("VERSION_CONFLICT", I18nUtil.get("taskplan.concurrentUpdate"),
                 latest == null ? null : snapshot(latest));
         }
         log.info("[task-plan] current task advanced action={}, planId={}, version={}->{}, status={}, userId={}, "
@@ -464,16 +466,16 @@ public class TaskPlanApplicationService {
 
     private List<TaskPlanSnapshot.TaskSnapshot> createTasks(List<TaskPlanUpdateRequest.TaskInput> input, Date now) {
         if (input == null || input.isEmpty()) {
-            throw commandError("INVALID_REQUEST", "tasks must contain at least one task", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.tasksRequired"), null);
         }
         if (input.size() > MAX_TASKS) {
-            throw commandError("INVALID_REQUEST", "tasks must not contain more than " + MAX_TASKS + " tasks", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.tasksLimit", MAX_TASKS), null);
         }
         List<TaskPlanSnapshot.TaskSnapshot> tasks = new ArrayList<>(input.size());
         for (int index = 0; index < input.size(); index++) {
             TaskPlanUpdateRequest.TaskInput source = input.get(index);
             if (source == null) {
-                throw commandError("INVALID_REQUEST", "tasks[" + index + "] must not be null", null);
+                throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.taskRequired", index), null);
             }
             TaskPlanSnapshot.TaskSnapshot task = new TaskPlanSnapshot.TaskSnapshot();
             task.setTaskId(String.valueOf(index + 1));
@@ -520,7 +522,7 @@ public class TaskPlanApplicationService {
                     || ("CANCELLED".equals(haltStatus) && "CANCELLED".equals(status));
                 if (!allowed) {
                     throw commandError("INVALID_EXECUTION_ORDER",
-                        "Task at position " + task.getPosition() + " cannot execute after " + haltStatus, current);
+                        I18nUtil.get("taskplan.validation.executionAfterTerminal", task.getPosition(), haltStatus), current);
                 }
                 continue;
             }
@@ -530,7 +532,7 @@ public class TaskPlanApplicationService {
             }
             if (pendingTailOnly) {
                 throw commandError("INVALID_EXECUTION_ORDER",
-                    "Task at position " + task.getPosition() + " cannot start before previous tasks are terminal",
+                    I18nUtil.get("taskplan.validation.executionBeforePrevious", task.getPosition()),
                     current);
             }
             if ("IN_PROGRESS".equals(status)) {
@@ -558,7 +560,7 @@ public class TaskPlanApplicationService {
             task.setStatus(failed ? "SKIPPED" : "CANCELLED");
             task.setStatusReason(new TaskPlanSnapshot.StatusReason(
                 failed ? "BLOCKED_BY_PREVIOUS_FAILURE" : "PLAN_CANCELLED",
-                failed ? "前序任务失败，后续任务已跳过" : "前序任务取消，后续任务已取消"));
+                failed ? I18nUtil.get("taskplan.validation.previousFailed") : I18nUtil.get("taskplan.validation.previousCancelled")));
             task.setUpdatedAt(now);
             task.setCompletedAt(now);
         }
@@ -582,20 +584,20 @@ public class TaskPlanApplicationService {
             .filter(task -> "FAILED".equals(task.getStatus())).findFirst().orElse(null);
         if (failed != null) {
             String code = failed.getStatusReason() == null ? "TASK_FAILED" : failed.getStatusReason().getCode();
-            String message = failed.getStatusReason() == null ? "任务执行失败"
+            String message = failed.getStatusReason() == null ? I18nUtil.get("taskplan.execution.failed")
                 : failed.getStatusReason().getMessage();
             return new PlanStatusReason(StringUtils.defaultIfBlank(code, "TASK_FAILED"),
-                StringUtils.defaultIfBlank(message, "任务执行失败"));
+                StringUtils.defaultIfBlank(message, I18nUtil.get("taskplan.execution.failed")));
         }
         TaskPlanSnapshot.TaskSnapshot cancelled = tasks.stream()
             .filter(task -> "CANCELLED".equals(task.getStatus())).findFirst().orElse(null);
         if (cancelled != null) {
             String code = cancelled.getStatusReason() == null ? "TASK_CANCELLED"
                 : cancelled.getStatusReason().getCode();
-            String message = cancelled.getStatusReason() == null ? "任务执行已取消"
+            String message = cancelled.getStatusReason() == null ? I18nUtil.get("taskplan.execution.cancelled")
                 : cancelled.getStatusReason().getMessage();
             return new PlanStatusReason(StringUtils.defaultIfBlank(code, "TASK_CANCELLED"),
-                StringUtils.defaultIfBlank(message, "任务执行已取消"));
+                StringUtils.defaultIfBlank(message, I18nUtil.get("taskplan.execution.cancelled")));
         }
         return null;
     }
@@ -687,13 +689,24 @@ public class TaskPlanApplicationService {
         snapshot.setExplanation(plan.getLastExplanation());
         snapshot.setCreatedAt(plan.getCreatedAt());
         snapshot.setUpdatedAt(plan.getUpdatedAt());
-        snapshot.setTasks(tasks);
+        // 只调整响应副本中的系统状态原因，不改变任务状态或用户提交的说明。
+        List<TaskPlanSnapshot.TaskSnapshot> responseTasks = new ArrayList<>(tasks.size());
+        for (TaskPlanSnapshot.TaskSnapshot task : tasks) {
+            TaskPlanSnapshot.TaskSnapshot copy = new TaskPlanSnapshot.TaskSnapshot();
+            org.springframework.beans.BeanUtils.copyProperties(task, copy);
+            if (task.getStatusReason() != null) {
+                copy.setStatusReason(new TaskPlanSnapshot.StatusReason(task.getStatusReason().getCode(),
+                    TaskPlanMessages.localize(task.getStatusReason().getMessage())));
+            }
+            responseTasks.add(copy);
+        }
+        snapshot.setTasks(responseTasks);
         return snapshot;
     }
 
     private void requireCommandRequest(TaskPlanUpdateRequest request) {
         if (request == null) {
-            throw commandError("INVALID_REQUEST", "request must not be null", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.requestRequired"), null);
         }
         requiredTextCommand(request.getIdempotencyKey(), "idempotencyKey", 128);
         requiredTextCommand(request.getSourceRunId(), "sourceRunId", 128);
@@ -702,21 +715,21 @@ public class TaskPlanApplicationService {
     private void requireOwnedSessionCommand(Long sessionId, Long userId) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !Objects.equals(session.getCreatorId(), userId)) {
-            throw commandError("PLAN_NOT_FOUND", "Session not found", null);
+            throw commandError("PLAN_NOT_FOUND", I18nUtil.get("groupchat.session.notFound"), null);
         }
     }
 
     private void requireOwnedSession(Long sessionId, Long userId) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !Objects.equals(session.getCreatorId(), userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task plan not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("taskplan.notFound"));
         }
     }
 
     private String normalizeRuntimeCommand(String value) {
         String runtime = requiredTextCommand(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
         if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
-            throw commandError("INVALID_REQUEST", "unsupported sourceRuntime: " + value, null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.runtimeUnsupported", value), null);
         }
         return runtime;
     }
@@ -724,7 +737,7 @@ public class TaskPlanApplicationService {
     private String normalizeRuntime(String value) {
         String runtime = requiredText(value, "sourceRuntime", 32).toUpperCase(Locale.ROOT).replace('-', '_');
         if (!Set.of("BYCLAW_SUPER", "OPENCLAW").contains(runtime)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported sourceRuntime: " + value);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("taskplan.validation.runtimeUnsupported", value));
         }
         return runtime;
     }
@@ -732,11 +745,11 @@ public class TaskPlanApplicationService {
     private String requiredText(String value, String field, int maxLength) {
         String result = StringUtils.trimToNull(value);
         if (result == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("taskplan.validation.fieldRequired", field));
         }
         if (result.length() > maxLength) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                field + " exceeds " + maxLength + " characters");
+                I18nUtil.get("taskplan.validation.fieldTooLong", field, maxLength));
         }
         return result;
     }
@@ -750,16 +763,16 @@ public class TaskPlanApplicationService {
     }
 
     private TaskPlanSnapshot.StatusReason statusReason(String code, String message) {
-        return StringUtils.isBlank(code) ? null : new TaskPlanSnapshot.StatusReason(code, message);
+        return StringUtils.isBlank(code) ? null : new TaskPlanSnapshot.StatusReason(code, TaskPlanMessages.localize(message));
     }
 
     private String requiredTextCommand(String value, String field, int maxLength) {
         String result = StringUtils.trimToNull(value);
         if (result == null) {
-            throw commandError("INVALID_REQUEST", field + " is required", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.fieldRequired", field), null);
         }
         if (result.length() > maxLength) {
-            throw commandError("INVALID_REQUEST", field + " exceeds " + maxLength + " characters", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.fieldTooLong", field, maxLength), null);
         }
         return result;
     }
@@ -767,7 +780,7 @@ public class TaskPlanApplicationService {
     private String trimToNullCommand(String value, int maxLength) {
         String result = StringUtils.trimToNull(value);
         if (result != null && result.length() > maxLength) {
-            throw commandError("INVALID_REQUEST", "text exceeds " + maxLength + " characters", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.textTooLong", maxLength), null);
         }
         return result;
     }
@@ -775,7 +788,7 @@ public class TaskPlanApplicationService {
     private Long parseRequiredLongCommand(String value, String field) {
         Long parsed = parseOptionalLong(value);
         if (parsed == null) {
-            throw commandError("INVALID_REQUEST", field + " must be a positive integer string", null);
+            throw commandError("INVALID_REQUEST", I18nUtil.get("taskplan.validation.positiveIntegerRequired", field), null);
         }
         return parsed;
     }
@@ -783,7 +796,7 @@ public class TaskPlanApplicationService {
     private Long parseRequiredLong(String value, String field) {
         Long parsed = parseOptionalLong(value);
         if (parsed == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be a positive integer string");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("taskplan.validation.positiveIntegerRequired", field));
         }
         return parsed;
     }

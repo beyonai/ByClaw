@@ -46,22 +46,22 @@ public class TenantDeletionService {
 
     public String request(String enterpriseIdText, String confirmedName) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.admin.required");
         }
         if (enterpriseIdText == null || !enterpriseIdText.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
         long enterpriseId;
         try {
             enterpriseId = Long.parseLong(enterpriseIdText);
         }
         catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid", e);
         }
         String actualName = tenants.selectManagedEnterpriseName(enterpriseId);
-        if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant not found");
+        if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
         if (!actualName.equals(confirmedName)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant name confirmation does not match");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.delete.nameMismatch");
         }
         if ("DELETED".equals(status(enterpriseId))) return "COMPLETED";
         upsert(enterpriseId, DELETE_MARKER, "true");

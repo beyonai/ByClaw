@@ -160,13 +160,13 @@ const MyEmployeesPage: React.FC = () => {
       if (!resourceId) return;
       try {
         await applyResourceUse({ resourceId });
-        message.success('申请已提交，等待授权通过');
+        message.success(intl.formatMessage({ id: 'resource.useApplication.submitted' }));
         await refreshEmployee(employee);
       } catch (error: any) {
-        message.error(error?.message || '使用申请失败');
+        message.error(error?.message || intl.formatMessage({ id: 'resource.useApplication.failed' }));
       }
     },
-    [refreshEmployee]
+    [refreshEmployee, intl]
   );
 
   const handleEdit = useCallback(

@@ -43,7 +43,68 @@ const columns = {
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
+Object.assign(columns, {
+  byai_group_chat_forward_request: [
+    "request_id",
+    "enterprise_id",
+    "actor_user_id",
+    "backend",
+    "source_session_id",
+    "client_request_id",
+    "mode",
+    "request_hash",
+    "state",
+    "snapshot_version",
+    "frozen_json",
+    "source_manifest_json",
+    "sources_frozen",
+    "lease_owner",
+    "fencing_version",
+    "lease_until",
+    "create_time",
+    "update_time",
+  ],
+  byai_group_chat_forward_target: [
+    "target_id",
+    "enterprise_id",
+    "request_id",
+    "target_session_id",
+    "state",
+    "lease_owner",
+    "fencing_version",
+    "lease_until",
+    "checkpoint_json",
+    "message_ids_json",
+    "error_code",
+    "retryable",
+    "pending_delivery",
+    "create_time",
+    "update_time",
+  ],
+  byai_group_chat_forward_item: [
+    "item_id",
+    "enterprise_id",
+    "request_id",
+    "target_id",
+    "ordinal",
+    "selected_message_id",
+    "selected_merged_card",
+    "source_message_id",
+    "content",
+    "speaker_json",
+    "source_created_at",
+    "references_json",
+    "attachments_json",
+    "bound_message_id",
+    "create_time",
+  ],
+});
 const indexes = [
+  "uq_forward_request_actor_key",
+  "uq_forward_request_tenant",
+  "uq_forward_target_group",
+  "uq_forward_target_tenant",
+  "uq_forward_item_ordinal",
   "uq_tenant_session_business_id",
   "uq_tenant_message_business_id",
   "uq_tenant_message_command",
@@ -61,7 +122,8 @@ function setup(missing?: string) {
   const db = {
     query: async (sql: string) => {
       if (sql.includes("information_schema.columns")) return rows;
-      if (sql.includes("pg_index")) return indexes.map((name) => ({ name }));
+      if (sql.includes("pg_index"))
+        return indexes.filter((name) => name !== missing).map((name) => ({ name }));
       return [{ id_sequence: "1" }];
     },
   };
@@ -91,5 +153,25 @@ describe("group task schema readiness", () => {
     await readiness.check();
     expect(readiness.state.verified).toBe(true);
     expect(ready).toHaveBeenCalledWith(true);
+  });
+});
+
+// A historical schema marker cannot compensate for missing forwarding execution fields or constraints.
+describe("forwarding schema gate", () => {
+  it.each([
+    "backend",
+    "source_manifest_json",
+    "checkpoint_json",
+    "selected_merged_card",
+    "attachments_json",
+    "uq_forward_request_actor_key",
+    "uq_forward_request_tenant",
+    "uq_forward_target_group",
+    "uq_forward_target_tenant",
+    "uq_forward_item_ordinal",
+  ])("rejects missing %s before business admission", async (missing) => {
+    const { readiness, ready } = setup(missing);
+    await expect(readiness.check()).rejects.toThrow("BUSINESS_SCHEMA_INCOMPATIBLE");
+    expect(ready).not.toHaveBeenCalledWith(true);
   });
 });

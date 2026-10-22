@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,7 +55,7 @@ import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatGatewayExecutorTest {
+class GroupChatGatewayExecutorTest extends I18nTestSupport {
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private ScriptService script;
     private ByaiMessageMapper messages;
@@ -159,6 +160,10 @@ class GroupChatGatewayExecutorTest {
         assertThat(decorated).containsOnlyOnce("/by/.sessions/60/.byclaw/context/members/group-members.json");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
+        assertThat(groupChat.get("executionId")).isEqualTo(50L);
+        assertThat(groupChat.get("groupHistoryPath"))
+            .isEqualTo("/by/.sessions/60/.byclaw/context/turn/group-history.json");
+        assertThat(groupChat.get("originalContent")).isEqualTo(child.getMessageContent());
         assertThat(groupChat.get("contextToken")).isEqualTo("signed-context-token");
         assertThat(groupChat.get("conversationKey")).isEqualTo("10");
         assertThat(groupChat.get("beforeMessageId")).isEqualTo("20");
@@ -458,7 +463,7 @@ class GroupChatGatewayExecutorTest {
         context.traceId = execution.getTraceId();
         context.assistantChatDto.setAgentId(41L);
         assertThatThrownBy(() -> executor.decorate(context, "继续", new HashMap<>()))
-            .hasMessageContaining("identity does not match");
+            .hasMessageContaining("运行身份与派发任务不匹配");
         verifyNoInteractions(historyFiles);
     }
 
@@ -518,7 +523,9 @@ class GroupChatGatewayExecutorTest {
         context.traceId = execution.getTraceId();
         context.assistantChatDto.setAgentId(40L);
         JSONArray content = JSON.parseArray("[{\"role\":\"user\",\"content\":{\"text\":\"分析附件\",\"files\":[{\"name\":\"report.txt\"}]}}]");
-        JSONArray decorated = (JSONArray) executor.decorate(context, content, new HashMap<>());
+        Map<String, Object> params = new HashMap<>();
+        JSONArray decorated = (JSONArray) executor.decorate(context, content, params);
+        assertThat(((Map<?, ?>) params.get("groupChat")).get("originalContent")).isEqualTo("分析附件");
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
             .contains("群聊判定协议", "group-members.json").doesNotContain("HUMAN_30", "用户三十");
         assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");
@@ -535,4 +542,21 @@ class GroupChatGatewayExecutorTest {
         assertThat(params).isEmpty();
         verify(executions).selectByCandidateSessionId(99L);
     }
+
+    @Test
+    void referenceToForwardDoesNotRestoreRuntimeResources() throws Exception {
+        ByaiMessage original = new ByaiMessage(); original.setMessageId(20L); original.setSessionId(10L);
+        original.setMessageContent("{{opaque}}");
+        original.setMetadata("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceType\":\"COMMON_FILE\",\"resourceCode\":\"secret\"}]}");
+        when(messages.selectByMessageId(20L)).thenReturn(original);
+        child.setMessageContent(original.getMessageContent());
+        child.setMetadata("{\"scene\":\"GROUP_TASK\",\"resourceList\":[{\"id\":\"opaque\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceType\":\"COMMON_FILE\",\"resourceCode\":\"secret\"}]}");
+        executor.execute(execution, "/by/.sessions/60");
+        var dto = ArgumentCaptor.forClass(AssistantChatDto.class);
+        verify(script).startExistingMessageTurn(dto.capture(), any());
+        assertThat(dto.getValue().getResourceList()).isNullOrEmpty();
+        assertThat(dto.getValue().getFiles()).isNullOrEmpty();
+        assertThat(dto.getValue().getChatContent()).isEqualTo("需求说明");
+    }
+
 }

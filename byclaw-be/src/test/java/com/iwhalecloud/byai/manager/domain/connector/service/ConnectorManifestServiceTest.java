@@ -25,7 +25,7 @@ import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 @DisabledOnOs(OS.WINDOWS)
-class ConnectorManifestServiceTest {
+class ConnectorManifestServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Long USER_ID = 1001L;
 
@@ -46,6 +46,16 @@ class ConnectorManifestServiceTest {
         when(mapper.updateById(any())).thenReturn(1);
         org.mockito.Mockito.doReturn(1).when(mapper).deleteById(
             org.mockito.ArgumentMatchers.<java.io.Serializable>any());
+    }
+
+    @Test
+    void invalidUserValidationUsesTheCurrentLanguage() {
+        assertThatThrownBy(() -> service.upsertAndEnable(0L, connector(dwsManifest())))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("userId 必须为正整数");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.upsertAndEnable(0L, connector(dwsManifest())))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("userId must be positive");
+        verify(mapper, never()).insertConnectorParamIgnoreConflict(any());
     }
 
     @Test

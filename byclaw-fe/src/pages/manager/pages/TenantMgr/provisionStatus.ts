@@ -1,12 +1,18 @@
-export type TenantProvisionDisplayStatus = '未开通' | '开通中' | '已开通' | '失败' | '删除中' | '删除失败';
+export type TenantProvisionDisplayStatus =
+  | 'RESERVED'
+  | 'PROVISIONING'
+  | 'READY'
+  | 'FAILED'
+  | 'DELETING'
+  | 'DELETE_FAILED';
 
 export function tenantProvisionDisplayStatus(state: string): TenantProvisionDisplayStatus {
-  if (state === 'READY') return '已开通';
-  if (state === 'DELETING') return '删除中';
-  if (state === 'DELETE_FAILED') return '删除失败';
-  if (state === 'FAILED' || state === 'UNAVAILABLE' || !state) return '失败';
-  if (state === 'RESERVED') return '未开通';
-  return '开通中';
+  if (state === 'READY') return 'READY';
+  if (state === 'DELETING') return 'DELETING';
+  if (state === 'DELETE_FAILED') return 'DELETE_FAILED';
+  if (state === 'FAILED' || state === 'UNAVAILABLE' || !state) return 'FAILED';
+  if (state === 'RESERVED') return 'RESERVED';
+  return 'PROVISIONING';
 }
 
 export type ProvisionStepStatus = 'done' | 'active' | 'pending' | 'failed';

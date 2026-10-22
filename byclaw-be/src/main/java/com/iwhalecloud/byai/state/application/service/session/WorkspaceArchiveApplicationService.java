@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -272,7 +274,7 @@ public class WorkspaceArchiveApplicationService {
         }
         String currentUserCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(currentUserCode) || !currentUserCode.equals(userCode.trim())) {
-            throw new IllegalArgumentException("无权访问该用户的 workspace archive");
+            throw new IllegalArgumentException(I18nUtil.get("workspace.archive.accessDenied"));
         }
     }
 

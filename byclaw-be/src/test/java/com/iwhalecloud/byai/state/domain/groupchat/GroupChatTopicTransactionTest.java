@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,7 +29,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTopicSer
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 /** 真实 JDBC 提交/回滚验证；数据库方言 MERGE 并发行为仍需目标数据库集成验证。 */
-class GroupChatTopicTransactionTest {
+class GroupChatTopicTransactionTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     @TempDir Path directory;
 
     @Test

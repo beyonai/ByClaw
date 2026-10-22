@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -17,6 +20,9 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
@@ -32,6 +38,9 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
+import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
@@ -39,7 +48,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatConte
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
-class GroupChatContextServiceTest {
+class GroupChatContextServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
 
     private ByaiMessageMapper messageMapper;
 
@@ -69,6 +83,103 @@ class GroupChatContextServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void timelineResolvesCurrentGroupNicknamesAndUserNamesForExistingForwards() {
+        SessionMemberService members = mock(SessionMemberService.class);
+        UserService users = mock(UserService.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, members, null);
+        ReflectionTestUtils.setField(service, "userService", users);
+        ByaiSession session = new ByaiSession();
+        session.setSessionId(3L);
+        when(sessionService.findById(3L)).thenReturn(session);
+        when(members.findSessionMember(3L, "USER", 100L)).thenReturn(new ByaiSessionMember());
+        ByaiSessionMember nickname = member(200L, "当前群昵称");
+        ByaiSessionMember blankNickname = member(300L, " \t");
+        when(members.findSessionMembers(3L, "USER", null)).thenReturn(List.of(nickname, blankNickname));
+        Users user = new Users();
+        user.setUserId(300L);
+        user.setUserName("当前用户名");
+        Users formerMember = new Users();
+        formerMember.setUserId(400L);
+        formerMember.setUserName("已退群用户");
+        when(users.findByIds(anyCollection())).thenReturn(List.of(user, formerMember));
+        ByaiMessage forwarded = message(10L, 1, "聊天记录（1 条）", 200L);
+        forwarded.setCreatorId(200L);
+        forwarded.setCreatorName("200");
+        forwarded.setMetadata("""
+            {"kind":"FORWARD_MERGED","forward":{"forwardId":"900","mode":"MERGED",
+            "resourceMode":"SNAPSHOT_ONLY","itemCount":1,
+            "preview":[{"speakerName":"原发言人快照","content":"原文"}]}}
+            """);
+        ByaiMessage fallback = message(20L, 1, "普通消息", 300L);
+        fallback.setCreatorId(300L);
+        fallback.setCreatorName("过期名称");
+        ByaiMessage departed = message(30L, 1, "退群前消息", 400L);
+        departed.setCreatorId(400L);
+        departed.setCreatorName("400");
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 40L, 60))
+            .thenReturn(List.of(departed, fallback, forwarded));
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId("40");
+
+        var first = service.loadTimeline(request).getMessages();
+
+        assertThat(first).extracting(item -> item.getSpeaker().getDisplayName())
+            .containsExactly("当前群昵称", "当前用户名", "已退群用户");
+        assertThat(new ObjectMapper().valueToTree(first.get(0)).path("forward").path("preview").get(0)
+            .path("speakerName").asText()).isEqualTo("原发言人快照");
+        assertThat(forwarded.getCreatorName()).isEqualTo("200");
+        assertThat(fallback.getCreatorName()).isEqualTo("过期名称");
+        verify(members).findSessionMembers(3L, "USER", null);
+        verify(users).findByIds(anyCollection());
+
+        nickname.setMemName("修改后的群昵称");
+        user.setUserName("修改后的用户名");
+        assertThat(service.loadTimeline(request).getMessages()).extracting(item -> item.getSpeaker().getDisplayName())
+            .containsExactly("修改后的群昵称", "修改后的用户名", "已退群用户");
+    }
+
+    @Test
+    void quotedUserUsesItsOwnCurrentNameWithoutChangingAgentOrSystemSpeakers() {
+        SessionMemberService members = mock(SessionMemberService.class);
+        UserService users = mock(UserService.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, members, null);
+        ReflectionTestUtils.setField(service, "userService", users);
+        when(members.findSessionMembers(3L, "USER", null)).thenReturn(List.of(member(200L, "引用人群昵称")));
+        Users sender = new Users();
+        sender.setUserId(100L);
+        sender.setUserName("当前发送人用户名");
+        when(users.findByIds(anyCollection())).thenReturn(List.of(sender));
+        ByaiMessage quoted = message(10L, 1, "原消息", 200L);
+        quoted.setCreatorId(200L);
+        quoted.setCreatorName("200");
+        ByaiMessage reply = message(20L, 1, "回复", 100L);
+        reply.setCreatorId(100L);
+        reply.setMessageRef(10L);
+        ByaiMessage agent = message(30L, 2, "员工回复", 200L);
+        agent.setCreatorName("员工名称");
+        ByaiMessage event = message(40L, 5, "系统事件", 200L);
+        var result = service.toMessages(List.of(reply, agent, event), Map.of(10L, quoted));
+
+        assertThat(result.get(0).getSpeaker().getDisplayName()).isEqualTo("当前发送人用户名");
+        assertThat(result.get(0).getReplyTo().getSpeaker().getDisplayName()).isEqualTo("引用人群昵称");
+        assertThat(result.get(1).getSpeaker().getAgentName()).isEqualTo("员工名称");
+        assertThat(result.get(2).getSpeaker().getDisplayName()).isEqualTo("System");
+        verify(members).findSessionMembers(3L, "USER", null);
+        verify(users).findByIds(anyCollection());
+        verify(messageMapper, never()).selectByMessageId(10L);
+    }
+
+    private ByaiSessionMember member(Long userId, String nickname) {
+        ByaiSessionMember member = new ByaiSessionMember();
+        member.setSessionId(3L);
+        member.setMemObjId(userId);
+        member.setMemObjType("USER");
+        member.setMemName(nickname);
+        return member;
     }
 
     @Test
@@ -305,6 +416,20 @@ class GroupChatContextServiceTest {
     }
 
     @Test
+    void missingMetadataKindPreservesOrdinaryAttachmentsInGroupList() {
+        ByaiMessage source = message(20L, 1, "正文", 200L);
+        for (String metadata : List.of("{\"scene\":\"GROUP_CHAT\"}",
+            "{\"scene\":\"GROUP_CHAT\",\"kind\":null,\"files\":[]}")) {
+            source.setMetadata(metadata);
+            source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
+            assertThat(service.attachmentsForMessages(List.of(source)).get(source.getMessageId()))
+                .singleElement().satisfies(file -> assertThat(file.getFileId()).isEqualTo("10"));
+            source.setRelatedResources(null);
+            assertThat(service.attachmentsForMessages(List.of(source)).get(source.getMessageId())).isEmpty();
+        }
+    }
+
+    @Test
     void malformedMetadataAndNonPublicationFilesDoNotBreakOrdinaryAttachments() {
         ByaiMessage source = message(20L, 1, "正文", 200L);
         source.setRelatedResources("{\"files\":[{\"fileId\":\"10\",\"fileName\":\"input.pdf\"}]}");
@@ -409,6 +534,152 @@ class GroupChatContextServiceTest {
         assertThat(agent.getSnapshot().getLastIncludedMessageId()).isEqualTo("25");
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "1, 0, …",
+        "3, 0, …（消",
+        "13, 0, …（消息过长，已截断预览）",
+        "14, 1, …（消息过长，已截断预览）",
+        "20000, 19987, …（消息过长，已截断预览）"
+    })
+    void oversizedOnlyMessageRetainsIdentityAndBoundedPreviewWithoutChangingSource(
+        int budget, int retainedCharacters, String ending) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(25000), 100L);
+        source.setTopicId(90L);
+        source.setMetadata("{\"clientRequestId\":\"request-100\"}");
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", budget));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.getTopicId()).isEqualTo("90");
+            assertThat(item.getClientRequestId()).isEqualTo("request-100");
+            assertThat(item.getContent()).isEqualTo("x".repeat(retainedCharacters) + ending);
+            assertThat(item.getContent()).hasSize(budget);
+        });
+        assertThat(response.getSnapshot().getLastIncludedMessageId()).isEqualTo("100");
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+        assertThat(response.getTruncation().getReason()).isEqualTo("character_limit");
+        assertThat(response.getTruncation().getOmittedMessageCount()).isZero();
+        assertThat(source.getMessageContent()).isEqualTo("x".repeat(25000));
+    }
+
+    @Test
+    void oversizedMessagesAllowPagingThroughEveryOlderMessageWithoutGapsOrRepeats() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage latest = message(100L, 1, "x".repeat(25000), 100L);
+        ByaiMessage middle = message(99L, 1, "y".repeat(25000), 99L);
+        ByaiMessage oldest = message(98L, 1, "older", 98L);
+        when(messageMapper.selectLatestMessageId(3L)).thenReturn(100L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(latest, middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(3L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 100L, 50)).thenReturn(List.of(middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 100L)).thenReturn(2L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 99L, 50)).thenReturn(List.of(oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 99L)).thenReturn(1L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 98L, 50)).thenReturn(List.of());
+
+        var first = service.loadTimeline(contextRequest(null, 20000));
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("100");
+        assertThat(first.getTruncation().getOmittedMessageCount()).isEqualTo(2);
+        // 前端把本页最早消息 ID 作为排他游标，下一页从被字符预算挡住的消息继续。
+        var second = service.loadTimeline(contextRequest(first.getMessages().get(0).getMessageId(), 20000));
+        assertThat(second.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("99");
+        assertThat(second.getTruncation().getOmittedMessageCount()).isEqualTo(1);
+        var third = service.loadTimeline(contextRequest(second.getMessages().get(0).getMessageId(), 20000));
+        assertThat(third.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("98");
+        assertThat(third.getTruncation().getTruncated()).isFalse();
+        assertThat(service.loadTimeline(contextRequest(third.getMessages().get(0).getMessageId(), 20000)).getMessages())
+            .isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {19999, 20000})
+    void messageWithinCharacterBudgetIsReturnedUnchanged(int length) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(length), 100L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", 20000));
+
+        assertThat(response.getMessages()).singleElement()
+            .satisfies(item -> assertThat(item.getContent()).isEqualTo(source.getMessageContent()));
+        assertThat(response.getTruncation().getTruncated()).isFalse();
+        assertThat(response.getTruncation().getReason()).isNull();
+    }
+
+    @Test
+    void characterBudgetKeepsRecentWholeMessagesAndPagesFromTheOldestReturnedId() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage latest = message(30L, 1, "newer", 30L);
+        ByaiMessage middle = message(20L, 1, "older", 20L);
+        ByaiMessage oldest = message(10L, 1, "x", 10L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 40L, 50)).thenReturn(List.of(latest, middle, oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 40L)).thenReturn(3L);
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 20L, 50)).thenReturn(List.of(oldest));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 20L)).thenReturn(1L);
+
+        var first = service.loadTimeline(contextRequest("40", 10));
+
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("20", "30");
+        assertThat(first.getMessages()).extracting(GroupChatContextResponse.Message::getContent).containsExactly("older", "newer");
+        assertThat(first.getSnapshot().getLastIncludedMessageId()).isEqualTo("30");
+        assertThat(first.getTruncation().getReason()).isEqualTo("character_limit");
+        var second = service.loadTimeline(contextRequest(first.getMessages().get(0).getMessageId(), 10));
+        assertThat(second.getMessages()).extracting(GroupChatContextResponse.Message::getMessageId).containsExactly("10");
+        assertThat(second.getTruncation().getTruncated()).isFalse();
+    }
+
+    @Test
+    void tinyCharacterBudgetKeepsRecalledIdentityWithoutExposingOriginalContent() {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "secret".repeat(5000), 100L);
+        source.setRecalledAt(new Date());
+        when(messageMapper.selectTimelineBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countTimelineBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.loadTimeline(contextRequest("101", 3));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.isRecalled()).isTrue();
+            assertThat(item.getContent()).hasSizeLessThanOrEqualTo(3).doesNotContain("secret");
+            assertThat(item.getAttachments()).isEmpty();
+        });
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+        assertThat(source.getMessageContent()).isEqualTo("secret".repeat(5000));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {20001, 25000})
+    void agentContextAlsoKeepsOversizedMessageIdentityAndPreview(int length) {
+        when(sessionService.findById(3L)).thenReturn(new ByaiSession());
+        ByaiMessage source = message(100L, 1, "x".repeat(length), 100L);
+        when(messageMapper.selectVisibleBeforeMessageId(3L, 101L, 50)).thenReturn(List.of(source));
+        when(messageMapper.countVisibleBeforeMessageId(3L, 101L)).thenReturn(1L);
+
+        var response = service.load(contextRequest("101", 20000));
+
+        assertThat(response.getMessages()).singleElement().satisfies(item -> {
+            assertThat(item.getMessageId()).isEqualTo("100");
+            assertThat(item.getContent()).hasSize(20000).endsWith("…（消息过长，已截断预览）");
+        });
+        assertThat(response.getTruncation().getTruncated()).isTrue();
+    }
+
+    private GroupChatContextRequest contextRequest(String beforeMessageId, int maxCharacters) {
+        GroupChatContextRequest request = new GroupChatContextRequest();
+        request.setConversationKey("3");
+        request.setBeforeMessageId(beforeMessageId);
+        request.setMaxMessages(50);
+        request.setMaxCharacters(maxCharacters);
+        return request;
+    }
+
     private ByaiMessage message(Long messageId, int usage, String content, long createdAt) {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(messageId);
@@ -418,4 +689,52 @@ class GroupChatContextServiceTest {
         message.setCreateTime(new Date(createdAt));
         return message;
     }
+
+    @Test
+    void historyAndEventPreserveTokenAttachmentMapping() throws Exception {
+        ByaiMessage source = message(10L, 1, "{{opaque}} {{普通文本}}", 20L);
+        source.setMetadata("""
+            {"scene":"GROUP_CHAT","kind":"FORWARD_SINGLE","forward":{"forwardId":"9007199254740993","mode":"SINGLE","resourceMode":"SNAPSHOT_ONLY","itemCount":1},
+             "resourceList":[{"id":"opaque","resourceId":"/original/private","resourceName":"需求说明","resourceType":"COMMON_FILE"}]}
+            """);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"88\",\"fileName\":\"需求说明.pdf\",\"mediaType\":\"application/pdf\",\"size\":42,\"fileUrl\":\"/commonFile/preview?filePath=%2F.sessions%2F3%2Fcopy.pdf\"}]}");
+        var projected = service.toMessages(List.of(source)).get(0);
+        assertThat(projected.getContent()).isEqualTo("{{opaque}} {{普通文本}}");
+        assertThat(projected.getResourceList()).singleElement().satisfies(ref -> {
+            assertThat(ref.getId()).isEqualTo("opaque");
+            assertThat(ref.getResourceCode()).isNull();
+            assertThat(ref.getExtData()).isNull();
+        });
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(projected);
+        assertThat(json.path("resourceList").get(0).has("targetAttachmentId")).isFalse();
+        assertThat(json.path("resourceList").get(0).has("resourceCode")).isFalse();
+        assertThat(json.path("forward").path("forwardId").asText()).isEqualTo("9007199254740993");
+        assertThat(projected.getAttachments()).singleElement().satisfies(file -> assertThat(file.getMediaType()).isEqualTo("application/pdf"));
+        ByaiMessage activeReply = message(11L, 1, "请看引用", 100L); activeReply.setMessageRef(10L);
+        var reply = service.toMessages(List.of(activeReply), Map.of(10L, source)).get(0).getReplyTo();
+        assertThat(reply.getAcknowledgements()).isEmpty(); assertThat(reply.getCanAcknowledge()).isFalse();
+        var event = com.alibaba.fastjson.JSON.parseObject(com.alibaba.fastjson.JSON.toJSONString(projected));
+        assertThat(event.getJSONArray("resourceList").getJSONObject(0).containsKey("targetAttachmentId")).isFalse();
+        assertThat(event.getJSONArray("resourceList").getJSONObject(0).containsKey("extData")).isFalse();
+        source.setRecalledAt(new Date());
+        var recalled = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(service.toMessages(List.of(source)).get(0));
+        assertThat(recalled.path("resourceList").isEmpty()).isTrue();
+        assertThat(recalled.path("attachments").isEmpty()).isTrue();
+        assertThat(recalled.path("forward").isMissingNode() || recalled.path("forward").isNull()).isTrue();
+    }
+
+    @Test
+    void forwardAlwaysHasNoAcknowledgements() {
+        var acks = mock(ByaiGroupChatMessageAckMapper.class);
+        service = new GroupChatContextService(messageMapper, sessionService, resourceService, null, null, acks);
+        ReflectionTestUtils.setField(service, "taskMapper", tasks);
+        ByaiMessage source = message(10L, 1, "{{HUMAN_100}}", 20L);
+        source.setMetadata("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"HUMAN_100\",\"resourceId\":\"100\",\"resourceType\":\"HUMAN\",\"resourceName\":\"张三\"}]}");
+        var ack = new ByaiGroupChatMessageAck(); ack.setUserId(100L); ack.setMessageId(10L); ack.setUserName("张三");
+        when(acks.selectByMessageIds(3L, List.of(10L))).thenReturn(List.of(ack));
+        var result = service.toMessages(List.of(source)).get(0);
+        assertThat(result.getAcknowledgements()).isEmpty();
+        assertThat(result.isCanAcknowledge()).isFalse();
+    }
+
 }

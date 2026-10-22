@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.session.enums.MemObjType;
 
 import java.util.Date;
@@ -85,7 +87,7 @@ public class GroupChatSettingsService {
         if (request == null || (request.getSessionName() == null
             && request.getAllowJoinByLink() == null
             && request.getAllowMemberAddAgent() == null && request.getAllowMemberInviteUser() == null)) {
-            throw new IllegalArgumentException("No group settings supplied");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.settings.required"));
         }
         if (request.getSessionName() != null) {
             session.setSessionName(validateName(request.getSessionName()));
@@ -129,7 +131,7 @@ public class GroupChatSettingsService {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())
             || memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId) == null) {
-            throw new IllegalArgumentException("Group chat not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.notFound"));
         }
         return GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState());
     }
@@ -139,7 +141,7 @@ public class GroupChatSettingsService {
     public void acknowledgeDissolution(Long sessionId) {
         sessionService.lockById(sessionId);
         if (!isDissolved(sessionId)) {
-            throw new IllegalArgumentException("Group has not been dissolved");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.notDissolved"));
         }
         putExt(sessionId, "group_dissolution_ack_" + requireUser(), "true");
     }
@@ -148,11 +150,11 @@ public class GroupChatSettingsService {
     public void dissolve(Long sessionId) {
         ByaiSession session = sessionService.lockById(sessionId);
         if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())) {
-            throw new IllegalArgumentException("Group chat not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.notFound"));
         }
         ByaiSessionMember operator = memberService.findSessionMember(sessionId, MemObjType.USER.name(), requireUser());
         if (operator == null || !UserRole.OWNER.name().equals(operator.getUserRole())) {
-            throw new IllegalArgumentException("Only group owner can dissolve the group");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.dissolveDenied"));
         }
         if (GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState())) return;
         // 先关闭执行入口；保留成员和历史数据作为审计记录，不删除关联项目/云盘。
@@ -164,7 +166,7 @@ public class GroupChatSettingsService {
             .in(ByaiGroupChatExecution::getStatus, "QUEUED", "RUNNING", "FAILED_RETRYABLE")
             .set(ByaiGroupChatExecution::getStatus, "FAILED")
             .set(ByaiGroupChatExecution::getErrorCode, "GROUP_DISSOLVED")
-            .set(ByaiGroupChatExecution::getErrorMessage, "Group has been dissolved")
+            .set(ByaiGroupChatExecution::getErrorMessage, I18nUtil.get("groupchat.dissolved"))
             .set(ByaiGroupChatExecution::getFinishTime, new Date()));
         taskMapper.selectByGroup(sessionId).forEach(task -> {
             if ("ACTIVE".equals(task.getStatus())) taskMapper.cancel(task.getTaskSessionId(), new Date());
@@ -179,13 +181,13 @@ public class GroupChatSettingsService {
 
     private Long requireUser() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        if (userId == null || userId <= 0) throw new IllegalArgumentException("Login required");
+        if (userId == null || userId <= 0) throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
         return userId;
     }
 
     private String validateName(String value) {
         if (value == null || value.trim().isEmpty() || value.length() > 100) {
-            throw new IllegalArgumentException("Name must contain 1 to 100 characters");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.nameInvalid"));
         }
         return value.trim();
     }

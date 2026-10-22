@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -265,7 +267,7 @@ public class SsResourceService {
             return null;
         }
         if (resources.size() > 1) {
-            throw new BaseException("资源自然键不唯一：" + systemCode + "/" + resourceBizType + "/" + resourceCode);
+            throw new BaseException(I18nUtil.get("resource.naturalKey.duplicate", systemCode, resourceBizType, resourceCode));
         }
         return resources.get(0);
     }
@@ -281,8 +283,7 @@ public class SsResourceService {
         SsResource existing = findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
             ssResource.getResourceBizType(), ssResource.getResourceCode());
         if (existing != null) {
-            throw new BaseException("资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType()
-                + "/" + ssResource.getResourceCode());
+            throw new BaseException(I18nUtil.get("resource.code.alreadyExists", ssResource.getSystemCode(), ssResource.getResourceBizType(), ssResource.getResourceCode()));
         }
     }
 

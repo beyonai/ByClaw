@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -207,7 +209,7 @@ public class TenantChatRoutingAspect {
                     "/internal/v1/assiman/getMessageByIds", new MessageIds(List.of(Long.valueOf(messageId))),
                     new TypeReference<List<MessageView>>() { });
                 if (messages == null || messages.size() != 1 || !messageId.equals(messages.get(0).messageId())) {
-                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.message.notFound");
                 }
                 String sessionId = messages.get(0).sessionId();
                 if (sessionId == null || !sessionId.matches("[1-9][0-9]*")) throw unsupported();
@@ -233,20 +235,20 @@ public class TenantChatRoutingAspect {
         List<MessageView> messages = node.request(context, "POST", "/internal/v1/assiman/getMessageByIds",
             new MessageIds(List.of(Long.valueOf(messageId))), new TypeReference<List<MessageView>>() { });
         if (messages == null || messages.size() != 1 || !messageId.equals(messages.get(0).messageId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.message.notFound");
         }
         String sessionId = messages.get(0).sessionId();
         var result = node.command(context, "POST",
             "/internal/v1/sessions/" + sessionId + "/messages/" + messageId + "/feedback", sessionId,
             "UPDATE_FEEDBACK", new TenantNodeModels.MessageFeedback(messageId, type.toLowerCase(java.util.Locale.ROOT), mode, details));
-        return ResponseUtil.successResponse("update message success", result.metadata());
+        return ResponseUtil.successResponse(I18nUtil.get("chat.message.updated"), result.metadata());
     }
 
     private ResponseStatusException badRequest() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant chat request");
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.chat.request.invalid");
     }
 
     private ResponseStatusException unsupported() {
-        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant chat operation is not ready");
+        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.chat.notReady");
     }
 }

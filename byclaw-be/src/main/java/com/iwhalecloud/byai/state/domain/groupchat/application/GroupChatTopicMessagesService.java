@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -39,7 +41,7 @@ public class GroupChatTopicMessagesService {
     public GroupChatTopicMessagesResponse list(Long sessionId, Long topicId, Integer requestedLimit, String cursor) {
         authorization.requireCurrentUserMember(sessionId);
         ByaiGroupChatTopic topic = topics.selectTopic(sessionId, topicId);
-        if (topic == null) throw new IllegalArgumentException("Topic not found");
+        if (topic == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.topic.notFound"));
         ByaiMessage anchor = decodeCursor(sessionId, topicId, cursor);
         int limit = requestedLimit == null ? 20 : Math.max(1, Math.min(50, requestedLimit));
         List<ByaiMessage> rows = messages.selectTopicMessages(sessionId, topicId, topic.getRootMessageId(),
@@ -88,7 +90,7 @@ public class GroupChatTopicMessagesService {
             return anchor;
         }
         catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("Invalid topic message cursor");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.topic.messageCursorInvalid"));
         }
     }
 }

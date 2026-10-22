@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,7 +52,7 @@ public class MailRuntimeProbe {
 
     public Result check(Long userId, Long accountId) {
         if (userId == null || userId <= 0 || accountId == null || accountId <= 0) {
-            throw new IllegalArgumentException("邮箱账号ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.account.idRequired"));
         }
         SandboxCommandResult commandResult;
         try {
@@ -133,7 +135,7 @@ public class MailRuntimeProbe {
         boolean partial = "PARTIAL".equals(runtimeStatus)
             || capabilityStatus.values().stream().anyMatch(value -> !"YES".equals(value));
         return new Result(partial ? Status.PARTIAL : Status.NORMAL, latency.longValue(),
-            Map.copyOf(capabilityStatus), partial ? "部分邮箱能力暂不可用" : null);
+            Map.copyOf(capabilityStatus), partial ? I18nUtil.get("mail.capability.partial") : null);
     }
 
     private Result parseFailure(JsonNode root, Long accountId) {
@@ -159,7 +161,7 @@ public class MailRuntimeProbe {
             throw invalidOutput();
         }
         if ("AUTH_REQUIRED".equals(code) || "AUTH_EXPIRED".equals(code)) {
-            return new Result(Status.AUTH_REQUIRED, null, Map.of(), "邮箱需要重新授权");
+            return new Result(Status.AUTH_REQUIRED, null, Map.of(), I18nUtil.get("mail.authorization.required"));
         }
         return unavailable();
     }
@@ -193,7 +195,7 @@ public class MailRuntimeProbe {
     }
 
     private Result unavailable() {
-        return new Result(Status.UNAVAILABLE, null, Map.of(), "邮箱服务暂时不可用，请稍后重试");
+        return new Result(Status.UNAVAILABLE, null, Map.of(), I18nUtil.get("mail.account.unavailable"));
     }
 
     public enum Status {

@@ -1,37 +1,39 @@
+import { getLocale } from '@umijs/max';
 jest.mock('@/service/employeePublication', () => ({
   ...jest.requireActual('@/service/employeePublication'),
   openEmployeePublication: jest.fn(),
 }));
 import { openEmployeePublication } from '@/service/employeePublication';
-jest.mock('@umijs/max', () => ({
-  getIntl: () => {
-    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
+jest.mock('@umijs/max', () => {
+  // 导入 PersonnelModel 常量时就会调用 getIntl，状态必须在 mock 工厂内初始化。
+  const getLocale = jest.fn(() => 'zh-CN');
+  const getIntl = () => {
+    const messages = (
+      getLocale() === 'en-US' ? jest.requireActual('@/locales/en-US') : jest.requireActual('@/locales/zh-CN')
+    ).default;
     return {
       formatMessage: ({ id }: { id: string }) =>
         messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
     };
-  },
-  getLocale: () => 'zh-CN',
-  useIntl: () => {
-    const messages = jest.requireActual('@/locales/zh-CN/employeePublication').default;
-    return {
-      formatMessage: ({ id }: { id: string }) =>
-        messages[id as keyof typeof messages] || (id === 'resource.publishToEnterprise' ? '发布到企业' : id),
-    };
-  },
-  useDispatch: () => jest.fn(),
-  useSelector: (selector: any) =>
-    selector({
-      user: {
-        userInfo: {
+  };
+  return {
+    getIntl,
+    getLocale,
+    useIntl: getIntl,
+    useDispatch: () => jest.fn(),
+    useSelector: (selector: any) =>
+      selector({
+        user: {
+          userInfo: {
+            defaultDigEmployeeId: 'default-agent-1',
+          },
+        },
+        employees: {
           defaultDigEmployeeId: 'default-agent-1',
         },
-      },
-      employees: {
-        defaultDigEmployeeId: 'default-agent-1',
-      },
-    }),
-}));
+      }),
+  };
+});
 
 jest.mock('antd', () => {
   const actual = jest.requireActual('antd');
@@ -103,47 +105,55 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
 };
 
 afterEach(async () => {
+  // 即使断言提前失败，也要恢复 message 的 spy，保证真正执行全局消息清理。
+  jest.restoreAllMocks();
   // 全局 message 不属于 render 容器，必须单独清理，避免提示和计时器跨用例残留。
   await act(async () => {
     message.destroy();
   });
+  (getLocale as jest.Mock).mockReturnValue('zh-CN');
 });
 
 describe('digital employee publication entry', () => {
-  it('keeps preparation feedback visible and blocks duplicate clicks until navigation is ready', async () => {
-    let finish!: () => void;
-    (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      })
-    );
-    const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
-    const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
-    renderWithQueryClient(
-      <ResourceCard
-        resource={{
-          resourceId: '10',
-          resourceBizType: 'DIG_EMPLOYEE',
-          ownerType: 'personal',
-          canPublishEmployee: true,
-        }}
-      />
-    );
-    const entry = screen.getByText('发布到企业');
-    fireEvent.click(entry);
-    fireEvent.click(entry);
-    expect(openEmployeePublication).toHaveBeenCalledTimes(1);
-    expect(loading).toHaveBeenCalledWith(
-      expect.objectContaining({ content: '正在准备发布申请，请稍候…', duration: 0 })
-    );
-    expect(destroy).not.toHaveBeenCalled();
-    await act(async () => {
-      finish();
-    });
-    expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
-    loading.mockRestore();
-    destroy.mockRestore();
-  });
+  it.each([
+    ['zh-CN', '发布到企业', '正在准备发布申请，请稍候…'],
+    ['en-US', 'Publish to enterprise', 'Preparing the publication request. Please wait…'],
+  ])(
+    'localizes preparation feedback in %s and blocks duplicate clicks until navigation is ready',
+    async (locale, label, feedback) => {
+      (getLocale as jest.Mock).mockReturnValue(locale);
+      let finish!: () => void;
+      (openEmployeePublication as jest.Mock).mockClear().mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+      );
+      const loading = jest.spyOn(message, 'loading').mockImplementation(jest.fn());
+      const destroy = jest.spyOn(message, 'destroy').mockImplementation(jest.fn());
+      renderWithQueryClient(
+        <ResourceCard
+          resource={{
+            resourceId: '10',
+            resourceBizType: 'DIG_EMPLOYEE',
+            ownerType: 'personal',
+            canPublishEmployee: true,
+          }}
+        />
+      );
+      const entry = screen.getByText(label);
+      fireEvent.click(entry);
+      fireEvent.click(entry);
+      expect(openEmployeePublication).toHaveBeenCalledTimes(1);
+      expect(loading).toHaveBeenCalledWith(expect.objectContaining({ content: feedback, duration: 0 }));
+      expect(destroy).not.toHaveBeenCalled();
+      await act(async () => {
+        finish();
+      });
+      expect(destroy).toHaveBeenCalledWith('employee-publication-open-10');
+      loading.mockRestore();
+      destroy.mockRestore();
+    }
+  );
   it('displays the concrete server message when draft preparation rejects a string', async () => {
     (openEmployeePublication as jest.Mock).mockRejectedValueOnce('仅在用数字员工支持发起发布或更新');
     const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
@@ -184,12 +194,14 @@ describe('digital employee publication entry', () => {
       />
     );
     fireEvent.click(screen.getByText(label!));
-    await waitFor(() => {
-      if (status === 'PUBLISHED') expect(openEmployeePublication).toHaveBeenCalledWith('10', 'publishUpdate');
-      else expect(openEmployeePublication).toHaveBeenCalledWith('10');
-    });
+    const expectedArgs = status === 'PUBLISHED' ? ['10', 'publishUpdate'] : ['10'];
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith(...expectedArgs));
   });
-  it('views a published record without preparing another update', async () => {
+  it.each([
+    ['zh-CN', '查看发布记录'],
+    ['en-US', 'View publication history'],
+  ])('views a published record in %s without preparing another update', async (locale, label) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
     (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
     renderWithQueryClient(
       <ResourceCard
@@ -202,7 +214,7 @@ describe('digital employee publication entry', () => {
         }}
       />
     );
-    fireEvent.click(screen.getByText('查看发布记录'));
+    fireEvent.click(screen.getByText(label));
     await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('10'));
     expect(openEmployeePublication).toHaveBeenCalledTimes(1);
   });
@@ -237,7 +249,11 @@ describe('digital employee publication entry', () => {
     );
     expect(screen.queryByText('发布到企业')).not.toBeInTheDocument();
   });
-  it('opens an official copy in its ordinary editor without preparing a publication', async () => {
+  it.each([
+    ['zh-CN', '编辑信息'],
+    ['en-US', 'Edit Info'],
+  ])('opens an official copy in its ordinary editor in %s without preparing a publication', (locale, label) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
     (openEmployeePublication as jest.Mock).mockReset();
     const onEdit = jest.fn();
     renderWithQueryClient(
@@ -252,8 +268,60 @@ describe('digital employee publication entry', () => {
         actionConfig={{ onEdit }}
       />
     );
-    fireEvent.click(screen.getByText('common.editInfo'));
+    fireEvent.click(screen.getByText(label));
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(openEmployeePublication).not.toHaveBeenCalled();
+  });
+
+  // 创建者与管理员的资格由后端统一计算，菜单收到 canDelete 后应能完成确认和注销回调。
+  it.each([
+    ['zh-CN', '注销员工', '确定注销该员工吗？', '确定'],
+    ['en-US', 'Deregister employee', 'Deregister this employee?', 'Confirm'],
+  ])('deletes an authorized enterprise copy after confirmation in %s', async (locale, label, prompt, confirm) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
+    const onDeleteData = jest.fn();
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          resourceStatus: 3,
+          officialPublication: true,
+          canDelete: true,
+        }}
+        actionConfig={{ onDeleteData, enableDigitalEmployeeDelete: true }}
+      />
+    );
+
+    fireEvent.click(screen.getByText(label));
+    expect(await screen.findByText(prompt)).toBeInTheDocument();
+    expect(onDeleteData).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: confirm }));
+    await waitFor(() => expect(onDeleteData).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    { canDelete: false, resourceStatus: 3 },
+    { canDelete: undefined, resourceStatus: 3 },
+    { canDelete: false, resourceStatus: 2 },
+    { canDelete: true, resourceStatus: -1 },
+  ])('hides enterprise copy deletion for permissions/status %j', ({ canDelete, resourceStatus }) => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          canDelete,
+          resourceStatus,
+          resourceId: '10',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'enterprise',
+          officialPublication: true,
+          hasManagePermission: true,
+        }}
+        actionConfig={{ enableDigitalEmployeeDelete: true }}
+      />
+    );
+
+    expect(screen.queryByTestId('resource-menu-deleteData')).not.toBeInTheDocument();
   });
 });

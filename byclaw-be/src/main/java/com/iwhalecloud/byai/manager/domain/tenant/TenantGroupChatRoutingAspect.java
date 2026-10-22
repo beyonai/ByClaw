@@ -29,6 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 public class TenantGroupChatRoutingAspect {
     @org.springframework.beans.factory.annotation.Autowired
+    private TenantGroupMessageDisplayService messageDisplayService;
+    @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupMessageAckService messageAckService;
     @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupManagementService management;
@@ -53,8 +55,11 @@ public class TenantGroupChatRoutingAspect {
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTopicController.*(..))"
-        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))")
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))"
+        + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
+        // Forwarding owns its typed, strict routing boundary; generic create/list branches have legacy development exceptions.
+        if (call.getTarget() instanceof com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController) return call.proceed();
         TenantRequestContext context = TenantRequestContextHolder.get();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
@@ -79,7 +84,7 @@ public class TenantGroupChatRoutingAspect {
                 Long.valueOf(id(args[0])), Long.valueOf(id(args[1])), "acknowledge".equals(method)));
         }
         if (List.of("nickname", "changeRole", "transferOwnership", "leave", "dissolve",
-            "acknowledgeDissolution", "recall", "directSession").contains(method))
+            "acknowledgeDissolution", "recall", "undoRecall", "directSession").contains(method))
             return ResponseUtil.successResponse(management.change(context, method, Long.valueOf(id(args[0])), args));
         switch (method) {
             case "list": {
@@ -173,13 +178,13 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private Object read(TenantRequestContext context, String path) {
-        return ResponseUtil.successResponse(node.request(context, "GET", path, null,
-            new TypeReference<Object>() { }));
+        Object response = node.request(context, "GET", path, null, new TypeReference<Object>() { });
+        return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
     private Object write(TenantRequestContext context, String path, Object body) {
-        return ResponseUtil.successResponse(node.request(context, "POST", path, body,
-            new TypeReference<Object>() { }));
+        Object response = node.request(context, "POST", path, body, new TypeReference<Object>() { });
+        return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
     private String requirePath(String path) {
@@ -195,12 +200,12 @@ public class TenantGroupChatRoutingAspect {
     private String filePath(String path, Object requestedSize, Object cursor) {
         int pageSize = requestedSize == null ? 20 : requestedSize instanceof Integer size ? size : 0;
         if (pageSize < 1 || pageSize > 50) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageSize must be between 1 and 50");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupchat.files.page.size.invalid");
         }
         StringBuilder result = new StringBuilder(path).append("/files?pageSize=").append(pageSize);
         if (cursor != null && !cursor.toString().isBlank()) {
             if (!(cursor instanceof String value) || value.length() > 256 || !value.matches("[A-Za-z0-9_-]+={0,2}")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid group file cursor");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "groupchat.files.cursor.invalid");
             }
             result.append("&cursor=").append(value);
         }
@@ -220,6 +225,6 @@ public class TenantGroupChatRoutingAspect {
     }
 
     private ResponseStatusException unsupported() {
-        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant group operation is not ready");
+        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.group.notReady");
     }
 }

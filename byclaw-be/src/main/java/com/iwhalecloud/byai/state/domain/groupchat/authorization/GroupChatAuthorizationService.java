@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.authorization;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
@@ -35,7 +37,7 @@ public class GroupChatAuthorizationService {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || !SessionType.HS_AS.getCode().equals(session.getSessionType())
             || DISSOLVED_STATE.equals(session.getState())) {
-            throw new GroupChatMessageRejectedException("Group chat not found");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.notFound"));
         }
         return session;
     }
@@ -44,7 +46,7 @@ public class GroupChatAuthorizationService {
         requireGroup(sessionId);
         ByaiSessionMember member = memberService.findSessionMember(sessionId, MemObjType.USER.name(), userId);
         if (member == null) {
-            throw new GroupChatMessageRejectedException("User is not a group member");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.required"));
         }
         return member;
     }
@@ -52,7 +54,7 @@ public class GroupChatAuthorizationService {
     public ByaiSessionMember requireCurrentUserMember(Long sessionId) {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null) {
-            throw new GroupChatMessageRejectedException("User is not authenticated");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.authenticationRequired"));
         }
         return requireUserMember(sessionId, userId);
     }
@@ -60,7 +62,7 @@ public class GroupChatAuthorizationService {
     public void requireAdmin(Long sessionId) {
         ByaiSessionMember member = requireCurrentUserMember(sessionId);
         if (!UserRole.OWNER.name().equals(member.getUserRole()) && !UserRole.ADMIN.name().equals(member.getUserRole())) {
-            throw new IllegalArgumentException("Only group owner or administrator can modify members");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.members.manageDenied"));
         }
     }
 
@@ -76,18 +78,18 @@ public class GroupChatAuthorizationService {
 
     public void requireMemberInvite(Long sessionId, ByaiSessionMember member, String type) {
         if (!MemObjType.USER.name().equals(type) && !MemObjType.AGENT.name().equals(type)) {
-            throw new IllegalArgumentException("Invalid group member type");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.typeInvalid"));
         }
         if (UserRole.OWNER.name().equals(member.getUserRole()) || UserRole.ADMIN.name().equals(member.getUserRole())) return;
         String code = MemObjType.AGENT.name().equals(type) ? MEMBER_ADD_AGENT : MEMBER_INVITE_USER;
         if (!memberPermissionEnabled(sessionId, code)) {
-            throw new IllegalArgumentException("Group member invitation is disabled");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.invitation.disabled"));
         }
     }
 
     public void requireOwner(Long sessionId) {
         if (!UserRole.OWNER.name().equals(requireCurrentUserMember(sessionId).getUserRole())) {
-            throw new IllegalArgumentException("Only group owner can perform this operation");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.ownerRequired"));
         }
     }
 }

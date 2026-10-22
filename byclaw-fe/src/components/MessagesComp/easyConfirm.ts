@@ -35,7 +35,9 @@ const getFormStatus = (item: IMessageListItem): IFormStatus | undefined => {
 
 /** 判断消息项是否仍需要用户在快捷确认区完成操作。 */
 export const isPendingEasyConfirmListItem = (message: IMessage, item: IMessageListItem) => {
-  if (message.messageState !== IMessageState.Answer || !isEasyConfirmContentType(item.contentType)) {
+  const canContainPendingInteraction =
+    message.messageState === IMessageState.Answer || message.messageState === IMessageState.Done;
+  if (!canContainPendingInteraction || !isEasyConfirmContentType(item.contentType)) {
     return false;
   }
 

@@ -88,6 +88,22 @@ describe('easyConfirm message extraction', () => {
     expect(collectEasyConfirmItems(queryingMessage, (nextMessage) => nextMessage)).toEqual([]);
   });
 
+  it('keeps an unanswered interaction pending after its sandbox runtime stops', () => {
+    const pendingItem = createItem('pending-after-release', SSEMessageType.askUserQuestions, {
+      substance: {
+        questions: [{ id: 'fruit', header: '水果', question: '喜欢什么水果？', options: [] }],
+        formStatus: IFormStatus.INIT,
+      },
+    });
+    const reloadedMessage = createMessage({
+      messageState: IMessageState.Done,
+      messageList: [pendingItem],
+    });
+
+    expect(collectEasyConfirmItems(reloadedMessage, (nextMessage) => nextMessage)).toHaveLength(1);
+    expect(hasPendingEasyConfirmItem(reloadedMessage, [pendingItem])).toBe(true);
+  });
+
   it('collects pending interactions from both answer and thinking lists', () => {
     const thinkingItem = createItem('thinking-1', SSEMessageType.approvalForm, {
       substance: [{ confirmed: undefined }],

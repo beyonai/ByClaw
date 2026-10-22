@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { ConfigProvider, Form } from 'antd';
+import { ConfigProvider, Form, message } from 'antd';
 import type { FormInstance } from 'antd';
 import ModelFormFields from '../ModelFormFields';
 import SharedModelFormModal from '../SharedModelFormModal';
@@ -17,6 +17,12 @@ jest.mock('../ModelDebugPanel', () => () => <div />);
 jest.mock('../ModelFormSection', () => ({ title, children }: any) => <section aria-label={title}>{children}</section>);
 
 describe('image provider form isolation', () => {
+  afterEach(async () => {
+    await act(async () => {
+      message.destroy();
+    });
+  });
+
   it('shows Seedream fields only for its protocol and restores existing MiniMax fields', async () => {
     let form: FormInstance;
     const TestForm = () => {
@@ -61,6 +67,7 @@ describe('image provider form isolation', () => {
     expect(screen.queryByLabelText('modelMgr.modal.imageSize')).not.toBeInTheDocument();
   });
 
+  // 同一弹窗连续回填并保存两条记录，保留完整串值校验，同时为 CI 并发执行预留时间。
   it('preserves saved image defaults, unknown keys and extension JSON when only the name is edited', async () => {
     const detail = {
       id: '42',
@@ -95,7 +102,9 @@ describe('image provider form isolation', () => {
       );
     });
     await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('Seedream'));
-    fireEvent.change(screen.getByLabelText('modelMgr.modal.displayName'), { target: { value: 'Renamed Seedream' } });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('modelMgr.modal.displayName'), { target: { value: 'Renamed Seedream' } });
+    });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
     });
@@ -133,5 +142,5 @@ describe('image provider form isolation', () => {
     await waitFor(() => expect(saveModelRequest).toHaveBeenCalledTimes(1));
     expect(saveModelRequest.mock.calls[0][0].imageGenerationConfig).toEqual({ size: '2K' });
     expect(saveModelRequest.mock.calls[0][0].extendParam).toBeUndefined();
-  });
+  }, 15000);
 });

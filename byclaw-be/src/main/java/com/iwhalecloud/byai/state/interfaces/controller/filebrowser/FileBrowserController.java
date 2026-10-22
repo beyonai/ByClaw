@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -63,7 +65,7 @@ public class FileBrowserController {
     public ResponseUtil list(@RequestBody FileBrowserListRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -84,7 +86,7 @@ public class FileBrowserController {
     public ResponseUtil defaultPath(@RequestParam("resourceId") Long resourceId) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (resourceId == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -108,19 +110,19 @@ public class FileBrowserController {
         @RequestParam(value = "path", defaultValue = "/") String path) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (resourceId == null) {
             return ResponseUtil.fail("resourceId is required");
         }
         if (files == null || files.length == 0) {
-            return ResponseUtil.fail("请选择要上传的文件");
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.upload.fileRequired"));
         }
         try {
             fileBrowserService.upload(userCode, resourceId, path, files);
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("上传失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.uploadFailed", e.getMessage()));
         }
     }
 
@@ -135,15 +137,15 @@ public class FileBrowserController {
         @RequestBody FileBrowserSaveToKnowledgeRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         try {
             FileBrowserSaveToKnowledgeVo result =
                 knowledgeTransferApplicationService.saveToKnowledge(userCode, request);
-            return ResponseUtil.successResponse("已保存到知识库", result);
+            return ResponseUtil.successResponse(I18nUtil.get("filebrowser.knowledge.saved"), result);
         }
         catch (Exception e) {
-            return ResponseUtil.fail("保存到知识库失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("filebrowser.knowledge.saveFailed", e.getMessage()));
         }
     }
 
@@ -189,7 +191,7 @@ public class FileBrowserController {
         @RequestParam("uuid") String uuid) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (StringUtils.isBlank(sessionId)) {
             return ResponseUtil.fail("sessionId is required");
@@ -201,7 +203,7 @@ public class FileBrowserController {
             return ResponseUtil.successResponse(fileBrowserService.getChangedFileDiff(sessionId, uuid));
         }
         catch (Exception e) {
-            return ResponseUtil.fail("获取文件变更详情失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("filebrowser.change.loadFailed", e.getMessage()));
         }
     }
 
@@ -215,7 +217,7 @@ public class FileBrowserController {
     public ResponseUtil delete(@RequestBody FileBrowserDeleteRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -227,7 +229,7 @@ public class FileBrowserController {
             fileBrowserService.delete(userCode, request.getResourceId(), request.getPaths());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("删除失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.deleteFailed", e.getMessage()));
         }
     }
 
@@ -241,7 +243,7 @@ public class FileBrowserController {
     public ResponseUtil rename(@RequestBody FileBrowserRenameRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -256,7 +258,7 @@ public class FileBrowserController {
             fileBrowserService.rename(userCode, request.getResourceId(), request.getSourcePath(), request.getNewName());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("重命名失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.renameFailed", e.getMessage()));
         }
     }
 
@@ -270,7 +272,7 @@ public class FileBrowserController {
     public ResponseUtil move(@RequestBody FileBrowserMoveRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -286,7 +288,7 @@ public class FileBrowserController {
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("移动失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.moveFailed", e.getMessage()));
         }
     }
 
@@ -300,7 +302,7 @@ public class FileBrowserController {
     public ResponseUtil copy(@RequestBody FileBrowserCopyRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -316,7 +318,7 @@ public class FileBrowserController {
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("复制失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.copyFailed", e.getMessage()));
         }
     }
 
@@ -330,7 +332,7 @@ public class FileBrowserController {
     public ResponseUtil createFolder(@RequestBody FileBrowserListRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -342,7 +344,7 @@ public class FileBrowserController {
             fileBrowserService.createFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("创建文件夹失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.mkdirFailed", e.getMessage()));
         }
     }
 
@@ -356,7 +358,7 @@ public class FileBrowserController {
     public ResponseUtil ensureFolder(@RequestBody FileBrowserListRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");
@@ -368,7 +370,7 @@ public class FileBrowserController {
             fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
-            return ResponseUtil.fail("创建文件夹失败: " + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.mkdirFailed", e.getMessage()));
         }
     }
 
@@ -383,7 +385,7 @@ public class FileBrowserController {
     public ResponseUtil search(@RequestBody FileBrowserSearchRequest request) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("用户未登录");
+            return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
             return ResponseUtil.fail("resourceId is required");

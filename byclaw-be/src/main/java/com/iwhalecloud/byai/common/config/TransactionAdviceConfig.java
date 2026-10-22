@@ -129,6 +129,19 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
+                if (targetClass != null && java.util.Set.of(
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardRecoveryService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardQueryService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardExecutionContextService",
+                    "com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.attachment.GroupChatForwardAttachmentService")
+                    .contains(ClassUtils.getUserClass(targetClass).getName())) return notSurpportedTx;
+                // Each downstream I/O service can start REQUIRED independently of the suspended coordinator.
+                // Keep exclusions on the exact owning methods so final publication and unrelated writes remain atomic.
+                if (isForwardIoMethod(method, targetClass)) return notSurpportedTx;
+
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.state.application.service.chat.ChatFileArtifactApplicationService")
                     && "resolve".equals(method.getName())) {
@@ -138,9 +151,9 @@ public class TransactionAdviceConfig {
                 }
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService")
-                    && "openCommonFileInputStream".equals(method.getName())) {
-                    // Legacy paths may fail before the UserFS fallback succeeds. Suspend the caller's
-                    // database transaction so a recovered storage miss cannot mark a chat rollback-only.
+                    && ("openCommonFileInputStream".equals(method.getName()) || "preview".equals(method.getName()))) {
+                    // File preview and legacy paths may fail before the UserFS fallback succeeds. Suspend the
+                    // caller's database transaction so storage I/O cannot mark it rollback-only.
                     return notSurpportedTx;
                 }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
@@ -186,6 +199,23 @@ public class TransactionAdviceConfig {
         TransactionInterceptor txAdvice = new TransactionInterceptor(transactionManager, source);
         logger.info("Transaction advice configured successfully.");
         return txAdvice;
+    }
+
+    private static boolean isForwardIoMethod(Method method, Class<?> targetClass) {
+        if (targetClass == null) return false;
+        String owner = ClassUtils.getUserClass(targetClass).getName();
+        String name = method.getName();
+        return switch (owner) {
+            case "com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService" ->
+                "forwardMetadata".equals(name) || "forwardOpen".equals(name);
+            case "com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService" ->
+                "hasResourceForwardReadPermission".equals(name);
+            case "com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessService" ->
+                "canRead".equals(name) && method.getParameterCount() == 3;
+            case "com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService" ->
+                "fileDownloadForActor".equals(name) || "listDirForActor".equals(name);
+            default -> false;
+        };
     }
 
     private static boolean isStreamProjectionMethod(Method method, Class<?> targetClass) {

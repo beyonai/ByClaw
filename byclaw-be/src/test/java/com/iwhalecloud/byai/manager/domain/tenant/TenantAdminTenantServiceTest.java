@@ -1,8 +1,10 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,7 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantAdminTenantServiceTest {
+class TenantAdminTenantServiceTest extends I18nTestSupport {
 
     private final TenantAdminTenantMapper mapper = mock(TenantAdminTenantMapper.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
@@ -94,4 +96,24 @@ class TenantAdminTenantServiceTest {
         loginInfo.setUsersOrganizations(List.of(organization));
         CurrentUserHolder.setLoginInfo(loginInfo);
     }
+
+    @Test
+    void persistedFailureKeysUseTheViewersLocaleAndLegacyDiagnosticsRemainReadable() {
+        platformAdmin();
+        TenantAdminTenantRow row = new TenantAdminTenantRow();
+        row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"FAILED\"}");
+        row.setFailureReason("tenant.node.launch.incomplete");
+        when(mapper.selectTenants(any(), any(), any(), any(), any())).thenReturn(List.of(row));
+        var filter = new TenantAdminTenantService.TenantListFilter(null, null, null, null, null);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("tenant Node launch configuration is incomplete");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("租户 Node 启动配置不完整");
+        row.setFailureReason("tenant deletion failed: IllegalStateException");
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("租户删除失败：IllegalStateException");
+        row.setFailureReason("provider diagnostic");
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("provider diagnostic");
+    }
+
 }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,7 +43,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRespons
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
-class GroupChatReadServiceTest {
+class GroupChatReadServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
 
     @Test
     void memberSummaryQueryReadsAvatarForBothMemberTypes() throws Exception {
@@ -145,7 +152,7 @@ class GroupChatReadServiceTest {
             assertThat(result.isLatestMessageRecalled()).isTrue();
             assertThat(result.getLatestMessageId()).isEqualTo(20L);
             assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));
-            assertThat(result.getLatestMessageContent()).endsWith(" 撤回了一条消息");
+            assertThat(result.getLatestMessageContent()).endsWith(" recalled a message");
             assertThat(result.getLatestMessageAttachments()).isEmpty();
             assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("SECRET");
             verifyNoInteractions(messageMapper, broadcastService);

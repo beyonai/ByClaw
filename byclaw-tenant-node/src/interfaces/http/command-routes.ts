@@ -36,6 +36,7 @@ export function commandRoutes(
     ["POST", "/group-chats/:id/tasks/:taskId/cancel", "CANCEL_TASK"],
     ["PATCH", "/group-chats/:id/tasks/:taskId/pending-publication", "CHECKPOINT_PUBLICATION"],
     ["POST", "/group-chats/:id/messages/:messageId/recall", "RECALL_MESSAGE"],
+    ["POST", "/group-chats/:id/messages/:messageId/recall/undo", "UNDO_RECALL_MESSAGE"],
     ["POST", "/group-chats/:id/messages/:messageId/ack", "ACK_MESSAGE"],
     ["DELETE", "/group-chats/:id/messages/:messageId/ack", "UNACK_MESSAGE"],
     ["POST", "/group-chats/:id/tasks", "CREATE_TASK"],

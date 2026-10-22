@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import type { AskUserEvent, ResumeCommand } from '@byclaw/by-framework'
+import { shouldRetainInteractionAfterAskFailure } from './interaction-recovery.ts'
 
 export const BYCLAW_DSH_AGENT_TYPE = 'BYCLAW_DSH'
 export const DEFAULT_BYCLAW_BE_BASE_URL = 'http://123.56.153.229:8080'
@@ -231,17 +232,88 @@ interface PendingQuestion {
   reject: (error: Error) => void
 }
 
-/** Process-local rendezvous between a DSH ask-user tool call and by-framework Resume. */
+interface DurableQuestionStore {
+  create(input: {
+    interactionId: string
+    sessionId: string
+    userCode: string
+    agentSessionId: string
+    parentAgentSessionId?: string
+    questions: ByClawQuestion[]
+  }): Promise<void>
+  get(interactionId: string): Promise<{
+    sessionId: string
+    userCode: string
+    questions: ByClawQuestion[]
+  } | undefined>
+  answer(input: {
+    interactionId: string
+    sessionId: string
+    userCode: string
+    answer: ByClawQuestionAnswer
+  }): Promise<boolean>
+  consumeAnswered(
+    sessionId: string,
+    userCode: string,
+    questions?: readonly Pick<ByClawQuestion, 'id'>[],
+  ): Promise<{ answer?: ByClawQuestionAnswer } | undefined>
+  consume(interactionId: string, sessionId: string, userCode: string): Promise<{ answer?: ByClawQuestionAnswer } | undefined>
+  remove(record: { interactionId: string; sessionId: string; userCode: string }): Promise<void>
+}
+
+function plainQuestionAnswer(questions: ByClawQuestion[], response: string): ByClawQuestionAnswer {
+  const lines = response.split(/\r?\n/u)
+  return {
+    answers: questions.map((question, questionIndex) => {
+      const line = lines[questionIndex] ?? (questionIndex === 0 ? response : '')
+      const separator = Math.max(line.indexOf(':'), line.indexOf('：'))
+      const answerText = separator < 0 ? line : line.slice(separator + 1)
+      const candidate = answerText.split(/[,，]/u).map(value => value.trim()).filter(Boolean)
+      const labels = new Set(question.options?.map(option => option.label) ?? [])
+      const selected = candidate.filter(value => labels.has(value))
+      const custom = candidate.filter(value => !labels.has(value)).join(', ')
+      return { id: question.id, selected, ...custom === '' ? {} : { custom } }
+    }),
+  }
+}
+
+function structuredQuestionAnswer(questions: ByClawQuestion[], response: DshInteractionResponse): ByClawQuestionAnswer {
+  const byId = new Map(response.answers.map(answer => [answer.id, answer]))
+  return {
+    answers: questions.map(question => {
+      const answer = byId.get(question.id)
+      if (response.outcome === 'cancelled' || answer === undefined) return { id: question.id, selected: [], skipped: true }
+      const labels = new Set(question.options?.map(option => option.label) ?? [])
+      return {
+        id: question.id,
+        selected: answer.selected.filter(value => labels.has(value)),
+        ...answer.custom === undefined ? {} : { custom: answer.custom },
+        ...answer.skipped === true ? { skipped: true } : {},
+      }
+    }),
+  }
+}
+
+/** Hot in-memory rendezvous with an optional Redis hand-off across sandbox processes. */
 export class ByClawQuestionBroker {
   private readonly pending = new Map<string, PendingQuestion[]>()
 
+  constructor(private readonly durable?: DurableQuestionStore) {}
+
   async ask(options: {
     sessionId: string
+    userCode?: string
+    agentSessionId?: string
+    parentAgentSessionId?: string
     questions: ByClawQuestion[]
     emit(event: AskUserEvent): Promise<void>
     signal?: AbortSignal
   }): Promise<ByClawQuestionAnswer> {
     if (options.questions.length === 0) throw new Error('ask_user_question requires at least one question')
+    if (this.durable !== undefined && options.userCode !== undefined) {
+      const recovered = await this.durable.consumeAnswered(options.sessionId, options.userCode, options.questions)
+      if (recovered?.answer !== undefined) return recovered.answer
+    }
     const id = randomUUID()
     let pending!: PendingQuestion
     const answer = new Promise<ByClawQuestionAnswer>((resolve, reject) => {
@@ -259,11 +331,32 @@ export class ByClawQuestionBroker {
       pending.reject(new Error('ByClaw ask_user interaction was aborted'))
     }
     options.signal?.addEventListener('abort', onAbort, { once: true })
+    let requestEmitted = false
     try {
+      if (this.durable !== undefined) {
+        if (options.userCode === undefined || options.agentSessionId === undefined) {
+          throw new Error('Durable ask_user_question requires userCode and agentSessionId')
+        }
+        await this.durable.create({
+          interactionId: id,
+          sessionId: options.sessionId,
+          userCode: options.userCode,
+          agentSessionId: options.agentSessionId,
+          ...options.parentAgentSessionId === undefined ? {} : { parentAgentSessionId: options.parentAgentSessionId },
+          questions: options.questions,
+        })
+      }
       await options.emit({ prompt, metadata: { interaction_id: id, questions: options.questions } })
+      requestEmitted = true
       return await answer
     } catch (error) {
       this.remove(options.sessionId, id)
+      if (this.durable !== undefined && options.userCode !== undefined && !shouldRetainInteractionAfterAskFailure({
+        requestEmitted,
+        signalAborted: options.signal?.aborted === true,
+      })) {
+        await this.durable.remove({ interactionId: id, sessionId: options.sessionId, userCode: options.userCode }).catch(() => undefined)
+      }
       throw error
     } finally {
       options.signal?.removeEventListener('abort', onAbort)
@@ -271,58 +364,45 @@ export class ByClawQuestionBroker {
   }
 
   /** Resolve the matching interaction, or the oldest pending interaction for that session. */
-  resume(sessionId: string, response: string, interactionId?: string): boolean {
+  async resume(sessionId: string, userCode: string, response: string, interactionId?: string): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
-    if (queue === undefined || queue.length === 0) return false
-    const index = interactionId === undefined ? 0 : queue.findIndex(item => item.id === interactionId)
-    if (index < 0) return false
-    const pending = queue.splice(index, 1)[0] as PendingQuestion
-    if (queue.length === 0) this.pending.delete(sessionId)
-    const lines = response.split(/\r?\n/u)
-    pending.resolve({
-      answers: pending.questions.map((question, questionIndex) => {
-        const line = lines[questionIndex] ?? (questionIndex === 0 ? response : '')
-        const separator = Math.max(line.indexOf(':'), line.indexOf('：'))
-        const answerText = separator < 0 ? line : line.slice(separator + 1)
-        const candidate = answerText.split(/[,，]/u).map(value => value.trim()).filter(Boolean)
-        const labels = new Set(question.options?.map(option => option.label) ?? [])
-        const selected = candidate.filter(value => labels.has(value))
-        const custom = candidate.filter(value => !labels.has(value)).join(', ')
-        return {
-          id: question.id,
-          selected,
-          ...custom === '' ? {} : { custom },
-        }
-      }),
-    })
-    return true
+    const index = queue === undefined ? -1 : interactionId === undefined ? 0 : queue.findIndex(item => item.id === interactionId)
+    const pending = index < 0 ? undefined : queue?.[index]
+    const persisted = pending === undefined && interactionId !== undefined ? await this.durable?.get(interactionId) : undefined
+    const questions = pending?.questions ?? persisted?.questions
+    if (questions === undefined || (persisted !== undefined && (persisted.sessionId !== sessionId || persisted.userCode !== userCode))) return false
+    const answer = plainQuestionAnswer(questions, response)
+    if (this.durable !== undefined && interactionId !== undefined) {
+      if (!await this.durable.answer({ interactionId, sessionId, userCode, answer })) return false
+      if (pending !== undefined && await this.durable.consume(interactionId, sessionId, userCode) === undefined) return false
+    }
+    if (pending !== undefined && queue !== undefined) {
+      queue.splice(index, 1)
+      if (queue.length === 0) this.pending.delete(sessionId)
+      pending.resolve(answer)
+    }
+    return pending === undefined ? 'cold' : 'hot'
   }
 
   /** Resolve exactly one pending interaction from a versioned structured response. */
-  resumeStructured(sessionId: string, response: DshInteractionResponse): boolean {
+  async resumeStructured(sessionId: string, userCode: string, response: DshInteractionResponse): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
-    if (queue === undefined || queue.length === 0) return false
-    const index = queue.findIndex(item => item.id === response.interactionId)
-    if (index < 0) return false
-    const pending = queue.splice(index, 1)[0] as PendingQuestion
-    if (queue.length === 0) this.pending.delete(sessionId)
-    const byId = new Map(response.answers.map(answer => [answer.id, answer]))
-    pending.resolve({
-      answers: pending.questions.map(question => {
-        const answer = byId.get(question.id)
-        if (response.outcome === 'cancelled' || answer === undefined) {
-          return { id: question.id, selected: [], skipped: true }
-        }
-        const labels = new Set(question.options?.map(option => option.label) ?? [])
-        return {
-          id: question.id,
-          selected: answer.selected.filter(value => labels.has(value)),
-          ...answer.custom === undefined ? {} : { custom: answer.custom },
-          ...answer.skipped === true ? { skipped: true } : {},
-        }
-      }),
-    })
-    return true
+    const index = queue?.findIndex(item => item.id === response.interactionId) ?? -1
+    const pending = index < 0 ? undefined : queue?.[index]
+    const persisted = pending === undefined ? await this.durable?.get(response.interactionId) : undefined
+    const questions = pending?.questions ?? persisted?.questions
+    if (questions === undefined || (persisted !== undefined && (persisted.sessionId !== sessionId || persisted.userCode !== userCode))) return false
+    const answer = structuredQuestionAnswer(questions, response)
+    if (this.durable !== undefined) {
+      if (!await this.durable.answer({ interactionId: response.interactionId, sessionId, userCode, answer })) return false
+      if (pending !== undefined && await this.durable.consume(response.interactionId, sessionId, userCode) === undefined) return false
+    }
+    if (pending !== undefined && queue !== undefined) {
+      queue.splice(index, 1)
+      if (queue.length === 0) this.pending.delete(sessionId)
+      pending.resolve(answer)
+    }
+    return pending === undefined ? 'cold' : 'hot'
   }
 
   cancelSession(sessionId: string, reason: string): void {

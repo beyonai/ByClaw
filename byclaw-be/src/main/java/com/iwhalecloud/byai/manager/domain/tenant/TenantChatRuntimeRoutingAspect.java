@@ -117,7 +117,7 @@ public class TenantChatRuntimeRoutingAspect {
                 return ResponseUtil.successResponse(message(context, request.getMessageId()));
             }
             default:
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant chat operation is not ready");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.chat.notReady");
         }
     }
 
@@ -154,7 +154,7 @@ public class TenantChatRuntimeRoutingAspect {
         List<MessageView> messages = node.request(context, "POST", "/internal/v1/assiman/getMessageByIds",
             new MessageIds(List.of(messageId)), new TypeReference<List<MessageView>>() { });
         if (messages == null || messages.size() != 1 || !messageId.toString().equals(messages.get(0).messageId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant message not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.message.notFound");
         }
         return messages.get(0);
     }
@@ -170,6 +170,6 @@ public class TenantChatRuntimeRoutingAspect {
     }
 
     private ResponseStatusException invalid() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant chat request");
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.chat.request.invalid");
     }
 }

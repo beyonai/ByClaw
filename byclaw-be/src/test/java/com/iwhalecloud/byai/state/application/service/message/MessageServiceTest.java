@@ -24,7 +24,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.showcase.service.ShowcaseService;
 import com.iwhalecloud.byai.state.domain.taskplan.dto.TaskPlanSnapshot;
 
-class MessageServiceTest {
+class MessageServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ByaiMessageHotService byaiMessageHotService;
 

@@ -1,5 +1,9 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -106,8 +110,9 @@ public class GroupChatMessageAckService {
         authorizationService.requireGroup(sessionId);
         ByaiSessionMember member = authorizationService.requireCurrentUserMember(sessionId);
         ByaiMessage message = messageMapper.selectByMessageId(messageId);
-        if (message == null || !sessionId.equals(message.getSessionId()) || message.isRecalled()) {
-            throw new IllegalArgumentException("Message cannot be acknowledged");
+        if (message == null || !sessionId.equals(message.getSessionId()) || message.isRecalled()
+            || ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata())) {
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.ack.denied"));
         }
         if (!MemObjType.USER.name().equals(member.getMemObjType())
             || userId == null || userId.equals(message.getCreatorId())
@@ -152,7 +157,7 @@ public class GroupChatMessageAckService {
         }
         if (member != null && member.getMemName() != null && !member.getMemName().isBlank()
             && !member.getMemName().equals(String.valueOf(userId))) return member.getMemName();
-        return "群成员";
+        return I18nUtil.get("groupchat.memberFallback");
     }
 
     private Map<Long, String> resolveUserNames(List<Long> userIds) {
@@ -186,7 +191,7 @@ public class GroupChatMessageAckService {
 
     private String resolvedUserName(Map<Long, String> userNames, Long userId) {
         String userName = userNames.get(userId);
-        return userName == null || userName.isBlank() ? "群成员" : userName;
+        return userName == null || userName.isBlank() ? I18nUtil.get("groupchat.memberFallback") : userName;
     }
 
     private JSONObject toJson(ByaiGroupChatMessageAck ack, String userName) {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -57,17 +59,17 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
                 String name = resource == null || !Objects.equals(context.tenantId(), resource.getComAcctId())
                     ? String.valueOf(declared.id()) : resource.getResourceName();
                 String reason = null;
-                if (resource == null) reason = "依赖资源不存在";
-                else if (!Objects.equals(context.tenantId(), resource.getComAcctId())) reason = "依赖资源不属于当前企业";
-                else if (!matchesType(declared.type(), resource.getResourceBizType())) reason = "声明类型与实际资源类型不一致";
+                if (resource == null) reason = I18nUtil.get("employee.publication.dependencyMissing");
+                else if (!Objects.equals(context.tenantId(), resource.getComAcctId())) reason = I18nUtil.get("employee.publication.skillDependencyTenantMismatch");
+                else if (!matchesType(declared.type(), resource.getResourceBizType())) reason = I18nUtil.get("employee.publication.dependencyTypeMismatch");
                 else if (EmployeePublicationResources.isPersonal(resource)) reason = Issue.PERSONAL_RESOURCE_REASON;
-                else if (!"enterprise".equals(resource.getOwnerType())) reason = "无法确认依赖资源的企业归属";
-                else if (!Objects.equals(resource.getResourceStatus(), 2)) reason = "依赖资源已下架或失效";
+                else if (!"enterprise".equals(resource.getOwnerType())) reason = I18nUtil.get("employee.publication.dependencyOwnerUnknown");
+                else if (!Objects.equals(resource.getResourceStatus(), 2)) reason = I18nUtil.get("employee.publication.dependencyInactive");
                 if (reason != null) issues.add(new Issue(String.valueOf(declared.id()), declared.type(), name, reason));
             }
         } catch (Exception error) {
             issues.add(new Issue("", "SKILL", source.getResourceName(), error instanceof BaseException
-                ? error.getMessage() : "技能依赖文件无法读取，请检查 references/resourceMate.json"));
+                ? error.getMessage() : I18nUtil.get("employee.publication.manifestReadFailed")));
         }
         return new CheckResult(issues.isEmpty(), List.copyOf(issues));
     }
@@ -76,46 +78,46 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
 
     /** 以 SKILL.md 定位唯一技能根目录；只读取该根目录内的依赖声明，不解压到本机。 */
     List<DeclaredResource> manifest(byte[] bytes) throws Exception {
-        if (bytes == null || bytes.length == 0 || bytes.length > 100 * 1024 * 1024) throw new BaseException("技能文件为空或过大");
+        if (bytes == null || bytes.length == 0 || bytes.length > 100 * 1024 * 1024) throw new BaseException("employee.publication.skillFileInvalid");
         try (SeekableInMemoryByteChannel channel = new SeekableInMemoryByteChannel(bytes);
              ZipFile zip = new ZipFile(channel, StandardCharsets.UTF_8.name())) {
             List<String> roots = new ArrayList<>();
             Map<String, org.apache.commons.compress.archivers.zip.ZipArchiveEntry> entries = new LinkedHashMap<>();
             var iterator = zip.getEntries();
             while (iterator.hasMoreElements()) {
-                if (entries.size() >= 10000) throw new BaseException("技能包文件数量过多");
+                if (entries.size() >= 10000) throw new BaseException("employee.publication.tooManySkillFiles");
                 var entry = iterator.nextElement();
                 String name = entry.getName().replace('\\', '/');
                 if (name.startsWith("/") || name.contains(":") || List.of(name.split("/")).contains("..") || entry.isUnixSymlink()) {
-                    throw new BaseException("技能包包含无效路径或符号链接");
+                    throw new BaseException("employee.publication.skillEntryInvalid");
                 }
                 if (entry.isDirectory()) continue;
-                if (entries.putIfAbsent(name, entry) != null) throw new BaseException("技能包包含重复文件路径");
+                if (entries.putIfAbsent(name, entry) != null) throw new BaseException("employee.publication.skillEntryDuplicate");
                 if (name.equals("SKILL.md") || name.matches("[^/]+/SKILL\\.md")) {
                     roots.add(name.substring(0, name.length() - "SKILL.md".length()));
                 }
             }
-            if (roots.size() != 1) throw new BaseException("技能包需要唯一的 SKILL.md 根目录");
+            if (roots.size() != 1) throw new BaseException("employee.publication.skillRootInvalid");
             var entry = entries.get(roots.getFirst() + "references/resourceMate.json");
             // 按发布约定，未提供依赖声明等同于无关联资源；存在声明时仍须完整解析并校验。
             if (entry == null) return List.of();
             byte[] content;
             try (InputStream input = zip.getInputStream(entry)) { content = input.readNBytes(MAX_MANIFEST_BYTES + 1); }
-            if (content.length > MAX_MANIFEST_BYTES) throw new BaseException("技能依赖文件过大");
+            if (content.length > MAX_MANIFEST_BYTES) throw new BaseException("employee.publication.manifestTooLarge");
             String text = new String(content, StandardCharsets.UTF_8).replaceFirst("^\\uFEFF", "");
             JSONObject data = JSON.parseObject(text);
-            if (data == null || !(data.get("resources") instanceof JSONArray rows)) throw new BaseException("技能依赖文件必须包含 resources 数组");
-            if (rows.size() > 200) throw new BaseException("技能声明的依赖资源超过 200 项");
+            if (data == null || !(data.get("resources") instanceof JSONArray rows)) throw new BaseException("employee.publication.resourcesArrayRequired");
+            if (rows.size() > 200) throw new BaseException("employee.publication.tooManyDependencies");
             Map<Long, DeclaredResource> result = new LinkedHashMap<>();
             for (Object raw : rows) {
-                if (!(raw instanceof JSONObject row)) throw new BaseException("技能依赖条目格式不正确");
+                if (!(raw instanceof JSONObject row)) throw new BaseException("employee.publication.dependencyFormatInvalid");
                 String type = row.getString("resourceType");
                 String value = row.getString("resourceId");
                 if (!List.of("TOOL", "KNOWLEDGE_BASE").contains(StringUtils.defaultString(type))
-                    || value == null || !value.matches("[1-9][0-9]*")) throw new BaseException("技能依赖的 resourceId 或 resourceType 无效");
+                    || value == null || !value.matches("[1-9][0-9]*")) throw new BaseException("employee.publication.dependencyIdentityInvalid");
                 Long id = Long.valueOf(value);
                 DeclaredResource previous = result.putIfAbsent(id, new DeclaredResource(id, type));
-                if (previous != null && !previous.type().equals(type)) throw new BaseException("同一依赖资源声明了不同类型");
+                if (previous != null && !previous.type().equals(type)) throw new BaseException("employee.publication.dependencyTypeConflict");
             }
             return List.copyOf(result.values());
         }
@@ -131,13 +133,13 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
     @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
     public Long publish(SsResource source, SsResExtSkill snapshot, byte[] bytes, Long officialEmployeeId, Context context) {
         if (!DigitalEmployeeGovernanceService.isAdministrator() || context.requestId() == null
-            || !Objects.equals(context.tenantId(), CurrentUserHolder.getEnterpriseId())) throw new BaseException("无权执行技能发布");
+            || !Objects.equals(context.tenantId(), CurrentUserHolder.getEnterpriseId())) throw new BaseException("employee.publication.skillPublishDenied");
         SsResource employee = resources.findById(officialEmployeeId);
         if (!DigitalEmployeeGovernanceService.isOfficialCopy(employee)
-            || !Objects.equals(employee.getComAcctId(), context.tenantId())) throw new BaseException("企业员工不存在或不属于当前企业");
-        if (!DigestUtils.sha256Hex(bytes).equals(snapshot.getSkillPackageHash())) throw new BaseException("待审核技能文件已变化");
+            || !Objects.equals(employee.getComAcctId(), context.tenantId())) throw new BaseException("employee.publication.enterpriseEmployeeMissing");
+        if (!DigestUtils.sha256Hex(bytes).equals(snapshot.getSkillPackageHash())) throw new BaseException("employee.publication.reviewedFileChanged");
         CheckResult checked = check(source, snapshot, bytes, context);
-        if (!checked.copyAllowed()) throw new BaseException("技能依赖已变化，请重新确认发布清单");
+        if (!checked.copyAllowed()) throw new BaseException("employee.publication.dependenciesChanged");
         String code = "employee-skill-" + context.requestId() + "-" + source.getResourceId();
         SsResource target = mapper.selectOne(new LambdaQueryWrapper<SsResource>()
             .eq(SsResource::getComAcctId, context.tenantId()).eq(SsResource::getResourceCode, code));
@@ -147,7 +149,7 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
                 || !Objects.equals(target.getPublicationRequestId(), context.requestId())
                 || !Objects.equals(target.getResourceStatus(), 2) || existing == null
                 || !Objects.equals(existing.getSkillPackageHash(), snapshot.getSkillPackageHash())) {
-                throw new BaseException("企业技能副本已变化，不能覆盖");
+                throw new BaseException("employee.publication.skillCopyChanged");
             }
             relate(officialEmployeeId, target.getResourceId(), context, "DIG_EMPLOYEE_SKILL");
             return target.getResourceId();
@@ -178,11 +180,11 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
             "sourceCreatorId", String.valueOf(context.authorId()), "sourcePackageUrl", snapshot.getSkillUrl(),
             "sourceVersion", StringUtils.defaultString(snapshot.getVersion()))));
         skills.save(ext);
-        if (StringUtils.isBlank(runtime.refreshSkillBasicInfo(target))) throw new BaseException("企业技能运行配置生成失败");
+        if (StringUtils.isBlank(runtime.refreshSkillBasicInfo(target))) throw new BaseException("employee.publication.skillRuntimeFailed");
         artifacts.upsertArtifact(target.getResourceId(), "SKILL", "IMPORT_ZIP", "minio", ext.getSkillUrl(), "employee-publication");
         try {
             for (DeclaredResource dependency : manifest(bytes)) relate(target.getResourceId(), dependency.id(), context, "SKILL_RESOURCE");
-        } catch (Exception error) { throw new BaseException("技能依赖关系创建失败"); }
+        } catch (Exception error) { throw new BaseException("employee.publication.skillRelationsFailed"); }
         relate(officialEmployeeId, target.getResourceId(), context, "DIG_EMPLOYEE_SKILL");
         return target.getResourceId();
     }

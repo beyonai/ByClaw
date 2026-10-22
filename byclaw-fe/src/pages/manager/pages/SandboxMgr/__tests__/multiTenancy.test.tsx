@@ -2,11 +2,19 @@ import { act, render, screen } from '@testing-library/react';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { listTenants } from '@/pages/manager/service/TenantMgr';
 import SandboxMgr from '../index';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
+jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn() }));
 const mockDispatch = jest.fn();
 let mockUserInfo: any;
+let mockLocale = 'zh-CN';
 jest.mock('@umijs/max', () => ({
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      id.startsWith('sandbox.')
+        ? jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale).formatMessage({ id })
+        : id,
+  }),
   useDispatch: () => mockDispatch,
   useSelector: (select: any) => select({ user: { userInfo: mockUserInfo } }),
 }));
@@ -18,6 +26,8 @@ jest.mock('@/pages/manager/service/TenantMgr', () => ({ listTenants: jest.fn().m
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: 'commercial' });
+  mockLocale = 'zh-CN';
   mockUserInfo = { enterpriseId: '123', usersOrganizations: [{ userType: 'PLAT_MAN' }] };
 });
 
@@ -90,4 +100,36 @@ test('a role change to business manager ignores an earlier tenant response', () 
   act(() => tenantRequest.success({ list: [{ ...record, sandboxId: 'earlier-tenant-sandbox' }] }));
   expect(screen.getByText('current-user-sandbox')).toBeInTheDocument();
   expect(screen.queryByText('earlier-tenant-sandbox')).not.toBeInTheDocument();
+});
+
+test('localizes ownership controls while retaining the TENANT request scope', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+  const { rerender } = render(<SandboxMgr />);
+  expect(screen.getByRole('tab', { name: '租户资源' })).toBeInTheDocument();
+  mockLocale = 'en-US';
+  rerender(<SandboxMgr />);
+  expect(screen.getByRole('tab', { name: 'Tenant resources' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'User resources' })).toBeInTheDocument();
+  expect(mockDispatch).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: 'sandboxMgr/listSandboxRecords',
+      payload: expect.objectContaining({ ownerScope: 'TENANT' }),
+    })
+  );
+});
+
+test.each([
+  ['adminvip', 'openSource', true],
+  ['ordinary', 'openSource', false],
+  ['adminvip', 'commercial', false],
+  ['ordinary', 'commercial', false],
+  ['adminvip', undefined, false],
+])('recovery tab for account %s and version %s is visible=%s', async (account, version, visible) => {
+  mockUserInfo = { userCode: account, usersOrganizations: [] };
+  (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: version });
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  await act(async () => {
+    render(<SandboxMgr />);
+  });
+  expect(Boolean(screen.queryByRole('tab', { name: '恢复任务' }))).toBe(visible);
 });

@@ -26,6 +26,7 @@ import {
 import { queryAuthDoc } from '@/service/knowledgeCenter';
 import { ResourceTypeMap } from '@/constants/resource';
 import styles from './index.module.less';
+import { taskTemplateOptionLabel } from './optionLabels';
 
 export type TaskTemplateFormValues = {
   title: string;
@@ -94,10 +95,11 @@ export interface TaskTemplateModalProps {
   accountOptions?: TaskTemplateOption[];
 }
 
-const DEFAULT_CONFIG: Record<OperationTaskTemplateType, TaskTemplateFormValues> = {
+// 仅缺省字段使用当前语言，已有模板配置始终覆盖默认内容。
+const getDefaultConfig = (): Record<OperationTaskTemplateType, TaskTemplateFormValues> => ({
   collect: {
-    title: '采集 AI Agent 行业案例',
-    description: '采集近期企业级 AI Agent 的落地案例，提炼来源、核心场景和可复用亮点。',
+    title: getIntl().formatMessage({ id: 'taskTemplate.defaults.collect.title' }),
+    description: getIntl().formatMessage({ id: 'taskTemplate.defaults.collect.description' }),
     sourceMode: 'knowledge',
     sourceKnowledge: '运营素材知识库 / AI趋势',
     storageMode: 'knowledge',
@@ -106,30 +108,30 @@ const DEFAULT_CONFIG: Record<OperationTaskTemplateType, TaskTemplateFormValues> 
     runMode: 'once',
   },
   content: {
-    title: '创作 BeyondAI 实验室公众号文章',
-    description: '围绕企业 AI Agent 实践创作一篇面向企业管理者的深度文章，包含案例与行动建议。',
+    title: getIntl().formatMessage({ id: 'taskTemplate.defaults.content.title' }),
+    description: getIntl().formatMessage({ id: 'taskTemplate.defaults.content.description' }),
     contentType: '公众号文章',
-    audience: '企业管理者与 AI 产品负责人',
+    audience: getIntl().formatMessage({ id: 'taskTemplate.defaults.content.audience' }),
     executorType: 'agent',
     runMode: 'once',
   },
   publish: {
-    title: '发布已审核内容',
-    description: '将已审核内容发布到指定账号，发布前再次检查标题、封面和品牌口径。',
+    title: getIntl().formatMessage({ id: 'taskTemplate.defaults.publish.title' }),
+    description: getIntl().formatMessage({ id: 'taskTemplate.defaults.publish.description' }),
     platform: '微信公众号',
     account: 'BeyondAI实验室',
     executorType: 'agent',
     runMode: 'once',
   },
   analyze: {
-    title: '运营数据分析与优化',
-    description: '分析近 30 天账号与作品表现，识别高表现内容并输出下一周期优化建议。',
+    title: getIntl().formatMessage({ id: 'taskTemplate.defaults.analyze.title' }),
+    description: getIntl().formatMessage({ id: 'taskTemplate.defaults.analyze.description' }),
     analysisScope: '账号整体分析',
     range: '近 30 天',
     executorType: 'agent',
     runMode: 'once',
   },
-};
+});
 
 const DEFAULT_KNOWLEDGE_OPTIONS = [
   '运营素材知识库 / AI趋势',
@@ -137,12 +139,27 @@ const DEFAULT_KNOWLEDGE_OPTIONS = [
   '品牌内容知识库 / 历史文章',
 ].map((value) => ({ label: value, value }));
 const DEFAULT_ACCOUNT_OPTIONS = ['BeyondAI实验室', '百应AI服务号'].map((value) => ({ label: value, value }));
-const CONNECTOR_OPTIONS = ['钉钉', '企业微信', '飞书'].map((value) => ({ label: value, value }));
-const WEEKDAY_OPTIONS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, index) => ({
-  label,
-  value: index + 1,
-}));
-const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => ({ label: `${index + 1}日`, value: index + 1 }));
+// 选项值是历史配置的协议值，只翻译展示标签。
+const getConnectorOptions = () =>
+  ['钉钉', '企业微信', '飞书'].map((value) => ({ label: taskTemplateOptionLabel(value), value }));
+const getWeekdayOptions = () =>
+  [
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.1' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.2' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.3' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.4' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.5' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.6' }),
+    getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.7' }),
+  ].map((label, index) => ({
+    label,
+    value: index + 1,
+  }));
+const getMonthDayOptions = () =>
+  Array.from({ length: 31 }, (_, index) => ({
+    label: getIntl().formatMessage({ id: 'taskTemplate.monthDay' }, { v0: index + 1 }),
+    value: index + 1,
+  }));
 
 const resolveInitialOptionValue = (
   options: TaskTemplateOption[],
@@ -154,6 +171,7 @@ const resolveInitialOptionValue = (
 };
 
 const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormValues => {
+  const defaults = getDefaultConfig();
   try {
     const rawConfig =
       typeof template.config === 'string'
@@ -165,9 +183,9 @@ const parseTemplateConfig = (template: OperationTaskTemplate): TaskTemplateFormV
     ['ontology', 'sourceOntology', 'knowledgeOrganization', 'organizeTemplateId', 'organize'].forEach((key) => {
       delete config[key];
     });
-    return { ...(DEFAULT_CONFIG[template.templateType] || DEFAULT_CONFIG.collect), ...config };
+    return { ...(defaults[template.templateType] || defaults.collect), ...config };
   } catch {
-    return DEFAULT_CONFIG[template.templateType] || DEFAULT_CONFIG.collect;
+    return defaults[template.templateType] || defaults.collect;
   }
 };
 
@@ -189,9 +207,11 @@ const buildTemplatePrompt = (
 ) => {
   const detailLines: string[] = [];
   if (template.templateType === 'collect') {
-    const sourceModeLabel = { knowledge: '知识库采集', connector: '连接器采集', internet: '互联网采集' }[
-      values.sourceMode || 'knowledge'
-    ];
+    const sourceModeLabel = {
+      knowledge: getIntl().formatMessage({ id: 'taskTemplate.source.knowledge' }),
+      connector: getIntl().formatMessage({ id: 'taskTemplate.source.connector' }),
+      internet: getIntl().formatMessage({ id: 'taskTemplate.source.internet' }),
+    }[values.sourceMode || 'knowledge'];
     const source =
       values.sourceMode === 'connector'
         ? values.connector
@@ -206,54 +226,102 @@ const buildTemplatePrompt = (
       { id: 'ui.task.knowledgeTarget' },
       { v0: findOptionLabel(options.knowledgeBases, values.targetKnowledge) }
     );
-    detailLines.push(`采集方式：${sourceModeLabel}`, `采集来源：${sourceLabel}`, `入库位置：${target}`);
+    detailLines.push(
+      getIntl().formatMessage({ id: 'taskTemplate.prompt.sourceMode' }, { v0: sourceModeLabel }),
+      getIntl().formatMessage({ id: 'taskTemplate.prompt.source' }, { v0: sourceLabel }),
+      getIntl().formatMessage({ id: 'taskTemplate.prompt.target' }, { v0: target })
+    );
   } else if (template.templateType === 'content') {
-    detailLines.push(`内容类型：${values.contentType || '-'}`, `目标受众：${values.audience || '-'}`);
+    detailLines.push(
+      getIntl().formatMessage(
+        { id: 'taskTemplate.prompt.contentType' },
+        { v0: taskTemplateOptionLabel(values.contentType || '-') }
+      ),
+      getIntl().formatMessage({ id: 'taskTemplate.prompt.audience' }, { v0: values.audience || '-' })
+    );
   } else if (template.templateType === 'publish') {
     detailLines.push(
-      `发布平台：${values.platform || '-'}`,
-      `发布账号：${findOptionLabel(options.accounts, values.account)}`
+      getIntl().formatMessage(
+        { id: 'taskTemplate.prompt.platform' },
+        { v0: taskTemplateOptionLabel(values.platform || '-') }
+      ),
+      getIntl().formatMessage(
+        { id: 'taskTemplate.prompt.account' },
+        { v0: findOptionLabel(options.accounts, values.account) }
+      )
     );
   } else {
-    detailLines.push(`分析范围：${values.analysisScope || '-'}`, `时间范围：${values.range || '-'}`);
+    detailLines.push(
+      getIntl().formatMessage(
+        { id: 'taskTemplate.prompt.scope' },
+        { v0: taskTemplateOptionLabel(values.analysisScope || '-') }
+      ),
+      getIntl().formatMessage({ id: 'taskTemplate.prompt.range' }, { v0: taskTemplateOptionLabel(values.range || '-') })
+    );
   }
 
   const executor =
     values.executorType === 'group'
-      ? findOptionLabel(options.groups, values.agentGroupId, '数字员工组')
-      : findOptionLabel(options.agents, values.agentId, '数字员工');
+      ? findOptionLabel(
+        options.groups,
+        values.agentGroupId,
+        getIntl().formatMessage({ id: 'projectSpace.members.agentTabGroup' })
+      )
+      : findOptionLabel(
+        options.agents,
+        values.agentId,
+        getIntl().formatMessage({ id: 'projectTaskDetail.simple.agent' })
+      );
   const formatValue = (value: unknown, format = 'YYYY-MM-DD HH:mm') =>
     dayjs.isDayjs(value) ? value.format(format) : value ? String(value) : '-';
   const weekdays = (values.periodWeekdays || values.intervalWeekdays || [])
-    .map((value) => WEEKDAY_OPTIONS.find((option) => option.value === value)?.label || value)
+    .map((value) => getWeekdayOptions().find((option) => option.value === value)?.label || value)
     .join('、');
   const periodTypeLabel =
-    ({ daily: '每天', weekly: '每周', biweekly: '每双周', monthly: '每月', yearly: '每年' } as Record<string, string>)[
-      values.periodType || ''
-    ] || '待设置周期';
+    (
+      {
+        daily: getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.daily' }),
+        weekly: getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.weekly' }),
+        biweekly: getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.biweekly' }),
+        monthly: getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.monthly' }),
+        yearly: getIntl().formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.yearly' }),
+      } as Record<string, string>
+    )[values.periodType || ''] || getIntl().formatMessage({ id: 'taskTemplate.period.unset' });
   const runMode =
     values.runMode === 'periodic'
-      ? `按周期执行：${periodTypeLabel} ${
-        values.periodType === 'yearly'
-          ? formatValue(values.periodYearDateTime, 'MM-DD HH:mm')
-          : formatValue(values.periodTime, 'HH:mm')
-      }${weekdays ? `（${weekdays}）` : ''}`
+      ? getIntl().formatMessage(
+        { id: 'taskTemplate.prompt.periodic' },
+        {
+          v0: periodTypeLabel,
+          v1:
+              values.periodType === 'yearly'
+                ? formatValue(values.periodYearDateTime, 'MM-DD HH:mm')
+                : formatValue(values.periodTime, 'HH:mm'),
+          v2: weekdays ? `（${weekdays}）` : '',
+        }
+      )
       : values.runMode === 'interval'
-        ? `按间隔执行：每 ${values.intervalHours || 1} 小时${weekdays ? `（${weekdays}）` : ''}`
+        ? getIntl().formatMessage(
+          { id: 'taskTemplate.prompt.interval' },
+          { v0: values.intervalHours || 1, v1: weekdays ? `（${weekdays}）` : '' }
+        )
         : values.runMode === 'once'
-          ? `单次执行：${formatValue(values.onceTime)}`
-          : '单次执行';
+          ? getIntl().formatMessage({ id: 'taskTemplate.prompt.once' }, { v0: formatValue(values.onceTime) })
+          : getIntl().formatMessage({ id: 'taskTemplate.run.once' });
   return [
-    '请执行以下运营任务：',
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.intro' }),
     '',
-    `任务模板：${template.templateName}`,
-    `任务名称：${values.title}`,
-    `任务要求：${values.description}`,
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.template' }, { v0: template.templateName }),
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.title' }, { v0: values.title }),
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.requirements' }, { v0: values.description }),
     ...detailLines,
-    `执行主体：${executor || '数字员工'}`,
-    `执行方式：${runMode}`,
+    getIntl().formatMessage(
+      { id: 'taskTemplate.prompt.executor' },
+      { v0: executor || getIntl().formatMessage({ id: 'projectTaskDetail.simple.agent' }) }
+    ),
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.runMode' }, { v0: runMode }),
     '',
-    '请先确认理解任务与所需资源，再开始执行；执行过程中同步关键进展，并将成果保存到当前会话。',
+    getIntl().formatMessage({ id: 'taskTemplate.prompt.instructions' }),
   ].join('\n');
 };
 
@@ -267,7 +335,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   initialTitle,
   onCancel,
   onApply,
-  applyText = '确定应用到对话框',
+  applyText = intl.formatMessage({ id: 'taskTemplate.apply' }),
   applying = false,
   initialDescription,
   knowledgeOptions = [],
@@ -292,7 +360,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   useEffect(() => {
     // 切换到连接器采集后，若模板没有保存连接器，则默认选择第一个可用连接器。
     if (selectedTemplate?.templateType !== 'collect' || sourceMode !== 'connector' || connector) return;
-    form.setFieldValue('connector', CONNECTOR_OPTIONS[0]?.value);
+    form.setFieldValue('connector', getConnectorOptions()[0]?.value);
   }, [connector, form, selectedTemplate, sourceMode]);
 
   useEffect(() => {
@@ -306,7 +374,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         const rows = Array.isArray(response) ? response : [];
         setTemplates(rows.filter((item) => !['knowledge', 'object_discovery'].includes(item.templateType)));
       })
-      .catch((error: any) => message.error(error?.message || '任务模板加载失败'))
+      .catch((error: any) => message.error(error?.message || intl.formatMessage({ id: 'taskTemplate.loadFailed' })))
       .finally(() => setLoading(false));
     // 未由调用方传入知识库时，按当前账号可读范围拉取（type=all），避免展示固定示例数据。
     if (!knowledgeOptions.length && !knowledgeOptionsOnly) {
@@ -380,7 +448,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         periodYearDateTime: toDateTime(templateValues.periodYearDateTime),
       });
     } catch (error: any) {
-      message.error(error?.message || '任务模板详情加载失败');
+      message.error(error?.message || intl.formatMessage({ id: 'taskTemplate.detailFailed' }));
     } finally {
       setDetailLoading(false);
     }
@@ -389,17 +457,19 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   const title = selectedTemplate
     ? selectedTemplate.templateName
     : categoryLabel
-      ? `${categoryLabel} · 选择任务模板`
-      : '选择任务模板';
-  const subtitle = selectedTemplate ? '完善结构化任务信息和执行配置' : '用结构化信息精准描述任务，数字员工会据此执行';
+      ? intl.formatMessage({ id: 'taskTemplate.categoryTitle' }, { v0: categoryLabel })
+      : intl.formatMessage({ id: 'taskTemplate.select' });
+  const subtitle = selectedTemplate
+    ? intl.formatMessage({ id: 'taskTemplate.detailsSubtitle' })
+    : intl.formatMessage({ id: 'taskTemplate.selectSubtitle' });
   const fallbackAgentOptions = useMemo(
     () =>
       agentOptionsOnly
         ? agentOptions
         : agentOptions.length
           ? agentOptions
-          : [{ label: '当前数字员工', value: '当前数字员工' }],
-    [agentOptions, agentOptionsOnly]
+          : [{ label: intl.formatMessage({ id: 'sider.currentDigitalEmployee' }), value: '当前数字员工' }],
+    [agentOptions, agentOptionsOnly, intl]
   );
   const availableGroupOptions = useMemo(
     () => agentGroupOptions.filter((option) => option.value !== undefined && option.value !== null),
@@ -449,39 +519,45 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         <>
           <div className={styles.sourceMethodRow}>
             <div className={styles.methodField}>
-              <strong>采集方式</strong>
+              <strong>{intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectMode' })}</strong>
               <Form.Item name="sourceMode">
                 <Radio.Group optionType="button" buttonStyle="solid">
-                  <Radio.Button value="connector">连接器采集</Radio.Button>
-                  <Radio.Button value="internet">互联网采集</Radio.Button>
-                  <Radio.Button value="knowledge">知识库采集</Radio.Button>
+                  <Radio.Button value="connector">
+                    {intl.formatMessage({ id: 'taskTemplate.source.connector' })}
+                  </Radio.Button>
+                  <Radio.Button value="internet">
+                    {intl.formatMessage({ id: 'taskTemplate.source.internet' })}
+                  </Radio.Button>
+                  <Radio.Button value="knowledge">
+                    {intl.formatMessage({ id: 'taskTemplate.source.knowledge' })}
+                  </Radio.Button>
                 </Radio.Group>
               </Form.Item>
             </div>
             {sourceMode === 'connector' ? (
               <Form.Item
                 className={styles.methodConfigField}
-                label="连接器"
+                label={intl.formatMessage({ id: 'queryInput.tools.connector' })}
                 name="connector"
-                rules={[{ required: true, message: '请选择连接器' }]}
+                rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectConnector' }) }]}
               >
-                <Select options={CONNECTOR_OPTIONS} />
+                <Select options={getConnectorOptions()} />
               </Form.Item>
             ) : sourceMode === 'internet' ? (
               <Form.Item
                 className={styles.methodConfigField}
-                label="搜索范围"
+                label={intl.formatMessage({ id: 'taskTemplate.searchScope' })}
                 name="internetScope"
-                rules={[{ required: true, message: '请输入搜索范围' }]}
+                rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.enterSearchScope' }) }]}
               >
-                <Input placeholder="公开网页、行业媒体与公众号文章" />
+                <Input placeholder={intl.formatMessage({ id: 'taskTemplate.searchScopePlaceholder' })} />
               </Form.Item>
             ) : (
               <Form.Item
                 className={styles.methodConfigField}
-                label="来源知识库"
+                label={intl.formatMessage({ id: 'taskTemplate.sourceKnowledge' })}
                 name="sourceKnowledge"
-                rules={[{ required: true, message: '请选择来源知识库' }]}
+                rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectSourceKnowledge' }) }]}
               >
                 <Select options={availableKnowledgeOptions} showSearch optionFilterProp="label" />
               </Form.Item>
@@ -489,10 +565,12 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
           </div>
           <div className={styles.storageMethodRow}>
             <div className={styles.methodField}>
-              <strong>入库方式</strong>
+              <strong>{intl.formatMessage({ id: 'taskTemplate.storageMode' })}</strong>
               <Form.Item name="storageMode">
                 <Radio.Group optionType="button" buttonStyle="solid">
-                  <Radio.Button value="knowledge">知识库</Radio.Button>
+                  <Radio.Button value="knowledge">
+                    {intl.formatMessage({ id: 'projectSpace.resources.knowledge' })}
+                  </Radio.Button>
                 </Radio.Group>
               </Form.Item>
             </div>
@@ -511,10 +589,18 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     if (selectedTemplate.templateType === 'content') {
       return (
         <div className={styles.formGrid}>
-          <Form.Item label="内容类型" name="contentType">
-            <Select options={['公众号文章', '小红书图文', '短视频脚本'].map((value) => ({ label: value, value }))} />
+          <Form.Item
+            label={intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.contentType' })}
+            name="contentType"
+          >
+            <Select
+              options={['公众号文章', '小红书图文', '短视频脚本'].map((value) => ({
+                label: taskTemplateOptionLabel(value),
+                value,
+              }))}
+            />
           </Form.Item>
-          <Form.Item label="目标受众" name="audience">
+          <Form.Item label={intl.formatMessage({ id: 'taskTemplate.audience' })} name="audience">
             <Input />
           </Form.Item>
         </div>
@@ -523,12 +609,18 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     if (selectedTemplate.templateType === 'publish') {
       return (
         <div className={styles.formGrid}>
-          <Form.Item label="发布平台" name="platform">
+          <Form.Item label={intl.formatMessage({ id: 'taskTemplate.platform' })} name="platform">
             <Select
-              options={['微信公众号', '小红书', '微信视频号', '抖音'].map((value) => ({ label: value, value }))}
+              options={['微信公众号', '小红书', '微信视频号', '抖音'].map((value) => ({
+                label: taskTemplateOptionLabel(value),
+                value,
+              }))}
             />
           </Form.Item>
-          <Form.Item label="发布账号" name="account">
+          <Form.Item
+            label={intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishAccount' })}
+            name="account"
+          >
             <Select options={availableAccountOptions} showSearch optionFilterProp="label" />
           </Form.Item>
         </div>
@@ -536,11 +628,21 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
     }
     return (
       <div className={styles.formGrid}>
-        <Form.Item label="分析范围" name="analysisScope">
-          <Select options={['账号整体分析', '指定作品分析'].map((value) => ({ label: value, value }))} />
+        <Form.Item label={intl.formatMessage({ id: 'taskTemplate.analysisScope' })} name="analysisScope">
+          <Select
+            options={['账号整体分析', '指定作品分析'].map((value) => ({
+              label: taskTemplateOptionLabel(value),
+              value,
+            }))}
+          />
         </Form.Item>
-        <Form.Item label="时间范围" name="range">
-          <Select options={['近 7 天', '近 30 天', '本季度'].map((value) => ({ label: value, value }))} />
+        <Form.Item label={intl.formatMessage({ id: 'taskTemplate.timeRange' })} name="range">
+          <Select
+            options={['近 7 天', '近 30 天', '本季度'].map((value) => ({
+              label: taskTemplateOptionLabel(value),
+              value,
+            }))}
+          />
         </Form.Item>
       </div>
     );
@@ -573,7 +675,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         selectedTemplate
           ? [
             <Button key="back" disabled={applying || applyingTemplate} onClick={() => setSelectedTemplate(undefined)}>
-              返回模板
+              {intl.formatMessage({ id: 'taskTemplate.back' })}
             </Button>,
             <Button
               key="apply"
@@ -595,120 +697,203 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
         {selectedTemplate ? (
           <Form form={form} layout="vertical" className={styles.detailForm}>
             <Form.Item
-              label="任务名称"
+              label={intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.taskName' })}
               name="title"
-              rules={[{ required: true, whitespace: true, message: '请输入任务名称' }]}
+              rules={[
+                {
+                  required: true,
+                  whitespace: true,
+                  message: intl.formatMessage({ id: 'projectSpace.operation.taskForm.validation.taskNameRequired' }),
+                },
+              ]}
             >
               <Input maxLength={255} />
             </Form.Item>
             <Form.Item
-              label={selectedTemplate.templateType === 'collect' ? '采集内容描述' : '任务要求'}
+              label={
+                selectedTemplate.templateType === 'collect'
+                  ? intl.formatMessage({ id: 'taskTemplate.collectionDescription' })
+                  : intl.formatMessage({ id: 'taskTemplate.requirements' })
+              }
               name="description"
-              rules={[{ required: true, whitespace: true, message: '请输入任务要求' }]}
+              rules={[
+                {
+                  required: true,
+                  whitespace: true,
+                  message: intl.formatMessage({ id: 'taskTemplate.enterRequirements' }),
+                },
+              ]}
             >
               <Input.TextArea rows={3} maxLength={1000} />
             </Form.Item>
             {renderTypeFields()}
             <section className={styles.executionSection}>
-              <strong>执行配置</strong>
+              <strong>{intl.formatMessage({ id: 'projectSpace.requirements.executionConfig' })}</strong>
               <div className={styles.executionGrid}>
-                <Form.Item label="执行主体" name="executorType" rules={[{ required: true, message: '请选择执行主体' }]}>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'taskTemplate.executor' })}
+                  name="executorType"
+                  rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectExecutor' }) }]}
+                >
                   <Select
                     options={[
-                      { label: '数字员工', value: 'agent' },
-                      { label: '数字员工组（暂无可用）', value: 'group', disabled: !availableGroupOptions.length },
+                      { label: intl.formatMessage({ id: 'projectTaskDetail.simple.agent' }), value: 'agent' },
+                      {
+                        label: intl.formatMessage({ id: 'taskTemplate.groupUnavailable' }),
+                        value: 'group',
+                        disabled: !availableGroupOptions.length,
+                      },
                     ]}
                   />
                 </Form.Item>
                 {executorType === 'group' ? (
                   <Form.Item
-                    label="选择数字员工组"
+                    label={intl.formatMessage({ id: 'taskTemplate.selectGroupLabel' })}
                     name="agentGroupId"
-                    rules={[{ required: true, message: '请选择数字员工组' }]}
+                    rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectGroup' }) }]}
                   >
-                    <Select options={availableGroupOptions} notFoundContent="暂无可用数字员工组" />
+                    <Select
+                      options={availableGroupOptions}
+                      notFoundContent={intl.formatMessage({ id: 'taskTemplate.noGroups' })}
+                    />
                   </Form.Item>
                 ) : (
                   <Form.Item
-                    label="选择数字员工"
+                    label={intl.formatMessage({ id: 'projectSpace.operation.execute.agentLabel' })}
                     name="agentId"
-                    rules={[{ required: true, message: '请选择数字员工' }]}
+                    rules={[
+                      {
+                        required: true,
+                        message: intl.formatMessage({ id: 'projectSpace.resources.employeePlaceholder' }),
+                      },
+                    ]}
                   >
                     <Select options={fallbackAgentOptions} showSearch optionFilterProp="label" />
                   </Form.Item>
                 )}
                 <Form.Item
                   className={styles.executionModeField}
-                  label="执行方式"
+                  label={intl.formatMessage({ id: 'projectSpace.detail.integration.run.mode' })}
                   name="runMode"
-                  rules={[{ required: true, message: '请选择执行方式' }]}
+                  rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectRunMode' }) }]}
                 >
                   <Select
                     options={[
-                      { label: '单次执行', value: 'once' },
-                      { label: '按周期执行', value: 'periodic' },
-                      { label: '按间隔执行', value: 'interval' },
+                      { label: intl.formatMessage({ id: 'taskTemplate.run.once' }), value: 'once' },
+                      { label: intl.formatMessage({ id: 'taskTemplate.run.periodic' }), value: 'periodic' },
+                      { label: intl.formatMessage({ id: 'taskTemplate.run.interval' }), value: 'interval' },
                     ]}
                   />
                 </Form.Item>
                 {runMode === 'once' && (
-                  <Form.Item label="执行时间" name="onceTime" rules={[{ required: true, message: '请选择执行时间' }]}>
+                  <Form.Item
+                    label={intl.formatMessage({ id: 'taskTemplate.runTime' })}
+                    name="onceTime"
+                    rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.selectRunTime' }) }]}
+                  >
                     <DatePicker showTime={{ format: 'HH:mm' }} format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
                   </Form.Item>
                 )}
                 {runMode === 'periodic' && (
                   <>
                     <Form.Item
-                      label="周期类型"
+                      label={intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectPeriodType' })}
                       name="periodType"
-                      rules={[{ required: true, message: '请选择周期类型' }]}
+                      rules={[
+                        {
+                          required: true,
+                          message: intl.formatMessage({
+                            id: 'projectSpace.operation.taskForm.validation.collectPeriodTypeRequired',
+                          }),
+                        },
+                      ]}
                     >
                       <Select
                         options={[
-                          { label: '每天', value: 'daily' },
-                          { label: '每周', value: 'weekly' },
-                          { label: '每双周', value: 'biweekly' },
-                          { label: '每月', value: 'monthly' },
-                          { label: '每年', value: 'yearly' },
+                          {
+                            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.daily' }),
+                            value: 'daily',
+                          },
+                          {
+                            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.weekly' }),
+                            value: 'weekly',
+                          },
+                          {
+                            label: intl.formatMessage({
+                              id: 'projectSpace.operation.taskForm.collect.period.biweekly',
+                            }),
+                            value: 'biweekly',
+                          },
+                          {
+                            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.monthly' }),
+                            value: 'monthly',
+                          },
+                          {
+                            label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.yearly' }),
+                            value: 'yearly',
+                          },
                         ]}
                       />
                     </Form.Item>
                     {periodType === 'yearly' ? (
                       <Form.Item
-                        label="月日时分"
+                        label={intl.formatMessage({ id: 'taskTemplate.monthDayTime' })}
                         name="periodYearDateTime"
-                        rules={[{ required: true, message: '请选择月日时分' }]}
+                        rules={[
+                          { required: true, message: intl.formatMessage({ id: 'taskTemplate.selectMonthDayTime' }) },
+                        ]}
                       >
                         <DatePicker showTime={{ format: 'HH:mm' }} format="MM-DD HH:mm" style={{ width: '100%' }} />
                       </Form.Item>
                     ) : (
                       <Form.Item
-                        label="执行时分"
+                        label={intl.formatMessage({ id: 'taskTemplate.timeOfDay' })}
                         name="periodTime"
-                        rules={[{ required: true, message: '请选择执行时分' }]}
+                        rules={[
+                          { required: true, message: intl.formatMessage({ id: 'taskTemplate.selectTimeOfDay' }) },
+                        ]}
                       >
                         <TimePicker format="HH:mm" style={{ width: '100%' }} />
                       </Form.Item>
                     )}
                     {(periodType === 'weekly' || periodType === 'biweekly') && (
                       <Form.Item
-                        label="执行日"
+                        label={intl.formatMessage({ id: 'taskTemplate.runDays' })}
                         name="periodWeekdays"
-                        rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}
+                        rules={[
+                          {
+                            required: true,
+                            type: 'array',
+                            min: 1,
+                            message: intl.formatMessage({ id: 'taskTemplate.selectRunDays' }),
+                          },
+                        ]}
                       >
-                        <Select mode="multiple" options={WEEKDAY_OPTIONS} />
+                        <Select mode="multiple" options={getWeekdayOptions()} />
                       </Form.Item>
                     )}
                     {periodType === 'monthly' && (
                       <Form.Item
-                        label="执行日期"
+                        label={intl.formatMessage({ id: 'taskTemplate.runDates' })}
                         name="periodMonthDays"
-                        rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日期' }]}
+                        rules={[
+                          {
+                            required: true,
+                            type: 'array',
+                            min: 1,
+                            message: intl.formatMessage({ id: 'taskTemplate.selectRunDates' }),
+                          },
+                        ]}
                       >
-                        <Select mode="multiple" options={MONTH_DAY_OPTIONS} />
+                        <Select mode="multiple" options={getMonthDayOptions()} />
                       </Form.Item>
                     )}
-                    <Form.Item label="生效日期区间" name="effectiveDateRange">
+                    <Form.Item
+                      label={intl.formatMessage({
+                        id: 'projectSpace.operation.taskForm.field.collectEffectiveDateRange',
+                      })}
+                      name="effectiveDateRange"
+                    >
                       <DatePicker.RangePicker style={{ width: '100%' }} />
                     </Form.Item>
                   </>
@@ -716,20 +901,32 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
                 {runMode === 'interval' && (
                   <>
                     <Form.Item
-                      label="每几小时"
+                      label={intl.formatMessage({ id: 'taskTemplate.everyHours' })}
                       name="intervalHours"
-                      rules={[{ required: true, message: '请输入间隔小时数' }]}
+                      rules={[{ required: true, message: intl.formatMessage({ id: 'taskTemplate.enterInterval' }) }]}
                     >
                       <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                     </Form.Item>
                     <Form.Item
-                      label="执行日"
+                      label={intl.formatMessage({ id: 'taskTemplate.runDays' })}
                       name="intervalWeekdays"
-                      rules={[{ required: true, type: 'array', min: 1, message: '请选择执行日' }]}
+                      rules={[
+                        {
+                          required: true,
+                          type: 'array',
+                          min: 1,
+                          message: intl.formatMessage({ id: 'taskTemplate.selectRunDays' }),
+                        },
+                      ]}
                     >
-                      <Select mode="multiple" options={WEEKDAY_OPTIONS} />
+                      <Select mode="multiple" options={getWeekdayOptions()} />
                     </Form.Item>
-                    <Form.Item label="生效日期区间" name="effectiveDateRange">
+                    <Form.Item
+                      label={intl.formatMessage({
+                        id: 'projectSpace.operation.taskForm.field.collectEffectiveDateRange',
+                      })}
+                      name="effectiveDateRange"
+                    >
                       <DatePicker.RangePicker style={{ width: '100%' }} />
                     </Form.Item>
                   </>
@@ -757,7 +954,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
             ))}
           </div>
         ) : !loading ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可用任务模板" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'taskTemplate.empty' })} />
         ) : null}
       </Spin>
     </Modal>

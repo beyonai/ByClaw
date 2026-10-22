@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -74,16 +77,16 @@ public class GroupChatSessionContextFileService {
     /** Tenant callers supply a snapshot already authorized by the owning Node; storage remains shared. */
     public ContextFile prepareGroupSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, GroupChatContextResponse snapshot) {
-        requireMatchingSnapshot(groupRequest, snapshot, "历史上下文边界无效，请重试");
+        requireMatchingSnapshot(groupRequest, snapshot, I18nUtil.get("groupchat.context.history.boundary.invalid"));
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, null).get(0);
     }
 
     /** 租户名单与历史快照由所属 Node 鉴权，存储流程仍校验发起人的工作区身份。 */
     public ContextFile prepareGroupMemberSnapshot(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, GroupChatContextResponse snapshot, List<GroupMember> members) {
-        requireMatchingSnapshot(groupRequest, snapshot, "成员上下文边界无效，请重试");
+        requireMatchingSnapshot(groupRequest, snapshot, I18nUtil.get("groupchat.context.members.boundary.invalid"));
         if (members == null) {
-            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.members.failed"),
                 new IllegalArgumentException("Missing member roster"));
         }
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, snapshot, members).get(0);
@@ -102,7 +105,7 @@ public class GroupChatSessionContextFileService {
     public ContextFile prepareGroupMembers(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, List<GroupMember> members) {
         if (members == null) {
-            throw new ChatTurnPreparationException("成员上下文准备失败，请重试",
+            throw new ChatTurnPreparationException(I18nUtil.get("groupchat.context.members.failed"),
                 new IllegalArgumentException("Missing member roster"));
         }
         return prepare(userCode, groupRequest, traceId, currentUserMessageId, false, null, members).get(0);
@@ -124,7 +127,7 @@ public class GroupChatSessionContextFileService {
     private List<ContextFile> prepare(String userCode, GroupChatContextRequest groupRequest, String traceId,
         Long currentUserMessageId, boolean includeTaskHistory, GroupChatContextResponse authorizedSnapshot,
         List<GroupMember> members) {
-        String failureMessage = members == null ? "历史上下文准备失败，请重试" : "成员上下文准备失败，请重试";
+        String failureMessage = members == null ? I18nUtil.get("groupchat.context.history.failed") : I18nUtil.get("groupchat.context.members.failed");
         try {
             if (StringUtils.isBlank(userCode) || StringUtils.isBlank(traceId) || groupRequest == null
                 || groupRequest.getChildSessionId() == null || groupRequest.getChildSessionId() <= 0
@@ -245,14 +248,17 @@ public class GroupChatSessionContextFileService {
         // 查询层先过滤保证窗口完整；导出层防御性过滤，避免未来投影变化泄露事件。
         snapshot.getMessages().removeIf(message -> Integer.valueOf(5).equals(message.getUsage()));
         for (GroupChatContextResponse.Message message : snapshot.getMessages()) {
-            message.setContent(GroupChatMessagePreview.format(message.getContent(), message.getResourceList()));
+            boolean passive = ForwardRuntimeProjection.isSnapshotOnly(message.getForward())
+                || "FORWARD_SINGLE".equals(message.getKind()) || "FORWARD_MERGED".equals(message.getKind());
+            if (!passive) message.setContent(GroupChatMessagePreview.format(message.getContent(), message.getResourceList()));
             GroupChatContextResponse.ReplyReference reply = message.getReplyTo();
             if (reply != null && Integer.valueOf(5).equals(reply.getUsage())) {
                 message.setReplyTo(null);
             }
-            else if (reply != null) {
+            else if (reply != null && !ForwardRuntimeProjection.isSnapshotOnly(reply.getForward())) {
                 reply.setContent(GroupChatMessagePreview.format(reply.getContent(), reply.getResourceList()));
             }
+            ForwardRuntimeProjection.agentMessage(message);
         }
         if (snapshot.getSnapshot() != null) {
             List<GroupChatContextResponse.Message> exported = snapshot.getMessages();
@@ -335,9 +341,10 @@ public class GroupChatSessionContextFileService {
                 }
                 body.put("createdAt", message.getCreateTime() == null ? null : message.getCreateTime().getTime());
                 // 普通用户消息的成员快照在 related_resources，群来源旧记录可从 metadata 补充。
-                String content = GroupChatMessagePreview.fromMetadata(message.getMessageContent(),
-                    message.getRelatedResources());
-                body.put("content", GroupChatMessagePreview.fromMetadata(content, message.getMetadata()));
+                boolean passive = ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata());
+                String content = passive ? ForwardRuntimeProjection.projectMetadata(message.getMessageContent(), message.getMetadata())
+                    : GroupChatMessagePreview.fromMetadata(message.getMessageContent(), message.getRelatedResources());
+                body.put("content", passive ? content : GroupChatMessagePreview.fromMetadata(content, message.getMetadata()));
                 writer.write(objectMapper.writeValueAsString(body));
                 writer.newLine();
             }

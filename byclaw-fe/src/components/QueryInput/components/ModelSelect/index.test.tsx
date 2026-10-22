@@ -6,6 +6,7 @@ import ModelSelect, { reasoningLabelStrideFor } from '.';
 let mockUserInfo: Record<string, unknown> | null = null;
 
 jest.mock('@umijs/max', () => ({
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl('zh-CN'),
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useSelector: (selector: (state: unknown) => unknown) => selector({ user: { userInfo: mockUserInfo } }),
 }));

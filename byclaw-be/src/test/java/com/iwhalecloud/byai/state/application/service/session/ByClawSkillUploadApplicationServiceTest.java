@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -72,7 +74,6 @@ class ByClawSkillUploadApplicationServiceTest {
         messageSource.addMessage("byclaw.skill.zip.empty", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包不能为空");
         messageSource.addMessage("byclaw.skill.zip.read.failed", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包解析失败");
         messageSource.addMessage("byclaw.skill.zip.file.invalid", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包必须是 zip 格式");
-        messageSource.addMessage("byclaw.skill.zip.size.exceeded", Locale.SIMPLIFIED_CHINESE, "超过最大允许大小");
         messageSource.addMessage("byclaw.skill.zip.missing.doc", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包必须有且仅有一个 SKILL.md");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
@@ -107,6 +108,28 @@ class ByClawSkillUploadApplicationServiceTest {
         assertEquals(AGENT_PREFIX + "fol-auto-biztravel", dto.getSkillPath());
         assertNotNull(dto.getSkillDocObjectKey());
         assertTrue(dto.getSkillDocObjectKey().endsWith("/SKILL.md"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {50L * 1024 * 1024, 50L * 1024 * 1024 + 1, 100L * 1024 * 1024})
+    void shouldAcceptSkillZipAtAndAboveFormerSizeLimit(long declaredSize) throws IOException {
+        MultipartFile archive = buildZip("large-skill.zip", "large-skill/SKILL.md", "# Large skill");
+        // 只模拟请求层已接收的文件大小，保留真实 ZIP 内容，避免为业务校验回归分配大缓冲区。
+        MultipartFile zip = new MockMultipartFile("files", "large-skill.zip", "application/zip", archive.getBytes()) {
+            @Override
+            public long getSize() {
+                return declaredSize;
+            }
+        };
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto result = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("large-skill", result.getSkillName());
+        assertEquals(AGENT_PREFIX + "large-skill/SKILL.md", result.getSkillDocObjectKey());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertEquals(AGENT_PREFIX + "large-skill/SKILL.md", pathCaptor.getValue());
     }
 
     @Test

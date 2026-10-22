@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.notification;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.notification.NotificationManageDto;
@@ -157,13 +158,13 @@ public class NotificationController {
 
             ResponseUtil<Integer> resultUtil = new ResponseUtil<Integer>();
             resultUtil.setCode(0);
-            resultUtil.setMsg("更新了" + updateCount + "条记录");
+            resultUtil.setMsg(I18nUtil.get("notification.updated", String.valueOf(updateCount)));
             resultUtil.setData(updateCount);
             return resultUtil;
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
-            return ResponseUtil.fail("Failed to mark notification as read!" + e.getMessage());
+            return ResponseUtil.fail(I18nUtil.get("notification.read.failed", e.getMessage()));
         }
     }
 

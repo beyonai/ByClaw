@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
@@ -18,7 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
-class VoiceControllerTest {
+class VoiceControllerTest extends I18nTestSupport {
     @Mock private VoiceAudioService audio;
     @Mock private HarnessMediaClient media;
     private VoiceController controller;

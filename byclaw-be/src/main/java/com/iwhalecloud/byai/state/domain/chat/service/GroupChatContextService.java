@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 
 import java.util.ArrayList;
@@ -141,6 +144,16 @@ public class GroupChatContextService {
         ordered.replaceAll(projection::display);
         boolean characterTruncated = trimToCharacterLimit(ordered, maxCharacters);
         List<GroupChatContextResponse.Message> messages = toMessages(ordered, null, projection);
+        if (characterTruncated && messages.size() == 1) {
+            GroupChatContextResponse.Message message = messages.get(0);
+            String content = message.getContent();
+            if (content.length() > maxCharacters) {
+                // 只裁剪安全投影后的响应正文，保留原始消息 ID 供下一页继续读取更早历史。
+                String notice = message.isRecalled() ? "" : "…（消息过长，已截断预览）";
+                message.setContent(content.substring(0, Math.max(0, maxCharacters - notice.length()))
+                    + notice.substring(0, Math.min(maxCharacters, notice.length())));
+            }
+        }
         if (!timeline) {
             // 引用独立查询，不能绕过 Agent 主查询的系统事件排除规则。
             messages.forEach(message -> {
@@ -164,7 +177,7 @@ public class GroupChatContextService {
 
         int omitted = Math.max(0, Math.toIntExact(Math.min(Integer.MAX_VALUE, totalCount - messages.size())));
         GroupChatContextResponse.Truncation truncation = new GroupChatContextResponse.Truncation();
-        truncation.setTruncated(omitted > 0);
+        truncation.setTruncated(omitted > 0 || characterTruncated);
         truncation.setOmittedMessageCount(omitted);
         if (characterTruncated) {
             truncation.setReason("character_limit");
@@ -179,33 +192,33 @@ public class GroupChatContextService {
     private void requireGroupMember(Long sessionId, GroupChatContextRequest request) {
         ByaiSession session = sessionService.findById(sessionId);
         if (session == null || GroupChatAuthorizationService.DISSOLVED_STATE.equals(session.getState())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
         }
         String contextToken = request == null ? null : request.getContextToken();
         if (contextToken != null && tokenService != null) {
             Map<String, Object> claims = tokenService.verify(contextToken);
             if (request == null || request.getChildSessionId() == null || request.getInitiatorUserId() == null
                 || request.getTargetAgentId() == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (!String.valueOf(sessionId).equals(String.valueOf(claims.get("groupSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (request.getInitiatorUserId() != null
                 && !String.valueOf(request.getInitiatorUserId()).equals(String.valueOf(claims.get("initiatorUserId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (request.getTargetAgentId() != null
                 && !String.valueOf(request.getTargetAgentId()).equals(String.valueOf(claims.get("targetAgentId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             if (!String.valueOf(request.getChildSessionId()).equals(String.valueOf(claims.get("childSessionId")))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             Object boundary = claims.get("boundaryMessageId");
             Long requestedBefore = parseRequiredLong(request.getBeforeMessageId(), "beforeMessageId");
             if (boundary != null && requestedBefore > Long.parseLong(String.valueOf(boundary))) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
             }
             return;
         }
@@ -213,7 +226,7 @@ public class GroupChatContextService {
         boolean member = memberService != null
             && memberService.findSessionMember(sessionId, MemObjType.USER.name(), currentUserId) != null;
         if (session == null || (memberService != null && !member)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversation not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.context.notFound"));
         }
     }
 
@@ -224,12 +237,13 @@ public class GroupChatContextService {
             .mapToInt(String::length)
             .sum();
         boolean truncated = false;
-        while (!ordered.isEmpty() && characters > maxCharacters) {
+        // 最新消息单独超限时仍保留身份，正文在响应投影后裁剪，避免历史翻页丢失游标。
+        while (ordered.size() > 1 && characters > maxCharacters) {
             ByaiMessage removed = ordered.remove(0);
             characters -= StringUtils.defaultString(removed.getMessageContent()).length();
             truncated = true;
         }
-        return truncated;
+        return truncated || characters > maxCharacters;
     }
 
     /** 将已鉴权的公开群消息转换为统一的前端消息协议。 */
@@ -250,6 +264,10 @@ public class GroupChatContextService {
         Map<Long, String> cloudResources = new HashMap<>();
         Map<Long, ByaiGroupChatTask> tasks = loadMessageTasks(ordered);
         Map<Long, List<ByaiGroupChatMessageAck>> acknowledgements = loadAcknowledgements(ordered);
+        Map<Long, ByaiMessage> references = loadReferences(ordered, visibleReferences);
+        List<ByaiMessage> speakers = new ArrayList<>(ordered);
+        references.values().stream().filter(Objects::nonNull).forEach(speakers::add);
+        Map<Long, Map<Long, String>> displayNames = loadSpeakerDisplayNames(speakers);
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         for (int index = 0; index < ordered.size(); index++) {
             ByaiMessage source = projection.display(ordered.get(index));
@@ -262,16 +280,18 @@ public class GroupChatContextService {
             message.setCreatedAt(source.getCreateTime() == null ? 0L : source.getCreateTime().getTime());
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
             message.setResourceList(toMemberResources(source.getMetadata()));
-            List<ByaiGroupChatMessageAck> messageAcks = acknowledgements.getOrDefault(source.getMessageId(), List.of());
+            boolean passive = ForwardRuntimeProjection.isSnapshotOnly(source.getMetadata());
+            message.setForward(source.isRecalled() ? null : ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(source.getMetadata())));
+            List<ByaiGroupChatMessageAck> messageAcks = passive || source.isRecalled() ? List.of() : acknowledgements.getOrDefault(source.getMessageId(), List.of());
             message.setAcknowledgements(messageAcks.stream().map(this::toAcknowledgement).toList());
-            message.setCanAcknowledge(currentUserId != null
+            message.setCanAcknowledge(!passive && currentUserId != null
                 && !currentUserId.equals(source.getCreatorId())
                 && message.getResourceList().stream().anyMatch(resource -> "HUMAN".equals(resource.getResourceType())
                     && String.valueOf(currentUserId).equals(String.valueOf(resource.getResourceId())))
                 && messageAcks.stream().noneMatch(ack -> currentUserId.equals(ack.getUserId())));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
-            message.setGroupCoordination(toCoordination(source.getMetadata()));
-            message.setTaskId(toMetadataString(source.getMetadata(), "taskId"));
+            message.setGroupCoordination(passive ? null : toCoordination(source.getMetadata()));
+            message.setTaskId(passive ? null : toMetadataString(source.getMetadata(), "taskId"));
             message.setUsage(source.getUsage());
             message.setKind(Integer.valueOf(5).equals(source.getUsage()) ? "SYSTEM_EVENT"
                 : toMetadataString(source.getMetadata(), "kind"));
@@ -280,34 +300,82 @@ public class GroupChatContextService {
             }
             ByaiGroupChatTask task = tasks.get(messageTaskId(source));
             // 归属以任务记录为准，不使用发言 Agent、发布人或客户端 metadata 中的用户 ID。
-            if (task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
+            if (!passive && task != null && Objects.equals(task.getGroupSessionId(), source.getSessionId())
                 && task.getInitiatorUserId() != null) {
                 message.setInitiatorUserId(String.valueOf(task.getInitiatorUserId()));
             }
-            message.setTarget(toTarget(source));
+            message.setTarget(passive ? null : toTarget(source));
             message.setRole(toRole(source.getUsage()));
-            message.setSpeaker(toSpeaker(source, resources));
+            message.setSpeaker(toSpeaker(source, resources, displayNames));
             message.setAttachments(source.isRecalled() ? List.of() : toAttachments(source, cloudResources));
-            if (source.getMessageRef() != null) {
-                ByaiMessage referenced = visibleReferences == null ? messageMapper.selectByMessageId(source.getMessageRef())
-                    : visibleReferences.get(source.getMessageRef());
+            if (!passive && source.getMessageRef() != null) {
+                ByaiMessage referenced = references.get(source.getMessageRef());
                 if (referenced != null && Objects.equals(source.getSessionId(), referenced.getSessionId())) {
                     GroupChatContextResponse.ReplyReference reply = new GroupChatContextResponse.ReplyReference();
                     reply.setMessageId(String.valueOf(referenced.getMessageId()));
                     boolean hidden = source.isRecalled() || referenced.isRecalled();
                     reply.setRecalled(referenced.isRecalled());
-                    reply.setContent(hidden ? GroupChatRecallProjection.RECALLED_REFERENCE
+                    reply.setContent(hidden ? I18nUtil.get(GroupChatRecallProjection.RECALLED_REFERENCE)
                         : StringUtils.defaultString(referenced.getMessageContent()));
                     reply.setResourceList(hidden ? List.of() : toMemberResources(referenced.getMetadata()));
+                    reply.setForward(hidden ? null : ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+                    if (ForwardRuntimeProjection.isSnapshotOnly(referenced.getMetadata())) {
+                        reply.setAcknowledgements(List.of()); reply.setCanAcknowledge(false);
+                    }
                     reply.setUsage(referenced.getUsage());
                     reply.setRole(toRole(referenced.getUsage()));
-                    reply.setSpeaker(toSpeaker(referenced, resources));
+                    reply.setSpeaker(toSpeaker(referenced, resources, displayNames));
                     message.setReplyTo(reply);
                 }
             }
             result.add(message);
         }
         return result;
+    }
+
+    /** 只收集实际展示的同群引用，话题页的可见引用边界不能被额外查询绕过。 */
+    private Map<Long, ByaiMessage> loadReferences(List<ByaiMessage> messages, Map<Long, ByaiMessage> visibleReferences) {
+        Map<Long, ByaiMessage> references = new HashMap<>();
+        for (ByaiMessage message : messages) {
+            Long referenceId = message.getMessageRef();
+            if (referenceId == null || ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata())
+                || references.containsKey(referenceId)) continue;
+            ByaiMessage reference = visibleReferences == null ? messageMapper.selectByMessageId(referenceId)
+                : visibleReferences.get(referenceId);
+            references.put(referenceId, reference != null && Objects.equals(message.getSessionId(), reference.getSessionId())
+                ? reference : null);
+        }
+        return references;
+    }
+
+    /** 每次查询按群批量读取当前昵称，缺失时批量回退平台用户名，不修改消息中的姓名快照。 */
+    private Map<Long, Map<Long, String>> loadSpeakerDisplayNames(List<ByaiMessage> messages) {
+        List<ByaiMessage> userMessages = messages.stream().filter(message -> Integer.valueOf(1).equals(message.getUsage()))
+            .filter(message -> message.getSessionId() != null && message.getCreatorId() != null).toList();
+        Map<Long, Map<Long, String>> names = new HashMap<>();
+        userMessages.stream().map(ByaiMessage::getSessionId).distinct().forEach(sessionId -> {
+            Map<Long, String> groupNames = new HashMap<>();
+            if (memberService != null) {
+                memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null).stream()
+                    .filter(member -> Objects.equals(sessionId, member.getSessionId())
+                        && MemObjType.USER.name().equals(member.getMemObjType()) && member.getMemObjId() != null
+                        && StringUtils.isNotBlank(member.getMemName()))
+                    .forEach(member -> groupNames.put(member.getMemObjId(), member.getMemName()));
+            }
+            names.put(sessionId, groupNames);
+        });
+        List<Long> missingUserIds = userMessages.stream()
+            .filter(message -> !names.get(message.getSessionId()).containsKey(message.getCreatorId()))
+            .map(ByaiMessage::getCreatorId).distinct().toList();
+        Map<Long, String> userNames = new HashMap<>();
+        if (userService != null && !missingUserIds.isEmpty()) {
+            userService.findByIds(missingUserIds).stream()
+                .filter(user -> user.getUserId() != null && StringUtils.isNotBlank(user.getUserName()))
+                .forEach(user -> userNames.put(user.getUserId(), user.getUserName()));
+        }
+        userMessages.forEach(message -> names.get(message.getSessionId()).putIfAbsent(message.getCreatorId(),
+            userNames.getOrDefault(message.getCreatorId(), I18nUtil.get("groupchat.memberFallback"))));
+        return names;
     }
 
     private Map<Long, List<ByaiGroupChatMessageAck>> loadAcknowledgements(List<ByaiMessage> messages) {
@@ -349,7 +417,7 @@ public class GroupChatContextService {
         result.setUserId(String.valueOf(ack.getUserId()));
         String userName = ack.getUserName();
         result.setUserName(userName == null || userName.isBlank() || userName.equals(String.valueOf(ack.getUserId()))
-            ? "群成员" : userName);
+            ? I18nUtil.get("groupchat.memberFallback") : userName);
         result.setAcknowledgedAt(ack.getAcknowledgedAt() == null ? null : ack.getAcknowledgedAt().getTime());
         return result;
     }
@@ -429,6 +497,7 @@ public class GroupChatContextService {
         if (StringUtils.isBlank(metadata)) {
             return Collections.emptyList();
         }
+        if (ForwardRuntimeProjection.isSnapshotOnly(metadata)) return ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(metadata));
         try {
             JSONObject object = JSON.parseObject(metadata);
             JSONArray resourceList = object == null ? null : object.getJSONArray("resourceList");
@@ -458,19 +527,20 @@ public class GroupChatContextService {
         }
     }
 
-    private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources) {
+    private GroupChatContextResponse.Speaker toSpeaker(ByaiMessage message, Map<Long, SsResource> resources,
+        Map<Long, Map<Long, String>> displayNames) {
         GroupChatContextResponse.Speaker speaker = new GroupChatContextResponse.Speaker();
         if (Integer.valueOf(5).equals(message.getUsage())) {
             speaker.setType("system");
-            speaker.setDisplayName("系统");
+            speaker.setDisplayName(I18nUtil.get("groupchat.system"));
             return speaker;
         }
         if (Integer.valueOf(1).equals(message.getUsage())) {
             speaker.setType("user");
             speaker.setUserCode(resolveUserCode(message));
-            if (StringUtils.isNotBlank(message.getCreatorName())) {
-                speaker.setDisplayName(message.getCreatorName());
-            }
+            Map<Long, String> groupNames = displayNames.get(message.getSessionId());
+            speaker.setDisplayName(StringUtils.defaultIfBlank(groupNames == null ? null : groupNames.get(message.getCreatorId()),
+                I18nUtil.get("groupchat.memberFallback")));
             return speaker;
         }
 
@@ -555,6 +625,7 @@ public class GroupChatContextService {
 
     private List<GroupChatContextResponse.Attachment> toAttachments(ByaiMessage source,
         Map<Long, String> cloudResources) {
+        if ("FORWARD_MERGED".equals(ForwardRuntimeProjection.metadata(source.getMetadata()).path("kind").asText())) return List.of();
         List<GroupChatContextResponse.Attachment> legacy = toAttachments(source.getRelatedResources());
         List<GroupChatContextResponse.Attachment> result = legacy == null ? new ArrayList<>() : new ArrayList<>(legacy);
         JSONObject metadata;
@@ -565,8 +636,11 @@ public class GroupChatContextService {
             // 历史元数据损坏时仍返回普通附件，不影响整页消息。
             return legacy;
         }
+        // 普通群消息可能没有 kind，使用空值安全的比较保留原有附件。
+        String kind = metadata == null ? null : metadata.getString("kind");
         if (metadata == null || !"GROUP_CHAT".equals(metadata.getString("scene"))
-            || !"TASK_RESULT".equals(metadata.getString("kind")) || !(metadata.get("files") instanceof JSONArray)) {
+            || !("TASK_RESULT".equals(kind) || "FORWARD_SINGLE".equals(kind))
+            || !(metadata.get("files") instanceof JSONArray)) {
             return legacy;
         }
         for (Object value : metadata.getJSONArray("files")) {
@@ -602,27 +676,23 @@ public class GroupChatContextService {
     }
 
     private List<GroupChatContextResponse.Attachment> toAttachments(String relatedResources) {
-        if (StringUtils.isBlank(relatedResources)) {
-            return null;
-        }
+        if (StringUtils.isBlank(relatedResources)) return null;
         try {
-            MessageResourceDto resources = JSON.parseObject(relatedResources, MessageResourceDto.class);
-            if (resources == null || CollectionUtils.isEmpty(resources.getFiles())) {
-                return null;
-            }
+            JSONObject resources = JSON.parseObject(relatedResources);
+            JSONArray files = resources == null ? null : resources.getJSONArray("files");
+            if (files == null || files.isEmpty()) return null;
             List<GroupChatContextResponse.Attachment> result = new ArrayList<>();
-            for (MessageFileDto file : resources.getFiles()) {
-                if (file == null || StringUtils.isBlank(file.getFileId()) || StringUtils.isBlank(file.getFileName())) {
-                    continue;
-                }
-                GroupChatContextResponse.Attachment attachment = new GroupChatContextResponse.Attachment();
-                attachment.setFileId(file.getFileId());
-                attachment.setFileName(file.getFileName());
-                attachment.setFilePath(file.getFilePath());
-                attachment.setFileUrl(file.getFileUrl());
-                if (StringUtils.isNotBlank(file.getFileType())) {
-                    attachment.setMediaType(file.getFileType());
-                }
+            for (Object value : files) {
+                if (!(value instanceof JSONObject file) || StringUtils.isBlank(file.getString("fileId"))
+                    || StringUtils.isBlank(file.getString("fileName"))) continue;
+                var attachment = new GroupChatContextResponse.Attachment();
+                attachment.setFileId(file.getString("fileId"));
+                attachment.setFileName(file.getString("fileName"));
+                attachment.setFilePath(file.getString("filePath"));
+                attachment.setFileUrl(file.getString("fileUrl"));
+                // Forward descriptors use mediaType/size; ordinary uploads retain fileType compatibility.
+                attachment.setMediaType(StringUtils.defaultIfBlank(file.getString("fileType"), file.getString("mediaType")));
+                if (file.get("size") instanceof Number size && size.longValue() >= 0) attachment.setSize(size.longValue());
                 result.add(attachment);
             }
             return result.isEmpty() ? null : result;
@@ -652,7 +722,7 @@ public class GroupChatContextService {
             return Long.valueOf(value);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid beforeMessageId");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.context.cursorInvalid"));
         }
     }
 
@@ -661,7 +731,7 @@ public class GroupChatContextService {
             return defaultValue;
         }
         if (value <= 0 || value > maximum) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested group chat window is invalid");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("groupchat.window.invalid"));
         }
         return value;
     }

@@ -81,9 +81,13 @@ function AgentTeamsHeaderActivity({ rootSessionId, currentSession }: Props) {
       sessionName: member.name || intl.formatMessage({ id: 'ui.team.childAgent' }),
       sessionContent: member.currentTask,
       sessionExts: [
-        { extParamName: '外部会话标识', extParamCode: 'external_session_id', extParamValue: member.id },
         {
-          extParamName: '外部会话状态',
+          extParamName: intl.formatMessage({ id: 'chat.externalSessionId' }),
+          extParamCode: 'external_session_id',
+          extParamValue: member.id,
+        },
+        {
+          extParamName: intl.formatMessage({ id: 'chat.externalSessionStatus' }),
           extParamCode: 'external_session_status',
           extParamValue: member.status || '',
         },

@@ -23,6 +23,7 @@ function setup(options: { whenIdle?: () => Promise<void> } = {}) {
   const reporter = new IdleReporter({
     redis,
     sandboxId: 'sbx-1',
+    userCode: 'user001',
     streamKey: 'byclaw:dsh:sandbox:activity',
     maxLen: 500,
     idleTimeoutMs: IDLE,
@@ -54,6 +55,7 @@ describe('IdleReporter', () => {
     expect(redis.calls).toEqual([[
       'byclaw:dsh:sandbox:activity', 'MAXLEN', '~', 500, '*',
       'sandboxId', 'sbx-1',
+      'userCode', 'user001',
       'state', 'busy',
       'lastActiveAt', iso(0),
       'waitingUser', 0,
@@ -232,6 +234,7 @@ describe('IdleReporter', () => {
     const reporter = new IdleReporter({
       redis,
       sandboxId: 'sbx-1',
+      userCode: '',
       streamKey: 'k',
       maxLen: 1,
       idleTimeoutMs: IDLE,

@@ -1,3 +1,4 @@
+import { isSnapshotOnly, forwardResources, passiveText } from "./forward-projection.js";
 import { recallIdentity, recallContent } from "./message-format.js";
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
@@ -123,7 +124,14 @@ export class GroupHistory extends HistoryAccess {
         return {
           ...summary,
           latestMessageRecalled: latestMessageRecalledAt != null,
-          latestMessageContent: latestMessageRecalledAt ? recallContent(recalledMessage) : preview,
+          latestMessageContent: latestMessageRecalledAt
+            ? recallContent(recalledMessage)
+            : isSnapshotOnly(latestMessageMetadata)
+              ? passiveText(
+                  String(r.latestMessageContent ?? ""),
+                  forwardResources(objectJson(latestMessageMetadata)),
+                )
+              : preview,
           latestMessageRecall: latestMessageRecalledAt ? recallIdentity(recalledMessage) : null,
           members: (await this.repository.members(r.sessionId))
             .slice(0, 9)

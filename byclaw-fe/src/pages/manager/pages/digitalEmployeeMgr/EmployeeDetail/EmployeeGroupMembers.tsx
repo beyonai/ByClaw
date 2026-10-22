@@ -34,9 +34,9 @@ const normalizeMember = (item, index = 0) => {
   };
 };
 
-const unwrapCandidatePage = (response) => {
+const unwrapCandidatePage = (response, fallbackMessage) => {
   if (response?.code !== undefined && Number(response.code) !== 0) {
-    throw new Error(response?.msg || 'Failed to load digital employee candidates');
+    throw new Error(response?.msg || fallbackMessage);
   }
   return response?.data || response || {};
 };
@@ -121,7 +121,7 @@ export default function EmployeeGroupMembers({
       requestController
     )
       .then((response) => {
-        const page = unwrapCandidatePage(response);
+        const page = unwrapCandidatePage(response, intl.formatMessage({ id: 'employeeDetail.groupMember.loadFailed' }));
         const source = page?.list?.length ? page.list : page?.rows || [];
         const list = source.map(normalizeMember);
         const pageTotal = Number(page?.total ?? list.length);

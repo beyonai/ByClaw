@@ -64,6 +64,9 @@ export interface TeamActivitySnapshot {
   readonly description?: string
   readonly summary?: GroupTaskSummary & { current?: GroupTaskSummaryOutcome }
   readonly captainSessionId: string
+  /** Durable dispatch admission, used when restoring an interrupted command. */
+  readonly lifecycle?: TeamState['lifecycle']
+  readonly stoppedAt?: number
   readonly members: readonly TeamActivityMember[]
   readonly tasks: readonly TeamActivityTask[]
   readonly messageCount: number
@@ -181,6 +184,8 @@ export async function assembleTeamSnapshot(
     ...state.description !== undefined ? { description: state.description } : {},
     ...(state.summary === undefined ? {} : { summary: { ...state.summary, current: groupTaskSummaryOutcome(state, state.inputRevision ?? state.summary.initial.inputRevision) } }),
     captainSessionId: state.captainSessionId,
+    ...(state.lifecycle === undefined ? {} : { lifecycle: state.lifecycle }),
+    ...(state.stoppedAt === undefined ? {} : { stoppedAt: state.stoppedAt }),
     members,
     tasks: tasks.map((task) => ({
       id: task.id,

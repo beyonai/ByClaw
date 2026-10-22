@@ -20,7 +20,7 @@ import {
   EventType,
   TaskCancelledError,
   type AgentContext,
-  type AskAgentCommand,
+  AskAgentCommand,
   type GatewayDataEmitter,
   type ResumeCommand,
 } from '@byclaw/by-framework'
@@ -106,6 +106,7 @@ import {
   terminalByClawModelError,
   type ByClawModelError,
 } from './model-error.ts'
+import { buildRecoveredAskPayload, interactionAgentSessionId, type ByClawInteractionStore } from './interaction-recovery.ts'
 
 export interface ByClawDshSessionRuntimeOptions {
   workspace: string
@@ -127,7 +128,10 @@ export interface ByClawDshSessionRuntimeOptions {
   rosterPrompt: string | (() => string)
   sourceAgentType: string
   emitter: GatewayDataEmitter
+  interactionStore?: ByClawInteractionStore
   sessionMetadata: ByClawSessionMetadataStore
+  /** Notify independently owned session observers; failure must not reject user input. */
+  sessionOpening?: (command: AskAgentCommand, firstSession: boolean, signal: AbortSignal) => Promise<void>
   /** Bind trusted root role before extensions, including new roots without metadata yet. */
   rootSetup?: (agentCtx: Context, agent: Agent, binding: ByClawRootBinding) => void
   /** Await host extensions before a new, resumed, or reused session accepts input. */
@@ -971,6 +975,12 @@ export class ByClawAsyncTeamGate {
     this.finish()
   }
 
+  /** Reattach a cold command to durable work without requiring another start tool call. */
+  retainActiveTeam(): void {
+    this.begin('team')
+    if (this.waiting && this.kind === 'team') this.teamActive = true
+  }
+
   completeRetainedTeamWhenQuiescent(activeChildCount = 0): void {
     if (!this.waiting || this.kind !== 'team' || this.startCallId !== undefined || !this.teamActive) return
     this.teamQuiescent = true
@@ -1284,7 +1294,7 @@ export function isQuiescentTeamSnapshot(snapshot: Pick<TeamActivitySnapshot, 'ta
 
 /** Owns DSH root handles and maps their event logs onto one by-framework turn. */
 export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
-  readonly questions = new ByClawQuestionBroker()
+  readonly questions: ByClawQuestionBroker
   private readonly handles = new Map<string, RootHandle>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly foreground = new Map<string, ActiveTurn>()
@@ -1306,6 +1316,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }>()
 
   constructor(private readonly ctx: Context, private readonly options: ByClawDshSessionRuntimeOptions) {
+    this.questions = new ByClawQuestionBroker(options.interactionStore)
     this.disposeSessionEvents = ctx.root.on('session/event', (session, event) => {
       const pending = this.pendingForeground.get(String(session.id))
       if (event.type === 'user/message' && pending?.inputMessageId === String(event.data.id)) {
@@ -1374,6 +1385,28 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly voiceRequests = new Map<string, { fingerprint: string; promise: Promise<ByClawDshAskResult> }>()
   private readonly voiceControllers = new Map<string, AbortController>()
   private readonly voiceSummaryStreams = new WeakMap<ActiveTurn, Map<string, VoiceSummaryStreamFilter>>()
+  private readonly sessionOpeningJobs = new Set<Promise<void>>()
+  private readonly sessionOpeningController = new AbortController()
+  private readonly sessionOpeningHeaders = new Set<string>()
+  private readonly sessionOpeningOwners = new WeakSet<AskAgentCommand>()
+  private readonly sessionOpeningNotified = new WeakSet<AskAgentCommand>()
+
+  /** Own notification failures and teardown without making user input await observers. */
+  private observeSessionOpening(command: AskAgentCommand, firstSession: () => boolean | Promise<boolean>): void {
+    const opening = this.options.sessionOpening
+    if (opening === undefined || this.sessionOpeningController.signal.aborted) return
+    if (!this.sessionOpeningOwners.has(command) || this.sessionOpeningNotified.has(command)) return
+    this.sessionOpeningNotified.add(command)
+    const operation = (async () => {
+      const first = await firstSession()
+      if (!this.sessionOpeningController.signal.aborted) await opening(command, first, this.sessionOpeningController.signal)
+    })().catch((error: unknown) => {
+      if (this.sessionOpeningController.signal.aborted) return
+      const message = `byclaw-dsh session-opening observer failed; conversation continues: ${sanitizeByClawOperationalLog(error)}`
+      try { this.ctx.logger.warn(message) } catch (reportError: unknown) { console.warn(message, sanitizeByClawOperationalLog(reportError)) }
+    }).finally(() => { this.sessionOpeningJobs.delete(operation) })
+    this.sessionOpeningJobs.add(operation)
+  }
 
   async ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     const payload = byClawVoicePayload(command)
@@ -1425,6 +1458,21 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
     try {
+      const opening = this.options.sessionOpening
+      if (opening !== undefined) {
+        const headerId = normalizeByClawSessionId(command.header.sessionId)
+        // Reserve arrival order before any lookup can let a later dispatch overtake this one.
+        if (!this.sessionOpeningHeaders.has(headerId)) {
+          this.sessionOpeningHeaders.add(headerId)
+          this.sessionOpeningOwners.add(command)
+        }
+        if (headerId !== route.externalRootSessionId || route.targetDshSessionId !== undefined) {
+          // Routed requests never create a root under this header, so their lookup can run independently.
+          this.observeSessionOpening(command, async () => this.options.sessionMetadata.get(headerId) === undefined
+            && this.ctx.agents.get(SessionId(headerId)) === undefined
+            && await loadPersistedSessionById(this.ctx.sessionPersistence, SessionId(headerId)) === undefined)
+        }
+      }
       const background = this.waitingTurnFor(command, route)
       if (background !== undefined) {
         const previous = this.foregroundQueues.get(key) ?? Promise.resolve()
@@ -1623,16 +1671,55 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
   }
 
-  resume(command: ResumeCommand): boolean {
+  async resume(command: ResumeCommand, context?: AgentContext): Promise<boolean | ByClawDshAskResult> {
     const structured = parseDshInteractionResponse(command)
-    const accepted = structured !== undefined
-      ? this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), structured)
-      : this.questions.resume(normalizeByClawSessionId(command.header.sessionId), extractByClawUserText(command.content), interactionId(command))
-    if (accepted) {
+    const resumed = structured !== undefined
+      ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
+      : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command))
+    if (resumed) {
       const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
     }
-    return accepted
+    if (resumed === false) {
+      const unmatchedInteractionId = structured?.interactionId ?? interactionId(command)
+      const persisted = unmatchedInteractionId === undefined
+        ? undefined
+        : await this.options.interactionStore?.get(unmatchedInteractionId).catch(() => undefined)
+      this.ctx.logger.warn(
+        `[byclaw-dsh] unmatched ask_user_question Resume (interaction=${unmatchedInteractionId ?? '-'}, session=${command.header.sessionId}, persisted=${persisted === undefined ? 'missing' : persisted.status})`,
+      )
+    }
+    if (resumed !== 'cold') return resumed !== false
+    const recoveredInteractionId = structured?.interactionId ?? interactionId(command)
+    if (recoveredInteractionId === undefined || context === undefined || this.options.interactionStore === undefined) return false
+    const record = await this.options.interactionStore.consume(
+      recoveredInteractionId,
+      normalizeByClawSessionId(command.header.sessionId),
+      command.header.userCode,
+    )
+    if (record?.answer === undefined) return false
+    const recovered = buildRecoveredAskPayload(record)
+    this.ctx.logger.info(
+      `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
+    )
+    const recoveryCommand = new AskAgentCommand(
+      command.header,
+      recovered.text,
+      true,
+      { ...command.extraPayload, ...recovered.extraPayload, byclaw_recovered_interaction_id: recoveredInteractionId },
+    )
+    try {
+      return await this.ask(recoveryCommand, context)
+    } catch (error) {
+      await this.options.interactionStore.reopen(
+        recoveredInteractionId,
+        normalizeByClawSessionId(command.header.sessionId),
+        command.header.userCode,
+      ).catch(reopenError => {
+        this.ctx.logger.warn(`byclaw-dsh failed to reopen recovered interaction: ${sanitizeByClawOperationalLog(reopenError)}`)
+      })
+      throw error
+    }
   }
 
   async cancel(messageId: string, reason: string): Promise<void> {
@@ -1665,6 +1752,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async close(): Promise<void> {
+    this.sessionOpeningController.abort()
+    await Promise.allSettled(this.sessionOpeningJobs)
+    this.sessionOpeningHeaders.clear()
     for (const controller of this.voiceControllers.values()) controller.abort()
     this.voiceControllers.clear()
     this.voiceRequests.clear()
@@ -1816,6 +1906,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.queueRuntimeProjection(turn, turn.runtime.observeTurnActive(true))
     teamModelOverrides?.set(String(rootAgent.id), hasConversationModelOverride ? selection : undefined)
     try {
+      // The start tool belongs to the old process. Restore its wait fence before
+      // the resumed captain can answer, even if no member status edge arrives.
+      turn.teamSnapshots.request()
+      await turn.teamSnapshots.flush()
       const agent = directTarget === undefined
         ? await this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
         : (() => {
@@ -1953,6 +2047,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const key = `${command.header.userCode}\0${sessionId}`
     const existing = this.handles.get(key)
     if (existing !== undefined && this.ctx.agents.get(existing.handle.agent.id) === existing.handle.agent) {
+      if (normalizeByClawSessionId(command.header.sessionId) === externalRootSessionId) this.observeSessionOpening(command, () => false)
       assertStableSessionCwd(externalRootSessionId, existing.handle.agent.session.header.cwd, route.cwd)
       await this.ensureRootMetadata(existing.handle.agent.session, externalRootSessionId, requestedBinding, 'reuse', coordination)
       preparedRoot?.bindLiveGroupScope?.(existing.handle.agent)
@@ -2018,10 +2113,18 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
               ...question.options === undefined ? {} : { options: question.options },
             }))
             const waitingSessionId = String(exec.agent?.id ?? active.rootSessionId)
+            const durableAgentSessionId = exec.agent === undefined
+              ? active.rootSessionId
+              : interactionAgentSessionId(exec.agent)
             this.queueRuntimeProjection(active, active.runtime.observeWaitingInteraction(waitingSessionId, true))
             try {
               const result = await this.questions.ask({
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
+                userCode: active.userCode,
+                agentSessionId: durableAgentSessionId,
+                ...(exec.agent?.session.header.parentSession === undefined ? {} : {
+                  parentAgentSessionId: String(exec.agent.session.header.parentSession),
+                }),
                 questions,
                 emit: async event => {
                 const askingSession = exec.agent?.session
@@ -2092,6 +2195,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const persisted = persistedSession !== undefined
     const mode = resolveRootSessionOpenMode(live !== undefined, persisted)
+    if (normalizeByClawSessionId(command.header.sessionId) === externalRootSessionId) {
+      // Reuse the factory's read instead of racing an observer lookup against creation of this root.
+      const firstSession = mode === 'create' && this.options.sessionMetadata.get(externalRootSessionId) === undefined
+      this.observeSessionOpening(command, () => firstSession)
+    }
     const handle = mode === 'reuse'
       ? { agent: live as Agent, dispose: () => Promise.resolve() }
       : mode === 'resume'
@@ -2916,7 +3024,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   private async emitTeamSnapshots(turn: ActiveTurn): Promise<void> {
-    const captainSessionIds = new Set([turn.rootSessionId, ...turn.announcedChildren])
+    // A direct expert-group route can cold-resume its team captain before the
+    // captain emits a child event in this process. Keep that response session
+    // in the ownership scope so the first durable snapshot can restore the
+    // team's wait fence instead of treating it as an unrelated team.
+    const captainSessionIds = new Set([turn.rootSessionId, turn.responseSessionId, ...turn.announcedChildren])
     const ownsCaptain = (captainSessionId: string): boolean => captainSessionIds.has(captainSessionId)
     const roots = [{
       workspace: turn.workspace,
@@ -2937,6 +3049,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const workingChildren = new Set(ownedLiveSnapshots.flatMap(team => (
       team.members.filter(member => member.activity === 'working').map(member => member.id)
     )))
+    if (ownedLiveSnapshots.some(team => team.lifecycle !== 'draft' && team.stoppedAt === undefined
+      && ((team.tasks.length > 0 && !isQuiescentTeamSnapshot(team))
+        || team.members.some(member => member.activity === 'working')))) {
+      turn.teamGate.retainActiveTeam()
+    }
     turn.teamGate.observeSnapshotActiveChildren(workingChildren.size)
     this.queueRuntimeProjection(turn, turn.runtime.observeTeamActivity(
       ownedLiveSnapshots.some(team => !isQuiescentTeamSnapshot(team)),

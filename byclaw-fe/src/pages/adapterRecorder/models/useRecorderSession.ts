@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 /* eslint-disable indent, lines-around-comment */
 // 录制会话状态机 model(@umijs/max model)。
 // 持有 SessionState + stateVersion,每个动作按 05 State Machine 校验当前态,
@@ -5,7 +6,7 @@
 import { createElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
 import { getRecorderClient, type RecordingMode } from '../services/recorderClient';
-import { INVALID_STATE_HINT, isTerminalError } from '../constants/recorder';
+import { getInvalidStateHint, isTerminalError } from '../constants/recorder';
 import { deriveAdapterName } from './adapterName';
 import { selectCandidateData } from './candidateSelection';
 import { isActionAllowed, type RecorderAction } from './transitions';
@@ -184,8 +185,11 @@ export async function saveWithOverwriteConfirmation(
 export function formatAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>): string {
   const adapterPath = response.error?.details?.adapterPath;
   const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
-  const pathContent = conflictPath !== undefined ? ` 冲突路径：${conflictPath}` : '';
-  return `当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。${pathContent} 覆盖后原脚本将无法恢复，请确认是否继续。`;
+  const pathContent =
+    conflictPath !== undefined
+      ? getIntl().formatMessage({ id: 'adapterRecorder.save.conflictPath' }, { v0: conflictPath })
+      : '';
+  return getIntl().formatMessage({ id: 'adapterRecorder.save.overwriteDescription' }, { v0: pathContent });
 }
 
 export function renderAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>) {
@@ -194,7 +198,7 @@ export function renderAdapterOverwriteConfirmationContent(response: RequestEnvel
   return createElement(
     'div',
     null,
-    createElement('div', null, '当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。'),
+    createElement('div', null, getIntl().formatMessage({ id: 'adapterRecorder.save.overwriteWarning' })),
     conflictPath !== undefined
       ? createElement(
           'code',
@@ -211,16 +215,20 @@ export function renderAdapterOverwriteConfirmationContent(response: RequestEnvel
           conflictPath
         )
       : null,
-    createElement('div', { style: { marginTop: 12 } }, '覆盖后原脚本将无法恢复，请确认是否继续。')
+    createElement(
+      'div',
+      { style: { marginTop: 12 } },
+      getIntl().formatMessage({ id: 'adapterRecorder.save.irreversible' })
+    )
   );
 }
 
 export function getAdapterOverwriteConfirmationCopy(response: RequestEnvelope<SaveResult>) {
   return {
-    title: 'CLI 脚本已存在',
+    title: getIntl().formatMessage({ id: 'adapterRecorder.save.exists' }),
     content: renderAdapterOverwriteConfirmationContent(response),
-    okText: '覆盖保存',
-    cancelText: '取消',
+    okText: getIntl().formatMessage({ id: 'adapterRecorder.save.overwrite' }),
+    cancelText: getIntl().formatMessage({ id: 'common.cancel' }),
     okType: 'danger' as const,
   };
 }
@@ -263,7 +271,11 @@ export default function useRecorderSession() {
       // 串联动作(如 startCaptureA = navigate→captureStart)串两步时,setState 异步、闭包 state 仍是旧值,
       // 故允许显式传入第二步的校验起点;默认用当前 state。
       if (!isActionAllowed(action, fromStateOverride ?? state)) {
-        setError({ code: 'invalid_state', message: '非法状态转移', hint: INVALID_STATE_HINT });
+        setError({
+          code: 'invalid_state',
+          message: getIntl().formatMessage({ id: 'adapterRecorder.state.invalidTransition' }),
+          hint: getInvalidStateHint(),
+        });
         return false;
       }
       setLoading(true);
@@ -271,7 +283,12 @@ export default function useRecorderSession() {
       try {
         const res = await call();
         if (!res.ok || res.data === null) {
-          setError(res.error ?? { code: 'network_error', message: '未知错误' });
+          setError(
+            res.error ?? {
+              code: 'network_error',
+              message: getIntl().formatMessage({ id: 'adapterRecorder.error.unknown' }),
+            }
+          );
           // 终止性错误(page_lost 等租约丢失 / daemon 不可达)→ 会话终止为 failed(05 规则)。
           // 终态码清单是单一来源 isTerminalError(../constants/recorder),与 be 实际终态码契约对齐。
           if (res.error && isTerminalError(res.error.code)) {
@@ -283,7 +300,10 @@ export default function useRecorderSession() {
         advance(next, patch);
         return true;
       } catch (e) {
-        setError({ code: 'network_error', message: e instanceof Error ? e.message : '请求异常' });
+        setError({
+          code: 'network_error',
+          message: e instanceof Error ? e.message : getIntl().formatMessage({ id: 'adapterRecorder.error.request' }),
+        });
         return false;
       } finally {
         setLoading(false);
@@ -325,8 +345,8 @@ export default function useRecorderSession() {
       if (!canContinueAfterHealth(data.health)) {
         setError({
           code: 'invalid_state',
-          message: '必需健康检查尚未全部通过，请重新运行健康检查',
-          hint: INVALID_STATE_HINT,
+          message: getIntl().formatMessage({ id: 'adapterRecorder.health.requiredFailed' }),
+          hint: getInvalidStateHint(),
         });
         return false;
       }
@@ -365,8 +385,8 @@ export default function useRecorderSession() {
       if (!url) {
         setError({
           code: 'validation_failed',
-          message: '缺少目标 URL,请返回上一步重新绑定会话',
-          hint: INVALID_STATE_HINT,
+          message: getIntl().formatMessage({ id: 'adapterRecorder.bind.urlMissing' }),
+          hint: getInvalidStateHint(),
         });
         return false;
       }
@@ -397,8 +417,8 @@ export default function useRecorderSession() {
       if (!url) {
         setError({
           code: 'validation_failed',
-          message: '缺少目标 URL,请返回上一步重新绑定会话',
-          hint: INVALID_STATE_HINT,
+          message: getIntl().formatMessage({ id: 'adapterRecorder.bind.urlMissing' }),
+          hint: getInvalidStateHint(),
         });
         return false;
       }
@@ -445,7 +465,11 @@ export default function useRecorderSession() {
       const id = data.selectedCandidateId;
       const name = data.adapterName;
       if (!id || !name) {
-        setError({ code: 'validation_failed', message: '请先选择一个候选', hint: INVALID_STATE_HINT });
+        setError({
+          code: 'validation_failed',
+          message: getIntl().formatMessage({ id: 'adapterRecorder.candidate.selectionRequired' }),
+          hint: getInvalidStateHint(),
+        });
         return Promise.resolve(false);
       }
       const egressAck = egressConsent ? Date.now() : data.llmEgressAck;
@@ -460,7 +484,11 @@ export default function useRecorderSession() {
       const id = data.selectedCandidateId;
       const name = data.adapterName;
       if (!id || !name) {
-        setError({ code: 'validation_failed', message: '请先选择一个候选', hint: INVALID_STATE_HINT });
+        setError({
+          code: 'validation_failed',
+          message: getIntl().formatMessage({ id: 'adapterRecorder.candidate.selectionRequired' }),
+          hint: getInvalidStateHint(),
+        });
         return Promise.resolve(false);
       }
       return run(
@@ -579,7 +607,11 @@ export default function useRecorderSession() {
     // savedDraftIds 只表示本次会话成功过，不能据此跳过后续文件存在检查。
     saveDraft: async (draftId: string, source?: string) => {
       if (!isActionAllowed('saveAdapter', state)) {
-        setError({ code: 'invalid_state', message: '非法状态转移', hint: INVALID_STATE_HINT });
+        setError({
+          code: 'invalid_state',
+          message: getIntl().formatMessage({ id: 'adapterRecorder.state.invalidTransition' }),
+          hint: getInvalidStateHint(),
+        });
         return false;
       }
       setLoading(true);
@@ -593,7 +625,12 @@ export default function useRecorderSession() {
 
         const res = outcome.response;
         if (!res.ok || res.data === null) {
-          setError(res.error ?? { code: 'network_error', message: '未知错误' });
+          setError(
+            res.error ?? {
+              code: 'network_error',
+              message: getIntl().formatMessage({ id: 'adapterRecorder.error.unknown' }),
+            }
+          );
           if (res.error && isTerminalError(res.error.code)) advance('failed');
           return false;
         }
@@ -606,7 +643,10 @@ export default function useRecorderSession() {
         }));
         return res.data.allSucceeded;
       } catch (e) {
-        setError({ code: 'network_error', message: e instanceof Error ? e.message : '请求异常' });
+        setError({
+          code: 'network_error',
+          message: e instanceof Error ? e.message : getIntl().formatMessage({ id: 'adapterRecorder.error.request' }),
+        });
         return false;
       } finally {
         setLoading(false);
@@ -615,7 +655,11 @@ export default function useRecorderSession() {
     verify: () => {
       const name = data.adapterName;
       if (!name) {
-        setError({ code: 'validation_failed', message: 'adapter 名缺失,请重新选择候选', hint: INVALID_STATE_HINT });
+        setError({
+          code: 'validation_failed',
+          message: getIntl().formatMessage({ id: 'adapterRecorder.generate.nameMissing' }),
+          hint: getInvalidStateHint(),
+        });
         return Promise.resolve(false);
       }
       return run(

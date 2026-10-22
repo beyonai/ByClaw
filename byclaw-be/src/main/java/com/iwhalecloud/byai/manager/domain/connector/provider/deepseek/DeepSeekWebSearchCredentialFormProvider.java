@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.deepseek;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProvider;
@@ -61,12 +63,12 @@ public class DeepSeekWebSearchCredentialFormProvider
 
     private String validate(Map<String, String> credentials) {
         if (credentials == null || !credentials.keySet().equals(FORM_KEYS)) {
-            throw new IllegalArgumentException("DeepSeek credentials must include exactly apiKey");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.fieldsInvalid"));
         }
         String apiKey = credentials.get("apiKey");
         if (apiKey == null || apiKey.isBlank() || apiKey.length() > 4096
                 || apiKey.chars().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("DeepSeek apiKey is invalid");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.apiKeyInvalid"));
         }
         return apiKey;
     }

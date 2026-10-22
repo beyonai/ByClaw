@@ -21,7 +21,13 @@ import java.util.List;
  */
 public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
 
-    ByaiSession selectByIdForUpdate(@Param("sessionId") Long sessionId);
+    /** 写事务内先执行同值更新，再读取会话；并发写入串行处理至事务结束。 */
+    default ByaiSession selectByIdForUpdate(Long sessionId) {
+        serializeById(sessionId);
+        return selectById(sessionId);
+    }
+
+    int serializeById(@Param("sessionId") Long sessionId);
 
     /**
      * 根据条件查询会话列表

@@ -187,6 +187,33 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
+    void tenantContextCompletesUserNamesAfterNodeResolvesGroupNicknames() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        var users = mock(com.iwhalecloud.byai.manager.domain.users.service.UserService.class);
+        var user = new com.iwhalecloud.byai.manager.entity.users.Users();
+        user.setUserId(9007199254740993L);
+        user.setUserName("当前用户名");
+        when(users.findByIds(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(List.of(user));
+        ReflectionTestUtils.setField(aspect, "messageDisplayService", new TenantGroupMessageDisplayService(users));
+        Map<String, Object> data = Map.of("messages", List.of(
+            Map.of("creatorId", "9007199254740993", "creatorName", "9007199254740993",
+                "speaker", Map.of("type", "user")),
+            Map.of("creatorId", "9007199254740993",
+                "speaker", Map.of("type", "user", "displayName", "当前群昵称"))));
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/group-chats/9000000000000000001/context"),
+            any(), any())).thenReturn(data);
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("context", 9000000000000000001L,
+            new GroupChatContextRequest()));
+
+        var messages = new ObjectMapper().valueToTree(response.getData()).path("messages");
+        assertThat(messages.get(0).path("speaker").path("displayName").asText()).isEqualTo("当前用户名");
+        assertThat(messages.get(1).path("speaker").path("displayName").asText()).isEqualTo("当前群昵称");
+        verifyNoInteractions(legacy, memberships, memberService);
+    }
+
+    @Test
     void tenantContextOmitsAbsentCursorForNewGroups() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
         TenantRequestContextHolder.set(context);

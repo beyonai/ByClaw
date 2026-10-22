@@ -7,5 +7,8 @@
       name: '@byclaw/dsh-idle-reporter'
       inject: [agents]
       config:
+        # BYAI_WORKER_ID is injected by byclaw-be (`byclaw-dsh-<userCode>`); unset falls back to the hostname.
+        sandboxId: !!js process.env.BYAI_WORKER_ID || undefined
+        userCode: !!js process.env.USER_CODE || ''
         streamKey: !!js process.env.BYCLAW_DSH_ACTIVITY_STREAM || 'byclaw:dsh:sandbox:activity'
         idleTimeoutMs: !!js "process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS ? Number(process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS) : 1800000"

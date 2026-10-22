@@ -142,7 +142,7 @@ public class NotificationService {
      */
     public ByaiNotification getManageNotification(Long id) {
         if (id == null) {
-            throw new IllegalArgumentException("Notification id cannot be null");
+            throw new IllegalArgumentException(I18nUtil.get("notification.id.required"));
         }
         ByaiNotification notification = byaiNotificationMapper.selectById(id);
         if (notification == null || DELETED.equals(notification.getIsDeleted())) {
@@ -194,7 +194,7 @@ public class NotificationService {
         validateManageRequest(request, true);
         ByaiNotification notification = byaiNotificationMapper.selectById(request.getId());
         if (notification == null || DELETED.equals(notification.getIsDeleted())) {
-            throw new IllegalArgumentException("Notification does not exist");
+            throw new IllegalArgumentException(I18nUtil.get("notification.notFound"));
         }
         applyManageFields(notification, request);
         byaiNotificationMapper.updateById(notification);
@@ -206,7 +206,7 @@ public class NotificationService {
      */
     public boolean deleteManageNotification(Long id) {
         if (id == null) {
-            throw new IllegalArgumentException("Notification id cannot be null");
+            throw new IllegalArgumentException(I18nUtil.get("notification.id.required"));
         }
         ByaiNotification notification = new ByaiNotification();
         notification.setId(id);
@@ -216,16 +216,16 @@ public class NotificationService {
 
     private void validateManageRequest(NotificationManageDto request, boolean requireId) {
         if (request == null) {
-            throw new IllegalArgumentException("Notification request cannot be null");
+            throw new IllegalArgumentException(I18nUtil.get("notification.request.required"));
         }
         if (requireId && request.getId() == null) {
-            throw new IllegalArgumentException("Notification id cannot be null");
+            throw new IllegalArgumentException(I18nUtil.get("notification.id.required"));
         }
         if (!requireId && StringUtils.isBlank(request.getTitle())) {
-            throw new IllegalArgumentException("Notification title cannot be blank");
+            throw new IllegalArgumentException(I18nUtil.get("notification.title.required"));
         }
         if (!requireId && StringUtils.isBlank(request.getContent())) {
-            throw new IllegalArgumentException("Notification content cannot be blank");
+            throw new IllegalArgumentException(I18nUtil.get("notification.content.required"));
         }
     }
 

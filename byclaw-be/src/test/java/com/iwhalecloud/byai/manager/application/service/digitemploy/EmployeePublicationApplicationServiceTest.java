@@ -1,9 +1,14 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
@@ -23,12 +28,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class EmployeePublicationApplicationServiceTest {
+class EmployeePublicationApplicationServiceTest extends I18nTestSupport {
     DigitalEmployeePublicationMapper publications = mock(DigitalEmployeePublicationMapper.class);
     SsResourceMapper resources = mock(SsResourceMapper.class);
     UserService users = mock(UserService.class);
@@ -41,6 +48,8 @@ class EmployeePublicationApplicationServiceTest {
     AuthApplicationService auth = mock(AuthApplicationService.class);
     SequenceService sequence = mock(SequenceService.class);
     PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+    DingtalkRobotConfigService robotConfigService = mock(DingtalkRobotConfigService.class);
+    RobotChannelRegistryCoordinator robotChannels = mock(RobotChannelRegistryCoordinator.class);
     EmployeePublicationApplicationService service;
     SsResource source;
     DigitalEmployeePublication publication;
@@ -57,7 +66,7 @@ class EmployeePublicationApplicationServiceTest {
         when(sequence.nextVal()).thenReturn(101L, 102L, 103L);
         service = new EmployeePublicationApplicationService(publications, resources, governance, employees, dependencies,
             extensions, relations, mock(ResourceRuntimeInfoResolver.class), auth, sequence,
-            new TransactionTemplate(transactions), mock(DigEmployeeChangeEventPublisher.class));
+            new TransactionTemplate(transactions), mock(DigEmployeeChangeEventPublisher.class), robotConfigService, robotChannels);
         source = employee(10L, 7L);
         when(resources.selectById(10L)).thenReturn(source);
         when(publications.lockResource(10L, 1L)).thenReturn(source);
@@ -233,6 +242,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(result.publication().getStatus()).isEqualTo("FAILED");
         verify(transactions).rollback(any());
         verify(employees).restorePublicationRuntimeAfterRollback(anyLong());
+        verifyNoInteractions(robotChannels);
     }
     @Test void publicationSynchronizesResourceUseAfterRelationsAndBeforeRuntime() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
@@ -985,12 +995,166 @@ class EmployeePublicationApplicationServiceTest {
 
     @Test void candidateNeverContainsPersonalChannelsMemoryOrCredentials() {
         DigitalEmployeeDTO dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
+        // 首次发布以服务端资源身份为准，不能通过请求伪装为企业更新来带入个人凭证。
+        dto.setOwnerType("enterprise");
         dto.setMachineChannel("private-channel"); dto.setAgentSseHead("private-credential");
         dto.setAgentWebUrlOri("private-url"); dto.setTargetContent("private-runtime");
         DigitalEmployeeDTO snapshot = EmployeePublicationApplicationService.sanitize(dto, source);
         assertThat(snapshot.getMachineChannel()).isEqualTo("[]");
         assertThat(snapshot.getAgentSseHead()).isNull(); assertThat(snapshot.getAgentWebUrlOri()).isNull();
         assertThat(snapshot.getTargetContent()).isNull(); assertThat(snapshot.getMemoryConfigList()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "adminvip"})
+    void creatorAndAdminvipCanSaveOfficialRobotChangesWithoutChangingLiveConfiguration(String userCode) {
+        publishedCopyForPersonalUpdate();
+        login(userCode, "adminvip".equals(userCode) ? 8L : 7L, List.of());
+        DigitalEmployeeDetailsDTO live = officialDetails();
+        String originalChannel = "[{\"channel\":\"DingTalk\",\"clientId\":\"original\"}]";
+        live.setMachineChannel(originalChannel);
+        var draft = service.prepare(90L);
+        assertThat(draft.employee().getMachineChannel()).isEqualTo(originalChannel);
+        EmployeePublicationRequest edit = requestFor(draft.publication());
+        DigitalEmployeeDTO changed = JSON.parseObject(draft.publication().getSnapshotJson(), DigitalEmployeeDTO.class);
+        String changedChannel = "[{\"channel\":\"DingTalk\",\"clientId\":\"changed\",\"clientSecret\":\"test-secret\"}]";
+        changed.setMachineChannel(changedChannel);
+        edit.setEmployee(changed);
+
+        assertThat(service.save(edit).employee().getMachineChannel()).isEqualTo(changedChannel);
+        assertThat(live.getMachineChannel()).isEqualTo(originalChannel);
+        verify(extensions, never()).save(any(SsResExtDigEmployee.class));
+        verifyNoInteractions(robotChannels);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[]", "[{\"channel\":\"DingTalk\",\"clientId\":\"changed\"}]"})
+    void creatorRobotUpdatesAndRemovalApplyOnlyAfterApproval(String machineChannel) {
+        publishedCopyForPersonalUpdate();
+        officialDetails().setMachineChannel("[{\"channel\":\"DingTalk\",\"clientId\":\"original\"}]");
+        var draft = service.prepare(90L);
+        EmployeePublicationRequest edit = requestFor(draft.publication());
+        DigitalEmployeeDTO changed = JSON.parseObject(draft.publication().getSnapshotJson(), DigitalEmployeeDTO.class);
+        changed.setMachineChannel(machineChannel);
+        edit.setEmployee(changed);
+        service.save(edit);
+        edit.setRevision(draft.publication().getRevision());
+
+        assertThat(service.submit(edit).publication().getStatus()).isEqualTo("PENDING");
+        verify(extensions, never()).save(any(SsResExtDigEmployee.class));
+        verifyNoInteractions(robotChannels);
+        verify(robotConfigService).validateAndBuildRobotConfigs(argThat(candidate ->
+            candidate.getResourceId().equals(90L)
+                && candidate.getSsResExtDigEmployee().getMachineChannel().equals(machineChannel)));
+
+        login("adminvip", 8L, List.of());
+        edit.setRevision(draft.publication().getRevision());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        assertThat(service.approve(edit).publication().getStatus()).isEqualTo("PUBLISHED");
+        verify(extensions).save(argThat(extension -> extension.getResourceId().equals(90L)
+            && extension.getMachineChannel().equals(machineChannel)));
+        verify(robotChannels).refreshForResource(90L);
+    }
+
+    @Test
+    void personalUpdatePreservesEnterpriseRobotsInsteadOfCopyingPersonalCredentials() {
+        publishedCopyForPersonalUpdate();
+        EmployeeIdDTO personalId = new EmployeeIdDTO();
+        personalId.setResourceId(10L);
+        DigitalEmployeeDetailsDTO personal = employees.findDetailsById(personalId);
+        personal.setMachineChannel("[{\"channel\":\"DingTalk\",\"clientSecret\":\"personal-secret\"}]");
+        String enterpriseChannel = "[{\"channel\":\"DingTalk\",\"clientSecret\":\"enterprise-secret\"}]";
+        officialDetails().setMachineChannel(enterpriseChannel);
+
+        assertThat(service.prepareUpdate(10L).employee().getMachineChannel()).isEqualTo(enterpriseChannel);
+        assertThat(personal.getMachineChannel()).contains("personal-secret");
+        verifyNoInteractions(robotChannels);
+    }
+
+    @Test
+    void changedLiveRobotConfigurationRequiresRenewedComparisonBeforeSubmitting() {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L);
+        officialDetails().setMachineChannel("[{\"channel\":\"DingTalk\",\"clientId\":\"changed-by-admin\"}]");
+
+        assertThatThrownBy(() -> service.submit(requestFor(draft.publication())))
+            .hasMessageContaining("官方员工配置已变化");
+        verifyNoInteractions(robotChannels);
+    }
+
+    @Test
+    void robotValidationFailureIsLocalizedAndLeavesLiveConfigurationUntouched() {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L);
+        String messageKey = "dingtalk.robot.config.ownedByAnotherEmployee";
+        doThrow(new DingtalkRobotConfigValidationException("internal diagnostic", messageKey))
+            .when(robotConfigService).validateAndBuildRobotConfigs(any());
+
+        assertThatThrownBy(() -> service.submit(requestFor(draft.publication())))
+            .isInstanceOf(BaseException.class).hasMessage(I18nUtil.get(messageKey));
+        assertThat(draft.publication().getStatus()).isEqualTo("DRAFT");
+        verify(extensions, never()).save(any(SsResExtDigEmployee.class));
+        verifyNoInteractions(robotChannels);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void robotConnectionsRefreshOnlyAfterSuccessfulTransactionCompletion(boolean committed) {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L);
+        EmployeePublicationRequest submit = requestFor(draft.publication());
+        service.submit(submit);
+        submit.setRevision(draft.publication().getRevision());
+        login("adminvip", 8L, List.of());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        List<TransactionSynchronization> synchronizations;
+        try {
+            service.approve(submit);
+            verifyNoInteractions(robotChannels);
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        int status = committed ? TransactionSynchronization.STATUS_COMMITTED : TransactionSynchronization.STATUS_ROLLED_BACK;
+        synchronizations.forEach(synchronization -> synchronization.afterCompletion(status));
+        verify(robotChannels, times(committed ? 1 : 0)).refreshForResource(90L);
+    }
+
+    @Test
+    void unrelatedUserCannotSaveOfficialRobotConfiguration() {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L);
+        EmployeePublicationRequest edit = requestFor(draft.publication());
+        edit.setEmployee(JSON.parseObject(draft.publication().getSnapshotJson(), DigitalEmployeeDTO.class));
+        login("unrelated", 9L, List.of());
+
+        assertThatThrownBy(() -> service.save(edit)).isInstanceOf(BaseException.class);
+        verify(extensions, never()).save(any(SsResExtDigEmployee.class));
+        verifyNoInteractions(robotChannels);
+    }
+
+    @Test
+    void connectionRefreshFailureDoesNotReclassifyAnAppliedPublication() {
+        publishedCopyForPersonalUpdate();
+        var draft = service.prepare(90L);
+        EmployeePublicationRequest submit = requestFor(draft.publication());
+        service.submit(submit);
+        submit.setRevision(draft.publication().getRevision());
+        login("adminvip", 8L, List.of());
+        when(employees.syncPublicationOpenClawWorkSpace(anyLong(), any())).thenReturn(true);
+        doThrow(new IllegalStateException("connection unavailable")).when(robotChannels).refreshForResource(90L);
+
+        assertThat(service.approve(submit).publication().getStatus()).isEqualTo("PUBLISHED");
+        verify(extensions).save(any(SsResExtDigEmployee.class));
+        verify(employees, never()).restorePublicationRuntimeAfterRollback(anyLong());
+    }
+
+    private DigitalEmployeeDetailsDTO officialDetails() {
+        EmployeeIdDTO employeeId = new EmployeeIdDTO();
+        employeeId.setResourceId(90L);
+        return employees.findDetailsById(employeeId);
     }
 
     @Test void auditListOnlyOffersApprovalForAuthorizedReviewableRows() {
@@ -1063,7 +1227,7 @@ class EmployeePublicationApplicationServiceTest {
         var txEmployees = (DigitalEmployeeApplicationService) employeeFactory.getProxy();
         service = new EmployeePublicationApplicationService(publications, resources, governance, txEmployees, dependencies,
             extensions, relations, mock(ResourceRuntimeInfoResolver.class), auth, sequence,
-            new TransactionTemplate(manager), mock(DigEmployeeChangeEventPublisher.class));
+            new TransactionTemplate(manager), mock(DigEmployeeChangeEventPublisher.class), robotConfigService, robotChannels);
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.addAdvice(advice.getAdvisor());
         var proxied = (EmployeePublicationApplicationService) factory.getProxy();
@@ -1088,6 +1252,7 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM resource", Integer.class)).isEqualTo(existing ? 2 : 1);
         if (existing) assertThat(resources.selectById(90L).getResourceName()).isEqualTo("旧官方版本");
         verify(employees).restorePublicationRuntimeAfterRollback(anyLong());
+        verifyNoInteractions(robotChannels);
         succeeding.set(true);
         EmployeePublicationRequest retry = request(); retry.setRevision(read.get().getRevision());
         var published = proxied.approve(retry).publication();
@@ -1097,5 +1262,6 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM resource", Integer.class)).isEqualTo(2);
         assertThat(resources.selectById(published.getOfficialId()).getResourceName()).isEqualTo(existing ? "员工" : "员工(企业)");
         if (existing) assertThat(published.getOfficialId()).isEqualTo(90L);
+        verify(robotChannels, times(existing ? 1 : 0)).refreshForResource(90L);
     }
 }

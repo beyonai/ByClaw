@@ -22,7 +22,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialSecretStore;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class WeixinOpenPlatformAuthorizationProviderTest {
+class WeixinOpenPlatformAuthorizationProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private final WeixinOpenPlatformConfigResolver configs = mock(WeixinOpenPlatformConfigResolver.class);
     private final WeixinComponentTicketStore tickets = mock(WeixinComponentTicketStore.class);
     private final WeixinOpenPlatformClient client = mock(WeixinOpenPlatformClient.class);

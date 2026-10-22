@@ -56,7 +56,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 @ExtendWith(MockitoExtension.class)
-class DevloopOperationAccountReferenceAuthorizationTest {
+class DevloopOperationAccountReferenceAuthorizationTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final long USER_ID = 10L;
     private static final String USER_CODE = "user-10";

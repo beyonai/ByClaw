@@ -15,11 +15,11 @@ import lombok.Setter;
 @Setter
 public class ArtifactDataUpdateRequest {
 
-    @NotEmpty(message = "data不能为空")
-    @Size(max = 100, message = "data顶层字段数不能超过100")
+    @NotEmpty(message = "{artifact.data.required}")
+    @Size(max = 100, message = "{artifact.data.tooManyFields}")
     private Map<String, Object> data;
 
-    @NotNull(message = "version不能为空")
-    @Min(value = 1, message = "version必须大于等于1")
+    @NotNull(message = "{artifact.version.required}")
+    @Min(value = 1, message = "{artifact.version.min}")
     private Integer version;
 }

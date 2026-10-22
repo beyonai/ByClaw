@@ -98,16 +98,16 @@ public class FileBrowserApplicationService {
         String path = FILE_CHANGE_PATH_TEMPLATE.formatted(sessionId, uuid);
         try (InputStream inputStream = userFS.read(path)) {
             if (inputStream == null) {
-                throw new IllegalStateException("文件变更详情不存在");
+                throw new IllegalStateException(I18nUtil.get("filebrowser.change.notFound"));
             }
             ChangedFileDiffVo diff = objectMapper.readValue(inputStream, ChangedFileDiffVo.class);
             if (!sessionId.equals(diff.getSessionId()) || !uuid.equals(diff.getUuid())) {
-                throw new IllegalStateException("文件变更详情与请求参数不匹配");
+                throw new IllegalStateException(I18nUtil.get("filebrowser.change.mismatch"));
             }
             return diff;
         }
         catch (IOException e) {
-            throw new IllegalStateException("读取文件变更详情失败", e);
+            throw new IllegalStateException(I18nUtil.get("filebrowser.change.readFailed"), e);
         }
     }
 
@@ -221,7 +221,7 @@ public class FileBrowserApplicationService {
     private String normalizeDirPath(String path) {
         String normalizedPath = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.contains(normalizedPath, "..")) {
-            throw new IllegalArgumentException("非法路径: " + path);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.invalid", path));
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
@@ -258,7 +258,7 @@ public class FileBrowserApplicationService {
     private String resolveChildPath(String parentPath, String childName) {
         if (StringUtils.isBlank(childName) || childName.contains("/") || childName.contains("\\")
                 || childName.contains("..")) {
-            throw new IllegalArgumentException("非法文件名: " + childName);
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.filename.invalid", childName));
         }
         String parent = FileBrowserPathPolicy.normalize(parentPath);
         return "/".equals(parent) ? "/" + childName : parent + "/" + childName;
@@ -277,7 +277,7 @@ public class FileBrowserApplicationService {
     private String normalizePath(String path) {
         String normalizedPath = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.contains(normalizedPath, "..")) {
-            throw new IllegalArgumentException("非法路径: " + path);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.invalid", path));
         }
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;

@@ -355,6 +355,55 @@ assert.equal(inboundTurn.project.workspace, '/srv/byclaw/by/projects/20014944')
 assert.equal(inboundTurn.resources[0].resourceName, '研发知识库')
 assert.deepEqual(inboundTurn.connectors, { dws: true, gmail: false })
 
+const referencedFilesTurn = buildByClawInboundTurnContext({
+  header: {
+    messageId: 'turn-referenced-files',
+    sessionId: workspace.externalSessionId,
+    metadata: { project_info: { project_id: 20014944 } },
+  },
+  content: [],
+  extraPayload: {
+    resource_list: [{
+      resourceId: '/by/.sessions/350860623218590448/过程报告.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '过程报告.md',
+    }, {
+      resourceId: '/by/.shared/共享规范.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '共享规范.md',
+    }, {
+      resourceId: '/素材/需求说明.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '需求说明.md',
+    }],
+  },
+}, storage.byRoot)
+assert.deepEqual(referencedFilesTurn.resources[0], {
+  resourceId: '/by/.sessions/350860623218590448/过程报告.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '过程报告.md',
+  referenceSource: 'session',
+  filePath: '/srv/byclaw/by/.sessions/350860623218590448/过程报告.md',
+})
+assert.deepEqual(referencedFilesTurn.resources[1], {
+  resourceId: '/by/.shared/共享规范.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '共享规范.md',
+  referenceSource: 'shared',
+  filePath: '/srv/byclaw/by/.shared/共享规范.md',
+})
+assert.deepEqual(referencedFilesTurn.resources[2], {
+  resourceId: '/素材/需求说明.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '需求说明.md',
+  referenceSource: 'project-cloud',
+  filePath: '/素材/需求说明.md',
+})
+const referencedFilesDeclaration = byClawInboundTurnContextDeclaration(referencedFilesTurn)
+assert.match(referencedFilesDeclaration, /resource_usage: .*session.*直接使用文件系统工具读取/u)
+assert.match(referencedFilesDeclaration, /resource_usage: .*shared.*本地共享目录/u)
+assert.match(referencedFilesDeclaration, /resource_usage: .*project-cloud.*project-context.*20014944.*project-cloud-knowledge.*\/素材\/需求说明\.md/u)
+
 const deepSeekGlobalFallbackTurn = buildByClawInboundTurnContext({
   header: {
     messageId: 'turn-deepseek-global-fallback',

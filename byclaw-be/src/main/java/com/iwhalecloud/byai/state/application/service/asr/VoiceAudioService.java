@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.asr;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.alibaba.fastjson.JSON;
@@ -39,17 +41,17 @@ public class VoiceAudioService {
     /** Read summary MP3 bytes through the same session and path authorization as artifact playback. */
     public VoiceAudio loadArtifact(Long sessionId, String path) {
         if (CurrentUserHolder.getLoginInfo() == null || CurrentUserHolder.getCurrentUserId() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, I18nUtil.get("voice.authentication.required"));
         }
         if (sessionId == null || sessionId <= 0 || path == null
             || !(path.startsWith("/by/.sessions/") || path.startsWith("/.sessions/"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A session artifact path is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.artifact.path.required"));
         }
         var download = artifacts.download(sessionId, path);
         String name = download.getFileName();
         if (name == null || name.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 512
             || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".mp3")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Voice file must be MP3");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.mp3.required"));
         }
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         OutputStream bounded = new OutputStream() {
@@ -67,17 +69,17 @@ public class VoiceAudioService {
 
             private void checkLimit(int incoming) {
                 if (incoming > MAX_AUDIO_BYTES - bytes.size()) {
-                    throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Voice file exceeds 12 MB");
+                    throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, I18nUtil.get("voice.file.too.large"));
                 }
             }
         };
         try {
             download.getBody().writeTo(bounded);
         } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Voice file could not be read");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, I18nUtil.get("voice.file.read.failed"));
         }
         byte[] audio = bytes.toByteArray();
-        if (!isMp3(audio)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid MP3 audio");
+        if (!isMp3(audio)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.mp3.invalid"));
         return new VoiceAudio(null, sessionId, name, audio);
     }
 
@@ -85,54 +87,54 @@ public class VoiceAudioService {
         if (duration != null && (!Double.isFinite(duration.doubleValue())
             || duration.doubleValue() != Math.rint(duration.doubleValue())
             || duration.longValue() < 1 || duration.longValue() > 300000)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Voice duration must be 1 to 300000 milliseconds");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.duration.invalid"));
         }
     }
 
     public VoiceAudio load(Long fileId, Long sessionId) {
         if (CurrentUserHolder.getLoginInfo() == null || CurrentUserHolder.getCurrentUserId() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, I18nUtil.get("voice.authentication.required"));
         }
         if (fileId == null || fileId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "fileId is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.id.required"));
         }
         Files file = files.findById(fileId);
         if (file == null || !Objects.equals(file.getCreateBy(), CurrentUserHolder.getCurrentUserId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Voice file not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("voice.file.not.found"));
         }
         if (sessionId != null && !Objects.equals(sessionId, file.getChatId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Voice file does not belong to session");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, I18nUtil.get("voice.file.session.mismatch"));
         }
         String name = file.getConvertFileName() == null ? file.getFileName() : file.getConvertFileName();
         if (name == null || name.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 512
             || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".mp3")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Voice file must be MP3");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.mp3.required"));
         }
         if (file.getLength() != null && file.getLength() > MAX_AUDIO_BYTES) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Voice file exceeds 12 MB");
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, I18nUtil.get("voice.file.too.large"));
         }
         try {
             var reference = UriComponentsBuilder.fromUriString(file.getFileUrl()).build();
             if (!"/commonFile/preview".equals(reference.getPath()) || reference.getHost() != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid uploaded voice reference");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.reference.invalid"));
             }
             String bucket = reference.getQueryParams().getFirst("bucketName");
             String path = reference.getQueryParams().getFirst("filePath");
             if (path == null || path.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid uploaded voice reference");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.reference.invalid"));
             }
             try (InputStream stream = storage.openCommonFileInputStream(bucket, path)) {
                 byte[] audio = stream.readNBytes(MAX_AUDIO_BYTES + 1);
                 if (audio.length > MAX_AUDIO_BYTES) {
-                    throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Voice file exceeds 12 MB");
+                    throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, I18nUtil.get("voice.file.too.large"));
                 }
                 if (!isMp3(audio)) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid MP3 audio");
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.file.mp3.invalid"));
                 }
                 return new VoiceAudio(fileId, file.getChatId(), name, audio);
             }
         } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Voice file could not be read");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, I18nUtil.get("voice.file.read.failed"));
         }
     }
 
@@ -161,7 +163,7 @@ public class VoiceAudioService {
         try {
             fileId = Long.valueOf(String.valueOf(voice.get("fileId")));
         } catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "voice.fileId is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.reference.id.required"));
         }
         VoiceAudio audio = load(fileId, sessionId);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -171,7 +173,7 @@ public class VoiceAudioService {
         if (voice.containsKey("durationMs")) {
             Object value = voice.get("durationMs");
             if (!(value instanceof Number duration)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Voice duration must be 1 to 300000 milliseconds");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("voice.duration.invalid"));
             }
             validateDuration(duration);
             result.put("durationMs", ((Number) value).longValue());

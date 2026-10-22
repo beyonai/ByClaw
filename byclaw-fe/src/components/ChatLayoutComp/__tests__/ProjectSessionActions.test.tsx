@@ -8,6 +8,7 @@ jest.mock('@/service/devloop', () => ({
 }));
 
 jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
   useSelector: (selector: (state: any) => any) => selector({ user: { userInfo: { userId: 1001 } } }),
 }));
 

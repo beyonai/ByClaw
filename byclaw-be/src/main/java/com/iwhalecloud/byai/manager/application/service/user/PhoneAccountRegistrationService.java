@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import java.nio.ByteBuffer;
@@ -40,17 +42,17 @@ public class PhoneAccountRegistrationService {
     private Users resolve(String phone, boolean allowExisting) {
         String normalized = phone == null ? "" : phone.trim();
         if (normalized.isEmpty()) {
-            throw new BadCredentialsException("手机号无效");
+            throw new BadCredentialsException(I18nUtil.get("login.phone.invalid"));
         }
         // 事务锁覆盖持锁后的查询和插入；多实例间可串行化这两条受控注册路径。
         jdbcTemplate.queryForObject("SELECT pg_advisory_xact_lock(?)", Object.class, lockKey(normalized));
         List<Users> matches = userService.findAllByUserPhone(normalized);
         if (matches.size() > 1) {
-            throw new BadCredentialsException("手机号关联多个账号");
+            throw new BadCredentialsException(I18nUtil.get("login.phone.multipleAccounts"));
         }
         if (matches.size() == 1) {
             if (!allowExisting) {
-                throw new BadCredentialsException("手机号已注册");
+                throw new BadCredentialsException(I18nUtil.get("login.phone.registered"));
             }
             return matches.get(0);
         }

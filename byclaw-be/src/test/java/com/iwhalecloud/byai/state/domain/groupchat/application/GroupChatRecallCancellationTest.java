@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,7 +29,12 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionSendGate;
 
-class GroupChatRecallCancellationTest {
+class GroupChatRecallCancellationTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiGroupChatRecallMapper recalls = mock(ByaiGroupChatRecallMapper.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper executions = mock(ByaiGroupChatExecutionMapper.class);

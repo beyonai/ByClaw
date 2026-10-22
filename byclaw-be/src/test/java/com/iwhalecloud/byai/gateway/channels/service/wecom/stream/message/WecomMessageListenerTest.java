@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class WecomMessageListenerTest {
+class WecomMessageListenerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void chatFailureReplyIncludesMsgIdAndBusinessErrorFromCause() {

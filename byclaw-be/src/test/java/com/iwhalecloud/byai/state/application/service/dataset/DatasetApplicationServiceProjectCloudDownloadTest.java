@@ -42,7 +42,7 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessServic
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 @ExtendWith(MockitoExtension.class)
-class DatasetApplicationServiceProjectCloudDownloadTest {
+class DatasetApplicationServiceProjectCloudDownloadTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private SsResourceService ssResourceService;
@@ -73,6 +73,33 @@ class DatasetApplicationServiceProjectCloudDownloadTest {
     void restoreMessages() {
         CurrentUserHolder.clearLoginInfo();
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", originalMessageSource);
+    }
+
+    @Test void forwardMetadataMatchesExactPathAndDoesNotEnterMatchedDirectory() {
+        var actor = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(20,10);
+        SsResource resource = new SsResource(); resource.setResourceId(60L); resource.setComAcctId(10L); resource.setResourceCode("cloud"); resource.setResourceBizType("KG_CLOUD");
+        when(ssResourceService.findById(60L)).thenReturn(resource);
+        when(authApplicationService.hasResourceForwardReadPermission(resource,20L,10L)).thenReturn(true);
+        var users=mock(com.iwhalecloud.byai.manager.domain.users.service.UserService.class);
+        var user=new com.iwhalecloud.byai.manager.entity.users.Users();user.setUserCode("actor");when(users.findById(20L)).thenReturn(user);
+        ReflectionTestUtils.setField(service,"forwardUserService",users);
+        var exact=new com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile();exact.setName("/parent/folder/");exact.setType("directory");
+        var neighbor=new com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile();neighbor.setName("/other/folder/");neighbor.setType("directory");
+        var data=new Data();data.setData(List.of(exact,neighbor));var response=new PythonBuildResponse<Data>();response.setResultCode("0");response.setResultObject(data);
+        when(feignPythonBuildService.listDirForActor(any(KbListDir.class),eq(60L),any(LoginInfo.class))).thenReturn(response);
+        var result=service.forwardMetadata(actor,60,"/parent/folder");assertThat(result.type()).isEqualTo("directory");
+        var query=ArgumentCaptor.forClass(KbListDir.class);verify(feignPythonBuildService).listDirForActor(query.capture(),eq(60L),any(LoginInfo.class));
+        assertThat(query.getValue().getDirectoryPath()).isEqualTo("/parent/");
+        assertThatThrownBy(() -> service.forwardOpen(actor,result)).hasMessage("FORWARD_RESOURCE_UNRESOLVABLE");
+        verify(feignPythonBuildService,org.mockito.Mockito.never()).fileDownloadForActor(any(),any(),any());
+    }
+
+    @Test void forwardingRejectsWrongTenantBeforeAnyQaRead() {
+        SsResource resource = new SsResource(); resource.setResourceId(60L); resource.setComAcctId(11L); resource.setResourceCode("cloud");
+        when(ssResourceService.findById(60L)).thenReturn(resource);
+        assertThatThrownBy(() -> service.forwardMetadata(new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(20,10),60,"/file.txt"))
+            .hasMessage("RESOURCE_NOT_ACCESSIBLE");
+        verifyNoInteractions(feignPythonBuildService);
     }
 
     @Test

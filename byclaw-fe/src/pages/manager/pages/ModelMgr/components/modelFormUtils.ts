@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import {
   getImageGenerationProviderByProtocol,
   getImageProviderFormValues,
@@ -75,6 +76,7 @@ export const tokenMarks = Array.from({ length: 4 }, (_, index) => {
 
 export function buildDebugDefaults(intl: any) {
   return {
+    defaultSpeechText: intl.formatMessage({ id: 'modelMgr.modal.ttsDefaultText' }),
     defaultUserMessage: intl.formatMessage({ id: 'modelMgr.modal.debugDefaultUserMessage' }),
     defaultRerankQuery: intl.formatMessage({ id: 'modelMgr.modal.debugRerankQuery' }),
     defaultRerankDocs: [
@@ -560,6 +562,7 @@ export function buildAutoDebugRequestText(options: {
   changedKeys?: string[];
   previousApiEndpoint?: string;
   syncFormParameters?: boolean;
+  defaultSpeechText?: string;
   defaultUserMessage?: string;
   defaultRerankQuery?: string;
   defaultRerankDocs?: Array<{ text: string; metadata: { id: number }; score: number }>;
@@ -571,6 +574,7 @@ export function buildAutoDebugRequestText(options: {
     changedKeys,
     previousApiEndpoint,
     syncFormParameters = false,
+    defaultSpeechText,
     defaultUserMessage,
     defaultRerankQuery,
     defaultRerankDocs,
@@ -582,7 +586,13 @@ export function buildAutoDebugRequestText(options: {
   if (modelType === 'ASR') return JSON.stringify({ fileId: !isTypeSwitch ? prevObj?.fileId || '' : '' }, null, 2);
   if (modelType === 'TTS')
     return JSON.stringify(
-      { text: !isTypeSwitch ? prevObj?.text || '你好，欢迎使用 ByClaw。' : '你好，欢迎使用 ByClaw。' },
+      {
+        // Preserve edited sample text; only new/type-switched samples use the current locale.
+        text:
+          (!isTypeSwitch && prevObj?.text) ||
+          defaultSpeechText ||
+          getIntl().formatMessage({ id: 'modelMgr.modal.ttsDefaultText' }),
+      },
       null,
       2
     );

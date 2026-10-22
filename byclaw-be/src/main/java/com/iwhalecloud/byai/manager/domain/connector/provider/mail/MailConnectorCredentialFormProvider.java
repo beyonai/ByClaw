@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,7 +44,7 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
     @Override
     public CredentialFormVerification verify(String userId, ConnectorInfo connector, Map<String, String> credentials) {
         if (connector == null || credentials == null) {
-            throw new IllegalArgumentException("邮箱连接器凭据不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("mail.credential.required"));
         }
         String email = required(credentials, "email");
         String secret = credentials.getOrDefault("authCode", credentials.get("apiToken"));
@@ -99,7 +101,7 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             request.setSmtp(defaults[1]);
         }
         if (request.getImap() == null || request.getSmtp() == null) {
-            throw new IllegalArgumentException("邮箱服务器配置不完整");
+            throw new IllegalArgumentException(I18nUtil.get("mail.credential.serverIncomplete"));
         }
         try {
             Properties properties = new Properties();
@@ -125,7 +127,7 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
                 transport.connect(request.getSmtp().getHost(), request.getSmtp().getPort(), request.getEmail(), secret);
             }
         } catch (Exception e) {
-            throw new IllegalArgumentException("邮箱凭据或服务器配置校验失败");
+            throw new IllegalArgumentException(I18nUtil.get("mail.credential.validationFailed"));
         }
     }
 
@@ -142,10 +144,10 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             java.net.http.HttpResponse<String> response = client.send(request,
                 java.net.http.HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
             if (response.statusCode() / 100 != 2 || response.body() == null || response.body().isBlank()) {
-                throw new IllegalArgumentException("Fastmail 凭据校验失败");
+                throw new IllegalArgumentException(I18nUtil.get("mail.credential.fastmailInvalid"));
             }
         } catch (Exception e) {
-            throw new IllegalArgumentException("Fastmail 凭据校验失败");
+            throw new IllegalArgumentException(I18nUtil.get("mail.credential.fastmailInvalid"));
         }
     }
 
@@ -156,7 +158,7 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
             case "netease-163-mail" -> "netease-163";
             case "aliyun-mail" -> "aliyun-mail";
             case "custom-imap-mail" -> "custom-imap";
-            default -> throw new IllegalArgumentException("不支持的邮箱连接器");
+            default -> throw new IllegalArgumentException(I18nUtil.get("mail.credential.providerUnsupported"));
         };
     }
 
@@ -179,7 +181,7 @@ public class MailConnectorCredentialFormProvider implements ConnectorCredentialF
 
     private String requiredValue(String value, String key) {
         if (value == null || value.isBlank() || value.length() > 2048) {
-            throw new IllegalArgumentException("邮箱凭据字段无效: " + key);
+            throw new IllegalArgumentException(I18nUtil.get("mail.credential.fieldInvalid", key));
         }
         return value.trim();
     }

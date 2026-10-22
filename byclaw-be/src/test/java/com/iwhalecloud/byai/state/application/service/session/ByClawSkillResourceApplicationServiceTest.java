@@ -62,7 +62,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Locale;
 
-class ByClawSkillResourceApplicationServiceTest {
+class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SsResourceService ssResourceService;
     private SsResExtSkillService ssResExtSkillService;

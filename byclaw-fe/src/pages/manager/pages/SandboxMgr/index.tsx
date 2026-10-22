@@ -44,6 +44,7 @@ import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { hasAnyUserRole } from '@/utils/userRole';
@@ -55,6 +56,7 @@ import {
 } from './serviceSpecUtils';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
+import RecoveryPanel from './RecoveryPanel';
 import styles from './index.module.less';
 
 const { Option } = Select;
@@ -241,6 +243,22 @@ const SandboxMgr = () => {
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const showLaunchButton = isAdminVip(userInfo);
+  const [brandVersion, setBrandVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((response) => {
+        if (active) setBrandVersion(response?.paramValue ?? null);
+      })
+      .catch(() => {
+        if (active) setBrandVersion(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const canManageRecovery = userInfo?.userCode?.toLowerCase() === 'adminvip' && brandVersion === 'openSource';
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const canViewTenantResources =
     multiTenancyEnabled &&
     hasAnyUserRole(
@@ -1373,14 +1391,19 @@ const SandboxMgr = () => {
       width: 90,
     },
     {
-      title: '归属维度',
+      title: intl.formatMessage({ id: 'sandbox.ownerScope' }),
       dataIndex: 'ownerScope',
       align: 'center' as const,
       width: 110,
-      render: (value: string) => (value === 'TENANT' ? <Tag color="blue">租户</Tag> : <Tag>用户</Tag>),
+      render: (value: string) =>
+        value === 'TENANT' ? (
+          <Tag color="blue">{intl.formatMessage({ id: 'sandbox.ownerTenant' })}</Tag>
+        ) : (
+          <Tag>{intl.formatMessage({ id: 'sandbox.ownerUser' })}</Tag>
+        ),
     },
     {
-      title: '租户',
+      title: intl.formatMessage({ id: 'sandbox.ownerTenant' }),
       dataIndex: 'enterpriseId',
       align: 'center' as const,
       width: 180,
@@ -2012,28 +2035,45 @@ const SandboxMgr = () => {
       ? columns.filter((column) => tenantColumnKeys.has(String(column.dataIndex)))
       : columns.filter((column) => !['ownerScope', 'enterpriseId'].includes(String(column.dataIndex)));
 
+  const scopeTabs = (
+    <Tabs
+      activeKey={recoveryOpen && canManageRecovery ? 'RECOVERY' : ownerScope}
+      items={[
+        ...(canViewTenantResources
+          ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
+          : []),
+        { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
+        ...(canManageRecovery ? [{ key: 'RECOVERY', label: '恢复任务' }] : []),
+      ]}
+      onChange={(key) => {
+        setRecoveryOpen(key === 'RECOVERY');
+        if (key === 'RECOVERY') return;
+        const scope = key as 'TENANT' | 'USER';
+        setOwnerScope(scope);
+        setEnterpriseId(undefined);
+        loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
+      }}
+    />
+  );
+  if (recoveryOpen && canManageRecovery) {
+    return (
+      <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+        {scopeTabs}
+        <RecoveryPanel />
+      </div>
+    );
+  }
+
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
-      <Tabs
-        activeKey={ownerScope}
-        items={[
-          ...(canViewTenantResources ? [{ key: 'TENANT', label: '租户资源' }] : []),
-          { key: 'USER', label: '用户资源' },
-        ]}
-        onChange={(key) => {
-          const scope = key as 'TENANT' | 'USER';
-          setOwnerScope(scope);
-          setEnterpriseId(undefined);
-          loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
-        }}
-      />
+      {scopeTabs}
       <Row gutter={16} align="middle">
         <Col flex="auto">
           <Space size="middle">
             <Input.Search
               placeholder={
                 ownerScope === 'TENANT'
-                  ? '按租户名称 / 编码搜索'
+                  ? intl.formatMessage({ id: 'sandbox.tenantSearch' })
                   : intl.formatMessage({ id: 'sandboxMgr.search.placeholder' })
               }
               value={keyword}
@@ -2060,7 +2100,7 @@ const SandboxMgr = () => {
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                placeholder="筛选租户"
+                placeholder={intl.formatMessage({ id: 'sandbox.filterTenant' })}
                 value={enterpriseId}
                 style={{ width: 220 }}
                 onChange={(value?: string) => {

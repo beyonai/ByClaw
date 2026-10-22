@@ -130,6 +130,18 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:office-preview');
   });
 
+  it.each(['MicroMessenger/8.0', 'DingTalk/7.0'])('renders PDF with the canvas viewer in %s', async (agent) => {
+    jest.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(`Mozilla/5.0 ${agent}`);
+    const pdf = new Blob(['%PDF-1.4\n'], { type: 'application/pdf' });
+
+    render(<PreViewFile data={pdf} type="pdf" title="report.pdf" />);
+
+    await waitFor(() => {
+      expect(mockOfficeRender).toHaveBeenCalledWith(expect.objectContaining({ data: pdf, type: 'pdf' }));
+    });
+    expect(mockHtmlRender).not.toHaveBeenCalled();
+  });
+
   it.each(['html', 'h5'])('preserves relative resource resolution for %s', async (type) => {
     const html = new Blob(['<img src="./cover.png">'], { type: 'text/html' });
     Object.defineProperty(html, 'text', { value: () => Promise.resolve('<img src="./cover.png">') });
@@ -402,7 +414,8 @@ describe('PreViewFile binary and relative resource handling', () => {
     expect(screen.getByTestId('source-preview')).not.toHaveTextContent('old content');
   });
 
-  it.each(['tar', 'heics', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
+  // TAR 已由上方归档预览用例覆盖；仅未接入解码器的格式使用不支持提示。
+  it.each(['heics', 'psd'])('shows an explicit fallback for %s and preserves download', async (type) => {
     render(<PreViewFile data={new Blob(['binary content'])} type={type} title={`file.${type}`} />);
     expect(screen.getByText('fileRender.formatUnsupported')).toBeVisible();
     fireEvent.click(screen.getByTestId('icon-a-Downloadxiazai'));

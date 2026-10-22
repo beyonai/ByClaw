@@ -1,11 +1,14 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
@@ -16,7 +19,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-class SandboxAlertWebhookTest {
+class SandboxAlertWebhookTest extends I18nTestSupport {
     @Test
     void failedRecoveryReturnsRetryableStatusToAlertmanager() throws Exception {
         SandboxResizeService service = mock(SandboxResizeService.class);

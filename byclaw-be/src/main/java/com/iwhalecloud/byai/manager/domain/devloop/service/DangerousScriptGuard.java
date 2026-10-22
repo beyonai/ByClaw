@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import org.apache.commons.lang3.StringUtils;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,29 +19,29 @@ public class DangerousScriptGuard {
     private static final List<Rule> RULES = List.of(
         // rm -rf 作用到根/家目录/通配根:典型删库跑路。
         rule("(?i)\\brm\\s+(-[a-z]*\\s+)*-?[a-z]*r[a-z]*f?[a-z]*\\s+(-[a-z]*\\s+)*(/|~|/\\*|\\$HOME|/\\s|\\.\\s*$|\\*\\s*$)",
-            "递归强删根目录/家目录/通配路径(rm -rf)"),
+            "devloop.script.rootDelete"),
         // 磁盘格式化。
-        rule("(?i)\\bmkfs(\\.[a-z0-9]+)?\\b", "磁盘格式化命令(mkfs)"),
+        rule("(?i)\\bmkfs(\\.[a-z0-9]+)?\\b", "devloop.script.formatDisk"),
         // dd 直接写块设备。
-        rule("(?i)\\bdd\\b[^\\n]*\\bof=\\s*/dev/(sd|nvme|vd|hd|mapper)", "裸写块设备(dd of=/dev/...)"),
+        rule("(?i)\\bdd\\b[^\\n]*\\bof=\\s*/dev/(sd|nvme|vd|hd|mapper)", "devloop.script.rawWrite"),
         // 向块设备/整盘重定向。
-        rule("(?i)>\\s*/dev/(sd|nvme|vd|hd)[a-z0-9]*", "重定向写入块设备(> /dev/sdX)"),
+        rule("(?i)>\\s*/dev/(sd|nvme|vd|hd)[a-z0-9]*", "devloop.script.redirectDevice"),
         // 覆盖磁盘为空/随机。
-        rule("(?i)\\b(shred|wipefs)\\b", "磁盘擦除命令(shred/wipefs)"),
+        rule("(?i)\\b(shred|wipefs)\\b", "devloop.script.wipeDisk"),
         // 关机/重启/停机。
-        rule("(?i)\\b(shutdown|reboot|halt|poweroff|init\\s+0|init\\s+6)\\b", "关机/重启命令"),
+        rule("(?i)\\b(shutdown|reboot|halt|poweroff|init\\s+0|init\\s+6)\\b", "devloop.script.shutdown"),
         // fork 炸弹 :(){ :|:& };:
-        rule(":\\s*\\(\\s*\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:", "fork 炸弹"),
+        rule(":\\s*\\(\\s*\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:", "devloop.script.forkBomb"),
         // 远程下载直接管道执行:curl/wget ... | sh/bash。
         rule("(?i)\\b(curl|wget)\\b[^\\n|]*\\|\\s*(sudo\\s+)?(sh|bash|zsh|python[0-9.]*|node)\\b",
-            "远程脚本直接管道执行(curl/wget | sh)"),
+            "devloop.script.remotePipe"),
         // 递归 chmod/chown 作用到根/家目录。
         rule("(?i)\\bch(mod|own)\\s+(-[a-z]*\\s+)*-?[a-z]*R[a-z]*\\s+[^\\n]*\\s(/|~|\\$HOME)(\\s|$)",
-            "递归改权限/属主到根目录(chmod -R / / chown -R /)"),
+            "devloop.script.rootPermissions"),
         // 覆盖关键系统文件。
-        rule("(?i)>\\s*/etc/(passwd|shadow|sudoers|fstab|hosts)\\b", "覆盖关键系统文件(/etc/...)"),
+        rule("(?i)>\\s*/etc/(passwd|shadow|sudoers|fstab|hosts)\\b", "devloop.script.systemFiles"),
         // 清空 iptables 或危险 kill -9 -1。
-        rule("(?i)\\bkill\\s+-9\\s+-1\\b", "杀死所有进程(kill -9 -1)")
+        rule("(?i)\\bkill\\s+-9\\s+-1\\b", "devloop.script.killAll")
     );
 
     private static Rule rule(String regex, String reason) {
@@ -60,7 +61,9 @@ public class DangerousScriptGuard {
         }
         for (Rule r : RULES) {
             if (r.pattern.matcher(script).find()) {
-                return StringUtils.defaultString(label, "脚本") + ":检测到高危命令 — " + r.reason;
+                // 规则只保存消息键，检测时按调用者语言生成提示。
+                return I18nUtil.get("devloop.script.blocked",
+                    StringUtils.defaultString(label, I18nUtil.get("devloop.script.label")), I18nUtil.get(r.reason));
             }
         }
         return null;

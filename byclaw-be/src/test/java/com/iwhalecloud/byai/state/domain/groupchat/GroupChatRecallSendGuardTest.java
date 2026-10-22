@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -18,7 +20,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatRecallCa
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatRecallSendGuard;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionSendGate;
 
-class GroupChatRecallSendGuardTest {
+class GroupChatRecallSendGuardTest extends I18nTestSupport {
     private final ByaiGroupChatExecutionMapper executions = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);

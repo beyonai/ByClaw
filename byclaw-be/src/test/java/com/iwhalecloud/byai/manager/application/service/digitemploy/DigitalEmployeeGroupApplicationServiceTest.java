@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -39,7 +41,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
-class DigitalEmployeeGroupApplicationServiceTest {
+class DigitalEmployeeGroupApplicationServiceTest extends I18nTestSupport {
 
     @Mock
     private SequenceService sequenceService;

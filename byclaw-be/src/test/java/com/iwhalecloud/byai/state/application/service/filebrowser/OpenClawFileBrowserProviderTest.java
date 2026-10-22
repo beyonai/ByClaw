@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressEndpointResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntimeResolver;
 
-class OpenClawFileBrowserProviderTest {
+class OpenClawFileBrowserProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final OpenClawFileBrowserProvider provider = new OpenClawFileBrowserProvider(
         mock(SandboxIngressEndpointResolver.class),

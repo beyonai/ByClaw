@@ -33,6 +33,11 @@ public class FilesService {
      *
      * @param fileId 文件信息
      */
+    /** Narrow owning-session inventory used for exact-path forwarding association, never basename lookup. */
+    public List<Files> findForwardSessionFiles(Long sessionId) {
+        return filesMapper.selectList(new LambdaQueryWrapper<Files>().eq(Files::getChatId, sessionId));
+    }
+
     public Files findById(Long fileId) {
         return filesMapper.selectById(fileId);
     }

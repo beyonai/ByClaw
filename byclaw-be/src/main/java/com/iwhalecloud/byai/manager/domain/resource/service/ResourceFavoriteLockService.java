@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
@@ -37,12 +39,12 @@ public class ResourceFavoriteLockService {
         Lock lock = lockRegistry.obtain(lockKey);
         try {
             if (!lock.tryLock(30, TimeUnit.SECONDS)) {
-                throw new CannotAcquireLockException("Timed out waiting for resource favorite lock: " + lockKey);
+                throw new CannotAcquireLockException(I18nUtil.get("resource.favorite.lock.timeout", lockKey));
             }
         }
         catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new CannotAcquireLockException("Interrupted waiting for resource favorite lock", exception);
+            throw new CannotAcquireLockException(I18nUtil.get("resource.favorite.lock.interrupted"), exception);
         }
         try {
             TransactionSynchronizationManager.registerSynchronization(new FavoriteLockSynchronization(lockKey, lock, lockRegistry));

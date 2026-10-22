@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -22,7 +24,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.UserMailAccount;
 
-class MailAccountProjectionServiceTest {
+class MailAccountProjectionServiceTest extends I18nTestSupport {
     @TempDir Path directory;
     final ObjectMapper json = new ObjectMapper();
     final MailAccountProjectionStateService state = mock(MailAccountProjectionStateService.class);
@@ -319,7 +321,7 @@ class MailAccountProjectionServiceTest {
     private MailAccountProjectionService service() { return service(new TestMailFileOperations()); }
     private MailAccountProjectionService service(MailAccountProjectionService.FileOperations operations) {
         var workspace = mock(ConnectorCredentialWorkspaceService.class);
-        when(workspace.resolveProjectionFile(1001L, MailAccountProjectionService.PROJECTION_PATH))
+        when(workspace.resolveLocalProjectionFile(1001L, MailAccountProjectionService.PROJECTION_PATH))
             .thenReturn(file("qq-mail"));
         return new MailAccountProjectionService(workspace, resolver, state, lease, cache, json, operations);
     }

@@ -24,7 +24,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialSecret;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class GithubOAuth2AuthorizationProviderTest {
+class GithubOAuth2AuthorizationProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     @Test
     void startBuildsAuthorizationCodePkceRequestAndKeepsVerifierInProviderState() throws Exception {
         GithubOAuth2AuthorizationProvider provider = new GithubOAuth2AuthorizationProvider(

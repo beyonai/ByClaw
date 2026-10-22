@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -34,7 +36,7 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import com.sun.net.httpserver.HttpServer;
 @DisabledOnOs(OS.WINDOWS)
-class MailRuntimeProbeTest {
+class MailRuntimeProbeTest extends I18nTestSupport {
 
     @TempDir
     Path sandboxRoot;

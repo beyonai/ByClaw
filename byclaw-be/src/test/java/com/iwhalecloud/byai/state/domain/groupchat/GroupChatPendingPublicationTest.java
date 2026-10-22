@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -77,7 +78,12 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
-class GroupChatPendingPublicationTest {
+class GroupChatPendingPublicationTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final GroupChatAgentMentionParser parser = mock(GroupChatAgentMentionParser.class);
     private final GroupChatExecutionCoordinator coordinator = mock(GroupChatExecutionCoordinator.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);

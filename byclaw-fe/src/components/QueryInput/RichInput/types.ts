@@ -42,6 +42,10 @@ export type Resource = {
   chatAvatar?: string;
   agentType?: string;
   isInactiveAgentSelection?: boolean;
+  ownerAgentId?: string;
+  isAgentResourceValidationPending?: boolean;
+  requiresAgentResourceReplacement?: boolean;
+  resourceReplacementType?: 'skill' | 'knowledge' | 'tool';
 };
 
 export interface PayloadType {
@@ -80,6 +84,7 @@ export interface Props {
   mentionPopoverPlacement?: PopoverProps['placement'];
   onResourcePopoverChange?: (state: { open: boolean; inputText?: string; width?: number }) => void;
   allowMultiAgentInExpertMode?: boolean;
+  userCode?: string;
 }
 
 export interface MentionTriggerInfo {

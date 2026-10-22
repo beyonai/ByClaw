@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.artifact.config.ArtifactProperties;
 import com.iwhalecloud.byai.state.domain.artifact.storage.ArtifactStoragePort;
 import java.io.IOException;
@@ -63,10 +65,10 @@ public class ArtifactArchiveExtractor {
                     ZipArchiveEntry entry = entries.nextElement();
                     entryCount++;
                     if (entryCount > properties.getMaxEntries()) {
-                        throw new IllegalArgumentException("ZIP文件数量超过限制: " + properties.getMaxEntries());
+                        throw new IllegalArgumentException(I18nUtil.get("artifact.zip.entryLimit", String.valueOf(properties.getMaxEntries())));
                     }
                     if (!zip.canReadEntryData(entry)) {
-                        throw new IllegalArgumentException("ZIP包含无法读取的条目: " + entry.getName());
+                        throw new IllegalArgumentException(I18nUtil.get("artifact.zip.unreadableEntry", entry.getName()));
                     }
                     String relativePath = normalizedEntryPath(entry.getName(), layout.strippedTopLevelDirectory());
                     validateEntry(entry, relativePath);
@@ -83,11 +85,11 @@ public class ArtifactArchiveExtractor {
                     }
                     totalExpanded = Math.addExact(totalExpanded, entrySize);
                     if (totalExpanded > properties.getMaxExpandedBytes()) {
-                        throw new IllegalArgumentException("ZIP解压后总大小超过限制");
+                        throw new IllegalArgumentException(I18nUtil.get("artifact.zip.totalSizeExceeded"));
                     }
                     if (archive.getSize() > 0
                         && totalExpanded > archive.getSize() * (long) properties.getMaxCompressionRatio()) {
-                        throw new IllegalArgumentException("ZIP压缩率超过限制");
+                        throw new IllegalArgumentException(I18nUtil.get("artifact.zip.ratioExceeded"));
                     }
 
                     String objectKey = join(contentPrefix, relativePath);
@@ -106,7 +108,7 @@ public class ArtifactArchiveExtractor {
             }
         }
         catch (ArithmeticException e) {
-            throw new IllegalArgumentException("ZIP解压后大小溢出", e);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.sizeOverflow"), e);
         }
         finally {
             deleteTemporaryDirectory(temporaryDirectory);
@@ -123,10 +125,10 @@ public class ArtifactArchiveExtractor {
             ZipArchiveEntry entry = entries.nextElement();
             count++;
             if (count > properties.getMaxEntries()) {
-                throw new IllegalArgumentException("ZIP文件数量超过限制: " + properties.getMaxEntries());
+                throw new IllegalArgumentException(I18nUtil.get("artifact.zip.entryLimit", String.valueOf(properties.getMaxEntries())));
             }
             if (!zip.canReadEntryData(entry)) {
-                throw new IllegalArgumentException("ZIP包含无法读取的条目: " + entry.getName());
+                throw new IllegalArgumentException(I18nUtil.get("artifact.zip.unreadableEntry", entry.getName()));
             }
             String path = normalizedEntryPath(entry.getName(), null);
             validateEntry(entry, path);
@@ -147,33 +149,33 @@ public class ArtifactArchiveExtractor {
             }
         }
         if (count == 0) {
-            throw new IllegalArgumentException("ZIP文件为空或格式无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.empty"));
         }
         return new ArchiveLayout(canStrip ? commonTopLevel : null);
     }
 
     private void validateEntry(ZipArchiveEntry entry, String relativePath) {
         if (entry.isUnixSymlink()) {
-            throw new IllegalArgumentException("ZIP不允许包含符号链接: " + entry.getName());
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.symlink", entry.getName()));
         }
         int unixType = entry.getUnixMode() & ZIP_UNIX_FILE_TYPE_MASK;
         if (unixType != 0 && unixType != ZIP_UNIX_REGULAR_FILE && unixType != ZIP_UNIX_DIRECTORY) {
-            throw new IllegalArgumentException("ZIP不允许包含特殊文件: " + entry.getName());
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.specialFile", entry.getName()));
         }
         int depth = relativePath.isBlank() ? 0 : relativePath.split("/").length;
         if (depth > properties.getMaxDepth()) {
-            throw new IllegalArgumentException("ZIP目录深度超过限制: " + relativePath);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.depthLimit", relativePath));
         }
     }
 
     private String normalizedEntryPath(String entryName, String strippedTopLevelDirectory) {
         String value = entryName == null ? "" : entryName.replace('\\', '/');
         if (value.startsWith("/") || value.matches("^[A-Za-z]:.*")) {
-            throw new IllegalArgumentException("ZIP包含绝对路径: " + entryName);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.absolutePath", entryName));
         }
         for (String segment : value.split("/")) {
             if ("..".equals(segment)) {
-                throw new IllegalArgumentException("ZIP包含路径穿越: " + entryName);
+                throw new IllegalArgumentException(I18nUtil.get("artifact.zip.traversal", entryName));
             }
         }
         while (value.startsWith("./")) {
@@ -198,7 +200,7 @@ public class ArtifactArchiveExtractor {
         while ((read = input.read(buffer)) != -1) {
             total += read;
             if (total > maximumBytes) {
-                throw new IllegalArgumentException("ZIP单文件大小超过限制");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.zip.fileSizeExceeded"));
             }
             output.write(buffer, 0, read);
         }
@@ -214,7 +216,7 @@ public class ArtifactArchiveExtractor {
         }
         String content = Files.readString(file, StandardCharsets.UTF_8);
         if (ROOT_ABSOLUTE_REFERENCE.matcher(content).find()) {
-            warnings.add("检测到根绝对资源路径，path预览模式下可能无法加载: " + relativePath);
+            warnings.add(I18nUtil.get("artifact.preview.absoluteWarning", relativePath));
         }
     }
 

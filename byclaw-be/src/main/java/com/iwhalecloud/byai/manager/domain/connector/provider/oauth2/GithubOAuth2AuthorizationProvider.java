@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.oauth2;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -77,7 +79,7 @@ public class GithubOAuth2AuthorizationProvider
                 null,
                 null,
                 "OAUTH_PROVIDER_CONFIG_INVALID",
-                "GitHub OAuth2未配置完整，请联系管理员"
+                I18nUtil.get("connector.oauth.githubConfigIncomplete")
             );
         }
         String state = OAuth2State.create(context.authorizationId());
@@ -109,13 +111,13 @@ public class GithubOAuth2AuthorizationProvider
     @Override
     public AuthorizationStatusResult handleCallback(AuthorizationSessionContext session, AuthorizationCallback callback) {
         if (callback == null || StringUtils.hasText(callback.error())) {
-            return failure("OAUTH_DENIED", "用户拒绝或平台取消授权");
+            return failure("OAUTH_DENIED", I18nUtil.get("connector.oauth.denied"));
         }
         Map<String, String> state = readState(session.providerState());
         if (!StringUtils.hasText(callback.code()) || !StringUtils.hasText(callback.state())
                 || !callback.state().equals(state.get("oauthState"))
                 || !session.authorizationId().equals(OAuth2State.authorizationId(callback.state()))) {
-            return failure("OAUTH_STATE_INVALID", "OAuth2回调state无效");
+            return failure("OAUTH_STATE_INVALID", I18nUtil.get("connector.oauth.stateInvalid"));
         }
         try {
             GithubOAuth2Client.Token token = client.exchange(new GithubOAuth2Client.ExchangeRequest(
@@ -123,14 +125,14 @@ public class GithubOAuth2AuthorizationProvider
                 state.get("redirectUri"), state.get("codeVerifier")
             ));
             if (token == null || !StringUtils.hasText(token.accessToken())) {
-                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth2令牌交换失败");
+                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", I18nUtil.get("connector.oauth.exchangeFailed"));
             }
             if (!hasRequiredScopes(state.get("scope"), token.scopes())) {
-                return failure("OAUTH_SCOPE_INSUFFICIENT", "OAuth2授权范围不足");
+                return failure("OAUTH_SCOPE_INSUFFICIENT", I18nUtil.get("connector.oauth.scopeInsufficient"));
             }
             GithubOAuth2Client.User user = client.loadUser(token.accessToken());
             if (user == null || !StringUtils.hasText(user.id()) || !StringUtils.hasText(user.login())) {
-                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth2账号验证失败");
+                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", I18nUtil.get("connector.oauth.accountInvalid"));
             }
             String reference = secretStore.save(ConnectorCredentialSecret.forOAuth2(
                 providerCode(), session.userId(), session.connectorId(), token.accessToken(), token.refreshToken(),
@@ -141,7 +143,7 @@ public class GithubOAuth2AuthorizationProvider
                     : CredentialRenewalMode.CREDENTIAL_REISSUE,
                 token.accessExpiresAt(), token.refreshExpiresAt(), new Date(), reference);
         } catch (RuntimeException e) {
-            return failure("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth2令牌交换失败");
+            return failure("OAUTH_TOKEN_EXCHANGE_FAILED", I18nUtil.get("connector.oauth.exchangeFailed"));
         }
     }
 
@@ -149,7 +151,7 @@ public class GithubOAuth2AuthorizationProvider
         try {
             return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() { });
         } catch (Exception e) {
-            throw new IllegalArgumentException("OAuth2会话数据无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.sessionInvalid"), e);
         }
     }
 
@@ -189,37 +191,37 @@ public class GithubOAuth2AuthorizationProvider
             }
             String secretEnv = config.path("clientSecretEnv").asText(null);
             if (!StringUtils.hasText(clientId) || !StringUtils.hasText(secretEnv)) {
-                throw new IllegalArgumentException("OAuth2配置无效");
+                throw new IllegalArgumentException(I18nUtil.get("connector.oauth.configInvalid"));
             }
             client.revoke(new GithubOAuth2Client.RevokeRequest(
                 clientId, secretResolver.resolve(secretEnv), secret.accessToken()));
             secretStore.revoke(secret.credentialReference());
         } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("OAuth2配置无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.configInvalid"), e);
         }
     }
 
     @Override
     public AuthorizationStatusResult verify(Long userId, ConnectorInfo connector) {
         if (userId == null || connector == null || connector.getConnectorId() == null) {
-            return failure("CONNECTOR_CREDENTIAL_INVALID", "连接器凭证不存在");
+            return failure("CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.notFound"));
         }
         try {
             ConnectorCredentialSecret secret = secretStore.findActive(
                 userId.toString(), connector.getConnectorId(), providerCode()).orElse(null);
             if (secret == null) {
-                return failure("CONNECTOR_CREDENTIAL_INVALID", "连接器凭证不存在");
+                return failure("CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.notFound"));
             }
             GithubOAuth2Client.User user = client.loadUser(secret.accessToken());
             if (user == null || !StringUtils.hasText(user.id()) || !StringUtils.hasText(user.login())) {
-                return failure("CONNECTOR_CREDENTIAL_INVALID", "连接器凭证验证失败");
+                return failure("CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.verificationFailed"));
             }
             return AuthorizationStatusResult.connected(user.id(), user.login(), CredentialState.READY,
                 StringUtils.hasText(secret.refreshToken()) ? CredentialRenewalMode.REFRESH_TOKEN
                     : CredentialRenewalMode.CREDENTIAL_REISSUE,
                 secret.accessExpiresAt(), secret.refreshExpiresAt(), new Date(), secret.credentialReference());
         } catch (RuntimeException e) {
-            return failure("CONNECTOR_CREDENTIAL_INVALID", "连接器凭证验证失败");
+            return failure("CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.verificationFailed"));
         }
     }
 
@@ -239,7 +241,7 @@ public class GithubOAuth2AuthorizationProvider
     private String required(Map<String, Object> config, String key) {
         Object value = config == null ? null : config.get(key);
         if (value == null || !StringUtils.hasText(value.toString())) {
-            throw new IllegalArgumentException("OAuth2配置缺少" + key);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.configMissing", key));
         }
         return value.toString();
     }
@@ -261,11 +263,11 @@ public class GithubOAuth2AuthorizationProvider
             boolean https = "https".equalsIgnoreCase(uri.getScheme());
             boolean http = "http".equalsIgnoreCase(uri.getScheme());
             if (!uri.isAbsolute() || (!https && !http) || !StringUtils.hasText(uri.getHost())) {
-                throw new IllegalArgumentException("OAuth2 redirectUri必须是HTTP或HTTPS绝对地址");
+                throw new IllegalArgumentException(I18nUtil.get("connector.oauth.redirectUriRequired"));
             }
             return uri.toString();
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("OAuth2 redirectUri无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.redirectUriInvalid"), e);
         }
     }
 

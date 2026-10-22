@@ -20,6 +20,9 @@ class ConnectorPrivateFileProjectionWriterTest {
         Path target = Files.createDirectories(tempDir.resolve(".connector-auth/.model")).resolve("tts.json");
         Files.writeString(target, "old");
         ConnectorPrivateFileProjectionWriter writer = new ConnectorPrivateFileProjectionWriter();
+        org.springframework.test.util.ReflectionTestUtils.setField(writer, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
 
         writer.write(target, "{\"revision\":\"new\"}");
 
@@ -44,6 +47,9 @@ class ConnectorPrivateFileProjectionWriterTest {
             return;
         }
         ConnectorPrivateFileProjectionWriter writer = new ConnectorPrivateFileProjectionWriter();
+        org.springframework.test.util.ReflectionTestUtils.setField(writer, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
 
         assertThatThrownBy(() -> writer.write(target, "secret"))
             .isInstanceOf(IllegalStateException.class)
@@ -55,6 +61,9 @@ class ConnectorPrivateFileProjectionWriterTest {
     void rejectsOversizedProjection() {
         Path target = tempDir.resolve("tts.json");
         ConnectorPrivateFileProjectionWriter writer = new ConnectorPrivateFileProjectionWriter();
+        org.springframework.test.util.ReflectionTestUtils.setField(writer, "platformPrivateFiles",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), ""));
 
         assertThatThrownBy(() -> writer.write(target, "x".repeat(64 * 1024 + 1)))
             .isInstanceOf(IllegalArgumentException.class)

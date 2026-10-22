@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationApplicationService;
 import com.iwhalecloud.byai.state.infrastructure.exception.GlobalExceptionHandler;
@@ -11,7 +13,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-class EmployeePublicationControllerTest {
+class EmployeePublicationControllerTest extends I18nTestSupport {
     @Test void pageOpeningUsesExplicitPostEndpointAndValidatesRequestId() throws Exception {
         var service = mock(EmployeePublicationApplicationService.class);
         var mvc = MockMvcBuilders.standaloneSetup(new EmployeePublicationController(service))

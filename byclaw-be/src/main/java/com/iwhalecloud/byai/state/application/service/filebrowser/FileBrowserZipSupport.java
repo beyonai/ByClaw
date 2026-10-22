@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -43,8 +45,8 @@ final class FileBrowserZipSupport {
                 writtenSize += length;
             }
             if (expectedSize != null && expectedSize >= 0 && writtenSize != expectedSize) {
-                throw new IOException("文件流长度不完整: entry=" + entryName + ", expected=" + expectedSize
-                    + ", actual=" + writtenSize);
+                throw new IOException(I18nUtil.get("fileBrowser.zip.incomplete", entryName, String.valueOf(expectedSize),
+                    String.valueOf(writtenSize)));
             }
         }
         finally {

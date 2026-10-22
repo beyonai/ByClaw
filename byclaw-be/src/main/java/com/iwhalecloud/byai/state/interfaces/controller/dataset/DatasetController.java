@@ -34,6 +34,8 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -239,6 +241,14 @@ public class DatasetController {
             datasetApplicationService.moveKnowledgeItems(request, headers));
     }
 
+    /** 复制原始文档到指定知识库目录，支持项目云盘及跨知识库复制。 */
+    @PostMapping("/copyKnowledgeFile")
+    public ResponseUtil<KnowledgeFileCopyResult> copyKnowledgeFile(HttpServletRequest httpServletRequest,
+        @Valid @RequestBody KnowledgeFileCopyRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.copy.success"),
+            datasetApplicationService.copyKnowledgeFile(request, this.parseHeadersFromRequest(httpServletRequest)));
+    }
+
     /**
      * 查询 Markdown 文件的入站、出站引用关系。
      */
@@ -258,7 +268,7 @@ public class DatasetController {
         Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
 
         KnowledgeEntityBatchResult knowledgeEntityBatchResult = datasetApplicationService.entityDiscovery(requestParam, headers);
-        return ResponseUtil.successResponse("知识实体发现任务已受理", knowledgeEntityBatchResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.discovery.accepted"), knowledgeEntityBatchResult);
     }
 
 
@@ -272,7 +282,7 @@ public class DatasetController {
 
         KnowledgeEntityBatchResult responseResult = datasetApplicationService.entityEnrich(requestParam, headers);
 
-        return ResponseUtil.successResponse("知识实体补全任务已受理", responseResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.enrichment.accepted"), responseResult);
     }
 
     /**
@@ -402,8 +412,8 @@ public class DatasetController {
             return ResponseEntity.ok().contentType(MediaType.parseMediaType(result.getContentType()))
                 .header("Content-Disposition", buildContentDisposition(result.getFileName())).body(responseBody);
         } catch (Exception e) {
-            logger.error("文件转Markdown失败", e);
-            String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
+            logger.error(I18nUtil.get("knowledge.markdown.failed"), e);
+            String errorMessage = e.getMessage() == null ? I18nUtil.get("knowledge.markdown.failed") : e.getMessage();
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(outputStream -> outputStream.write(errorMessage.getBytes(StandardCharsets.UTF_8)));
         }

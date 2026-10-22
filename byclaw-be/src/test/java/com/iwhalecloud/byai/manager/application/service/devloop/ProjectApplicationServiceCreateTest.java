@@ -43,7 +43,7 @@ import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplication
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 @ExtendWith(MockitoExtension.class)
-class ProjectApplicationServiceCreateTest {
+class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private ProjectService projectService;

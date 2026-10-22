@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import type { OperationAccount, OperationAccountFormValues } from './types';
 
 const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['loginStatus'] => {
@@ -20,7 +21,7 @@ export const normalizeOperationAccounts = (source: unknown): OperationAccount[] 
         item.accountName ||
         item.name ||
         (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
-          ? '自定义链接'
+          ? getIntl().formatMessage({ id: 'projectSpace.operation.accountForm.field.customUrl' })
           : ''),
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
       avatar: item.avatar,

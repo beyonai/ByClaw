@@ -3,7 +3,7 @@
 /**
  * Fold the repository's plugins into the base image's pnpm workspace.
  *
- * Two things have to happen before `pnpm install` can build them here:
+ * Three things have to happen before `pnpm install` can build them here:
  *
  * 1. The workspace has to see each plugin root and its nested packages, which
  *    is what PLUGIN_PATTERNS below adds.
@@ -15,6 +15,10 @@
  *    install. Approvals and denials therefore both have to travel: a plugin
  *    that denies `tree-sitter-*` needs that `false` copied up, or the install
  *    stops on the very packages it took care to refuse.
+ * 3. Framework and DSH dependencies, including transitive dependencies and
+ *    peers, must resolve to the host workspace. Published copies of Cordis
+ *    have separate Context declarations and cannot receive the host services'
+ *    module augmentations. Root overrides cover nested plugin packages too.
  *
  * Precedence is harness, then base image, then plugins. A plugin's workspace
  * file describes the environment it builds in standalone; once it is mounted
@@ -29,8 +33,8 @@
  * authority to defer to, so the script fails rather than picking one.
  */
 
-import { readdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { glob, readdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join, relative, resolve } from 'node:path'
 import { dump, load } from 'js-yaml'
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml'
@@ -95,6 +99,38 @@ async function pluginWorkspaces() {
 
 const workspace = load(await readFile(WORKSPACE_FILE, 'utf8')) ?? {}
 workspace.packages ??= []
+
+// Discover names from the actual base image, rather than assuming that a
+// plugin's pinned registry version matches the version shipped by the host.
+const hostPackages = new Map()
+for await (const path of glob(workspace.packages.filter(pattern => !pattern.startsWith('!'))
+  .map(pattern => join(pattern, 'package.json')), {
+  exclude: workspace.packages.filter(pattern => pattern.startsWith('!'))
+    .map(pattern => join(pattern.slice(1), 'package.json')),
+})) {
+  const pluginRelative = relative(resolve(pluginsRoot), resolve(path))
+  if (!pluginRelative.startsWith('../') && pluginRelative !== '..') continue
+  const manifest = JSON.parse(await readFile(path, 'utf8'))
+  if (!manifest.name?.startsWith('@deepseek-ai/')) continue
+  if (hostPackages.has(manifest.name)) throw new Error(`duplicate host package: ${manifest.name}`)
+  hostPackages.set(manifest.name, `link:${dirname(path)}`)
+}
+if (!hostPackages.has('@deepseek-ai/cordis')) {
+  throw new Error('the base workspace must contain @deepseek-ai/cordis before adding plugins')
+}
+workspace.overrides ??= {}
+// A version-qualified selector takes precedence over an unqualified override.
+// Remove those for host-owned names so they cannot reintroduce registry copies.
+for (const selector of Object.keys(workspace.overrides)) {
+  const target = selector.split('>').at(-1)
+  if ([...hostPackages.keys()].some(name => target === name || target.startsWith(`${name}@`))) {
+    delete workspace.overrides[selector]
+  }
+}
+for (const [name, target] of [...hostPackages].sort(([a], [b]) => a.localeCompare(b))) {
+  workspace.overrides[name] = target
+}
+
 for (const pattern of PLUGIN_PATTERNS) {
   if (!workspace.packages.includes(pattern)) workspace.packages.push(pattern)
 }
@@ -123,6 +159,7 @@ for (const [name, { allowed, source }] of decisions) {
 }
 
 await writeFile(WORKSPACE_FILE, dump(workspace, { lineWidth: -1, noRefs: true }))
+console.log(`workspace prepared: ${hostPackages.size} host package overrides (framework, DSH and peers)`)
 console.log(adopted.length === 0
   ? 'workspace prepared: no build decision to adopt'
   : `workspace prepared, adopted ${adopted.length} build decision(s): ${adopted.join(', ')}`)

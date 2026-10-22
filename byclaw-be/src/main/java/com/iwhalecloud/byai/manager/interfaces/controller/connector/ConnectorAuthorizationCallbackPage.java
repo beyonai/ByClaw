@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.connector;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import org.springframework.context.i18n.LocaleContextHolder;
+
 final class ConnectorAuthorizationCallbackPage {
     private ConnectorAuthorizationCallbackPage() {
     }
@@ -7,13 +10,13 @@ final class ConnectorAuthorizationCallbackPage {
     static String render(boolean connected) {
         String stateClass = connected ? "success" : "failed";
         String symbol = connected ? "&#10003;" : "!";
-        String title = connected ? "GitHub 授权成功" : "GitHub 授权未完成";
+        String title = connected ? I18nUtil.get("connector.callback.successTitle") : I18nUtil.get("connector.callback.failedTitle");
         String message = connected
-            ? "ByClaw 已获得您的 GitHub 授权，此页面将自动关闭。"
-            : "请返回 ByClaw 查看详细信息并重新授权。";
+            ? I18nUtil.get("connector.callback.successMessage")
+            : I18nUtil.get("connector.callback.failedMessage");
         return """
             <!doctype html>
-            <html lang="zh-CN">
+            <html lang="%s">
             <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -41,11 +44,12 @@ final class ConnectorAuthorizationCallbackPage {
                 <div class="icon" aria-hidden="true">%s</div>
                 <h1>%s</h1>
                 <p>%s</p>
-                <button type="button" onclick="window.close()">关闭页面</button>
+                <button type="button" onclick="window.close()">%s</button>
               </main>
               <script>setTimeout(function () { window.close(); }, 1200);</script>
             </body>
             </html>
-            """.formatted(title, stateClass, symbol, title, message);
+            """.formatted(LocaleContextHolder.getLocale().toLanguageTag(), title, stateClass, symbol, title, message,
+                I18nUtil.get("connector.callback.close"));
     }
 }

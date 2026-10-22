@@ -9,6 +9,15 @@ const fields = [
   { key: 'smtpHost', label: 'SMTP 地址', inputType: 'text' as const, maxLength: 255 },
 ];
 
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+beforeEach(() => {
+  mockLocale = 'zh-CN';
+});
+
 it('groups custom IMAP fields without changing submitted credential keys', async () => {
   const submit = jest.fn();
   render(
@@ -157,4 +166,33 @@ it('keeps advanced defaults submitted while showing only the token initially', a
   await waitFor(() =>
     expect(submit).toHaveBeenCalledWith({ apiToken: 'test-token', modelProtocol: 'VOLCENGINE_IMAGE' })
   );
+});
+
+it('localizes advanced configuration and required-field messages after a locale change', async () => {
+  const field = {
+    key: 'apiToken',
+    label: 'API Token',
+    inputType: 'password' as const,
+    maxLength: 2048,
+    advanced: true,
+  };
+  const form = (
+    <Form>
+      <CredentialFields fields={[field]} />
+      <Button htmlType="submit">Submit</Button>
+    </Form>
+  );
+  const view = render(form);
+  expect(screen.getByText('高级配置')).toBeInTheDocument();
+  mockLocale = 'en-US';
+  view.rerender(
+    <Form>
+      <CredentialFields fields={[field]} />
+      <Button htmlType="submit">Submit</Button>
+    </Form>
+  );
+  fireEvent.click(screen.getByText('Advanced settings'));
+  fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+  expect(await screen.findByText('Please enter API Token')).toBeInTheDocument();
+  expect(screen.getByLabelText('API Token')).toHaveAttribute('id', 'apiToken');
 });

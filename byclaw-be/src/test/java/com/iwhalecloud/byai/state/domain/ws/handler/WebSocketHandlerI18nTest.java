@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -27,7 +28,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-class WebSocketHandlerI18nTest {
+class WebSocketHandlerI18nTest extends I18nTestSupport {
     @Test
     void tenantTaskPlanLookupDoesNotFailTheActiveChat() {
         TenantContextService tenantContextService = mock(TenantContextService.class);
@@ -192,8 +193,12 @@ class WebSocketHandlerI18nTest {
         }
     }
 
-    @Test
-    void tenantChatFailureUsesCorrelatedWebSocketErrorFrame() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|租户聊天失败，请稍后重试",
+        "en-US|Tenant chat failed. Please try again later."
+    }, delimiter = '|')
+    void tenantChatFailureUsesCorrelatedWebSocketErrorFrame(String language, String expected) {
         TenantContextService tenantContextService = mock(TenantContextService.class);
         org.mockito.Mockito.when(tenantContextService.validate("123"))
             .thenReturn(new TenantRequestContext(1L, 123L, "MEMBER"));
@@ -212,9 +217,9 @@ class WebSocketHandlerI18nTest {
         channel.attr(Constant.ATT_ENTERPRISE_ID).set("123");
         try {
             channel.writeInbound(new TextWebSocketFrame(
-                "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\"}"));
+                "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\",\"language\":\"" + language + "\"}"));
             TextWebSocketFrame error = channel.readOutbound();
-            assertThat(error.text()).contains("ERROR", "chat-1", "123");
+            assertThat(error.text()).contains("ERROR", "chat-1", "123", expected).doesNotContain("sandbox starting");
             error.release();
             assertThat(TenantRequestContextHolder.get()).isNull();
         }

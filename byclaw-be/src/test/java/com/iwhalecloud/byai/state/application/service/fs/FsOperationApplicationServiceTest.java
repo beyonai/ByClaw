@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.fs;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -43,7 +45,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class FsOperationApplicationServiceTest {
+class FsOperationApplicationServiceTest extends I18nTestSupport {
 
     @Mock
     private UserFS userFS;

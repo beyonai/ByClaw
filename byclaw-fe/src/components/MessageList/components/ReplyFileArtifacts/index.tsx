@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { getVoicePlaybackEpoch } from '@/utils/voicePlayback';
 import ImageArtifactGallery from '../ImageArtifactGallery';
 import { isSpeechArtifactPath, structuredAudioPaths, structuredImagePaths } from '@/utils/imageArtifacts';
@@ -62,6 +63,7 @@ function ReplyFileArtifacts({
   autoPlay?: boolean;
   userId?: string | number;
 }) {
+  const intl = useIntl();
   const [artifacts, setArtifacts] = useState<ChatFileArtifact[]>([]);
   const answerText = useMemo(
     () => [message.text, message.finalContent, getDisplayAnswer(message.messageList)].filter(Boolean).join('\n'),
@@ -193,7 +195,7 @@ function ReplyFileArtifacts({
               }
               autoPlayEpoch={playbackEpoch}
               autoPlay={autoPlay}
-              label="语音摘要"
+              label={intl.formatMessage({ id: 'voice.summary' })}
               variant="assistant"
               loadAudio={async () => (await fileItem.downloadRequest!()).file}
               transcribeAudio={() =>

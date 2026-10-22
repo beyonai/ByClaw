@@ -6934,6 +6934,824 @@
           }
         }
       }
+    },
+    "/internal/v1/group-chats/{sourceId}/forward-targets": {
+      "get": {
+        "summary": "Strict same-tenant forwarding targets; no enterpriseId query accepted",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "pageNum",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Trimmed literal substring; percent, underscore and backslash are data"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardTargetPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{sourceId}/forward-requests": {
+      "post": {
+        "summary": "Prepare forwarding; BE public route uses /message-forwards; always 202 including zero attachments",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{sourceId}/forward-requests/{requestId}": {
+      "get": {
+        "summary": "Original actor/exact tenant/source receipt; source-group leave is allowed",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{sourceId}/forward-requests/{requestId}/retry": {
+      "post": {
+        "summary": "Retry original actor selected targets; successful message IDs remain immutable",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardRetry"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{targetId}/messages/{messageId}/forward-items": {
+      "get": {
+        "summary": "Current target USER read permission and actual bound message; no source membership required",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "targetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "description": "Opaque cursor bound to tenant, target group, current message and snapshotVersion; cross-binding/unknown boundary is 404"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardItemPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{sourceId}/forward-requests/{requestId}/complete-text": {
+      "post": {
+        "summary": "Complete server-proven resource-free snapshots using per-target atomic publication",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FORWARD_INVALID_REQUEST: strict forwarding input/pagination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Service authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fixed tenant/generation identity mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_ACCESSIBLE: unknown or cross-bound current target/message/attachment/cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or operation state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not READY or authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{id}/messages/{messageId}/recall/undo": {
+      "post": {
+        "summary": "UNDO_RECALL_MESSAGE",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCommand"
+              }
+            }
+          }
+        },
+        "description": "The original recall operator may restore message visibility within 120 seconds. Payload must include messageId and the recalledAt epoch milliseconds from the recall response. Cancelled tasks and executions remain cancelled."
+      }
     }
   },
   "components": {
@@ -7067,7 +7885,8 @@
               "SAVE_PENDING_PUBLICATION",
               "DELETE_PENDING_PUBLICATION",
               "RECALL_MESSAGE",
-              "SEND_GROUP_MESSAGE"
+              "SEND_GROUP_MESSAGE",
+              "UNDO_RECALL_MESSAGE"
             ]
           },
           "tenantMemberUserIds": {
@@ -7364,6 +8183,303 @@
             }
           }
         ]
+      },
+      "ForwardCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clientRequestId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9:_-]{1,64}$"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["SINGLE", "MERGED"]
+          },
+          "messageIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "targetSessionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          }
+        },
+        "required": ["clientRequestId", "mode", "messageIds", "targetSessionIds"]
+      },
+      "ForwardRetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "targetSessionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          }
+        },
+        "required": ["targetSessionIds"]
+      },
+      "ForwardOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "state": {
+            "enum": ["RUNNING", "SUCCEEDED", "PARTIAL_FAILED", "FAILED"]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "targetSessionId": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}$"
+                },
+                "state": {
+                  "enum": ["PENDING", "COPYING", "READY", "SUCCEEDED", "FAILED"]
+                },
+                "messageIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  }
+                },
+                "errorCode": {
+                  "type": ["string", "null"]
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["targetSessionId", "state", "messageIds", "errorCode", "retryable"]
+            }
+          }
+        },
+        "required": ["requestId", "state", "targets"],
+        "description": "Typed internal raw receipt. BE wraps ResponseUtil once and projects requestId to public forwardRequestId and each target state to public status. No frozen content or physical locators."
+      },
+      "ForwardReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": ["string", "null"]
+          },
+          "resourceName": {
+            "type": "string"
+          },
+          "resourceType": {
+            "type": ["string", "null"]
+          },
+          "resourceCode": {
+            "type": ["string", "null"]
+          },
+          "extData": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["id", "resourceName"]
+      },
+      "ForwardAttachment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fileId": {
+            "type": ["string", "null"]
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "filePath": {
+            "type": "string"
+          },
+          "fileUrl": {
+            "type": ["string", "null"]
+          },
+          "cloudResourceId": {
+            "type": ["string", "null"]
+          },
+          "mediaType": {
+            "type": ["string", "null"]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["fileName", "filePath", "size"]
+      },
+      "ForwardItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "selectedMessageId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "selectedMergedCard": {
+            "type": "boolean"
+          },
+          "sourceMessageId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw frozen content; literal tokens unchanged"
+          },
+          "speaker": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": ["USER", "AGENT"]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,18}$"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["type", "id", "name"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resourceList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForwardReference"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForwardAttachment"
+            }
+          }
+        },
+        "required": [
+          "itemId",
+          "selectedMessageId",
+          "selectedMergedCard",
+          "sourceMessageId",
+          "ordinal",
+          "content",
+          "speaker",
+          "createdAt",
+          "resourceList",
+          "attachments"
+        ]
+      },
+      "ForwardItemPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForwardItem"
+            }
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["items", "pageSize", "hasMore", "nextCursor"]
+      },
+      "ForwardTargetPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pageNum": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enterpriseId": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}$"
+                },
+                "projectId": {
+                  "type": ["string", "null"]
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": ["sessionId", "name", "enterpriseId", "projectId", "role"]
+            }
+          }
+        },
+        "required": ["pageNum", "pageSize", "total", "totalPages", "list"]
       }
     }
   }

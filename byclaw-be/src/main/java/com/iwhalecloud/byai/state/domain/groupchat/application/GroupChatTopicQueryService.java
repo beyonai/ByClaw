@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -109,7 +111,7 @@ public class GroupChatTopicQueryService {
             return new Cursor(new Date(time), messageId, topicId);
         }
         catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("Invalid topic cursor");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.topic.cursorInvalid"));
         }
     }
 

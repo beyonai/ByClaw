@@ -25,6 +25,10 @@
 }
 
 .attachment {
+  // 上传入口通过 flex 对齐图标，避免内联图标的文字基线偏移。
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 18px !important;
   color: #666;
   cursor: pointer;

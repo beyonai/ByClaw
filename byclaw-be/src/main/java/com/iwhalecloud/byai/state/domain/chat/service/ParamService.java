@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+
+
 import com.iwhalecloud.byai.state.application.service.asr.VoiceAudioService;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -153,6 +156,14 @@ public class ParamService {
         AuthContextBo authContextBo = resourceAuthContextService.getAuthContextBo();
 
         AssistantChatDto assistantChatDto = ctx.getAssistantChatDto();
+        // Existing input is server-owned; quoted backgrounds never mark the whole active request passive.
+        if (ctx.existingUserMessage != null && ForwardRuntimeProjection.isSnapshotOnly(ctx.existingUserMessage.getMetadata())) {
+            if (java.util.Objects.equals(assistantChatDto.getChatContent(), ctx.existingUserMessage.getMessageContent())) {
+                assistantChatDto.setChatContent(ForwardRuntimeProjection.projectMetadata(assistantChatDto.getChatContent(), ctx.existingUserMessage.getMetadata()));
+            }
+            assistantChatDto.setResourceList(Collections.emptyList());
+            assistantChatDto.setFiles(null);
+        }
         Integer isDebug = assistantChatDto.getIsDebug();
         List<ResourceVo> resourceList = assistantChatDto.getResourceList();
 
@@ -176,7 +187,7 @@ public class ParamService {
             && digitalEmployeeGroupApplicationService.isGroup(assistantChatDto.getAgentId())) {
             SsResource group = ssResourceService.findById(assistantChatDto.getAgentId());
             if (group == null) {
-                throw new ManagerRuntimeException("数字员工组不存在或已停用");
+                throw new ManagerRuntimeException(I18nUtil.get("employee.group.inactive"));
             }
             validateOrchestratorRef(assistantChatDto.getOrchestrator(), group.getResourceId());
             Map<String, Object> orchestrator = new HashMap<>();
@@ -273,7 +284,7 @@ public class ParamService {
         String id = String.valueOf(orchestrator.get("id"));
         if (!"byclaw.orchestrator-ref/v1".equals(schemaVersion) || !"EXPERT_TEAM".equals(kind)
             || !String.valueOf(groupId).equals(id)) {
-            throw new ManagerRuntimeException("orchestrator 与当前数字员工组不一致");
+            throw new ManagerRuntimeException(I18nUtil.get("employee.group.orchestratorMismatch"));
         }
     }
 
@@ -957,7 +968,10 @@ public class ParamService {
                 continue;
             }
             // user 消息若关联文件，按 Python message_and_files 的形式前置 markdown 文件链接
-            if ("user".equals(role)) {
+            if (ForwardRuntimeProjection.isSnapshotOnly(msg.getMetadata())) {
+                content = ForwardRuntimeProjection.projectMetadata(content, msg.getMetadata());
+            }
+            else if ("user".equals(role)) {
                 content = prependUserMessageFiles(msg.getRelatedResources(), content);
             }
             Map<String, String> entry = new HashMap<>(2);

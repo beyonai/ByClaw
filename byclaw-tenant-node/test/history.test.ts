@@ -43,6 +43,67 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("reads current target-group nicknames for old forwards without changing source snapshots", async () => {
+    const { service, repo } = setup();
+    const sender = "9007199254740993";
+    const source = message({
+      creatorId: sender,
+      creatorName: sender,
+      metadata: {
+        kind: "FORWARD_MERGED",
+        forward: {
+          forwardId: "900",
+          mode: "MERGED",
+          resourceMode: "SNAPSHOT_ONLY",
+          itemCount: 1,
+          preview: [{ speakerName: "原发言人快照", content: "原文" }],
+        },
+      },
+    });
+    vi.mocked(repo.messages).mockResolvedValue([source]);
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: sender, memName: "当前群昵称" },
+      { memObjType: "AGENT", memObjId: sender, memName: "同 ID 员工" },
+    ]);
+
+    const first = await service.context("20", "30", "101", 60, 30000);
+
+    expect(first.messages[0]?.speaker).toMatchObject({
+      type: "user",
+      userCode: sender,
+      displayName: "当前群昵称",
+    });
+    expect(first.messages[0]?.forward.preview[0].speakerName).toBe("原发言人快照");
+    expect(source.creatorName).toBe(sender);
+    expect(repo.members).toHaveBeenCalledExactlyOnceWith("30");
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: sender, memName: "修改后的昵称" },
+    ]);
+    const next = await service.context("20", "30", "101", 60, 30000);
+    expect(next.messages[0]?.speaker.displayName).toBe("修改后的昵称");
+  });
+  it("leaves missing and blank nicknames for BE userName resolution, including quoted users", async () => {
+    const { repo } = setup();
+    const quoted = message({ creatorId: "21", creatorName: "21" });
+    vi.mocked(repo.messages).mockResolvedValue([quoted]);
+    vi.mocked(repo.members).mockResolvedValue([
+      { memObjType: "USER", memObjId: "20", memName: " \t" },
+      { memObjType: "USER", memObjId: "21", memName: "引用人群昵称" },
+    ]);
+    const result = await displayMessages(repo, [
+      message({ messageId: "101", creatorId: "20", creatorName: "过期用户名", messageRef: "100" }),
+      message({ messageId: "102", creatorId: "22", creatorName: "22" }),
+      message({ messageId: "103", usage: 2, creatorId: "20", creatorName: "员工名称" }),
+      message({ messageId: "104", usage: 5, creatorId: "20" }),
+    ]);
+
+    expect(result[0]?.speaker.displayName).toBeNull();
+    expect(result[0]?.replyTo.speaker.displayName).toBe("引用人群昵称");
+    expect(result[1]?.speaker.displayName).toBeNull();
+    expect(result[2]?.speaker.agentName).toBe("员工名称");
+    expect(result[3]?.speaker.displayName).toBe("系统");
+    expect(repo.members).toHaveBeenCalledExactlyOnceWith("30");
+  });
   it("validates project IDs before reading tenant group membership", async () => {
     const { repo, service } = setup();
     await expect(service.groupProjectAccess("21", "50")).resolves.toEqual({
@@ -415,4 +476,165 @@ describe("tenant history use cases", () => {
     });
     await expect(service.access("20", "30")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
   });
+});
+
+describe("passive forwarding history", () => {
+  it("preserves raw tokens and whitelist attachments without acknowledgements, including replies", async () => {
+    const { repo } = setup();
+    const source = message({
+      creatorId: "99",
+      metadata: {
+        kind: "FORWARD_SINGLE",
+        forward: {
+          forwardId: "9007199254740993",
+          mode: "SINGLE",
+          resourceMode: "SNAPSHOT_ONLY",
+          itemCount: 1,
+        },
+        resourceList: [
+          {
+            id: "opaque",
+            resourceId: "/private/path",
+            resourceName: "需求说明",
+            resourceType: "COMMON_FILE",
+          },
+        ],
+      },
+      messageContent: "{{opaque}}",
+      relatedResources: {
+        files: [
+          {
+            fileId: "88",
+            fileName: "需求说明",
+            mediaType: "text/plain",
+            size: 4,
+            fileUrl: "/commonFile/preview?filePath=%2F.sessions%2F30%2Fcopy.txt",
+          },
+        ],
+      },
+    });
+    vi.mocked(repo.messages).mockResolvedValue([source]);
+    vi.mocked(repo.acknowledgements).mockResolvedValue([{ messageId: "100", userId: "20" }]);
+    const [result] = await displayMessages(
+      repo,
+      [source, message({ messageId: "101", messageRef: "100" })],
+      "20",
+    );
+    expect(result).toMatchObject({
+      content: "{{opaque}}",
+      acknowledgements: [],
+      canAcknowledge: false,
+      forward: { forwardId: "9007199254740993", resourceMode: "SNAPSHOT_ONLY" },
+    });
+    expect(result!.resourceList).toEqual([
+      {
+        id: "opaque",
+        resourceId: "/private/path",
+        resourceName: "需求说明",
+        resourceType: "COMMON_FILE",
+      },
+    ]);
+    expect(result!.attachments[0].mediaType).toBe("text/plain");
+    const reply = (
+      await displayMessages(repo, [message({ messageId: "101", messageRef: "100" })], "20")
+    )[0]!.replyTo;
+    expect(reply.resourceList).toEqual(result!.resourceList);
+    expect(reply.acknowledgements).toEqual([]);
+    const recalled = (
+      await displayMessages(repo, [{ ...source, recalledAt: new Date() }], "20")
+    )[0]!;
+    expect(recalled.resourceList).toEqual([]);
+    expect(recalled.attachments).toEqual([]);
+    expect(recalled.forward).toBeUndefined();
+  });
+});
+
+it("exports a snapshot to Agent as names and descriptive attachment fields only", async () => {
+  const { service, repo } = setup();
+  const source = message({
+    metadata: {
+      kind: "FORWARD_SINGLE",
+      forward: { resourceMode: "SNAPSHOT_ONLY", forwardId: "800", mode: "SINGLE", itemCount: 1 },
+      resourceList: [
+        {
+          id: "opaque",
+          resourceId: "/private",
+          resourceType: "COMMON_FILE",
+          resourceName: "需求{{HUMAN_21}}",
+          resourceCode: "secret",
+        },
+        { id: "HUMAN_21", resourceName: "不应展开" },
+      ],
+    },
+    messageContent: "{{opaque}} literal /user/body",
+    relatedResources: {
+      files: [
+        {
+          fileId: "88",
+          fileName: "需求.pdf",
+          fileUrl: "/download",
+          mediaType: "application/pdf",
+          size: 42,
+        },
+      ],
+    },
+  });
+  vi.mocked(repo.messages).mockResolvedValue([source]);
+  vi.mocked(repo.countMessages).mockResolvedValue(1);
+  const result = await service.context("20", "30", "101", 60, 30000, true);
+  expect(result.messages[0]).toMatchObject({
+    content: "需求{{HUMAN_21}} literal /user/body",
+    attachments: [{ fileName: "需求.pdf", mediaType: "application/pdf", size: 42 }],
+  });
+  expect(result.messages[0]).not.toHaveProperty("resourceList");
+  expect(JSON.stringify(result)).not.toMatch(/\/private|\/download|secret|不应展开/);
+});
+
+it("bounds merged preview by code points and never exposes enriched entry fields", async () => {
+  const { repo } = setup();
+  const entry = { speakerName: "甲", content: "😀".repeat(121), resourceCode: "secret" };
+  const source = message({
+    messageContent: "聊天记录（4 条）",
+    metadata: {
+      kind: "FORWARD_MERGED",
+      forward: {
+        forwardId: "9007199254740993",
+        mode: "SINGLE",
+        resourceMode: "SNAPSHOT_ONLY",
+        itemCount: 4,
+        preview: [entry, entry, entry, entry],
+        physicalKey: "secret",
+      },
+      resourceList: [{ id: "opaque", resourceCode: "secret" }],
+    },
+  });
+  const result = (await displayMessages(repo, [source], "20"))[0]!;
+  expect(result.resourceList).toEqual([]);
+  expect(result.forward.preview).toHaveLength(3);
+  expect(result.forward.preview[0]).toEqual({ speakerName: "甲", content: "😀".repeat(120) });
+  expect(JSON.stringify(result)).not.toContain("secret");
+});
+
+it("does not restore legacy executable references from a snapshot in traditional history", async () => {
+  const { service, repo } = setup();
+  const ref = {
+    id: "opaque",
+    resourceId: "/private",
+    resourceType: "COMMON_FILE",
+    resourceName: "需求说明",
+    resourceCode: "secret-code",
+    extData: "secret-ext",
+  };
+  const source = message({
+    enterpriseId: "10",
+    metadata: { kind: "FORWARD_SINGLE", resourceList: [ref] },
+    relatedResources: {
+      resourceList: [ref],
+      files: [{ fileId: "88", fileName: "需求.pdf", fileUrl: "/private/download" }],
+    },
+  });
+  vi.mocked(repo.messages).mockResolvedValue([source]);
+  const result = await service.byIds("20", ["100"]);
+  expect(JSON.stringify(result)).not.toMatch(/secret-code|secret-ext|\/private\/download/);
+  expect(JSON.parse(result[0]!.metadata).forward.resourceMode).toBe("SNAPSHOT_ONLY");
 });

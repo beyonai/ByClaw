@@ -2,10 +2,6 @@ package com.iwhalecloud.byai.gateway.route;
 
 import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,7 +21,6 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatGatewayRequestDecorator;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -41,8 +36,6 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
-import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
@@ -86,9 +79,6 @@ public class RouteService {
     private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
     private static final String SESSION_WORKSPACE_ROOT = "/by/.sessions";
 
-    @Value("${file.storage.local.path}")
-    private String fileStorageLocalPath;
-
     @Autowired
     private GatewayClient gatewayClient;
 
@@ -125,11 +115,6 @@ public class RouteService {
     @Autowired
     private A2aRouteService a2aRouteService;
 
-    @Autowired
-    private ProjectApplicationService projectApplicationService;
-
-    @Autowired
-    private UserBucketNamingService userBucketNamingService;
     @Autowired
     private ProjectService projectService;
     @Autowired
@@ -200,7 +185,7 @@ public class RouteService {
             && "COORDINATED".equals(scope.get("mode"))
             && String.valueOf(ctx.getAssistantChatDto().getAgentId()).equals(scope.get("coordinatorAgentId"))) {
             throw new com.iwhalecloud.byai.state.domain.chat.service.ChatTurnPreparationException(
-                "群组工作助手的当前执行渠道不支持团队调度，请配置支持团队协作的执行渠道", null);
+                I18nUtil.get("groupchat.team.channelUnsupported"), null);
         }
         if (interfaceIntegration) {
             interfaceRouteService.route(ctx);
@@ -860,70 +845,18 @@ public class RouteService {
     }
 
     /**
-     * 所有会话均在当前会话的过程文件目录执行，避免同一项目下的会话互相覆盖产物。
+     * 只解析会话的容器内工作目录。目录创建由 Harness 负责，BE 不访问挂载卷。
      */
     private String resolveSandboxWorkspace(String sessionId) {
         if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException("会话工作目录解析失败：缺少会话 ID");
+            throw new BdpRuntimeException(I18nUtil.get("chat.workspace.missingSession"));
         }
-        ensureConversationWorkspaceExists(sessionId);
         return SESSION_WORKSPACE_ROOT + "/" + sessionId;
     }
 
-    private void ensureConversationWorkspaceExists(String sessionId) {
-        Path conversationWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(),
-                "by", ".sessions", sessionId)
-            .toAbsolutePath()
-            .normalize();
-        try {
-            if (Files.exists(conversationWorkspace)) {
-                if (!Files.isDirectory(conversationWorkspace)) {
-                    throw new BdpRuntimeException("会话工作目录初始化失败：目标路径不是目录 " + conversationWorkspace);
-                }
-                return;
-            }
-            Files.createDirectories(conversationWorkspace);
-        } catch (IOException | SecurityException e) {
-            throw new BdpRuntimeException("会话工作目录初始化失败：" + conversationWorkspace, e);
-        }
-    }
-
-    /**
-     * 将项目的 NFS 实际路径转换为沙箱内用户桶根目录下的绝对路径。
-     *
-     * @param projectId 项目 ID
-     * @return 以正斜杠开头的沙箱项目路径
-     */
+    /** 只传递容器内路径；目录由沙箱中的 Harness 初始化，不依赖 BE 本机挂载。 */
     private String resolveSandboxProjectWorkspace(Long projectId) {
-        Path projectWorkspace = projectApplicationService.getProjectWorkspacePath(projectId)
-            .toAbsolutePath().normalize();
-        Path userBucketRoot = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket())
-            .toAbsolutePath().normalize();
-        if (!projectWorkspace.startsWith(userBucketRoot)) {
-            return toSandboxAbsolutePath(projectWorkspace.toString());
-        }
-
-        return toSandboxAbsolutePath(userBucketRoot.relativize(projectWorkspace).toString());
-    }
-
-    /**
-     * 将路径分隔符统一为正斜杠，并确保路径以正斜杠开头。
-     *
-     * @param path 待转换路径
-     * @return 沙箱内绝对路径
-     */
-    private String toSandboxAbsolutePath(String path) {
-        String normalizedPath = path.replace('\\', '/');
-        return normalizedPath.startsWith("/") ? normalizedPath : "/" + normalizedPath;
-    }
-
-    /**
-     * 解析当前登录用户的用户桶名称。
-     *
-     * @return 当前登录用户对应的规范化用户桶名称
-     */
-    private String resolveCurrentUserBucket() {
-        return userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
+        return "/by/projects/" + projectId;
     }
 
     private void restartSandboxWithProgress(ChatProcessContext ctx, String userCode, Long agentId,

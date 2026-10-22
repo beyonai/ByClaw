@@ -625,7 +625,7 @@ public class AuthApplicationService {
         result.setResourceBizType(ssResource.getResourceBizType());
         if ((Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !hasResourceAccessPermission(ssResource)) {
-            throw new BaseException("无权查看资源内容及成员配置");
+            throw new BaseException("auth.resource.content.view.denied");
         }
         result.setExtInfo(buildResourceExtInfo(ssResource));
 
@@ -1536,7 +1536,11 @@ public class AuthApplicationService {
      * 判断指定用户是否具备资源使用权限，不修改当前登录用户上下文。
      */
     public boolean hasResourceUsePermission(SsResource ssResource, Long userId) {
-        if (ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
+        return hasResourceUsePermission(ssResource, userId, true);
+    }
+
+    private boolean hasResourceUsePermission(SsResource ssResource, Long userId, boolean ambientDefaults) {
+        if (ambientDefaults && ssResource != null && userId != null && userId.equals(CurrentUserHolder.getCurrentUserId())
             && (Boolean.TRUE.equals(ssResource.getViewAuthControlled()) || Boolean.TRUE.equals(ssResource.getUseAuthControlled()))
             && !Objects.equals(ssResource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         if (ssResource == null || ssResource.getResourceId() == null
@@ -1548,7 +1552,7 @@ public class AuthApplicationService {
             return false;
         }
         if (userId.equals(ssResource.getCreateBy())
-            || (userId.equals(CurrentUserHolder.getCurrentUserId())
+            || (ambientDefaults && userId.equals(CurrentUserHolder.getCurrentUserId())
             && isCurrentUserBoundDefaultPersonalResource(ssResource))) {
             return true;
         }
@@ -1605,6 +1609,23 @@ public class AuthApplicationService {
             .filter(grant -> isEffectiveResourceUseGrant(grant, new Date())).toList();
         return grants.stream().anyMatch(grant -> Color.RED.equalsIgnoreCase(grant.getGrantToType()))
             && grants.stream().noneMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
+    }
+
+    /** Forwarding always requires exact tenant scope and uses the persisted actor, not ambient request defaults. */
+    public boolean hasResourceForwardReadPermission(SsResource resource, Long userId, Long enterpriseId) {
+        if (resource == null || userId == null || enterpriseId == null || !Objects.equals(resource.getComAcctId(), enterpriseId)
+            || Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())) return false;
+        if (ResourceBizTypeEnum.KG_CLOUD.name().equals(resource.getResourceBizType())) {
+            return projectService.findByCloudResourceId(resource.getResourceId()).stream()
+                .filter(project -> !"1".equals(project.getDeleteFlag()) && Objects.equals(project.getEnterpriseId(), enterpriseId))
+                .anyMatch(project -> {
+                    Boolean tenant = tenantProjectCloudAccessService.canRead(project, userId, enterpriseId);
+                    return tenant != null ? tenant : Objects.equals(project.getCreateBy(), userId)
+                        || projectMemberService.isMember(project.getProjectId(), userId);
+                });
+        }
+        return hasResourceUsePermission(resource, userId, false)
+            || isGlobalResourceManagerByUserId(userId);
     }
 
     public boolean hasResourceAccessPermission(SsResource ssResource) {
@@ -2518,7 +2539,7 @@ public class AuthApplicationService {
     public void grantDigitalEmployeesToUser(Collection<Long> resourceIds, Long userId) {
         if (CollectionUtils.isEmpty(resourceIds)) return;
         if (userId == null || userId <= 0 || resourceIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("Invalid digital employee grant target");
+            throw new IllegalArgumentException(I18nUtil.get("employee.grant.targetInvalid"));
         }
         Set<Long> distinctIds = new LinkedHashSet<>(resourceIds);
         LambdaQueryWrapper<PrivilegeGrant> query = new LambdaQueryWrapper<>();
@@ -4032,7 +4053,7 @@ public class AuthApplicationService {
     private void validateEmployeeAuthorizationTarget(SsResource resource) {
         if (employeeGovernance == null) return;
         employeeGovernance.requireNotProtected(resource);
-        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("发布技能为固定快照，请通过员工发布流程更新");
+        if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) throw new BaseException("employee.publication.fixedSkillSnapshot");
         if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isOfficialCopy(resource)
             && !hasResourceManagePermission(resource)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
@@ -4059,7 +4080,7 @@ public class AuthApplicationService {
             vo.setCanUseAuth(canManage);
             vo.setCanOffShelf(canManage && Objects.equals(resource.getResourceStatus(), 2));
             vo.setCanOnShelf(canManage && Objects.equals(resource.getResourceStatus(), 3));
-            vo.setCanDelete(admin && Objects.equals(resource.getResourceStatus(), 3));
+            vo.setCanDelete(employeeGovernance.canDeleteOfficial(resource));
         }
         // 停用按 adminvip 创建者身份隐藏“管理授权”的规则，保留原代码供追溯。
         // if (com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)

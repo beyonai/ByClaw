@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -7,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class OpenAiImageConfigurationVerifierTest {
+class OpenAiImageConfigurationVerifierTest extends I18nTestSupport {
 
     private final OpenAiImageConfigurationVerifier verifier = new OpenAiImageConfigurationVerifier();
 

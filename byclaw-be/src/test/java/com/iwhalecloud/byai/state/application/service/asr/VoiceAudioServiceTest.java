@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.asr;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -27,7 +29,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
-class VoiceAudioServiceTest {
+class VoiceAudioServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     @Mock private FilesService files;
     @Mock private FilesApplicationService storage;
     @Mock private ChatFileArtifactApplicationService artifacts;
@@ -163,4 +170,22 @@ class VoiceAudioServiceTest {
         file.setFileUrl("/commonFile/preview?style=minio&bucketName=byclaw-user42&filePath=/100/voice.mp3");
         return file;
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|fileId 不能为空|语音时长必须为 1 至 300000 毫秒",
+        "en-US|fileId is required|Voice duration must be 1 to 300000 milliseconds"
+    }, delimiter = '|')
+    void invalidVoiceInputUsesTheCurrentLanguageWithoutReadingStorage(String language, String fileId, String duration) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        assertThatThrownBy(() -> service.load(null, null)).isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+            assertThat(error.getStatusCode().value()).isEqualTo(400);
+            assertThat(error.getReason()).isEqualTo(fileId);
+        });
+        assertThatThrownBy(() -> VoiceAudioService.validateDuration(0)).isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+            assertThat(error.getStatusCode().value()).isEqualTo(400);
+            assertThat(error.getReason()).isEqualTo(duration);
+        });
+        verifyNoInteractions(files, storage, artifacts);
+    }
+
 }

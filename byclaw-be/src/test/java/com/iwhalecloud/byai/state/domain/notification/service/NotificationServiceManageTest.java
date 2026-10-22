@@ -21,7 +21,22 @@ import com.iwhalecloud.byai.manager.mapper.notification.ByaiNotificationMapper;
 import com.iwhalecloud.byai.manager.vo.notification.NotificationVO;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class NotificationServiceManageTest {
+class NotificationServiceManageTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void validatesNotificationContentInTheRequestLanguage() {
+        NotificationService service = newService(mock(ByaiNotificationMapper.class), mock(SequenceService.class));
+        NotificationManageDto request = new NotificationManageDto();
+        assertThat(assertThrows(IllegalArgumentException.class, () -> service.createManageNotification(request)))
+            .hasMessage("通知标题不能为空");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(assertThrows(IllegalArgumentException.class, () -> service.createManageNotification(request)))
+            .hasMessage("Notification title cannot be blank");
+        request.setTitle("用户标题");
+        assertThat(assertThrows(IllegalArgumentException.class, () -> service.createManageNotification(request)))
+            .hasMessage("Notification content cannot be blank");
+        assertThat(request.getTitle()).isEqualTo("用户标题");
+    }
 
     @Test
     void queryManagePageDelegatesToNotificationMapper() {

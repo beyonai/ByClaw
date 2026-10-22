@@ -10,7 +10,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 本 skill 是 byCLI 的浏览器与 Adapter 执行层——根据已路由的站点任务选择命令、驱动浏览器、发现或修复 Adapter，并返回执行结果。
 
-常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
+常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、知乎、视频号、百家号、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
 
 ## 路由边界
 
@@ -81,7 +81,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - `--adapter-session` 仅用于 structured help 同时暴露该选项和 `adapterConcurrency.isolatedTabs: true` 的命令；是否允许并行仍由 workflow-specific reference 决定。任一 capability signal 缺失或调用未传该选项时，保持 legacy shared mode，不得猜测版本能力或自行并行
-- 每个 `bycli weixin` 或 `bycli weixin-channels` 命令、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com`、`weixin.sogou.com` 或 `channels.weixin.qq.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则。视频号适用该文档的“视频号统计与鉴权”段，不能套用公众号 token 或登录 TIMEOUT 判定。
+- 每个 `bycli weixin` 或 `bycli weixin-channels` 命令、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com`、`weixin.sogou.com` 或 `channels.weixin.qq.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则。视频号适用该文档的“视频号执行与鉴权”段及 [weixin-channels.md](./references/weixin-channels.md)，不能套用公众号 token 或登录 TIMEOUT 判定。
 - 独立执行 browser-backed `weixin` / `weixin-channels` 命令必须经过 `scripts/weixin-browser-runner.mjs`，状态放在当前已初始化任务目录下。Runner 内部持有登录 Gate 与桥接恢复预算，Agent 不得直接调用底层浏览器命令或 Gate CLI。`knowledge-collection acquire-weixin-channels` 是获准编排入口：它内部复用同一 Gate、统一持有一次桥接预检，外层不得再套 Runner。仅用户明确完成验证后的新确认可传 `--verification-confirmed true`，“再试试”不算确认。
 - If the Runner returns `details.bridgeCode=BRIDGE_UNAVAILABLE` or `BRIDGE_RECOVERY_BUSY`, the outer Agent must not run bridge-bootstrap, doctor, browser start, or daemon restart again. Report the final state; a write retry after `BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL` requires separate explicit user approval and must not use `--verification-confirmed`.
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
@@ -94,6 +94,9 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
 | 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
+| 知乎搜索、回答/文章读取、草稿、发布或创作数据 | `zhihu` Adapter | [zhihu.md](./references/zhihu.md) |
+| 视频号发布、草稿恢复、状态或账号/视频数据 | `weixin-channels` Adapter 与微信 Runner | [weixin-channels.md](./references/weixin-channels.md) + [weixin.md](./references/weixin.md) |
+| 百家号视频下载、视频/图文/文章发布或作品数据 | `baijiahao` Adapter | [baijiahao.md](./references/baijiahao.md) |
 | 抖音作品、分享链接或视频文件归档 | 现成 douyin Adapter；委派采集由 `acquire-douyin` 持有 | 下方「抖音作品读取与下载」 |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | 截图素材归档 / 章节截图加说明 ZIP | 编排器的独立 screenshot-collection；byCLI 只读执行 | [browser.md 的截图素材委派](./references/browser.md#截图素材委派) |
@@ -168,6 +171,16 @@ bycli douyin download "<同一作品目标>" --output "<授权输出目录>" --m
 委派采集归档只由已初始化会话的 `knowledge-collection acquire-douyin` 串行调用 `read` 与 `download --metadata true`，网站执行器不另跑这两条命令、不反向加载采集 Skill、不手工写归档回执。Runner 独占一次 bridge 预检，外层不另跑 bootstrap、doctor 或套其他 Runner。明确认证或人工验证时保留原 session、TAB 和证据并 STOP；只有用户明确完成验证后，根 Agent 才可对原 `acquire-douyin` 命令添加 `--verification-confirmed true` 续采，不重做桥接。字幕缺失不触发认证重试。未委派的直接查询继续遵循本 Skill 的浏览器前置与 STOP 规则。
 
 抖音采集 Runner 默认给下载子进程 300 秒内层预算、给字幕读取 60 秒；显式 `BYCLI_BROWSER_COMMAND_TIMEOUT` 会覆盖两个默认值，外层预算分别至少为内层加 60 秒且不短于 300/120 秒。长视频可在 `acquire-douyin` 命令前设置 `BYCLI_BROWSER_COMMAND_TIMEOUT=900`，外层自动至少为 960 秒；`KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS` 的显式外层值也须满足余量，非法或过短值在执行前拒绝。执行工具预算还须覆盖整次预检、下载、读取和清理。超时结果不确定时保留现场，不自动改超时、item ID、URL 或目录重试。文件落盘和归档成功不等于网页可下载或预览，后两项仅按实际验证结果报告。
+
+### 知乎、视频号与百家号发布
+
+按上方路由读取所需平台 reference，再用 `bycli list -f json` 与目标命令的 `--help -f json` 核对已安装能力。reference 是选型指引，不替代动态发现；缺少命令或参数时报告实际能力，不拼造命令。
+
+这三个平台的发布 Adapter 采用「保存平台草稿 → 重开核对 → 展示给用户确认 → 单独提交 → 查询状态/数据」。用户提出发布任务后先完成授权范围内的准备，展示已保存草稿的账号、标题/描述、正文、视频/图片、封面和 AI/原创声明，取得对当前具体草稿的明确发布确认，才单独执行 `--mode submit --execute --user-confirmed`。准备阶段不得设置 `--user-confirmed`；创建草稿成功不能称为已发布。AI 与原创声明按实际素材和用户提供的信息填写，不猜测版权或代用户接受协议。
+
+同一作品始终使用同一个 `--operation` 本地记录，父目录须已存在；保留记录、源文件及哈希，不换路径或删除记录规避防重。串行完成同一账号的准备、核对与提交，Adapter 自主管理编辑 TAB，不用 raw browser 操作 Adapter TAB。仅平台命令明确支持并要求绑定的恢复模式可使用已人工核对的页面及会话，不能据此泛化 TAB 管理权限。
+
+上传成功、`prepared`、提交尝试、后台已发表、公开可见和数据可读分别报告。根据真实作品类型、精确 ID 和返回的 URL 核验；不把上传 ID、草稿 ID、预览 URL 或后台状态当作公开链接。`submitted=true`、未知提交、验证码或连接中断后先保留现场；不自动重放提交，只在允许继续时执行相应只读状态查询。指标缺失保留 `null` 与原因，真实零保留 `0`，不得跨平台混用指标或日期口径。
 
 ### 通用 flag
 

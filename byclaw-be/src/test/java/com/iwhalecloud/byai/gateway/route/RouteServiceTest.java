@@ -69,7 +69,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 @DisabledOnOs(OS.WINDOWS)
-class RouteServiceTest {
+class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @TempDir
     Path tempDir;
@@ -111,6 +111,11 @@ class RouteServiceTest {
         projectResourceService = mock(ProjectResourceService.class);
         userBucketNamingService = mock(UserBucketNamingService.class);
         messageSource = new StaticMessageSource();
+        var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
+        bundle.setBasename("i18n/messages");
+        bundle.setDefaultEncoding("UTF-8");
+        bundle.setFallbackToSystemLocale(false);
+        messageSource.setParentMessageSource(bundle);
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
         messageSource.addMessage("sandbox.launch.progress.ready", Locale.SIMPLIFIED_CHINESE, "个人助理已启动，正在处理请求");
@@ -138,11 +143,8 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
-        ReflectionTestUtils.setField(routeService, "projectApplicationService", projectApplicationService);
         ReflectionTestUtils.setField(routeService, "projectService", projectService);
         ReflectionTestUtils.setField(routeService, "projectResourceService", projectResourceService);
-        ReflectionTestUtils.setField(routeService, "userBucketNamingService", userBucketNamingService);
-        ReflectionTestUtils.setField(routeService, "fileStorageLocalPath", tempDir.toString());
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -468,12 +470,12 @@ class RouteServiceTest {
             anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
         assertThat(paramsCaptor.getValue())
             .containsEntry("cwd", "/by/.sessions/3");
-        assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/3"))).isTrue();
+        assertThat(tempDir.resolve("byclaw-u1/by/.sessions/3")).doesNotExist();
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
             .containsEntry("project_id", 123L)
             .containsEntry("workspace", "/by/projects/123");
-        verify(projectApplicationService).getProjectWorkspacePath(123L);
+        verifyNoInteractions(projectApplicationService);
     }
 
     @Test
@@ -496,7 +498,7 @@ class RouteServiceTest {
             verify(gatewayClient).sendMessage(anyString(), eq(String.valueOf(sessionId)), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(),
                 argThat(params -> ("/by/.sessions/" + sessionId).equals(params.get("cwd"))), any());
-            assertThat(Files.isDirectory(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId))).isTrue();
+            assertThat(tempDir.resolve("byclaw-u1/by/.sessions/" + sessionId)).doesNotExist();
         }
     }
 
@@ -521,9 +523,7 @@ class RouteServiceTest {
             .containsEntry("cwd", "/by/.sessions/3");
         assertThat(metadataCaptor.getValue())
             .doesNotContainKey("project_info");
-        assertThat(Files.isDirectory(
-            tempDir.resolve("byclaw-u1/by/.sessions/3")))
-            .isTrue();
+        assertThat(tempDir.resolve("byclaw-u1/by/.sessions/3")).doesNotExist();
         verifyNoInteractions(projectApplicationService);
     }
 
@@ -551,18 +551,26 @@ class RouteServiceTest {
 
     @ParameterizedTest
     @CsvSource(value = { "123", "NULL" }, nullValues = "NULL")
-    void route_rejectsMessageWhenConversationWorkspaceCannotBeCreated(Long projectId) throws Exception {
+    void route_dispatchesWithoutTouchingBackendWorkspace(Long projectId) throws Exception {
         Path conversationWorkspace = tempDir.resolve("byclaw-u1/by/.sessions/3");
         Files.createDirectories(conversationWorkspace.getParent());
         Files.createFile(conversationWorkspace);
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(projectId);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
 
-        assertThatThrownBy(() -> routeService.route(ctx))
-            .isInstanceOf(BdpRuntimeException.class)
-            .hasMessageContaining("会话工作目录初始化失败");
+        routeService.route(ctx);
 
-        verifyNoInteractions(gatewayClient);
+        assertThat(conversationWorkspace).isRegularFile();
+        verifyNoInteractions(projectApplicationService);
+        verify(gatewayClient).sendMessage(anyString(), eq("3"), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(),
+            argThat(params -> "/by/.sessions/3".equals(params.get("cwd"))), any());
     }
 
     @ParameterizedTest
@@ -586,7 +594,7 @@ class RouteServiceTest {
     }
 
     @Test
-    void route_keepsActualProjectWorkspaceWhenItIsOutsideCurrentUserBucket() throws Exception {
+    void route_doesNotUseBackendHostPathAsSandboxProjectWorkspace() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setProjectId(123L);
         Project project = mock(Project.class);
@@ -609,7 +617,8 @@ class RouteServiceTest {
             anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         JSONObject projectInfo = (JSONObject) metadataCaptor.getValue().get("project_info");
         assertThat(projectInfo)
-            .containsEntry("workspace", "/external/projects/123");
+            .containsEntry("workspace", "/by/projects/123");
+        verifyNoInteractions(projectApplicationService);
     }
 
     @Test
@@ -1044,4 +1053,32 @@ class RouteServiceTest {
     private String output(ChatProcessContext ctx) {
         return new String(((ByteArrayOutputStream) ctx.res).toByteArray(), StandardCharsets.UTF_8);
     }
+
+    @Test
+    void routeKeepsActiveSelectionWhileAppendingOnlyPassiveNames() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ResourceVo active = new ResourceVo(); active.setResourceId("123"); active.setResourceType(AgentMetaEnum.KG_DOC);
+        active.setResourceName("主动知识库"); active.setResourceCode("active-dataset");
+        ctx.getAssistantChatDto().setResourceList(List.of(active));
+        ctx.getParams().put("resource_list", List.of(active));
+        var snapshot = new com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse.Message();
+        snapshot.setForward(Map.of("resourceMode", "SNAPSHOT_ONLY")); snapshot.setContent("{{opaque}}");
+        ResourceVo passive = new ResourceVo(); passive.setId("opaque"); passive.setResourceId("123"); passive.setResourceType(AgentMetaEnum.KG_DOC);
+        passive.setResourceName("需求说明"); passive.setResourceCode("private-dataset"); passive.setExtData("/private/path");
+        snapshot.setResourceList(List.of(passive));
+        com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection.agentMessage(snapshot);
+        ChatGatewayRequestDecorator decorator = (context, content, params) -> content + "\n" + com.alibaba.fastjson.JSON.toJSONString(snapshot);
+        ObjectProvider<ChatGatewayRequestDecorator> decorators = mock(ObjectProvider.class);
+        when(decorators.orderedStream()).thenAnswer(call -> Stream.of(decorator));
+        ReflectionTestUtils.setField(routeService, "requestDecorators", decorators);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(call -> { ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx)); return successResponse(); });
+        routeService.route(ctx);
+        ArgumentCaptor<Object> body = ArgumentCaptor.forClass(Object.class);
+        ArgumentCaptor<Map<String, Object>> params = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), body.capture(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), params.capture(), any());
+        assertThat(params.getValue().get("resource_list")).isEqualTo(List.of(active));
+        assertThat(body.getValue().toString()).contains("需求说明").doesNotContain("private-dataset", "/private/path");
+    }
+
 }

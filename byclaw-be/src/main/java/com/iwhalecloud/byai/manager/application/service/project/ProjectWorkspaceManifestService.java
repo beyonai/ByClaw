@@ -35,6 +35,8 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 @Service
 public class ProjectWorkspaceManifestService {
 
+
+
     private static final Logger log = LoggerFactory.getLogger(ProjectWorkspaceManifestService.class);
 
     private static final String REPO_TYPE_WORKSPACE = "workspace";

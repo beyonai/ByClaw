@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
@@ -111,7 +113,7 @@ public class UserPrivateParamApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public UserPrivateParamVO save(UserPrivateParamDTO request) {
         if (request == null) {
-            throw new IllegalArgumentException("个人参数配置不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.privateParams.required"));
         }
         Long userId = currentUserId();
         Date now = new Date();
@@ -146,7 +148,7 @@ public class UserPrivateParamApplicationService {
             entity.setParamValueLast4(last4(value));
         }
         else if (create) {
-            throw new IllegalArgumentException("新增个人参数时参数值不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.valueRequired"));
         }
 
         if (create) {
@@ -166,7 +168,7 @@ public class UserPrivateParamApplicationService {
     public Boolean delete(UserPrivateParamDTO request) {
         Long paramId = request == null ? null : request.getParamId();
         if (paramId == null) {
-            throw new IllegalArgumentException("个人参数ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.idRequired"));
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
@@ -187,7 +189,7 @@ public class UserPrivateParamApplicationService {
     public UserPrivateParamVO enable(UserPrivateParamDTO request) {
         Long paramId = request == null ? null : request.getParamId();
         if (paramId == null) {
-            throw new IllegalArgumentException("个人参数ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.idRequired"));
         }
         Long userId = currentUserId();
         UserPrivateParam param = getOwnedParam(userId, paramId);
@@ -306,18 +308,18 @@ public class UserPrivateParamApplicationService {
         UserPrivateParam param = userPrivateParamMapper.selectOne(baseQuery(userId)
             .eq(UserPrivateParam::getParamId, paramId));
         if (param == null) {
-            throw new IllegalArgumentException("个人参数不存在或无权限访问");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.notFound"));
         }
         return param;
     }
 
     private void validateSaveRequest(UserPrivateParamDTO request) {
         if (request == null) {
-            throw new IllegalArgumentException("个人参数配置不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.privateParams.required"));
         }
         String key = normalizeKey(request.getKey());
         if (!PARAM_KEY_PATTERN.matcher(key).matches()) {
-            throw new IllegalArgumentException("参数名必须符合环境变量格式：[A-Z_][A-Z0-9_]{0,127}");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.nameInvalid"));
         }
     }
 
@@ -356,7 +358,7 @@ public class UserPrivateParamApplicationService {
         }
         Long count = userPrivateParamMapper.selectCount(query);
         if (count != null && count > 0) {
-            throw new IllegalArgumentException("参数名已存在");
+            throw new IllegalArgumentException(I18nUtil.get("user.param.nameExists"));
         }
     }
 
@@ -383,14 +385,14 @@ public class UserPrivateParamApplicationService {
 
     private void assertUserManaged(UserPrivateParam param) {
         if (param != null && PARAM_SOURCE_CONNECTOR.equals(param.getParamSource())) {
-            throw new IllegalArgumentException("系统托管连接器参数不允许用户修改");
+            throw new IllegalArgumentException(I18nUtil.get("user.privateParams.systemManaged"));
         }
     }
 
     private Long currentUserId() {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
-            throw new IllegalStateException("当前用户未登录");
+            throw new IllegalStateException(I18nUtil.get("user.loginRequired"));
         }
         return userId;
     }
@@ -398,7 +400,7 @@ public class UserPrivateParamApplicationService {
     private String currentUserCode() {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode)) {
-            throw new IllegalStateException("当前用户编码为空");
+            throw new IllegalStateException(I18nUtil.get("user.codeRequired"));
         }
         return userCode;
     }

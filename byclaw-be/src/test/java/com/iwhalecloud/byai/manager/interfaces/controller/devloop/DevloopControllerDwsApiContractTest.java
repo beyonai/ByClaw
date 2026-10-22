@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 
-class DevloopControllerDwsApiContractTest {
+class DevloopControllerDwsApiContractTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void authStatusKeepsLegacyRouteAndPassesThroughApplicationResponse() throws Exception {

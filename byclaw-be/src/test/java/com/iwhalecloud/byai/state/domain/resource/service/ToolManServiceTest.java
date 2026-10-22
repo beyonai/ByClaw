@@ -44,7 +44,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class ToolManServiceTest {
+class ToolManServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @AfterEach
     void tearDown() {

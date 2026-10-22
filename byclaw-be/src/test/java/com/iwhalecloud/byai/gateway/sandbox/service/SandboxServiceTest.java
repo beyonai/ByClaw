@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import org.mockito.MockedStatic;
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import java.time.OffsetDateTime;
 import java.time.Instant;
 import java.util.Date;
@@ -51,7 +52,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class SandboxServiceTest {
+class SandboxServiceTest extends I18nTestSupport {
 
     @Test
     void userLaunch_rejectsTenantSandboxSpecBeforeCreatingRecord() {
@@ -745,6 +746,7 @@ class SandboxServiceTest {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", mock(SandboxLifecycleFacade.class));
 
         LoginInfo operator = new LoginInfo();
         operator.setUserCode("operator001");

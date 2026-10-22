@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.storage.*;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.*;
@@ -26,6 +28,37 @@ public class PlatformBusinessStorageRouting {
                 : legacy;
     }
 
+    /** 共享目录按启动期执行侧选路；远程失败直接传播，不能执行本地补做。 */
+    public void ensureDirectory(String bucket, String path, Runnable legacy) {
+        if (!gateway.isRemote()) {
+            legacy.run();
+            return;
+        }
+        gateway.call("storage", "ensure-directory",
+                gateway.params("namespace", "workspace", "bucketOrRoot", bucket, "path", path));
+    }
+
+    @FunctionalInterface
+    public interface DirectoryCreation {
+        void run() throws IOException;
+    }
+
+    /** 仅做路径映射；remote 在 BE 打开/检查目录之前转平台，legacy 保留原 IOException 边界。 */
+    public void createDirectoriesWithinRoot(String configuredRoot, java.nio.file.Path target,
+            DirectoryCreation legacy) throws IOException {
+        if (!gateway.isRemote()) {
+            legacy.run();
+            return;
+        }
+        java.nio.file.Path root = java.nio.file.Paths.get(configuredRoot).toAbsolutePath().normalize();
+        java.nio.file.Path directory = target.toAbsolutePath().normalize();
+        if (!directory.startsWith(root)) {
+            throw new IllegalArgumentException("Path traversal detected: " + target);
+        }
+        gateway.call("storage", "create-directories", gateway.params("namespace", "workspace",
+                "bucketOrRoot", "", "path", root.relativize(directory).toString()));
+    }
+
     public FileIngressBackend ingress(FileIngressBackend legacy) {
         if (!gateway.isRemote() || !StorageType.isLocalFilesystem(legacy.getStorageType()))
             return legacy;
@@ -50,7 +83,7 @@ public class PlatformBusinessStorageRouting {
                             file.getSize(),
                             file.getContentType());
                 } catch (IOException failure) {
-                    throw new IllegalStateException("Local file upload failed: " + target, failure);
+                    throw new IllegalStateException(I18nUtil.get("platform.file.upload.failed", target), failure);
                 }
             }
 

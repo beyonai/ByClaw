@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 用户按提示写 ${envAddress} 就必须真被替换——此前没有替换实现,变量被 shell 当字面量,
  * 出厂的健康检查示例脚本必然请求失败。
  */
-class StageVarExpansionTest {
+class StageVarExpansionTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static StageDef stage(String source, String script) {
         StageDef stage = new StageDef();

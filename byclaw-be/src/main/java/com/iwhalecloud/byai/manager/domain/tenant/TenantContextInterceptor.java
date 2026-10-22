@@ -33,21 +33,25 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         String contextToken = request.getHeader("X-Tenant-Context");
         if (enterpriseId == null) {
             if (contextToken != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant identity required");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.identity.required");
             }
             return true;
         }
         if (contextToken == null || contextToken.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant context token required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.token.required");
         }
+        // 云盘存储位于平台，复制按两端资源独立鉴权；租户选择仍须通过正常令牌验证。
+        boolean knowledgeFileCopy = "POST".equalsIgnoreCase(request.getMethod())
+            && "/datasetController/copyKnowledgeFile".equals(path);
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
+            && !knowledgeFileCopy
             && !"/api/v1/sessionResources/query".equals(path)
             && !"/project/session/listByQo".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)
             && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
             && !path.startsWith("/group-chat/tasks/")
             && !CHAT_ROUTES.contains(path)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant route is not ready");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.route.notReady");
         }
         TenantRequestContextHolder.set(tenantContextService.validate(enterpriseId, contextToken));
         return true;

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.concurrent.ArrayBlockingQueue;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,7 +65,7 @@ public class ChatStreamRuntimeCoordinator {
             boolean localListener = sessionStreamManager.isSessionListenerActive(sessionId);
             if (!localListener && !ChatTransport.WEBSOCKET.equals(ctx.transport)) {
                 throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException(
-                    "当前连接无法接收此会话的新回复，请重新连接后再试");
+                    I18nUtil.get("chat.connection.unavailable"));
             }
             // Persist before sending: the listener may be owned by another backend instance.
             chatRuntimeStateService.saveConcurrent(ctx);

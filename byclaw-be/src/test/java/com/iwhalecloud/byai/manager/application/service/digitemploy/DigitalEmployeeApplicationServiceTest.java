@@ -45,6 +45,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
@@ -57,6 +58,7 @@ import com.iwhalecloud.byai.manager.vo.skillgroup.SkillGroupUninstallPreviewVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillPathResolver;
 import org.mockito.ArgumentCaptor;
@@ -64,6 +66,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.MessageSource;
@@ -96,7 +99,7 @@ import static org.mockito.Mockito.spy;
 
 import org.mockito.InOrder;
 
-class DigitalEmployeeApplicationServiceTest {
+class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void editorRejectsNewControlledResourceWithoutUsePermissionButRetainsExistingBinding() {
@@ -487,20 +490,93 @@ class DigitalEmployeeApplicationServiceTest {
         verify(ssResourceService, never()).update(any(SsResource.class));
     }
 
-    @Test
-    void officialEmployeeDeletion_stillRequiresOfficialAdministrator() {
-        ReflectionTestUtils.setField(service, "employeeGovernance", mock(DigitalEmployeeGovernanceService.class));
+    @ParameterizedTest
+    @CsvSource({"author, 2", "adminvip, 7", "PLAT_MAN, 7"})
+    void officialEmployeeDeletion_allowsCreatorOrAdministrator(String identity, Long creatorId) {
+        SsResource resource = prepareOfficialEmployeeDeletion(identity, creatorId, 3, 1L);
         EmployeeIdDTO dto = new EmployeeIdDTO();
         dto.setResourceId(200L);
-        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, 1L);
-        resource.setPublicationSourceId(199L);
-        resource.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
-        when(ssResourceService.findById(200L)).thenReturn(resource);
-        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        service.deleteDigitalEmployee(dto);
+
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.DELETE.getNum());
+        verify(ssResourceService).update(resource);
+        verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(200L,
+            ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        verify(digEmployeeChangeEventPublisher).publishAfterCommitOrNow(
+            DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED, 200L);
+        verify(robotChannelRegistryCoordinator).unregisterForResource(200L);
+    }
+
+    /** 即便通用管理权限通过，也不能越过创建者、企业或 adminvip 资源保护边界。 */
+    @ParameterizedTest
+    @CsvSource({
+        "manager, 7, 1",
+        "author, 2, 99",
+        "adminvip, 7, 99",
+        "PLAT_MAN, 7, 99",
+        "PLAT_MAN, 1, 1"
+    })
+    void officialEmployeeDeletion_rejectsNonCreatorManagerAndProtectedOrOtherEnterpriseCopy(
+        String identity, Long creatorId, Long tenantId) {
+        SsResource resource = prepareOfficialEmployeeDeletion(identity, creatorId, 3, tenantId);
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+
+        assertThatThrownBy(() -> service.deleteDigitalEmployee(dto)).isInstanceOf(BaseException.class);
+        assertThat(resource.getResourceStatus()).isEqualTo(ResourceStatus.OFF_SHELF.getNum());
+        verify(ssResourceService, never()).update(any(SsResource.class));
+        verifyNoInteractions(robotChannelRegistryCoordinator, digEmployeeChangeEventPublisher,
+            suasSuperassistService, resourceArtifactStorageService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "author, 2, 0", "author, 2, 2", "author, 2, -1",
+        "adminvip, 7, 0", "adminvip, 7, 2", "adminvip, 7, -1",
+        "PLAT_MAN, 7, 0", "PLAT_MAN, 7, 2", "PLAT_MAN, 7, -1"
+    })
+    void officialEmployeeDeletion_rejectsCopiesThatAreNotOffShelf(String identity, Long creatorId, int status) {
+        SsResource resource = prepareOfficialEmployeeDeletion(identity, creatorId, status, 1L);
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
+
+        assertThatThrownBy(() -> service.deleteDigitalEmployee(dto))
+            .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
+        assertThat(resource.getResourceStatus()).isEqualTo(status);
+        verify(ssResourceService, never()).update(any(SsResource.class));
+        verifyNoInteractions(robotChannelRegistryCoordinator, digEmployeeChangeEventPublisher);
+    }
+
+    @Test
+    void officialEmployeeDeletion_stillChecksResourceManagementPermission() {
+        SsResource resource = prepareOfficialEmployeeDeletion("author", 2L, 3, 1L);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(false);
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(200L);
 
         assertThatThrownBy(() -> service.deleteDigitalEmployee(dto))
             .isInstanceOf(BaseException.class).hasMessage("user.permission.nopermission");
         verify(ssResourceService, never()).update(any(SsResource.class));
+        verifyNoInteractions(robotChannelRegistryCoordinator, digEmployeeChangeEventPublisher);
+    }
+
+    private SsResource prepareOfficialEmployeeDeletion(String identity, Long creatorId, int status, Long tenantId) {
+        EmployeePublicationApplicationServiceTest.login(identity, 2L, List.of(identity));
+        Users protectedCreator = new Users();
+        protectedCreator.setUserCode("adminvip");
+        when(userService.findById(1L)).thenReturn(protectedCreator);
+        DigitalEmployeeGovernanceService governance = new DigitalEmployeeGovernanceService(userService,
+            mock(ByaiSystemConfigService.class), mock(DigitalEmployeePublicationMapper.class),
+            ssResExtDigEmployeeService);
+        ReflectionTestUtils.setField(service, "employeeGovernance", governance);
+        SsResource resource = buildDigitalEmployee(200L, OwnerType.ENTERPRISE, creatorId);
+        resource.setPublicationSourceId(199L);
+        resource.setResourceStatus(status);
+        resource.setComAcctId(tenantId);
+        when(ssResourceService.findById(200L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        return resource;
     }
 
     /**

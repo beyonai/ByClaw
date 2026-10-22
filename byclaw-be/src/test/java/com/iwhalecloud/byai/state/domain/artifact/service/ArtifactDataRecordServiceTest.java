@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class ArtifactDataRecordServiceTest {
+class ArtifactDataRecordServiceTest extends I18nTestSupport {
 
     private ArtifactDataRecordMapper mapper;
     private ArtifactApplicationService artifactApplicationService;

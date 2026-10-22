@@ -6,7 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /** 代码平台 clone 地址与安全凭据提示。 */
-class DevloopRepoCloneUrlTest {
+class DevloopRepoCloneUrlTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     @DisplayName("github: 保留标准 https 地址，由 Git credential helper 提供凭据")

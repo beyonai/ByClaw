@@ -9,7 +9,6 @@ const MAX_ARRAY = 200
 const SECRET = /(?:token|secret|password|authorization|api[-_]?key|cookie|credential)/iu
 export const name = 'dsh-langfuse'
 
-function parseBool(value, fallback) { return value === undefined || value === '' ? fallback : !['0', 'false', 'off', 'no'].includes(String(value).toLowerCase()) }
 function basic(publicKey, secretKey) { return `Basic ${Buffer.from(`${publicKey}:${secretKey}`).toString('base64')}` }
 function parseHeaders(value) {
   if (!value) return {}
@@ -25,7 +24,7 @@ export function resolveConfig(config = {}, env = process.env) {
   const endpoint = rawEndpoint ? `${String(rawEndpoint).replace(/\/+$/u, '')}${String(rawEndpoint).endsWith('/v1/traces') ? '' : '/v1/traces'}` : baseUrl ? `${baseUrl}/api/public/otel/v1/traces` : ''
   const headers = parseHeaders(config.otlpHeaders ?? env.OTEL_EXPORTER_OTLP_HEADERS)
   if (publicKey && secretKey && !Object.keys(headers).some(key => key.toLowerCase() === 'authorization')) headers.Authorization = basic(publicKey, secretKey)
-  return { enabled: config.enabled ?? parseBool(env.LANGFUSE_ENABLED, true), baseUrl, publicKey, secretKey, endpoint, headers, serviceName: config.serviceName ?? env.LANGFUSE_SERVICE_NAME ?? env.OTEL_SERVICE_NAME ?? 'byclaw-dsh', sampleRate: Math.max(0, Math.min(1, Number(config.sampleRate ?? env.LANGFUSE_SAMPLE_RATE ?? 1))), maxText: Number(config.maxText ?? MAX_TEXT), maxArray: Number(config.maxArray ?? MAX_ARRAY), retryCount: Number(config.retryCount ?? 2), flushIntervalMs: Number(config.flushIntervalMs ?? 1000), userId: config.userId === undefined || config.userId === null || String(config.userId).trim() === '' ? undefined : String(config.userId) }
+  return { enabled: Boolean(baseUrl && publicKey && secretKey), baseUrl, publicKey, secretKey, endpoint, headers, serviceName: config.serviceName ?? env.LANGFUSE_SERVICE_NAME ?? env.OTEL_SERVICE_NAME ?? 'byclaw-dsh', sampleRate: Math.max(0, Math.min(1, Number(config.sampleRate ?? env.LANGFUSE_SAMPLE_RATE ?? 1))), maxText: Number(config.maxText ?? MAX_TEXT), maxArray: Number(config.maxArray ?? MAX_ARRAY), retryCount: Number(config.retryCount ?? 2), flushIntervalMs: Number(config.flushIntervalMs ?? 1000), userId: config.userId === undefined || config.userId === null || String(config.userId).trim() === '' ? undefined : String(config.userId) }
 }
 
 function trim(value, depth, limits) {

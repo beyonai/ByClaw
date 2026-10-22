@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -21,7 +23,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatCandidateSessionServiceTest {
+class GroupChatCandidateSessionServiceTest extends I18nTestSupport {
     private final SessionService sessionService = mock(SessionService.class);
     private final ByaiMessageMapper messageMapper = mock(ByaiMessageMapper.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
@@ -94,4 +96,16 @@ class GroupChatCandidateSessionServiceTest {
         verify(messageMapper).insert(captor.capture());
         return captor.getValue();
     }
+
+    @Test
+    void wrapperRetainsPassiveProvenanceAndOnlyDisplayReferences() {
+        ByaiMessage original = source("{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceType\":\"COMMON_FILE\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceCode\":\"secret\",\"extData\":\"secret-ext\"}]}");
+        var child = createChild(original);
+        var metadata = JSON.parseObject(child.getMetadata());
+        assertThat(metadata.getJSONObject("forward").getString("resourceMode")).isEqualTo("SNAPSHOT_ONLY");
+        assertThat(metadata.getJSONArray("resourceList").getJSONObject(0).getString("id")).isEqualTo("opaque");
+        assertThat(child.getMetadata()).doesNotContain("resourceCode", "extData", "secret");
+        assertThat(original.getMetadata()).contains("secret");
+    }
+
 }
