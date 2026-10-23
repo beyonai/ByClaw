@@ -163,7 +163,11 @@ class TenantNodeClientTest {
             List<String> receivedPaths = endpoint == server ? paths : replacementPaths;
             endpoint.createContext("/", exchange -> {
                 receivedPaths.add(exchange.getRequestURI().toString());
-                if (exchange.getRequestURI().toString().contains("forward-work") || exchange.getRequestURI().toString().contains("forward-maintenance")) serviceActors.add(java.util.Objects.toString(exchange.getRequestHeaders().getFirst("X-Actor-User-Id"), "absent"));
+                String requestPath = exchange.getRequestURI().getPath();
+                if (requestPath.contains("forward-work") || requestPath.contains("forward-maintenance")
+                    || requestPath.contains("/operations/")) {
+                    serviceActors.add(java.util.Objects.toString(exchange.getRequestHeaders().getFirst("X-Actor-User-Id"), "absent"));
+                }
                 String response = exchange.getRequestURI().getPath().endsWith("/health/ready")
                     ? "{\"ready\":true,\"enterpriseId\":\"123\",\"generation\":\"1\",\"dbSandboxRecordId\":\"987\"}"
                     : "{\"groups\":[]}";
@@ -216,6 +220,17 @@ class TenantNodeClientTest {
                 new TypeReference<Map<String,Object>>() {})).containsEntry("groups", List.of());
             assertThat(client.serviceRequest(123L,"POST","/internal/v1/forward-maintenance/scan",Map.of("category","DELIVERY","limit",20),new TypeReference<Map<String,Object>>(){})).containsEntry("groups",List.of());
             assertThat(serviceActors).containsExactly("absent","absent");
+            // 运营关联会话沿用租户就绪验证，不注入普通用户身份。
+            assertThat(client.operationsRequest(123L, "POST", "/internal/v1/operations/groups/30/conversations/query",
+                Map.of("pageNum", 2, "pageSize", 20), new TypeReference<Map<String, Object>>() { }))
+                .containsEntry("groups", List.of());
+            assertThat(serviceActors).containsExactly("absent", "absent", "absent");
+            assertThatThrownBy(() -> client.operationsRequest(123L, "DELETE", "/internal/v1/operations/groups/30/conversations/query",
+                null, new TypeReference<Map<String, Object>>() { }))
+                .isInstanceOf(ResponseStatusException.class);
+            assertThatThrownBy(() -> client.operationsRequest(123L, "POST", "/internal/v1/operations/groups/30/conversations/query?enterpriseId=99",
+                null, new TypeReference<Map<String, Object>>() { }))
+                .isInstanceOf(ResponseStatusException.class);
             assertThatThrownBy(() -> client.serviceRequest(123L, "GET", "/internal/v1/group-chats", null,
                 new TypeReference<Map<String,Object>>() {})).hasMessageContaining("invalid forward service request");
         }

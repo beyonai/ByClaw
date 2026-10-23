@@ -15,6 +15,8 @@ import { commandRoutes } from "./command-routes.js";
 import { sessionRoutes } from "./session-routes.js";
 import { mirrorRoutes } from "./mirror-routes.js";
 import { schemaRoutes } from "./schema-routes.js";
+import type OperationsQueries from '../../application/OperationsQueries.js';
+import operationsRoutes from './operationsRoutes.js';
 
 import { forwardSourceRoutes } from "./group-forward-source-routes.js";
 import type { ForwardSourceAuthorityReader } from "../../application/group-forward-source-authority.js";
@@ -23,6 +25,7 @@ import type { GroupForwardService } from "../../application/group-forward-servic
 import { groupForwardRoutes } from "./group-forward-routes.js";
 
 export interface HttpServices {
+  operations?: OperationsQueries;
   forwards?: GroupForwardService;
   forwardSources?: ForwardSourceAuthorityReader;
   commands: CommandService;
@@ -99,6 +102,9 @@ export function createApp(
   if (services.forwardSources) forwardSourceRoutes(app, services.forwardSources);
   commandRoutes(app, config, services.commands);
   sessionRoutes(app, services.sessions, services.history);
+  if (services.operations) {
+    operationsRoutes(app, services.operations);
+  }
   if (services.mirror) mirrorRoutes(app, config, services.mirror);
   return app;
 }

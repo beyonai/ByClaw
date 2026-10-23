@@ -45,6 +45,7 @@ public class GroupChatFileQueryService {
         Cursor lastIncluded = null;
         GroupChatFileListResponse response = new GroupChatFileListResponse();
         response.setPageSize(pageSize);
+        long total = 0;
         while (true) {
             List<ByaiMessage> rows = messages.selectGroupFileMessagePage(sessionId, beforeMessageId,
                 includeCursor, MESSAGE_BATCH_SIZE);
@@ -52,15 +53,21 @@ public class GroupChatFileQueryService {
             Map<Long, List<GroupChatContextResponse.Attachment>> projected = context.relatedResourceAttachmentsForMessages(rows);
             for (ByaiMessage row : rows) {
                 List<GroupChatContextResponse.Attachment> attachments = projected.getOrDefault(row.getMessageId(), List.of());
+                // 首屏复用有效附件投影统计全部消息，避免损坏 JSON、空附件和任务元数据被误计数。
+                // 按批读取且只保留当前页文件，续页沿用首屏总数，不再扫描全群。
+                total += attachments.size();
                 // 游标消息也参与查询，从已返回附件的下一项继续，避免多文件消息跨页时丢失剩余项。
                 int start = resume != null && row.getMessageId().equals(resume.messageId())
                     ? (int) Math.min(attachments.size(), (long) resume.attachmentIndex() + 1) : 0;
                 for (int index = start; index < attachments.size(); index++) {
                     // 多发现一个有效附件才声明还有下一页，不按候选消息数量推断文件数量。
                     if (response.getFiles().size() == pageSize) {
-                        response.setHasMore(true);
-                        response.setNextCursor(encodeCursor(sessionId, lastIncluded));
-                        return response;
+                        if (!response.isHasMore()) {
+                            response.setHasMore(true);
+                            response.setNextCursor(encodeCursor(sessionId, lastIncluded));
+                        }
+                        if (resume != null) return response;
+                        break;
                     }
                     GroupChatFileListResponse.FileItem item = new GroupChatFileListResponse.FileItem();
                     item.setMessageId(String.valueOf(row.getMessageId()));
@@ -79,6 +86,9 @@ public class GroupChatFileQueryService {
             if (rows.size() < MESSAGE_BATCH_SIZE) break;
             beforeMessageId = rows.get(rows.size() - 1).getMessageId();
             includeCursor = false;
+        }
+        if (resume == null) {
+            response.setTotal(total);
         }
         return response;
     }

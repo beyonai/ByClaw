@@ -58,19 +58,22 @@ class GroupChatTopicQueryServiceTest extends I18nTestSupport {
 
     @Test
     void cursorRoundTripsGroupAndAllSortKeysAndFetchesOnlyPageDisplay() {
+        when(topics.countVisible(10L)).thenReturn(27L);
         when(topics.selectPage(eq(10L), isNull(), isNull(), isNull(), eq(2)))
             .thenReturn(List.of(topic(1L, 3L, 2000), topic(2L, 4L, 1000)));
         ByaiMessage last = GroupChatTopicServiceTest.message(3L, 1L);
         when(messages.selectVisibleGroupMessagesByIds(10L, List.of(1L, 3L))).thenReturn(List.of(last));
         when(messages.selectVisibleGroupMessagesByIds(10L, List.of(1L))).thenReturn(List.of());
         var result = service.list(10L, 1, null);
+        assertThat(result.getTotal()).isEqualTo(27L);
         assertThat(result.isHasMore()).isTrue();
         assertThat(result.getItems()).hasSize(1);
         assertThat(result.getItems().get(0).getTopicId()).isEqualTo("1");
         assertThat(result.getItems().get(0).getRootMessage()).isNull();
         assertThat(result.getItems().get(0).getLastMessage().getMessageId()).isEqualTo("3");
         verify(context).toMessages(List.of(last), Map.of());
-        service.list(10L, 1, result.getNextCursor());
+        assertThat(service.list(10L, 1, result.getNextCursor()).getTotal()).isNull();
+        verify(topics).countVisible(10L);
         verify(topics).selectPage(10L, new Date(2000), 3L, 1L, 2);
         assertThatThrownBy(() -> service.list(11L, 1, result.getNextCursor()))
             .isInstanceOf(IllegalArgumentException.class);

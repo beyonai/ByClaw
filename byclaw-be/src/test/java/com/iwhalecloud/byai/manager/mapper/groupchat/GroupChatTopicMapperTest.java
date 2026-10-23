@@ -95,6 +95,9 @@ class GroupChatTopicMapperTest {
             var mapper = session.getMapper(ByaiGroupChatTopicMapper.class);
             assertThat(mapper.selectPage(10L, null, null, null, 2))
                 .extracting(ByaiGroupChatTopic::getTopicId).containsExactly(2L, 4L);
+            assertThat(mapper.countVisible(10L)).isEqualTo(2L);
+            assertThat(mapper.countVisible(11L)).isEqualTo(1L);
+            assertThat(mapper.countVisible(12L)).isZero();
             assertThat(mapper.selectPage(10L, new Date(4000), 21L, 2L, 2))
                 .extracting(ByaiGroupChatTopic::getTopicId).containsExactly(4L);
             assertThat(mapper.selectPage(11L, null, null, null, 2))

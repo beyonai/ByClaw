@@ -27,6 +27,7 @@ import { Discovery } from "./infrastructure/discovery/by-framework-discovery.js"
 import { TenantWorker } from "./infrastructure/discovery/tenant-worker.js";
 import { SqlGroupForwardStore } from "./infrastructure/persistence/group-forward-prepare.js";
 import { createApp } from "./interfaces/http/app.js";
+import OperationsQueries from './application/OperationsQueries.js';
 
 /** 组装应用端口与基础设施；连接池、Redis、HTTPS 客户端的关闭由这里统一负责。 */
 export async function bootstrap(config: Config) {
@@ -111,6 +112,7 @@ export async function bootstrap(config: Config) {
       },
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),
+      operations: new OperationsQueries(read, config.enterpriseId),
       connected: () => connection.connected,
       ready: (): boolean => runtime.ready,
       provisioned: () => runtime.provisioned,

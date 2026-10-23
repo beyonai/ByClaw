@@ -2498,12 +2498,17 @@ public class SandboxService {
             if (response == null || !response.isSuccess()) {
                 LOGGER.warn("远程释放沙箱返回失败：{}，原因：{}", sandboxRef(record),
                     response != null ? response.getMessage() : "响应为空");
+                throw new SandboxReleaseException(response == null);
             }
+        }
+        catch (SandboxReleaseException failure) {
+            throw failure;
         }
         catch (Exception e) {
             LOGGER.error("远程释放沙箱失败：{}", sandboxRef(record), e);
+            throw new SandboxReleaseException(true);
         }
-        // 无论远程调用是否成功，都更新本地记录状态
+        // 只有远端确认成功才释放记录与缓存；失败保留 RELEASING，交给既有对账流程核对。
         Date releaseTime = new Date();
         int released = sandboxRecordMapper.updateStatusToReleased(record.getId(), releaseReason, releaseTime,
             record.getLockVersion());

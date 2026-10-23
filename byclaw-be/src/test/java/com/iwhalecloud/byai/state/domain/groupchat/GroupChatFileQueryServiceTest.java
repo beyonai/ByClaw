@@ -80,6 +80,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
         stored.add(upload(200L, 2000, "d"));
         stored.add(upload(50L, 1000, "e"));
         var first = service.list(10L, 2, null);
+        assertThat(first.getTotal()).isEqualTo(5L);
         assertThat(ids(first)).containsExactly("a", "b");
         assertThat(first.getPageSize()).isEqualTo(2);
         assertThat(first.isHasMore()).isTrue();
@@ -89,6 +90,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
         // 下一页保持原来的时间边界，不混入分页期间新发送的消息。
         stored.add(upload(999L, 4000, "new"));
         var second = service.list(10L, 2, first.getNextCursor());
+        assertThat(second.getTotal()).isNull();
         assertThat(ids(second)).containsExactly("c", "d");
         assertThat(second.isHasMore()).isTrue();
         var last = service.list(10L, 2, second.getNextCursor());
@@ -108,6 +110,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
         });
         stored.add(upload(200L, 500, "a", "b", "c"));
         var page = service.list(10L, 2, null);
+        assertThat(page.getTotal()).isEqualTo(3L);
         assertThat(ids(page)).containsExactly("a", "b");
         assertThat(page.isHasMore()).isTrue();
         verify(messages).selectGroupFileMessagePage(10L, null, false, 100);
@@ -130,6 +133,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
         stored.add(metadataOnly);
         var page = service.list(10L, 2, null);
         assertThat(ids(page)).containsExactly("image");
+        assertThat(page.getTotal()).isEqualTo(1L);
         assertThat(page.getFiles().get(0).getAttachment().getMediaType()).isEqualTo("image/png");
 
         assertThat(page.isHasMore()).isFalse();
@@ -151,6 +155,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
     @Test
     void emptyGroupReturnsTerminalPageAndDefaultSizeIsTwenty() {
         var page = service.list(10L, null, null);
+        assertThat(page.getTotal()).isZero();
         assertThat(page.getFiles()).isEmpty();
         assertThat(page.getPageSize()).isEqualTo(20);
         assertThat(page.isHasMore()).isFalse();
@@ -183,6 +188,7 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
         mvc.perform(get("/group-chats/10/files").param("pageSize", "2"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(0))
             .andExpect(jsonPath("$.data.files.length()").value(2))
+            .andExpect(jsonPath("$.data.total").value(3))
             .andExpect(jsonPath("$.data.files[0].messageId").value("100"))
             .andExpect(jsonPath("$.data.files[0].attachment.filePath").value("/uploads/a"))
             .andExpect(jsonPath("$.data.hasMore").value(true))
@@ -242,6 +248,19 @@ class GroupChatFileQueryServiceTest extends I18nTestSupport {
             .andExpect(jsonPath("$.data.files[1].uploaderId").value(nullValue()))
             .andExpect(jsonPath("$.data.files[1].uploaderName").value(nullValue()))
             .andExpect(jsonPath("$.data.files[1].uploaderType").doesNotExist());
+    }
+
+    @Test
+    void firstPageCountsAllBatchesWithoutReturningAllFilesAndRefreshReflectsRecall() {
+        IntStream.range(1, 1002).forEach(index ->
+            stored.add(upload((long) index, index, "shared-file")));
+        var first = service.list(10L, 20, null);
+        assertThat(first.getTotal()).isEqualTo(1001L);
+        assertThat(first.getFiles()).hasSize(20);
+        assertThat(first.isHasMore()).isTrue();
+        stored.get(0).setRecalledAt(new Date());
+        stored.get(1).setRecalledAt(new Date());
+        assertThat(service.list(10L, 20, null).getTotal()).isEqualTo(999L);
     }
 
     private List<String> ids(GroupChatFileListResponse page) {

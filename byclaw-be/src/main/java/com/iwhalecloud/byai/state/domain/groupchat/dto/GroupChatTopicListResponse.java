@@ -7,10 +7,11 @@ import lombok.Data;
 
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 
-/** 话题页不包含精确总数，所有业务 ID 使用字符串。 */
+/** 首屏附带可见话题总数，后续游标页沿用首屏总数；业务 ID 使用字符串。 */
 @Data
 public class GroupChatTopicListResponse {
     private List<Item> items = new ArrayList<>();
+    private Long total;
     private boolean hasMore;
     private String nextCursor;
 

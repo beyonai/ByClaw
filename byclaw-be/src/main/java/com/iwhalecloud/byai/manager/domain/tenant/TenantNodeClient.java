@@ -83,6 +83,21 @@ public class TenantNodeClient {
         return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
     }
 
+    /** 运营查询独立白名单，不向服务请求注入普通用户身份或开放任意 Node 路径。 */
+    public <I, O> O operationsRequest(long enterpriseId, String method, String path, I body,
+                                      TypeReference<O> responseType) {
+        boolean list = "POST".equals(method) && "/internal/v1/operations/groups/query".equals(path);
+        boolean detail = "GET".equals(method) && path.matches("/internal/v1/operations/groups/[1-9][0-9]*");
+        boolean members = "POST".equals(method)
+            && path.matches("/internal/v1/operations/groups/[1-9][0-9]*/members/query");
+        boolean conversations = "POST".equals(method)
+            && path.matches("/internal/v1/operations/groups/[1-9][0-9]*/conversations/query");
+        if (enterpriseId <= 0 || !(list || detail || members || conversations)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "operations.request.invalid");
+        }
+        return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
+    }
+
     private record ServiceIdentity(long enterpriseId, Long userId) { }
 
     private <I, O> O requestBound(ServiceIdentity context, String method, String path, I body, TypeReference<O> responseType) {

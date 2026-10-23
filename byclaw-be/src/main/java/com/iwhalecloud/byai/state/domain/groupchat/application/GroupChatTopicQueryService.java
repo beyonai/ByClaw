@@ -49,6 +49,9 @@ public class GroupChatTopicQueryService {
         List<ByaiGroupChatTopic> rows = topicMapper.selectPage(sessionId, before == null ? null : before.time(),
             before == null ? null : before.messageId(), before == null ? null : before.topicId(), limit + 1);
         GroupChatTopicListResponse response = new GroupChatTopicListResponse();
+        if (before == null) {
+            response.setTotal(topicMapper.countVisible(sessionId));
+        }
         response.setHasMore(rows.size() > limit);
         List<ByaiGroupChatTopic> page = rows.subList(0, Math.min(rows.size(), limit));
         Set<Long> ids = new LinkedHashSet<>();
