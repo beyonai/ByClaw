@@ -44,6 +44,32 @@ describe('TaskExecutionPlan', () => {
     mockTeamSnapshot = undefined;
   });
 
+  it('maximizes a collapsed plan, restores it expanded, and resets on conversation change', () => {
+    const taskPlan: TaskPlanSnapshot = {
+      planId: 'plan',
+      version: 1,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 'root',
+      messageId: '100',
+      tasks: [{ taskId: '1', position: 1, title: 'Visible task', status: 'PENDING' }],
+    };
+    const { rerender } = render(<TaskExecutionPlan taskPlan={taskPlan} />);
+    expect(screen.queryByText('Visible task')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.maximize' }));
+    expect(screen.getByRole('dialog')).toContainElement(screen.getByText('Visible task'));
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.restore' }));
+    expect(screen.getByText('Visible task')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'messageList.taskPlan.title' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.maximize' }));
+    rerender(<TaskExecutionPlan taskPlan={{ ...taskPlan, sessionId: 'other' }} />);
+    expect(screen.getByRole('button', { name: 'messageList.taskPlan.title' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    expect(screen.getByRole('button', { name: 'messageList.taskPlan.maximize' })).toBeInTheDocument();
+  });
+
   it('opens the same member conversation as team activity for existing plans without execution history', () => {
     mockTeamSnapshot = {
       schemaVersion: 2,
@@ -235,6 +261,9 @@ describe('TaskExecutionPlan', () => {
 
     render(<TaskExecutionPlan taskPlan={taskPlan} />);
     fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
+    expect(screen.getByText('Run 1')).toBeInTheDocument();
+    expect(screen.getByText('Run 2')).toBeInTheDocument();
+    expect(screen.getAllByText('Conversation 1')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Implement feature Open latest execution' }));
     expect(mockLocateMessage).toHaveBeenLastCalledWith({
       sessionId: 'child',

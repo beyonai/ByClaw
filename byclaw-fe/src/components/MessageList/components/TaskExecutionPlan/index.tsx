@@ -3,12 +3,14 @@ import {
   CloseCircleOutlined,
   DownOutlined,
   LoadingOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
   MinusCircleOutlined,
   RightOutlined,
   ArrowRightOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
-import { Tooltip } from 'antd';
+import { Modal, Tooltip } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl } from '@umijs/max';
 import type { TaskPlanSnapshot, TaskPlanTask, TaskPlanTaskStatus } from '@/typescript/message';
@@ -45,6 +47,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   const { setSessionId } = useGlobal();
   const teamSnapshot = useAgentTeamsSnapshot(taskPlan.sessionId);
   const [collapsed, setCollapsed] = useState(true);
+  const [maximized, setMaximized] = useState(false);
   const tasks = useMemo(
     () => [...(taskPlan.tasks || [])].sort((left, right) => left.position - right.position),
     [taskPlan.tasks]
@@ -65,6 +68,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   useEffect(() => {
     // Snapshot refreshes may replace planId; only changing conversations resets the user's choice.
     setCollapsed(true);
+    setMaximized(false);
   }, [taskPlan.sessionId]);
 
   const hasRunningTask = tasks.some((task) => task.status === 'IN_PROGRESS');
@@ -87,28 +91,55 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
 
   if (!tasks.length) return null;
 
-  return (
-    <section className={styles.taskPlan} aria-label={intl.formatMessage({ id: 'messageList.taskPlan.title' })}>
-      <button
-        type="button"
-        className={styles.header}
-        aria-label={intl.formatMessage({ id: 'messageList.taskPlan.title' })}
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed((value) => !value)}
-      >
-        <span className={styles.headerTitle}>
-          {hasRunningTask ? (
-            <LoadingOutlined spin className={styles.runningHeaderIcon} />
-          ) : (
-            <UnorderedListOutlined className={styles.headerIcon} />
-          )}
-          <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
-        </span>
-        <span className={`${styles.progress} ${hasRunningTask ? styles.runningProgress : ''}`}>{progress}</span>
-        <span className={styles.chevron} aria-hidden="true">
-          {collapsed ? <RightOutlined /> : <DownOutlined />}
-        </span>
-      </button>
+  const plan = (
+    <section
+      className={`${styles.taskPlan} ${maximized ? styles.maximized : ''}`}
+      aria-label={intl.formatMessage({ id: 'messageList.taskPlan.title' })}
+    >
+      <div className={styles.headerRow}>
+        <button
+          type="button"
+          className={styles.header}
+          aria-label={intl.formatMessage({ id: 'messageList.taskPlan.title' })}
+          aria-expanded={!collapsed}
+          onClick={() => {
+            if (maximized) setMaximized(false);
+            setCollapsed((value) => !value);
+          }}
+        >
+          <span className={styles.headerTitle}>
+            {hasRunningTask ? (
+              <LoadingOutlined spin className={styles.runningHeaderIcon} />
+            ) : (
+              <UnorderedListOutlined className={styles.headerIcon} />
+            )}
+            <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
+          </span>
+          <span className={`${styles.progress} ${hasRunningTask ? styles.runningProgress : ''}`}>{progress}</span>
+          <span className={styles.chevron} aria-hidden="true">
+            {collapsed ? <RightOutlined /> : <DownOutlined />}
+          </span>
+        </button>
+        <Tooltip
+          title={intl.formatMessage({
+            id: maximized ? 'messageList.taskPlan.restore' : 'messageList.taskPlan.maximize',
+          })}
+        >
+          <button
+            type="button"
+            className={styles.sizeButton}
+            aria-label={intl.formatMessage({
+              id: maximized ? 'messageList.taskPlan.restore' : 'messageList.taskPlan.maximize',
+            })}
+            onClick={() => {
+              setCollapsed(false);
+              setMaximized((value) => !value);
+            }}
+          >
+            {maximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+          </button>
+        </Tooltip>
+      </div>
       {!collapsed && (
         <ul className={styles.taskList}>
           {tasks.map((task) => {
@@ -182,69 +213,66 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                   ) : null}
                   {executions.length ? (
                     <span className={styles.executionLinks}>
-                      {executions.map((execution) =>
-                        execution.runs.length ? (
-                          execution.runs.map((run, index) =>
-                            run.sessionId && run.messageId ? (
-                              <button
-                                type="button"
-                                key={`${execution.attemptId || execution.attempt}:${
-                                  run.runId || `${run.sessionId}:${run.messageId}`
-                                }`}
-                                aria-label={`${task.title} ${intl.formatMessage(
-                                  { id: 'messageList.taskPlan.attempt' },
-                                  { attempt: execution.attempt }
-                                )} ${intl.formatMessage(
-                                  { id: 'messageList.taskPlan.executionTurn' },
-                                  { turn: index + 1 }
-                                )}`}
-                                title={execution.assignee}
-                                onClick={() =>
-                                  void locateMessage({
-                                    sessionId: run.sessionId!,
-                                    messageId: run.messageId!,
-                                    preserveAgentContext: true,
-                                  })
-                                }
-                              >
-                                {intl.formatMessage(
-                                  { id: 'messageList.taskPlan.attempt' },
-                                  { attempt: execution.attempt }
-                                )}
-                                {execution.runs.length > 1 && (
-                                  <>
-                                    {' · '}
-                                    {intl.formatMessage(
-                                      { id: 'messageList.taskPlan.executionTurn' },
-                                      { turn: index + 1 }
-                                    )}
-                                  </>
-                                )}
-                              </button>
-                            ) : (
-                              <span
-                                key={`${execution.attemptId || execution.attempt}:${run.runId || index}`}
-                                className={styles.executionUnavailable}
-                              >
-                                {intl.formatMessage(
-                                  { id: 'messageList.taskPlan.attempt' },
-                                  { attempt: execution.attempt }
-                                )}
-                                {' · '}
-                                {intl.formatMessage({ id: 'messageList.taskPlan.executionTurn' }, { turn: index + 1 })}
-                                {' · '}
-                                {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
-                              </span>
-                            )
-                          )
-                        ) : (
-                          <span key={execution.attemptId || execution.attempt} className={styles.executionUnavailable}>
+                      {executions.map((execution) => (
+                        <span className={styles.executionRound} key={execution.attemptId || execution.attempt}>
+                          <span className={styles.roundLabel}>
                             {intl.formatMessage({ id: 'messageList.taskPlan.attempt' }, { attempt: execution.attempt })}
-                            {' · '}
-                            {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
                           </span>
-                        )
-                      )}
+                          {execution.runs.length ? (
+                            execution.runs.map((run, index) =>
+                              run.sessionId && run.messageId ? (
+                                <button
+                                  type="button"
+                                  key={`${execution.attemptId || execution.attempt}:${
+                                    run.runId || `${run.sessionId}:${run.messageId}`
+                                  }`}
+                                  aria-label={`${task.title} ${intl.formatMessage(
+                                    { id: 'messageList.taskPlan.attempt' },
+                                    { attempt: execution.attempt }
+                                  )} ${intl.formatMessage(
+                                    { id: 'messageList.taskPlan.executionTurn' },
+                                    { turn: index + 1 }
+                                  )}`}
+                                  title={execution.assignee}
+                                  onClick={() =>
+                                    void locateMessage({
+                                      sessionId: run.sessionId!,
+                                      messageId: run.messageId!,
+                                      preserveAgentContext: true,
+                                    })
+                                  }
+                                >
+                                  {intl.formatMessage(
+                                    { id: 'messageList.taskPlan.executionTurn' },
+                                    { turn: index + 1 }
+                                  )}
+                                </button>
+                              ) : (
+                                <span
+                                  key={`${execution.attemptId || execution.attempt}:${run.runId || index}`}
+                                  className={styles.executionUnavailable}
+                                >
+                                  {intl.formatMessage(
+                                    { id: 'messageList.taskPlan.attempt' },
+                                    { attempt: execution.attempt }
+                                  )}
+                                  {' · '}
+                                  {intl.formatMessage(
+                                    { id: 'messageList.taskPlan.executionTurn' },
+                                    { turn: index + 1 }
+                                  )}
+                                  {' · '}
+                                  {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
+                                </span>
+                              )
+                            )
+                          ) : (
+                            <span className={styles.executionUnavailable}>
+                              {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
+                            </span>
+                          )}
+                        </span>
+                      ))}
                     </span>
                   ) : task.teamId ? (
                     <span className={styles.executionUnavailable}>
@@ -258,6 +286,24 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
         </ul>
       )}
     </section>
+  );
+  return (
+    <>
+      {!maximized && plan}
+      <Modal
+        open={maximized}
+        title={null}
+        footer={null}
+        closable={false}
+        width="calc(100vw - 32px)"
+        style={{ top: 16, paddingBottom: 0 }}
+        styles={{ body: { padding: 0 } }}
+        onCancel={() => setMaximized(false)}
+        destroyOnHidden
+      >
+        {maximized && plan}
+      </Modal>
+    </>
   );
 };
 

@@ -2180,6 +2180,8 @@ export default {
   // MessageList Component
   'messageList.sqlAnalysis': 'SQL Analysis',
   'messageList.defaultAIName': 'Beyond AI',
+  'messageList.taskPlan.maximize': 'Maximize',
+  'messageList.taskPlan.restore': 'Restore',
   'messageList.taskPlan.title': 'Task execution plan',
   'messageList.taskPlan.updated': 'Task plan updated',
   'messageList.taskPlan.progress': '{completed}/{total} completed',

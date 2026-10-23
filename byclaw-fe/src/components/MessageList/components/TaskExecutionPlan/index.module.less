@@ -253,6 +253,22 @@
   }
 }
 
+.executionRound {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.roundLabel {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .memberConversationLabel {
   display: inline-flex;
   align-items: center;
@@ -274,4 +290,88 @@
 
 .taskReason {
   color: #d14343;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+
+  .header {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.sizeButton {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #7a8596;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #246bfe;
+  }
+}
+
+.maximized {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 80px);
+
+  .taskList {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .header {
+    gap: 2px 6px;
+    padding-right: 30px;
+  }
+
+  .progress {
+    flex-basis: 100%;
+    padding-left: 22px;
+  }
+
+  .progressTrack {
+    flex: 1 1 48px;
+    max-width: 96px;
+  }
+
+  .taskList {
+    gap: 8px;
+    padding: 0 8px 8px;
+  }
+
+  .taskItem {
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 6px;
+    padding: 5px 4px;
+  }
+
+  .executionLinks {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .executionRound {
+    flex: 0 0 auto;
+  }
 }
