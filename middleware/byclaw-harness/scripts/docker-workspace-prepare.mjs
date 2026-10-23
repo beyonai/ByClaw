@@ -118,6 +118,19 @@ for await (const path of glob(workspace.packages.filter(pattern => !pattern.star
 if (!hostPackages.has('@deepseek-ai/cordis')) {
   throw new Error('the base workspace must contain @deepseek-ai/cordis before adding plugins')
 }
+// The image stages the reviewed npm artifact here before preparing its workspace.
+// Override old direct and transitive requests (including version-qualified ones).
+const frameworkManifest = await readFile(join(pluginsRoot, 'by-framework/package.json'), 'utf8')
+  .catch(error => { if (error?.code === 'ENOENT') return undefined; throw error })
+if (frameworkManifest !== undefined) {
+  const framework = JSON.parse(frameworkManifest)
+  if (framework.name !== '@byclaw/by-framework' || framework.version !== '1.7.0-byclaw.1'
+    || framework.byclaw?.dispatch !== 'unbounded') {
+    throw new Error('plugins/by-framework must contain the reviewed unbounded framework artifact')
+  }
+  hostPackages.set(framework.name, `link:${join(pluginsRoot, 'by-framework')}`)
+}
+
 workspace.overrides ??= {}
 // A version-qualified selector takes precedence over an unqualified override.
 // Remove those for host-owned names so they cannot reintroduce registry copies.

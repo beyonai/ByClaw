@@ -28,6 +28,9 @@ ENV DSH_ROOT=/workspace
 USER root
 
 COPY middleware/byclaw-harness/plugins/ /workspace/plugins/
+COPY middleware/byclaw-harness/vendor/by-framework/ /workspace/vendor/by-framework/
+COPY middleware/byclaw-harness/scripts/prepare-by-framework.mjs /workspace/scripts/prepare-by-framework.mjs
+COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /workspace/scripts/verify-by-framework-runtime.mjs
 COPY middleware/byclaw-harness/scripts/docker-plugin-layout.mjs /workspace/scripts/docker-plugin-layout.mjs
 COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/scripts/docker-workspace-prepare.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
@@ -44,8 +47,10 @@ RUN set -eu; \
 # Mount the plugins into the base image's workspace and carry every plugin's
 # own build-script decisions up to this root, approvals and denials alike —
 # see the script for why an unstated denial is what fails the install.
-RUN node scripts/docker-workspace-prepare.mjs plugins \
-    && pnpm install --no-frozen-lockfile
+RUN node scripts/prepare-by-framework.mjs \
+    && node scripts/docker-workspace-prepare.mjs plugins \
+    && pnpm install --no-frozen-lockfile \
+    && node scripts/verify-by-framework-runtime.mjs plugins/byclaw-integration/package.json
 
 # The pinned DSH release needs explicit request reassembly for model failover.
 # Patch only this disposable build workspace, then rebuild the two affected core
@@ -126,6 +131,7 @@ ENV npm_config_registry=${NPM_REGISTRY}
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
+COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 # Shared connector Skills need these executables in the final image. Keep their
 # versions aligned with OpenClaw and check access as the DSH runtime user.
 RUN set -eu; \
@@ -245,6 +251,7 @@ RUN set -eux; \
     node /tmp/prune-dsh-profile.mjs "${BYCLAW_DSH_MANAGED_HOME}/profiles/web/node_modules"; \
     test -z "$(find "${BYCLAW_DSH_MANAGED_HOME}/profiles/web/node_modules" -type f -name '*.map' -print -quit)"; \
     cd "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
+    node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs "$(node -p "require.resolve('@byclaw/dsh-integration/package.json')")"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \

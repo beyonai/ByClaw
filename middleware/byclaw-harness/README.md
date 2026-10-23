@@ -4,6 +4,12 @@ English | [中文](README.zh.md)
 
 This repository maintains the ByClaw plugin suite for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The plugins integrate through DSH services, events, tools, prompts, and bundle layers without modifying DSH core source.
 
+## Framework optimization in Docker
+
+Both `Dockerfile` and `Dockerfile.extensions` include the repository-owned `@byclaw/by-framework@1.7.0-byclaw.1` artifact. Builds verify its SHA-256 and override older dependencies in both the builder workspace and the final profile. No npm publication or developer checkout is needed. The runner consumes messages independently of task completion, retains shutdown draining and checks consumer health. Both stages probe 64 waiting tasks followed by Resume; this validates scheduling, not Redis Cluster or model throughput.
+
+Build from the repository root. See the [framework package guide](vendor/by-framework/README.md) for build commands, in-image verification and source provenance.
+
 ## Plugin index
 
 | Plugin | Package | Responsibility | Documentation |

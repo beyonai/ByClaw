@@ -4,6 +4,12 @@
 
 这个仓库维护 ByClaw 面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的插件套件。插件通过 DSH 服务、事件、工具、系统提示词和 bundle 层接入，不修改 DSH 核心源码。
 
+## Docker 中的框架优化
+
+`Dockerfile` 和 `Dockerfile.extensions` 都包含仓库内固定的 `@byclaw/by-framework@1.7.0-byclaw.1`，构建时校验 SHA-256，并覆盖构建工作区及最终 profile 的旧版本依赖。无需发布 npm 包，也不依赖本地框架源码路径。框架移除了任务完成前阻塞消费循环的并发上限，保留停止时等待在途任务和消费健康检查。两阶段均执行 64 个等待任务与后续 Resume 的回归探针；它验证调度行为，不代表 Redis 集群或实际模型的吞吐能力。
+
+从仓库根目录构建即可包含优化；构建、镜像内验证命令与源码来源见 [框架包说明](vendor/by-framework/README.md)。
+
 ## 插件目录
 
 | 插件 | 包名 | 作用 | 详细文档 |
