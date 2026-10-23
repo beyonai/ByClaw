@@ -143,6 +143,7 @@ interface SsSandboxRecord {
   enterpriseId?: string | number;
   resourceId: number;
   userCode: string;
+  userName?: string;
   sandboxType: string;
   endpoint: string;
   sandboxId?: string;
@@ -1406,6 +1407,15 @@ const SandboxMgr = () => {
       render: renderEllipsisText,
     },
     {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.userName' }),
+      dataIndex: 'userName',
+      align: 'center' as const,
+      fixed: 'left' as const,
+      width: 120,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxType' }),
       dataIndex: 'sandboxType',
       align: 'center' as const,
@@ -2150,7 +2160,7 @@ const SandboxMgr = () => {
             showTotal: (total: number) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
             onChange: handlePaginationChange,
           }}
-          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2690, y: 'calc(100vh - 280px)' }}
+          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2810, y: 'calc(100vh - 280px)' }}
           loading={manualLoading}
           className={styles.table}
         />

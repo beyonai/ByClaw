@@ -161,3 +161,24 @@ test('running endpoints show named links and expand the complete list without na
   expect(await screen.findByRole('link', { name: 'bycli' })).toHaveAttribute('href', 'https://sandbox.example/cli');
   expect(screen.queryByText(/\{"openclaw"/)).not.toBeInTheDocument();
 });
+
+test('shows the user name returned for a user sandbox record', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 1,
+          ownerScope: 'USER',
+          userCode: 'user001',
+          userName: 'Test User',
+          sandboxType: 'openclaw',
+          status: 'RUNNING',
+        },
+      ],
+    })
+  );
+  expect(screen.getByText('Test User')).toBeInTheDocument();
+});

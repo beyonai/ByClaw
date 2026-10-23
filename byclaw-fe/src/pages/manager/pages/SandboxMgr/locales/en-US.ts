@@ -15,6 +15,7 @@ export default {
   'sandboxMgr.table.id': 'ID',
   'sandboxMgr.table.resourceId': 'Resource ID',
   'sandboxMgr.table.userCode': 'User Code',
+  'sandboxMgr.table.userName': 'User Name',
   'sandboxMgr.table.sandboxType': 'Sandbox Type',
   'sandboxMgr.table.sandboxId': 'Sandbox ID',
   'sandboxMgr.table.endpoint': 'Endpoint',

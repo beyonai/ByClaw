@@ -11,6 +11,9 @@ import lombok.Setter;
 @Setter
 public class SandboxRecordView extends SsSandboxRecord {
 
+    /** Display name resolved from the shared Redis user cache for management views. */
+    private String userName;
+
     private String workerId;
 
     /** Null means the registry could not report a value; false means the lease is absent. */

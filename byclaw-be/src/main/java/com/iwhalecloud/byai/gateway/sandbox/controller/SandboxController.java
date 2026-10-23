@@ -48,6 +48,7 @@ import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -481,6 +482,14 @@ public class SandboxController {
                 if (view != null) {
                     view.setStatus(record.getStatus());
                     view.setProviderStatus(record.getStatus());
+                    if (!"TENANT".equals(record.getOwnerScope()) && StringUtils.isNotBlank(record.getUserCode())) {
+                        try {
+                            view.setUserName(ShareCacheUtil.getShareBfmUser(record.getUserCode()).getUserName());
+                        } catch (RuntimeException e) {
+                            log.warn("Failed to resolve sandbox user name from Redis, userCode={}",
+                                record.getUserCode(), e);
+                        }
+                    }
                 }
                 return view;
             }).collect(Collectors.toList());

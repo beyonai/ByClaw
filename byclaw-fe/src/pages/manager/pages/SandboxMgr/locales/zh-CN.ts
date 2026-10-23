@@ -15,6 +15,7 @@ export default {
   'sandboxMgr.table.id': 'ID',
   'sandboxMgr.table.resourceId': '资源ID',
   'sandboxMgr.table.userCode': '用户编码',
+  'sandboxMgr.table.userName': '用户名称',
   'sandboxMgr.table.sandboxType': '沙箱类型',
   'sandboxMgr.table.sandboxId': '沙箱ID',
   'sandboxMgr.table.endpoint': '访问地址',

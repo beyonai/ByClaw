@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
@@ -23,6 +24,7 @@ import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
@@ -118,6 +120,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
+        record.setUserCode("user001");
         record.setSandboxId("live-id");
         record.setSandboxType("openclaw");
         record.setEndpoint(
@@ -126,6 +129,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         when(sandboxRecordMapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(record));
         SandboxRecordView view = new SandboxRecordView();
         view.setId(1L);
+        view.setUserCode("user001");
         view.setSandboxType("openclaw");
         view.setEndpoint(record.getEndpoint());
         view.setWorkerOnline(false);
@@ -133,7 +137,13 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         when(sandboxRecordMapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
         when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
-        ResponseUtil response = controller.listRecords(Map.of());
+        ResponseUtil response;
+        try (var redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_CODE_user001")).thenReturn("1001");
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_1001"))
+                .thenReturn("{\"userId\":1001,\"userCode\":\"user001\",\"userName\":\"Test User\"}");
+            response = controller.listRecords(Map.of());
+        }
 
         assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
         @SuppressWarnings("unchecked")
@@ -141,6 +151,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         @SuppressWarnings("unchecked")
         List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
         assertThat(list).hasSize(1);
+        assertThat(list.get(0).getUserName()).isEqualTo("Test User");
         assertThat(com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport.parseInstanceEndpoints(
             list.get(0).getEndpoint())).containsEntry("openclaw", "http://host/proxy/18789/chat?token=abc")
             .containsEntry("ui", "http://host/proxy/3000?token=abc");
