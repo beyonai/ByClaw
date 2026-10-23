@@ -86,13 +86,48 @@ give up; it then waits before trying again (1 s, doubling to 30 s) and reports
 the cause instead of calling BE on every operation. A spec without an ssh
 endpoint is a configuration error and fails at once.
 
+## Several environments per user
+
+One process may run employees with different needs: a video employee wants a
+media toolchain, a writer a small image. Each need is a named **environment**
+with its own B. The plugin keeps a pool of them (`ctx.toolEnvironments`) and
+mounts `ctx.ssh` as a router: every request goes to the environment of the
+Agent whose driver is running (DSH runs an Agent's turn, tool executions
+included, inside `agents.withInitiator`), so DSH's fs, subprocess, sandbox and
+PTC providers need no change. An Agent is bound to an environment by
+`byclaw-integration` when its template declares one (`toolEnvironment` on the
+employee, or inferred from its Skills' `metadata.openclaw.requires.bins`:
+ffmpeg, libreoffice → `media`); descendants inherit the binding; everything
+else uses `default`. Only one B exists per environment name; the same type is
+never started twice for a user.
+
+Environments are configured with `BYCLAW_TOOL_ENV_ENVIRONMENTS`, a JSON object
+by logical name (`default` is implicit):
+
+```json
+{"media": {"serviceKey": "byclaw-dsh-tools-media"}, "gpu": {}}
+```
+
+With `byclaw-be`, an entry without `serviceKey` sends the name as
+`environment` with the launch and BE maps it to a spec (system parameter
+`BYCLAW_TOOL_ENV_SPECS`); the `sandboxType` BE answers with is used for every
+later call about that B. With `opensandbox`, an entry's `image` overrides the
+default image. `static` serves the default only. Each environment keeps its
+own identity directory (`<stateDir>/environments/<name>`) and ssh alias.
+
+The pool exposes each environment's facts (sandbox id, connected, starting,
+requests in flight, last activity): `dsh-idle-reporter` writes one activity
+entry per started environment under B's own sandbox id, which is what BE's
+reclaim rule for tool sandboxes judges. A read-only `tool_environments` tool
+lets the model list them; it never chooses one.
+
 ## Backends
 
 | `BYCLAW_DSH_TOOL_ENV` | Who creates B | Idle pause | Where the keys come from |
 |---|---|---|---|
 | `static` | nobody: a fixed sshd (development, tests) | no | start sshd with them |
 | `opensandbox` | A, through the OpenSandbox API with a key held in A | yes | B's create request |
-| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | not yet | A's state directory, mounted into B; or the user's BE private parameters (`publishKeys`) |
+| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | release instead (`BYCLAW_TOOL_ENV_RELEASE_ON_IDLE=1`); otherwise BE's reclaim rule | A's state directory, mounted into B; or the user's BE private parameters (`publishKeys`) |
 
 ### `byclaw-be`
 
@@ -196,6 +231,8 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
+| `BYCLAW_TOOL_ENV_ENVIRONMENTS` | JSON object of further environments by logical name (above); default `{}` |
+| `BYCLAW_TOOL_ENV_RELEASE_ON_IDLE` | `byclaw-be`: `1` releases an idle B through BE instead of keeping it; the next tool call starts a fresh one (user data lives on the shared volume) |
 | `BYCLAW_TOOL_ENV_HOST`, `BYCLAW_TOOL_ENV_PORT` | `static` backend sshd endpoint |
 | `BYCLAW_TOOL_ENV_WS_URL` | `static` backend: B's WebSocket bridge URL instead of a TCP endpoint |
 | `BYCLAW_TOOL_ENV_WORKSPACE` | remote default workspace (default `/by`) |
@@ -253,19 +290,23 @@ out of the global spec: it would reach every A.
   its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
   host cannot mount the user's volume.
 
-## Follow-ups (`byclaw-be`, deliberately not done yet)
+## Lifecycle of B with `byclaw-be`
 
-- **Idle pause/resume.** BE has no pause API, so `pause()` is a no-op and B keeps
-  running between turns. OpenSandbox's pause/resume is reachable through BE's
-  `/v1/sandboxes/**` passthrough if this is wanted later.
-- **Releasing B.** Nothing removes B when A is released, and nothing on the BE
-  side may either: BE marks sandboxes started through `launchByUserCode` for a
-  spec that is not open for login (the tool sandbox) as manual-release, because
-  A's use of B never refreshes the record's `last_access_time` and the idle
-  sweep would otherwise release B in the middle of a task. B is released by
-  hand (or by `removeSandbox`) until B gets its own heartbeat and reclaim rule.
+- **Idle.** BE has no pause API. With `BYCLAW_TOOL_ENV_RELEASE_ON_IDLE=1` the
+  idle timer releases B (`removeSandbox`) and the next operation starts a fresh
+  one; otherwise B keeps running between turns.
+- **Reclaim.** BE marks sandboxes started through `launchByUserCode` for a
+  non-login spec with the lease policy `DSH_REPORTED`: they are never released
+  by access-time idling (A's use of B over SSH does not refresh it), only on
+  what `dsh-idle-reporter` writes about each B — fresh `releasable` releases,
+  fresh `busy` keeps, silence (this process gone) releases after BE's guards.
+  See `byclaw-be`'s sandbox README.
 
 ## Building B's image
+
+`Dockerfile.tools` takes `TOOL_ENV_PROFILE`: `media` (the default) keeps A's
+whole toolchain, `default` drops ffmpeg and libreoffice for a smaller image.
+Build one per environment you configure and point each spec at its image.
 
 B runs the user's commands, so it needs A's toolchain: system packages,
 Python and Node CLIs, the builtin skills. `middleware/byclaw-harness/Dockerfile.tools`
