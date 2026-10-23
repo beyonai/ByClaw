@@ -22,6 +22,7 @@ async function json(path, value) {
 const node = (script, args = [], cwd = root, success = true) =>
   run(process.execPath, [join(root, 'scripts', script), ...args], cwd, success)
 try {
+  run(process.execPath, [join(moduleRoot, 'scripts/docker-framework-layout-verify.mjs')])
   await cp(join(moduleRoot, 'vendor/by-framework'), join(root, 'vendor/by-framework'), { recursive: true })
   await mkdir(join(root, 'scripts'))
   for (const name of ['prepare-by-framework.mjs', 'verify-by-framework-runtime.mjs',

@@ -131,7 +131,6 @@ ENV npm_config_registry=${NPM_REGISTRY}
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.85
 COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
-COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 # Shared connector Skills need these executables in the final image. Keep their
 # versions aligned with OpenClaw and check access as the DSH runtime user.
 RUN set -eu; \
@@ -206,6 +205,7 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/lib/ /workspace/packages/core/agent/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/src/ /workspace/packages/core/agent-loop/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/lib/ /workspace/packages/core/agent-loop/lib/
+COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
 # The build decisions the plugin-builder folded together. This stage starts from
