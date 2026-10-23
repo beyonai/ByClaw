@@ -63,6 +63,12 @@ public interface SsSandboxRecordMapper {
 
     List<SsSandboxRecord> selectRunningAutoscaleRecords();
 
+    /** Running user sandboxes under one lease policy (e.g. tool sandboxes released on DSH activity). */
+    List<SsSandboxRecord> selectRunningByLeasePolicy(@Param("leasePolicy") String leasePolicy);
+
+    /** Change the lease policy only; auto_release and the lock version stay as they are. */
+    int updateLeasePolicy(@Param("id") Long id, @Param("leasePolicy") String leasePolicy);
+
     /**
      * 更新沙箱状态为已释放
      *

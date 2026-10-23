@@ -14,10 +14,14 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * @param streamId Redis Stream 记录 ID，用于丢弃乱序到达的旧记录
  * @param at 容器侧生成时间，仅供排查
  * @param lastActiveAt 容器侧最后忙碌时间，仅供排查
+ * @param sandboxType 上报方声明的沙箱类型（工具沙箱条目带 serviceKey；宿主自身条目为空）
+ * @param kind 条目种类：{@code tool-env} 表示 DSH 宿主代工具沙箱上报；空表示沙箱自身上报
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record DshActivity(String userCode, String state, long receivedAt, String streamId, String at,
-    String lastActiveAt) {
+    String lastActiveAt, String sandboxType, String kind) {
+    public static final String KIND_TOOL_ENV = "tool-env";
+
 
     public static final String STATE_BUSY = "busy";
 
@@ -31,6 +35,12 @@ public record DshActivity(String userCode, String state, long receivedAt, String
     @JsonIgnore
     public boolean isReleasable() {
         return STATE_RELEASABLE.equals(state);
+    }
+
+    /** 由 DSH 宿主代某个工具沙箱上报的条目。 */
+    @JsonIgnore
+    public boolean isToolEnvironment() {
+        return KIND_TOOL_ENV.equals(kind);
     }
 
     /** 最近一次上报在静默阈值内收到时视为新鲜。 */
