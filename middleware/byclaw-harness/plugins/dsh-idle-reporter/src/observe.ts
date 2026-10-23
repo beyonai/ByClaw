@@ -105,9 +105,11 @@ export function observeActivity(ctx: Context, onChange: () => void): ActivityObs
       for (const owner of questions.values()) {
         if (owner === undefined) unattributedWaits++
       }
+      const jobs = runningJobs(ctx, agents)
       return {
-        agents: agentFacts(ctx, agents, approvals, questions),
-        runningJobs: runningJobs(ctx, agents),
+        agents: agentFacts(ctx, agents, approvals, questions).map(agent => ({ ...agent, jobs: jobs.owned.get(agent.id) ?? 0 })),
+        runningJobs: jobs.total,
+        unownedJobs: jobs.unowned,
         unattributedWaits,
       }
     },
@@ -147,17 +149,26 @@ function agentFacts(
 }
 
 /**
- * `list()` without a caller returns only unowned jobs, so union it with each
- * live Agent's own view and dedupe by job id.
+ * `list()` without a caller returns only unowned jobs; `list(agent)` returns
+ * those plus the Agent's own. Attribute each live job to its owner (the first
+ * Agent whose view adds it) and keep the deduped total.
  */
-function runningJobs(ctx: Context, agents: readonly Agent[]): number {
+function runningJobs(ctx: Context, agents: readonly Agent[]): { total: number; unowned: number; owned: Map<string, number> } {
+  const owned = new Map<string, number>()
   const jobs = ctx.get('jobs')
-  if (jobs === undefined) return 0
+  if (jobs === undefined) return { total: 0, unowned: 0, owned }
   const live = new Set<string>()
-  for (const view of [jobs.list(), ...agents.map(agent => jobs.list(agent.id))]) {
-    for (const job of view) {
-      if (job.status === 'running' || job.status === 'stopping') live.add(job.id)
+  const running = (job: { status: string }): boolean => job.status === 'running' || job.status === 'stopping'
+  for (const job of jobs.list()) if (running(job)) live.add(job.id)
+  const unowned = live.size
+  for (const agent of agents) {
+    let count = 0
+    for (const job of jobs.list(agent.id)) {
+      if (!running(job) || live.has(job.id)) continue
+      live.add(job.id)
+      count++
     }
+    if (count > 0) owned.set(agent.id, count)
   }
-  return live.size
+  return { total: live.size, unowned, owned }
 }

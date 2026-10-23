@@ -23,6 +23,12 @@ export interface ByClawDigitalEmployee {
   /** Baiying `prologue.modelId`; omission selects the current Redis default LLM. */
   modelId?: string
   version?: string
+  /**
+   * Logical tool-environment name (`advancedSettings.toolEnvironment` or a top-level
+   * `toolEnvironment`): which sandbox this employee's commands run in. Omission
+   * lets the runtime infer it from the employee's Skills, else the default.
+   */
+  toolEnvironment?: string
   skills: ByClawSkillRef[]
 }
 

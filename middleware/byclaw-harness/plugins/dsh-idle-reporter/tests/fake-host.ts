@@ -77,6 +77,8 @@ export class FakeHost {
   }
 
   inject(deps: string[], callback: (ctx: { jobs: FakeJobs }) => void): void {
+    // The tool-environment pool is never provided here: that injection stays pending, as in a process without the plugin.
+    if (deps.join() === 'toolEnvironments') return
     if (deps.join() !== 'jobs') throw new Error(`unexpected inject ${deps.join()}`)
     if (this.jobs !== undefined) callback({ jobs: this.jobs })
     else this.pendingInject = callback

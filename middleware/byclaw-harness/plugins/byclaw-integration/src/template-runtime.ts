@@ -185,6 +185,8 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
   beforeInstantiate?: () => Promise<void>
   routeDelegation?: (parent: Agent, task: string, requestedTemplateId: string, signal: AbortSignal) => Promise<string>
   onRootSetup?: (agent: Agent, template: DshAgentTemplate) => void
+  /** Bind an instance (root or child) to the tool environment its template wants; returns the disposer. */
+  bindEnvironment?: (agent: Agent, template: DshAgentTemplate) => () => void
   generationLease?: GenerationLease
   generationCatalogDir?: string
   maxDepth?: number
@@ -258,6 +260,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
     const disposeAssistancePolicy = assistance === undefined ? () => undefined : childCtx.systemPrompt.section({ name: 'byclaw:linked-assistance-result', order: 119,
       text: 'This child owns a structured assistance request for its original parent task. Before your final response call group_resolve_assistance(status=completed, result=<actual inputs>) or status=blocked with blocking_reason and the precise user material/capability needed. Return only real results; do not create another platform task. The final response then resumes the same original employee.' })
       disposers.push(disposeBoundary, disposeAssistancePolicy)
+      disposers.push(config.bindEnvironment?.(child, template) ?? (() => undefined))
       const installedSkills = installTemplateSkills(childCtx, child, template, config.skillRuntime)
       disposers.push(installedSkills.dispose)
       disposers.push(installByClawPromptVariables(childCtx))
@@ -377,6 +380,8 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
           setup(agentCtx: Context, agent: Agent): void {
             if (coordination !== undefined) config.groupCoordination?.bind(String(agent.id), template.source.resourceId, undefined, coordination)
             config.onRootSetup?.(agent, template)
+            const disposeEnvironment = config.bindEnvironment?.(agent, template) ?? (() => undefined)
+            agentCtx.effect(() => disposeEnvironment, 'byclaw-template:tool-environment')
             const scope = config.groupCoordination?.get(String(agent.id))
             const disposeBoundary = config.groupCoordination?.installMemberBoundary?.(agentCtx, agent) ?? (() => undefined)
             const installedSkills = installTemplateSkills(agentCtx, agent, template, config.skillRuntime)

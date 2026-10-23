@@ -18,6 +18,8 @@ class FakeByClawBe {
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  /** Logical environment names BE knows, mapped to specs; unknown names are refused. */
+  environments: Record<string, string> = { media: 'byclaw-dsh-tools-media' }
   /** The user's private parameters, as BE stores them: values never read back whole. */
   readonly privateParams = new Map<string, { paramId: number; value: string }>()
   private next = 1
@@ -62,7 +64,13 @@ class FakeByClawBe {
     const user = String(body['userCode'])
     if (path === '/byaiService/sandbox/launchByUserCode') {
       if (this.launchFailure !== undefined) return { code: -1, msg: this.launchFailure, data: null }
-      const key = `${user}/${String(body['serviceKey'])}`
+      let sandboxType = String(body['serviceKey'])
+      if (typeof body['environment'] === 'string') {
+        const resolved = this.environments[body['environment']]
+        if (resolved === undefined) return { code: -1, msg: `沙箱启动失败: unknown tool environment ${body['environment']}`, data: null }
+        sandboxType = resolved
+      }
+      const key = `${user}/${sandboxType}`
       let record = this.records.get(key)
       if (record === undefined) {
         record = { sandboxId: `sb${String(this.next++)}`, instanceEndpoints: { ...this.nextEndpoints } }
@@ -70,7 +78,7 @@ class FakeByClawBe {
       }
       const primary = Object.values(record.instanceEndpoints)[0] ?? ''
       return { code: 0, msg: 'success', data: {
-        sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
+        sandboxId: record.sandboxId, sandboxType, endpoint: primary, endpoints: primary === '' ? [] : [primary],
         instanceEndpoints: this.launchWithoutInstanceEndpoints ? undefined : record.instanceEndpoints,
       } }
     }
@@ -110,6 +118,7 @@ describe('ByClawBeBackend', () => {
     config = {
       baseUrl: `${baseUrl}/`, userCode: 'u1', token: 'jwt-u1', systemCode: '', serviceKey: 'byclaw-dsh-tools',
       sshInstance: 'ssh', hostTemplate: '', port: 22, publishKeys: false, readyTimeoutMs: 1500, requestTimeoutMs: 5000,
+      environment: '', releaseOnIdle: false,
     }
     logs.length = 0
   })
@@ -327,12 +336,47 @@ describe('ByClawBeBackend', () => {
     await expect(backend.ensure()).rejects.toThrow(/launchByUserCode failed: 沙箱启动失败: Unknown sandbox service key/u)
   })
 
-  it('pause is a no-op for this backend', async () => {
+  it('pause is a no-op for this backend unless releaseOnIdle is set', async () => {
     const backend = new ByClawBeBackend(config, identity, () => {})
     await backend.ensure()
+    expect(backend.sandboxId).toBe('sb1')
+    expect(backend.serviceKey).toBe('byclaw-dsh-tools')
     await backend.pause()
     expect(fake.calls).toHaveLength(1)
     expect(fake.records.size).toBe(1)
+    expect(backend.sandboxId).toBe('sb1')
+  })
+
+  it('with releaseOnIdle, pause releases B through BE and forgets its id; the next ensure starts a new one', async () => {
+    const backend = new ByClawBeBackend({ ...config, releaseOnIdle: true }, identity, message => logs.push(message))
+    await backend.ensure()
+    await backend.pause()
+    expect(fake.calls.map(call => call.path.split('/').pop())).toEqual(['launchByUserCode', 'removeSandbox'])
+    expect(fake.records.size).toBe(0)
+    expect(backend.sandboxId).toBeUndefined()
+    // Nothing to release twice.
+    await backend.pause()
+    expect(fake.calls).toHaveLength(2)
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(backend.sandboxId).toBe('sb2')
+    expect(logs).toContain('released tool environment of type byclaw-dsh-tools')
+  })
+
+  it('launches a named environment through BE and uses the spec BE resolved for everything after', async () => {
+    const backend = new ByClawBeBackend({ ...config, environment: 'media', releaseOnIdle: true }, identity, () => {})
+    expect(backend.serviceKey).toBe('byclaw-dsh-tools')
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(fake.calls[0]?.body).toEqual({ userCode: 'u1', serviceKey: 'byclaw-dsh-tools', environment: 'media' })
+    expect(backend.serviceKey).toBe('byclaw-dsh-tools-media')
+    expect(fake.records.has('u1/byclaw-dsh-tools-media')).toBe(true)
+    await backend.pause()
+    expect(fake.calls[1]?.body).toEqual({ userCode: 'u1', sandboxType: 'byclaw-dsh-tools-media' })
+    expect(fake.records.size).toBe(0)
+  })
+
+  it('reports an environment BE does not know as a launch failure', async () => {
+    const backend = new ByClawBeBackend({ ...config, environment: 'quantum' }, identity, () => {}, { launchRetryWindowMs: 0 })
+    await expect(backend.ensure()).rejects.toThrow(/unknown tool environment quantum/u)
   })
 })
 

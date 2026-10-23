@@ -35,6 +35,8 @@ export interface IdleReporterOptions {
   activity: () => Activity
   /** Settles once every live Agent is quiescent, maintenance work included. */
   whenIdle: () => Promise<void>
+  /** Extra fields written into every entry after the standard ones (e.g. what kind of sandbox this is). */
+  fields?: Readonly<Record<string, string>>
   logger: ReporterLogger
   /** How long the pre-release maintenance check may wait. Defaults to 100 ms. */
   maintenanceBudgetMs?: number
@@ -222,6 +224,7 @@ export class IdleReporter {
       'agents', activity.agents,
       'jobs', activity.jobs,
       'pid', this.pid,
+      ...Object.entries(this.options.fields ?? {}).flat(),
       'at', new Date(now).toISOString(),
     ]
     // Assign before any Redis code runs so a synchronous throw cannot leave a

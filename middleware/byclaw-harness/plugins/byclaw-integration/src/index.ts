@@ -40,6 +40,7 @@ import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRunti
 import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
 import { lazyToolEnvironment, lazyToolEnvironmentFiles, toolEnvironmentFiles } from './tool-environment-files.ts'
+import { bindTemplateEnvironment, type ToolEnvironmentBinder } from './tool-environment-binding.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
 import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
@@ -949,6 +950,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       subagentProvider: config.subagentProvider ?? 'spawn',
       resolveModel: (bindingId, modelId) => models.resolve(bindingId, modelId),
       beforeInstantiate: synchronizeOrRetain,
+      bindEnvironment: (agent, template) => bindTemplateEnvironment(
+        ctx.get('toolEnvironments') as ToolEnvironmentBinder | undefined, String(agent.id), template, console),
       onRootSetup: (agent, template) => {
         rootEmployeeCodes.set(agent, template.kind === 'agent' ? template.source.resourceCode : '')
         if (isSuperAssistant(agent) && groupCoordination.get(String(agent.id)) === undefined) superAssistantPolicy.bind(agent.ctx, agent)
@@ -1018,6 +1021,21 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         }
       },
     }), 'byclawEmployeeRoots')
+
+    ctx.tools.register(defineTool({
+      name: 'tool_environments',
+      description: 'Read-only: the tool environments (sandboxes) this user has for running commands, with their state. Which environment an employee uses is fixed by its template; use this to explain waits or tell the user which sandbox is active, never to choose one.',
+      parameters: {},
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: { json: { type: 'string', required: true } } },
+        render: (_args, value) => [{ type: 'text', text: value.json }],
+      },
+      execute: async () => {
+        const pool = ctx.get('toolEnvironments') as { names: readonly string[]; defaultName: string; list(): unknown[] } | undefined
+        if (pool === undefined) return { json: JSON.stringify({ environments: [], note: 'commands run on this host; no separate tool environment' }) }
+        return { json: JSON.stringify({ default: pool.defaultName, configured: pool.names, environments: pool.list() }) }
+      },
+    }))
 
     ctx.tools.register(defineTool({
       name: 'byclaw_list_resources',

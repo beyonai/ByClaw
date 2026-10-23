@@ -3,9 +3,12 @@
  * providers in a separate sandbox (B) while this process (A) keeps the Web UI,
  * agents, models, sessions and configuration.
  *
- * The profile patch mounts this service as `ctx.ssh` and swaps the local
- * fs/subprocess/sandbox/PTC rows for DSH's SSH providers only when
- * `BYCLAW_DSH_TOOL_ENV` selects a backend; otherwise nothing changes.
+ * The profile patch mounts this plugin only when `BYCLAW_DSH_TOOL_ENV` selects a
+ * backend, and then swaps the local fs/subprocess/sandbox/PTC rows for DSH's SSH
+ * providers; otherwise nothing changes. The plugin provides `ctx.ssh` (a router:
+ * every call goes to the environment of the Agent that runs) and
+ * `ctx.toolEnvironments` (the per-user pool of environments and the Agent
+ * bindings), see src/environments.ts.
  */
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
@@ -15,10 +18,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
 import { ByClawBeBackend, parseEndpoint, type ByClawBeBackendConfig } from './be-backend.ts'
-import { ToolEnvConnection } from './connection.ts'
+import { ToolEnvConnection, type ToolEnvConnectionOptions } from './connection.ts'
+import { DEFAULT_ENVIRONMENT, ToolEnvRouter, ToolEnvironments, type AgentLineage } from './environments.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
 export { ToolEnvConnection } from './connection.ts'
+export { DEFAULT_ENVIRONMENT, ToolEnvRouter, ToolEnvironments } from './environments.ts'
+export type { AgentLineage, ToolEnvRequester, ToolEnvironmentStatus, ToolEnvironmentsOptions } from './environments.ts'
 export { OpenSandboxBackend, StaticBackend, waitForEndpoint, waitForHttp, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
 export { ToolEnvIdentity } from './identity.ts'
@@ -61,7 +67,20 @@ export interface Config {
     volumes: OpenSandboxVolume[]
   }
   /** `byclaw-be` backend settings. */
-  byclawBe: Omit<ByClawBeBackendConfig, 'port'>
+  byclawBe: Omit<ByClawBeBackendConfig, 'port' | 'environment' | 'releaseOnIdle'>
+  /**
+   * Further environments by logical name (`default` is implicit). `byclaw-be`
+   * sends the name with the launch and BE resolves the spec, unless `serviceKey`
+   * pins one; `opensandbox` uses `image`. `static` has the default only.
+   */
+  environments: Record<string, EnvironmentConfig>
+  /** Release an idle B (`byclaw-be`) instead of keeping it; the reclaim design's fast path. */
+  releaseOnIdle: boolean
+}
+
+export interface EnvironmentConfig {
+  serviceKey?: string
+  image?: string
 }
 
 const volume = schema.object({
@@ -70,7 +89,7 @@ const volume = schema.object({
   readOnly: schema.boolean(), uid: schema.natural(), gid: schema.natural(), mode: schema.string(),
 })
 
-export class ToolEnv extends ToolEnvConnection {
+export class ToolEnv extends ToolEnvironments {
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
     stateDir: schema.string().required(),
@@ -108,13 +127,19 @@ export class ToolEnv extends ToolEnvConnection {
       // A launch may create B and wait for its endpoints on the BE side.
       requestTimeoutMs: schema.natural().default(180_000),
     }).default({} as Config['byclawBe']),
+    environments: schema.dict(schema.object({
+      serviceKey: schema.string(),
+      image: schema.string(),
+    })).default({}),
+    releaseOnIdle: schema.boolean().default(false),
   }) as schema<Config>
 
   constructor(ctx: Context, config: Config) {
-    const identity = new ToolEnvIdentity(config.stateDir, config.alias)
+    const names = Object.keys(config.environments).filter(name => name !== DEFAULT_ENVIRONMENT)
+    if (config.backend === 'static' && names.length > 0) throw new Error('byclaw-tool-env: the static backend serves the default environment only')
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
     const bootstrapPath = join(dirname(realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ptc-runtime-node')))), 'process.js')
-    super(ctx, {
+    const shared: ToolEnvConnectionOptions = {
       ssh: {
         // A and B run the same image, so A's own Node, helper and PTC bootstrap
         // paths and digests describe B's installation.
@@ -126,11 +151,38 @@ export class ToolEnv extends ToolEnvConnection {
       },
       ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath },
       idleMs: config.idleMs,
-    }, backendFor(ctx, config, identity), identity)
+    }
+    super(ctx, {
+      names,
+      create: name => mountEnvironment(ctx, config, shared, name),
+      lineage: () => ctx.get('agents') as AgentLineage | undefined,
+    })
+    // `ctx.ssh` for every consumer; the environments themselves live in isolated fibers.
+    new ToolEnvRouter(ctx, this)
   }
 }
 
-function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): ToolEnvBackend {
+/**
+ * One environment's connection in its own fiber under an isolated `ssh` key:
+ * `ToolEnvConnection` registers itself as `ssh`, and that registration must stay
+ * invisible to the rest of the process (the router is the process's `ssh`).
+ * Creating the connection does not start B.
+ */
+function mountEnvironment(ctx: Context, config: Config, shared: ToolEnvConnectionOptions, name: string): ToolEnvConnection {
+  const identity = name === DEFAULT_ENVIRONMENT
+    ? new ToolEnvIdentity(config.stateDir, config.alias)
+    : new ToolEnvIdentity(join(config.stateDir, 'environments', name), `${config.alias}-${name}`)
+  let connection: ToolEnvConnection | undefined
+  ctx.isolate('ssh', Symbol(`byclaw-tool-env:${name}`)).plugin({
+    name: `byclaw-tool-env:${name}`,
+    apply: (inner: Context) => { connection = new ToolEnvConnection(inner, shared, backendFor(inner, config, identity, name), identity) },
+  })
+  if (connection === undefined) throw new Error(`byclaw-tool-env: environment "${name}" did not mount`)
+  return connection
+}
+
+function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity, name: string): ToolEnvBackend {
+  const overrides = config.environments[name] ?? {}
   if (config.backend === 'static') {
     const endpoint = config.wsUrl === '' ? undefined : parseEndpoint(config.wsUrl, config.port)
     if (config.wsUrl !== '' && endpoint?.websocket === undefined) throw new Error('byclaw-tool-env: wsUrl must be a ws://, wss://, http:// or https:// URL')
@@ -138,21 +190,30 @@ function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): To
   }
   // Named explicitly: the default name derives from the class ("tool-env"), which the console filter silences.
   const logger = ctx.logger('byclaw-tool-env')
+  const log = (message: string): void => { logger.info(name === DEFAULT_ENVIRONMENT ? message : `[${name}] ${message}`) }
   if (config.backend === 'byclaw-be') {
     const be = config.byclawBe
     for (const key of ['baseUrl', 'userCode', 'token', 'serviceKey'] as const) {
       if (be[key] === '') throw new Error(`byclaw-tool-env: byclawBe.${key} is required for the byclaw-be backend`)
     }
-    return new ByClawBeBackend({ ...be, port: config.port }, identity, message => { logger.info(message) })
+    return new ByClawBeBackend({
+      ...be,
+      port: config.port,
+      serviceKey: overrides.serviceKey || be.serviceKey,
+      // A pinned spec needs no resolution; otherwise BE maps the logical name.
+      environment: name === DEFAULT_ENVIRONMENT || overrides.serviceKey ? '' : name,
+      releaseOnIdle: config.releaseOnIdle,
+    }, identity, log)
   }
   const settings = config.openSandbox
   for (const key of ['baseUrl', 'apiKey', 'image'] as const) {
     if (settings[key] === '') throw new Error(`byclaw-tool-env: openSandbox.${key} is required for the opensandbox backend`)
   }
   const backend: OpenSandboxBackendConfig = {
-    ...settings, port: config.port, stateFile: join(config.stateDir, 'sandbox.json'),
+    ...settings, image: overrides.image || settings.image, port: config.port,
+    stateFile: name === DEFAULT_ENVIRONMENT ? join(config.stateDir, 'sandbox.json') : join(config.stateDir, 'environments', name, 'sandbox.json'),
   }
-  return new OpenSandboxBackend(backend, identity, message => { logger.info(message) })
+  return new OpenSandboxBackend(backend, identity, log)
 }
 
 function digest(path: string): string {

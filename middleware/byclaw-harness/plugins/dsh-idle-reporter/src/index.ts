@@ -6,10 +6,12 @@ import z from '@deepseek-ai/schemastery'
 import { createRedis } from '@byclaw/by-framework'
 import { hostname } from 'node:os'
 import { computeActivity } from './activity.ts'
+import { ToolEnvironmentReporters, type ToolEnvironmentsView } from './environments.ts'
 import { observeActivity } from './observe.ts'
 import { IdleReporter } from './reporter.ts'
 
-export { computeActivity, type Activity, type ActivityFacts, type AgentFact } from './activity.ts'
+export { computeActivity, type Activity, type ActivityFacts, type ActivityScope, type AgentFact } from './activity.ts'
+export { ToolEnvironmentReporters, type EnvironmentReporterOptions, type ToolEnvironmentsView } from './environments.ts'
 export { observeActivity, type ActivityObservation } from './observe.ts'
 export {
   IdleReporter,
@@ -42,6 +44,14 @@ export interface Config {
   /** Idle time after which the sandbox is releasable. */
   idleTimeoutMs?: number
   heartbeatMs?: number
+  /**
+   * Report this process's own sandbox. Off on a shared DSH host, whose user
+   * contexts have no sandbox of their own to release; their tool environments
+   * are still reported.
+   */
+  reportSelf?: boolean
+  /** Idle time after which a tool environment is releasable; defaults to `idleTimeoutMs`. */
+  environmentIdleTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -51,6 +61,8 @@ export const Config: z<Config> = z.object({
   maxLen: z.number().default(DEFAULT_MAX_LEN),
   idleTimeoutMs: z.number().default(DEFAULT_IDLE_TIMEOUT_MS),
   heartbeatMs: z.number().default(DEFAULT_HEARTBEAT_MS),
+  reportSelf: z.boolean().default(true),
+  environmentIdleTimeoutMs: z.number(),
 })
 
 export interface ResolvedConfig {
@@ -60,6 +72,8 @@ export interface ResolvedConfig {
   maxLen: number
   idleTimeoutMs: number
   heartbeatMs: number
+  reportSelf: boolean
+  environmentIdleTimeoutMs: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,13 +111,21 @@ export function resolveConfig(raw: unknown, defaultSandboxId: string = hostname(
     }
     return value
   }
+  const flag = (key: string, fallback: boolean): boolean => {
+    const value = config[key] ?? fallback
+    if (typeof value !== 'boolean') throw new Error(`${name}: config.${key} must be a boolean, got ${JSON.stringify(value)}`)
+    return value
+  }
+  const idleTimeoutMs = positive('idleTimeoutMs', DEFAULT_IDLE_TIMEOUT_MS)
   return {
     sandboxId: text('sandboxId', defaultSandboxId),
     userCode: optionalText('userCode'),
     streamKey: text('streamKey', DEFAULT_STREAM_KEY),
     maxLen: positive('maxLen', DEFAULT_MAX_LEN),
-    idleTimeoutMs: positive('idleTimeoutMs', DEFAULT_IDLE_TIMEOUT_MS),
+    idleTimeoutMs,
     heartbeatMs: positive('heartbeatMs', DEFAULT_HEARTBEAT_MS),
+    reportSelf: flag('reportSelf', true),
+    environmentIdleTimeoutMs: positive('environmentIdleTimeoutMs', idleTimeoutMs),
   }
 }
 
@@ -159,23 +181,51 @@ export function apply(ctx: Context, config: Config): void {
   redis.on('ready', () => { connectionFailing = false })
 
   // `observeActivity` may report a change synchronously (an already-present
-  // jobs service), before the reporter exists.
+  // jobs service), before the reporters exist.
   let current: IdleReporter | undefined
-  const observation = observeActivity(ctx, () => { current?.changed() })
-  const reporter = new IdleReporter({
-    redis,
-    ...resolved,
-    activity: () => computeActivity(observation.facts()),
-    whenIdle: () => observation.whenIdle(),
-    logger: ctx.logger,
-  })
+  let environments: ToolEnvironmentReporters | undefined
+  const observation = observeActivity(ctx, () => { current?.changed(); environments?.changed() })
+  const reporter = resolved.reportSelf
+    ? new IdleReporter({
+        redis,
+        ...resolved,
+        activity: () => computeActivity(observation.facts()),
+        whenIdle: () => observation.whenIdle(),
+        logger: ctx.logger,
+      })
+    : undefined
   current = reporter
   ctx.effect(() => {
-    reporter.start()
-    ctx.logger.info(`reporting sandbox ${resolved.sandboxId} to ${resolved.streamKey} (idle timeout ${resolved.idleTimeoutMs} ms, heartbeat ${resolved.heartbeatMs} ms)`)
+    reporter?.start()
+    if (reporter !== undefined) ctx.logger.info(`reporting sandbox ${resolved.sandboxId} to ${resolved.streamKey} (idle timeout ${resolved.idleTimeoutMs} ms, heartbeat ${resolved.heartbeatMs} ms)`)
+    else ctx.logger.info(`not reporting this process's own sandbox (reportSelf=false); tool environments are reported as they start`)
     return async () => {
-      reporter.close()
+      reporter?.close()
       await closeRedis(redis)
     }
   }, 'byclaw-idle-reporter.lifecycle')
+  // Tool environments (B) are optional: without the dsh-tool-env plugin nothing here runs.
+  ctx.inject(['toolEnvironments'], (envCtx) => {
+    const view = envCtx.get('toolEnvironments') as ToolEnvironmentsView | undefined
+    if (view === undefined) return
+    const reporters = new ToolEnvironmentReporters(view, observation, {
+      redis,
+      userCode: resolved.userCode,
+      streamKey: resolved.streamKey,
+      maxLen: resolved.maxLen,
+      idleTimeoutMs: resolved.environmentIdleTimeoutMs,
+      heartbeatMs: resolved.heartbeatMs,
+      logger: ctx.logger,
+    })
+    environments = reporters
+    // A connection's own use (requests, streams, a start) is not an Agent event: poll it with the heartbeat.
+    const poll = setInterval(() => { reporters.changed() }, resolved.heartbeatMs)
+    poll.unref()
+    reporters.changed()
+    envCtx.effect(() => () => {
+      clearInterval(poll)
+      reporters.close()
+      if (environments === reporters) environments = undefined
+    }, 'byclaw-idle-reporter.environments')
+  })
 }

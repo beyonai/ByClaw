@@ -31,8 +31,16 @@ export interface ByClawBeBackendConfig {
   token: string
   /** Optional `system-code` header; empty sends none. */
   systemCode: string
-  /** `sandbox_service_spec.service_key` of the tool sandbox. */
+  /** `sandbox_service_spec.service_key` of the tool sandbox; the default environment's spec. */
   serviceKey: string
+  /**
+   * Logical environment name sent with the launch (`environment`), which BE maps
+   * to a spec; empty launches `serviceKey` directly. BE answers with the
+   * resolved `sandboxType`, used for every later call about this B.
+   */
+  environment: string
+  /** `pause()` releases B instead of keeping it: the idle fast path of the reclaim design. */
+  releaseOnIdle: boolean
   /** Key in `instanceEndpoints` that carries B's sshd address. */
   sshInstance: string
   /**
@@ -63,7 +71,7 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
+interface LaunchData { sandboxId?: string; sandboxType?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
 interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string> }
 
 /** `ResponseUtil.SUCCESS` in ByClaw BE; failures are `-1` with `msg`. */
@@ -99,6 +107,12 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private readonly launchRetryWindowMs: number
   /** Timeout handed to the most recent BE request; tests read it to check the retry budget. */
   lastRequestTimeoutMs = 0
+  /** The spec BE resolved for this environment; the configured serviceKey until a launch says otherwise. */
+  private sandboxType: string
+  private currentId: string | undefined
+
+  get sandboxId(): string | undefined { return this.currentId }
+  get serviceKey(): string { return this.sandboxType }
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -109,6 +123,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     this.now = clock.now ?? Date.now
     this.sleep = clock.sleep ?? (ms => new Promise(resolve => { setTimeout(resolve, ms).unref() }))
     this.launchRetryWindowMs = clock.launchRetryWindowMs ?? LAUNCH_RETRY.windowMs
+    this.sandboxType = config.serviceKey
   }
 
   /**
@@ -136,8 +151,19 @@ export class ByClawBeBackend implements ToolEnvBackend {
     })
   }
 
-  /** Idle pause is not implemented for this backend yet; B keeps running. */
-  async pause(): Promise<void> {}
+  /**
+   * BE has no pause: with `releaseOnIdle` an idle B is released and the next
+   * operation starts a fresh one (user data lives on the shared volume);
+   * otherwise B keeps running until BE's reclaim rule or an operator releases it.
+   */
+  pause(): Promise<void> {
+    if (!this.config.releaseOnIdle) return Promise.resolve()
+    return this.serial(async () => {
+      if (this.currentId === undefined) return
+      await this.remove()
+      this.currentId = undefined
+    })
+  }
 
   async dispose(): Promise<void> { await this.operation.catch(() => {}) }
 
@@ -186,14 +212,18 @@ export class ByClawBeBackend implements ToolEnvBackend {
   }
 
   private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
-    const { userCode, serviceKey, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
+    const { userCode, serviceKey, environment, sshInstance } = this.config
+    const data = await this.call('/sandbox/launchByUserCode', {
+      userCode, serviceKey, ...(environment === '' ? {} : { environment }),
+    }, 'POST', timeoutMs) as LaunchData | undefined
+    if (typeof data?.sandboxType === 'string' && data.sandboxType !== '') this.sandboxType = data.sandboxType
+    const sandboxType = this.sandboxType
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
-      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
-      const ofType = entries.filter(entry => entry.sandboxType === serviceKey)
+      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
+      const ofType = entries.filter(entry => entry.sandboxType === sandboxType)
       const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
       sandboxId ??= entry?.sandboxId
       endpoint = this.sshEndpoint(entry?.instanceEndpoints)
@@ -203,19 +233,21 @@ export class ByClawBeBackend implements ToolEnvBackend {
       this.log(`ByClaw BE reported no tcp address for "${sshInstance}"; using host template ${endpoint.hostName}:${String(endpoint.port)}`)
     }
     if (endpoint === undefined) {
-      throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${serviceKey}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
+      throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${sandboxType}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
+    this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     return endpoint
   }
 
   private async remove(): Promise<void> {
-    const { userCode, serviceKey } = this.config
+    const { userCode } = this.config
+    const sandboxType = this.sandboxType
     try {
-      await this.call('/sandbox/removeSandbox', { userCode, sandboxType: serviceKey })
-      this.log(`released tool environment of type ${serviceKey}`)
+      await this.call('/sandbox/removeSandbox', { userCode, sandboxType })
+      this.log(`released tool environment of type ${sandboxType}`)
     } catch (error) {
-      this.log(`release of tool environment ${serviceKey} failed: ${message(error)}`)
+      this.log(`release of tool environment ${sandboxType} failed: ${message(error)}`)
     }
   }
 

@@ -31,11 +31,18 @@ export interface ToolEnvBackend {
   pause(): Promise<void>
   /** Stop background work; B itself is left to its own expiry. */
   dispose(): Promise<void>
+  /** B's identity on its platform after `ensure()`; undefined before the first start or after a release. */
+  readonly sandboxId?: string | undefined
+  /** What B is made of: the BE sandbox type or the OpenSandbox image; for status and reporting. */
+  readonly serviceKey?: string
 }
 
 /** Fixed sshd endpoint (TCP or WebSocket bridge); pause is a no-op. */
 export class StaticBackend implements ToolEnvBackend {
   constructor(private readonly endpoint: ToolEnvEndpoint, private readonly identity: ToolEnvIdentity) {}
+
+  get sandboxId(): string { return `${this.endpoint.hostName}:${String(this.endpoint.port)}` }
+  get serviceKey(): string { return 'static' }
 
   async ensure(): Promise<ToolEnvEndpoint> {
     await this.identity.keys()
@@ -93,6 +100,10 @@ const PAUSED = new Set(['paused', 'pausing'])
 export class OpenSandboxBackend implements ToolEnvBackend {
   private renewTimer: NodeJS.Timeout | undefined
   private operation: Promise<unknown> = Promise.resolve()
+  private currentId: string | undefined
+
+  get sandboxId(): string | undefined { return this.currentId }
+  get serviceKey(): string { return this.config.image }
 
   constructor(
     private readonly config: OpenSandboxBackendConfig,
@@ -141,6 +152,7 @@ export class OpenSandboxBackend implements ToolEnvBackend {
     await waitForPort(endpoint, this.config.readyTimeoutMs)
     await this.renew(id).catch(() => {})
     this.startRenew(id)
+    this.currentId = id
     return endpoint
   }
 

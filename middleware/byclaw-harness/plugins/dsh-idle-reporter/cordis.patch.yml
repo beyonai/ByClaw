@@ -12,3 +12,6 @@
         userCode: !!js process.env.USER_CODE || ''
         streamKey: !!js process.env.BYCLAW_DSH_ACTIVITY_STREAM || 'byclaw:dsh:sandbox:activity'
         idleTimeoutMs: !!js "process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS ? Number(process.env.BYCLAW_DSH_IDLE_TIMEOUT_MS) : 1800000"
+        # Tool environments (B, dsh-tool-env) are reported as they start; their idle time may be shorter.
+        environmentIdleTimeoutMs: !!js "process.env.BYCLAW_TOOL_ENV_IDLE_REPORT_MS ? Number(process.env.BYCLAW_TOOL_ENV_IDLE_REPORT_MS) : undefined"
+        reportSelf: !!js "process.env.BYCLAW_DSH_IDLE_REPORT_SELF !== '0'"
