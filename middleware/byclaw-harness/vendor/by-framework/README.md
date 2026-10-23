@@ -15,7 +15,7 @@ docker build -f middleware/byclaw-harness/Dockerfile -t byclaw-harness:unbounded
 # Dockerfile.extensions has the same integration.
 ```
 
-`prepare-by-framework.mjs` checks the archive hash and stages a supporting workspace package (not a DSH plugin bundle). Root overrides replace even old `1.6.0` requests. The existing package pipeline packs it into the final managed profile and creates a `file:` override there. Both stages resolve the framework from the integration plugin and run `verify-by-framework-runtime.mjs`: 64 suspended tasks, a later Resume, shutdown drain and stale-consumer health, with legacy limits omitted/1/8/50. A wrong package or failed assertion stops the image build.
+`prepare-by-framework.mjs` checks the archive hash and stages a supporting workspace package (not a DSH plugin bundle). Root overrides replace even old `1.6.0` requests. The existing package pipeline packs it into the final managed profile and creates a `file:` override there. Both stages resolve the framework from the integration plugin and run `verify-by-framework-runtime.mjs`: 64 suspended tasks, a later Resume, shutdown drain and stale-consumer health, with legacy limits omitted/1/8/50. The verifier is copied directly into the runtime stage before profile installation; copying it only into an independent tools stage does not make it available in the final image. Both layout and package-route regression checks enforce this stage and ordering requirement. A wrong package or failed assertion stops the image build.
 
 After building, the same probe can run without Redis or model calls:
 

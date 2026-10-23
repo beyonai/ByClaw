@@ -79,6 +79,7 @@ grep -F "ignoreDefaultArgs: ['--disable-extensions', '--no-startup-window']" plu
 grep -F '每次执行 raw browser 命令或 COOKIE/INTERCEPT/UI Adapter 命令前' builtin/skills/bycli/SKILL.md >/dev/null
 grep -F -- '--browser-user byclaw' docker-entrypoint.sh >/dev/null
 grep -F -- '--dsh-user byclaw' docker-entrypoint.sh >/dev/null
+node scripts/docker-framework-layout-verify.mjs "${dockerfiles[@]}"
 node scripts/docker-plugin-dependencies-verify.mjs
 node scripts/prune-dsh-profile.test.mjs
 
