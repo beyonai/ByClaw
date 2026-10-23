@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This repository maintains the ByClaw plugin suite for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The plugins integrate through DSH services, events, tools, prompts, and bundle layers without modifying DSH core source.
+This repository maintains the ByClaw plugin suite for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The plugins use DSH's public services, events, tools, prompts and bundle APIs. Version-pinned image-build patches for DSH compatibility and startup are documented below.
 
 ## Framework optimization in Docker
 
@@ -238,7 +238,38 @@ required for private browser runtime"; that mode is for per-user sandboxes.
 
 ## Verification and startup
 
-The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
+The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.slim`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. The new `prepare-dsh-startup-021.mjs` patch indexes immutable resolver path prefixes in the disposable build workspace; it rejects other DSH versions/source shapes. All three business images rebuild app-boot and copy its source and compiled output together. Model-routing compatibility is likewise applied only in that build workspace. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
+
+DSH 0.2.1 startup optimizations (2026-10-23) apply to **all three image variants**, including slim:
+
+- Integration builds a tree-shaken pi-ai auth helper artifact (about 4.85 KB). `createProvider` uses pi-ai's public `/models` entry; startup no longer imports the aggregate entry's unused Typebox graph. Keep `pnpm build` intact: `tsc` alone does not produce the optimized helper.
+- Devflow loads the TypeScript compiler on the first TS/JS code-anchor evaluation. Its synchronous symbol/hash API and anchor semantics remain unchanged. Model HTTP transport loads on the first model request; media HTTP transport loads on the first actual download. Connection/header deadlines, body cancellation and DNS pinning stay intact.
+- DSH OTel, product telemetry and the Langfuse plugin ship bundled SDK implementations. Shared `@opentelemetry/api`, `api-logs` and Cordis remain external; all dynamic platform-detector chunks travel with the entry. A loopback collector verifies JSON/gzip logs and protobuf traces from the actual compiled artifacts during image build.
+- Document conversion loads LibreOffice/font/codec dependencies on first conversion, with one shared import promise and retry on import failure. Plugin management loads `execa` only when an operation runs; child-process handles, output streaming, cancellation and repair remain intact. `prepare-dsh-lazy-021.mjs` version/source guards these build-only changes; all three images rebuild and copy source plus compiled output.
+- The DSH resolver replaces repeated scans of large immutable package-root arrays with a per-generation prefix index. Native resolution precedence, package exports, profile replacement and Worker resolution remain covered by upstream tests.
+- Existing compiled CLI/preload, lazy Skill version checks and **`by-framework@1.7.0-byclaw.1`** remain enabled. The framework archive/checksum and `unbounded` dispatch implementation are unchanged; the consumer verifier still exercises 64 waiting tasks, Resume admission, draining and health.
+- The plugin-builder runs `startup-imports-verify.mjs` after building all bundles, rejecting eager Typebox/compiler loading and checking that TS anchors still work on demand. This gate is present in `Dockerfile`, `Dockerfile.slim` and `Dockerfile.extensions`.
+
+Local verification used Node **22.19.0** on macOS, a disposable DSH **0.2.1-rc.2** workspace with the same complete business profile and optimized framework across all variants. Five interleaved fresh-process runs per variant used empty user patches, isolated homes, blocked business networking, and stopped immediately at integration `activate` (before business synchronization/Worker registration):
+
+| Local startup measurement | Original | Prior optimization | Final |
+| --- | ---: | ---: | ---: |
+| Process launch → integration activation, median | 1.772 s | 1.021 s | 1.057 s |
+| Five samples, seconds | 1.658 / 1.714 / 1.772 / 1.778 / 1.927 | 0.961 / 1.006 / 1.064 / 1.021 / 1.061 | 0.903 / 0.985 / 1.091 / 1.057 / 1.107 |
+| Module load-hook calls before activation | 2,970 | 1,556 | **1,380** |
+
+The final implementation reduces local median startup by **40.3%** and load-hook calls by **53.5%** against the original in this matched run. The five-run comparison did not establish a latency gain for the last lazy-loading pass alone, so a further **10 interleaved runs per variant** compared prior vs final: **1.020 s → 0.956 s median (6.2% reduction)**. These warm-cache macOS timings remain sensitive to other desktop work.
+
+Earlier results were 2,981 → 2,100 → 1,567 calls. After pnpm refreshed the disposable workspace dependency layout, both the original and prior variants measured 11 fewer calls. The matched table above therefore uses 2,970 / 1,556 / 1,380; **176 calls** are removed by the final document/plugin-manager change itself. Both variants retain the same optimized framework.
+
+These numbers are not ACS/NAS cold-start times and do not establish a new Worker-ready latency. The previously observed ACS CLI→activation interval was 19.558 s; its original logs cannot retrospectively assign all of that time to individual imports. Rebuild the selected image variant and remeasure a fresh ACS container using its image digest and the CLI/activate/worker-ready markers. No full Podman image build or ACS deployment was performed in this iteration.
+
+Targeted validation: 5,045 upstream resolver tests, 36 Devflow anchor tests, 12 compiled Langfuse tests, 29 media-runtime tests, 90 Office conversion tests, 106 plugin-manager operation/process/GitHub/registry tests, real loopback telemetry export, compiled model runtime/routing/transport checks, lazy Skill checks, Worker concurrency/framework checks, and all three Dockerfile wiring checks. No production sandbox deployment is performed by these checks. Run the import regression after the full plugin build:
+
+```sh
+node plugins/byclaw-integration/scripts/startup-imports-verify.mjs
+node scripts/verify-startup-bundles.mjs /workspace
+```
 
 The current-runtime end-to-end check launches the official headless profile twice with an isolated `DSH_HOME` and a deterministic local model adapter. It checks FIFO prompts, live output, template configuration, session persistence, and cold resume without Redis or API keys. Build the plugins first, then run:
 

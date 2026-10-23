@@ -10,8 +10,16 @@
  */
 
 import { createHash } from 'node:crypto'
-import ts from 'typescript'
+import { createRequire } from 'node:module'
+import type ts from 'typescript'
 import type { LanguageEvaluator } from './types.ts'
+
+const require = createRequire(import.meta.url)
+let compiler: typeof ts | undefined
+/** Keep the synchronous public API; load the compiler only for a TS/JS anchor. */
+function typescript(): typeof ts {
+  return compiler ??= require('typescript') as typeof ts
+}
 
 /** Prefix carried in every hash value so the algorithm travels with it. */
 const ALGORITHM = 'sha1'
@@ -26,6 +34,7 @@ const ALGORITHM = 'sha1'
  * @returns `true` when the statement binds that name.
  */
 function declaresName(node: ts.Node, symbol: string): boolean {
+  const ts = typescript()
   if (ts.isVariableStatement(node)) {
     return node.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === symbol)
   }
@@ -50,6 +59,7 @@ function declaresName(node: ts.Node, symbol: string): boolean {
  *   anchor on a renamed symbol silently keep passing.
  */
 export function findSymbolText(source: string, symbol: string): string | undefined {
+  const ts = typescript()
   const file = ts.createSourceFile('anchor.ts', source, ts.ScriptTarget.Latest, true)
   for (const statement of file.statements) {
     if (declaresName(statement, symbol)) return statement.getText(file)
@@ -69,6 +79,7 @@ export function findSymbolText(source: string, symbol: string): string | undefin
  * @returns the normalized single-line form.
  */
 export function normalizeSymbolBody(declaration: string): string {
+  const ts = typescript()
   const pieces: string[] = []
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, /* skipTrivia */ true, ts.LanguageVariant.Standard, declaration)
   let token = scanner.scan()

@@ -19,9 +19,6 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter, type ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import {
-  createProvider,
-  defaultProviderAuthContext,
-  InMemoryCredentialStore,
   type Api,
   type Model,
   type ModelThinkingLevel,
@@ -33,6 +30,8 @@ import {
   type ThinkingBudgets,
   type ThinkingLevelMap,
 } from '@earendil-works/pi-ai'
+import { createProvider } from '@earendil-works/pi-ai/models'
+import { defaultProviderAuthContext, InMemoryCredentialStore } from './pi-ai-runtime.js'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'

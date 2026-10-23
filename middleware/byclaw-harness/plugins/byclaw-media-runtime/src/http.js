@@ -1,7 +1,6 @@
 import { setTimeout } from 'node:timers/promises'
 import dns from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { Agent } from 'undici'
 
 export const MAX_MEDIA_BYTES = 50 * 1024 * 1024
 const responseSignals = new WeakMap()
@@ -150,6 +149,8 @@ export async function downloadAsset(value, context = {}) {
     context.signal?.throwIfAborted()
     // Keep the original URL for Host, certificate verification and TLS SNI.
     // Only the socket lookup is replaced with the already-validated addresses.
+    const { Agent } = await import('undici')
+    context.signal?.throwIfAborted()
     dispatcher = new Agent({ connect: { lookup: pinnedLookup } })
   }
   try {

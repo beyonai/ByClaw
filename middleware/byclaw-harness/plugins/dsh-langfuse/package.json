@@ -4,15 +4,38 @@
   "private": true,
   "description": "Langfuse observability for DeepSeek Harness sessions, tools and agents",
   "type": "module",
-  "main": "src/index.js",
-  "exports": { ".": "./src/index.js", "./cordis.patch.yml": "./cordis.patch.yml", "./package.json": "./package.json" },
-  "files": ["src", "cordis.patch.yml", "README.md", "README.zh.md", "MAPPING.zh.md", "VALIDATION.zh.md"],
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "scripts": { "test": "node --test tests/*.test.js" },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "MAPPING.zh.md",
+    "VALIDATION.zh.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node scripts/build-runtime.mjs && node --test tests/*.test.js",
+    "build": "node scripts/build-runtime.mjs"
+  },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "0.220.0",
     "@opentelemetry/resources": "2.12.0",
-    "@opentelemetry/sdk-trace-base": "2.12.0"
+    "@opentelemetry/sdk-trace-base": "2.12.0",
+    "@opentelemetry/api-logs": "0.220.0"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.14"
   }
 }

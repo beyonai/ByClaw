@@ -49,3 +49,5 @@ npm test
 ## 已知差异
 
 DSH 没有 OpenClaw 的统一 diagnostics event 总线，本插件直接适配 DSH 的 host/scoped events。远程子进程必须加载本插件并共享 observation bridge 文件才能继承父 context。DSH 事件不提供的价格或 token 字段不会推算或伪造。
+
+构建时执行 `npm run build`，运行入口使用 `lib/index.js`。私有 OpenTelemetry SDK 会合并打包，共享的 `@opentelemetry/api`、`api-logs` 保持外部引用；不会关闭遥测或修改采样策略。`npm test` 会先构建，再验证实际产物。

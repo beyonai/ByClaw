@@ -29,6 +29,10 @@ COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /workspac
 COPY middleware/byclaw-harness/scripts/docker-plugin-layout.mjs /workspace/scripts/docker-plugin-layout.mjs
 COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/scripts/docker-workspace-prepare.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
+COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
+COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
 
 WORKDIR /workspace
 
@@ -47,10 +51,16 @@ RUN node scripts/prepare-by-framework.mjs \
     && pnpm install --no-frozen-lockfile \
     && node scripts/verify-by-framework-runtime.mjs plugins/byclaw-integration/package.json
 
-# The pinned DSH release needs explicit request reassembly for model failover.
-# Patch only this disposable build workspace, then rebuild the two affected core
-# packages with upstream's compiler and host bundler before building consumers.
-RUN node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace \
+# Apply pinned startup and model-routing changes only in the build workspace.
+# Rebuild affected core packages before consumers; ship source and compiled output together.
+RUN node scripts/prepare-dsh-startup-021.mjs /workspace \
+    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot \
+    && node scripts/prepare-dsh-lazy-021.mjs /workspace \
+    && pnpm exec tsc -b packages/document/office-to-pdf/tsconfig.json packages/boot/plugin-manager/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/document/office-to-pdf --filter packages/boot/plugin-manager \
+    && node scripts/bundle-dsh-startup-deps.mjs /workspace \
+    && node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace \
     && pnpm exec tsc -b packages/core/agent-loop/tsconfig.json \
     && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/core/agent --filter packages/core/agent-loop \
     && node --input-type=module -e "const runtime=await import('./packages/core/agent-loop/lib/index.js');if(runtime.byclawRequestReassembly!==true)throw new Error('DSH model-routing compatibility build is missing')"
@@ -69,7 +79,9 @@ RUN set -eux; \
     test "${bundle_count}" -gt 0; \
     pnpm -r ${filter_args} --if-present run build; \
     pnpm --filter @byclaw/dsh-codegraph run verify:contract; \
-    pnpm --filter @byclaw/dsh-codegraph run verify:runtime
+    pnpm --filter @byclaw/dsh-codegraph run verify:runtime; \
+    node plugins/byclaw-integration/scripts/startup-imports-verify.mjs; \
+    node scripts/verify-startup-bundles.mjs /workspace
 
 RUN set -eux; \
     mkdir -p /tmp/byclaw-plugin-packs; \
@@ -131,6 +143,12 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /opt/byclaw/plugins/ /opt/bycla
 # The compiled CLI and explicit source rollback use the same module resolver.
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/plugin-manager/src/ /workspace/packages/boot/plugin-manager/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/boot/plugin-manager/lib/ /workspace/packages/boot/plugin-manager/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/document/office-to-pdf/src/ /workspace/packages/document/office-to-pdf/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/document/office-to-pdf/lib/ /workspace/packages/document/office-to-pdf/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/telemetry/otel/lib/ /workspace/packages/telemetry/otel/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/host/product-telemetry-otel/lib/ /workspace/packages/host/product-telemetry-otel/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/src/ /workspace/packages/client/modules/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/client/modules/lib/ /workspace/packages/client/modules/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/src/ /workspace/packages/typert/loader/src/
@@ -231,6 +249,12 @@ WORKDIR /workspace
 COPY --from=profile-builder --chown=byclaw:byclaw /opt/byclaw/dsh-managed/ /opt/byclaw/dsh-managed/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/plugin-manager/src/ /workspace/packages/boot/plugin-manager/src/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/plugin-manager/lib/ /workspace/packages/boot/plugin-manager/lib/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/document/office-to-pdf/src/ /workspace/packages/document/office-to-pdf/src/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/document/office-to-pdf/lib/ /workspace/packages/document/office-to-pdf/lib/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/telemetry/otel/lib/ /workspace/packages/telemetry/otel/lib/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/host/product-telemetry-otel/lib/ /workspace/packages/host/product-telemetry-otel/lib/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/client/modules/src/ /workspace/packages/client/modules/src/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/client/modules/lib/ /workspace/packages/client/modules/lib/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/typert/loader/src/ /workspace/packages/typert/loader/src/

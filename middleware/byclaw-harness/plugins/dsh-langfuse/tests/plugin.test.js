@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { resolveConfig, safeValue, traceInput, ObservationState, LangfuseIngestion, apply } from '../src/index.js'
+import { resolveConfig, safeValue, traceInput, ObservationState, LangfuseIngestion, apply } from '../lib/index.js'
 
 class Span {
   constructor(name, attributes, parent, n) { this.name = name; this.attributes = { ...attributes }; this.parent = parent; this.n = n; this.ended = false }
