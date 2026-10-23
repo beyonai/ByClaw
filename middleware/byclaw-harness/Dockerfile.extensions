@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # Build the reusable image first:
-#   docker build -f middleware/byclaw-harness/Dockerfile.base -t byclaw/dsh-base:0.2.1-rc.2 .
+#   docker build -f middleware/byclaw-harness/Dockerfile.base -t 192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2 .
 # Then build this business-extension image:
 #   docker build -f middleware/byclaw-harness/Dockerfile.extensions -t byclaw/dsh:latest .
 # The base must come from this branch's Dockerfile.base (DSH 0.2.1-rc.2): the
 # plugins depend on 0.2.1 workspace packages that older bases do not contain.
-ARG BASE_IMAGE=byclaw/dsh-base:0.2.1-rc.2
+ARG BASE_IMAGE=192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 
