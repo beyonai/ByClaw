@@ -97,7 +97,9 @@ mvn -B -f byclaw-be/pom.xml verify
 - 查询（`sandboxInfo`）把宿主上的上下文作为一条 `byclaw-dsh` 条目并入结果（宿主 `GET`），不读记录。
 - 心跳/续约/空闲回收对这类上下文不做任何事：宿主按自己的空闲规则回收。
 - 工具沙箱（B）由宿主上的运行时在第一次工具调用时经 `launchByUserCode` 按工具规格（`enabled=0`）启动；
-  这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。B 目前不自动释放。
+  这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。经 `launchByUserCode` 拉起（或复用）的
+  未开放规格沙箱在拉起后被改为手动释放（`auto_release=0`，平台远程模式经平台 `update-id`）：宿主通过 SSH 使用 B
+  不会刷新 `last_access_time`，否则空闲回收会在任务执行中途把 B 释放掉。B 的自动回收另行设计，目前由人工释放。
 
 决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。
