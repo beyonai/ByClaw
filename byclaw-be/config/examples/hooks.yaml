@@ -92,7 +92,7 @@ byclaw:
             type: hmac-sha256
             client-id: "${HOOK_CLIENT_ID:byclaw-service}"
             secret: "${WORKGROUP_HOOK_SIGNING_SECRET:}"
-            # 远程签名请求必须使用 HTTPS；本机测试可显式允许 literal loopback HTTP。
+            # 签名请求支持 HTTP 和 HTTPS；保留此兼容字段，但不再限制 HTTP 地址。
             allow-loopback-http: ${WORKGROUP_HOOK_ALLOW_LOOPBACK_HTTP:false}
             separator: "\n"
             canonical-fields:

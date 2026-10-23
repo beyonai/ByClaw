@@ -15,7 +15,6 @@ import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import okhttp3.Headers;
-import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okio.Buffer;
 
@@ -37,11 +36,7 @@ final class HmacHookSigner {
             || auth.getSecret().contains("${")) {
             errors.add(path + ".http.auth.secret: require an independently generated secret of at least 32 characters");
         }
-        HttpUrl url = http.getUrl() == null ? null : HttpUrl.parse(http.getUrl());
-        if (url != null && !url.isHttps() && !(auth.isAllowLoopbackHttp()
-            && Set.of("127.0.0.1", "::1").contains(url.host()))) {
-            errors.add(path + ".http.url: signed requests require HTTPS or explicitly permitted literal loopback HTTP");
-        }
+        // Transport URLs may use HTTP or HTTPS; HookRequestMapper validates the URL scheme.
         if (auth.getToken() != null || http.getHeaders().keySet().stream().anyMatch("Authorization"::equalsIgnoreCase)) {
             errors.add(path + ".http.auth: HMAC cannot be combined with another credential");
         }

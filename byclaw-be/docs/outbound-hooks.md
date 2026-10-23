@@ -136,7 +136,7 @@ auth:
 - `http.url`：HTTP(S) 绝对地址，允许部署环境的内部服务地址；不允许 URL 用户信息和 fragment。
 - `http.method`：POST（默认）、PUT、PATCH、DELETE、GET；GET 不允许配置 body。
 - `http.headers`：静态字符串请求头，支持 Spring `${ENV_VAR}` 占位符。若配置 Content-Type，只接受 `application/json`。
-- `http.auth.type`：`none`（默认）、`bearer` 或 `hmac-sha256`。Bearer 使用 `http.auth.token`；通用 HMAC 使用 `secret/canonical-fields/headers`，可选 `client-id/separator/allow-loopback-http`。两种认证均不可与另一种凭据混用；动态认证输出头不能由静态 headers 重复配置。
+- `http.auth.type`：`none`（默认）、`bearer` 或 `hmac-sha256`。Bearer 使用 `http.auth.token`；通用 HMAC 使用 `secret/canonical-fields/headers`，可选 `client-id/separator`。HMAC 请求支持 HTTP 和 HTTPS 地址；`allow-loopback-http` 仅为兼容旧配置保留，不再影响地址校验。两种认证均不可与另一种凭据混用；动态认证输出头不能由静态 headers 重复配置。
 - `required-data-fields`：订阅必需的白名单 data 字段名；字段缺失、为 null 或空字符串时过滤通知，不执行 HTTP。配置中不存在于事件 schema 的字段名会阻止启动。
 - `retry.max-attempts`：总尝试次数，默认 1（不重试），允许 1–100；`retry.delay` 默认 5s，允许 100ms–5m；`retry.statuses` 指定可重试的 400–599 状态码；`retry.transport-errors` 默认 true，仅在次数上限大于 1 时生效。
 - `http.body`：输出 JSON 字段与取值规则。每个字段必须且只能配置 `from` 或 `value`。`from` 仅接受上表路径；`value` 可为 YAML 字符串、数字、布尔值等常量。输出字符串使用 JSON 编码，不进行模板字符串拼接；当前只提供顶层字段映射，不执行脚本、SpEL，也不对 URL/Header 做事件字段插值。

@@ -131,7 +131,7 @@ class HookAuthenticationIntegrationTest {
         });
     }
 
-    /** 签名配置错误分别指出字段，不回显密钥；禁止静态覆盖认证头或向远程 HTTP 发送签名。 */
+    /** 签名配置错误分别指出字段，不回显密钥；禁止静态覆盖认证头。 */
     @Test
     void invalidSigningConfigurationFailsClosedWithoutLeakingSecrets() throws Exception {
         configured().withPropertyValues(
@@ -145,8 +145,20 @@ class HookAuthenticationIntegrationTest {
                 String errors = context.getStartupFailure().toString();
                 assertThat(context.getStartupFailure()).hasStackTraceContaining("auth.client-id")
                     .hasStackTraceContaining("auth.secret").hasStackTraceContaining("auth.headers.X-Webhook-Signature")
-                    .hasStackTraceContaining("http.url").hasStackTraceContaining("retry.max-attempts");
+                    .hasStackTraceContaining("retry.max-attempts");
                 assertThat(errors).doesNotContain("short-secret", "static-signature", "remote.invalid");
+            });
+    }
+
+    /** Remote HTTP endpoints are valid without the legacy loopback opt-in. */
+    @Test
+    void remoteHttpSigningConfigurationIsAccepted() throws Exception {
+        configured().withPropertyValues(
+            "byclaw.hooks.subscriptions.workgroup-sync.http.url=http://remote.invalid/hook",
+            "byclaw.hooks.subscriptions.workgroup-sync.http.auth.allow-loopback-http=false")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context).hasSingleBean(HookDispatcher.class);
             });
     }
 
