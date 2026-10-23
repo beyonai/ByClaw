@@ -61,6 +61,26 @@ class TenantChatRoutingAspectTest extends I18nTestSupport {
     }
 
     @Test
+    void executionLinkUsesTheTenantMessagePositionAndRejectsMissingHistory() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
+        TenantRequestContextHolder.set(context);
+        var query = new com.iwhalecloud.byai.state.common.dto.MessageQo();
+        query.setSessionId(456L);
+        query.setMessageId(789L);
+        var target = new TenantNodeModels.MessageOutline("789", "assistant", 2, "run", "run", null,
+            null, 22, 40, false);
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/assiman/getMessageOutline"), any(), any()))
+            .thenReturn(java.util.List.of(target));
+        var controller = com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.class;
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call(controller, "getMessageCountAndPosition", query));
+        assertThat(result.getData()).isEqualTo(java.util.Map.of("position", 22L, "totalCount", 40L));
+        query.setMessageId(790L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> aspect.route(call(controller, "getMessageCountAndPosition", query)))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    @Test
     void tenantTaskChildrenUseAnAuthorizedNodeEndpoint() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
         TenantRequestContextHolder.set(context);

@@ -45,7 +45,7 @@ class RequestValidationLocalizationTest extends I18nTestSupport {
                 .satisfies(error -> assertThat(error.getMessage()).isEqualTo("项目名称不能超过100个字"));
             LocaleContextHolder.setLocale(Locale.US);
             assertThat(validator.validateProperty(project, "projectName")).singleElement()
-                .satisfies(error -> assertThat(error.getMessage()).isEqualTo("Project name must not exceed 100 characters"));
+                .satisfies(error -> assertThat(error.getMessage()).isEqualTo("Project name cannot exceed 100 characters"));
             var discovery = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest();
             discovery.setResourceId(9007199254740993L);
             discovery.setMaxEntities(13);

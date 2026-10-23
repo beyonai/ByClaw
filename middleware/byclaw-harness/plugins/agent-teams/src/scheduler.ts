@@ -29,6 +29,7 @@ import { GroupWorkerBlockedError } from './group-errors.ts'
 import { groupTaskSummaryOutcome, validateGroupTaskSummary, renderGroupTaskSummary } from './group-summary.ts'
 import { groupInputRevision, recoverGroupAssistanceOutboxes, beginGroupAssistanceResultDelivery, groupAssistanceResultRequest, hasPendingGroupAssistanceResult } from './group-assistance.ts'
 import { memberTaskContextDeclaration } from './group-context.ts'
+import { recordTaskExecutionExternal, syncTaskExecution } from './task-executions.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from './message-source.ts'
 import { type GroupExternalExecution, groupPolicy } from './group-scope.ts'
@@ -432,6 +433,7 @@ export function installTeamScheduler(
           if (openTask !== undefined && currentMember.runtime !== 'byclaw-worker' && (openTask.attempt ?? 0) >= config.maxTaskAttempts) {
             openTask.status = 'failed'
             openTask.output = recoveryFailureOutput(openTask, config.maxTaskAttempts)
+            syncTaskExecution(openTask)
             openTask.attemptId = undefined
             openTask.updatedAt = Date.now()
             currentMember.status = 'idle'
@@ -504,6 +506,7 @@ export function installTeamScheduler(
                   const task = fresh?.tasks.find(candidate => candidate.id === ticket.taskId)
                   if (fresh === undefined || task?.attemptId !== ticket.attemptId) throw new Error('External dispatch attempt expired')
                   task.externalExecution = execution
+                  recordTaskExecutionExternal(task, ticket.attemptId, execution)
                   task.status = 'in_progress'
                   await writeTeam(stateRoot, fresh)
                 }) })
@@ -628,6 +631,7 @@ export function installTeamScheduler(
           task.status = exhausted ? 'failed' : 'pending'
           task.output = exhausted ? recoveryFailureOutput(task, config.maxTaskAttempts) : undefined
           task.assignee = exhausted ? ticket.memberName : ticket.previousAssignee
+          syncTaskExecution(task)
           task.attemptId = undefined
           task.handoffId = undefined
           task.reassigning = false
@@ -703,6 +707,7 @@ export function installTeamScheduler(
         ...payload.failure.status === undefined ? {} : { status: payload.failure.status },
         recordedAt: Date.now(),
       }
+      syncTaskExecution(task)
       task.attemptId = undefined
       task.updatedAt = Date.now()
       member.status = 'idle'

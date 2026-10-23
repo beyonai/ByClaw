@@ -17,6 +17,53 @@ const createAssistantMessage = (overrides: Partial<IMessage>): IMessage =>
   } as IMessage);
 
 describe('selectLatestTaskPlan', () => {
+  it('preserves unbound runs and upgrades their exact identity when a binding arrives', () => {
+    const planEvent = (seq: number, bound: boolean) => ({
+      uuid: `plan-${seq}`,
+      seq,
+      contentType: SSEMessageType.taskOutline,
+      status: SSEEventStatus.done,
+      orginContent: '',
+      content: {
+        substance: JSON.stringify({
+          team_id: 'team-1',
+          planId: 'team:team-1',
+          steps: [
+            {
+              sub_steps: [
+                {
+                  id: 't1',
+                  step_description: 'Review',
+                  executions: [
+                    {
+                      attempt: 1,
+                      attempt_id: 'a1',
+                      runs: [
+                        {
+                          child_run_id: 'external:1',
+                          child_turn: 1,
+                          ...(bound ? { child_session_id: '200', child_message_id: '201' } : {}),
+                        },
+                        { child_run_id: 'external:2', child_turn: 2 },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    const result = selectLatestTaskPlan([
+      createAssistantMessage({ messageList: [planEvent(1, false), planEvent(2, true)] }),
+    ]);
+    expect(result?.tasks[0].executions?.[0].runs).toEqual([
+      { runId: 'external:1', childTurn: 1, sessionId: '200', messageId: '201' },
+      { runId: 'external:2', childTurn: 2 },
+    ]);
+  });
+
   it('uses the newest native task plan snapshot in the current conversation', () => {
     const first = createAssistantMessage({
       msgId: 'message-1',
@@ -131,6 +178,63 @@ describe('selectLatestTaskPlan', () => {
         ],
       })
     );
+  });
+
+  it('retains earlier attempts across successive task-plan snapshots for one team', () => {
+    const createPlanEvent = (seq: number, attempt: number, attemptId: string, messageId: string) => ({
+      uuid: `plan-${attempt}`,
+      contentType: SSEMessageType.taskOutline,
+      status: SSEEventStatus.done,
+      orginContent: '',
+      seq,
+      content: {
+        substance: JSON.stringify({
+          team_id: 'team-1',
+          task_description: 'Team plan',
+          steps: [
+            {
+              sub_steps: [
+                {
+                  id: 'task-1',
+                  task_id: 'task-1',
+                  team_id: 'team-1',
+                  attempt,
+                  attempt_id: attemptId,
+                  executions: [
+                    {
+                      attempt,
+                      attempt_id: attemptId,
+                      assignee: 'Engineer',
+                      runs: [{ child_session_id: 'child-1', child_message_id: messageId }],
+                    },
+                  ],
+                  step_description: 'Implement feature',
+                  tool_metadata: { status: attempt === 2 ? 'in_progress' : 'failed' },
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    const message = createAssistantMessage({
+      messageList: [createPlanEvent(1, 1, 'attempt-1', 'run-1'), createPlanEvent(2, 2, 'attempt-2', 'run-2')],
+    });
+
+    expect(selectLatestTaskPlan([message])?.tasks[0]?.executions).toEqual([
+      {
+        attempt: 1,
+        attemptId: 'attempt-1',
+        assignee: 'Engineer',
+        runs: [{ sessionId: 'child-1', messageId: 'run-1' }],
+      },
+      {
+        attempt: 2,
+        attemptId: 'attempt-2',
+        assignee: 'Engineer',
+        runs: [{ sessionId: 'child-1', messageId: 'run-2' }],
+      },
+    ]);
   });
 
   it('does not leak a task plan from another session when the selected child conversation has none', () => {

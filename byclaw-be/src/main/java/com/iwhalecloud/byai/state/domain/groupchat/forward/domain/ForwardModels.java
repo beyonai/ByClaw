@@ -26,6 +26,7 @@ public final class ForwardModels {
             messageIds = normalizedIds(messageIds, 100); targetSessionIds = normalizedIds(targetSessionIds, 10);
         }
     }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public record ForwardReference(String id, String resourceId, String resourceName, String resourceType,
             String resourceCode, String extData) {
         public ForwardReference(String id,String resourceId,String resourceName,String resourceType,String resourceCode) {

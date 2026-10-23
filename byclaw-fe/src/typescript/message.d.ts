@@ -25,17 +25,26 @@ export type TaskPlanStatusReason = {
 
 export type TaskPlanTask = {
   taskId: string;
+  teamId?: string;
   position: number;
   title: string;
   description?: string;
+  assignee?: string;
   status: TaskPlanTaskStatus;
   statusReason?: TaskPlanStatusReason | null;
   startedAt?: string;
   completedAt?: string;
+  executions?: Array<{
+    attempt: number;
+    attemptId?: string;
+    assignee?: string;
+    runs: Array<{ sessionId?: string; messageId?: string; runId?: string; childTurn?: number }>;
+  }>;
 };
 
 export type TaskPlanSnapshot = {
   planId: string;
+  teamId?: string;
   version: number;
   title: string;
   status: TaskPlanStatus;

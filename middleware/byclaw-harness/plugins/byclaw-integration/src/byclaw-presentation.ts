@@ -1,7 +1,7 @@
 /** Native ByClaw frontend projections for DSH session activity. */
 
 import { EventType, type GatewayDataEmitter } from '@byclaw/by-framework'
-import { taskPlanCard, type DshSessionEventKind, type DshSessionStatus } from './protocol.ts'
+import { taskPlanCard, type TaskPlanTodo, type DshSessionEventKind, type DshSessionStatus } from './protocol.ts'
 import type { ByClawSessionRuntimeSnapshot } from './session-activity.ts'
 import type { ByClawEditDiffEvent } from '@byclaw/dsh-diff-viewer/byclaw-edit-diff'
 
@@ -127,29 +127,78 @@ export function childOutputProjection(text: string, context: DshProjectionContex
 }
 
 export interface DshTeamTaskPlanTask {
+  id: string
+  teamId?: string
   subject: string
   status: string
   state: 'blocked' | 'open' | 'running' | 'completed'
+  attempt?: number
+  attemptId?: string
+  assignee?: string
+  externalSessionId?: string
+  childTurn?: number
+  childSessionId?: string
+  childMessageId?: string
+  executions?: ReadonlyArray<{
+    attempt: number
+    attemptId: string
+    assignee: string
+    status: string
+    runs: ReadonlyArray<{
+      externalSessionId?: string
+      childTurn?: number
+      childSessionId?: string
+      childMessageId?: string
+    }>
+  }>
 }
 
 /** Convert an Agent Teams task snapshot into the native ByClaw task-plan shape. */
 export function teamTaskPlanTodos(
   tasks: readonly DshTeamTaskPlanTask[],
-): ReadonlyArray<{ content: string; status: string }> {
+): ReadonlyArray<{
+  content: string
+  status: string
+  taskId: string
+  teamId?: string
+  attempt?: number
+  attemptId?: string
+  assignee?: string
+  externalSessionId?: string
+  childRunId?: string
+  childSessionId?: string
+  childMessageId?: string
+  executions?: DshTeamTaskPlanTask['executions']
+}> {
   return tasks.map((task) => {
     const status = task.status.toLowerCase()
-    if (status === 'failed' || status === 'error') return { content: task.subject, status: 'failed' }
-    if (status === 'cancelled' || status === 'canceled') return { content: task.subject, status: 'cancelled' }
-    if (status === 'skipped') return { content: task.subject, status: 'skipped' }
-    if (task.state === 'completed') return { content: task.subject, status: 'completed' }
-    if (task.state === 'running') return { content: task.subject, status: 'in_progress' }
-    return { content: task.subject, status: 'pending' }
+    const planStatus = status === 'failed' || status === 'error' ? 'failed'
+      : status === 'cancelled' || status === 'canceled' ? 'cancelled'
+      : status === 'skipped' ? 'skipped'
+      : task.state === 'completed' ? 'completed'
+      : task.state === 'running' ? 'in_progress' : 'pending'
+    return {
+      content: task.subject,
+      status: planStatus,
+      taskId: task.id,
+      ...(task.teamId === undefined ? {} : { teamId: task.teamId }),
+      ...(task.attempt === undefined ? {} : { attempt: task.attempt }),
+      ...(task.attemptId === undefined ? {} : { attemptId: task.attemptId }),
+      ...(task.assignee === undefined ? {} : { assignee: task.assignee }),
+      ...(task.externalSessionId === undefined ? {} : { externalSessionId: task.externalSessionId }),
+      ...(task.childSessionId === undefined ? {} : { childSessionId: task.childSessionId }),
+      ...(task.childMessageId === undefined ? {} : { childMessageId: task.childMessageId }),
+      ...(task.executions === undefined ? {} : { executions: task.executions }),
+      ...(task.externalSessionId === undefined || task.childTurn === undefined ? {} : {
+        childRunId: `${task.externalSessionId}:${task.childTurn}`,
+      }),
+    }
   })
 }
 
 /** Render one DSH todo snapshot as the task-plan card for its own conversation scope. */
 export function taskPlanProjection(
-  todos: ReadonlyArray<{ content: string; status: string }>,
+  todos: ReadonlyArray<TaskPlanTodo>,
   context: DshProjectionContext,
 ): ByClawProjection {
   const card = taskPlanCard(todos)

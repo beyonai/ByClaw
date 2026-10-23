@@ -15,6 +15,7 @@ import { assertGroupTaskAdmission, setGroupTaskSummary, validateGroupTaskSummary
 import { groupPolicy, groupScope, assertGroupCoordinator } from './group-scope.ts'
 import { defaultTeamStateRuntime, teamStateRuntime, type TeamStateRuntime } from './runtime-state.ts'
 import type { ClaudeBridgeOptions } from './claude-bridge.ts'
+import { AGENT_TEAMS_EXECUTION_LOCATION, bindTaskExecution, type AgentTeamsExecutionLocationService } from './task-executions.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from './message-source.ts'
@@ -201,6 +202,13 @@ function requireCaptain(exec: ToolRunContext): Agent {
     throw new Error('agent_teams tools require a calling agent (exec.agent was undefined)')
   }
   return exec.agent
+}
+
+function executionLocation(ctx: Context, agentSessionId: string): { sessionId: string; messageId: string } | undefined {
+  // Verify harnesses register the tools on a bare context without service lookup.
+  if (typeof ctx.get !== 'function') return undefined
+  const service = ctx.get(AGENT_TEAMS_EXECUTION_LOCATION, false) as AgentTeamsExecutionLocationService | undefined
+  return service?.get(agentSessionId)
 }
 
 /** The captain's workspace directory (team state root parent). */
@@ -1549,6 +1557,16 @@ export function registerAgentTeamsTools(ctx: Context, suppliedConfig: ToolsConfi
           if (assignee === undefined || task.assignee !== assignee) {
             throw new Error(`task ${task.id} is already claimed by "${task.assignee ?? 'nobody'}"`)
           }
+          if (bindTaskExecution(task, identity.kind === 'captain' ? CAPTAIN_KEY : identity.name,
+            String(caller.id), caller.session.ownEvents(), executionLocation(ctx, String(caller.id)))) {
+            await writeTeam(stateRoot, fresh)
+            appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, caller.session), 'agent-teams/task-updated', {
+              teamId: fresh.id,
+              taskId: task.id,
+              status: task.status,
+              assignee: task.assignee,
+            })
+          }
           return {
             task_id: task.id,
             status: task.status,
@@ -1571,6 +1589,8 @@ export function registerAgentTeamsTools(ctx: Context, suppliedConfig: ToolsConfi
           throw new Error(`member "${assignee}" is busy with ${busy.id}; finish or reassign it first`)
         }
         const attemptId = beginTaskAttempt(task, assignee)
+        bindTaskExecution(task, identity.kind === 'captain' ? CAPTAIN_KEY : identity.name, String(caller.id),
+          caller.session.ownEvents(), executionLocation(ctx, String(caller.id)))
         if (fresh.groupCoordination !== undefined) task.inputRevision = groupInputRevision(ctx, String(caller.id), fresh.inputRevision)
         await writeTeam(stateRoot, fresh)
         appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, caller.session), 'agent-teams/task-updated', {
@@ -1671,6 +1691,8 @@ export function registerAgentTeamsTools(ctx: Context, suppliedConfig: ToolsConfi
           }
         }
         const previousStatus = task.status
+        bindTaskExecution(task, identity.kind === 'captain' ? CAPTAIN_KEY : identity.name, String(caller.id),
+          caller.session.ownEvents(), executionLocation(ctx, String(caller.id)))
         if (args.status !== undefined) {
           const transition = transitionError(task.status, args.status)
           if (transition !== undefined) throw new Error(transition)

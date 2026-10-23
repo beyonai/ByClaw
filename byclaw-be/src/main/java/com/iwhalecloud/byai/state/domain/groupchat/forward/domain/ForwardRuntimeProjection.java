@@ -61,7 +61,7 @@ public final class ForwardRuntimeProjection {
         if (!values.isArray()) return result;
         for (JsonNode ref : values) {
             if (text(ref, "id") != null && text(ref, "resourceName") != null) result.add(new ForwardReference(
-                text(ref, "id"), text(ref, "resourceId"), text(ref, "resourceName"), text(ref, "resourceType"), text(ref, "resourceCode"),text(ref,"extData")));
+                text(ref, "id"), text(ref, "resourceId"), text(ref, "resourceName"), text(ref, "resourceType"), null, null));
         }
         return result;
     }
@@ -74,7 +74,6 @@ public final class ForwardRuntimeProjection {
             resource.setId(ref.id()); resource.setResourceId(ref.resourceId()); resource.setResourceName(ref.resourceName());
             try { resource.setResourceType(AgentMetaEnum.valueOf(ref.resourceType())); }
             catch (IllegalArgumentException | NullPointerException ignored) { continue; }
-            resource.setResourceCode(ref.resourceCode()); resource.setExtData(ref.extData());
             result.add(resource);
         }
         return result;

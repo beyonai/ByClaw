@@ -233,7 +233,9 @@ class GroupChatQueuedGatewayTest extends I18nTestSupport {
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         Map<String, Object> params = new HashMap<>();
         String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
-        assertThat(content).contains("\"dispatchId\":\"52\"");
+        assertThat(content).contains("[群聊协议]", "group_request_assistance")
+            .doesNotContain("group-chat-disposition.json");
+        assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
         verify(tokens).issue(10L, 60L, 30L, 40L, 68L);
         turn.setPhase("CHAT_CONTINUATION");
         assertThat((String) executor.decorate(ctx, CURRENT_MESSAGE, params))

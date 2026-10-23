@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { validateScript } from "../src/infrastructure/schema/script-validator.js";
 
 const names = [
+  "byai_session_member",
   "byai_group_chat_forward_request",
   "byai_group_chat_forward_target",
   "byai_group_chat_forward_item",

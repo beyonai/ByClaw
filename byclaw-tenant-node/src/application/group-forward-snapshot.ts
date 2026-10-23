@@ -175,8 +175,6 @@ export function freezeSource(
           resourceId,
           resourceName: name,
           resourceType,
-          resourceCode: null,
-          extData: null,
         });
         if (resourceType === "KG_DOC_FILE" || resourceType === "COMMON_FILE") {
           if (!resourceId) return fail("FORWARD_RESOURCE_UNRESOLVABLE");

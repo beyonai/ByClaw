@@ -38,7 +38,7 @@ function RobotModal(props: IProps) {
   const intl = useIntl();
 
   // 输入编码时也向读屏用户说明绑定限制，每个弹窗使用独立的描述 ID。
-  const robotCodeHintId = useId();
+  const robotCodeHintId = `robot-code-hint-${useId().replace(/:/g, '')}`;
   const hasIdentity = Boolean(getRobotConfigIdentityValue(item) || item.appId);
   const [form] = Form.useForm<RobotConfig>();
   const channelTabs = useMemo(() => {
@@ -176,11 +176,7 @@ function RobotModal(props: IProps) {
               label={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeLabel' })}
               tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeTooltip' })}
             />
-            <Typography.Text
-              id={robotCodeHintId}
-              className={styles.robotCodeHint}
-              type="secondary"
-            >
+            <Typography.Text id={robotCodeHintId} className={styles.robotCodeHint} type="secondary">
               {intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeBindingHint' })}
             </Typography.Text>
           </span>
@@ -188,11 +184,7 @@ function RobotModal(props: IProps) {
         name="robotCode"
         rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.robotCodeRequired' }) }]}
       >
-        <Input
-          aria-describedby={robotCodeHintId}
-          className={styles.robotFieldControl}
-          placeholder=""
-        />
+        <Input aria-describedby={robotCodeHintId} className={styles.robotFieldControl} placeholder="" />
       </Form.Item>
       <Form.Item
         label={

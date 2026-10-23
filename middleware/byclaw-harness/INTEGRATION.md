@@ -99,6 +99,31 @@ node middleware/byclaw-harness/scripts/startup-client-modules-verify.mjs
 不会把 daemon/status 的调用计数当成就绪信号。构建失败会保留实际错误检查；
 无需关闭该校验或调整 byCLI 版本。[竞态原因与验证记录](docs/startup-2026-10-22/build-supervisor-race.md)。
 
+### 浏览器启动时加载并验证本地扩展
+
+每次 Chromium 启动都从 `BYCLAW_BROWSER_EXTENSIONS` 指向的本地目录加载扩展，镜像默认
+为 `/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension`。扩展随本地 byCLI 安装包更新，
+启动流程不联网安装或升级，不需要手动执行 reload 命令。
+
+`shared-novnc` 下，supervisor 在扩展连接后自动运行 `bycli doctor --json`，确认运行中的
+构建与当前本地安装文件一致（`extensionBuildVerified: true`）、`uploadReady: true`、
+能力包含 `dialog-policy-v1`，并检查 daemon 非陈旧和实际连通性。只有全部通过才记录
+`local extension verified` 并将浏览器标为就绪；缺失字段、旧构建或能力缺失都会在超时后
+明确报错，不把“已连接”当作“已加载本地最新构建”。这些检查不执行平台上传验收。
+
+默认 `on-demand` 仍在首次浏览器调用时启动和校验；`eager` 在容器启动阶段完成后才启动
+DSH。浏览器意外退出后自动拉起的新实例也重新校验本地构建。容器内替换扩展文件不会改变
+已经运行的 Chromium；本机制在下次浏览器启动时加载替换后的文件。
+
+两个 Dockerfile 的基础镜像缺省统一为 `byclaw/harness-base:2026.9.8`，可通过
+`BASE_IMAGE` 覆盖；byCLI/扩展版本与安装步骤按主 Dockerfile 对齐，主文件的版本锁定
+保持不变。“最新”指本地已安装的代码，不指 npm 仓库最新版。旧安装包缺少所需
+构建元数据或能力时会校验失败，需要另行更新本地安装包。
+
+回归入口为 `python3 middleware/byclaw-harness/scripts/browser-supervisor-verify.py`。
+测试覆盖普通/按需启动、扩展构建与能力门禁、连接恢复、超时和退出清理；使用模拟
+browserd/byCLI，不替代完整业务镜像构建和真实扩展验收。
+
 
 ### 持久目录解析与首用浏览器初始化
 

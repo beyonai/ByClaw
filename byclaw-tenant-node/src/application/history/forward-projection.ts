@@ -18,7 +18,7 @@ export function forwardResources(meta: Row): Row[] {
     .filter((ref) => ref && typeof ref.id === "string" && typeof ref.resourceName === "string")
     .map((ref) =>
       Object.fromEntries(
-        ["id", "resourceId", "resourceName", "resourceType", "resourceCode", "extData"]
+        ["id", "resourceId", "resourceName", "resourceType"]
           .filter((key) => typeof ref[key] === "string")
           .map((key) => [key, ref[key]]),
       ),

@@ -297,7 +297,7 @@ describe('digital employee publication entry', () => {
     fireEvent.click(screen.getByText(label));
     expect(await screen.findByText(prompt)).toBeInTheDocument();
     expect(onDeleteData).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: confirm }));
+    fireEvent.click(screen.getByRole('button', { name: (name) => name.replace(/\s/g, '') === confirm }));
     await waitFor(() => expect(onDeleteData).toHaveBeenCalledTimes(1));
   });
 

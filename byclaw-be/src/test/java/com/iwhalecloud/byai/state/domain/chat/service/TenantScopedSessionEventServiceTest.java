@@ -16,6 +16,42 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 class TenantScopedSessionEventServiceTest {
+    @Test
+    void taskPlanBindsExactTenantRunsWithoutAdvancingTheirRuntime() throws Exception {
+        var node = mock(TenantNodeClient.class);
+        var redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get(anyString())).thenReturn("{\"userId\":20,\"enterpriseId\":10,\"role\":\"MEMBER\"}");
+        var broadcaster = mock(ScopedProjectionBroadcaster.class);
+        var service = new TenantScopedSessionEventService(node, redis, new PythonSseService(),
+            new GatewayStreamEventProcessor(), broadcaster);
+        when(node.command(any(), anyString(), anyString(), anyString(), eq("ENSURE_EXTERNAL_CHILD"), any()))
+            .thenAnswer(call -> {
+                var fields = call.getArgument(5, TenantNodeModels.Fields.class).values();
+                String id = "1".equals(fields.get("childTurn")) ? "61" : "62";
+                var binding = new ObjectMapper().readTree(JSON.toJSONString(Map.of(
+                    "session", Map.of("sessionId", "51"), "message", Map.of("messageId", id))));
+                return new TenantNodeModels.CommandResult("50", "bind", "ENSURE_EXTERNAL_CHILD", null, null, null, null, binding);
+            });
+        var event = event("1-0", "2008", """
+            {"steps":[{"sub_steps":[{"id":"t1","assignee":"Engineer","executions":[
+              {"attempt":1,"runs":[{"external_session_id":"member","child_run_id":"member:1","child_turn":1}]},
+              {"attempt":2,"runs":[{"external_session_id":"member","child_run_id":"member:2","child_turn":2}]}
+            ]}]}]}
+            """);
+        event.getJSONObject("metadata").put("session_scope", "parent");
+        event.getJSONObject("metadata").put("event_kind", "plan");
+        assertThat(service.handleIfNecessary(50L, event)).isFalse();
+        var answer = JSON.parseObject(event.getString("data"));
+        var plan = JSON.parseObject(answer.getJSONArray("choices").getJSONObject(0).getJSONObject("delta").getString("content"));
+        var executions = plan.getJSONArray("steps").getJSONObject(0).getJSONArray("sub_steps").getJSONObject(0).getJSONArray("executions");
+        assertThat(executions.getJSONObject(0).getJSONArray("runs").getJSONObject(0).getString("child_message_id")).isEqualTo("61");
+        assertThat(executions.getJSONObject(1).getJSONArray("runs").getJSONObject(0).getString("child_message_id")).isEqualTo("62");
+        verify(node, never()).command(any(), anyString(), anyString(), anyString(), eq("SAVE_EXTERNAL_CHILD"), any(), anyString());
+        verifyNoInteractions(broadcaster);
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.NullAndEmptySource
     @org.junit.jupiter.params.provider.ValueSource(strings = {"root"})

@@ -218,7 +218,9 @@ hash 的字节约定：递归按 JSON 对象键的 UTF-16 字典顺序排序，�
 
 BE 在任务输入时保存可信的租户归属，Redis 恢复上下文保留同一身份。外部子 Agent 的会话、消息和绑定写入该租户 Node；`POST /internal/v1/sessions/{id}/children/query` 先校验父会话，再沿父链校验各子会话与任务发起人。会话详情和子会话列表返回导航所需的 `parentSessionId` 与外部 `sessionExts`，普通会话列表排除子会话。
 
-`ENSURE_EXTERNAL_CHILD` 复用稳定子会话与消息 ID；`SAVE_EXTERNAL_CHILD` 使用 `expectedStreamId` 校验读取水位，提交消息正文、结构化事件、推理记录、最终正文和新水位后才允许 ACK。后端按 Stream 水位及逻辑事件序号去重，较新的 `child_turn` 重置上轮内容，过期轮次不覆盖新内容。后续状态事件保留已写入的最终正文。子会话消息使用既有 `created_seq` 和 `storage_version` 字段，无需新增数据库结构。
+`ENSURE_EXTERNAL_CHILD` 复用稳定子会话，并按 `childRunId` 为每次成员运行分配独立消息；重复请求复用同一轮消息。`SAVE_EXTERNAL_CHILD` 使用 `expectedStreamId` 校验读取水位，提交消息正文、结构化事件、推理记录、最终正文和新水位后才允许 ACK。后端按 Stream 水位及逻辑事件序号去重，子会话已推进到新轮次后，旧轮次的迟到事件会被丢弃，不能覆盖新轮次消息或运行状态。子会话消息使用既有 `created_seq` 和 `storage_version` 字段，无需新增数据库结构。
+
+任务计划携带每轮的精确子会话消息标识；前端先加载包含该消息的页，再滚动到目标消息。不会把历史轮次重定向到同一成员的最新聊天记录。
 
 实时父会话事件、运行状态和子会话快照、增量及状态帧均携带 `enterpriseId`，仅发给同一用户在对应企业的频道，并通过 Redis Pub/Sub 送达其他 BE 实例。接收实例按自己的子会话订阅选择正文或状态通知，再生成增量；消息元数据保留 `messageRenderVersion=v2`、本地父会话 ID 和外部运行标识。群回显只提取文本或明确的最终答案，任务计划、团队快照及文件变更保留在结构化消息中。DIRECT 与 COORDINATED 任务均通知终态。
 
@@ -349,3 +351,5 @@ BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 �
 群消息文件接口 `GET /internal/v1/group-chats/{id}/files` 仅返回可见消息的 `related_resources.files`，不读取或返回 `metadata.files`。文件按消息时间倒序分页，同一消息内保持有效附件顺序；时间线仍展示已发布任务结果的附件。
 
 Voice INPUT mirrors preserve `metadata: { messageType: "VOICE", voice: { fileId, fileName, mimeType: "audio/mpeg", durationMs? } }` in the message history JSON. The reference uses an owned positive decimal file ID, an MP3 filename of at most 512 UTF-8 bytes, and an optional integer duration from 1 to 300000 milliseconds. Contract validation and the persistence writer reject extra voice fields, audio base64, provider configuration, and signed URLs. The producer hash includes this metadata; consumers do not rewrite the envelope before checking it. Ordinary INPUT events can omit metadata. The backend mirror/outbox producer must use the same allowlist.
+
+群聊转发回归使用 `../byclaw-qa/fixtures/group-chat-forward/` 中的跨端共用夹具，覆盖 ID 规范化、资源名称冻结和同租户成员资格。快照资源引用仅投影公开展示字段，不恢复 `resourceCode`、`extData`；缺少转发来源标识的旧快照附件仅保留名称、类型和大小，已发布的目标文件副本保留预览信息。

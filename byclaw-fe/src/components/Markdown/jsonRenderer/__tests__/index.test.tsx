@@ -5,6 +5,7 @@ import JsonRenderer from '..';
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
 }));
 
 describe('JsonRenderer', () => {

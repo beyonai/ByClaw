@@ -64,6 +64,11 @@ public class TenantScopedSessionEventService {
     public Boolean handleIfNecessary(Long parentId, JSONObject event) {
         JSONObject metadata = event == null ? null : event.getJSONObject("metadata");
         String scope = metadata == null ? null : metadata.getString("session_scope");
+        if ("parent".equals(scope) && "plan".equals(metadata.getString("event_kind"))) {
+            TenantRequestContext tenant = owner(parentId);
+            if (tenant != null) enrichTaskPlan(tenant, parentId, event, metadata);
+            return tenant == null ? null : false;
+        }
         // Terminal root events may carry metadata without a session scope.
         if (!"child".equals(scope) && !"team".equals(scope))
             return owner(parentId) == null ? null : false;
@@ -92,6 +97,8 @@ public class TenantScopedSessionEventService {
         copy(fields, "childName", metadata, "child_name");
         copy(fields, "childRole", metadata, "child_role");
         copy(fields, "childTask", metadata, "child_task");
+        copy(fields, "childRunId", metadata, "child_run_id");
+        copy(fields, "childTurn", metadata, "child_turn");
         var result = node.command(tenant, "POST", "/internal/v1/sessions/" + parentId + "/external-children",
             parentId.toString(), "ENSURE_EXTERNAL_CHILD", new Fields(fields));
         if (result == null || result.data() == null) throw new IllegalStateException("missing tenant child binding");
@@ -100,6 +107,10 @@ public class TenantScopedSessionEventService {
 
     private void project(TenantRequestContext tenant, Long parentId, List<JSONObject> events) {
         JSONObject metadata = events.getFirst().getJSONObject("metadata");
+        for (JSONObject event : events) {
+            JSONObject eventMetadata = event.getJSONObject("metadata");
+            if ("plan".equals(eventMetadata.getString("event_kind"))) enrichTaskPlan(tenant, parentId, event, eventMetadata);
+        }
         JSONObject bound = binding(tenant, parentId, metadata);
         JSONObject session = bound.getJSONObject("session"), stored = bound.getJSONObject("message");
         JSONObject previous = JSON.parseObject(stored.getString("metadata"));
@@ -166,6 +177,7 @@ public class TenantScopedSessionEventService {
             parentId.toString(), "SAVE_EXTERNAL_CHILD", new Fields(fields),
             "child-" + hash(session.getString("sessionId") + ":" + watermark));
         if (result == null || result.data() == null) throw new IllegalStateException("missing child commit");
+        if (result.data().path("staleRun").asBoolean(false)) return;
         JSONObject committed = JSON.parseObject(result.data().path("message").toString());
         JSONObject notification = new JSONObject();
         notification.put("type", "NEW_MESSAGE"); notification.put("sessionId", session.getString("sessionId"));
@@ -192,6 +204,61 @@ public class TenantScopedSessionEventService {
             member.put("byclawSessionId", binding(tenant, parentId, child).getJSONObject("session").getString("sessionId"));
         }
         delta.put("content", card.toJSONString()); event.put("data", answer.toJSONString());
+    }
+
+    private void enrichTaskPlan(TenantRequestContext tenant, Long parentId, JSONObject event, JSONObject metadata) {
+        JSONObject answer = JSON.parseObject(event.getString("data"));
+        if (answer == null || answer.getJSONArray("choices") == null || answer.getJSONArray("choices").isEmpty()) return;
+        JSONObject delta = answer.getJSONArray("choices").getJSONObject(0).getJSONObject("delta");
+        JSONObject plan = delta == null ? null : JSON.parseObject(delta.getString("content"));
+        JSONArray steps = plan == null ? null : plan.getJSONArray("steps");
+        if (steps == null) return;
+        for (Object stepValue : steps) {
+            JSONObject step = (JSONObject) stepValue;
+            JSONArray tasks = step.getJSONArray("sub_steps");
+            if (tasks == null) continue;
+            for (Object taskValue : tasks) {
+                JSONObject task = (JSONObject) taskValue;
+                JSONArray executions = task.getJSONArray("executions");
+                if (executions != null) for (Object executionValue : executions) {
+                    JSONObject execution = (JSONObject) executionValue;
+                    JSONArray runs = execution == null ? null : execution.getJSONArray("runs");
+                    if (runs == null) continue;
+                    for (Object runValue : runs) {
+                        JSONObject run = (JSONObject) runValue;
+                        if (run == null || (run.getString("child_session_id") != null
+                            && run.getString("child_message_id") != null)) continue;
+                        String externalSessionId = run.getString("external_session_id");
+                        String childRunId = run.getString("child_run_id");
+                        if (externalSessionId == null || childRunId == null) continue;
+                        JSONObject child = new JSONObject(new LinkedHashMap<>(metadata));
+                        child.put("external_session_id", externalSessionId);
+                        child.put("child_run_id", childRunId);
+                        child.put("child_turn", run.get("child_turn"));
+                        child.put("child_name", task.getString("assignee"));
+                        JSONObject bound = binding(tenant, parentId, child);
+                        run.put("child_session_id", bound.getJSONObject("session").getString("sessionId"));
+                        run.put("child_message_id", bound.getJSONObject("message").getString("messageId"));
+                        run.remove("external_session_id");
+                    }
+                }
+                if (task.getString("child_session_id") != null && task.getString("child_message_id") != null) continue;
+                String externalSessionId = task.getString("external_session_id");
+                String childRunId = task.getString("child_run_id");
+                if (externalSessionId == null || childRunId == null) continue;
+                JSONObject child = new JSONObject(new LinkedHashMap<>(metadata));
+                child.put("external_session_id", externalSessionId);
+                child.put("child_run_id", childRunId);
+                child.put("child_name", task.getString("assignee"));
+                JSONObject bound = binding(tenant, parentId, child);
+                task.put("child_session_id", bound.getJSONObject("session").getString("sessionId"));
+                task.put("child_message_id", bound.getJSONObject("message").getString("messageId"));
+                task.remove("external_session_id");
+                task.remove("child_run_id");
+            }
+        }
+        delta.put("content", plan.toJSONString());
+        event.put("data", answer.toJSONString());
     }
 
     private static void copy(Map<String, Object> fields, String key, JSONObject metadata, String source) {

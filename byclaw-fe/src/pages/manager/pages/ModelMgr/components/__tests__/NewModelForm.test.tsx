@@ -74,7 +74,11 @@ async function change(label: string, value: string) {
       const more = screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' });
       if (more.getAttribute('aria-expanded') === 'false') fireEvent.click(more);
     }
-    fireEvent.change(screen.getByLabelText(`modelMgr.modal.${label}`), { target: { value } });
+    const input =
+      label === 'quickPreset'
+        ? screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' })
+        : screen.getByLabelText(`modelMgr.modal.${label}`);
+    fireEvent.change(input, { target: { value } });
   });
 }
 
@@ -139,7 +143,7 @@ describe('new model quick setup', () => {
     await renderForm();
     expect(screen.queryByText('modelMgr.modal.identityGroup')).not.toBeInTheDocument();
     expect(screen.queryByText('modelMgr.modal.quickPresetHint')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('modelMgr.modal.quickPreset')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' })).toBeInTheDocument();
 
     await change('modelCode', 'text-embedding-v4');
     expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('text-embedding-v4');
@@ -215,14 +219,17 @@ describe('new model quick setup', () => {
   ])('offers localized official templates without arbitrary saved names: %s', async (locale, expectedLabel) => {
     mockIntl.locale = locale;
     await renderForm('add', { displayName: 'Example test model', modelCode: 'model2' });
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
     await change('quickPreset', 'model2');
     expect(screen.queryByText('Example test model')).not.toBeInTheDocument();
     expect(screen.queryByText('model2')).not.toBeInTheDocument();
     await change('quickPreset', 'qwen3.6-plus');
     expect(await screen.findByText(expectedLabel)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.keyDown(screen.getByLabelText('modelMgr.modal.quickPreset'), { key: 'Escape', keyCode: 27 });
+      fireEvent.keyDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }), {
+        key: 'Escape',
+        keyCode: 27,
+      });
     });
     await change('modelCode', 'model2');
     expect(screen.getByLabelText('modelMgr.modal.modelCode')).toHaveValue('model2');
@@ -272,7 +279,7 @@ describe('new model quick setup', () => {
     'saves %s from its public template with only a user-supplied key',
     async (search, label, modelCode, contextTokens, maxTokens, enabled) => {
       const save = await renderForm();
-      fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
       await change('quickPreset', search);
       await selectOption(label);
       await change('apiToken', 'test-token');
@@ -338,7 +345,7 @@ describe('new model quick setup', () => {
     expect(screen.getByLabelText('modelMgr.modal.connectTimeoutSec')).not.toBeVisible();
     expect(screen.getByLabelText('modelMgr.modal.apiEndpoint')).not.toBeVisible();
     expect(screen.getByLabelText('modelMgr.modal.systemTags')).not.toBeVisible();
-    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
     await change('quickPreset', 'doubao-seedream-4-0-250828');
     await selectOption('doubao-seedream-4-0-250828 · 字节跳动（火山方舟接入）');
     await change('apiToken', 'test-token');

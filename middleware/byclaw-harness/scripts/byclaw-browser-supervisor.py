@@ -107,6 +107,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--browserd-command", default="")
     parser.add_argument("--bycli-daemon-command", default="")
     parser.add_argument("--bycli-status-command", default="")
+    parser.add_argument("--bycli-doctor-command", default="")
     parser.add_argument("--bycli-health-interval", type=float, default=30.0)
     parser.add_argument("--bycli-command-timeout", type=float, default=3.0)
     parser.add_argument("--prepare-command", default="")
@@ -196,12 +197,12 @@ def acquire_browser_profile_lock(
     return descriptor
 
 
-def bycli_bridge_ready(
+def bycli_report(
     command: Sequence[str],
     environment: dict[str, str],
     account: pwd.struct_passwd,
     timeout: float,
-) -> bool:
+) -> dict:
     child_environment = dict(environment)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
@@ -218,10 +219,20 @@ def bycli_bridge_ready(
             check=False,
         )
         if result.returncode != 0:
-            return False
+            return {}
         payload = json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, TypeError):
-        return False
+    except (subprocess.TimeoutExpired, ValueError, OSError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def bycli_bridge_ready(
+    command: Sequence[str],
+    environment: dict[str, str],
+    account: pwd.struct_passwd,
+    timeout: float,
+) -> bool:
+    payload = bycli_report(command, environment, account, timeout)
     return bool(
         isinstance(payload, dict)
         and payload.get("state") == "ready"
@@ -233,6 +244,20 @@ def bycli_bridge_ready(
     )
 
 
+def bycli_extension_checks(report: dict) -> dict[str, bool]:
+    capabilities = report.get("extensionCapabilities")
+    connectivity = report.get("connectivity")
+    return {
+        "daemonRunning": report.get("daemonRunning") is True,
+        "extensionConnected": report.get("extensionConnected") is True,
+        "daemonCurrent": report.get("daemonStale") is not True,
+        "connectivity": isinstance(connectivity, dict) and connectivity.get("ok") is True,
+        "extensionBuildVerified": report.get("extensionBuildVerified") is True,
+        "uploadReady": report.get("uploadReady") is True,
+        "dialog-policy-v1": isinstance(capabilities, list) and "dialog-policy-v1" in capabilities,
+    }
+
+
 def wait_for_bycli_bridge(
     command: Sequence[str],
     environment: dict[str, str],
@@ -240,8 +265,10 @@ def wait_for_bycli_bridge(
     browser_process: subprocess.Popen[bytes],
     timeout: float,
     command_timeout: float,
+    doctor_command: Sequence[str] | None = None,
 ) -> None:
     deadline = time.monotonic() + timeout
+    checks = None
     while time.monotonic() < deadline:
         returncode = browser_process.poll()
         if returncode is not None:
@@ -250,8 +277,25 @@ def wait_for_bycli_bridge(
         if bycli_bridge_ready(
             command, environment, account, min(command_timeout, max(remaining, 0.01))
         ):
-            return
+            if doctor_command is None:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            doctor = bycli_report(
+                doctor_command, environment, account, min(max(command_timeout, 10.0), remaining)
+            )
+            current_checks = bycli_extension_checks(doctor)
+            # Keep the last structured result if a final probe exhausts the deadline.
+            if doctor or checks is None:
+                checks = current_checks
+            if all(current_checks.values()) and time.monotonic() <= deadline and browser_process.poll() is None:
+                report_bycli_status("local extension verified " + json.dumps(checks, sort_keys=True))
+                return
         time.sleep(min(0.05, max(deadline - time.monotonic(), 0)))
+    if checks is not None:
+        failed = ",".join(name for name, ready in checks.items() if not ready) or "deadline"
+        raise RuntimeError(f"browser-supervisor-bycli-extension-verification-timeout:{failed}")
     raise RuntimeError("browser-supervisor-bycli-readiness-timeout")
 
 
@@ -432,6 +476,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if options.bycli_status_command
             else [DEFAULT_BYCLI_DAEMON_COMMAND, "daemon", "status", "--json"]
         )
+        bycli_doctor_command = (
+            [options.bycli_doctor_command]
+            if options.bycli_doctor_command
+            else [DEFAULT_BYCLI_DAEMON_COMMAND, "doctor", "--json"]
+        )
 
         def restart_bycli() -> int:
             process = spawn(bycli_command, base_environment, browser_account)
@@ -522,6 +571,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     browserd,
                     options.readiness_timeout,
                     options.bycli_command_timeout,
+                    doctor_command=bycli_doctor_command,
                 )
                 report_bycli_status("connected")
             browser_generation = read_browser_generation(browser_generation_path)
@@ -611,10 +661,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         browserd,
                         options.readiness_timeout,
                         options.bycli_command_timeout,
+                        doctor_command=bycli_doctor_command,
                     )
                 except RuntimeError as error:
                     if str(error).startswith("browser-supervisor-browserd-exited"):
                         raise
+                    report_bycli_status(str(error))
                     raise RuntimeError(
                         "browser-supervisor-bycli-bridge-unrecoverable"
                     ) from error

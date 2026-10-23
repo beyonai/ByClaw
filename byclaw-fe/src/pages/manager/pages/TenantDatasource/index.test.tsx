@@ -95,7 +95,7 @@ describe('tenant datasource workbench', () => {
     // Ant Design 图标的名称也会进入按钮的可访问名称，与中文用例采用相同匹配方式。
     fireEvent.click(screen.getByRole('button', { name: /Run SQL/ }));
     await waitFor(() => expect(executeTenantSql).toHaveBeenCalledWith('123', 'SELECT 1', 1, false));
-    expect(await screen.findByText('Page 1 · 1 rows')).toBeInTheDocument();
+    expect(await screen.findByText(/^Page 1 · 1 rows(?: · \d+ ms)?$/)).toBeInTheDocument();
     expect(screen.getByText('Up to 500 rows per page')).toBeInTheDocument();
   });
 

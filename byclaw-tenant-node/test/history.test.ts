@@ -638,3 +638,23 @@ it("does not restore legacy executable references from a snapshot in traditional
   expect(JSON.stringify(result)).not.toMatch(/secret-code|secret-ext|\/private\/download/);
   expect(JSON.parse(result[0]!.metadata).forward.resourceMode).toBe("SNAPSHOT_ONLY");
 });
+
+it("preserves published destination-copy attachments in traditional history", async () => {
+  const { service, repo } = setup();
+  const file = {
+    fileId: "88",
+    fileName: "copy.pdf",
+    fileUrl: "/commonFile/preview?filePath=copy.pdf",
+  };
+  vi.mocked(repo.messages).mockResolvedValue([
+    message({
+      metadata: {
+        kind: "FORWARD_SINGLE",
+        forward: { forwardId: "501", resourceMode: "SNAPSHOT_ONLY" },
+      },
+      relatedResources: { files: [file] },
+    }),
+  ]);
+  const result = await service.byIds("20", ["100"]);
+  expect(JSON.parse(result[0]!.relatedResources).files).toEqual([file]);
+});

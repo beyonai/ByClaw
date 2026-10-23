@@ -20,6 +20,7 @@ public class GroupChatForwardStoreTest {
     @BeforeEach void fixture() throws Exception {
         url = "jdbc:h2:mem:forward" + System.nanoTime() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
         execute("CREATE SCHEMA byai");
+        execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT PRIMARY KEY)");
         // H2 exposes the production database's documented wall-clock function through a test-only alias.
         execute("CREATE ALIAS clock_timestamp FOR \"com.iwhalecloud.byai.state.domain.groupchat.forward.GroupChatForwardStoreTest.clockTimestamp\"");
         String ddl = Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"));

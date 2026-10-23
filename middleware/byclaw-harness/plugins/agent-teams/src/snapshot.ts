@@ -48,6 +48,10 @@ export interface TeamActivityTask {
   readonly depth: number
   readonly waitingUser?: GroupTaskBlocker
   readonly outputInputRevision?: string
+  readonly attempt?: number
+  readonly attemptId?: string
+  readonly externalExecution?: TeamTask['externalExecution']
+  readonly executions?: TeamTask['executions']
 }
 
 /** One captain-inbox preview row. */
@@ -197,6 +201,10 @@ export async function assembleTeamSnapshot(
       depth: depths.get(task.id) ?? 0,
       ...(task.waitingUser === undefined ? {} : { waitingUser: task.waitingUser }),
       ...(task.outputInputRevision === undefined ? {} : { outputInputRevision: task.outputInputRevision }),
+      ...(task.attempt === undefined ? {} : { attempt: task.attempt }),
+      ...(task.attemptId === undefined ? {} : { attemptId: task.attemptId }),
+      ...(task.externalExecution === undefined ? {} : { externalExecution: task.externalExecution }),
+      ...(task.executions === undefined ? {} : { executions: structuredClone(task.executions) }),
     })),
     messageCount: captainInbox.length
       + members.reduce((count, member) => count + member.unread, 0),

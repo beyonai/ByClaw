@@ -154,7 +154,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         Map<String, Object> params = new HashMap<>();
         params.put("groupChat", Map.of("conversationKey", "60"));
         String decorated = (String) executor.decorate(context, child.getMessageContent(), params);
-        assertThat(decorated).contains("group-chat-disposition.json", "group-members.json", "[任务交付提醒]",
+        assertThat(decorated).contains("[群聊协议]", "group_request_assistance", "group-members.json", "[任务交付提醒]",
                 "/by/.sessions/60/.byclaw/task-delivery.json")
             .doesNotContain("HUMAN_30", "用户三十");
         assertThat(decorated).containsOnlyOnce("/by/.sessions/60/.byclaw/context/members/group-members.json");
@@ -527,7 +527,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         JSONArray decorated = (JSONArray) executor.decorate(context, content, params);
         assertThat(((Map<?, ?>) params.get("groupChat")).get("originalContent")).isEqualTo("分析附件");
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getString("text"))
-            .contains("群聊判定协议", "group-members.json").doesNotContain("HUMAN_30", "用户三十");
+            .contains("[群聊协议]", "group_request_assistance", "group-members.json").doesNotContain("HUMAN_30", "用户三十");
         assertThat(content.getJSONObject(0).getJSONObject("content").getString("text")).isEqualTo("分析附件");
         assertThat(decorated.getJSONObject(0).getJSONObject("content").getJSONArray("files"))
             .isEqualTo(content.getJSONObject(0).getJSONObject("content").getJSONArray("files"));

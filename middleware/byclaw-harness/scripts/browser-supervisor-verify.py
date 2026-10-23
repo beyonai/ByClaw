@@ -117,6 +117,7 @@ record = {
     "ownsRuntime": os.environ.get("BYCLAW_BROWSER_OWNS_RUNTIME"),
     "display": os.environ.get("DISPLAY"),
     "fdEnvRemoved": fd_name not in os.environ,
+    "extensionVerifiedAtStart": os.path.exists(os.environ["FAKE_BYCLI_DOCTOR_VERIFIED"]),
 }
 def stop(signum, _frame):
     with open(os.environ["FAKE_DSH_SIGNAL"], "w") as output:
@@ -219,6 +220,33 @@ else:
 """
 
 
+FAKE_BYCLI_DOCTOR = r"""#!/usr/bin/env python3
+import json, os, sys, time
+path = os.environ["FAKE_BYCLI_DOCTOR_RECORD"]
+calls = int(open(path).read()) if os.path.exists(path) else 0
+open(path, "w").write(str(calls + 1))
+states = os.environ.get("FAKE_BYCLI_DOCTOR_SEQUENCE", "ready").split(",")
+state = states[min(calls, len(states) - 1)]
+report = {
+    "daemonRunning": True, "extensionConnected": True, "daemonStale": False,
+    "connectivity": {"ok": True}, "extensionBuildVerified": True, "uploadReady": True,
+    "extensionCapabilities": ["file-input-shadow-v1", "dialog-policy-v1"],
+}
+if state == "mismatch": report["extensionBuildVerified"] = False
+if state == "unverified": report.pop("extensionBuildVerified")
+if state == "no-upload": report["uploadReady"] = False
+if state == "no-dialog": report["extensionCapabilities"] = ["file-input-shadow-v1"]
+if state == "bad-capabilities": report["extensionCapabilities"] = "dialog-policy-v1"
+if state == "disconnected": report["extensionConnected"] = False
+if state == "stale": report["daemonStale"] = True
+if state == "connectivity-failed": report["connectivity"] = {"ok": False}
+if state == "slow": time.sleep(5)
+if state == "failed": raise SystemExit(1)
+if state == "ready": open(os.environ["FAKE_BYCLI_DOCTOR_VERIFIED"], "w").close()
+print("not-json" if state == "malformed" else "[]" if state == "nonobject" else json.dumps(report))
+"""
+
+
 FAKE_PREPARE = r"""#!/usr/bin/env python3
 import json, os, signal, time
 assert os.environ.get("BYCLAW_DSH_PREPARE_ONLY") == "1"
@@ -263,6 +291,7 @@ def fixture(
     bycli_status_sequence: str = "ready",
     bycli_health_interval: float = 0.1,
     bycli_recovery_delay: float = 0,
+    bycli_doctor_sequence: str = "ready",
     browser_profile: Path | None = None,
 ):
     browser = directory / "fake-browserd.py"
@@ -271,18 +300,21 @@ def fixture(
     prepare_command = directory / "fake-prepare.py"
     bycli_daemon = directory / "fake-bycli-daemon.py"
     bycli_status = directory / "fake-bycli-status.py"
+    bycli_doctor = directory / "fake-bycli-doctor.py"
     browser.write_text(FAKE_BROWSERD)
     dsh.write_text(FAKE_DSH)
     desktop.write_text(FAKE_DESKTOP)
     prepare_command.write_text(FAKE_PREPARE)
     bycli_daemon.write_text(FAKE_BYCLI_DAEMON)
     bycli_status.write_text(FAKE_BYCLI_STATUS)
+    bycli_doctor.write_text(FAKE_BYCLI_DOCTOR)
     browser.chmod(0o755)
     dsh.chmod(0o755)
     desktop.chmod(0o755)
     prepare_command.chmod(0o755)
     bycli_daemon.chmod(0o755)
     bycli_status.chmod(0o755)
+    bycli_doctor.chmod(0o755)
     socket_path = directory / "browserd.sock"
     browser_record = directory / "browser.json"
     dsh_record = directory / "dsh.json"
@@ -309,6 +341,9 @@ def fixture(
         "FAKE_BYCLI_STATUS_RECORD": str(directory / "bycli-status-count"),
         "FAKE_BYCLI_STATUS_SEQUENCE": bycli_status_sequence,
         "FAKE_BYCLI_RECOVERY_DELAY": str(bycli_recovery_delay),
+        "FAKE_BYCLI_DOCTOR_RECORD": str(directory / "bycli-doctor-count"),
+        "FAKE_BYCLI_DOCTOR_SEQUENCE": bycli_doctor_sequence,
+        "FAKE_BYCLI_DOCTOR_VERIFIED": str(directory / "bycli-doctor-verified"),
         "BYCLAW_BYCLI_ENABLED": "true" if bycli else "false",
         "BYCLAW_BROWSER_VIEWER": viewer,
         **({"BYCLAW_BROWSER_USER_DATA_DIR": str(browser_profile)} if browser_profile else {}),
@@ -332,6 +367,7 @@ def fixture(
         command.extend([
             "--bycli-daemon-command", str(bycli_daemon),
             "--bycli-status-command", str(bycli_status),
+            "--bycli-doctor-command", str(bycli_doctor),
             "--bycli-health-interval", str(bycli_health_interval),
         ])
     if prepare:
@@ -494,6 +530,41 @@ def run_bycli_connected_status(root: Path) -> None:
     result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
     assert result.returncode == 7, result
     assert "byCLI Browser Bridge connected" in result.stderr
+    assert "local extension verified" in result.stderr
+    assert int((root / "bycli-doctor-count").read_text()) == 1
+    assert json.loads((root / "dsh.json").read_text())["extensionVerifiedAtStart"] is True
+
+
+def run_bycli_extension_verification(root: Path) -> None:
+    for state in ["mismatch", "unverified", "no-upload", "no-dialog", "bad-capabilities",
+                  "disconnected", "stale", "connectivity-failed", "malformed", "nonobject", "failed", "slow"]:
+        directory = root / state
+        directory.mkdir()
+        command, env, _socket, browser_record, dsh_record = fixture(
+            directory, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
+            bycli_doctor_sequence=state,
+        )
+        result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+        assert result.returncode == 1, (state, result)
+        assert "browser-supervisor-bycli-extension-verification-timeout" in result.stderr, (state, result)
+        assert browser_record.exists()
+        assert not dsh_record.exists(), (state, "DSH started with an unverified extension")
+        assert json.loads((directory / "bycli.json").read_text())["calls"] == 1
+        if state == "mismatch": assert "extensionBuildVerified" in result.stderr
+        if state == "no-dialog": assert "dialog-policy-v1" in result.stderr
+
+
+def run_bycli_extension_wait(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, dsh_mode="exit7",
+        bycli_doctor_sequence="mismatch,ready",
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert dsh_record.exists()
+    assert int((root / "bycli-doctor-count").read_text()) == 2
+    assert "local extension verified" in result.stderr
+    assert json.loads(dsh_record.read_text())["extensionVerifiedAtStart"] is True
 
 
 def run_bycli_startup_gate(root: Path) -> None:
@@ -501,7 +572,7 @@ def run_bycli_startup_gate(root: Path) -> None:
         root,
         viewer="shared-novnc",
         bycli=True,
-        readiness_timeout=0.3,
+        readiness_timeout=0.8,
         bycli_status_sequence="disconnected",
     )
     result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
@@ -522,7 +593,10 @@ def wait_for_bycli_reconnected(
             command, env=env, text=True, stdout=subprocess.DEVNULL, stderr=log
         )
         try:
-            wait_for(dsh_record, process)
+            try:
+                wait_for(dsh_record, process)
+            except AssertionError as error:
+                raise AssertionError(f"{error}\n{log_path.read_text()}") from error
             deadline = time.monotonic() + 5
             while True:
                 stderr = log_path.read_text()
@@ -599,13 +673,14 @@ def run_bycli_browser_generation_recovery(root: Path) -> None:
     assert json.loads((root / "bycli.json").read_text())["calls"] == 2
     assert "browser generation changed from 1 to 2" in stderr
     assert "byCLI Browser Bridge reconnected" in stderr
+    assert int((root / "bycli-doctor-count").read_text()) == 2
     browser = json.loads(browser_record.read_text())
     assert browser["generationFile"].endswith("/browser-generation.json")
 
 
 def run_bycli_reconnect_wait_rejects_failure(root: Path) -> None:
     command, env, _socket, _browser_record, dsh_record = fixture(
-        root, viewer="shared-novnc", bycli=True, readiness_timeout=0.3,
+        root, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
         bycli_status_sequence="ready,disconnected", bycli_health_interval=0.05,
     )
     try:
@@ -617,12 +692,27 @@ def run_bycli_reconnect_wait_rejects_failure(root: Path) -> None:
         raise AssertionError("failed bridge recovery was accepted as ready")
 
 
+def run_bycli_generation_rechecks_extension(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, browser_mode="restart-generation",
+        readiness_timeout=0.8, bycli_doctor_sequence="ready,mismatch", bycli_health_interval=30,
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert dsh_record.exists(), "initial verified startup failed"
+    assert "browser generation changed from 1 to 2" in result.stderr
+    assert "extension-verification-timeout" in result.stderr, result.stderr
+    assert "extensionBuildVerified" in result.stderr, result.stderr
+    assert "byCLI Browser Bridge reconnected" not in result.stderr
+    assert int((root / "bycli-doctor-count").read_text()) >= 2
+
+
 def run_bycli_watchdog_failure(root: Path) -> None:
     command, env, _socket, _browser_record, dsh_record = fixture(
         root,
         viewer="shared-novnc",
         bycli=True,
-        readiness_timeout=0.3,
+        readiness_timeout=0.8,
         bycli_status_sequence="ready,disconnected",
         bycli_health_interval=0.05,
     )
@@ -639,12 +729,12 @@ def run_bycli_malformed_status(root: Path) -> None:
         root,
         viewer="shared-novnc",
         bycli=True,
-        readiness_timeout=0.3,
+        readiness_timeout=0.8,
         bycli_status_sequence="malformed",
     )
     result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
     assert result.returncode == 1, result
-    assert "browser-supervisor-bycli-readiness-timeout" in result.stderr
+    assert "browser-supervisor-bycli-readiness-timeout" in result.stderr, result.stderr
     assert not dsh_record.exists()
 
 
@@ -744,6 +834,8 @@ def run_lazy_activation(root: Path) -> None:
         wait_for(Path(str(path) + ".activated"), process)
         assert json.loads(browser_record.read_text())["digest"] == json.loads(dsh_record.read_text())["digest"]
         assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+        assert int((root / "bycli-doctor-count").read_text()) == 1
+        assert json.loads(dsh_record.read_text())["extensionVerifiedAtStart"] is False
         assert profile.is_dir()
         assert json.loads(browser_record.read_text())["profileExclusive"] == "true"
     finally:
@@ -751,6 +843,30 @@ def run_lazy_activation(root: Path) -> None:
         process.communicate(timeout=5)
     assert not path.exists()
     assert not Path(str(path) + ".activated").exists()
+
+
+def run_lazy_extension_verification_failure(root: Path) -> None:
+    command, env, path, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
+        bycli_doctor_sequence="mismatch",
+    )
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not (root / "bycli-doctor-count").exists()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(str(path))
+        _, stderr = process.communicate(timeout=5)
+        assert process.returncode == 1, stderr
+        assert "extension-verification-timeout" in stderr, stderr
+        assert "extensionBuildVerified" in stderr, stderr
+        assert not Path(str(path) + ".activated").exists()
+        assert (root / "dsh.signal").exists(), "DSH survived failed first-use verification"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.communicate(timeout=5)
 
 
 def run_lazy_profile_conflict(root: Path) -> None:
@@ -822,6 +938,7 @@ def main() -> None:
         base = Path(temporary)
         for name, check in [
             ("lazy-activation", run_lazy_activation),
+            ("lazy-extension-verification-failure", run_lazy_extension_verification_failure),
             ("lazy-unused-exit", run_lazy_unused_exit),
             ("lazy-profile-conflict", run_lazy_profile_conflict),
             ("exit", run_exit_propagation),
@@ -833,10 +950,13 @@ def main() -> None:
             ("prepare", run_prepare_before_secret),
             ("bycli-daemon", run_bycli_daemon_lifecycle),
             ("bycli-connected-status", run_bycli_connected_status),
+            ("bycli-extension-verification", run_bycli_extension_verification),
+            ("bycli-extension-wait", run_bycli_extension_wait),
             ("bycli-startup-gate", run_bycli_startup_gate),
             ("bycli-watchdog-recovery", run_bycli_watchdog_recovery),
             ("bycli-watchdog-transient", run_bycli_watchdog_tolerates_transient_disconnect),
             ("bycli-browser-generation", run_bycli_browser_generation_recovery),
+            ("bycli-generation-rechecks-extension", run_bycli_generation_rechecks_extension),
             ("bycli-reconnect-wait-failure", run_bycli_reconnect_wait_rejects_failure),
             ("bycli-watchdog-failure", run_bycli_watchdog_failure),
             ("bycli-malformed-status", run_bycli_malformed_status),

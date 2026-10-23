@@ -48,6 +48,9 @@ const LEGACY_TYPED_ERROR_CODES = [
   'ARGUMENT',
   'EMPTY_RESULT',
   'COMMAND_EXEC',
+  'COVER_NOT_READY',
+  'UPLOAD_NOT_STARTED',
+  'UPLOAD_RESULT_UNKNOWN',
   'AUTH_REQUIRED',
   'TIMEOUT',
   'CAPTCHA',
@@ -306,7 +309,15 @@ export async function runGate({
   const lockPath = join(stateDir, `${fingerprint}.lock`);
   await mkdir(lockPath, { mode: 0o700 });
   try {
-    const state = await readState(statePath);
+    let state = await readState(statePath);
+    // Channels' operation journal owns upload/save/submit idempotency. This
+    // gate owns authentication only; an explicit invocation may inspect or
+    // recover after success, argument errors, stale pages or unknown results.
+    if (site === 'weixin-channels' && ['complete', 'terminal'].includes(state?.phase)
+      && !HUMAN_GATE_CODES.has(state.lastCode)
+      && state.lastCode !== 'INTERRUPTED_AFTER_RERUN_CONSUMPTION') {
+      state = { ...state, phase: 'initial' };
+    }
     const consumedReruns = confirmedRerunCount(state);
     if (state?.phase === 'terminal') {
       const terminalAuthCode = HUMAN_GATE_CODES.has(state.lastCode)

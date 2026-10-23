@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { ActivityTeam } from './ActivityPanel.tsx'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import { expertState, teamForParent, type ExpertVisualState } from './expert-team-model.ts'

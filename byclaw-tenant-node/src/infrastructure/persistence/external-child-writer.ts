@@ -20,6 +20,7 @@ export async function ensureExternalChild(context: CommandContext) {
     "SELECT ext_param_value FROM byai.byai_session_ext WHERE session_id=$1 AND ext_param_code=$2",
     [command.sessionId, key],
   );
+  const runId = text(command.payload.childRunId, 255);
   if (binding) {
     const ids = JSON.parse(binding.extParamValue);
     if (ids.externalRootSessionId !== root) throw new DomainError("MIRROR_CONTEXT_MISMATCH");
@@ -40,7 +41,57 @@ export async function ensureExternalChild(context: CommandContext) {
       message.sessionId !== session.sessionId
     )
       throw new DomainError("MIRROR_CONTEXT_MISMATCH");
-    return { data: { session, message } };
+    if (!runId) return { data: { session, message } };
+    const runKey = `external_child_run:${createHash("sha256").update(runId).digest("hex")}`;
+    const runBinding = await first(
+      db,
+      "SELECT ext_param_value FROM byai.byai_session_ext WHERE session_id=$1 AND ext_param_code=$2",
+      [ids.childSessionId, runKey],
+    );
+    if (runBinding) {
+      const runMessage = await first(
+        db,
+        "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2",
+        [JSON.parse(runBinding.extParamValue).messageId, command.enterpriseId],
+      );
+      if (!runMessage || runMessage.sessionId !== session.sessionId)
+        throw new DomainError("MIRROR_CONTEXT_MISMATCH");
+      return { data: { session, message: runMessage } };
+    }
+    const nextMessageId = await nextId(db, command.enterpriseId);
+    const nextSeq = String(BigInt(session.lastSeq ?? 1) + 1n);
+    const runMessage = {
+      id: nextMessageId,
+      message_id: nextMessageId,
+      session_id: session.sessionId,
+      enterprise_id: command.enterpriseId,
+      usage: 2,
+      role: "assistant",
+      message_content: "",
+      message_struct: "[]",
+      infer_log: "[]",
+      metadata: JSON.stringify({
+        child_run_id: runId,
+        ...(command.payload.childTurn ? { child_turn: command.payload.childTurn } : {}),
+      }),
+      msg_status: 1,
+      is_complete: false,
+      storage_version: "0",
+      created_seq: nextSeq,
+      create_time: new Date(),
+      update_time: new Date(),
+    };
+    await insert(db, "byai_message", runMessage);
+    const updatedSession = await first(
+      db,
+      "UPDATE byai.byai_session SET last_seq=$1,update_time=CURRENT_TIMESTAMP WHERE session_id=$2 AND enterprise_id=$3 RETURNING *",
+      [nextSeq, session.sessionId, command.enterpriseId],
+    );
+    await new ChildContext(db, { ...command, sessionId: session.sessionId }).setExtension(
+      runKey,
+      JSON.stringify({ messageId: nextMessageId, childRunId: runId }),
+    );
+    return { data: { session: updatedSession ?? session, message: camel(runMessage) } };
   }
   const childSessionId = await nextId(db, command.enterpriseId);
   const messageId = await nextId(db, command.enterpriseId);
@@ -75,7 +126,14 @@ export async function ensureExternalChild(context: CommandContext) {
     message_content: "",
     message_struct: "[]",
     infer_log: "[]",
-    metadata: "{}",
+    metadata: JSON.stringify(
+      runId
+        ? {
+            child_run_id: runId,
+            ...(command.payload.childTurn ? { child_turn: command.payload.childTurn } : {}),
+          }
+        : {},
+    ),
     msg_status: 1,
     is_complete: false,
     storage_version: "0",
@@ -96,6 +154,10 @@ export async function ensureExternalChild(context: CommandContext) {
     child_role: command.payload.childRole ?? "",
   }))
     await child.setExtension(code, text(value, 4000, true));
+  if (runId) {
+    const runKey = `external_child_run:${createHash("sha256").update(runId).digest("hex")}`;
+    await child.setExtension(runKey, JSON.stringify({ messageId, childRunId: runId }));
+  }
   await context.setExtension(
     key,
     JSON.stringify({ childSessionId, messageId, externalRootSessionId: root }),
@@ -141,6 +203,27 @@ export async function saveExternalChild(context: CommandContext) {
   )
     throw new DomainError("INVALID_EXTERNAL_CHILD");
   const metadata = { ...p.metadata, event_stream_id: p.streamId };
+  const marker = await first(
+    db,
+    "SELECT ext_param_value FROM byai.byai_session_ext WHERE session_id=$1 AND ext_param_code=$2",
+    [childId, "external_latest_run"],
+  );
+  const latest = marker ? JSON.parse(marker.extParamValue) : null;
+  const turn = Number(metadata.child_turn);
+  const runId = typeof metadata.child_run_id === "string" ? metadata.child_run_id : null;
+  if (
+    Number.isSafeInteger(turn) &&
+    turn > 0 &&
+    runId &&
+    latest &&
+    (turn < latest.turn || (turn === latest.turn && runId !== latest.runId))
+  ) {
+    return { data: { session: child, message, staleRun: true } };
+  }
+  const childContext = new ChildContext(db, { ...command, sessionId: childId });
+  if (Number.isSafeInteger(turn) && turn > 0 && runId) {
+    await childContext.setExtension("external_latest_run", JSON.stringify({ turn, runId }));
+  }
   const committed = await first(
     db,
     `UPDATE byai.byai_message SET message_content=$1,message_struct=$2,infer_log=$3,
@@ -159,7 +242,7 @@ export async function saveExternalChild(context: CommandContext) {
       p.finalContent == null ? null : text(p.finalContent, 2 * 1024 * 1024, true),
     ],
   );
-  await new ChildContext(db, { ...command, sessionId: childId }).setExtension(
+  await childContext.setExtension(
     "external_session_status",
     String(metadata.session_status ?? (p.complete ? "completed" : "running")),
   );
