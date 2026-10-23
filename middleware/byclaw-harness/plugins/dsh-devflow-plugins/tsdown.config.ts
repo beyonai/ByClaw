@@ -1,6 +1,6 @@
 /**
- * Host-half build: one ESM entry pair per package (`lib/index.js` and the
- * `lib/invariant.js` companion), which is what `main`/`exports` point at and
+ * Host-half build: one ESM entry per package (`lib/index.js`), which is what
+ * `main`/`exports` point at and
  * therefore what a consumer actually loads. `tsc -b` emits declarations into
  * `lib/types/`; it does not emit the runtime entries, so publishing without
  * this step ships manifests pointing at files that do not exist.
@@ -28,7 +28,6 @@ export default defineConfig(HOST_PACKAGES.map((name): UserConfig => ({
   name,
   entry: [
     `packages/${name}/src/index.ts`,
-    `packages/${name}/src/invariant.ts`,
     ...(name === 'devflow-midscene'
       ? ['cli', 'worker', 'runner'].map(entry => `packages/${name}/src/${entry}.ts`)
       : []),

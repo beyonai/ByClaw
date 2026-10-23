@@ -27,7 +27,8 @@ import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { registerAgentTeamsTools, type ToolsConfig } from './tools.ts'
 import { readFile } from 'node:fs/promises'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { bindTeamStateRuntime, defaultTeamStateRuntime, TeamStateRuntime } from './runtime-state.ts'
+import type { ClaudeBridgeOptions, ClaudeSubprocessHost } from './claude-bridge.ts'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
@@ -81,10 +82,10 @@ export const inject = ['tools', 'llm', 'subagents', 'systemPrompt', 'agents']
 export interface Config {
   /**
    * Logical state namespace (default `.agent-teams`). Host-owned runtime state
-   * is keyed by workspace and namespace under `$DSH_HOME/runtime/byclaw-agent-teams/`.
+   * is keyed by workspace and namespace under `<dshHome>/runtime/byclaw-agent-teams/`.
    */
   stateDir?: string
-  /** `ctx.subagents` provider used to spawn members; must support continuable children and personas (default `spawn`). */
+  /** `ctx.subagents` provider used to spawn members; must support continuable children; AgentTeams applies the member persona itself (default `spawn`). */
   memberProvider?: string
   /** Optional model override applied to every member. */
   memberModel?: string
@@ -96,8 +97,22 @@ export interface Config {
   controlledWorkflow?: boolean
   /** Automatic task-attempt ceiling (default `3`). */
   maxTaskAttempts?: number
-  /** Machine-global expert-template and runtime-pointer directory. */
+  /** Machine-global expert-template and runtime-pointer directory (default `<dshHome>/agent-teams`). */
   catalogDir?: string
+  /** This context's DSH home for host-private team state; omitted reads `DSH_HOME` (or `~/.dsh`). */
+  dshHome?: string
+  /**
+   * Session workspaces exist only on the tool environment: workspace paths
+   * are never resolved on this host, and Claude Code members run through
+   * `ctx.subprocess` with only `claudeEnv`.
+   */
+  workspaceOnToolEnvironment?: boolean
+  /** Workspace for sessions without a cwd (default `process.cwd()`; required for that case on a tool environment). */
+  workspace?: string
+  /** Claude Code member executable (default `claude`). */
+  claudeBin?: string
+  /** Explicit environment for Claude Code members (e.g. `ANTHROPIC_*`). */
+  claudeEnv?: Record<string, string>
 }
 
 export const Config: z<Config> = z.object({
@@ -109,6 +124,11 @@ export const Config: z<Config> = z.object({
   controlledWorkflow: z.boolean().default(false),
   maxTaskAttempts: z.natural().min(1).default(3),
   catalogDir: z.string(),
+  dshHome: z.string(),
+  workspaceOnToolEnvironment: z.boolean().default(false),
+  workspace: z.string(),
+  claudeBin: z.string(),
+  claudeEnv: z.dict(z.string()),
 })
 
 /** The model-facing usage policy: when and how to drive AgentTeams. */
@@ -130,6 +150,20 @@ Tools: ${toolNames}`
 export function apply(ctx: Context, config: Config): void {
   const modelOverrides = createAgentTeamsModelOverrideService()
   ctx.provide(AGENT_TEAMS_MODEL_OVERRIDES, modelOverrides)
+  const dshHome = config.dshHome?.trim() || undefined
+  const toolEnvironment = config.workspaceOnToolEnvironment === true
+  // Without explicit placement keep the process-wide runtime (and its aliases) shared with sibling plugins.
+  const stateRuntime = dshHome === undefined && !toolEnvironment && config.workspace === undefined
+    ? defaultTeamStateRuntime
+    : new TeamStateRuntime({ dshHome, workspaceOnToolEnvironment: toolEnvironment, workspace: config.workspace })
+  if (stateRuntime !== defaultTeamStateRuntime) {
+    ctx.effect(() => bindTeamStateRuntime(ctx, stateRuntime), 'agent-teams: state runtime')
+  }
+  const claude: ClaudeBridgeOptions = {
+    ...config.claudeBin === undefined ? {} : { claudeBin: config.claudeBin },
+    ...config.claudeEnv === undefined ? {} : { env: config.claudeEnv },
+    ...toolEnvironment ? { subprocess: () => ctx.get('subprocess') as ClaudeSubprocessHost | undefined } : {},
+  }
   const resolved: ToolsConfig = {
     stateDir: config.stateDir ?? '.agent-teams',
     memberProvider: config.memberProvider ?? 'spawn',
@@ -137,8 +171,10 @@ export function apply(ctx: Context, config: Config): void {
     memberMaxDepth: config.memberMaxDepth ?? 1,
     controlledWorkflow: config.controlledWorkflow ?? false,
     maxTaskAttempts: config.maxTaskAttempts ?? 3,
-    catalogDir: config.catalogDir ?? defaultCatalogDir(),
+    catalogDir: config.catalogDir ?? defaultCatalogDir(dshHome),
     modelOverrides,
+    stateRuntime,
+    claude,
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /
@@ -194,7 +230,7 @@ export function apply(ctx: Context, config: Config): void {
       const url = new URL(req.url ?? '/', 'http://x')
       const roots = workspaceRegistry.list().map((workspace) => ({
         workspace: workspace.title,
-        stateRoot: resolveTeamStateRoot(workspace.path, resolved.stateDir),
+        stateRoot: stateRuntime.resolveTeamStateRoot(workspace.path, resolved.stateDir),
       }))
       // ?archived=1 serves teams moved to archive/ (post-delete review).
       const snapshots = url.searchParams.get('archived') === '1'

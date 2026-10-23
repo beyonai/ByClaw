@@ -9,9 +9,10 @@
  * @module @zhchxiao123/dsh-devflow-iron-rules/rules
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { ResolvedConfig } from './index.ts'
 import type { IronRule, ParsedRuleFile, RuleEnforcement, RuleSet, WatchStatus } from './types.ts'
 
@@ -26,7 +27,8 @@ export interface Workspace {
 /**
  * Derive the calling agent's rule root, the same way every other devflow root
  * derives: `<session cwd>/.devflow/iron-rules` for an agent whose session
- * carries a working directory, else the configured default root — NOT the
+ * carries a working directory, else the configured default root under the
+ * configured `projectRoot` (this process's cwd when unset) — NOT the
  * nearest git ancestor, so rules, cards, and spec documents always share one
  * `.devflow/`.
  * @param agent - the calling agent.
@@ -39,7 +41,8 @@ export function workspaceOf(agent: Agent, config: ResolvedConfig): Workspace {
     const projectRoot = resolve(cwd)
     return { projectRoot, rulesDir: join(projectRoot, '.devflow', 'iron-rules') }
   }
-  return { projectRoot: process.cwd(), rulesDir: resolve(config.root) }
+  const projectRoot = config.projectRoot ?? process.cwd()
+  return { projectRoot, rulesDir: resolve(projectRoot, config.root) }
 }
 
 /** A rule id becomes a directory name, so containment is a property of the id itself. */
@@ -110,21 +113,26 @@ function parseWatches(raw: string | undefined): readonly string[] | undefined {
  * though it is not yet worth interrupting anyone over.
  * @param rule - the rule to measure.
  * @param projectRoot - absolute root the declared prefixes resolve against.
+ * @param io - where the workspace is read; this process's filesystem by default.
  * @returns the counts, or `undefined` when the rule declared no paths —
  *   staleness is unknowable without a declaration, and "unknown" must not read
  *   as "stale".
  */
-export async function watchStatus(rule: IronRule, projectRoot: string): Promise<WatchStatus | undefined> {
+export async function watchStatus(
+  rule: IronRule,
+  projectRoot: string,
+  io: WorkspaceIo = localWorkspaceIo,
+): Promise<WatchStatus | undefined> {
   if (rule.watches === undefined || rule.watches.length === 0) return undefined
-  const present = await Promise.all(rule.watches.map(async watch => await pathExists(join(projectRoot, watch))))
+  const present = await Promise.all(rule.watches.map(async watch => await pathExists(io, join(projectRoot, watch))))
   const missing = present.filter(exists => !exists).length
   return { declared: present.length, missing, stale: missing === present.length }
 }
 
 /** Whether `path` exists at all. */
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(io: WorkspaceIo, path: string): Promise<boolean> {
   try {
-    await stat(path)
+    await io.stat(path)
     return true
   } catch {
     // stat is the try's only operation, so a missing path is the only failure.
@@ -142,13 +150,13 @@ interface LoadedRule {
 }
 
 /** Read and parse one rule directory. */
-async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
+async function loadRule(io: WorkspaceIo, rulesDir: string, id: string): Promise<LoadedRule> {
   const dir = join(rulesDir, id)
   const rulePath = join(dir, 'RULE.md')
 
   let text: string
   try {
-    text = await readFile(rulePath, 'utf8')
+    text = await io.readFile(rulePath)
   } catch {
     // readFile is the try's only operation; a directory without RULE.md is not
     // a rule, which is ordinary (a stray directory) rather than an error.
@@ -162,7 +170,7 @@ async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
   }
 
   const checkScript = join(dir, 'check.sh')
-  const hasCheck = await pathExists(checkScript)
+  const hasCheck = await pathExists(io, checkScript)
   // A rule authored before `enforcement` existed still has to load. The script
   // on disk is the honest answer to "what enforces this" for those.
   const declared = frontmatter.enforcement
@@ -198,15 +206,16 @@ async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
  * ordinary empty state, which is what makes the plugin inert in a workspace
  * that carries no rules.
  * @param workspace - the roots from {@link workspaceOf}.
+ * @param io - where the workspace is read; this process's filesystem by default.
  * @returns the parsed rules in directory-name order plus any skip reasons.
  */
-export async function loadRules(workspace: Workspace): Promise<RuleSet> {
+export async function loadRules(workspace: Workspace, io: WorkspaceIo = localWorkspaceIo): Promise<RuleSet> {
   const { projectRoot, rulesDir } = workspace
   const warnings: string[] = []
 
   let entries: string[]
   try {
-    entries = (await readdir(rulesDir, { withFileTypes: true }))
+    entries = (await io.readdir(rulesDir))
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .sort()
@@ -223,7 +232,7 @@ export async function loadRules(workspace: Workspace): Promise<RuleSet> {
       warnings.push(`${diagnostic}, skipped`)
       continue
     }
-    const { rule, warning } = await loadRule(rulesDir, id)
+    const { rule, warning } = await loadRule(io, rulesDir, id)
     if (warning !== undefined) warnings.push(warning)
     if (rule !== undefined) rules.push(rule)
   }

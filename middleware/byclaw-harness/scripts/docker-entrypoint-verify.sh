@@ -15,7 +15,7 @@ mkdir -p \
   "${managed_home}/profiles/web" \
   "${managed_home}/profiles/web/node_modules/profile-package" \
   "${managed_home}/profiles/web/node_modules/test-plugin" \
-  "${managed_home}/profiles/node_modules/fallback-package" \
+  "${managed_home}/profiles/node_modules/peer-package" \
   "${managed_home}/skills/devflow" \
   "${dsh_home}/plugins/stale" \
   "${dsh_home}/profiles/web" \
@@ -31,7 +31,6 @@ printf '%s\n' 'integration-plugin' >"${managed_home}/plugins/integration/version
 printf '%s\n' 'web-profile' >"${managed_home}/profiles/web/package.json"
 printf '%s\n' 'seed-patch' >"${managed_home}/profiles/web/cordis.patch.yml"
 printf '%s\n' 'profile-module' >"${managed_home}/profiles/web/node_modules/profile-package/version"
-printf '%s\n' 'fallback-module' >"${managed_home}/profiles/node_modules/fallback-package/version"
 cat >"${managed_home}/profiles/web/node_modules/test-plugin/package.json" <<'EOF'
 {"name":"test-plugin","type":"module","exports":"./index.js"}
 EOF
@@ -63,14 +62,21 @@ cat >"${workspace}/fake-dsh-cli.mjs" <<'EOF'
 import { writeFileSync } from 'node:fs'
 writeFileSync(process.env.BYCLAW_TEST_CAPTURE, `${process.argv.slice(2).join('\n')}\n`)
 EOF
+# Stands in for the loopback forwarder preload and records the port it is given.
+cat >"${workspace}/fake-loopback-forward.mjs" <<'EOF'
+import { writeFileSync } from 'node:fs'
+writeFileSync(`${process.env.BYCLAW_TEST_CAPTURE}.forward`, `${process.env.BYCLAW_DSH_LOOPBACK_PORT}\n`)
+EOF
 
 run_entrypoint() {
+  rm -f "${capture}.forward"
   env \
     DSH_HOME="${dsh_home}" \
     BYCLAW_DSH_MANAGED_HOME="${managed_home}" \
     BYCLAW_DSH_PREPARE_ONLY=1 \
     DSH_ROOT="${workspace}" \
     BYCLAW_DSH_CLI_ENTRY="${workspace}/fake-dsh-cli.mjs" \
+    BYCLAW_DSH_LOOPBACK_FORWARDER="${workspace}/fake-loopback-forward.mjs" \
     BYCLAW_TEST_CAPTURE="${capture}" \
     bash "${repo_root}/docker-entrypoint.sh" "$@"
   env \
@@ -79,6 +85,7 @@ run_entrypoint() {
     BYCLAW_DSH_PREPARED=1 \
     DSH_ROOT="${workspace}" \
     BYCLAW_DSH_CLI_ENTRY="${workspace}/fake-dsh-cli.mjs" \
+    BYCLAW_DSH_LOOPBACK_FORWARDER="${workspace}/fake-loopback-forward.mjs" \
     BYCLAW_TEST_CAPTURE="${capture}" \
     bash "${repo_root}/docker-entrypoint.sh" "$@"
 }
@@ -107,6 +114,8 @@ test "$(cat "${dsh_home}/agent-teams/team")" = 'team-data'
 test "$(cat "${dsh_home}/agent-templates/template")" = 'template-data'
 test "$(cat "${dsh_home}/.credentials.yaml")" = 'credential-data'
 diff -u <(printf '%s\n' web --host 0.0.0.0 --port 8080 --no-open) "${capture}"
+# The 0.0.0.0 listener gets its port mirrored on loopback.
+test "$(cat "${capture}.forward")" = 8080
 
 # A lock whose recorded process still exists may belong to a live writer and
 # must never be removed by startup recovery.
@@ -122,10 +131,22 @@ rm "${dsh_home}/.credentials.yaml.lock"
 # Repeated starts keep the managed links and preserve an explicit host.
 run_entrypoint web --host 127.0.0.1 --port 8081
 diff -u <(printf '%s\n' web --host 127.0.0.1 --port 8081) "${capture}"
+test ! -e "${capture}.forward"
+
+# An explicit 0.0.0.0 is mirrored too; without --port, DSH's default 3080 is.
+run_entrypoint web --host=0.0.0.0 --no-open
+diff -u <(printf '%s\n' web --host=0.0.0.0 --no-open) "${capture}"
+test "$(cat "${capture}.forward")" = 3080
+
+# Port 0 asks the OS for a port, which cannot be mirrored in advance.
+run_entrypoint web --port 0
+diff -u <(printf '%s\n' web --host 0.0.0.0 --port 0) "${capture}"
+test ! -e "${capture}.forward"
 
 # Other DSH commands pass through unchanged.
 run_entrypoint headless --help
 diff -u <(printf '%s\n' headless --help) "${capture}"
+test ! -e "${capture}.forward"
 
 # The supervisor prepares managed state before creating the secret FD. Its
 # prepared child must exec DSH without rerunning any filesystem subprocesses.
@@ -136,8 +157,10 @@ env \
   BYCLAW_DSH_PREPARED=1 \
   DSH_ROOT="${workspace}" \
   BYCLAW_DSH_CLI_ENTRY="${workspace}/fake-dsh-cli.mjs" \
+  BYCLAW_DSH_LOOPBACK_FORWARDER="${workspace}/fake-loopback-forward.mjs" \
   BYCLAW_TEST_CAPTURE="${prepared_capture}" \
   bash "${repo_root}/docker-entrypoint.sh" web --port 8082 --no-open
 diff -u <(printf '%s\n' web --host 0.0.0.0 --port 8082 --no-open) "${prepared_capture}"
+test "$(cat "${prepared_capture}.forward")" = 8082
 
 printf '%s\n' 'docker entrypoint verification passed'

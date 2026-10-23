@@ -2,9 +2,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createHash, randomUUID } from 'node:crypto'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { teamStateRuntime } from './runtime-state.ts'
 import { groupPolicy, groupScope } from './group-scope.ts'
 import { findTeamByParticipant, readTeam, withTeamLock, writeTeam, createMessage, appendMailbox,
   acknowledgeMailbox, readMailbox, releaseMailboxDelivery, CAPTAIN_KEY } from './state.ts'
@@ -72,7 +73,7 @@ export async function requestGroupMemberAssistance(ctx: Context, member: Agent, 
   objective: string, inputs?: string): Promise<GroupAssistanceResult | undefined> {
   const scope = groupScope(ctx, String(member.id))
   if (scope === undefined || scope.role !== 'member') throw new Error('A bound group member is required')
-  const stateRoot = resolveTeamStateRoot(member.session.header.cwd ?? process.cwd(), stateDir)
+  const stateRoot = teamStateRuntime(ctx).stateRootOf(member, stateDir)
   const located = await findTeamByParticipant(stateRoot, String(member.id))
   if (located === undefined) return undefined
   const inputRevision = groupInputRevision(ctx, String(member.id), located.inputRevision ?? located.tasks.find(task => task.assignee === located.members.find(candidate => candidate.id === String(member.id))?.name)?.inputRevision)
@@ -104,7 +105,7 @@ export async function requestGroupMemberAssistance(ctx: Context, member: Agent, 
   const captain = ctx.agents.get(requested.team.captainSessionId as SessionId)
   if (captain !== undefined && requested.message !== undefined) {
     try { captain.steer(createUserMessage({ content: [{ type: 'text', text: requested.message.content }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' } }))
+      source: { kind: 'plugin:dsh-agent-teams' } }))
     await withTeamLock(`team:${stateRoot}:${requested.team.id}`, () => acknowledgeMailbox(
       stateRoot, requested.team.id, CAPTAIN_KEY, [requested.message!.id]))
     } catch { /* The persisted assistance mailbox will be delivered on resume. */ }

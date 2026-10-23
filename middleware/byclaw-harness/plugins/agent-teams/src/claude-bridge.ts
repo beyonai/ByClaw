@@ -7,8 +7,10 @@
  * session id per member for context continuity (`--resume <sid>`), and
  * persists the task transcript in the team state directory.
  *
- * The `claude` executable and its provider configuration (cc-switch) come
- * from the ambient user environment; no API key is configured here.
+ * By default the `claude` executable and its provider configuration
+ * (cc-switch) come from the ambient host environment. With a `subprocess`
+ * provider (a separate tool environment) the CLI runs there instead and
+ * receives only the explicitly configured `env`, never host credentials.
  *
  * @module dsh-agent-teams/claude-bridge
  */
@@ -82,6 +84,80 @@ export function claudeProcessEnvironment(source: NodeJS.ProcessEnv = process.env
   return environment
 }
 
+/** Structural slice of the DSH subprocess service (`ctx.subprocess`). */
+export interface ClaudeSubprocessHost {
+  spawn(spec: {
+    argv: readonly string[]
+    cwd: string
+    graceMs: number
+    signal?: AbortSignal
+    env?: NodeJS.ProcessEnv
+    stdio: {
+      stdin: 'ignore'
+      stdout: { maxBytes: number }
+      stderr: { maxBytes: number }
+    }
+  }): {
+    done: Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>
+    collected: {
+      stdout?: { readFrom(offset: number): { text: string } }
+      stderr?: { readFrom(offset: number): { text: string } }
+    }
+  }
+}
+
+/** Per-context Claude member execution settings. */
+export interface ClaudeBridgeOptions {
+  /** Executable name or path (default `claude`). */
+  claudeBin?: string
+  /** Explicit child environment entries (e.g. `ANTHROPIC_*`), merged over the host allowlist in host mode. */
+  env?: Record<string, string>
+  /**
+   * Resolve the subprocess provider (the tool environment) to run through,
+   * with only `env`; omitted runs on the host. Resolving to nothing fails the
+   * turn rather than falling back to the host.
+   */
+  subprocess?: () => ClaudeSubprocessHost | undefined
+  /** One-turn time budget (ms). */
+  timeoutMs?: number
+}
+
+const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+
+function requireSubprocess(resolve: () => ClaudeSubprocessHost | undefined): ClaudeSubprocessHost {
+  const subprocess = resolve()
+  if (subprocess === undefined) throw new Error('no subprocess provider for the tool environment')
+  return subprocess
+}
+
+/** Run the CLI through a subprocess provider; resolves stdout or throws like `execFile`. */
+async function runThroughSubprocess(
+  subprocess: ClaudeSubprocessHost,
+  argv: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<string> {
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), timeoutMs)
+  try {
+    const handle = subprocess.spawn({
+      argv, cwd, env, graceMs: 2000, signal: abort.signal,
+      stdio: { stdin: 'ignore', stdout: { maxBytes: MAX_OUTPUT_BYTES }, stderr: { maxBytes: 64 * 1024 } },
+    })
+    const outcome = await handle.done
+    if (abort.signal.aborted) throw new Error(`timed out after ${String(timeoutMs)}ms`)
+    const stdout = handle.collected.stdout?.readFrom(0).text ?? ''
+    if (outcome.exitCode !== 0) {
+      const stderr = handle.collected.stderr?.readFrom(0).text ?? ''
+      throw new Error(`exit ${String(outcome.exitCode ?? outcome.signal)}: ${stderr.slice(0, 2000)}`)
+    }
+    return stdout
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Read (or initialize) the per-member claude session record. */
 export function readClaudeMemberState(
   stateDir: string,
@@ -122,9 +198,7 @@ export async function runClaudeTurn(
     stateDir: string
     teamId: string
     memberName: string
-    timeoutMs?: number
-    claudeBin?: string
-  },
+  } & ClaudeBridgeOptions,
 ): Promise<ClaudeTurnResult> {
   const state = readClaudeMemberState(opts.stateDir, opts.teamId, opts.memberName)
   const bin = opts.claudeBin ?? 'claude'
@@ -134,12 +208,14 @@ export async function runClaudeTurn(
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
   try {
-    const { stdout } = await execFileAsync(bin, args, {
-      cwd: opts.cwd,
-      timeout: timeoutMs,
-      maxBuffer: 8 * 1024 * 1024,
-      env: claudeProcessEnvironment(),
-    })
+    const stdout = opts.subprocess !== undefined
+      ? await runThroughSubprocess(requireSubprocess(opts.subprocess), [bin, ...args], opts.cwd, { ...opts.env }, timeoutMs)
+      : (await execFileAsync(bin, args, {
+        cwd: opts.cwd,
+        timeout: timeoutMs,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        env: { ...claudeProcessEnvironment(), ...opts.env },
+      })).stdout
     let parsed: Record<string, unknown>
     try {
       parsed = JSON.parse(stdout) as Record<string, unknown>

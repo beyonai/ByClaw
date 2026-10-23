@@ -5,7 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
-import SessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as SessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 

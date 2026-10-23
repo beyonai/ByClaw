@@ -13,7 +13,15 @@ import {
   type ByClawInboundTurnContext,
 } from './inbound-context.ts'
 
-const BYCLAW_CONTEXT_PLUGIN = 'byclaw-context'
+/** Source kind of the ByClaw context messages; a 0.1.5 session's `{ kind: 'plugin', plugin: 'byclaw-context' }` loads as this. */
+const BYCLAW_CONTEXT_SOURCE = 'plugin:byclaw-context'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:byclaw-context': { kind: 'plugin:byclaw-context' }
+    'plugin:byclaw-integration': { kind: 'plugin:byclaw-integration' }
+  }
+}
 const BYCLAW_CONTEXT_MARKER = '<!-- byclaw-context:session-workspace -->'
 export const BYCLAW_SESSION_WORKSPACE_EVENT = 'byclaw/session-workspace'
 export const BYCLAW_ROOT_BINDING_EVENT = 'byclaw/root-binding'
@@ -284,8 +292,7 @@ function ownByClawContextExists(session: Pick<Session, 'ownEvents'>, workspace: 
   // current declaration rather than rewriting history or repeating it every turn.
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!
-    if (event.type !== 'user/message' || event.data.source.kind !== 'plugin'
-      || event.data.source.plugin !== BYCLAW_CONTEXT_PLUGIN) continue
+    if (event.type !== 'user/message' || event.data.source.kind !== BYCLAW_CONTEXT_SOURCE) continue
     const context = event.data.content.find(block => block.type === 'text' && block.text.includes(BYCLAW_CONTEXT_MARKER))
     if (context?.type === 'text') return context.text === byClawContextText(workspace)
   }
@@ -300,8 +307,7 @@ function ownByClawTurnContextExists(
   const events = session.ownEvents()
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!
-    if (event.type !== 'user/message' || event.data.source.kind !== 'plugin'
-      || event.data.source.plugin !== BYCLAW_CONTEXT_PLUGIN) continue
+    if (event.type !== 'user/message' || event.data.source.kind !== BYCLAW_CONTEXT_SOURCE) continue
     const context = event.data.content.find(block => block.type === 'text'
       && block.text.includes('<!-- byclaw-context:turn:'))
     if (context?.type === 'text') return context.text.includes(marker)
@@ -329,13 +335,13 @@ export function appendByClawContext(
   if (!ownByClawContextExists(session, workspace)) {
     contexts.push(createUserMessage({
       content: [{ type: 'text', text: byClawContextText(workspace) }],
-      source: { kind: 'plugin', plugin: BYCLAW_CONTEXT_PLUGIN },
+      source: { kind: BYCLAW_CONTEXT_SOURCE },
     }))
   }
   if (turn !== undefined && !ownByClawTurnContextExists(session, turn.messageId)) {
     contexts.push(createUserMessage({
       content: [{ type: 'text', text: byClawInboundTurnContextDeclaration(turn, scope) }],
-      source: { kind: 'plugin', plugin: BYCLAW_CONTEXT_PLUGIN },
+      source: { kind: BYCLAW_CONTEXT_SOURCE },
     }))
   }
   return contexts.length === 0 ? messages : [...messages, ...contexts]

@@ -1,0 +1,65 @@
+# Split tool execution into a separate sandbox (B) when BYCLAW_DSH_TOOL_ENV is
+# `static`, `opensandbox` or `byclaw-be`. Unset (the default) leaves every row below inert
+# and the base local providers in place, so existing deployments are unchanged.
+#
+# Split mode replaces the base local filesystem, subprocess, sandbox and PTC rows
+# with DSH's SSH providers. They all reach B through `ctx.ssh`, which this plugin
+# provides as a reconnecting lease over B (see src/connection.ts).
+- id: fs-sandbox
+  disabled: !!js "['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: subprocess
+  disabled: !!js "['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: sandbox
+  disabled: !!js "['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- id: ptc-runtime
+  disabled: !!js "['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+- insert:
+    - id: byclaw-tool-env
+      name: '@byclaw/dsh-tool-env'
+      disabled: !!js "!['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+      config:
+        backend: !!js "process.env.BYCLAW_DSH_TOOL_ENV || 'static'"
+        stateDir: !!js dshHomePath('byclaw-tool-env')
+        workspace: !!js "process.env.BYCLAW_TOOL_ENV_WORKSPACE || '/by'"
+        idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 600000)"
+        host: !!js "process.env.BYCLAW_TOOL_ENV_HOST || '127.0.0.1'"
+        port: !!js "Number(process.env.BYCLAW_TOOL_ENV_PORT || 22)"
+        wsUrl: !!js "process.env.BYCLAW_TOOL_ENV_WS_URL || ''"
+        openSandbox: !!js "JSON.parse(process.env.BYCLAW_TOOL_ENV_OPENSANDBOX || '{}')"
+        # `byclaw-be`: BE creates B from its own spec as this user. USER_CODE and
+        # BEYOND_TOKEN are what BE already injects into A; the base URL is the one
+        # the byclaw-dsh plugin uses.
+        byclawBe:
+          baseUrl: !!js "process.env.BYCLAW_TOOL_ENV_BE_BASE_URL || process.env.BYCLAW_DSH_BASE_URL || process.env.BYAI_SERVICE_BASE_URL || ''"
+          userCode: !!js "process.env.USER_CODE || ''"
+          token: !!js "process.env.BEYOND_TOKEN || ''"
+          systemCode: !!js "process.env.BYCLAW_TOOL_ENV_SYSTEM_CODE || ''"
+          serviceKey: !!js "process.env.BYCLAW_TOOL_ENV_SERVICE_KEY || 'byclaw-dsh-tools'"
+          sshInstance: !!js "process.env.BYCLAW_TOOL_ENV_SSH_INSTANCE || 'ssh'"
+          hostTemplate: !!js "process.env.BYCLAW_TOOL_ENV_HOST_TEMPLATE ?? 'sandbox-{id}'"
+          publishKeys: !!js "process.env.BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS === '1'"
+          readyTimeoutMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_READY_TIMEOUT_MS || 180000)"
+          requestTimeoutMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS || 180000)"
+
+    - id: byclaw-tool-env-fs
+      name: '@deepseek-ai/dsh-fs-ssh'
+      disabled: !!js "!['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-subprocess
+      name: '@deepseek-ai/dsh-subprocess-ssh'
+      disabled: !!js "!['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-sandbox
+      name: '@deepseek-ai/dsh-sandbox-ssh'
+      disabled: !!js "!['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+
+    - id: byclaw-tool-env-ptc
+      name: '@deepseek-ai/dsh-ptc-runtime-node'
+      disabled: !!js "!['static', 'opensandbox', 'byclaw-be'].includes(process.env.BYCLAW_DSH_TOOL_ENV ?? '')"
+      inject: [ssh]
+      config:
+        launch: !!js ctx.ssh.ptcLaunch

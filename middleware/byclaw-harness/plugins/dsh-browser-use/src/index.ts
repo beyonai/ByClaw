@@ -15,6 +15,7 @@ import type { TurnBoundaryProjectionSource } from './turn-identity.js'
 import { readBrowserSecretFromEnvironment } from './secret-fd.js'
 import type { BrowserAction } from './protocol.js'
 import { validScrollFields } from './browser-scroll.js'
+import { LocalBrowserdRuntime, OwnedBrowserBroker, type OwnedRuntimeOptions } from './owned-runtime.js'
 
 export const name = 'dsh-browser-use'
 
@@ -25,6 +26,32 @@ export interface Config {
   maxQueue?: number
   idleBrowserMs?: number
   leaseTimeoutMs?: number
+  /**
+   * Opt-in for hosts that run several DSH contexts in one process: this context
+   * spawns, owns and stops its own browserd, with every path, secret and port
+   * below taken from config instead of the environment. Off keeps the
+   * supervisor-launched broker.
+   */
+  ownsRuntime?: boolean
+  /** Required with ownsRuntime: private directory for socket, downloads, screenshots, sessions and lock. */
+  runtimeDir?: string
+  /** Required with ownsRuntime: this context's DSH home (profile under `<dshHome>/browser/user-data`). */
+  dshHome?: string
+  socketPath?: string
+  /** Broker secret held in memory; generated per context when omitted. */
+  brokerSecret?: string
+  userDataDir?: string
+  automationLockPath?: string
+  artifactRoot?: string
+  browserdCommand?: string[]
+  browserdEnv?: Record<string, string>
+  readinessTimeoutMs?: number
+  viewer?: 'none' | 'novnc' | 'shared-novnc'
+  viewerHost?: string
+  viewerPort?: number
+  displayRange?: string
+  rfbPortRange?: string
+  websockifyPortRange?: string
 }
 
 export type BrowserPluginConfig = Config
@@ -34,7 +61,24 @@ export const Config: z<Config> = z.object({
   maxQueue: z.number().default(32),
   idleBrowserMs: z.number().default(30_000),
   leaseTimeoutMs: z.number().default(900_000),
-})
+  ownsRuntime: z.boolean().default(false),
+  runtimeDir: z.string(),
+  dshHome: z.string(),
+  socketPath: z.string(),
+  brokerSecret: z.string(),
+  userDataDir: z.string(),
+  automationLockPath: z.string(),
+  artifactRoot: z.string(),
+  browserdCommand: z.array(z.string()),
+  browserdEnv: z.dict(z.string()),
+  readinessTimeoutMs: z.natural(),
+  viewer: z.union(['none', 'novnc', 'shared-novnc']),
+  viewerHost: z.string(),
+  viewerPort: z.natural(),
+  displayRange: z.string(),
+  rfbPortRange: z.string(),
+  websockifyPortRange: z.string(),
+}) as z<Config>
 
 const SAFE_PRESS_KEYS = new Set([
   'Tab', 'Enter', 'Escape', 'Space', 'Backspace', 'Delete',
@@ -491,7 +535,7 @@ function browserTool(controller: BrowserSessionController, goalEnabled: boolean)
   return { ...defined, parameters: { ...BROWSER_PARAMETERS, oneOf: [...BROWSER_PARAMETERS.oneOf, ...(goalEnabled ? GOAL_BRANCHES : [])] } as unknown as Record<string, unknown> }
 }
 
-function resolved(config: Config): Required<Config> {
+function resolved(config: Config): Required<Pick<Config, 'maxContexts' | 'maxQueue' | 'idleBrowserMs' | 'leaseTimeoutMs'>> {
   return {
     maxContexts: config.maxContexts ?? 4,
     maxQueue: config.maxQueue ?? 32,
@@ -538,6 +582,10 @@ export function registerBrowserTool(
 }
 
 export function apply(ctx: Context, config: Config): void {
+  if (config.ownsRuntime) {
+    applyOwnedRuntime(ctx, config)
+    return
+  }
   ctx.logger.info(`[byclaw-browser-goal] ${browserGoalEnabled() ? 'enabled' : 'disabled'}`)
   const socketPath = process.env.BYCLAW_BROWSER_SOCKET ?? '/run/byclaw-browser/browserd.sock'
   const secret = readBrowserSecretFromEnvironment()
@@ -556,4 +604,63 @@ export function apply(ctx: Context, config: Config): void {
       log: (event, data) => ctx.logger.info(`[byclaw-browser-goal] ${event} ${JSON.stringify(data)}`),
     } satisfies BrowserGoalServices } : {}) },
   )
+}
+
+function goalText(ctx: Context): BrowserGoalServices['text'] {
+  return { forAgent: agent => {
+    const service = (ctx as unknown as { byclawBrowserText?: BrowserTextServiceFactory }).byclawBrowserText
+    return service?.forAgent(agent) ?? { async generate() { throw new Error('browser-goal-text-unavailable') } }
+  } }
+}
+
+/** Map the plugin config onto one context's runtime; exported for the shared-host contract tests. */
+export function ownedRuntimeOptions(config: Config, log?: OwnedRuntimeOptions['log']): OwnedRuntimeOptions {
+  if (!config.runtimeDir || !config.dshHome) throw new Error('browser-owned-runtime-missing-config')
+  const optional = <K extends keyof Config>(key: K) => (
+    config[key] === undefined || config[key] === '' ? {} : { [key]: config[key] }
+  )
+  return {
+    runtimeDir: config.runtimeDir,
+    dshHome: config.dshHome,
+    ...optional('socketPath'),
+    ...(config.brokerSecret ? { secret: config.brokerSecret } : {}),
+    ...optional('userDataDir'),
+    idleBrowserMs: resolved(config).idleBrowserMs,
+    ...optional('readinessTimeoutMs'),
+    ...(config.browserdCommand?.length ? { browserdCommand: config.browserdCommand } : {}),
+    ...(config.browserdEnv ? { browserdEnv: config.browserdEnv } : {}),
+    ...optional('viewer'),
+    ...optional('viewerHost'),
+    ...optional('viewerPort'),
+    ...optional('displayRange'),
+    ...optional('rfbPortRange'),
+    ...optional('websockifyPortRange'),
+    ...(log ? { log } : {}),
+  } as OwnedRuntimeOptions
+}
+
+/** Per-context goal paths: the automation lock and run artifacts never use fixed paths or the working directory. */
+export function ownedGoalPaths(config: Config): { automationLockPath: string; artifactRoot: string } {
+  if (!config.runtimeDir || !config.dshHome) throw new Error('browser-owned-runtime-missing-config')
+  return {
+    automationLockPath: config.automationLockPath || join(config.runtimeDir, 'automation.lock'),
+    artifactRoot: config.artifactRoot || join(config.dshHome, 'browser', 'goal-artifacts'),
+  }
+}
+
+/** One context, one browserd: socket, secret, profile, lock and artifacts come from config only. */
+function applyOwnedRuntime(ctx: Context, config: Config): BrowserSessionController {
+  const runtime = new LocalBrowserdRuntime(ownedRuntimeOptions(config, (level, message) => ctx.logger[level](message)))
+  const paths = ownedGoalPaths(config)
+  const goalEnabled = browserGoalEnabled()
+  ctx.logger.info(`[byclaw-browser-goal] ${goalEnabled ? 'enabled' : 'disabled'}`)
+  return registerBrowserTool(ctx, config, new OwnedBrowserBroker(runtime), {
+    shutdownOnDispose: true,
+    ...(goalEnabled ? { goal: {
+      config: { ...resolveGoalConfig(), lockPath: paths.automationLockPath },
+      artifactRoot: paths.artifactRoot,
+      text: goalText(ctx),
+      log: (event, data) => ctx.logger.info(`[byclaw-browser-goal] ${event} ${JSON.stringify(data)}`),
+    } satisfies BrowserGoalServices } : {}),
+  })
 }

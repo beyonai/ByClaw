@@ -19,6 +19,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import WorkingDirectoryFixture, { WORKING_DIRECTORY_FIXTURE } from '../../../tests/working-directory-fixture'
 import FilesystemDevflowStore from '@zhchxiao123/dsh-devflow-filesystem'
 import * as ToolDevflow from '@zhchxiao123/dsh-devflow-tool'
 import * as DevflowFsGuard from '@zhchxiao123/dsh-devflow-fs-guard'
@@ -41,6 +42,7 @@ async function boot(configLines: string[] = []): Promise<Context> {
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
     "- name: '@deepseek-ai/dsh-fs-local'",
+    `- name: '${WORKING_DIRECTORY_FIXTURE}'`,
     "- name: '@deepseek-ai/dsh-tool-fs'",
     "- name: '@zhchxiao123/dsh-devflow-filesystem'",
     "- name: '@zhchxiao123/dsh-devflow-tool'",
@@ -59,6 +61,7 @@ async function boot(configLines: string[] = []): Promise<Context> {
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
+    [WORKING_DIRECTORY_FIXTURE, WorkingDirectoryFixture],
     ['@deepseek-ai/dsh-tool-fs', ToolFs],
     ['@zhchxiao123/dsh-devflow-filesystem', FilesystemDevflowStore],
     ['@zhchxiao123/dsh-devflow-tool', ToolDevflow],
@@ -73,6 +76,9 @@ async function boot(configLines: string[] = []): Promise<Context> {
   } as unknown as NonNullable<typeof ctx.loader.internal>
   await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
   await ctx.loader.await()
+  // The Loader settles every entry without rejecting; a row whose config
+  // or apply failed surfaces through its own fiber.
+  for (const entry of ctx.loader.entries()) await entry.fiber?.await()
   return ctx
 }
 

@@ -340,7 +340,7 @@ describe('isContextInjectionMessage', () => {
   it('recognizes plugin-stamped sources structurally', () => {
     expect(isContextInjectionMessage({
       content: [{ type: 'text', text: 'runtime context' }],
-      source: { kind: 'plugin', plugin: SIDE_INJECTION_PLUGIN },
+      source: { kind: `plugin:${SIDE_INJECTION_PLUGIN}` },
     })).toBe(true)
     expect(isContextInjectionMessage({
       content: [{ type: 'text', text: 'q' }],

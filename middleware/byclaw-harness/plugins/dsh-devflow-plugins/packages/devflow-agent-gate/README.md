@@ -34,6 +34,7 @@ An edge with no entry delegates without touching the store. An input kind with n
 |---|---|---|
 | `edges` | `{}` | Admission check per `from->to` edge: the subagent `provider` the checker starts on, the `inputs` artifact kinds inlined into its prompt (optional; unregistered kinds are skipped), and the `prompt` instruction it judges by. An edge with no entry is not checked. |
 | `checkTimeoutMs` | `600000` | Milliseconds one checker may take from dispatch to verdict; overrunning fails closed. |
+| `workspaceOnToolEnvironment` | `false` | Read inputs and keep reports and the verdict cache through the context's `ctx.fs` / `ctx.subprocess` instead of this process. |
 
 Misconfiguration fails the load, naming the config item: an edge key not of the form `<from>-><to>` with known location names, a blank `provider` or `prompt`, an input kind outside the seam's kind grammar (lowercase letters, digits, and dashes, starting alphanumeric), or a non-positive `checkTimeoutMs`.
 

@@ -39,6 +39,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
@@ -66,6 +67,8 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 /** 群聊资源创建和成员管理用例。 */
 @Service
 public class GroupChatApplicationService {
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks workgroupHooks;
     @Autowired
     private GroupWorkAssistantService workAssistantService;
     @Autowired
@@ -196,6 +199,16 @@ public class GroupChatApplicationService {
         response.setMembers(members);
         response.setCoordinatorAgentId(coordinatorId == null ? null : coordinatorId.toString());
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
+        // 工作组及初始成员、权限全部创建完成后登记通知，回滚时不会发送 HTTP。
+        // 事件携带真实企业归属，不将项目存储默认企业或个人账号的 comAcctId 当作业务企业。
+        var tenantContext = TenantRequestContextHolder.get();
+        var loginInfo = CurrentUserHolder.getLoginInfo();
+        Long eventEnterpriseId = loginInfo == null ? null : loginInfo.getEnterpriseId();
+        if (tenantContext != null) {
+            eventEnterpriseId = tenantContext.enterpriseId();
+        }
+        workgroupHooks.created(session.getSessionId().toString(), session.getSessionName(), eventEnterpriseId,
+            session.getProjectId(), operatorId);
         return response;
     }
 

@@ -160,6 +160,18 @@ try {
   assert.equal(afterRestart.header.cwd, cwd)
   assert.deepEqual((await afterRestart.read()).events, resumed.snapshotEvents())
   await afterRestart.close()
+  uninstall()
+  // With the workspace on a tool environment the projected cwd is created there, not on this host.
+  const remoteDirectories = []
+  uninstall = installByClawSessionCwdCompatibility(
+    backend, new ByClawSessionMetadataStore(table), byRoot, undefined, async path => { remoteDirectories.push(path) },
+  )
+  await rm(cwd, { recursive: true, force: true })
+  const remote = await backend.open('conversation', 'write')
+  assert.equal(remote.header.cwd, cwd)
+  assert.deepEqual(remoteDirectories, [cwd])
+  await assert.rejects(readFile(join(cwd, 'missing'), 'utf8'), { code: 'ENOENT' })
+  await remote.close()
 } finally {
   uninstall()
   await rm(byRoot, { recursive: true, force: true })

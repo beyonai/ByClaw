@@ -3,7 +3,7 @@ import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { registerTeamStateWorkspaceAlias } from '@byclaw/dsh-agent-teams'
+import { teamStateRuntime, type TeamStateRuntime } from '@byclaw/dsh-agent-teams'
 import { resolveByClawInboundPath } from './inbound-context.ts'
 import { byClawSessionCwd, isLegacyProjectCwd } from './session-cwd.ts'
 import type { ByClawSessionMetadataStore } from './session-metadata.ts'
@@ -18,6 +18,10 @@ export function installByClawSessionCwdCompatibility(
   persistence: Pick<SessionPersistence, 'open' | 'stat' | 'list'>,
   metadata: Pick<ByClawSessionMetadataStore, 'get'>,
   byRoot: string,
+  /** This context's AgentTeams state runtime, resolved per use (default: the process-wide runtime). */
+  stateRuntime: () => TeamStateRuntime = () => teamStateRuntime(),
+  /** Creates the projected cwd where the session's tools run (default: this host). */
+  ensureDirectory: (path: string) => Promise<void> = async (path) => { await mkdir(path, { recursive: true }) },
 ): () => void {
   const originalOpen = persistence.open
   const originalStat = persistence.stat
@@ -72,10 +76,10 @@ export function installByClawSessionCwdCompatibility(
       const header = await projectHeader(handle.header)
       if (header === handle.header) return handle
       if (access === 'write') {
-        await mkdir(header.cwd!, { recursive: true })
+        await ensureDirectory(header.cwd!)
         const key = JSON.stringify([header.cwd, handle.header.cwd])
         if (!stateAliases.has(key)) {
-          stateAliases.set(key, registerTeamStateWorkspaceAlias(
+          stateAliases.set(key, stateRuntime().registerWorkspaceAlias(
             header.cwd!, resolveByClawInboundPath(handle.header.cwd!, byRoot),
           ))
         }

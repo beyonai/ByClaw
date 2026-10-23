@@ -185,7 +185,7 @@ FILE_STORAGE_LOCAL_PATH=/absolute/path/to/byclaw-file
     memberMaxDepth: 2
 ```
 
-常用可选项包括 `catalogDir`、`agentTemplateDir`、`skillCacheDir`、`builtinSkillDir`、`workspace`、`workerId`、`maxConcurrency`、`refreshChannel`、`subagentProvider`、`agentPreset`，以及在 Redis 模式中用作降级、在本地模式中作为必填运行模型的 `provider`/`model`。资源同步调优项包括 `snapshotConcurrency`（默认 `8`）、`projectionConcurrency`（`8`）、`authorizationPollMs`（`5000`）、`authorizationPollOnlyMs`（`2000`）、`authorizationMissingGraceMs`（`15000`）和 `resourceDebounceMs`（`250`）；`projectionConcurrency` 限制单次代次中 Skill、员工模型和专家团运行配置请求的合计并发数，运行时可用正整数环境变量 `BYCLAW_DSH_PROJECTION_CONCURRENCY` 覆盖。Skill 同步会对每个缓存目录单独执行原子替换，不再为每个代次复制完整持久化缓存；Agent 与专家团模板目录仍按完整代次原子发布，撤销的 Skill 只会在新模板和运行时 Skill 视图均提交后删除。每个 ByClaw 根会话都会显式挂载 `agentPreset`，默认值为 `standard`；根 Agent 与委派 Agent 获得该 preset 实际组合的编码工具，数字员工的 Skill 目录按前述内置与关联资源规则裁剪。CodeGraph 等运行能力由各自已安装插件注册，ByClaw Integration 不再声明或扫描这些能力。
+常用可选项包括 `catalogDir`、`agentTemplateDir`、`skillCacheDir`、`builtinSkillDir`、`workspace`、`workerId`、`refreshChannel`、`subagentProvider`、`agentPreset`，以及在 Redis 模式中用作降级、在本地模式中作为必填运行模型的 `provider`/`model`。资源同步调优项包括 `snapshotConcurrency`（默认 `8`）、`projectionConcurrency`（`8`）、`authorizationPollMs`（`5000`）、`authorizationPollOnlyMs`（`2000`）、`authorizationMissingGraceMs`（`15000`）和 `resourceDebounceMs`（`250`）；`projectionConcurrency` 限制单次代次中 Skill、员工模型和专家团运行配置请求的合计并发数，运行时可用正整数环境变量 `BYCLAW_DSH_PROJECTION_CONCURRENCY` 覆盖。Skill 同步会对每个缓存目录单独执行原子替换，不再为每个代次复制完整持久化缓存；Agent 与专家团模板目录仍按完整代次原子发布，撤销的 Skill 只会在新模板和运行时 Skill 视图均提交后删除。每个 ByClaw 根会话都会显式挂载 `agentPreset`，默认值为 `standard`；根 Agent 与委派 Agent 获得该 preset 实际组合的编码工具，数字员工的 Skill 目录按前述内置与关联资源规则裁剪。CodeGraph 等运行能力由各自已安装插件注册，ByClaw Integration 不再声明或扫描这些能力。
 
 `agentTypes` 可覆盖 Worker 实际消费的完整 AgentType 列表。缺省时仍注册 `BYCLAW_DSH` 与 `BYCLAW_DSH_<userCode>`。临时替换默认超级助手 Worker 时，以 ByClaw BE 实际报出的目标类型为准；当前默认超级助手入口使用 `['BY_SUPER']`。单一且完全相同的 AgentType 列表会沿用 by-framework 为原 Worker 派生的消费组，避免创建新消费组重放历史消息。接管前必须确认原 Worker 已停止或通过 `WorkerManager.suspendWorker` 暂停，回切时先停止 DSH 再恢复原 Worker。
 
@@ -349,3 +349,5 @@ Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill
 ### 2026-10-22 冷启动投影优化
 
 模板 staging 保留原目录校验与文件命名规则，只复制用户模板、未知文件和子目录；本代际会重新生成的 ByClaw 模板不再先复制后删除。原代际锁、双目录发布回滚、撤权清理及 Skill 懒加载/版本检查不变。`session-metadata-ready` 日志将会话元数据恢复从内置 Skill 加载区间中单独标出。新增 `template-staging-verify.mjs` 覆盖撤权、用户文件保留、目录碰撞拒绝与失败时保留旧代际。
+
+Worker 消息分发不再设置任务并发上限，原 `maxConcurrency` 插件配置不再生效；会话内顺序和 DSH 工具并发仍独立控制。适配器显式关闭已发布 by-framework 版本的默认上限，因此不依赖 framework 升级即可生效。Redis 阻塞读取、消息 ACK、取消、健康检查和退出时等待在途任务均保留。`snapshotConcurrency`、`projectionConcurrency` 仍限制资源同步并发。实际容量取决于任务负载、保留状态、模型配额和 Redis 事件流量，取消分发上限不代表吞吐量没有上限。

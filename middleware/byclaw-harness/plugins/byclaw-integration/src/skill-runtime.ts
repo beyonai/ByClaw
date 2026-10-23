@@ -6,13 +6,13 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createHash } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
-import type { Dirent } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load } from 'js-yaml'
 import type { DshAgentTemplate } from './agent-template.ts'
 import { groupScope } from '@byclaw/dsh-agent-teams'
 import { projectMemberSkill, revokeMemberSkillRoots, setActiveMemberSkillRoots } from './group-skill-resources.ts'
+import type { ToolEnvironmentFiles } from './tool-environment-files.ts'
 
 /** Structural registry API supported by the adapter; no DSH implementation is replaced. */
 interface SkillSummary {
@@ -39,7 +39,37 @@ interface Binding {
   dshAgentId: string
 }
 
-const AGENT_SKILLS_ROOT = '/by/.openclaw'
+/** Default employee (agent-workspace) Skill root inside the user tree. */
+export const AGENT_SKILLS_ROOT = '/by/.openclaw'
+
+/** Employee (agent-workspace) Skill root beneath a user tree (`byRoot`). */
+export function agentSkillRootFor(byRoot: string): string {
+  return join(resolve(byRoot), '.openclaw')
+}
+
+/** Directory listing and text reads of employee Skills: this host by default, or the tool environment. */
+interface WorkspaceSkillReader {
+  list(path: string): Promise<Array<{ name: string; skillDirectory: boolean }>>
+  read(path: string): Promise<string>
+}
+
+const hostWorkspaceSkills: WorkspaceSkillReader = {
+  async list(path) {
+    return (await readdir(path, { withFileTypes: true }))
+      .map(entry => ({ name: entry.name, skillDirectory: entry.isDirectory() || entry.isSymbolicLink() }))
+  },
+  read: path => readFile(path, 'utf8'),
+}
+
+function toolEnvironmentWorkspaceSkills(files: ToolEnvironmentFiles): WorkspaceSkillReader {
+  return {
+    // Listing reports a symlink by its target type or as `other`; a non-directory then has no SKILL.md.
+    async list(path) {
+      return (await files.listDir(path)).map(entry => ({ name: entry.name, skillDirectory: entry.type !== 'file' }))
+    },
+    read: path => files.readText(path),
+  }
+}
 
 function agentWorkspaceSkillRoot(root: string, agentId: string): string {
   return join(root, `workspace-baiying-agent-${agentId}`, 'skills')
@@ -85,8 +115,14 @@ function booleanField(data: Record<string, unknown>, key: string, fallback: bool
   return value
 }
 
-async function readDefinition(readPath: string, publishedPath: string, code?: string, onCompatibleName?: (name: string) => void): Promise<SkillDefinition> {
-  const raw = (await readFile(readPath, 'utf8')).replace(/^\uFEFF/u, '')
+async function readDefinition(
+  readPath: string,
+  publishedPath: string,
+  code?: string,
+  onCompatibleName?: (name: string) => void,
+  read: (path: string) => Promise<string> = path => readFile(path, 'utf8'),
+): Promise<SkillDefinition> {
+  const raw = (await read(readPath)).replace(/^\uFEFF/u, '')
   const match = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/u.exec(raw)
   const parsed: unknown = match === null ? {} : load(match[1]!)
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`invalid Skill metadata: ${readPath}`)
@@ -154,21 +190,22 @@ async function readAgentWorkspaceView(
   skillsRoot: string,
   agentId: string,
   onInvalidSkill: (path: string, error: unknown) => void,
+  reader: WorkspaceSkillReader = hostWorkspaceSkills,
 ): Promise<View | undefined> {
   const root = agentWorkspaceSkillRoot(skillsRoot, agentId)
-  let entries: Dirent[]
+  let entries: Array<{ name: string; skillDirectory: boolean }>
   try {
-    entries = await readdir(root, { withFileTypes: true })
+    entries = await reader.list(root)
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
   const definitions: SkillDefinition[] = []
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+    if (!entry.skillDirectory) continue
     const skillPath = join(root, entry.name, 'SKILL.md')
     try {
-      const definition = await readDefinition(skillPath, skillPath)
+      const definition = await readDefinition(skillPath, skillPath, undefined, undefined, reader.read)
       definitions.push({ ...definition, source: 'agent-workspace', provider: 'byclaw' })
     } catch (error: unknown) {
       // A malformed workspace Skill must not make the entire Agent turn fail.
@@ -197,11 +234,23 @@ export class ByClawSkillRuntime {
     private readonly builtins: View,
     private readonly agentSkillRoot: string,
     private readonly reportWorkspaceError: (path: string, error: unknown) => void,
+    private readonly workspaceSkills: WorkspaceSkillReader = hostWorkspaceSkills,
+    private readonly dshHome?: string,
     private readonly resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>,
   ) {}
 
   /** Load deployment Skills once and install lifecycle-owned registry adapters. */
-  static async install(ctx: Context, options: { builtinSkillDir?: string; agentSkillRoot?: string; resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate> } = {}): Promise<ByClawSkillRuntime> {
+  static async install(ctx: Context, options: {
+    builtinSkillDir?: string
+    /** Employee Skill root; defaults to `/by/.openclaw`. */
+    agentSkillRoot?: string
+    /** Read employee Skills in the separate tool environment holding the user tree. */
+    files?: ToolEnvironmentFiles
+    /** This context's DSH home for group-member Skill copies; defaults to `DSH_HOME`. */
+    dshHome?: string
+    /** Lazily resolve a template's associated Skills on first lookup (startup keeps only references). */
+    resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>
+  } = {}): Promise<ByClawSkillRuntime> {
     const root = resolveBuiltinSkillDir(options.builtinSkillDir)
     const entries = (await readdir(root, { withFileTypes: true }))
       .filter(entry => entry.isDirectory() || entry.isSymbolicLink()).sort((a, b) => a.name.localeCompare(b.name))
@@ -218,6 +267,8 @@ export class ByClawSkillRuntime {
       viewOf(definitions),
       options.agentSkillRoot ?? AGENT_SKILLS_ROOT,
       (path, error) => ctx.logger.error(`[byclaw-dsh] Invalid agent workspace Skill ${path}; skipping: ${String(error)}`),
+      options.files === undefined ? hostWorkspaceSkills : toolEnvironmentWorkspaceSkills(options.files),
+      options.dshHome,
       options.resolveDeferredTemplate,
     )
     runtime.installAdapters(ctx)
@@ -347,11 +398,11 @@ export class ByClawSkillRuntime {
       // win over bundled and resource-projected Skills with the same name.
       const workspaceRoot = agentWorkspaceSkillRoot(this.agentSkillRoot, template.source.resourceId)
       try {
-        for (const entry of (await readdir(workspaceRoot, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-          if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+        for (const entry of (await this.workspaceSkills.list(workspaceRoot)).sort((a, b) => a.name.localeCompare(b.name))) {
+          if (!entry.skillDirectory) continue
           const skillPath = join(workspaceRoot, entry.name, 'SKILL.md')
           try {
-            const definition = await readDefinition(skillPath, skillPath)
+            const definition = await readDefinition(skillPath, skillPath, undefined, undefined, this.workspaceSkills.read)
             merged.set(definition.name, { ...definition, source: 'agent-workspace', provider: 'byclaw' })
           } catch (error: unknown) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
@@ -414,7 +465,7 @@ export class ByClawSkillRuntime {
       if (this.reportedWorkspaceErrors.has(key)) return
       this.reportedWorkspaceErrors.add(key)
       this.reportWorkspaceError(path, error)
-    })
+    }, this.workspaceSkills)
     if (workspace === undefined) return base
     const merged = new Map(base.definitions)
     for (const definition of workspace.definitions.values()) merged.set(definition.name, definition)
@@ -434,11 +485,11 @@ export class ByClawSkillRuntime {
     const present = async (view: View, scope?: object): Promise<View> => {
       const agent = scope as Agent | undefined
       if (agent === undefined || groupScope(ctx, String(agent.id))?.role !== 'member') return view
-      const definitions = await Promise.all([...view.definitions.values()].map(definition => projectMemberSkill(String(agent.id), definition, view.digest)))
+      const definitions = await Promise.all([...view.definitions.values()].map(definition => projectMemberSkill(String(agent.id), definition, view.digest, runtime.dshHome)))
       if (runtime.disposed) throw new Error('ByClaw Skill runtime is disposed')
       const current = await runtime.effectiveView(runtime.bindingForScope(scope), false)
       if (current.digest !== view.digest) return present(current, scope)
-      setActiveMemberSkillRoots(String(agent.id), definitions.flatMap(definition => definition.resourceBase === undefined ? [] : [definition.resourceBase.path]))
+      setActiveMemberSkillRoots(String(agent.id), definitions.flatMap(definition => definition.resourceBase === undefined ? [] : [definition.resourceBase.path]), runtime.dshHome)
       runtime.projectedMembers.add(String(agent.id))
       return { definitions: new Map(definitions.map(definition => [definition.name, definition])), digest: view.digest }
     }

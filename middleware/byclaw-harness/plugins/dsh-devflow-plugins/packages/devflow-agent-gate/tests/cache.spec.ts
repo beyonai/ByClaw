@@ -12,6 +12,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture from '../../../tests/working-directory-fixture'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
 import type { DevActor, TransitionResult } from '@zhchxiao123/dsh-devflow'
 import FilesystemDevflowStore from '@zhchxiao123/dsh-devflow-filesystem'
@@ -60,6 +61,7 @@ async function boot(replies: ScriptedReply[]): Promise<Booted> {
   context = ctx
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentDefaultModelConfig, MODEL_ROUTE)
+  await ctx.plugin(WorkingDirectoryFixture)
   await ctx.plugin(SubagentRuntime)
   const calls: CheckerCall[] = []
   ctx.subagents.registerProvider(checkerProvider({ replies }, calls))

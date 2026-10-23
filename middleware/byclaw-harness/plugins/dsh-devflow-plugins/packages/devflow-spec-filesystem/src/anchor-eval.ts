@@ -8,16 +8,17 @@
  * @module @zhchxiao123/dsh-devflow-spec-filesystem/src/anchor-eval
  */
 
-import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { AnchorVerdict, ContentHashAnchor, SpecAnchor, SymbolAnchor } from '@zhchxiao123/dsh-devflow-spec'
 import { evaluatorFor } from './evaluators/registry.ts'
 import type { LanguageEvaluator, SymbolLookup } from './evaluators/types.ts'
 
 /** One anchored file's parse results, keyed by the stat that identified it. */
 interface CachedSource {
-  readonly size: number
-  readonly mtimeMs: number
+  /** The stat's freshness token (size and mtime on this host's filesystem). */
+  readonly version: string
   /** Symbol lookups over that exact text; the parse is what this exists to skip. */
   readonly symbols: Map<string, SymbolLookup>
 }
@@ -51,6 +52,8 @@ export interface AnchorEvaluationContext {
    * TypeScript parse for every anchor pointing at an unchanged file.
    */
   cache?: AnchorSourceCache
+  /** Where anchored sources are read; this process's filesystem when omitted. */
+  io?: WorkspaceIo
 }
 
 /**
@@ -61,9 +64,9 @@ export interface AnchorEvaluationContext {
  * @throws when the path exists but cannot be read — an infrastructure failure,
  *   not a verdict about the anchor.
  */
-async function readSource(repoRoot: string, file: string): Promise<string | undefined> {
+async function readSource(io: WorkspaceIo, repoRoot: string, file: string): Promise<string | undefined> {
   try {
-    return await readFile(join(repoRoot, file), 'utf8')
+    return await io.readFile(join(repoRoot, file))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
@@ -72,13 +75,13 @@ async function readSource(repoRoot: string, file: string): Promise<string | unde
 
 /**
  * Identify one anchored file cheaply.
+ * @param io - where the file is.
  * @param path - the absolute path.
- * @returns its size and mtime, or `undefined` when it is not there.
+ * @returns its freshness token, or `undefined` when it is not there.
  */
-async function identify(path: string): Promise<{ size: number; mtimeMs: number } | undefined> {
+async function identify(io: WorkspaceIo, path: string): Promise<{ version: string } | undefined> {
   try {
-    const stats = await stat(path)
-    return { size: stats.size, mtimeMs: stats.mtimeMs }
+    return { version: (await io.stat(path)).version }
   } catch {
     // stat is the try's only operation; an unreachable path is reported as
     // absent and the caller falls through to an uncached read, which raises
@@ -108,20 +111,21 @@ async function lookupSymbol(
   symbol: string,
 ): Promise<SymbolLookup | undefined> {
   const cache = context.cache
-  if (cache === undefined) return parseSymbol(evaluator, await readSource(context.repoRoot, file), symbol)
+  const io = context.io ?? localWorkspaceIo
+  if (cache === undefined) return parseSymbol(evaluator, await readSource(io, context.repoRoot, file), symbol)
 
-  const identity = await identify(join(context.repoRoot, file))
-  if (identity === undefined) return parseSymbol(evaluator, await readSource(context.repoRoot, file), symbol)
+  const identity = await identify(io, join(context.repoRoot, file))
+  if (identity === undefined) return parseSymbol(evaluator, await readSource(io, context.repoRoot, file), symbol)
 
   const cached = cache.get(file)
-  const entry = cached !== undefined && cached.size === identity.size && cached.mtimeMs === identity.mtimeMs
+  const entry = cached !== undefined && cached.version === identity.version
     ? cached
-    : { size: identity.size, mtimeMs: identity.mtimeMs, symbols: new Map<string, SymbolLookup>() }
+    : { version: identity.version, symbols: new Map<string, SymbolLookup>() }
   if (entry !== cached) cache.set(file, entry)
 
   const hit = entry.symbols.get(symbol)
   if (hit !== undefined) return hit
-  const parsed = await parseSymbol(evaluator, await readSource(context.repoRoot, file), symbol)
+  const parsed = await parseSymbol(evaluator, await readSource(io, context.repoRoot, file), symbol)
   // The stat above proved the file existed; only a delete racing between it
   // and the read reaches this, and that leaves nothing worth caching.
   /* v8 ignore next */

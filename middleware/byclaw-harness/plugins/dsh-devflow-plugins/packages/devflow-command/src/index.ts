@@ -9,13 +9,12 @@
  * @module @zhchxiao123/dsh-devflow-command
  */
 
-import { readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { DevflowCardId, isCardLocation } from '@zhchxiao123/dsh-devflow'
-import type { DevActor, DevCard, RestoreRejectionCode } from '@zhchxiao123/dsh-devflow'
+import { DevflowCardId, isCardLocation, workspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { DevActor, DevCard, RestoreRejectionCode, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 // Type-only: the document seam is optional, so nothing here imports its runtime.
 import type { AnchorVerdict, SpecSummary } from '@zhchxiao123/dsh-devflow-spec'
 // Type-only for the same reason: the sentinel's workspace-layout seam is
@@ -39,11 +38,19 @@ export interface Config {
    * coverage question was not asked rather than implying full coverage.
    */
   specScopes?: string[]
+  /**
+   * Read the workspace and run `/devflow doctor`'s git questions on the
+   * context's tool environment (`ctx.fs` / `ctx.subprocess`) rather than in
+   * this process; set it wherever the store's own `workspaceOnToolEnvironment`
+   * is set.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Schemastery validator supplying the command defaults. */
 export const Config: z<Config> = z.object({
   specScopes: z.array(z.string()).default([]),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 const USAGE = 'Usage: /devflow [show <id>|move <id> <stage> [reason]|takeover <id>|abandon <id> <reason>|archive [<id>]|restore <id>|archived [<YYYY-MM>|--cursor <cursor>]|spec|doctor]'
@@ -242,6 +249,7 @@ interface Density {
  * @param tally - accumulator for the count and the unreadable directories.
  */
 async function tallyAnchorable(
+  io: WorkspaceIo,
   dir: ScopeDir,
   extensions: readonly string[],
   scopeDirs: ReadonlySet<string>,
@@ -249,7 +257,7 @@ async function tallyAnchorable(
 ): Promise<void> {
   let entries
   try {
-    entries = await readdir(dir.path, { withFileTypes: true })
+    entries = await io.readdir(dir.path)
   } catch {
     // Swallows every reason a directory does not open — absent, not a
     // directory, unreadable. Nothing else can distinguish them either, and
@@ -266,7 +274,7 @@ async function tallyAnchorable(
       // a dot FILE is counted like any other, because an anchor may point at it.
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
       if (scopeDirs.has(path)) continue
-      await tallyAnchorable({ path, reported: join(dir.reported, entry.name) }, extensions, scopeDirs, tally)
+      await tallyAnchorable(io, { path, reported: join(dir.reported, entry.name) }, extensions, scopeDirs, tally)
     } else if (entry.isFile() && extensions.some(extension => entry.name.endsWith(extension))) {
       tally.files += 1
     }
@@ -279,12 +287,16 @@ async function tallyAnchorable(
  * @param extensions - the provider's anchorable extensions.
  * @returns one tally per scope.
  */
-async function densities(dirs: ReadonlyMap<string, readonly ScopeDir[]>, extensions: readonly string[]): Promise<Map<string, Density>> {
+async function densities(
+  io: WorkspaceIo,
+  dirs: ReadonlyMap<string, readonly ScopeDir[]>,
+  extensions: readonly string[],
+): Promise<Map<string, Density>> {
   const owned = new Set([...dirs.values()].flat().map(dir => dir.path))
   const tallies = new Map<string, Density>()
   for (const [scope, scopeDirs] of dirs) {
     const tally: Density = { files: 0, unreadable: [] }
-    for (const dir of scopeDirs) await tallyAnchorable(dir, extensions, owned, tally)
+    for (const dir of scopeDirs) await tallyAnchorable(io, dir, extensions, owned, tally)
     tallies.set(scope, tally)
   }
   return tallies
@@ -390,6 +402,7 @@ interface CoverageSection {
  * @returns the report lines with what the closing instructions need.
  */
 async function coverageSection(
+  io: WorkspaceIo,
   expectation: Extract<CoverageExpectation, { kind: 'asked' }>,
   summaries: readonly SpecSummary[],
   extensions: readonly string[],
@@ -398,7 +411,7 @@ async function coverageSection(
   for (const summary of summaries) {
     for (const scope of summary.waives ?? []) waivedBy.set(scope, [...waivedBy.get(scope) ?? [], summary])
   }
-  const density = expectation.dirs === undefined ? undefined : await densities(expectation.dirs, extensions)
+  const density = expectation.dirs === undefined ? undefined : await densities(io, expectation.dirs, extensions)
   const verdicts = expectation.scopes.map(scope => ({ scope, verdict: scopeVerdict(scope, summaries, waivedBy.get(scope) ?? []) }))
   const tally = { documented: 0, waived: 0, 'no-document': 0 }
   for (const { verdict } of verdicts) tally[verdict.kind] += 1
@@ -457,7 +470,12 @@ function churnOnlyScopes(scopes: readonly string[], summaries: readonly SpecSumm
  * @param cwd - the invoking session's workspace root, when it has one.
  * @returns the report lines, or `undefined` when the seam is not mounted.
  */
-async function specHealthLines(ctx: Context, scopes: readonly string[], cwd: string | undefined): Promise<string[] | undefined> {
+async function specHealthLines(
+  ctx: Context,
+  io: WorkspaceIo,
+  scopes: readonly string[],
+  cwd: string | undefined,
+): Promise<string[] | undefined> {
   const store = ctx.get('devflowSpec')
   if (store === undefined) return undefined
 
@@ -495,7 +513,7 @@ async function specHealthLines(ctx: Context, scopes: readonly string[], cwd: str
     // Silence here would read as full coverage. It is an unasked question.
     lines.push('', expectation.line)
   } else {
-    const census = await coverageSection(expectation, summaries, store.anchorableExtensions)
+    const census = await coverageSection(io, expectation, summaries, store.anchorableExtensions)
     lines.push(...census.lines)
     uncovered = census.uncovered
     doubted = census.doubted
@@ -634,20 +652,25 @@ async function backlinkLine(ctx: Context, parent: DevflowCardId, root: string | 
 }
 
 /** Execute one parsed intervention through the seam that owns enforcement. */
-async function executeDevflowCommand(ctx: Context, invocation: CommandInvocation, scopes: readonly string[]): Promise<CommandResult> {
+async function executeDevflowCommand(
+  ctx: Context,
+  io: WorkspaceIo,
+  invocation: CommandInvocation,
+  scopes: readonly string[],
+): Promise<CommandResult> {
   const command = parseDevflowCommand(invocation.rawInput)
   const root = invocationRoot(invocation)
   switch (command.kind) {
     case 'invalid':
       return { kind: 'error', text: `${command.problem}. ${USAGE}` }
     case 'spec': {
-      const lines = await specHealthLines(ctx, scopes, invocation.agent.session.header.cwd)
+      const lines = await specHealthLines(ctx, io, scopes, invocation.agent.session.header.cwd)
       return lines === undefined
         ? { kind: 'error', text: 'the architecture-document seam is not mounted here; add a ctx.devflowSpec provider to report document health' }
         : { kind: 'success', text: lines.join('\n') }
     }
     case 'doctor': {
-      const lines = await doctorLines(ctx, invocation.agent.session.header.cwd, root)
+      const lines = await doctorLines(ctx, io, invocation.agent.session.header.cwd, root)
       return { kind: 'success', text: lines.join('\n') }
     }
     case 'board': {
@@ -793,10 +816,11 @@ function restoreRejection(id: string, code: RestoreRejectionCode, message: strin
  */
 export function apply(ctx: Context, config: Config): void {
   const scopes = config.specScopes ?? []
+  const io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
   ctx.commands.register({
     name: 'devflow',
     description: 'inspect or intervene on the devflow task board',
     input: { hint: '[show <id>|move <id> <stage> [reason]|takeover <id>|abandon <id> <reason>|archive [<id>]|restore <id>|archived [<YYYY-MM>|--cursor <cursor>]|spec|doctor]' },
-    handler: async invocation => await executeDevflowCommand(ctx, invocation, scopes),
+    handler: async invocation => await executeDevflowCommand(ctx, io, invocation, scopes),
   })
 }

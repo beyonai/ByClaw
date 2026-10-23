@@ -18,21 +18,24 @@ export interface FakeJob {
   owner?: FakeAgent
 }
 
-/** Mirrors the visibility rule of the real registry: `list()` = unowned, `list(a)` = unowned + a's. */
+/** Mirrors the visibility rule of the real registry: `list()` = unowned, `list(id)` = unowned + that session's. */
 export class FakeJobs {
   jobs: FakeJob[] = []
-  readonly listeners: Array<(owner: FakeAgent | undefined) => void> = []
-  list(caller?: FakeAgent): Array<{ id: string; status: FakeJob['status'] }> {
+  readonly listeners: Array<{ filter: unknown; listener: (event: { type: string }) => void }> = []
+  list(caller?: string): Array<{ id: string; status: FakeJob['status'] }> {
     return this.jobs
-      .filter(job => job.owner === undefined || job.owner.id === caller?.id)
+      .filter(job => job.owner === undefined || job.owner.id === caller)
       .map(job => ({ id: job.id, status: job.status }))
   }
-  onJobsChanged(listener: (owner: FakeAgent | undefined) => void): () => void {
-    this.listeners.push(listener)
-    return () => undefined
+  readonly events = {
+    subscribe: (filter: unknown, listener: (event: { type: string }) => void): () => void => {
+      this.listeners.push({ filter, listener })
+      return () => undefined
+    },
   }
-  changed(owner?: FakeAgent): void {
-    for (const listener of this.listeners) listener(owner)
+  /** Deliver one registry event; the default is a visible-set change. */
+  changed(type = 'registered'): void {
+    for (const { listener } of this.listeners) listener({ type })
   }
 }
 

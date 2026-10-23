@@ -45,7 +45,6 @@ export class ByClawDshWorkerRuntime {
   private readonly registry: WorkerRegistry
   private readonly worker: ByClawDshGatewayWorker
   private readonly redis: ReturnType<typeof createRedis>
-  private readonly maxConcurrency: number
   private runner: WorkerRunner | undefined
   private run: Promise<void> | undefined
   private lifecycle: AbortController | undefined
@@ -55,11 +54,9 @@ export class ByClawDshWorkerRuntime {
     workerId: string
     agentTypes: string[]
     sessions: ByClawDshSessionRuntime
-    maxConcurrency: number
   }) {
     this.registry = new WorkerRegistry(options.redis)
     this.redis = options.redis
-    this.maxConcurrency = options.maxConcurrency
     this.worker = new ByClawDshGatewayWorker({
       workerId: options.workerId,
       agentTypes: options.agentTypes,
@@ -74,7 +71,9 @@ export class ByClawDshWorkerRuntime {
     this.run = superviseWorker(() => {
       const runner = new WorkerRunner(this.worker, {
         redisClient: this.redis,
-        maxConcurrency: this.maxConcurrency,
+        // Published framework versions default to 50. Disable that legacy cap
+        // so waiting requests cannot prevent their Resume messages from running.
+        maxConcurrency: Number.POSITIVE_INFINITY,
       })
       this.runner = runner
       return runner

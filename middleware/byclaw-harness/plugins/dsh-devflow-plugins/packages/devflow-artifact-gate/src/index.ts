@@ -16,12 +16,11 @@
  * @module @zhchxiao123/dsh-devflow-artifact-gate
  */
 
-import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { isCardLocation, isLegalTransition } from '@zhchxiao123/dsh-devflow'
-import type { ArtifactContract, ArtifactRequirementInspection, ArtifactTransitionInspection, CardLocation, DevCard, PublishedArtifactKindStructure, TransitionAttempt, TransitionDecision } from '@zhchxiao123/dsh-devflow'
+import { isCardLocation, isLegalTransition, workspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { ArtifactContract, ArtifactRequirementInspection, ArtifactTransitionInspection, CardLocation, DevCard, PublishedArtifactKindStructure, TransitionAttempt, TransitionDecision, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import { parse as parseYaml } from 'yaml'
 import type { ArtifactKindStructure, ArtifactStructures } from './types.ts'
 
@@ -40,6 +39,12 @@ export interface Config {
   kinds?: Record<string, ArtifactKindStructure>
   /** Artifact kinds each `from->to` edge requires; an edge with no entry is not gated. */
   edges?: Record<string, string[]>
+  /**
+   * Read artifacts through the context's tool environment (`ctx.fs`) rather
+   * than this process's filesystem; set it wherever the store's own
+   * `workspaceOnToolEnvironment` is set.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /**
@@ -107,6 +112,7 @@ export const Config: z<Config> = z.object({
     nonEmptySections: z.array(z.string()),
   })).default(BYCLAW_KINDS),
   edges: z.dict(z.array(z.string())).default(BYCLAW_EDGES),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /**
@@ -149,12 +155,13 @@ export function apply(ctx: Context, config: Config): void {
   const kinds = validatedStructures(config.kinds ?? {})
   const edges = validatedEdges(config.edges ?? {}, kinds)
   const published = publishedStructures(kinds)
+  const io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
   ctx.effect(
     () => ctx.provide('devflowArtifactStructures', published),
     'devflow-artifact-gate: kind-structure service',
   )
   ctx.effect(
-    () => ctx.provide('devflowArtifactContract', artifactContract(edges, published)),
+    () => ctx.provide('devflowArtifactContract', artifactContract(io, edges, published)),
     'devflow-artifact-gate: contract inspection service',
   )
   ctx.effect(() => ctx.on(
@@ -167,7 +174,7 @@ export function apply(ctx: Context, config: Config): void {
       // so any store write here would wait for a transition waiting for it.
       const card = await ctx.devflow.read(attempt.id, attempt.root)
       const inspections = await Promise.all(edge.requirements.map(requirement =>
-        inspectRequirement(card, requirement, requiredPublishedStructure(published, requirement.kind)),
+        inspectRequirement(io, card, requirement, requiredPublishedStructure(published, requirement.kind)),
       ))
       const defects = inspections.flatMap(inspection => inspection.defects)
       if (defects.length === 0) return await next()
@@ -181,6 +188,7 @@ export function apply(ctx: Context, config: Config): void {
 
 /** Build the immutable dynamic inspection seam over one validated contract. */
 function artifactContract(
+  io: WorkspaceIo,
   edges: Readonly<Record<string, ValidatedEdge>>,
   kinds: ArtifactStructures,
 ): ArtifactContract {
@@ -191,7 +199,7 @@ function artifactContract(
         if (edge.from !== card.stage) continue
         if (!isLegalTransition(card.stage, edge.to, card)) continue
         const inspected = await Promise.all(edge.requirements.map(requirement =>
-          inspectRequirement(card, requirement, requiredPublishedStructure(kinds, requirement.kind)),
+          inspectRequirement(io, card, requirement, requiredPublishedStructure(kinds, requirement.kind)),
         ))
         outgoing.push(Object.freeze({
           from: card.stage,
@@ -291,11 +299,13 @@ function publishedStructures(kinds: Record<string, CheckedStructure>): ArtifactS
  * Check one required kind against the card: the newest registration of that
  * kind (the highest journal revision; path-only registrations carry no kind
  * and never match) must exist, be readable, and pass its structure requirements.
+ * @param io - where the card's files are read.
  * @param card - the read value of the card being moved.
  * @param requirement - the required kind and its structure.
  * @returns the defects found, each naming the kind and what is wrong.
  */
 async function inspectRequirement(
+  io: WorkspaceIo,
   card: DevCard,
   requirement: Requirement,
   publishedStructure: PublishedArtifactKindStructure,
@@ -311,7 +321,7 @@ async function inspectRequirement(
   // which the seam names as the card file's parent.
   let raw: string
   try {
-    raw = await readFile(join(dirname(card.path), newest.path), 'utf8')
+    raw = await io.readFile(join(dirname(card.path), newest.path))
   } catch (error) {
     return inspected(kind, publishedStructure, newest, [`${kind}: the registered artifact ${newest.path} cannot be read (${message(error)}); the journal references a file the disk does not serve`])
   }

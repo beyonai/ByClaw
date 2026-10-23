@@ -13,7 +13,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createElement } from 'react'
-import { IconBranchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { BETTER_SIDEBAR, type BetterSidebarService, type BetterSidebarTabProps } from './better-sidebar.ts'
 import { createBoardBinding } from './binding.ts'
 import type { BoardBinding } from './binding.ts'
@@ -65,7 +65,7 @@ export function boardTabDefinition(ctx: ClientContext): SidebarRightTabDefinitio
       order: 20,
       title: () => t('panel.title'),
       description: () => t('guide.description'),
-      icon: IconBranchOutline16,
+      icon: IconBranchOutlineRegular,
     }],
   }
 }
@@ -77,7 +77,13 @@ export function boardTabDefinition(ctx: ClientContext): SidebarRightTabDefinitio
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-devflow: dictionaries')
-  const openSession = (id: string): void => { ctx.sessions.open(id as SessionId) }
+  // Session navigation moved from `ctx.sessions` to the workspace view owner
+  // (`@deepseek-ai/dsh-client-ui-workspace`). Looked up by name rather than
+  // injected so the board never waits on it; absent, a click does nothing.
+  const openSession = (id: string): void => {
+    const workspace = ctx.get('uiWorkspace') as { openSession(id: SessionId): void } | undefined
+    workspace?.openSession(id as SessionId)
+  }
   const bindings = new Map<string, { binding: BoardBinding; watchers: number }>()
 
   const entryFor = (sessionId: string): { binding: BoardBinding; watchers: number } => {
@@ -140,7 +146,7 @@ export function apply(ctx: ClientContext): void {
         unregister = next.registerTab({
           id: BETTER_SIDEBAR_TAB_ID,
           title: () => ctx.locale.bind(NS)('panel.title'),
-          icon: size => createElement(IconBranchOutline16, { size }),
+          icon: size => createElement(IconBranchOutlineRegular, { size }),
           order: 60,
           single: true,
           component: BetterSidebarPage,

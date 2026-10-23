@@ -1,0 +1,131 @@
+# 通用配置示例；复制到部署环境后使用 spring.config.additional-location 加载。
+# 默认关闭；只启用实际需要的订阅，地址、Token 和签名密钥由部署系统注入。
+# 此处 HMAC 原文及头名仅为示范，双方必须约定相同协议。
+byclaw:
+  hooks:
+    enabled: ${BYCLAW_HOOKS_ENABLED:false}
+    defaults:
+      connect-timeout: 2s
+      call-timeout: 5s
+    subscriptions:
+      # Bearer 示例：用户注册事件。
+      registration-crm:
+        enabled: true
+        event: user.registered
+        event-version: 1
+        retry:
+          max-attempts: 1
+          delay: 5s
+          statuses: [429, 500, 502, 503, 504]
+          transport-errors: true
+        http:
+          method: POST
+          url: "${REGISTRATION_HOOK_URL:https://receiver.example.com/events/users}"
+          headers:
+            Content-Type: application/json
+            X-Source: byclaw
+          auth:
+            type: bearer
+            token: "${REGISTRATION_HOOK_TOKEN:}"
+          body:
+            eventId:
+              from: event.id
+            occurredAt:
+              from: event.occurredAtEpochSeconds
+            userId:
+              from: data.userId
+            name:
+              from: data.displayName
+            registrationSource:
+              from: data.registrationSource
+            source:
+              value: byclaw
+      # 无认证示例：只向接收方允许匿名访问的接口发送。
+      tenant-sync:
+        enabled: false
+        event: tenant.created
+        event-version: 1
+        http:
+          method: POST
+          url: "${TENANT_CREATED_HOOK_URL:https://receiver.example.com/events/tenants}"
+          headers:
+            Content-Type: application/json
+          auth:
+            type: none
+          body:
+            eventId:
+              from: event.id
+            occurredAt:
+              from: event.occurredAtEpochSeconds
+            enterpriseId:
+              from: data.enterpriseId
+            enterpriseName:
+              from: data.enterpriseName
+            packageId:
+              from: data.packageId
+            packageName:
+              from: data.packageName
+            createdBy:
+              from: data.createdBy
+            requestId:
+              from: data.requestId
+            provisionState:
+              from: data.provisionState
+      # 通用 HMAC 示例：原文按顺序取值，不运行脚本或表达式。
+      workgroup-sync:
+        enabled: false
+        event: workgroup.created
+        event-version: 1
+        required-data-fields: [enterpriseId]
+        retry:
+          max-attempts: 3
+          delay: 5s
+          statuses: [429, 500, 502, 503, 504]
+          transport-errors: true
+        http:
+          method: POST
+          url: "${WORKGROUP_CREATED_HOOK_URL:https://receiver.example.com/events/workgroups}"
+          headers:
+            Content-Type: application/json
+            X-Source: byclaw
+          auth:
+            type: hmac-sha256
+            client-id: "${HOOK_CLIENT_ID:byclaw-service}"
+            secret: "${WORKGROUP_HOOK_SIGNING_SECRET:}"
+            # 远程签名请求必须使用 HTTPS；本机测试可显式允许 literal loopback HTTP。
+            allow-loopback-http: ${WORKGROUP_HOOK_ALLOW_LOOPBACK_HTTP:false}
+            separator: "\n"
+            canonical-fields:
+              - value: hook-request-v1
+              - from: auth.clientId
+              - from: request.method
+              - from: request.path
+              - from: request.query
+              - from: request.timestamp
+              - from: request.nonce
+              - from: request.headers.Idempotency-Key
+              - from: request.bodySha256
+            headers:
+              X-Webhook-Client:
+                from: auth.clientId
+              X-Webhook-Timestamp:
+                from: request.timestamp
+              X-Webhook-Nonce:
+                from: request.nonce
+              X-Webhook-Signature:
+                from: signature
+          body:
+            eventId:
+              from: event.id
+            occurredAt:
+              from: event.occurredAtEpochSeconds
+            enterpriseId:
+              from: data.enterpriseId
+            workgroupId:
+              from: data.groupId
+            groupName:
+              from: data.groupName
+            projectId:
+              from: data.projectId
+            createdBy:
+              from: data.createdBy

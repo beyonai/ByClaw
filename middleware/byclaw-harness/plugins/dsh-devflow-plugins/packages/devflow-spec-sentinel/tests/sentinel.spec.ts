@@ -107,7 +107,7 @@ describe('applySentinel', () => {
     const text = messageText(steered[0])
     expect(text).toContain('[@scope/pkg/backend/edges]')
     expect(text).toContain('anchor a1 (symbol) on src/stages.ts#isLegal')
-    expect(steered[0]?.source).toEqual({ kind: 'plugin', plugin: 'devflow-spec-sentinel' })
+    expect(steered[0]?.source).toEqual({ kind: 'plugin:devflow-spec-sentinel' })
   })
 
   it('never interrupts the same session twice over one document', async () => {
@@ -232,6 +232,14 @@ describe('workspaceOf', () => {
     expect(workspaceOf(agent, { root: '/etc/spec' })).toEqual({
       repoRoot: resolve('.'),
       specRoot: resolve('/etc/spec'),
+    })
+  })
+
+  it('falls back to the configured repoRoot, resolving a relative root under it', () => {
+    const { agent } = agentWith('workspace-configured', null)
+    expect(workspaceOf(agent, { root: '.devflow/spec', repoRoot: '/by' })).toEqual({
+      repoRoot: '/by',
+      specRoot: join('/by', '.devflow', 'spec'),
     })
   })
 })

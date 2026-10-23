@@ -4,7 +4,7 @@
  * the selected narrow stage, collapsed lanes, and the completed-card cap.
  */
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { IconChevronDownOutline14, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DevCard, DevflowCardId, DevStage } from '@zhchxiao123/dsh-devflow/client'
 import { BOARD_STAGES, cardArtifacts, cardServiceClass, projectKanban } from './board.ts'
@@ -185,7 +185,7 @@ function SwimlaneHeader({ lane, collapsed, toggle, openCardDetail, actions, t }:
         aria-label={t(collapsed ? 'row.children.expand' : 'row.children.collapse', { id: lane.parent.id })}
         onClick={toggleLane}
       >
-        <IconChevronDownOutline14 className={collapsed ? css.rowToggleCollapsed : undefined} />
+        <IconChevronDownOutlineRegular className={collapsed ? css.rowToggleCollapsed : undefined} />
       </button>
       <button
         type="button"

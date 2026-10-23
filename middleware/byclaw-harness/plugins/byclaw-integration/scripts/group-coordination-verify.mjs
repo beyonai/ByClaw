@@ -99,9 +99,9 @@ const stale = { tasks: [{ id: 'task', attemptId: 'new', status:'in_progress' }],
 assert.throws(() => prepareGroupAssistanceReturn(stale,'request','worker','late'))
 
 const gate = new ByClawAsyncTeamGate(1000,10)
-gate.observe({ type: 'tool/code-dispatch-start', data: { name:'group_request_assistance',subCallId:'assist' } })
+gate.observe({ type: 'tool/ptc-dispatch-start', data: { name:'group_request_assistance',subCallId:'assist' } })
 assert.equal(gate.waiting,true)
-gate.observe({type:'tool/code-dispatch',data:{name:'group_request_assistance',subCallId:'assist',isError:true}})
+gate.observe({type:'tool/ptc-dispatch',data:{name:'group_request_assistance',subCallId:'assist',isError:true}})
 gate.observe({type:'turn/end',data:{reason:{kind:'completed'}}})
 assert.equal(gate.waiting,false)
 

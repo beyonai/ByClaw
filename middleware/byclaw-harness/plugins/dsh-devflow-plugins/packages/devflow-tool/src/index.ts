@@ -17,17 +17,32 @@
  * @module @zhchxiao123/dsh-devflow-tool
  */
 
-import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { ARTIFACT_RECORD_SCHEMA, ARTIFACT_TRANSITION_INSPECTION_SCHEMA, DEFAULT_SERVICE_CLASS, DEV_STAGES, DevflowCardId, SERVICE_CLASSES } from '@zhchxiao123/dsh-devflow'
-import type { ArtifactRequest, ArtifactTransitionInspection, CardLocation, CardQuery, DevActor, DevCard, ServiceClass, TransitionResult } from '@zhchxiao123/dsh-devflow'
+import { ARTIFACT_RECORD_SCHEMA, ARTIFACT_TRANSITION_INSPECTION_SCHEMA, DEFAULT_SERVICE_CLASS, DEV_STAGES, DevflowCardId, SERVICE_CLASSES, workspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { ArtifactRequest, ArtifactTransitionInspection, CardLocation, CardQuery, DevActor, DevCard, ServiceClass, TransitionResult, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 // Type-only: the spec seam is optional, so nothing here may import its runtime.
 import type { SpecFreshness } from '@zhchxiao123/dsh-devflow-spec'
 export const name = 'tool-devflow'
 export const inject = ['tools', 'devflow']
+
+/** Plugin configuration. */
+export interface Config {
+  /**
+   * Read card artifacts through the context's tool environment (`ctx.fs`)
+   * rather than this process's filesystem; set it wherever the store's own
+   * `workspaceOnToolEnvironment` is set.
+   */
+  workspaceOnToolEnvironment?: boolean
+}
+
+/** Schemastery validator supplying the defaults. */
+export const Config: z<Config> = z.object({
+  workspaceOnToolEnvironment: z.boolean().default(false),
+})
 
 /** Card locations offered in the model-facing stage filter. */
 const LOCATIONS = [...DEV_STAGES, 'blocked'] as const
@@ -222,12 +237,12 @@ type DeclaredScope =
  * @returns the declaration state, carrying one id prefix per non-empty line
  *   of the artifact's `## Scope` section when it declares any.
  */
-async function declaredScope(card: DevCard): Promise<DeclaredScope> {
+async function declaredScope(io: WorkspaceIo, card: DevCard): Promise<DeclaredScope> {
   const newest = card.artifactRecords.filter(record => record.kind === SPEC_REFS_KIND).at(-1)
   if (newest === undefined) return { state: 'undeclared' }
   let raw
   try {
-    raw = await readFile(join(dirname(card.path), newest.path), 'utf8')
+    raw = await io.readFile(join(dirname(card.path), newest.path))
   } catch {
     // Swallows every read failure of the registration — a file deleted behind
     // the journal, an unreadable directory. The card itself already read, so
@@ -252,10 +267,10 @@ async function declaredScope(card: DevCard): Promise<DeclaredScope> {
  * without the seam no index was ever promised, so even a broken registration
  * stays silent.
  */
-async function specRefs(ctx: Context, card: DevCard): Promise<Pick<CardIndexes, 'specRefs' | 'specRefsWarning'> | undefined> {
+async function specRefs(ctx: Context, io: WorkspaceIo, card: DevCard): Promise<Pick<CardIndexes, 'specRefs' | 'specRefsWarning'> | undefined> {
   const store = ctx.get('devflowSpec')
   if (store === undefined) return undefined
-  const declared = await declaredScope(card)
+  const declared = await declaredScope(io, card)
   if (declared.state === 'undeclared') return undefined
   if (declared.state === 'unserved') return { specRefsWarning: SPEC_REFS_WARNING }
   // Prefixes may overlap, and a document under two of them is one document.
@@ -280,11 +295,12 @@ async function specRefs(ctx: Context, card: DevCard): Promise<Pick<CardIndexes, 
 /** Add the card's current index projections to any single-card wire value. */
 async function withCardIndexes<Value extends object>(
   ctx: Context,
+  io: WorkspaceIo,
   card: DevCard,
   value: Value,
 ): Promise<Value & CardIndexes> {
   const gates = await artifactGates(ctx, card)
-  const refs = await specRefs(ctx, card)
+  const refs = await specRefs(ctx, io, card)
   return {
     ...value,
     ...gates === undefined ? {} : { artifactGates: gates },
@@ -373,9 +389,10 @@ function callerRoot(exec: ToolRunContext): string | undefined {
  */
 async function committedMove(
   ctx: Context,
+  io: WorkspaceIo,
   result: Extract<TransitionResult, { ok: true }>,
 ): Promise<{ id: string; from: CardLocation; to: CardLocation; stageRevision: number } & CardIndexes> {
-  return await withCardIndexes(ctx, result.card, {
+  return await withCardIndexes(ctx, io, result.card, {
     id: result.card.id,
     from: result.from,
     to: result.card.stage,
@@ -386,8 +403,10 @@ async function committedMove(
 /**
  * Register the devflow read tools on `ctx.tools`.
  * @param ctx - registrant context carrying the tool registry and the devflow store.
+ * @param config - where card artifacts are read from.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
+  const io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
   ctx.tools.register(defineTool({
     name: 'devflow_list',
     description:
@@ -560,7 +579,7 @@ export function apply(ctx: Context): void {
         ...root !== undefined ? { root } : {},
       }))
       if (!result.ok) throw new Error(result.message)
-      return await withCardIndexes(ctx, result.card, summarize(result.card))
+      return await withCardIndexes(ctx, io, result.card, summarize(result.card))
     },
     presentCall: args => ({
       card: 'generic',
@@ -630,7 +649,7 @@ export function apply(ctx: Context): void {
       // Only one level exists, so a child never has children of its own.
       const children = card.parent === undefined ? await ctx.devflow.list({ parent: card.id }, root) : []
       const parentTitle = card.parent === undefined ? undefined : await titleOf(ctx, card.parent, root)
-      return await withCardIndexes(ctx, card, {
+      return await withCardIndexes(ctx, io, card, {
         ...summarize(card),
         ...card.blockedFrom !== undefined ? { blockedFrom: card.blockedFrom } : {},
         ...parentTitle !== undefined ? { parentTitle } : {},
@@ -702,7 +721,7 @@ export function apply(ctx: Context): void {
         ...root !== undefined ? { root } : {},
       }))
       if (!result.ok) throw new Error(result.message)
-      return await committedMove(ctx, result)
+      return await committedMove(ctx, io, result)
     },
     presentCall: args => ({
       card: 'generic',
@@ -747,7 +766,7 @@ export function apply(ctx: Context): void {
         await claim.handle.release()
         throw new Error(result.message)
       }
-      return await committedMove(ctx, result)
+      return await committedMove(ctx, io, result)
     },
     presentCall: args => ({
       card: 'generic',
@@ -830,7 +849,7 @@ export function apply(ctx: Context): void {
       }
       const result = await ctx.devflow.attachArtifact(request)
       if (!result.ok) throw new Error(result.message)
-      return await withCardIndexes(ctx, result.card, {
+      return await withCardIndexes(ctx, io, result.card, {
         id: result.card.id,
         path: result.record.path,
         ...result.record.kind !== undefined ? { kind: result.record.kind } : {},
@@ -889,7 +908,7 @@ export function apply(ctx: Context): void {
       }
       // The record's path is journal-recorded relative to the card directory,
       // which the seam names as the card file's parent.
-      const content = await readFile(join(dirname(card.path), newest.path), 'utf8')
+      const content = await io.readFile(join(dirname(card.path), newest.path))
       return { id: card.id, kind: args.kind, path: newest.path, rev: newest.rev, stage: newest.stage, content }
     },
     presentCall: args => ({

@@ -2,7 +2,7 @@
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { teamStateRuntime } from './runtime-state.ts'
 import { join } from 'node:path'
 import { findTeamByCaptain, readTeam, withTeamLock, writeTeam, invalidateTaskAttempt, readUnreadMailbox, acknowledgeMailbox, CAPTAIN_KEY } from './state.ts'
 import { appendTeamEvent } from './events.ts'
@@ -77,7 +77,7 @@ export function installAgentTeamsLifecycle(
 ): void {
   const service: AgentTeamsLifecycleBarrier = {
     async waitForCaptain(captainSessionId, workspace, signal) {
-      const stateRoot = resolveTeamStateRoot(workspace, stateDir)
+      const stateRoot = teamStateRuntime(ctx).resolveTeamStateRoot(workspace, stateDir)
       const deadline = Date.now() + maxWaitMs
       while (true) {
         const team = await findTeamByCaptain(stateRoot, captainSessionId)
@@ -103,8 +103,8 @@ export function isTeamCaptainStopped(captain: object): boolean {
 }
 
 /** Resume admission only for a new explicit user command; keep cancelled tasks terminal. */
-export async function resumeCaptainTeam(captain: Agent, stateDir: string): Promise<void> {
-  const stateRoot = resolveTeamStateRoot(captain.session.header.cwd ?? process.cwd(), stateDir)
+export async function resumeCaptainTeam(captain: Agent, stateDir: string, ctx?: Context): Promise<void> {
+  const stateRoot = teamStateRuntime(ctx).stateRootOf(captain, stateDir)
   const team = await findTeamByCaptain(stateRoot, captain.id)
   if (team !== undefined) {
     await withTeamLock(`team:${stateRoot}:${team.id}`, async () => {
@@ -120,7 +120,7 @@ export async function resumeCaptainTeam(captain: Agent, stateDir: string): Promi
 /** Cancel the current team's work while retaining its roster, transcript and completed results. */
 export async function cancelCaptainTeam(ctx: Context, captain: Agent, stateDir: string): Promise<void> {
   stoppedCaptains.add(captain)
-  const stateRoot = resolveTeamStateRoot(captain.session.header.cwd ?? process.cwd(), stateDir)
+  const stateRoot = teamStateRuntime(ctx).stateRootOf(captain, stateDir)
   const team = await findTeamByCaptain(stateRoot, captain.id)
   if (team === undefined) return
   await withTeamLock(`team:${stateRoot}:${team.id}`, async () => {

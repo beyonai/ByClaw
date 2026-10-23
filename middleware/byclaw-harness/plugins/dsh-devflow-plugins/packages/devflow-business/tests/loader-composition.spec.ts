@@ -19,6 +19,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import WorkingDirectoryFixture, { WORKING_DIRECTORY_FIXTURE } from '../../../tests/working-directory-fixture'
 import * as DevflowFsGuard from '@zhchxiao123/dsh-devflow-fs-guard'
 import * as DevflowBusiness from '@zhchxiao123/dsh-devflow-business'
 import { emptyInbox } from '../../../tests/agent-double.ts'
@@ -45,6 +46,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
     "- name: '@deepseek-ai/dsh-fs-local'",
+    `- name: '${WORKING_DIRECTORY_FIXTURE}'`,
     "- name: '@deepseek-ai/dsh-tool-fs'",
     "- name: '@zhchxiao123/dsh-devflow-fs-guard'",
     "- name: '@zhchxiao123/dsh-devflow-business'",
@@ -61,6 +63,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
+    [WORKING_DIRECTORY_FIXTURE, WorkingDirectoryFixture],
     ['@deepseek-ai/dsh-tool-fs', ToolFs],
     ['@zhchxiao123/dsh-devflow-fs-guard', DevflowFsGuard],
     ['@zhchxiao123/dsh-devflow-business', DevflowBusiness],

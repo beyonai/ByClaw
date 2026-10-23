@@ -27,7 +27,7 @@ describe('dsh-better-sidebar plugin export shape', () => {
     const unwrapped = loader.unwrapExports(sidebar) as Record<string, unknown>
     expect(unwrapped).toBe(sidebar)
     expect(unwrapped.name).toBe('dsh-better-sidebar')
-    expect(unwrapped.inject).toEqual(['webServer', 'sessions', 'webRuntime', 'tools'])
+    expect(unwrapped.inject).toEqual(['webServer', 'sessions', 'webStartup', 'tools'])
     expect(unwrapped.Config).toBeDefined()
     expect(typeof unwrapped.apply).toBe('function')
   })
@@ -59,6 +59,24 @@ describe('dsh-better-sidebar plugin export shape', () => {
     })({ shell: '/bin/zsh', shellArgs: ['--noprofile', '--no-rc'] })
     expect(configuredWithArgs.shell).toBe('/bin/zsh')
     expect(configuredWithArgs.shellArgs).toEqual(['--noprofile', '--no-rc'])
+  })
+
+  it('declares every side card preference as a volatile row-config field (DSH 0.2.1 settings forms)', async () => {
+    const { Config, PrefsSchema, readSidebarPrefs, SIDEBAR_PREFS_DEFAULTS } = await import('../src/config.ts')
+    const dict = (Config as unknown as { dict: Record<string, { meta: { volatile?: boolean } }> }).dict
+    const prefKeys = Object.keys((PrefsSchema as unknown as { dict: Record<string, unknown> }).dict)
+    for (const key of prefKeys) expect(dict[key]?.meta.volatile, key).toBe(true)
+    // The ordinary host limits stay restart-applied (never live-editable).
+    for (const key of ['readLimit', 'mediaLimit', 'uploadLimit', 'listLimit', 'terminalsPerSession', 'reconnectGraceMs', 'shell', 'shellArgs']) {
+      expect(dict[key]?.meta.volatile, key).toBeUndefined()
+    }
+    // Parsed through the Loader schema, each preference is a live reference
+    // whose value is the preference default.
+    const parsed = (Config as unknown as (input: unknown) => Record<string, unknown>)({ openByDefault: true })
+    expect(typeof (parsed.openByDefault as { get?: unknown }).get).toBe('function')
+    expect(readSidebarPrefs(parsed as never)).toEqual({ ...SIDEBAR_PREFS_DEFAULTS, openByDefault: true })
+    // Direct callers without a config read the defaults.
+    expect(readSidebarPrefs(undefined)).toEqual(SIDEBAR_PREFS_DEFAULTS)
   })
 
   it('registers the side card preferences schema with the documented defaults', async () => {

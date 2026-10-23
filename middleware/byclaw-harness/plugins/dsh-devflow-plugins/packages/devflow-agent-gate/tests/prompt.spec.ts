@@ -1,8 +1,7 @@
 // What the checker actually receives and how its reply is read: the prompt
 // carries the instruction, the card, every configured input's newest content
 // under its separator, and the verdict contract; the dispatch routes the
-// deployment model and, when the provider supports start-time filtering,
-// denies exactly the registered mutation tools; the verdict is the last
+// deployment model; the verdict is the last
 // parsable block of the reply.
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,6 +14,7 @@ import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture from '../../../tests/working-directory-fixture'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
@@ -52,7 +52,6 @@ async function writeCard(id: string): Promise<void> {
 
 interface BootOptions {
   inputs?: string[]
-  toolFilterCapability?: boolean
   withTools?: boolean
   registerTools?: string[]
 }
@@ -69,6 +68,7 @@ async function boot(replies: ScriptedReply[], options: BootOptions = {}): Promis
   context = ctx
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentDefaultModelConfig, MODEL_ROUTE)
+  await ctx.plugin(WorkingDirectoryFixture)
   await ctx.plugin(SubagentRuntime)
   if (options.withTools === true) {
     await ctx.plugin(SystemPrompt)
@@ -86,7 +86,6 @@ async function boot(replies: ScriptedReply[], options: BootOptions = {}): Promis
   const calls: CheckerCall[] = []
   ctx.subagents.registerProvider(checkerProvider({
     replies,
-    ...options.toolFilterCapability === undefined ? {} : { toolFilter: options.toolFilterCapability },
   }, calls))
   await ctx.plugin(FilesystemDevflowStore, { root }).await()
   await ctx.plugin(DevflowAgentGate, {
@@ -218,31 +217,6 @@ describe('devflow-agent-gate checker dispatch', () => {
 
     expect(await move(store, '0303-dedupe')).toMatchObject({ ok: true })
     expect(calls[0].prompt.match(/--- artifact prd /g)).toHaveLength(1)
-  })
-
-  it('denies exactly the registered mutation tools when the provider supports start-time filtering', async () => {
-    const { store, calls } = await boot([allowReply('fine')], {
-      inputs: [],
-      toolFilterCapability: true,
-      withTools: true,
-      registerTools: ['devflow_transition', 'devflow_attach_artifact', 'write', 'unrelated_tool'],
-    })
-    await writeCard('0304-filtered')
-    expect(await move(store, '0304-filtered')).toMatchObject({ ok: true })
-    // Only the denied candidates that actually exist: an unknown name would
-    // fail the start, and unrelated tools stay untouched.
-    expect(calls[0].toolFilter).toEqual({ deny: ['devflow_transition', 'devflow_attach_artifact', 'write'] })
-  })
-
-  it.each([
-    { label: 'the provider lacks the capability', options: { toolFilterCapability: false, withTools: true, registerTools: ['write'] } },
-    { label: 'no tool runtime is composed', options: { toolFilterCapability: true } },
-    { label: 'none of the denied candidates is registered', options: { toolFilterCapability: true, withTools: true, registerTools: ['unrelated_tool'] } },
-  ])('sends no tool filter when $label', async ({ options }) => {
-    const { store, calls } = await boot([allowReply('fine')], { inputs: [], ...options })
-    await writeCard('0305-unfiltered')
-    expect(await move(store, '0305-unfiltered')).toMatchObject({ ok: true })
-    expect(calls[0].toolFilter).toBeUndefined()
   })
 
   it('reads the last parsable verdict block, skipping a trailing block that is not one', async () => {

@@ -31,5 +31,16 @@ export function downloadAsset(value: string, context?: RequestContext): Promise<
 export function resolveDownloadLookup(hostname: string, resolver?: (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>): Promise<import('node:net').LookupFunction>
 export function pollDelay(ms: number, signal?: AbortSignal): Promise<void>
 export const MAX_MEDIA_BYTES: number
-export function persistAssets(root: string, kind: 'image' | 'tts' | 'asr', assets: MediaAsset[]): Promise<Array<{ path: string; mimeType: string; bytes: number }>>
+/** Filesystem operations for {@link persistAssets}; defaults to this host's `node:fs`. */
+export interface MediaArtifactIo {
+  /** Symlink-resolved path; rejects when absent. */
+  realpath(path: string): Promise<string>
+  /** Recursive owner-only directory creation. */
+  mkdir(path: string): Promise<void>
+  /** Create a new owner-only file; rejects when it already exists. */
+  writeExclusive(path: string, bytes: Uint8Array): Promise<void>
+  /** Remove a file; absence is not an error. */
+  remove(path: string): Promise<void>
+}
+export function persistAssets(root: string, kind: 'image' | 'tts' | 'asr', assets: MediaAsset[], io?: MediaArtifactIo): Promise<Array<{ path: string; mimeType: string; bytes: number }>>
 export function mountMediaPlugin(ctx: any, options: { kind: 'image' | 'tts'; generate: (model: MediaModel, args: any, context: RequestContext) => Promise<MediaAsset[] | MediaGenerationResult>; describe?: (model: MediaModel) => SpeechOptions; modelId?: string; provider?: string; protocol?: string }): void

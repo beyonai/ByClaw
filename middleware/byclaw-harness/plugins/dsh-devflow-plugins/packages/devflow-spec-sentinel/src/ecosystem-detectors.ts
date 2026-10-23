@@ -18,11 +18,11 @@
  * @module @zhchxiao123/dsh-devflow-spec-sentinel/src/ecosystem-detectors
  */
 
-import type { Dirent } from 'node:fs'
-import { readFile, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { parse as parseTomlText } from 'smol-toml'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceEntry, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { WorkspacePackage } from './types.ts'
 
 /** One ecosystem's manifest reader in the detector chain. */
@@ -41,11 +41,12 @@ export interface EcosystemDetector {
    * Read the members this ecosystem declares at `root`.
    * @param root - absolute workspace root.
    * @param warn - sink for out-of-surface and ill-formed-manifest warnings.
+   * @param io - where the workspace is read; this process's filesystem when omitted.
    * @returns `null` when the governing manifest is absent or cannot testify;
    *   otherwise the members, empty when the manifest exists but no member
    *   could be read.
    */
-  detect(root: string, warn: (message: string) => void): Promise<readonly WorkspacePackage[] | null>
+  detect(root: string, warn: (message: string) => void, io?: WorkspaceIo): Promise<readonly WorkspacePackage[] | null>
 }
 
 /**
@@ -54,9 +55,9 @@ export interface EcosystemDetector {
  * @returns the contents, or `undefined` when the file is absent or unreadable
  *   — for a detector, "this ecosystem does not answer here".
  */
-async function tryReadFile(path: string): Promise<string | undefined> {
+async function tryReadFile(io: WorkspaceIo, path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, 'utf8')
+    return await io.readFile(path)
   } catch {
     // An absent manifest is the non-answer every detector starts from.
     return undefined
@@ -119,12 +120,12 @@ function asName(value: unknown): string | undefined {
  * @returns absolute candidate directories; membership is decided later by
  *   each candidate's own manifest.
  */
-async function expandPattern(root: string, pattern: string, warn: (message: string) => void): Promise<string[]> {
+async function expandPattern(io: WorkspaceIo, root: string, pattern: string, warn: (message: string) => void): Promise<string[]> {
   if (pattern.endsWith('/*')) {
     const parent = join(root, pattern.slice(0, -2))
     let entries
     try {
-      entries = await readdir(parent, { withFileTypes: true })
+      entries = await io.readdir(parent)
     } catch {
       // An absent parent directory matches nothing; pnpm treats it the same way.
       return []
@@ -146,13 +147,13 @@ async function expandPattern(root: string, pattern: string, warn: (message: stri
  * @param warn - sink for unsupported-pattern warnings.
  * @returns absolute candidate directories, sorted for a deterministic layout.
  */
-async function expandGlobs(root: string, patterns: readonly string[], warn: (message: string) => void): Promise<string[]> {
+async function expandGlobs(io: WorkspaceIo, root: string, patterns: readonly string[], warn: (message: string) => void): Promise<string[]> {
   const included = new Set<string>()
   const excluded = new Set<string>()
   for (const pattern of patterns) {
     const negated = pattern.startsWith('!')
     const target = negated ? excluded : included
-    for (const dir of await expandPattern(root, negated ? pattern.slice(1) : pattern, warn)) target.add(dir)
+    for (const dir of await expandPattern(io, root, negated ? pattern.slice(1) : pattern, warn)) target.add(dir)
   }
   return [...included].filter(dir => !excluded.has(dir)).sort()
 }
@@ -164,10 +165,14 @@ async function expandGlobs(root: string, patterns: readonly string[], warn: (mes
  * @returns the named members. A candidate without a readable name is not a
  *   member (pnpm's own semantics, applied across ecosystems), not a failure.
  */
-async function membersOf(dirs: readonly string[], nameOf: (dir: string) => Promise<string | undefined>): Promise<WorkspacePackage[]> {
+async function membersOf(
+  io: WorkspaceIo,
+  dirs: readonly string[],
+  nameOf: (io: WorkspaceIo, dir: string) => Promise<string | undefined>,
+): Promise<WorkspacePackage[]> {
   const packages: WorkspacePackage[] = []
   for (const dir of dirs) {
-    const name = await nameOf(dir)
+    const name = await nameOf(io, dir)
     if (name !== undefined) packages.push({ dir, scopeId: name })
   }
   return packages
@@ -180,10 +185,10 @@ async function membersOf(dirs: readonly string[], nameOf: (dir: string) => Promi
  * @returns the name, or `undefined` when the directory has no readable, named
  *   manifest.
  */
-export async function packageJsonName(dir: string): Promise<string | undefined> {
+export async function packageJsonName(io: WorkspaceIo, dir: string): Promise<string | undefined> {
   let manifest: unknown
   try {
-    manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    manifest = JSON.parse(await io.readFile(join(dir, 'package.json')))
   } catch {
     // Unreadable or unparsable manifest: the directory merely matched a glob.
     return undefined
@@ -220,16 +225,16 @@ export function packageGlobs(text: string): string[] | undefined {
 export const pnpmWorkspace: EcosystemDetector = {
   name: 'pnpm-workspace',
   manifests: root => [join(root, 'pnpm-workspace.yaml')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'pnpm-workspace.yaml')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     const globs = packageGlobs(text)
     if (globs === undefined) {
       warn(`devflow-spec-sentinel: ${manifestPath} carries no readable "packages" list; its members are not in the layout`)
       return []
     }
-    return membersOf(await expandGlobs(root, globs, warn), packageJsonName)
+    return membersOf(io, await expandGlobs(io, root, globs, warn), packageJsonName)
   },
 }
 
@@ -247,9 +252,9 @@ export const pnpmWorkspace: EcosystemDetector = {
 export const npmWorkspaces: EcosystemDetector = {
   name: 'npm/yarn/bun workspaces',
   manifests: root => [join(root, 'package.json')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'package.json')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     let parsed: unknown
     try {
@@ -270,7 +275,7 @@ export const npmWorkspaces: EcosystemDetector = {
         + ' { packages: [...] }; its members are not in the layout')
       return []
     }
-    return membersOf(await expandGlobs(root, globs, warn), packageJsonName)
+    return membersOf(io, await expandGlobs(io, root, globs, warn), packageJsonName)
   },
 }
 
@@ -279,8 +284,8 @@ export const npmWorkspaces: EcosystemDetector = {
  * @param dir - absolute candidate directory.
  * @returns the crate name, or `undefined` when no named manifest is readable.
  */
-async function cargoPackageName(dir: string): Promise<string | undefined> {
-  const text = await tryReadFile(join(dir, 'Cargo.toml'))
+async function cargoPackageName(io: WorkspaceIo, dir: string): Promise<string | undefined> {
+  const text = await tryReadFile(io, join(dir, 'Cargo.toml'))
   if (text === undefined) return undefined
   const manifest = parseToml(text)
   return manifest === undefined ? undefined : asName(asRecord(manifest.package)?.name)
@@ -300,9 +305,9 @@ async function cargoPackageName(dir: string): Promise<string | undefined> {
 export const cargoWorkspace: EcosystemDetector = {
   name: 'cargo',
   manifests: root => [join(root, 'Cargo.toml')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'Cargo.toml')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     const manifest = parseToml(text)
     if (manifest === undefined) {
@@ -323,7 +328,7 @@ export const cargoWorkspace: EcosystemDetector = {
           + ' its members are not in the layout')
         return []
       }
-      packages.push(...await membersOf(await expandGlobs(root, globs, warn), cargoPackageName))
+      packages.push(...await membersOf(io, await expandGlobs(io, root, globs, warn), cargoPackageName))
     }
     const rootName = asName(rootPackage?.name)
     if (rootName !== undefined) packages.push({ dir: root, scopeId: rootName })
@@ -355,8 +360,8 @@ function goModuleScope(text: string): string | undefined {
  * @param dir - absolute member directory.
  * @returns the scope name, or `undefined` without a readable module line.
  */
-async function goMemberScope(dir: string): Promise<string | undefined> {
-  const text = await tryReadFile(join(dir, 'go.mod'))
+async function goMemberScope(io: WorkspaceIo, dir: string): Promise<string | undefined> {
+  const text = await tryReadFile(io, join(dir, 'go.mod'))
   return text === undefined ? undefined : goModuleScope(text)
 }
 
@@ -419,9 +424,9 @@ function goWorkUses(text: string, path: string, warn: (message: string) => void)
 export const goModules: EcosystemDetector = {
   name: 'go',
   manifests: root => [join(root, 'go.work'), join(root, 'go.mod')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const workPath = join(root, 'go.work')
-    const work = await tryReadFile(workPath)
+    const work = await tryReadFile(io, workPath)
     if (work !== undefined) {
       const dirs: string[] = []
       for (const use of goWorkUses(work, workPath, warn)) {
@@ -432,10 +437,10 @@ export const goModules: EcosystemDetector = {
         }
         dirs.push(join(root, use))
       }
-      return membersOf(dirs, goMemberScope)
+      return membersOf(io, dirs, goMemberScope)
     }
     const modPath = join(root, 'go.mod')
-    const mod = await tryReadFile(modPath)
+    const mod = await tryReadFile(io, modPath)
     if (mod === undefined) return null
     const name = goModuleScope(mod)
     if (name === undefined) {
@@ -451,8 +456,8 @@ export const goModules: EcosystemDetector = {
  * @param dir - absolute candidate directory.
  * @returns the project name, or `undefined` when no named manifest is readable.
  */
-async function pyprojectName(dir: string): Promise<string | undefined> {
-  const text = await tryReadFile(join(dir, 'pyproject.toml'))
+async function pyprojectName(io: WorkspaceIo, dir: string): Promise<string | undefined> {
+  const text = await tryReadFile(io, join(dir, 'pyproject.toml'))
   if (text === undefined) return undefined
   const manifest = parseToml(text)
   return manifest === undefined ? undefined : asName(asRecord(manifest.project)?.name)
@@ -474,9 +479,9 @@ async function pyprojectName(dir: string): Promise<string | undefined> {
 export const uvWorkspace: EcosystemDetector = {
   name: 'uv-workspace',
   manifests: root => [join(root, 'pyproject.toml')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'pyproject.toml')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     const manifest = parseToml(text)
     if (manifest === undefined) {
@@ -492,8 +497,8 @@ export const uvWorkspace: EcosystemDetector = {
         + ' its members are not in the layout')
       return []
     }
-    const dirs = await expandGlobs(root, [...members, ...exclude.map(pattern => `!${pattern}`)], warn)
-    const packages = await membersOf(dirs, pyprojectName)
+    const dirs = await expandGlobs(io, root, [...members, ...exclude.map(pattern => `!${pattern}`)], warn)
+    const packages = await membersOf(io, dirs, pyprojectName)
     const rootName = asName(asRecord(manifest.project)?.name)
     if (rootName !== undefined) packages.push({ dir: root, scopeId: rootName })
     return packages
@@ -541,9 +546,9 @@ function scanPom(text: string): PomFacts {
  * @returns the directory's base name, or `undefined` when the path is not a
  *   directory — a listed module without a directory has no home for documents.
  */
-async function directoryName(dir: string): Promise<string | undefined> {
+async function directoryName(io: WorkspaceIo, dir: string): Promise<string | undefined> {
   try {
-    return (await stat(dir)).isDirectory() ? basename(dir) : undefined
+    return (await io.stat(dir)).isDirectory() ? basename(dir) : undefined
   } catch {
     // The module points nowhere; it merely appeared in the list.
     return undefined
@@ -567,9 +572,9 @@ async function directoryName(dir: string): Promise<string | undefined> {
 export const mavenModules: EcosystemDetector = {
   name: 'maven',
   manifests: root => [join(root, 'pom.xml')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'pom.xml')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     const { artifactId, modules } = scanPom(text)
     if (modules.length === 0) {
@@ -588,8 +593,8 @@ export const mavenModules: EcosystemDetector = {
         continue
       }
       const dir = join(root, module)
-      const memberPom = await tryReadFile(join(dir, 'pom.xml'))
-      const scopeId = (memberPom === undefined ? undefined : scanPom(memberPom).artifactId) ?? await directoryName(dir)
+      const memberPom = await tryReadFile(io, join(dir, 'pom.xml'))
+      const scopeId = (memberPom === undefined ? undefined : scanPom(memberPom).artifactId) ?? await directoryName(io, dir)
       if (scopeId !== undefined) packages.push({ dir, scopeId })
     }
     return packages
@@ -618,12 +623,12 @@ const GRADLE_INCLUDE_ARGS = /^(['"])[^'"]*\1(\s*,\s*(['"])[^'"]*\3)*$/
 export const gradleSettings: EcosystemDetector = {
   name: 'gradle-settings',
   manifests: root => [join(root, 'settings.gradle'), join(root, 'settings.gradle.kts')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     let manifestPath = join(root, 'settings.gradle')
-    let text = await tryReadFile(manifestPath)
+    let text = await tryReadFile(io, manifestPath)
     if (text === undefined) {
       manifestPath = join(root, 'settings.gradle.kts')
-      text = await tryReadFile(manifestPath)
+      text = await tryReadFile(io, manifestPath)
     }
     if (text === undefined) return null
 
@@ -683,9 +688,9 @@ export const gradleSettings: EcosystemDetector = {
  * @returns `true` for a file; `false` for absence or any non-file — a
  *   directory wearing a manifest's name is not a manifest.
  */
-async function isFile(path: string): Promise<boolean> {
+async function isFile(io: WorkspaceIo, path: string): Promise<boolean> {
   try {
-    return (await stat(path)).isFile()
+    return (await io.stat(path)).isFile()
   } catch {
     // Absence is the non-answer every existence probe starts from.
     return false
@@ -698,9 +703,9 @@ async function isFile(path: string): Promise<boolean> {
  * @returns the entries, empty when the directory is absent or unreadable —
  *   nothing to enumerate is an answer, not an error.
  */
-async function listDirents(path: string): Promise<Dirent[]> {
+async function listDirents(io: WorkspaceIo, path: string): Promise<WorkspaceEntry[]> {
   try {
-    return await readdir(path, { withFileTypes: true })
+    return await io.readdir(path)
   } catch {
     // An absent directory holds no manifests.
     return []
@@ -713,8 +718,8 @@ async function listDirents(path: string): Promise<Dirent[]> {
  * @param suffix - the filename suffix, extension dot included.
  * @returns the matching file names.
  */
-async function rootFilesEndingWith(root: string, suffix: string): Promise<string[]> {
-  return (await listDirents(root))
+async function rootFilesEndingWith(io: WorkspaceIo, root: string, suffix: string): Promise<string[]> {
+  return (await listDirents(io, root))
     .filter(entry => entry.isFile() && entry.name.endsWith(suffix))
     .map(entry => entry.name)
     .sort()
@@ -735,9 +740,9 @@ async function rootFilesEndingWith(root: string, suffix: string): Promise<string
 export const pyprojectPackage: EcosystemDetector = {
   name: 'pyproject',
   manifests: root => [join(root, 'pyproject.toml')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'pyproject.toml')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     const manifest = parseToml(text)
     if (manifest === undefined) {
@@ -772,9 +777,9 @@ export const pyprojectPackage: EcosystemDetector = {
 export const composerPackage: EcosystemDetector = {
   name: 'composer',
   manifests: root => [join(root, 'composer.json')],
-  async detect(root, warn) {
+  async detect(root, warn, io = localWorkspaceIo) {
     const manifestPath = join(root, 'composer.json')
-    const text = await tryReadFile(manifestPath)
+    const text = await tryReadFile(io, manifestPath)
     if (text === undefined) return null
     let parsed: unknown
     try {
@@ -816,9 +821,9 @@ export const composerPackage: EcosystemDetector = {
 export const rubyPackage: EcosystemDetector = {
   name: 'ruby',
   manifests: root => [join(root, 'Gemfile'), root],
-  async detect(root) {
-    const present = await isFile(join(root, 'Gemfile'))
-      || (await rootFilesEndingWith(root, '.gemspec')).length > 0
+  async detect(root, _warn, io = localWorkspaceIo) {
+    const present = await isFile(io, join(root, 'Gemfile'))
+      || (await rootFilesEndingWith(io, root, '.gemspec')).length > 0
     return present ? [{ dir: root, scopeId: basename(root) }] : null
   },
 }
@@ -843,10 +848,10 @@ const SLN_PROJECT_LINE = /^Project\("[^"]*"\)\s*=\s*"([^"]*)"\s*,\s*"([^"]*)"/
 export const dotnetProjects: EcosystemDetector = {
   name: 'dotnet',
   manifests: root => [root],
-  async detect(root, warn) {
-    const slnNames = await rootFilesEndingWith(root, '.sln')
+  async detect(root, warn, io = localWorkspaceIo) {
+    const slnNames = await rootFilesEndingWith(io, root, '.sln')
     if (slnNames.length === 0) {
-      const csprojNames = await rootFilesEndingWith(root, '.csproj')
+      const csprojNames = await rootFilesEndingWith(io, root, '.csproj')
       if (csprojNames.length === 0) return null
       return csprojNames.map(name => ({ dir: root, scopeId: name.slice(0, -'.csproj'.length) }))
     }
@@ -855,7 +860,7 @@ export const dotnetProjects: EcosystemDetector = {
       const slnPath = join(root, slnName)
       // The file was just listed at the root; a read failure here is the
       // chain's warn-and-skip detector-error path, not a surface case.
-      const text = await readFile(slnPath, 'utf8')
+      const text = await io.readFile(slnPath)
       for (const raw of text.split('\n')) {
         const match = SLN_PROJECT_LINE.exec(raw.trim())
         if (match === null) continue
@@ -868,7 +873,7 @@ export const dotnetProjects: EcosystemDetector = {
           continue
         }
         const dir = join(root, dirname(path))
-        if (await directoryName(dir) !== undefined) packages.push({ dir, scopeId })
+        if (await directoryName(io, dir) !== undefined) packages.push({ dir, scopeId })
       }
     }
     if (packages.length === 0) {
@@ -891,16 +896,16 @@ export const dotnetProjects: EcosystemDetector = {
 export const mixProjects: EcosystemDetector = {
   name: 'mix',
   manifests: root => [join(root, 'mix.exs'), join(root, 'apps')],
-  async detect(root) {
-    if (!await isFile(join(root, 'mix.exs'))) return null
+  async detect(root, _warn, io = localWorkspaceIo) {
+    if (!await isFile(io, join(root, 'mix.exs'))) return null
     const members: WorkspacePackage[] = []
-    const apps = (await listDirents(join(root, 'apps')))
+    const apps = (await listDirents(io, join(root, 'apps')))
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .sort()
     for (const app of apps) {
       const dir = join(root, 'apps', app)
-      if (await isFile(join(dir, 'mix.exs'))) members.push({ dir, scopeId: app })
+      if (await isFile(io, join(dir, 'mix.exs'))) members.push({ dir, scopeId: app })
     }
     return members.length > 0 ? members : [{ dir: root, scopeId: basename(root) }]
   },

@@ -8,15 +8,13 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentType } from 'react'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { IconBranchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { stubSettingsScope } from './harness-doubles.ts'
 import { apply as applyLocale, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, BETTER_SIDEBAR_TAB_ID, BOARD_TAB_ID, BOARD_TAB_KIND, inject } from '../src/client/index.ts'
 import type { SidebarRightTabDefinition, SidebarRightTabInfo } from '../src/client/sidebar-right.ts'
 import { apply as applyNode } from '../src/index.ts'
-import * as DevflowInvariant from '../src/invariant.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
 
 /** Drain the asynchronous read-face settlement queue. */
@@ -156,7 +154,9 @@ async function bench(listResult: () => unknown): Promise<Bench> {
   }, () => null)
   ctx.provide('sessions', {
     list: { getSnapshot: () => ({ current: 'ses-one', ids: ['ses-known'] }), subscribe: () => () => {} },
-    open: (id: string) => { state.openedSessions.push(id) },
+  } as never)
+  ctx.provide('uiWorkspace', {
+    openSession: (id: string) => { state.openedSessions.push(id) },
   } as never)
   ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
   vi.stubGlobal('fetch', (input: string, init: { body: string }) => {
@@ -187,7 +187,8 @@ async function bench(listResult: () => unknown): Promise<Bench> {
     }
   })
   ctx.provide('remote', { $on: () => () => {} } as never)
-  ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
+  // DSH 0.2.1's locale plugin reads its settings through `configForms`.
+  ctx.provide('configForms', { get: () => stubSettingsScope().scope } as never)
   await ctx.plugin({ inject: localeInject, apply: applyLocale }).await()
   ctx.locale.setLocale('zh')
   state.fiber = ctx.plugin({ inject: [...inject], apply })
@@ -221,7 +222,7 @@ describe('ui-devflow browser half', () => {
     const definition = state.definitions[0]
     expect(definition).toMatchObject({ id: BOARD_TAB_ID, kind: BOARD_TAB_KIND })
     expect(definition.title('sidebar://devflow')).toBe('研发流程')
-    expect(definition.guide?.[0]).toMatchObject({ order: 20, icon: IconBranchOutline16 })
+    expect(definition.guide?.[0]).toMatchObject({ order: 20, icon: IconBranchOutlineRegular })
     expect(definition.guide?.[0]?.title()).toBe('研发流程')
     expect(definition.guide?.[0]?.description()).toContain('任务阶段')
     expect(state.ctx.slots.entries('sidebar.right.pane.tab')).toHaveLength(1)
@@ -394,17 +395,5 @@ describe('ui-devflow browser half', () => {
 describe('ui-devflow node half', () => {
   it('contributes no host behavior', () => {
     expect(applyNode).not.toThrow()
-  })
-})
-
-describe('ui-devflow invariant companion', () => {
-  it('reserves package ownership under its declared companion name', async () => {
-    const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, { enabled: true })
-    const fiber = ctx.plugin(DevflowInvariant)
-    await fiber.await()
-    expect(DevflowInvariant.name).toBe('client-ui-devflow-invariant')
-    expect(DevflowInvariant.inject).toEqual(['invariants'])
-    await fiber.dispose()
   })
 })

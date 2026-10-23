@@ -113,7 +113,7 @@ describe('observeActivity', () => {
       { id: 'bash-4', status: 'completed', owner: root },
     ]
     const before = changes()
-    jobs.changed(root)
+    jobs.changed('settled')
     expect(changes()).toBe(before + 1)
     expect(activity()).toEqual({ busy: true, waitingUser: 0, agents: 0, jobs: 3 })
   })
@@ -135,7 +135,21 @@ describe('observeActivity', () => {
     const before = changes()
     jobs.changed()
     expect(jobs.listeners).toHaveLength(1)
+    expect(jobs.listeners[0]?.filter).toEqual({ owners: 'all' })
     expect(changes()).toBe(before + 1)
+  })
+
+  it('ignores job output and progress events, which leave the visible set unchanged', () => {
+    const { host, changes } = observed()
+    const jobs = new FakeJobs()
+    host.provideJobs(jobs)
+    const before = changes()
+    jobs.changed('output')
+    jobs.changed('progress')
+    expect(changes()).toBe(before)
+    jobs.changed('stopping')
+    jobs.changed('removed')
+    expect(changes()).toBe(before + 2)
   })
 
   it('forgets the question of a disposed Agent so a same-id resume is not counted waiting', async () => {

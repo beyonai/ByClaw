@@ -87,6 +87,21 @@ public class SandboxService {
     private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway() { return platformGatewayProvider.getObject(); }
     private boolean platformRemote() { return platformGatewayProvider != null && platformGateway().isRemote(); }
 
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper sandboxServiceSpecEntityMapper;
+
+    /** 常驻（共享）DSH 宿主上的用户上下文；未配置 shared-dsh-host.base-url 时为空。 */
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
+
+    /**
+     * 该用户的这类沙箱是常驻宿主上的进程内上下文：不建记录、不启动沙箱，直接向宿主要上下文（幂等 PUT）。
+     * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
+     */
+    private boolean sharedHostRoutes(String userCode, String sandboxType) {
+        return sharedDshHostContexts != null && sharedDshHostContexts.routes(userCode, sandboxType);
+    }
+
 
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
@@ -220,6 +235,19 @@ public class SandboxService {
     /** Redis key 前缀：用户首选沙箱 serviceKey */
     private static final String PREFERRED_SERVICE_KEY_PREFIX = "byai:sandbox:preferred-service-key:";
 
+    /**
+     * Redis key 前缀：由共享 DSH 宿主承载的用户。宿主为它承载的每个用户写入此 key（值为宿主标识）
+     * 并定期续期；key 存在时该用户的消息由宿主的 BYCLAW_DSH_<user> worker 处理，不再启动独立的
+     * byclaw-dsh 沙箱。宿主停止后 key 过期，自动恢复为每用户独立沙箱。
+     * 配置了 byclaw.sandbox.shared-dsh-host.base-url 时由 SharedDshHostRuntimeProvider 管理宿主上的用户上下文，
+     * 此跳过逻辑不再生效（否则 BE 自己 PUT 出的用户会被挡在记录与 endpoint 之外）。
+     */
+    static final String SHARED_DSH_HOST_KEY_PREFIX = "byclaw:dsh:shared-host:user:";
+
+    /** 非空表示 byclaw-dsh 由 SharedDshHostRuntimeProvider 托管到共享宿主。 */
+    @Value("${byclaw.sandbox.shared-dsh-host.base-url:}")
+    private String sharedDshHostBaseUrl;
+
     private static final String CRON_NEXT_RUN_REDIS_KEY = "sandbox:cron:nextRunTime";
 
     /** 沙箱空闲超时时间（分钟） */
@@ -317,6 +345,21 @@ public class SandboxService {
         String key = PREFERRED_SERVICE_KEY_PREFIX + userCode;
         RedisUtil.setString(key, serviceKey);
         LOGGER.info("保存用户首选 serviceKey: userCode={}, serviceKey={}", userCode, serviceKey);
+    }
+
+    /**
+     * 规格是否对用户开放（{@code enabled=1}）。未知规格按不开放处理。
+     */
+    public boolean isServiceKeyEnabled(String serviceKey) {
+        if (StringUtils.isBlank(serviceKey) || sandboxServiceSpecEntityMapper == null) {
+            return false;
+        }
+        com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity entity =
+            sandboxServiceSpecEntityMapper.selectProfileAwareByServiceKey(serviceKey.trim());
+        if (entity == null) {
+            entity = sandboxServiceSpecEntityMapper.selectLegacyByServiceKey(serviceKey.trim());
+        }
+        return entity != null && entity.getEnabled() != null && entity.getEnabled() == 1;
     }
 
     /**
@@ -418,6 +461,15 @@ public class SandboxService {
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         String serviceType, boolean waitForWorkerReady, SsSandboxRecord recoveryTarget,
         SandboxLaunchRouting resolvedRouting) {
+        SandboxLaunchRouting routing = resolvedRouting != null ? resolvedRouting
+            : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        if (sharedHostRoutes(userCode, routing.getSandboxType())) {
+            SandboxLaunchData hosted = sharedDshHostContexts.ensure(userCode);
+            if (waitForWorkerReady && StringUtils.isNotBlank(targetAgentType)) {
+                waitWorkerReadySync(targetAgentType);
+            }
+            return hosted;
+        }
         if (platformRemote()) {
             Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
                 "targetAgentType", targetAgentType, "serviceType", serviceType,
@@ -425,8 +477,6 @@ public class SandboxService {
             if (resolvedRouting != null) params.put("routing", platformGateway().route(resolvedRouting));
             return platformGateway().convert(platformGateway().service("restart", params), SandboxLaunchData.class);
         }
-        SandboxLaunchRouting routing = resolvedRouting != null ? resolvedRouting
-            : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -512,6 +562,7 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
         if (platformRemote()) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -553,6 +604,27 @@ public class SandboxService {
         }
     }
 
+    /**
+     * 用户的 byclaw-dsh 由不受 BE 管理的共享 DSH 宿主承载时返回宿主标识，否则返回 null。Redis 不可用时按未承载处理，
+     * 保持原有的每用户沙箱行为。宿主由 BE 托管（配置了 shared-dsh-host.base-url）时始终返回 null，走正常启动流程。
+     */
+    private String sharedDshHost(String userCode, SandboxLaunchRouting routing) {
+        if (StringUtils.isNotBlank(sharedDshHostBaseUrl)) {
+            return null;
+        }
+        if (StringUtils.isBlank(userCode) || routing == null
+            || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(routing.getSandboxType())) {
+            return null;
+        }
+        try {
+            return StringUtils.trimToNull(RedisUtil.getString(SHARED_DSH_HOST_KEY_PREFIX + userCode.trim()));
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("查询共享 DSH 宿主失败，按独立沙箱处理，用户编码：{}，原因：{}", userCode, e.getMessage());
+            return null;
+        }
+    }
+
     private String buildLaunchLockKey(String userCode, SandboxLaunchRouting routing) {
         return SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
             + routing.getEffectiveResourceId();
@@ -584,8 +656,13 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     public SandboxLaunchData launchSandboxAwait(String userCode, Long resourceId) {
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
+        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
+        if (sharedDshHost(userCode, routing) != null) {
+            // 共享宿主没有每用户沙箱 endpoint 可等待；消息经宿主 worker 处理。
+            return new SandboxLaunchData();
+        }
 
         // 1. 查询DB是否已有运行中的沙箱记录
         SsSandboxRecord existingRecord = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
@@ -714,6 +791,11 @@ public class SandboxService {
 
     private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
         boolean skipReusableSandbox) {
+        String sharedHost = sharedDshHost(userCode, routing);
+        if (sharedHost != null) {
+            LOGGER.info("用户 {} 的 DSH 由共享宿主 {} 承载，跳过启动独立 byclaw-dsh 沙箱", userCode, sharedHost);
+            return new SandboxLaunchData();
+        }
         // 校验运行中沙箱数量是否超过系统参数上限
         checkRunningSandboxLimit();
 
@@ -1020,6 +1102,8 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxType(String userCode, String sandboxType) {
+        // A resident-host context has no record and no lease; the host keeps it alive by its own idle rule.
+        if (sharedHostRoutes(userCode, sandboxType)) return true;
         if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode,"sandboxType",sandboxType)));
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("running-state 心跳失败：无法获取用户编码");
@@ -1244,22 +1328,43 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
-        if (platformRemote()) return (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+        if (platformRemote()) {
+            @SuppressWarnings("unchecked")
+            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+            return withSharedHostContext(userCode, remote);
+        }
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
         List<SandboxInfo> cached = sandboxMetadataCache.listByUser(userCode);
         if (cached != null && !cached.isEmpty()) {
             cached.forEach(this::hydrateGatewayToken);
-            return cached;
+            return withSharedHostContext(userCode, cached);
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
-        if (records == null || records.isEmpty()) {
-            return List.of();
-        }
-        List<SandboxInfo> result = records.stream().map(this::toSandboxInfo).collect(Collectors.toList());
+        List<SandboxInfo> result = records == null ? new ArrayList<>()
+            : records.stream().map(this::toSandboxInfo).collect(Collectors.toList());
         result.forEach(sandboxMetadataCache::put);
-        return result;
+        return withSharedHostContext(userCode, result);
+    }
+
+    /** The resident host's context for the user is not a record; listings read it from the host. */
+    private List<SandboxInfo> withSharedHostContext(String userCode, List<SandboxInfo> infos) {
+        if (!sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)) {
+            return infos;
+        }
+        List<SandboxInfo> merged = new ArrayList<>();
+        if (infos != null) {
+            infos.stream().filter(info -> info != null
+                && !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(info.getSandboxType())).forEach(merged::add);
+        }
+        try {
+            sharedDshHostContexts.info(userCode).ifPresent(merged::add);
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("读取常驻 DSH 宿主上下文失败，userCode={}，原因：{}", userCode, e.getMessage());
+        }
+        return merged;
     }
 
     /**
@@ -1276,7 +1381,19 @@ public class SandboxService {
      * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
-        if (platformRemote()) { platformGateway().service("remove",platformGateway().params("userCode",userCode,"resourceId",resourceId,"sandboxType",requestedSandboxType));return; }
+        String requestedType = StringUtils.trimToNull(requestedSandboxType);
+        if (resourceId == null && (requestedType == null || SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(requestedType))
+            && sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)) {
+            // The user's assistant lives on the resident host: releasing it is a DELETE there, nothing else.
+            sharedDshHostContexts.release(userCode);
+            if (requestedType != null) {
+                return;
+            }
+        }
+        if (platformRemote()) {
+            platformGateway().service("remove",platformGateway().params("userCode",userCode,"resourceId",resourceId,"sandboxType",requestedSandboxType));
+            return;
+        }
         String releaseReason = manualReleaseReason(userCode);
         String sandboxType = StringUtils.trimToNull(requestedSandboxType);
         List<Long> effectiveResourceIds = new ArrayList<>();
@@ -2150,7 +2267,7 @@ public class SandboxService {
         SandboxLaunchData launchData;
         try {
             launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
-                () -> launchSandbox(record.getUserCode(), record.getResourceId()));
+                () -> relaunchMissingRecord(record));
         } catch (RuntimeException failure) {
             recordRecovery(record, "REBUILD_FAILED", null);
             throw failure;
@@ -2166,6 +2283,18 @@ public class SandboxService {
             recordRecovery(record, "REBUILD_FAILED", null);
             LOGGER.warn("沙箱一致性检测重拉失败，旧记录：{}", sandboxRef(record));
         }
+    }
+
+    /**
+     * 远端缺失的记录按它自己的沙箱类型重拉。按 resourceId 重新解析路由只看员工的 workerAgentType，
+     * 会把 byclaw-dsh 记录重拉成 openclaw；共享 DSH 宿主重启后它承载的每个用户都会走到这里。
+     */
+    SandboxLaunchData relaunchMissingRecord(SsSandboxRecord record) {
+        String sandboxType = record.getSandboxType();
+        if (StringUtils.isBlank(sandboxType) || SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
+            return launchSandbox(record.getUserCode(), record.getResourceId());
+        }
+        return launchSandboxWithServiceKey(record.getUserCode(), sandboxType);
     }
 
     private void logRemoteOrphans(SandboxReconcileGroup group, List<SsSandboxRecord> records,
@@ -3065,6 +3194,4 @@ public class SandboxService {
             + ", version=" + record.getVersion()
             + ", lockVersion=" + record.getLockVersion();
     }
-
-
 }

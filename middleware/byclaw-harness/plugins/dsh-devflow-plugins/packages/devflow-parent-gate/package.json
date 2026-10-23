@@ -18,29 +18,22 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
-    "lib/invariant.js",
     "lib/types/**/*.d.ts",
     "LICENSE",
     "README.md"
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/cordis": "4.0.5",
     "@zhchxiao123/dsh-devflow": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/cordis": "4.0.5",
     "@zhchxiao123/dsh-devflow": "workspace:^",
     "@zhchxiao123/dsh-devflow-filesystem": "workspace:^"
   },

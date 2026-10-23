@@ -13,12 +13,17 @@ describe('bash provider bundle', () => {
       'dsh-bash-provider-test',
       require.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'),
     )
+    // The harness runs the Web profile, whose bundle carries the ui-conversation row.
+    const web = loadOverlayPatches(
+      'dsh-bash-provider-test',
+      require.resolve('@deepseek-ai/dsh-web-app/cordis.patch.yml'),
+    )
     const plugin = loadOverlayPatches(
       'dsh-bash-provider-test',
       join(packageRoot, 'cordis.patch.yml'),
     )
     const warnings: string[] = []
-    const rows = composeEntries([base, plugin], warning => warnings.push(warning))
+    const rows = composeEntries([base, web, plugin], warning => warnings.push(warning))
 
     expect(warnings).toEqual([])
     expect(rows.find(row => row.id === 'bash-sandbox')).toMatchObject({ disabled: true })
@@ -37,9 +42,9 @@ describe('bash provider bundle', () => {
       name: '@deepseek-ai/dsh-web-search-deepseek',
     })
     expect(rows.find(row => row.id === 'web-search-deepseek')?.disabled).not.toBe(true)
-    expect(rows.find(row => row.id === 'settings')).toMatchObject({ disabled: true })
-    expect(rows.find(row => row.id === 'byclaw-settings')).toMatchObject({
-      name: '@byclaw/dsh-bash-provider/settings',
+    expect(rows.find(row => row.id === 'settings')?.disabled).not.toBe(true)
+    expect(rows.find(row => row.id === 'ui-conversation')?.config).toMatchObject({
+      busyEnter: { __jsExpr: "process.env.BYCLAW_DSH_BUSY_ENTER ?? 'queue'" },
     })
   })
 })
