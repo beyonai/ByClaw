@@ -199,7 +199,6 @@ export interface Config {
   model?: string
   workerId?: string
   agentTypes?: string[]
-  maxConcurrency?: number
   refreshChannel?: string
   authorizationPollMs?: number
   authorizationPollOnlyMs?: number
@@ -271,7 +270,6 @@ export const Config: z<Config> = z.object({
   userFsRoot: z.string(),
   workerHistory: z.union(['memory', 'none']).default('memory'),
   agentTypes: z.array(z.string()).default(undefined as unknown as string[]),
-  maxConcurrency: z.natural().min(1).default(8),
   refreshChannel: z.string().default('byai:pub:dig_employee_change'),
   authorizationPollMs: z.natural().min(1).default(5_000),
   authorizationPollOnlyMs: z.natural().min(1).default(2_000),
@@ -1166,7 +1164,6 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       workerId: id,
       agentTypes,
       sessions,
-      maxConcurrency: config.maxConcurrency ?? 8,
     })
     startupPhase('worker-start')
     await worker.start(id)

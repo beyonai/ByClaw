@@ -189,7 +189,6 @@ This example configures the session/team plugins. The capability and Web plugins
     userCode: !!js process.env.USER_CODE
     baseUrl: 'http://123.56.153.229:8080'
     stateDir: .agent-teams
-    maxConcurrency: 8
     subagentProvider: spawn
     agentPreset: standard
 

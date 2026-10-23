@@ -191,7 +191,6 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
     userCode: !!js process.env.USER_CODE
     baseUrl: 'http://123.56.153.229:8080'
     stateDir: .agent-teams
-    maxConcurrency: 8
     subagentProvider: spawn
     agentPreset: standard
 
