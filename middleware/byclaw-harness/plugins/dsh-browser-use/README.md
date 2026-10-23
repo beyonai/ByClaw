@@ -250,3 +250,9 @@ The Docker build includes same-runtime-UID artifact permission and subreaper che
 ### Optional Jev goal execution
 
 `BYCLAW_BROWSER_JEV_ENABLED=false` by default. Enable it on both the Worker and browserd to expose `browser.runGoal` and `browser.goalControl`. It shares `BYCLAW_JEV_*` with the routers; field text reuses the calling session’s resolved provider/model and existing credentials through ByClaw integration, with no separate model configuration. Each goal snapshots the actual request route (including the result of Auto routing), without rerouting or attaching tools. The goal loop is bounded, checks semantic page state and control generations before actions, and never replays uncertain mutations. `reported_done` is a model claim; `verified` only checks supplied page predicates. See [configuration, controls, logs and limitations](README.zh.md#jev-目标执行默认关闭). Tool descriptions use concise Chinese to match the repository's business tool convention; this does not imply provider compatibility.
+
+## Browser in the tool environment (slim deployment)
+
+`workspaceOnToolEnvironment: true` (`BYCLAW_BROWSER_ON_TOOL_ENV=1`) runs browserd through the context's SSH subprocess provider. This branch takes precedence over `ownsRuntime`, including multi-host contexts. It is off by default, preserving existing local deployments.
+
+Screenshots and downloads live in B; goal downloads are copied within B. Native browser sessions use port 8082 by default and have a separate profile from byCLI on B:8081. Configure `BYCLAW_TOOL_BROWSER_VIEWER` / `BYCLAW_TOOL_BROWSER_VIEWER_PORT` for the desktop. Disconnects never replay actions; idle bridges with no leases or pending requests exit to release SSH activity. A/B must use paired artifacts. See [the slim build and deployment guide](../../README.slim.md).

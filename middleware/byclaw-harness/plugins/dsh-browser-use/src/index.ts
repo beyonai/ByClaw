@@ -1,4 +1,8 @@
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
+import { saveToolEnvironmentDownload } from './tool-environment-artifacts.js'
+import { ToolEnvironmentBrowserRuntime, type BrowserSubprocess } from './tool-environment-runtime.js'
 import { browserGoalEnabled, resolveGoalConfig } from './goal-config.js'
 import type { BrowserTextServiceFactory } from './goal-types.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -33,6 +37,8 @@ export interface Config {
    * supervisor-launched broker.
    */
   ownsRuntime?: boolean
+  /** Run browserd through this context's SSH subprocess provider. Local behavior is the default. */
+  workspaceOnToolEnvironment?: boolean
   /** Required with ownsRuntime: private directory for socket, downloads, screenshots, sessions and lock. */
   runtimeDir?: string
   /** Required with ownsRuntime: this context's DSH home (profile under `<dshHome>/browser/user-data`). */
@@ -62,6 +68,7 @@ export const Config: z<Config> = z.object({
   idleBrowserMs: z.number().default(30_000),
   leaseTimeoutMs: z.number().default(900_000),
   ownsRuntime: z.boolean().default(false),
+  workspaceOnToolEnvironment: z.boolean().default(false),
   runtimeDir: z.string(),
   dshHome: z.string(),
   socketPath: z.string(),
@@ -582,6 +589,10 @@ export function registerBrowserTool(
 }
 
 export function apply(ctx: Context, config: Config): void {
+  if (config.workspaceOnToolEnvironment) {
+    applyToolEnvironmentRuntime(ctx, config)
+    return
+  }
   if (config.ownsRuntime) {
     applyOwnedRuntime(ctx, config)
     return
@@ -660,6 +671,37 @@ function applyOwnedRuntime(ctx: Context, config: Config): BrowserSessionControll
       config: { ...resolveGoalConfig(), lockPath: paths.automationLockPath },
       artifactRoot: paths.artifactRoot,
       text: goalText(ctx),
+      log: (event, data) => ctx.logger.info(`[byclaw-browser-goal] ${event} ${JSON.stringify(data)}`),
+    } satisfies BrowserGoalServices } : {}),
+  })
+}
+
+/** Browser frames use the same authenticated SSH subprocess connection as other tools. */
+function applyToolEnvironmentRuntime(ctx: Context, config: Config): void {
+  const home = config.dshHome || process.env.DSH_HOME || join(homedir(), '.dsh')
+  const contextId = createHash('sha256').update(home).digest('hex').slice(0, 24)
+  const subprocess = (): BrowserSubprocess => {
+    if (!ctx.get('ssh')) throw new Error('browser-tool-environment-requires-ssh')
+    const provider = ctx.get('subprocess') as BrowserSubprocess | undefined
+    if (!provider) throw new Error('browser-tool-environment-requires-subprocess')
+    return provider
+  }
+  const runtime = new ToolEnvironmentBrowserRuntime({
+    socketPath: join(config.runtimeDir || join(home, '..', 'run', 'browser'), 'remote.sock'),
+    contextId, subprocess, goalEnabled: browserGoalEnabled(),
+    idleBrowserMs: resolved(config).idleBrowserMs,
+    readinessTimeoutMs: config.readinessTimeoutMs ?? 60_000,
+    viewer: config.viewer ?? 'none', viewerPort: config.viewerPort ?? 8082,
+  })
+  registerBrowserTool(ctx, config, new OwnedBrowserBroker(runtime), {
+    shutdownOnDispose: true,
+    ...(browserGoalEnabled() ? { goal: {
+      config: { ...resolveGoalConfig(), lockPath: config.automationLockPath || join(home, 'browser', 'automation.lock') },
+      artifactRoot: join('/by/.browser', contextId, 'artifacts'),
+      text: goalText(ctx),
+      saveDownload: (source, name, runId) => saveToolEnvironmentDownload(
+        subprocess(), join('/by/.browser', contextId, 'artifacts'), source, name, runId,
+      ),
       log: (event, data) => ctx.logger.info(`[byclaw-browser-goal] ${event} ${JSON.stringify(data)}`),
     } satisfies BrowserGoalServices } : {}),
   })

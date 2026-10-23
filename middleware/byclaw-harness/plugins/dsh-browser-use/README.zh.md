@@ -248,3 +248,9 @@ noVNC 顶部显示运行状态及暂停/继续/取消。为在服务端隔离人
 - `finished`：最终状态、原因、步骤数、总耗时。
 
 目标日志按 runId/sessionId 关联；辅助文字模型的 text_model 日志按 sessionId 关联。不记录原始目标、网页正文、输入值、密钥或 Cookie。`jev_response` 不能证明动作成功；以 action_completed、finished、页面成功条件及真实业务结果逐层核对。真实 Jev 渠道、真实文本模型和 Docker/noVNC 部署仍需部署环境验证，本地模拟不能证明生产调用成功或性能收益。
+
+## 工具沙箱浏览器（slim 部署）
+
+配置 `workspaceOnToolEnvironment: true`（镜像变量 `BYCLAW_BROWSER_ON_TOOL_ENV=1`）后，浏览器通过当前上下文的 SSH subprocess 在工具沙箱运行；这个分支优先于 `ownsRuntime`，也适用于 multi-host。默认关闭，因此原有本地部署不变。
+
+截图和下载路径属于 B，goal 下载也在 B 内复制。原生浏览器默认端口 8082，与 B 上 byCLI 的 8081 和登录态分开。配置 `BYCLAW_TOOL_BROWSER_VIEWER` / `BYCLAW_TOOL_BROWSER_VIEWER_PORT` 调整桌面；连接断开不重放操作，空闲且没有 lease/请求时释放远程进程。A/B 必须使用配套构建产物。完整构建与部署说明见 [README.slim.md](../../README.slim.md)。

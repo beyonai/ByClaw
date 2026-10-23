@@ -1,0 +1,96 @@
+# syntax=docker/dockerfile:1
+# Repository-root context. DSH build tools stay in the disposable builder.
+ARG RUNTIME_IMAGE=python:3.12-slim-trixie
+FROM ${RUNTIME_IMAGE} AS runtime-os
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    NVM_DIR=/opt/nvm NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    PATH=/opt/nvm/current/bin:/usr/local/bin:$PATH
+RUN set -eux; \
+    sed -i -E "s|https?://deb.debian.org|${APT_MIRROR}|g;s|https?://security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends bash ca-certificates curl git jq openssh-client \
+        rsync unzip procps util-linux libstdc++6 libatomic1 bubblewrap; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid 1001 byclaw; \
+    useradd --uid 1001 --gid byclaw --create-home --shell /bin/bash byclaw; \
+    install -d -o byclaw -g byclaw /by /by/byclaw/.dsh /home/byclaw/.dsh
+
+FROM runtime-os AS dsh-builder
+ARG NVM_VERSION=0.40.3
+ARG NODE_VERSION=22.19.0
+ARG PNPM_VERSION=11.28.5
+ARG CODEGRAPH_VERSION=1.6.0
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+ARG NVM_SOURCE_BASE=https://cdn.jsdelivr.net/gh/nvm-sh/nvm
+ARG NVM_SH_SHA256=390260ab9eb1da20e8bc0ebea2ee90f528d53e5e9f6e13b16717db4af454df9d
+ARG NVM_EXEC_SHA256=e6b7a2bafac6994e1ba14282cff82c75476fba0788f68a9ecf558dfdf3331621
+ARG NVM_BASH_COMPLETION_SHA256=b7eb3bf03d59b61e451957b020640aa55fe8bf47fb39d85d244e259f445d2fbe
+
+RUN set -eux; \
+    mkdir -p "${NVM_DIR}"; \
+    for file_spec in \
+        "nvm.sh:${NVM_SH_SHA256}" \
+        "nvm-exec:${NVM_EXEC_SHA256}" \
+        "bash_completion:${NVM_BASH_COMPLETION_SHA256}"; do \
+        file_name="${file_spec%%:*}"; \
+        file_sha256="${file_spec#*:}"; \
+        curl -fL \
+            --retry 5 \
+            --retry-delay 2 \
+            --connect-timeout 10 \
+            --max-time 120 \
+            "${NVM_SOURCE_BASE}@v${NVM_VERSION}/${file_name}" \
+            -o "${NVM_DIR}/${file_name}"; \
+        echo "${file_sha256}  ${NVM_DIR}/${file_name}" | sha256sum -c -; \
+    done; \
+    chmod 0755 "${NVM_DIR}/nvm-exec"
+
+RUN . "${NVM_DIR}/nvm.sh" \
+    && nvm install "${NODE_VERSION}" \
+    && nvm alias default "${NODE_VERSION}" \
+    && ln -s "${NVM_DIR}/versions/node/v${NODE_VERSION}" "${NVM_DIR}/current"
+
+ENV npm_config_nodedir=/opt/nvm/current
+
+RUN npm install --global "pnpm@${PNPM_VERSION}" \
+    && npm install --global "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" --registry=https://registry.npmjs.org \
+    && test "$(codegraph --version)" = "${CODEGRAPH_VERSION}" \
+    && npm cache clean --force
+RUN printf '%s\n' \
+        'export NVM_DIR="/opt/nvm"' \
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' \
+        '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"' \
+        > /etc/profile.d/nvm.sh \
+    && chmod 0644 /etc/profile.d/nvm.sh
+
+ARG DSH_REPOSITORY=https://githubfast.com/deepseek-ai/deepseek-harness.git
+ARG DSH_REF=dsh-v0.2.1-rc.2
+
+RUN git clone --depth 1 --branch "${DSH_REF}" "${DSH_REPOSITORY}" /workspace
+
+WORKDIR /workspace
+
+RUN pnpm config set registry "${NPM_CONFIG_REGISTRY}" \
+    && pnpm install --no-frozen-lockfile \
+    && pnpm run build \
+    && mkdir -p /by/byclaw/.dsh \
+    && chown -R byclaw:byclaw /workspace /by/byclaw/.dsh
+
+# Keep workspace peers and Node headers: later plugin builds need native headers;
+# DSH also loads TS/client sources at runtime. Do not blindly prune this workspace.
+RUN rm -rf /workspace/.git /workspace/.pnpm-store \
+    && find /workspace -type f \( -name '*.map' -o -name '*.tsbuildinfo' \) -delete
+
+FROM runtime-os AS dsh-base-slim
+ARG DSH_REF=dsh-v0.2.1-rc.2
+COPY --from=dsh-builder /opt/nvm/ /opt/nvm/
+COPY --from=dsh-builder /etc/profile.d/nvm.sh /etc/profile.d/nvm.sh
+COPY --from=dsh-builder --chown=byclaw:byclaw /workspace/ /workspace/
+ENV npm_config_nodedir=/opt/nvm/current DSH_HOME=/by/byclaw/.dsh CODEGRAPH_MCP_CWD=/by
+WORKDIR /workspace
+LABEL io.byclaw.dsh.base="slim" io.byclaw.dsh.ref="${DSH_REF}"

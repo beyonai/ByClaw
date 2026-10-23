@@ -1,0 +1,231 @@
+# syntax=docker/dockerfile:1
+# Build from the exact Dockerfile.slim image that this sandbox will serve.
+ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+# Fixed connector tools have an independent cache, unaffected by plugin edits.
+FROM ${HARNESS_IMAGE} AS connector-tools
+USER root
+ARG NPM_REGISTRY
+ENV npm_config_registry=${NPM_REGISTRY}
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.85
+COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
+# Shared connector Skills need these executables in the final image. Keep their
+# versions aligned with OpenClaw and check access as the DSH runtime user.
+RUN set -eu; \
+    npm install --global --ignore-scripts --no-audit --no-fund --update-notifier=false "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    node /tmp/lark-mirror-first.mjs "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
+    node "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
+    wecom_version="$(wecom-cli --version)"; \
+    test "${wecom_version}" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    lark_version="$(lark-cli --version)"; \
+    test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    su -s /bin/sh byclaw -c 'wecom-cli --help >/dev/null && lark-cli --help >/dev/null'; \
+    npm cache clean --force
+
+
+FROM ${HARNESS_IMAGE} AS tools
+USER root
+ARG NPM_REGISTRY
+ARG PLAYWRIGHT_VERSION=1.62.1
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+ARG BYCLI_VERSION=2.1.74
+ARG BYCLI_EXTENSION_VERSION=2.1.28
+ARG ALIYUN_CLI_VERSION=3.4.11
+ARG ALIYUN_CLI_AMD64_SHA256=a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c
+ARG ALIYUN_CLI_ARM64_SHA256=b0b6f6f7545f9472b697fc27915c8956e5a3320a6160729dcc5b4eff21435ae8
+ARG RTK_VERSION=0.47.0
+ARG RTK_AMD64_SHA256=7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7
+ARG RTK_ARM64_SHA256=960ceb5f1f5f0b0939b32b5b1d41dec6d9a7113137b0703c68dca0d169a260fc
+ARG RTK_DOWNLOAD_BASE=https://github.com/rtk-ai/rtk/releases/download
+ARG UV_VERSION=0.12.7
+ARG ALIBABACLOUD_MCP_PROXY_VERSION=0.2.17
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config fd-find ffmpeg fontconfig fonts-liberation fonts-noto-cjk \
+        fonts-wqy-microhei fonts-wqy-zenhei less libreoffice maven netcat-openbsd novnc \
+        openjdk-21-jdk-headless psmisc ripgrep sqlite3 tree websockify xauth x11vnc xvfb zip \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install --global "playwright@${PLAYWRIGHT_VERSION}" \
+    && playwright install --with-deps chromium \
+    && npm cache clean --force && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /ms-playwright
+RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}" "alibabacloud.mcp-proxy==${ALIBABACLOUD_MCP_PROXY_VERSION}"
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) cli_arch=amd64; cli_sha256="${ALIYUN_CLI_AMD64_SHA256}" ;; \
+        arm64) cli_arch=arm64; cli_sha256="${ALIYUN_CLI_ARM64_SHA256}" ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    cli_archive="aliyun-cli-linux-${ALIYUN_CLI_VERSION}-${cli_arch}.tgz"; \
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --max-time 120 \
+        "https://aliyuncli.alicdn.com/${cli_archive}" \
+        -o "/tmp/${cli_archive}"; \
+    echo "${cli_sha256}  /tmp/${cli_archive}" | sha256sum -c -; \
+    tar -xzf "/tmp/${cli_archive}" -C /usr/local/bin; \
+    chmod 0755 /usr/local/bin/aliyun; \
+    rm -f "/tmp/${cli_archive}"; \
+    aliyun version
+
+# rtk (Rust Token Killer, https://github.com/rtk-ai/rtk): a single static
+# binary, so the pre-built release tarball is fetched directly rather than
+# building from source or using cargo. @byclaw/dsh-bash-provider probes for
+# this binary on PATH at startup and silently no-ops the command-compression
+# half of its executor when it is absent, so this step is required for that
+# feature (not just recommended) but never blocks a boot without it.
+# RTK_DOWNLOAD_BASE is overridable at build time the same way DSH_REPOSITORY
+# is, if a mirror is needed for hosts where github.com release assets are
+# slow or unreachable.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) rtk_asset="rtk-x86_64-unknown-linux-musl.tar.gz"; rtk_sha256="${RTK_AMD64_SHA256}" ;; \
+        arm64) rtk_asset="rtk-aarch64-unknown-linux-gnu.tar.gz"; rtk_sha256="${RTK_ARM64_SHA256}" ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --max-time 1200 \
+        "${RTK_DOWNLOAD_BASE}/v${RTK_VERSION}/${rtk_asset}" \
+        -o "/tmp/${rtk_asset}"; \
+    echo "${rtk_sha256}  /tmp/${rtk_asset}" | sha256sum -c -; \
+    tar -xzf "/tmp/${rtk_asset}" -C /usr/local/bin; \
+    chmod 0755 /usr/local/bin/rtk; \
+    rm -f "/tmp/${rtk_asset}"; \
+    rtk --version
+
+
+ENV DSH_HOME=/home/byclaw/.dsh \
+    BYCLAW_DSH_CLI_ENTRY=apps/cli/lib/bin.js \
+    BYCLAW_DSH_MANAGED_HOME=/opt/byclaw/dsh-managed \
+    BYCLAW_BROWSER_SOCKET=/run/byclaw-browser/browserd.sock \
+    BYCLAW_BROWSER_DOWNLOAD_ROOT=/run/byclaw-browser/downloads \
+    BYCLAW_BROWSER_SCREENSHOT_ROOT=/run/byclaw-browser/screenshots \
+    BYCLAW_BROWSER_IDLE_MS=30000 \
+    BYCLI_BROWSER_IDLE_TIMEOUT=900 \
+    BYCLI_BRIDGE_BOOTSTRAP_SCRIPT=/opt/byclaw/builtin/skills/bycli/scripts/bridge-bootstrap.mjs \
+    BYCLAW_BROWSER_STARTUP=on-demand \
+    BYCLAW_BROWSER_VIEWER=shared-novnc \
+    BYCLAW_BROWSER_USER_DATA_DIR=/by/.bycli/browser/user-data \
+    BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension \
+    BYCLAW_BYCLI_ENABLED=true \
+    BYCLAW_BROWSER_XVFB_SCREEN=1365x768x24 \
+    BYCLAW_BROWSER_SESSION_RUNTIME_ROOT=/run/byclaw-browser/sessions \
+    BYCLAW_BROWSER_DISPLAY_RANGE=100-199 \
+    BYCLAW_BROWSER_RFB_PORT_RANGE=5901-6000 \
+    BYCLAW_BROWSER_WEBSOCKIFY_PORT_RANGE=6101-6200 \
+    BYCLAW_BROWSER_VNC_WEB_PORT=8081 \
+    BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS=0.0.0.0 \
+    PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/bin:$PATH \
+    BYCLAW_RUNTIME_HOME=/opt/byclaw/builtin \
+    BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills
+
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py
+COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-download-permissions-verify.py /tmp/browser-download-permissions-verify.py
+COPY --chmod=0755 middleware/byclaw-harness/scripts/docker-entrypoint-fd-verify.py /tmp/docker-entrypoint-fd-verify.py
+COPY middleware/byclaw-harness/browser/novnc-index.html /usr/local/share/byclaw-browser/novnc-index.html
+
+USER root
+
+RUN python -m pip install --no-cache-dir \
+        "by-framework==0.2.2.dev10" \
+        /opt/byclaw/builtin/python-clis/kbcli \
+        /opt/byclaw/builtin/python-clis/groksearchcli \
+        /opt/byclaw/builtin/python-clis/callcli \
+        "/opt/byclaw/builtin/python-clis/dbcli[all]" \
+    && python -m pip check \
+    && kbcli --help >/dev/null \
+    && groksearchcli --help >/dev/null \
+    && callcli --help >/dev/null \
+    && dbcli --help >/dev/null
+
+# knowledge-collection's no-key search provider is a runtime dependency,
+# not part of the copied skill payload or the generic DSH base.
+COPY middleware/byclaw-harness/scripts/install-search-runtime.sh middleware/byclaw-harness/scripts/searxng-cli-constraints.txt /tmp/byclaw-search-runtime/
+COPY middleware/byclaw-harness/scripts/searxng-cli/ /tmp/byclaw-search-runtime/searxng-cli/
+# Optional mounted wheelhouse; versions remain constrained by the lock-derived file.
+ARG SEARXNG_WHEELHOUSE
+RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
+        /tmp/byclaw-search-runtime/searxng-cli/searxng_pack_settings.yml \
+        /tmp/byclaw-search-runtime/searxng-cli-constraints.txt \
+    && /opt/searxng-cli-venv/bin/python -m pip check \
+    && su -s /bin/sh byclaw -c 'searxng-cli --list-engines >/dev/null' \
+    && rm -rf /tmp/byclaw-search-runtime
+
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@wecom/ /opt/nvm/current/lib/node_modules/@wecom/
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/nvm/current/lib/node_modules/@larksuite/
+RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli \
+    && ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli
+
+RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
+    && test "$(bycli --version)" = "${BYCLI_VERSION}" \
+    && test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json \
+    && node -e 'const manifest = require("/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json"); if (manifest.version !== process.argv[1] || !manifest.permissions?.includes("system.display")) process.exit(1)' "${BYCLI_EXTENSION_VERSION}" \
+    && npm cache clean --force
+RUN ln -sf /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli
+
+RUN set -eux; \
+    novnc_source=''; \
+    for candidate in /usr/share/novnc /usr/share/noVNC; do \
+        if [ -d "${candidate}" ]; then novnc_source="${candidate}"; break; fi; \
+    done; \
+    test -n "${novnc_source}"; \
+    mkdir -p /opt/byclaw/novnc; \
+    cp -a "${novnc_source}/." /opt/byclaw/novnc/; \
+    cp /usr/local/share/byclaw-browser/novnc-index.html /opt/byclaw/novnc/index.html; \
+    test -f /opt/byclaw/novnc/core/rfb.js; \
+    browser_path="$(node -e "const { chromium } = require('/opt/nvm/current/lib/node_modules/playwright'); process.stdout.write(chromium.executablePath())")"; \
+    test -x "${browser_path}"; \
+    ln -s "${browser_path}" /usr/local/bin/byclaw-playwright-chromium; \
+    ln -s "${browser_path}" /usr/local/bin/chromium; \
+    /usr/local/bin/chromium --version; \
+    test -f /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/browserd.js; \
+    test -f /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/scripts/vnc-isolation-integration.mjs; \
+    chown -R root:root /opt/byclaw/novnc /usr/local/share/byclaw-browser; \
+    chmod -R a=rX /opt/byclaw/novnc /usr/local/share/byclaw-browser; \
+    python3 /tmp/browser-download-permissions-verify.py; \
+    BYCLAW_TEST_SUPERVISOR=/usr/local/bin/byclaw-browser-supervisor \
+        python3 /tmp/browser-supervisor-verify.py; \
+    BYCLAW_TEST_COMPILED_CLI=1 BYCLAW_TEST_ENTRYPOINT=/usr/local/bin/byclaw-dsh-entrypoint \
+        BYCLAW_TEST_SECRET_HELPER=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/secret-fd.js \
+        python3 /tmp/docker-entrypoint-fd-verify.py; \
+    rm -f /tmp/browser-download-permissions-verify.py \
+        /tmp/browser-supervisor-verify.py /tmp/docker-entrypoint-fd-verify.py; \
+    chown -R byclaw:byclaw /home/byclaw/.dsh
+
+# Tool environment (B) of the opt-in split deployment (plugins/dsh-tool-env):
+# `byclaw-dsh-entrypoint tools` runs this sshd for DSH's SSH helper. The
+# package's generated host keys are removed; B serves the key its runtime (A)
+# hands it at creation.
+# The bridge runs on the image's own python3 (/usr/local/bin), so `websockets` is a pip package here.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
+    && test -x /usr/sbin/sshd \
+    && python3 -m pip install --no-cache-dir websockets \
+    && python3 -m pip check \
+    && python3 -c 'import websockets'
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
+# WebSocket bridge to sshd for runtimes behind an HTTP ingress (BYCLAW_TOOL_ENV_WS_PORT).
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
+
+ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
+    BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc
+
+
+COPY --chmod=0755 middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh /usr/local/bin/byclaw-tool-slim-entrypoint
+# Existing BE/OpenSandbox specs explicitly invoke the legacy path with "tools".
+# Route that path to the B launcher too, so neither path bypasses byCLI supervision.
+RUN mv /usr/local/bin/byclaw-dsh-entrypoint /usr/local/bin/byclaw-dsh-full-entrypoint \
+    && ln -s /usr/local/bin/byclaw-tool-slim-entrypoint /usr/local/bin/byclaw-dsh-entrypoint
+# byCLI's interactive browser has its own profile and port. Native browser tools
+# create isolated browserd processes through SSH on port 8082 when first used.
+ENV BYCLAW_BROWSER_ON_TOOL_ENV=0
+RUN test -f /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/tool-environment-bridge.js \
+    && env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env \
+    && chmod 0644 /etc/byclaw-tool-env.session-env
+WORKDIR /by
+EXPOSE 22 8081 8082
+LABEL io.byclaw.harness.variant="tool-slim" io.byclaw.browser.location="tool-environment"
+ENTRYPOINT ["/usr/local/bin/byclaw-tool-slim-entrypoint"]
+CMD ["tools"]
