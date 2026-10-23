@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { TaskPlanSnapshot } from '@/typescript/message';
 import type { AgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/AgentTeamsActivity';
 import TaskExecutionPlan from './index';
@@ -217,7 +217,7 @@ describe('TaskExecutionPlan', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('opens the latest execution by default and allows selecting an earlier attempt', () => {
+  it('opens the latest execution by default and allows selecting an earlier attempt', async () => {
     mockTeamSnapshot = {
       schemaVersion: 2,
       eventKind: 'agent-teams/snapshot',
@@ -264,14 +264,18 @@ describe('TaskExecutionPlan', () => {
     expect(screen.getByText('Run 1')).toBeInTheDocument();
     expect(screen.getByText('Run 2')).toBeInTheDocument();
     expect(screen.getAllByText('Conversation 1')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Implement feature Open latest execution' }));
+    const latestExecutionButton = screen.getByRole('button', { name: 'Implement feature Open latest execution' });
+    fireEvent.click(latestExecutionButton);
+    await waitFor(() => expect(latestExecutionButton).toBeEnabled());
     expect(mockLocateMessage).toHaveBeenLastCalledWith({
       sessionId: 'child',
       messageId: 'child-message-2',
       preserveAgentContext: true,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Implement feature Run 1 Conversation 1' }));
+    const firstExecutionButton = screen.getByRole('button', { name: 'Implement feature Run 1 Conversation 1' });
+    fireEvent.click(firstExecutionButton);
+    await waitFor(() => expect(firstExecutionButton).toBeEnabled());
     expect(mockLocateMessage).toHaveBeenLastCalledWith({
       sessionId: 'child',
       messageId: 'child-message-1',
@@ -280,7 +284,7 @@ describe('TaskExecutionPlan', () => {
     expect(mockSetSessionId).not.toHaveBeenCalled();
   });
 
-  it('keeps an unavailable latest conversation visible without opening an older one', () => {
+  it('keeps an unavailable latest conversation visible without opening an older one', async () => {
     render(
       <TaskExecutionPlan
         taskPlan={{
@@ -314,7 +318,9 @@ describe('TaskExecutionPlan', () => {
     fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
     expect(screen.queryByRole('button', { name: 'Review Open latest execution' })).not.toBeInTheDocument();
     expect(screen.getByText(/messageList.taskPlan.noExecution/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Review Run 1 Conversation 1' }));
+    const availableExecutionButton = screen.getByRole('button', { name: 'Review Run 1 Conversation 1' });
+    fireEvent.click(availableExecutionButton);
+    await waitFor(() => expect(availableExecutionButton).toBeEnabled());
     expect(mockLocateMessage).toHaveBeenCalledWith({
       sessionId: 'child',
       messageId: 'old-message',
@@ -349,5 +355,45 @@ describe('TaskExecutionPlan', () => {
     fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
     expect(screen.queryByText('Run 1')).not.toBeInTheDocument();
     expect(screen.queryByText('messageList.taskPlan.noExecution')).not.toBeInTheDocument();
+  });
+
+  it('shows immediate feedback while locating an execution', async () => {
+    let resolveLocate: () => void = () => undefined;
+    mockLocateMessage.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLocate = resolve;
+        })
+    );
+    render(
+      <TaskExecutionPlan
+        taskPlan={{
+          planId: 'plan-loading',
+          version: 1,
+          title: 'Plan',
+          status: 'COMPLETED',
+          sessionId: 'root',
+          messageId: 'root-message',
+          tasks: [
+            {
+              taskId: 'task-1',
+              position: 1,
+              title: 'Review',
+              status: 'COMPLETED',
+              executions: [{ attempt: 1, runs: [{ sessionId: 'child', messageId: 'child-message' }] }],
+            },
+          ],
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
+    const executionButton = screen.getByRole('button', { name: 'Review Run 1 Conversation 1' });
+    fireEvent.click(executionButton);
+    expect(executionButton).toBeDisabled();
+    expect(executionButton).toHaveAttribute('aria-busy', 'true');
+
+    resolveLocate();
+    await waitFor(() => expect(executionButton).toBeEnabled());
   });
 });

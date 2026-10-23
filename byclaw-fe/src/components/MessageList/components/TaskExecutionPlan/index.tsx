@@ -25,6 +25,14 @@ type Props = {
 
 const statusOrder: TaskPlanTaskStatus[] = ['COMPLETED', 'IN_PROGRESS', 'PENDING', 'FAILED', 'CANCELLED', 'SKIPPED'];
 
+const getRunExecutionKey = (
+  taskId: string,
+  attempt: number,
+  attemptId: string | undefined,
+  run: { sessionId?: string; messageId?: string; runId?: string },
+  index: number
+) => [taskId, attemptId || attempt, run.runId || `${run.sessionId}:${run.messageId}` || index].join(':');
+
 const getStatusIcon = (status: TaskPlanTaskStatus) => {
   switch (status) {
     case 'COMPLETED':
@@ -48,6 +56,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   const teamSnapshot = useAgentTeamsSnapshot(taskPlan.sessionId);
   const [collapsed, setCollapsed] = useState(true);
   const [maximized, setMaximized] = useState(false);
+  const [locatingExecution, setLocatingExecution] = useState<string>();
   const tasks = useMemo(
     () => [...(taskPlan.tasks || [])].sort((left, right) => left.position - right.position),
     [taskPlan.tasks]
@@ -81,10 +90,15 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     .map(({ status, count }) => intl.formatMessage({ id: `messageList.taskPlan.summary.${status}` }, { count }))
     .join(' · ');
   const openExecution = useCallback(
-    (execution: NonNullable<TaskPlanTask['executions']>[number]) => {
+    async (execution: NonNullable<TaskPlanTask['executions']>[number], executionKey: string) => {
       const target = execution.runs[execution.runs.length - 1];
-      if (target?.sessionId && target.messageId)
-        void locateMessage({ sessionId: target.sessionId, messageId: target.messageId, preserveAgentContext: true });
+      if (!target?.sessionId || !target.messageId) return;
+      setLocatingExecution(executionKey);
+      try {
+        await locateMessage({ sessionId: target.sessionId, messageId: target.messageId, preserveAgentContext: true });
+      } finally {
+        setLocatingExecution((current) => (current === executionKey ? undefined : current));
+      }
     },
     [locateMessage]
   );
@@ -149,6 +163,9 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
             const executions = (task.executions || []).filter((execution) => execution.runs.length > 0);
             const latestExecution = executions[executions.length - 1];
             const latestTarget = latestExecution?.runs[latestExecution.runs.length - 1];
+            const latestExecutionKey = latestExecution
+              ? `${task.taskId}:${latestExecution.attemptId || latestExecution.attempt}:latest`
+              : undefined;
             const teamTask =
               navigationTeam?.tasks?.find((candidate) => candidate.id === task.taskId) ||
               navigationTeam?.tasks?.find((candidate) => candidate.subject === task.title);
@@ -172,8 +189,11 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                         type="button"
                         className={styles.taskLink}
                         aria-label={`${task.title} ${intl.formatMessage({ id: 'messageList.taskPlan.latestAttempt' })}`}
-                        onClick={() => openExecution(latestExecution!)}
+                        aria-busy={locatingExecution === latestExecutionKey}
+                        disabled={locatingExecution === latestExecutionKey}
+                        onClick={() => void openExecution(latestExecution!, latestExecutionKey!)}
                       >
+                        {locatingExecution === latestExecutionKey ? <LoadingOutlined spin /> : null}
                         {task.title}
                       </button>
                     ) : memberSessionId ? (
@@ -233,15 +253,36 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                                     { id: 'messageList.taskPlan.executionTurn' },
                                     { turn: index + 1 }
                                   )}`}
+                                  aria-busy={
+                                    locatingExecution ===
+                                    getRunExecutionKey(task.taskId, execution.attempt, execution.attemptId, run, index)
+                                  }
+                                  disabled={
+                                    locatingExecution ===
+                                    getRunExecutionKey(task.taskId, execution.attempt, execution.attemptId, run, index)
+                                  }
                                   title={execution.assignee}
                                   onClick={() =>
-                                    void locateMessage({
-                                      sessionId: run.sessionId!,
-                                      messageId: run.messageId!,
-                                      preserveAgentContext: true,
-                                    })
+                                    void openExecution(
+                                      { ...execution, runs: [run] },
+                                      getRunExecutionKey(
+                                        task.taskId,
+                                        execution.attempt,
+                                        execution.attemptId,
+                                        run,
+                                        index
+                                      )
+                                    )
                                   }
                                 >
+                                  {locatingExecution ===
+                                    getRunExecutionKey(
+                                      task.taskId,
+                                      execution.attempt,
+                                      execution.attemptId,
+                                      run,
+                                      index
+                                    ) && <LoadingOutlined spin />}
                                   {intl.formatMessage(
                                     { id: 'messageList.taskPlan.executionTurn' },
                                     { turn: index + 1 }
