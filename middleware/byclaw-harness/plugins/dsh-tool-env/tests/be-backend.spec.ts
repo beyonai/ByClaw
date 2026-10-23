@@ -300,17 +300,25 @@ describe('ByClawBeBackend', () => {
     expect(logs.some(line => line.includes('next attempt in'))).toBe(false)
   })
 
-  it('gives up after the retry window and then backs off', async () => {
+  it('gives up after the retry window and then backs off; retries never outlive the window', async () => {
     let clock = 1_000_000
+    const timeouts: number[] = []
     fake.launchFailure = '沙箱启动失败: Unknown sandbox service key: byclaw-dsh-tools'
     const backend = new ByClawBeBackend(config, identity, message => logs.push(message), {
       now: () => clock, sleep: async ms => { clock += ms }, launchRetryWindowMs: 7_000,
     })
+    const launches = (): number => fake.calls.filter(call => {
+      if (!call.path.endsWith('/sandbox/launchByUserCode')) return false
+      timeouts.push(backend.lastRequestTimeoutMs)
+      return true
+    }).length
     await expect(backend.ensure()).rejects.toThrow(/launchByUserCode failed: 沙箱启动失败: Unknown sandbox service key/u)
-    // 0 s, 3 s, 6 s, then the window (7 s) is over at the next failure.
-    expect(fake.calls.filter(call => call.path.endsWith('/sandbox/launchByUserCode'))).toHaveLength(4)
+    // Attempts at 0 s, 3 s and 6 s; at 7 s the window is spent, so no fourth request goes out.
+    expect(launches()).toBe(3)
+    // The first attempt may take the full request timeout; later ones only what the window has left.
+    expect(backend.lastRequestTimeoutMs).toBe(1000)
     await expect(backend.ensure()).rejects.toThrow(/next launch attempt in 1 s/u)
-    expect(fake.calls.filter(call => call.path.endsWith('/sandbox/launchByUserCode'))).toHaveLength(4)
+    expect(launches()).toBe(3)
   })
 
   it('surfaces BE failures with their message', async () => {

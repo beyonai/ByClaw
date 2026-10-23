@@ -18,6 +18,14 @@ export function defaultAbsentRoots(env: NodeJS.ProcessEnv = process.env): string
 /** Instruction files DSH looks for in the session directory's ancestors before the model runs. */
 const INSTRUCTION_FILES = new Set(['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md'])
 
+/** Requests that only end something on the connection they were issued on. */
+const CLEANUP_METHODS = new Set(['process.terminate', 'fs.streamClose'])
+
+/** Whether `method` only cleans up after a process or stream of an existing connection. */
+export function isCleanupRequest(method: string): boolean {
+  return CLEANUP_METHODS.has(method)
+}
+
 /**
  * What a turn asks about the user tree before any tool runs, answered without
  * starting B. Path resolution only normalizes. Directories this host has
@@ -40,7 +48,7 @@ export function answerWhileDown(
   if (params === null || typeof params !== 'object') return undefined
   // Nothing of ours runs on B while it is down: terminating it is already done. Starting
   // B for that, or failing because it cannot start, would turn cleanup into a turn error.
-  if (method === 'process.terminate' || method === 'fs.streamClose') return null
+  if (isCleanupRequest(method)) return null
   const input = params as { path?: unknown; cwd?: unknown; target?: { targetKey?: unknown } }
   const trim = (path: string): string => { const clean = normalize(path); return clean.length > 1 ? clean.replace(/\/+$/u, '') : clean }
   const pending = pendingDirectories.map(trim)
