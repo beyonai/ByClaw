@@ -233,11 +233,11 @@ export const selectLatestTaskPlan = (
         if (!task.executions?.length) return;
         const teamId = task.teamId || plan.teamId;
         if (!teamId) return;
-        const key = `${teamId}:${task.taskId}`;
-        const executions = executionHistory.get(key) || [];
+        const taskKey = `${teamId}:${task.taskId}`;
+        const executions = executionHistory.get(taskKey) || [];
         task.executions.forEach((execution) => {
-          const key = execution.attemptId || `${execution.attempt}`;
-          const index = executions.findIndex((entry) => (entry.attemptId || `${entry.attempt}`) === key);
+          const executionKey = execution.attemptId || `${execution.attempt}`;
+          const index = executions.findIndex((entry) => (entry.attemptId || `${entry.attempt}`) === executionKey);
           if (index < 0) executions.push(execution);
           else {
             const current = executions[index]!;
@@ -254,7 +254,7 @@ export const selectLatestTaskPlan = (
             executions[index] = { ...current, ...execution, runs };
           }
         });
-        executionHistory.set(key, executions);
+        executionHistory.set(taskKey, executions);
       });
     });
 
