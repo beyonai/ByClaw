@@ -12,9 +12,10 @@ import { ActivityPanel } from './ActivityPanel.tsx'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { ExpertTeamDock, type ExpertTeamDockInjected } from './ExpertTeamDock.tsx'
 import { registerAgentTeamsConversationDefinition } from './registration.ts'
+import { currentSessionId, type WorkspaceNavigation } from './current-session.ts'
 
-/** Required services: conversation nodes, slots, and sessions navigation. */
-export const inject = ['uiConversation', 'slots', 'sessions']
+/** Required services: conversation nodes, slots, the session list, and workspace navigation. */
+export const inject = ['uiConversation', 'slots', 'sessions', 'uiWorkspace']
 
 /**
  * Mount the floater through a body portal (the web shell has no top-right
@@ -23,13 +24,16 @@ export const inject = ['uiConversation', 'slots', 'sessions']
  * for a closed floater or a re-opened session.
  */
 export function apply(ctx: ClientContext): void {
+  // DSH 0.2.1 moved Session navigation from `ctx.sessions.open()` to `ctx.uiWorkspace`.
+  const navigation = (ctx as unknown as { readonly uiWorkspace: WorkspaceNavigation }).uiWorkspace
+  const openSession = (id: SessionId): void => { navigation.openSession(id) }
   const host = document.createElement('div')
   host.dataset.agentTeamsHost = ''
   document.body.appendChild(host)
   const root = createRoot(host)
   root.render(<ActivityPanel
     sessionsList={ctx.sessions.list}
-    openSession={(id: SessionId) => { ctx.sessions.open(id) }}
+    openSession={openSession}
   />)
   ctx.effect(() => () => {
     root.unmount()
@@ -41,8 +45,8 @@ export function apply(ctx: ClientContext): void {
     name: 'conversation.chat.node',
     key: 'agent-teams',
     inject: (): AgentTeamsCardInjected => ({
-      openSession: (id: SessionId) => { ctx.sessions.open(id) },
-      currentSessionId: () => ctx.sessions.list.getSnapshot().current,
+      openSession,
+      currentSessionId: () => currentSessionId(ctx.sessions.list.getSnapshot()),
     }),
   }, AgentTeamsCard))
 
@@ -51,7 +55,7 @@ export function apply(ctx: ClientContext): void {
     id: 'agent-teams-experts',
     order: 15,
     inject: (): ExpertTeamDockInjected => ({
-      openSession: (id: SessionId) => { ctx.sessions.open(id) },
+      openSession,
     }),
   }, ExpertTeamDock))
 }

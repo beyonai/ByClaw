@@ -22,6 +22,10 @@ The policy requires every CodeGraph call to pass the Agent's authoritative curre
 
 `Dockerfile.base` declares and validates its installed version through `ARG CODEGRAPH_VERSION`. During the extension-image build, `verify:runtime` compares the inherited `codegraph --version` with the plugin manifest, performs a real MCP initialization, and requires `tools/list` to match the declared tool surface exactly. A mismatch therefore stops the image build. Upgrade CodeGraph only by updating the Docker argument, plugin contract, policy, and expected MCP surface together.
 
+## Tool environment
+
+DSH's MCP stdio transport spawns its server with the MCP SDK on this host, not through `ctx.subprocess`, so the `codegraph-mcp` row always runs CodeGraph where DSH runs. When the workspace lives in a separate tool sandbox, disable that row and set `workspaceOnToolEnvironment: true` on `dsh-codegraph` together with a private `stateDir`. The plugin then starts `command args` (default `codegraph serve --mcp`, in `cwd`, default `/by`) through `ctx.subprocess` for every MCP connection, and mounts its own `codegraph` MCP client, which reaches that process through `bridge/stdio-socket.mjs` and a `0600` Unix socket in `stateDir`. The tool name is unchanged. The server's open streams keep the tool sandbox awake for as long as the context runs, and `codegraph` must be installed in the tool sandbox image.
+
 ## Verification
 
 ```sh
@@ -29,4 +33,4 @@ pnpm --filter @byclaw/dsh-codegraph run verify
 pnpm --filter @byclaw/dsh-codegraph run verify:runtime
 ```
 
-`verify` builds the plugin, checks its manifest contract, patch configuration, and generated policy, and runs isolated runtime-verifier fixtures. `verify:contract` performs only the contract checks against existing build output, which lets image builds avoid compiling the plugin twice. `verify:runtime` requires the declared CodeGraph binary on `PATH` (or in `CODEGRAPH_COMMAND`) and checks its version and live MCP tool list using the environment declared by the patch. An end-to-end capability prompt should contain only the business request. Inspect DSH session events afterward to confirm the Agent selected `mcp__codegraph__codegraph_explore` autonomously.
+`verify` builds the plugin, checks its manifest contract, patch configuration, and generated policy, runs isolated runtime-verifier fixtures, and runs the tool-environment route against a fake server through the local subprocess provider. `verify:contract` performs only the contract checks against existing build output, which lets image builds avoid compiling the plugin twice. `verify:runtime` requires the declared CodeGraph binary on `PATH` (or in `CODEGRAPH_COMMAND`) and checks its version and live MCP tool list using the environment declared by the patch. An end-to-end capability prompt should contain only the business request. Inspect DSH session events afterward to confirm the Agent selected `mcp__codegraph__codegraph_explore` autonomously.

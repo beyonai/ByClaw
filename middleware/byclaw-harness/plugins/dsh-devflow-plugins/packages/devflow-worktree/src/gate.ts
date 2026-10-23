@@ -16,10 +16,9 @@
  * resolved directories.
  */
 
-import { readFile, realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { TransitionAttempt, TransitionDecision } from '@zhchxiao123/dsh-devflow'
+import type { TransitionAttempt, TransitionDecision, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import { createMainWorktreeResolver } from './maintree.ts'
 import { createDispatchPreconditionChecker } from './preconditions.ts'
 import type { WorktreeDispatch } from './types.ts'
@@ -54,9 +53,9 @@ export function parseWorktreeDispatch(content: string): WorktreeDispatch | undef
   return { branch, base, worktree }
 }
 
-async function canonical(path: string): Promise<string | undefined> {
+async function canonical(io: WorkspaceIo, path: string): Promise<string | undefined> {
   try {
-    return await realpath(path)
+    return await io.realpath(path)
   } catch {
     // The path does not exist or cannot be resolved — a removed worktree is
     // the ordinary case, and the caller decides what its absence means.
@@ -70,10 +69,11 @@ async function canonical(path: string): Promise<string | undefined> {
  * @param ctx - registrant context; the devflow store is reached by name per
  * decision, never injected.
  * @param artifactKind - the dispatch artifact kind the fence reads.
+ * @param io - where the dispatch artifact is read and git runs.
  */
-export function registerWorktreeFence(ctx: Context, artifactKind: string): void {
-  const mainWorktreeOf = createMainWorktreeResolver()
-  const preconditionFaultOf = createDispatchPreconditionChecker()
+export function registerWorktreeFence(ctx: Context, artifactKind: string, io: WorkspaceIo): void {
+  const mainWorktreeOf = createMainWorktreeResolver(io)
+  const preconditionFaultOf = createDispatchPreconditionChecker(io.execFile)
   ctx.on('devflow/transition', async (attempt: TransitionAttempt, next: () => Promise<TransitionDecision>): Promise<TransitionDecision> => {
     const devflow = ctx.get('devflow')
     /* v8 ignore next -- the waterfall only dispatches from a live devflow store. */
@@ -85,7 +85,7 @@ export function registerWorktreeFence(ctx: Context, artifactKind: string): void 
     if (newest === undefined) return next()
     let content: string
     try {
-      content = await readFile(join(dirname(card.path), newest.path), 'utf8')
+      content = await io.readFile(join(dirname(card.path), newest.path))
     } catch {
       // A registered dispatch the disk does not serve: a fence that guessed
       // instead of vetoing would wave through exactly the writes the record
@@ -102,11 +102,11 @@ export function registerWorktreeFence(ctx: Context, artifactKind: string): void 
     // the worktree is not the same board at all.
     const fault = await preconditionFaultOf(workspace, attempt.root, attempt.id)
     if (fault !== undefined) return { allowed: false, reason: fault }
-    const here = await canonical(workspace)
+    const here = await canonical(io, workspace)
     if (here === undefined) {
       return { allowed: false, reason: unreadable(attempt, workspace) }
     }
-    const target = await canonical(dispatch.worktree)
+    const target = await canonical(io, dispatch.worktree)
     if (target !== undefined && here === target) return next()
     const main = await mainWorktreeOf(workspace)
     if (main !== undefined && here === main) return next()

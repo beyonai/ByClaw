@@ -20,6 +20,8 @@ public class SandboxProperties {
 
     private HealthConfig health = new HealthConfig();
 
+    private SharedDshHostConfig sharedDshHost = new SharedDshHostConfig();
+
     /**
      * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
@@ -134,6 +136,32 @@ public class SandboxProperties {
         private double downscaleMemoryHeadroom = 1.25D;
 
         private String boundaryBlacklistPodSuffix = "-0";
+    }
+
+    /**
+     * Shared DSH host: one DSH process serving a context per user. When {@code baseUrl} is set, every
+     * {@code byclaw-dsh} sandbox becomes a user context on that host (admin API {@code /v1/users/{user}});
+     * other sandbox types are unaffected. Blank keeps one sandbox per user.
+     */
+    @Data
+    public static class SharedDshHostConfig {
+        /** Admin API base URL as reachable from the backend, for example {@code http://10.0.0.5:7300}. */
+        private String baseUrl;
+
+        /** Bearer token, the host's {@code BYCLAW_MULTI_HOST_TOKEN}. Required when {@code baseUrl} is set. */
+        private String token;
+
+        /** Browser-facing base URL of the host's {@code /u/{user}/} gateway. Defaults to {@code baseUrl}. */
+        private String webBaseUrl;
+
+        private Duration connectTimeout = Duration.ofSeconds(5);
+
+        /** PUT waits for the user's context to boot; keep it below {@code sandboxCreationLockTtl}. */
+        private Duration requestTimeout = Duration.ofSeconds(100);
+
+        public boolean isEnabled() {
+            return baseUrl != null && !baseUrl.isBlank();
+        }
     }
 
     @Data

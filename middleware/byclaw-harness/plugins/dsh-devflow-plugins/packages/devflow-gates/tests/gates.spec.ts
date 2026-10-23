@@ -8,7 +8,7 @@ import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { ShellExecutor } from '@deepseek-ai/dsh-shell'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import { emptyInbox } from '../../../tests/agent-double.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -51,7 +51,7 @@ class ScriptedExecutor extends ShellExecutor {
     }
   }
 
-  run(spec: ShellExecSpec): Promise<ShellRunResult> {
+  private scripted(spec: ShellExecSpec): Promise<ShellRunResult> {
     this.ran.push(spec.command)
     this.specs.push(spec)
     const entry = this.script[spec.command]
@@ -67,8 +67,10 @@ class ScriptedExecutor extends ShellExecutor {
     })
   }
 
-  start(): ShellProcess {
-    throw new Error('gates never start background processes')
+  execute(spec: ShellExecSpec): Promise<ShellExecution> {
+    // Foreground callers only read the result projection.
+    const result = this.scripted(spec)
+    return Promise.resolve({ result: () => result } as unknown as ShellExecution)
   }
 }
 

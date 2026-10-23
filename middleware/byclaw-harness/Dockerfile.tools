@@ -1,0 +1,63 @@
+# Tool environment (B) image of the opt-in split deployment (plugins/dsh-tool-env):
+# the harness (A) image minus what only A's runtime uses, flattened into one
+# layer. B runs the user's commands, so it keeps A's whole toolchain (system
+# packages, Python CLIs, Node CLIs, builtin skills); it drops A's own DSH
+# installation except the SSH helper closure (which A verifies by digest), the
+# Playwright browser (the browser runs on A) and build caches. Build it from the
+# very A image it will serve, right after that image:
+#   docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
+#   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
+# Build context is the repository root, like the other harness Dockerfiles.
+ARG HARNESS_IMAGE=byclaw/dsh:latest
+
+
+# --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---
+FROM ${HARNESS_IMAGE} AS trimmed
+USER root
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
+RUN set -eux; \
+    bash /tmp/tool-env-docker/collect-closure.sh /tmp/tool-env-closure.tar; \
+    # A's image environment (PATH, BYCLAW_* settings) for every SSH session on B; see tool-env-sshd.sh.
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env; \
+    # Runtime-only parts of A.
+    rm -rf /ms-playwright /root/.local /root/.cache /root/.npm /home/byclaw/.cache /home/byclaw/.npm; \
+    # A's DSH installation: keep only the helper's closure, at the same paths.
+    rm -rf /workspace; \
+    mkdir -p /workspace; \
+    tar -xf /tmp/tool-env-closure.tar -C /; \
+    chown -R root:root /workspace; \
+    # A launches the helper by its managed-profile path, whose own copy depended on
+    # the removed installation; serve the closure's copy (same content, same digest) there.
+    profile_ssh=/opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh; \
+    cmp "${profile_ssh}/lib/helper.js" /workspace/packages/ssh/ssh/lib/helper.js; \
+    rm -rf "${profile_ssh}"; \
+    ln -s /workspace/packages/ssh/ssh "${profile_ssh}"; \
+    # Everything the helper imports must still resolve, from both paths, as the login user.
+    cd /workspace/packages/ssh/ssh; \
+    TRACE_OUT=/tmp/tool-env-resolved.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs; \
+    test -s /tmp/tool-env-resolved.txt; \
+    su -s /bin/sh byclaw -c "cd ${profile_ssh} && TRACE_OUT=/tmp/tool-env-resolved-user.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs" </dev/null; \
+    test -s /tmp/tool-env-resolved-user.txt; \
+    test -x /usr/sbin/sshd; \
+    python3 -c 'import websockets'; \
+    rm -rf /tmp/* /var/tmp/* /etc/ssh/ssh_host_*
+
+
+# --- One layer: pulls stay proportional to what B contains ---
+FROM scratch AS tools
+COPY --from=trimmed / /
+# The image configuration does not survive the flattening; these mirror A.
+ENV DSH_HOME=/home/byclaw/.dsh \
+    BYCLAW_DATA_ROOT=/by \
+    BYCLAW_RUNTIME_HOME=/opt/byclaw/builtin \
+    BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+WORKDIR /by
+# The same entrypoint as A; only its `tools` mode applies here.
+ENTRYPOINT ["/usr/local/bin/byclaw-dsh-entrypoint"]
+CMD ["tools"]

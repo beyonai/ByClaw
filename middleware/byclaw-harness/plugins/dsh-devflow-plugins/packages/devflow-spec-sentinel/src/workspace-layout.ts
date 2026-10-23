@@ -20,10 +20,11 @@
  * @module @zhchxiao123/dsh-devflow-spec-sentinel/src/workspace-layout
  */
 
-import { stat } from 'node:fs/promises'
 import { basename, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { isValidSpecId } from '@zhchxiao123/dsh-devflow-spec'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import { DETECTORS, packageJsonName } from './ecosystem-detectors.ts'
 import type { EcosystemDetector } from './ecosystem-detectors.ts'
 import type { DevflowSpecWorkspace, WorkspaceLayoutResult, WorkspacePackage } from './types.ts'
@@ -35,15 +36,16 @@ interface LayoutCacheEntry {
 }
 
 /**
- * Observe one file's mtime.
+ * Observe one file's freshness token (its mtime and size on this host).
+ * @param io - where the workspace is read.
  * @param path - absolute file path.
- * @returns the mtime, or `undefined` when the file does not exist — recorded
+ * @returns the token, or `undefined` when the file does not exist — recorded
  *   rather than skipped, because a manifest appearing later must invalidate
  *   a cached layout as surely as an edit.
  */
-async function mtimeOf(path: string): Promise<number | undefined> {
+async function mtimeOf(io: WorkspaceIo, path: string): Promise<string | undefined> {
   try {
-    return (await stat(path)).mtimeMs
+    return (await io.stat(path)).version
   } catch {
     // Absence is the recorded state, not an error.
     return undefined
@@ -54,14 +56,15 @@ async function mtimeOf(path: string): Promise<number | undefined> {
  * Fingerprint the mtime-or-absence of every governing manifest the chain
  * would consult; equal strings mean the member set cannot have changed on
  * the chain's supported surface.
+ * @param io - where the workspace is read.
  * @param root - absolute workspace root.
  * @param detectors - the detector chain.
  * @returns the serialized manifest state, deterministic in chain order.
  */
-async function manifestFingerprint(root: string, detectors: readonly EcosystemDetector[]): Promise<string> {
+async function manifestFingerprint(io: WorkspaceIo, root: string, detectors: readonly EcosystemDetector[]): Promise<string> {
   const paths = [...new Set(detectors.flatMap(detector => detector.manifests(root)))]
   const parts: string[] = []
-  for (const path of paths) parts.push(`${path}=${await mtimeOf(path) ?? 'absent'}`)
+  for (const path of paths) parts.push(`${path}=${await mtimeOf(io, path) ?? 'absent'}`)
   return parts.join('\n')
 }
 
@@ -108,16 +111,21 @@ export function normalizeMember(
  * @param ctx - context supplying the warning logger.
  * @param detectors - the detector chain; parameterized so a test can inject
  *   a hostile detector, defaulting to the real {@link DETECTORS}.
+ * @param io - where the workspace is read; this process's filesystem by default.
  * @returns the service value.
  */
-export function createWorkspaceLayout(ctx: Context, detectors: readonly EcosystemDetector[] = DETECTORS): DevflowSpecWorkspace {
+export function createWorkspaceLayout(
+  ctx: Context,
+  detectors: readonly EcosystemDetector[] = DETECTORS,
+  io: WorkspaceIo = localWorkspaceIo,
+): DevflowSpecWorkspace {
   const cache = new Map<string, LayoutCacheEntry>()
   const warn = (message: string): void => { ctx.logger.warn(message) }
 
   async function discover(root: string): Promise<WorkspaceLayoutResult> {
     const resolvedRoot = resolve(root)
     try {
-      const fingerprint = await manifestFingerprint(resolvedRoot, detectors)
+      const fingerprint = await manifestFingerprint(io, resolvedRoot, detectors)
       const cached = cache.get(resolvedRoot)
       if (cached !== undefined && cached.fingerprint === fingerprint) return cached.result
 
@@ -130,7 +138,7 @@ export function createWorkspaceLayout(ctx: Context, detectors: readonly Ecosyste
       for (const detector of detectors) {
         let members: readonly WorkspacePackage[] | null
         try {
-          members = await detector.detect(resolvedRoot, warn)
+          members = await detector.detect(resolvedRoot, warn, io)
         } catch (error) {
           // One detector must never take the chain down with it.
           warn(`devflow-spec-sentinel: ${detector.name} detection failed for ${resolvedRoot}: ${String(error)}`)
@@ -146,7 +154,7 @@ export function createWorkspaceLayout(ctx: Context, detectors: readonly Ecosyste
       // members could not be read, and papering over that with a
       // single-package answer would be the silent cap all over again.
       if (answered.length === 0) {
-        const name = await packageJsonName(resolvedRoot)
+        const name = await packageJsonName(io, resolvedRoot)
         if (name === undefined) {
           warn(`devflow-spec-sentinel: ${resolvedRoot} carries no recognized workspace manifest and no named package.json;`
             + ' workspace layout is empty')

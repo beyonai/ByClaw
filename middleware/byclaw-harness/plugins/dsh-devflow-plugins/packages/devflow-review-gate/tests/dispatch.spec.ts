@@ -11,6 +11,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture from '../../../tests/working-directory-fixture'
 import AgentRuntime from '@deepseek-ai/dsh-agent'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -68,7 +69,6 @@ interface Booted {
 
 async function boot(options: {
   replies: ScriptedReply[] | ((prompt: string) => ScriptedReply)
-  toolFilter?: boolean
   agentOptions?: boolean
   failStart?: string
   withRuntime?: boolean
@@ -98,10 +98,10 @@ async function boot(options: {
   if (options.withRuntime !== false) {
     await ctx.plugin(AgentRuntime).await()
     await ctx.plugin(AgentDefaultModel, { provider: 'test-provider', model: 'test-model' }).await()
+    await ctx.plugin(WorkingDirectoryFixture)
     await ctx.plugin(SubagentRuntime).await()
     ctx.subagents.registerProvider(checkerProvider({
       replies: options.replies,
-      ...options.toolFilter === undefined ? {} : { toolFilter: options.toolFilter },
       ...options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions },
       ...options.failStart === undefined ? {} : { failStart: options.failStart },
     }, calls))
@@ -169,45 +169,6 @@ describe('what a checker is sent', () => {
     const { ctx, calls, dispatch, parentFor } = await boot({ replies: () => cleanReply(['a.ts']), agentOptions: false })
     await reviewGroup(ctx, dispatch, GROUPS[0], parentFor, new Promise<never>(() => {}))
     expect(calls[0].agentOptions).toBeUndefined()
-  })
-
-  it('sends no tool filter when the provider cannot apply one', async () => {
-    const { ctx, calls, dispatch, parentFor } = await boot({ replies: () => cleanReply(['a.ts']), toolFilter: false })
-    await reviewGroup(ctx, dispatch, GROUPS[0], parentFor, new Promise<never>(() => {}))
-    expect(calls[0].toolFilter).toBeUndefined()
-  })
-
-  it('denies the mutation tools that are actually registered', async () => {
-    const { ctx, calls, dispatch, parentFor } = await boot({
-      replies: () => cleanReply(['a.ts']),
-      toolFilter: true,
-      withTools: true,
-      registerTools: ['write', 'devflow_transition', 'read'],
-    })
-    await reviewGroup(ctx, dispatch, GROUPS[0], parentFor, new Promise<never>(() => {}))
-    expect(calls[0].toolFilter).toEqual({ deny: ['devflow_transition', 'write'] })
-  })
-
-  // The runtime rejects an unknown tool name, so the filter may only name
-  // tools that exist — a deployment without them needs no filter at all.
-  it('sends no filter when none of the denied tools are registered', async () => {
-    const { ctx, calls, dispatch, parentFor } = await boot({
-      replies: () => cleanReply(['a.ts']),
-      toolFilter: true,
-      withTools: true,
-      registerTools: ['read'],
-    })
-    await reviewGroup(ctx, dispatch, GROUPS[0], parentFor, new Promise<never>(() => {}))
-    expect(calls[0].toolFilter).toBeUndefined()
-  })
-
-  it('sends no filter when the deployment has no tool registry at all', async () => {
-    const { ctx, calls, dispatch, parentFor } = await boot({
-      replies: () => cleanReply(['a.ts']),
-      toolFilter: true,
-    })
-    await reviewGroup(ctx, dispatch, GROUPS[0], parentFor, new Promise<never>(() => {}))
-    expect(calls[0].toolFilter).toBeUndefined()
   })
 
   it('reuses one synthetic parent across every group of a root', async () => {

@@ -16,6 +16,7 @@ This repository maintains the ByClaw plugin suite for [DeepSeek Harness (DSH)](h
 | Diff Viewer | `@byclaw/dsh-diff-viewer` | Replaces write/edit diff cards with a scalable unified or split visual diff | [README](./plugins/dsh-diff-viewer/README.md) |
 | CodeGraph | `@byclaw/dsh-codegraph` | Composes the CodeGraph MCP server and registers CodeGraph usage policy for root and delegated Agents | [中文](./plugins/dsh-codegraph/README.zh.md) · [English](./plugins/dsh-codegraph/README.md) |
 | LAN Web | `@byclaw/dsh-lan-web` | Enables the explicit `dsh web --host 0.0.0.0` LAN bind; ByClaw integration can optionally disable Web token authentication | [中文](./plugins/dsh-lan-web/README.zh.md) · [English](./plugins/dsh-lan-web/README.md) |
+| Tool environment | `@byclaw/dsh-tool-env` | Opt-in: runs DSH's files, processes, terminals, PTC and sandbox in a separate tool sandbox over SSH; the sandbox comes from OpenSandbox directly or from ByClaw BE's sandbox API (`BYCLAW_DSH_TOOL_ENV`) | [中文](./plugins/dsh-tool-env/README.zh.md) · [English](./plugins/dsh-tool-env/README.md) |
 | Iron Rules | `@byclaw/dsh-iron-rules` | Carries a repository's development rules into the model context and runs each rule's check script when a turn that touched files stops | [中文](./plugins/iron-rules/README.zh.md) · [English](./plugins/iron-rules/README.md) |
 | Environment Forwarding | `@byclaw/dsh-bash-provider` | Forwards every host environment variable, including credential-shaped names, to model-facing Bash commands; also routes eligible commands through rtk (Rust Token Killer) to compress tool output and save tokens | [中文](./plugins/dsh-bash-provider/README.zh.md) · [English](./plugins/dsh-bash-provider/README.md) |
 | Browser Use | `@byclaw/dsh-browser-use` | Exposes one stateful `browser` tool with one owner per session and optional fully isolated per-session Chromium/noVNC desktops | [中文](./plugins/dsh-browser-use/README.zh.md) · [English](./plugins/dsh-browser-use/README.md) |
@@ -44,6 +45,8 @@ DSH profile
 │   └── codegraph:usage-policy：根与委派 Agent 继承的系统提示词
 ├── @byclaw/dsh-lan-web
 │   └── 替换 Web startup provider，保留 DSH 原生安全链
+├── @byclaw/dsh-tool-env
+│   └── 可选：fs/subprocess/sandbox/PTC 改走 SSH 到独立工具沙箱（OpenSandbox 租约、空闲暂停、恢复）
 ├── @byclaw/dsh-bash-provider
 │   ├── 替换 sandboxed Bash provider，显式透传宿主环境
 │   ├── 叠加把符合条件的 Bash 命令路由给 rtk 压缩输出（合并自原 dsh-bash-rtk 插件）
@@ -211,9 +214,26 @@ Each plugin README owns the detailed field semantics, failure conditions, and li
 - [ByClaw Integration configuration and architecture](./plugins/byclaw-integration/README.zh.md#配置)
 - [Browser Use tool, isolation, Docker, and noVNC](./plugins/dsh-browser-use/README.md)
 
+## Shared DSH host
+
+`scripts/byclaw-multi-host.mjs` serves many users from one process (one DSH
+context per user, admin API and `/u/{user}/` web gateway on port 7300; BE's
+`byclaw.sandbox.shared-dsh-host.*` settings point at it). The image carries the
+launcher; start it through the entrypoint's `multi-host` mode, which runs it as
+the DSH user (`byclaw`) whether the container starts as root or not:
+
+```sh
+docker run -d --name byclaw-multi-host --env-file host.env \
+  -v /data/byclaw-multi-host:/data/multi-host byclaw/dsh:<tag> multi-host
+```
+
+The launcher's header comment lists its environment variables. Running the
+image's default `web` entrypoint as a non-root user fails with "root entrypoint
+required for private browser runtime"; that mode is for per-user sandboxes.
+
 ## Verification and startup
 
-AgentTeams, ByClaw Integration, Better Sidebar, and Iron Rules are verified against DSH `0.1.3-alpha.2` (`c389f96`) and its current session, subagent, and prompt APIs; peer dependencies declare the required API versions. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
+The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. Compatibility changes stay in the plugins and do not modify DSH source. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
 
 The current-runtime end-to-end check launches the official headless profile twice with an isolated `DSH_HOME` and a deterministic local model adapter. It checks FIFO prompts, live output, template configuration, session persistence, and cold resume without Redis or API keys. Build the plugins first, then run:
 
@@ -237,6 +257,8 @@ pnpm --dir plugins/dsh-devflow-plugins run build
 dsh --profile web --dump-config
 dsh web --host 0.0.0.0 --no-open
 ```
+
+DSH 0.2 rejects wildcard listeners, so `@byclaw/dsh-lan-web` binds `--host 0.0.0.0` to the first non-internal IPv4 address and does not serve 127.0.0.1. The image entrypoint mirrors that Web port on 127.0.0.1 (`scripts/dsh-loopback-forward.mjs`) so in-container clients, such as the OpenSandbox execd `/proxy/<port>` route, still reach DSH.
 
 `--dump-config` must show `agent-teams`, `byclaw-dsh`, `better-sidebar`, `dsh-diff-viewer`, `codegraph-mcp`, `dsh-codegraph`, `byclaw-lan-web-startup`, `byclaw-bash-provider`, `byclaw-browser-use`, and the Devflow rows from `devflow` through `devflow-ui`. Browser Use exposes exactly one stateful tool named `browser`; private leases and capabilities never enter model context. Integration subscribes to Redis and completes one blocking resource synchronization before its Worker starts.
 

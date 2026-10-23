@@ -38,14 +38,22 @@ function validateWordTiming(bytes) {
   }
 }
 
-export async function persistAssets(sessionRoot, kind, assets) {
+/** Host filesystem operations; a caller whose session tree lives elsewhere supplies its own. */
+const HOST_ARTIFACT_IO = {
+  realpath: path => realpath(path),
+  mkdir: path => mkdir(path, { recursive: true, mode: 0o700 }).then(() => undefined),
+  writeExclusive: (path, bytes) => writeFile(path, bytes, { flag: 'wx', mode: 0o600 }),
+  remove: path => rm(path, { force: true }),
+}
+
+export async function persistAssets(sessionRoot, kind, assets, io = HOST_ARTIFACT_IO) {
   if (typeof sessionRoot !== 'string' || !isAbsolute(sessionRoot)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED: missing authoritative session_root')
   if (!['image', 'tts', 'asr'].includes(kind)) throw new Error('MEDIA_INVALID_KIND')
   if (!Array.isArray(assets) || !assets.length || assets.length > 8) throw new Error('MEDIA_EMPTY_ARTIFACTS')
-  const root = await realpath(sessionRoot)
+  const root = await io.realpath(sessionRoot)
   const directory = join(root, kind)
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  if (await realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY: symlink directory is forbidden')
+  await io.mkdir(directory)
+  if (await io.realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY: symlink directory is forbidden')
   const results = []
   try {
     for (const asset of assets) {
@@ -58,12 +66,12 @@ export async function persistAssets(sessionRoot, kind, assets) {
       const filename = `${randomUUID()}.${extension}`
       const file = join(directory, filename)
       if (relative(root, file).startsWith('..' + sep)) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
-      await writeFile(file, asset.bytes, { flag: 'wx', mode: 0o600 })
+      await io.writeExclusive(file, asset.bytes)
       results.push({ path: join(sessionRoot, kind, filename), mimeType, bytes: asset.bytes.length })
     }
     return results
   } catch (error) {
-    await Promise.all(results.map(result => rm(result.path, { force: true })))
+    await Promise.all(results.map(result => io.remove(result.path)))
     throw error
   }
 }

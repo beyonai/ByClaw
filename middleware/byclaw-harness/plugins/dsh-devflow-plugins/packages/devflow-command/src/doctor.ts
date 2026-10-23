@@ -25,18 +25,13 @@
  * reclamation is a decision this line has deliberately deferred.
  */
 
-import { execFile } from 'node:child_process'
-import { lstat, readFile, realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ArtifactRecord, DevActor, DevCard } from '@zhchxiao123/dsh-devflow'
+import type { ArtifactRecord, DevActor, DevCard, WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 // The fence's own pure reads, so a fault this reports and the veto a
 // transition receives are one sentence rather than two accounts of one fault.
 // The entry is deliberately not the worktree plugin's index: see its module doc.
 import { createDispatchPreconditionChecker, parseWorktreeDispatch } from '@zhchxiao123/dsh-devflow-worktree/dispatch'
-
-const exec = promisify(execFile)
 
 /**
  * The artifact kind a dispatch is read from. It is the worktree plugin's
@@ -92,27 +87,28 @@ const NOT_ASKED: readonly string[] = [
 /**
  * The deployment health report.
  * @param ctx - context carrying the devflow store and the optional services.
+ * @param io - where the workspace is read and git runs.
  * @param cwd - the invoking session's workspace root, when it has one.
  * @param root - the devflow root under it; absent with `cwd`, in which case
  *   the cards come from the store's configured default root and no directory
  *   is known to ask git about.
  * @returns the report lines, in reading order.
  */
-export async function doctorLines(ctx: Context, cwd: string | undefined, root: string | undefined): Promise<string[]> {
+export async function doctorLines(ctx: Context, io: WorkspaceIo, cwd: string | undefined, root: string | undefined): Promise<string[]> {
   const place: Place | undefined = cwd === undefined || root === undefined ? undefined : { dir: cwd, root }
   // Every section but Board reads the board itself, so a workspace without one
   // leaves them with nothing to report — which is an unanswered question and
   // is rendered as one, rather than as a policy that requires nothing and a
   // dispatch set that is empty.
-  const at = place !== undefined && await isDirectory(place.root) ? place : undefined
+  const at = place !== undefined && await isDirectory(io, place.root) ? place : undefined
   const cards = await ctx.devflow.list(undefined, root)
   const unanswered: string[] = []
   return [
     'devflow doctor — a read-only report; this command changed nothing.',
-    ...section('Board', await boardBody(place, at, cards, unanswered)),
+    ...section('Board', await boardBody(io, place, at, cards, unanswered)),
     ...section('Leases', await leaseBody(ctx, cards, root)),
-    ...section('Worktrees', await worktreeBody(at, cards, unanswered)),
-    ...section('Gates', await gateBody(ctx, at, unanswered)),
+    ...section('Worktrees', await worktreeBody(io, at, cards, unanswered)),
+    ...section('Gates', await gateBody(ctx, io, at, unanswered)),
     ...section('Not asked', notAskedBody(unanswered)),
   ]
 }
@@ -141,6 +137,7 @@ function section(title: string, body: readonly string[]): string[] {
  * @returns the section body.
  */
 async function boardBody(
+  io: WorkspaceIo,
   place: Place | undefined,
   at: Place | undefined,
   cards: readonly DevCard[],
@@ -165,7 +162,7 @@ async function boardBody(
   // board", so each unanswerable case leaves its own marker where the answer
   // would have been.
   const unasked = [...body, 'dispatch preconditions — not asked; see "Not asked" below']
-  if (!await isWorkTree(at.dir)) {
+  if (!await isWorkTree(io, at.dir)) {
     unanswered.push(`The two dispatch preconditions. git could not answer about ${at.dir} — it is not inside a working tree, or git is not on PATH — `
       + 'so whether the board is committed and its transient state ignored is unknown here, not confirmed.')
     return unasked
@@ -176,7 +173,7 @@ async function boardBody(
     unanswered.push('The two dispatch preconditions. The fence asks them about one card\'s lease file, and this board holds no active card to ask about.')
     return unasked
   }
-  const fault = await createDispatchPreconditionChecker()(at.dir, at.root, subject.id)
+  const fault = await createDispatchPreconditionChecker(io.execFile)(at.dir, at.root, subject.id)
   body.push('dispatch preconditions — the two questions the worktree fence asks git:')
   if (fault === undefined) {
     body.push(`  the board is tracked and card ${subject.id}'s transient state is ignored`)
@@ -257,11 +254,11 @@ function elapsed(ms: number): string {
  * @param unanswered - accumulator for the `Not asked` section.
  * @returns the section body.
  */
-async function worktreeBody(at: Place | undefined, cards: readonly DevCard[], unanswered: string[]): Promise<string[]> {
+async function worktreeBody(io: WorkspaceIo, at: Place | undefined, cards: readonly DevCard[], unanswered: string[]): Promise<string[]> {
   if (at === undefined) return ['not asked — see Board for why there is nothing here to read']
   const dispatched = dispatchesOf(cards)
   if (dispatched.length === 0) return [`no active card carries a "${DISPATCH_KIND}" artifact, so none is dispatched to a worktree`]
-  const linked = await linkedWorktrees(at.dir)
+  const linked = await linkedWorktrees(io, at.dir)
   if (linked === undefined) {
     unanswered.push(`Whether each worktree below is linked to this repository: "git worktree list" could not be run in ${at.dir}, `
       + 'so only the existence of each path was checked.')
@@ -270,7 +267,7 @@ async function worktreeBody(at: Place | undefined, cards: readonly DevCard[], un
   for (const { card, record } of dispatched) {
     let content: string
     try {
-      content = await readFile(join(dirname(card.path), record.path), 'utf8')
+      content = await io.readFile(join(dirname(card.path), record.path))
     } catch {
       // Swallows every reason the artifact does not open — removed, renamed,
       // unreadable. The fence vetoes all three identically, and naming the
@@ -284,7 +281,7 @@ async function worktreeBody(at: Place | undefined, cards: readonly DevCard[], un
       continue
     }
     body.push(`${card.id} — dispatched to ${dispatch.worktree} on branch ${dispatch.branch} (base ${dispatch.base})`)
-    const target = await canonical(dispatch.worktree)
+    const target = await canonical(io, dispatch.worktree)
     if (target === undefined) {
       body.push('  path: MISSING — nothing exists there, so the card can only be moved from the repository\'s main working tree')
       continue
@@ -314,9 +311,9 @@ function dispatchesOf(cards: readonly DevCard[]): { card: DevCard; record: Artif
  * @param dir - the directory git is run in.
  * @returns whether git reports it inside a working tree.
  */
-async function isWorkTree(dir: string): Promise<boolean> {
+async function isWorkTree(io: WorkspaceIo, dir: string): Promise<boolean> {
   try {
-    return (await exec('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })).stdout.trim() === 'true'
+    return (await io.execFile('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })).stdout.trim() === 'true'
   } catch {
     // git absent, the directory gone, or no repository here — and a bare
     // repository answers "false" without failing. All of them mean the same
@@ -330,10 +327,10 @@ async function isWorkTree(dir: string): Promise<boolean> {
  * @param dir - the directory git is run in.
  * @returns the canonical paths, or `undefined` when git could not answer.
  */
-async function linkedWorktrees(dir: string): Promise<string[] | undefined> {
+async function linkedWorktrees(io: WorkspaceIo, dir: string): Promise<string[] | undefined> {
   let listed: string
   try {
-    listed = (await exec('git', ['worktree', 'list', '--porcelain'], { cwd: dir })).stdout
+    listed = (await io.execFile('git', ['worktree', 'list', '--porcelain'], { cwd: dir })).stdout
   } catch {
     // git absent, the directory missing, or not a work tree. A check that
     // could not run is reported as unasked rather than as a fault, the
@@ -346,7 +343,7 @@ async function linkedWorktrees(dir: string): Promise<string[] | undefined> {
     // A worktree removed but not pruned is still listed; it resolves to
     // nothing and is left out, so the dispatched path reports as missing
     // rather than as linked.
-    const path = await canonical(line.slice('worktree '.length))
+    const path = await canonical(io, line.slice('worktree '.length))
     if (path !== undefined) paths.push(path)
   }
   return paths
@@ -361,13 +358,13 @@ async function linkedWorktrees(dir: string): Promise<string[] | undefined> {
  * @param unanswered - accumulator for the `Not asked` section.
  * @returns the section body.
  */
-async function gateBody(ctx: Context, at: Place | undefined, unanswered: string[]): Promise<string[]> {
+async function gateBody(ctx: Context, io: WorkspaceIo, at: Place | undefined, unanswered: string[]): Promise<string[]> {
   const body = PROBES.map(probe => `${probe.service} — ${isMounted(ctx, probe.service) ? 'mounted' : 'NOT mounted'} (${probe.plugin}: ${probe.answers})`)
   if (at === undefined) return body
   const path = join(at.root, 'validation.json')
   let content: string
   try {
-    content = await readFile(path, 'utf8')
+    content = await io.readFile(path)
   } catch {
     // Swallows every reason the file does not open. It is optional, and a
     // deployment that requires no validator by project policy is the ordinary
@@ -450,9 +447,9 @@ function notAskedBody(unanswered: readonly string[]): string[] {
 }
 
 /** Whether a path is a directory; anything unreadable is not one for this purpose. */
-async function isDirectory(path: string): Promise<boolean> {
+async function isDirectory(io: WorkspaceIo, path: string): Promise<boolean> {
   try {
-    return (await lstat(path)).isDirectory()
+    return (await io.lstat(path)).isDirectory()
   } catch {
     // Swallows every reason the path does not stat — absent is the case this
     // exists for, and the others yield the same report line.
@@ -461,9 +458,9 @@ async function isDirectory(path: string): Promise<boolean> {
 }
 
 /** A path as git and the fence resolve it, or `undefined` when nothing is there. */
-async function canonical(path: string): Promise<string | undefined> {
+async function canonical(io: WorkspaceIo, path: string): Promise<string | undefined> {
   try {
-    return await realpath(path)
+    return await io.realpath(path)
   } catch {
     // Swallows every resolution failure; a removed worktree is the ordinary
     // one, and the caller reports the path as missing either way.

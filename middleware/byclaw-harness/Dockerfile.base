@@ -7,7 +7,7 @@ FROM python:3.12-slim-trixie AS dsh-base
 
 ARG NVM_VERSION=0.40.3
 ARG NODE_VERSION=22.19.0
-ARG PNPM_VERSION=11.7.0
+ARG PNPM_VERSION=11.28.5
 ARG PLAYWRIGHT_VERSION=1.62.1
 ARG CODEGRAPH_VERSION=1.6.0
 ARG PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
@@ -208,7 +208,7 @@ RUN printf '%s\n' \
     && chmod 0644 /etc/profile.d/nvm.sh
 
 ARG DSH_REPOSITORY=https://githubfast.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REF=dsh-v0.1.5-rc.2
+ARG DSH_REF=dsh-v0.2.1-rc.2
 
 RUN git clone --depth 1 --branch "${DSH_REF}" "${DSH_REPOSITORY}" /workspace
 

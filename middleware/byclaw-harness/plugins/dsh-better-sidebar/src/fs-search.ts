@@ -14,6 +14,7 @@
  */
 import { opendir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import type { ToolEnvironmentWorkspace } from './workspace-host.ts'
 
 /** One search: the relative paths of the matching entries (dirs included so
  *  the client can hint where matches live) plus the truncation flag. */
@@ -66,11 +67,12 @@ const SEARCH_SKIP_DIRS = new Set([
  * @param root - absolute search root.
  * @param query - the name substring; empty matches nothing.
  * @param opts - budget overrides (tests).
+ * @param workspace - the tool-environment workspace; omitted = this host's filesystem.
  * @returns the matching paths RELATIVE to `root` ('/'-separated), sorted,
  *  plus whether a budget cut the walk short. An unreadable level is skipped
  *  (permission errors never fail the whole search).
  */
-export async function searchFiles(root: string, query: string, opts: FsSearchOptions = {}): Promise<FsSearchResult> {
+export async function searchFiles(root: string, query: string, opts: FsSearchOptions = {}, workspace?: ToolEnvironmentWorkspace): Promise<FsSearchResult> {
   const needle = query.trim().toLowerCase()
   if (needle === '') return { matches: [], truncated: false }
   const maxMatches = opts.maxMatches ?? DEFAULT_MAX_MATCHES
@@ -82,7 +84,16 @@ export async function searchFiles(root: string, query: string, opts: FsSearchOpt
 
   const walk = async (dir: string): Promise<void> => {
     if (truncated) return
-    const level = await opendir(dir).catch(() => undefined)
+    const level = workspace === undefined
+      ? await opendir(dir).catch(() => undefined)
+      : await workspace.listDir(dir).then(
+        entries => entries.map(entry => ({
+          name: entry.name,
+          isDirectory: () => entry.isDir,
+          isSymbolicLink: () => entry.isSymlink,
+        })),
+        () => undefined,
+      )
     if (level === undefined) return
     for await (const dirent of level) {
       visited += 1

@@ -2,13 +2,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-tools'
-import { agentTeamsRuntimeRoot, canonicalRuntimePath, isPathWithin, type GroupAgentScope } from '@byclaw/dsh-agent-teams'
+import { canonicalRuntimePath, isPathWithin, teamStateRuntime, type GroupAgentScope, type TeamStateRuntime } from '@byclaw/dsh-agent-teams'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { existsSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { privateGenerationRoot } from './generation-paths.ts'
-import { activeMemberSkillRoots, memberSkillProjectionRoot, memberSkillRoot } from './group-skill-resources.ts'
+import { activeMemberSkillRoots, memberSkillProjectionRoot, memberSkillRoot, resolveByClawDshHome } from './group-skill-resources.ts'
 
 type MemberActor = { agent: Agent; scope: GroupAgentScope }
 type RecordLike = Record<string, unknown>
@@ -22,8 +21,12 @@ export class GroupStateBoundary {
   constructor(private readonly options: {
     privateRoots: readonly string[]
     getScope: (agentId: string) => GroupAgentScope | undefined
+    /** This context's DSH home (its `sessions`, `storages`, `runtime` stay private); defaults to `DSH_HOME`. */
+    dshHome?: string
+    /** This context's AgentTeams state runtime, resolved per use (default: the process-wide runtime). */
+    stateRuntime?: () => TeamStateRuntime
   }) {
-    const home = process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh')
+    const home = resolveByClawDshHome(options.dshHome)
     const legacyGenerationCopies = options.privateRoots.flatMap(root => {
       const parent = dirname(resolve(root))
       if (!existsSync(parent)) return []
@@ -33,8 +36,12 @@ export class GroupStateBoundary {
         .map(entry => join(parent, entry.name))
     })
     const roots = [...new Set([join(home, 'sessions'), join(home, 'storages'), join(home, 'runtime'),
-      agentTeamsRuntimeRoot(), ...legacyGenerationCopies, ...options.privateRoots.flatMap(root => [root, privateGenerationRoot(root)])].map(canonicalRuntimePath))]
+      ...legacyGenerationCopies, ...options.privateRoots.flatMap(root => [root, privateGenerationRoot(root)])].map(canonicalRuntimePath))]
     this.roots = roots.filter(root => !roots.some(parent => parent !== root && isPathWithin(root, parent)))
+  }
+
+  private stateRuntime(): TeamStateRuntime {
+    return this.options.stateRuntime?.() ?? teamStateRuntime()
   }
 
   member(agent: Agent | undefined): MemberActor | undefined {
@@ -45,12 +52,13 @@ export class GroupStateBoundary {
   assertPath(path: string, access: 'read' | 'write' = 'read'): void {
     const actor = this.actors.getStore()
     if (actor === undefined) return
-    const absolute = canonicalRuntimePath(resolve(actor.agent.session.header.cwd ?? process.cwd(), path))
-    const projection = memberSkillProjectionRoot()
-    const ownSkill = memberSkillRoot(String(actor.agent.id))
+    const runtime = this.stateRuntime()
+    const absolute = runtime.workspacePath(resolve(runtime.workspaceOf(actor.agent), path))
+    const projection = memberSkillProjectionRoot(this.options.dshHome)
+    const ownSkill = memberSkillRoot(String(actor.agent.id), this.options.dshHome)
     const allowedSkill = absolute === ownSkill || activeMemberSkillRoots(String(actor.agent.id)).some(root => isPathWithin(absolute, root))
     if ((isPathWithin(absolute, projection) && (access === 'write' || !allowedSkill))
-      || this.roots.some(root => isPathWithin(absolute, root))) {
+      || this.roots.some(root => isPathWithin(absolute, root)) || isPathWithin(absolute, runtime.runtimeRoot())) {
       throw new Error('GROUP_MEMBER_PRIVATE_STATE_DENIED: use your task/context tools; employee catalogs, other sessions and full team state are private runtime data')
     }
   }

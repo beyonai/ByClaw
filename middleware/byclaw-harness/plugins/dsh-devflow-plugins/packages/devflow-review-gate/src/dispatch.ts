@@ -19,31 +19,13 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 // Also resolves ctx.subagents for the checker dispatch.
-import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
-// Type-only: resolves the optional ctx.tools lookup behind the checker tool filter.
-import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { buildCheckerPrompt, parseCheckerVerdict } from './checker.ts'
 import type { CardContext } from './checker.ts'
 import { collectDiffs, filesOfGroup } from './diff.ts'
 import { ReviewError } from './ocr.ts'
 import type { CommandInvocation } from './ocr.ts'
 import type { CheckerVerdict, DelegatePreview, RuleGroup } from './types.ts'
-
-/**
- * Global tool names a checker must never hold. Restated from
- * `CHECKER_DENIED_TOOLS` in `@zhchxiao123/dsh-devflow-agent-gate`, which
- * denies the same set for the same reason: a checker that could move a card or
- * edit a file would be acting on the very work it is judging. A divergence
- * from that list is a defect in this copy.
- */
-const CHECKER_DENIED_TOOLS = [
-  'devflow_create',
-  'devflow_transition',
-  'devflow_take',
-  'devflow_attach_artifact',
-  'write',
-  'edit',
-]
 
 /**
  * One root's synthetic parent: a registered, never-prompted lineage and
@@ -118,18 +100,27 @@ function createGateAgent(ctx: Context, cwd: string, sequence: number): Agent {
  * @param ctx - the registrant context.
  * @returns a supplier resolving one parent per devflow root.
  */
-export function gateParents(ctx: Context): (agents: Context['agents'], root: string) => Agent {
-  const parents = new Map<string, Agent>()
+export function gateParents(ctx: Context): (agents: Context['agents'], root: string) => Promise<Agent> {
+  // Registration settles asynchronously on DSH 0.2.1, and the subagent
+  // runtime only accepts a parent that is already live, so the supplier hands
+  // out the parent once its registration has settled.
+  const parents = new Map<string, Promise<Agent>>()
   let sequence = 0
-  return (agents: Context['agents'], root: string): Agent => {
+  return (agents: Context['agents'], root: string): Promise<Agent> => {
     const existing = parents.get(root)
     if (existing !== undefined) return existing
     const parent = createGateAgent(ctx, dirname(root), ++sequence)
-    ctx.effect(function* () {
-      yield agents.register(parent)
-    }, 'devflow-review-gate parent agent')
-    parents.set(root, parent)
-    return parent
+    const ready = new Promise<Agent>((resolve, reject) => {
+      ctx.effect(function* () {
+        const registration = agents.register(parent)
+        registration.then(() => { resolve(parent) }, reject)
+        yield registration
+      }, 'devflow-review-gate parent agent')
+    })
+    // A failed registration must not poison later attempts on the same root.
+    ready.catch(() => { if (parents.get(root) === ready) parents.delete(root) })
+    parents.set(root, ready)
+    return ready
   }
 }
 
@@ -176,22 +167,6 @@ function resolveRuntime(ctx: Context): CheckerRuntime {
 }
 
 /**
- * The tool scoping sent with a checker when the provider supports start-time
- * filtering: the denied tools that are actually registered globally, because
- * the runtime rejects unknown names. A provider without the capability
- * dispatches unrestricted — the prompt's contract carries that trade-off, and
- * the README records it as a limitation.
- */
-function checkerToolFilter(ctx: Context, provider: SubagentProvider): ToolRestriction | undefined {
-  if (!provider.capabilities.toolFilter) return undefined
-  const tools = ctx.get('tools')
-  if (tools === undefined) return undefined
-  const deny = CHECKER_DENIED_TOOLS.filter(name => tools.get(name) !== undefined)
-  if (deny.length === 0) return undefined
-  return { deny }
-}
-
-/**
  * The provider/model override sent with a checker when the provider supports
  * it: the deployment's own default-model selection, so a checker routes the
  * same way ordinary agents do.
@@ -228,7 +203,7 @@ export async function reviewGroup(
   ctx: Context,
   dispatch: DispatchContext,
   group: RuleGroup,
-  parentFor: (agents: Context['agents'], root: string) => Agent,
+  parentFor: (agents: Context['agents'], root: string) => Promise<Agent>,
   deadline: Promise<never>,
 ): Promise<CheckerVerdict> {
   const { subagents, agents, defaultModel } = resolveRuntime(ctx)
@@ -242,19 +217,23 @@ export async function reviewGroup(
   const diffs = await collectDiffs(ctx, dispatch.git, dispatch.preview, files)
   const prompt = buildCheckerPrompt(dispatch.card, dispatch.edge, group.rule, diffs)
 
-  const filter = checkerToolFilter(ctx, provider)
   const agentOptions = checkerAgentOptions(provider, defaultModel)
   const controller = new AbortController()
-  const startPromise = subagents.start(dispatch.provider, {
+  // Caller delivery: the verdict comes back to the gate only, never as a
+  // completion notice to the synthetic parent.
+  const startPromise = parentFor(agents, dispatch.root).then(parent => subagents.startActivation({
+    provider: dispatch.provider,
     label: `devflow-review-gate:${dispatch.card.id}:${group.pattern}`,
-    parent: parentFor(agents, dispatch.root),
+    request: {
+      parent,
+      ...agentOptions === undefined ? {} : { agentOptions },
+      prompt: [{ type: 'text', text: prompt }],
+    },
     signal: controller.signal,
-    ...agentOptions === undefined ? {} : { agentOptions },
-    ...filter === undefined ? {} : { toolFilter: filter },
-    prompt: [{ type: 'text', text: prompt }],
-  })
+    delivery: 'caller',
+  }))
   try {
-    const run: SubagentRun = await Promise.race([startPromise, deadline])
+    const run: SubagentActivation = await Promise.race([startPromise, deadline])
     try {
       const result = await Promise.race([run.result, deadline])
       if (result.stopReason !== 'completed') {
@@ -290,7 +269,7 @@ export async function reviewGroups(
   ctx: Context,
   dispatch: DispatchContext,
   groups: readonly RuleGroup[],
-  parentFor: (agents: Context['agents'], root: string) => Agent,
+  parentFor: (agents: Context['agents'], root: string) => Promise<Agent>,
 ): Promise<CheckerVerdict[]> {
   if (groups.length === 0) return []
   let expire: ReturnType<typeof setTimeout> | undefined

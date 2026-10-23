@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # Build the reusable image first:
-#   docker build -f middleware/byclaw-harness/Dockerfile.base -t byclaw/dsh-base:latest .
+#   docker build -f middleware/byclaw-harness/Dockerfile.base -t 192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2 .
 # Then build this business-extension image:
 #   docker build -f middleware/byclaw-harness/Dockerfile.extensions -t byclaw/dsh:latest .
-ARG BASE_IMAGE=byclaw/harness-base:2026.9.8
+# The base must come from this branch's Dockerfile.base (DSH 0.2.1-rc.2): the
+# plugins depend on 0.2.1 workspace packages that older bases do not contain.
+ARG BASE_IMAGE=192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 
@@ -31,6 +33,13 @@ COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/s
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 
 WORKDIR /workspace
+
+# Fail early, with the reason, when BASE_IMAGE carries another DSH release.
+RUN set -eu; \
+    dsh_version="$(jq -er '.version' apps/cli/package.json)"; \
+    case "${dsh_version}" in 0.2.1*) ;; *) \
+        echo "BASE_IMAGE carries DSH ${dsh_version}; build it from this branch's Dockerfile.base (DSH 0.2.1-rc.2) and pass --build-arg BASE_IMAGE=<that image>" >&2; exit 1;; \
+    esac
 
 # Mount the plugins into the base image's workspace and carry every plugin's
 # own build-script decisions up to this root, approvals and denials alike —
@@ -66,6 +75,11 @@ RUN set -eux; \
     mkdir -p /tmp/byclaw-plugin-packs; \
     node scripts/docker-plugin-layout.mjs packages plugins >/tmp/byclaw-package-manifests; \
     node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace --manifests >>/tmp/byclaw-package-manifests; \
+    # DSH's SSH provider family is outside the CLI installation table; pack it
+    # from this workspace so @byclaw/dsh-tool-env installs the same build.
+    for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
+        printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
+    done; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -97,19 +111,11 @@ RUN set -eux; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
-# Keep generated module reconciliation on canonical local paths. The original
-# dependency closure, stale-link repair and packaged-executable semantics remain.
-COPY middleware/byclaw-harness/scripts/prepare-dsh-local-modules.mjs /tmp/prepare-dsh-local-modules.mjs
-COPY middleware/byclaw-harness/scripts/prepare-dsh-client-modules.mjs /tmp/prepare-dsh-client-modules.mjs
-COPY middleware/byclaw-harness/scripts/prepare-dsh-client-maps.mjs /tmp/prepare-dsh-client-maps.mjs
-COPY middleware/byclaw-harness/scripts/prepare-dsh-typert-loader.mjs /tmp/prepare-dsh-typert-loader.mjs
-RUN node /tmp/prepare-dsh-local-modules.mjs /workspace \
-    && node /tmp/prepare-dsh-client-modules.mjs /workspace \
-    && node /tmp/prepare-dsh-client-maps.mjs /workspace \
-    && node /tmp/prepare-dsh-typert-loader.mjs /workspace \
-    && pnpm exec tsc -b packages/boot/app-boot/tsconfig.json packages/client/modules/tsconfig.json packages/typert/loader/tsconfig.json \
-    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/boot/app-boot --filter packages/typert/loader \
-    && pnpm exec tsdown --env.DSH_BUILD_FACE client --filter packages/client/modules
+# DSH 0.2.1 already resolves module directories to canonical paths and composes
+# client bundles once (app-boot profile-resolution, client/modules, typert/loader
+# at 0.2.1); the 0.1.5 source patches scripts/prepare-dsh-local-modules.mjs,
+# prepare-dsh-client-modules.mjs, prepare-dsh-client-maps.mjs and
+# prepare-dsh-typert-loader.mjs refuse any other release and are not applied here.
 
 
 # Fixed connector tools have an independent cache, unaffected by plugin edits.
@@ -195,6 +201,7 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/src/ /workspace/packages/core/agent-loop/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/lib/ /workspace/packages/core/agent-loop/lib/
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
 # The build decisions the plugin-builder folded together. This stage starts from
 # the pristine base again, whose own workspace never saw the plugins, and the
 # packed plugins carry no pnpm-workspace.yaml of their own — so the merged file
@@ -206,9 +213,11 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/pnpm-workspace.yaml 
 # The profile installs the same packages the builder did, so it needs the same
 # allowBuilds: a denial missing here fails `dsh plugin add` with
 # ERR_PNPM_IGNORED_BUILDS exactly as it would fail an install.
-# plugin add does not run the launcher's module-fallback healing. Prepare the
-# same installation peers before importing packed core packages with plain Node;
-# autoInstallPeers stays disabled so Cordis/services share the host generation.
+# DSH 0.2 supplies installation peers in memory, only to modules under
+# $DSH_HOME/profiles; at runtime these packages load from /opt instead, so link
+# DSH's own installation table into the managed profiles/node_modules before
+# importing packed core packages with plain Node. autoInstallPeers stays
+# disabled so Cordis/services share the host generation.
 RUN set -eux; \
     DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" pnpm dsh plugin --profile web list >/dev/null; \
     profile_workspace="${BYCLAW_DSH_MANAGED_HOME}/profiles/web/pnpm-workspace.yaml"; \
@@ -232,14 +241,14 @@ RUN set -eux; \
     done <"${BYCLAW_DSH_MANAGED_HOME}/plugins/.bundle-names"; \
     test "$#" -gt 0; \
     DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" pnpm dsh plugin --profile web add "$@"; \
-    DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" node --import tsx/esm --input-type=module -e "const {healProfilesModuleFallback}=await import('./packages/boot/app-boot/src/profile.ts');await healProfilesModuleFallback({installAnchor:'/workspace/apps/cli/package.json'})"; \
+    DSH_HOME="${BYCLAW_DSH_MANAGED_HOME}" node --import tsx/esm /tmp/link-dsh-installation-peers.mjs /workspace web; \
     node /tmp/prune-dsh-profile.mjs "${BYCLAW_DSH_MANAGED_HOME}/profiles/web/node_modules"; \
     test -z "$(find "${BYCLAW_DSH_MANAGED_HOME}/profiles/web/node_modules" -type f -name '*.map' -print -quit)"; \
     cd "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
-    rm -f /tmp/prune-dsh-profile.mjs /tmp/byclaw-prepared-workspace.yaml
+    rm -f /tmp/prune-dsh-profile.mjs /tmp/link-dsh-installation-peers.mjs /tmp/byclaw-prepared-workspace.yaml
 
 RUN set -eux; \
     profile_manifest="${BYCLAW_DSH_MANAGED_HOME}/profiles/web/package.json"; \
@@ -264,6 +273,10 @@ RUN set -eux; \
 COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
+# Shared DSH host launcher (many users, one process); run it instead of the
+# entrypoint: `node scripts/byclaw-multi-host.mjs`. Inert for ordinary sandboxes.
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-multi-host.mjs
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
@@ -339,6 +352,15 @@ RUN set -eux; \
     rm -f /tmp/browser-download-permissions-verify.py \
         /tmp/browser-supervisor-verify.py /tmp/docker-entrypoint-fd-verify.py; \
     chown -R byclaw:byclaw /home/byclaw/.dsh
+
+# Tool environment (B) of the opt-in split deployment (plugins/dsh-tool-env):
+# `byclaw-dsh-entrypoint tools` runs this sshd for DSH's SSH helper. The
+# package's generated host keys are removed; B serves the key its runtime (A)
+# hands it at creation.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
+    && test -x /usr/sbin/sshd
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc

@@ -13,10 +13,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { groupInputRevision, prepareGroupAssistanceReturn, beginGroupAssistanceResultDelivery } from './group-assistance.ts'
 import { assertGroupTaskAdmission, setGroupTaskSummary, validateGroupTaskSummary, finalizeGroupTaskSummary, groupTaskSummaryOutcome, renderGroupTaskSummary } from './group-summary.ts'
 import { groupPolicy, groupScope, assertGroupCoordinator } from './group-scope.ts'
-import { resolveTeamStateRoot } from './runtime-state.ts'
+import { defaultTeamStateRuntime, teamStateRuntime, type TeamStateRuntime } from './runtime-state.ts'
+import type { ClaudeBridgeOptions } from './claude-bridge.ts'
 import { AGENT_TEAMS_EXECUTION_LOCATION, bindTaskExecution, type AgentTeamsExecutionLocationService } from './task-executions.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from './message-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
@@ -52,6 +54,7 @@ import {
   deliverToMember,
   installAgentTeamsReportDeliveryGuard,
   installRetiredMemberGuard,
+  installMemberComposition,
   installMemberSelectionRuntime,
   interruptMember,
   memberLabel,
@@ -106,6 +109,10 @@ export interface ToolsConfig {
   modelOverrides?: AgentTeamsModelOverrideService
   /** Test/runtime embedding hook; production installs the standard bridge. */
   memberSelectionRuntime?: MemberSelectionRuntime
+  /** Team-state placement; omitted uses the runtime bound to the plugin's context. */
+  stateRuntime?: TeamStateRuntime
+  /** How external Claude Code members run (default: the host `claude` CLI). */
+  claude?: ClaudeBridgeOptions
 }
 
 interface CatalogGenerationCoordinator {
@@ -198,18 +205,20 @@ function requireCaptain(exec: ToolRunContext): Agent {
 }
 
 function executionLocation(ctx: Context, agentSessionId: string): { sessionId: string; messageId: string } | undefined {
+  // Verify harnesses register the tools on a bare context without service lookup.
+  if (typeof ctx.get !== 'function') return undefined
   const service = ctx.get(AGENT_TEAMS_EXECUTION_LOCATION, false) as AgentTeamsExecutionLocationService | undefined
   return service?.get(agentSessionId)
 }
 
 /** The captain's workspace directory (team state root parent). */
-function workspaceOf(agent: Agent): string {
-  return agent.session.header.cwd ?? process.cwd()
+function workspaceOf(agent: Agent, config: ToolsConfig): string {
+  return (config.stateRuntime ?? defaultTeamStateRuntime).workspaceOf(agent)
 }
 
 /** Resolved absolute state root. */
 function stateRootOf(workspace: string, config: ToolsConfig): string {
-  return resolveTeamStateRoot(workspace, config.stateDir)
+  return (config.stateRuntime ?? defaultTeamStateRuntime).resolveTeamStateRoot(workspace, config.stateDir)
 }
 
 /** Process-local lock key scoped by workspace state root and team id. */
@@ -243,7 +252,7 @@ async function requireParticipantTeam(workspace: string, config: ToolsConfig, ca
 /** Resolve one discoverable runtime team without granting participant rights. */
 async function requireGlobalInstance(config: ToolsConfig, id: string): Promise<RuntimeInstanceView> {
   if (config.catalogDir === undefined) throw new Error('global expert-team catalog is not configured')
-  const instance = await readRuntimeInstance(config.catalogDir, id)
+  const instance = await readRuntimeInstance(config.catalogDir, id, config.stateRuntime)
   if (instance === undefined) throw new Error(`global Agent Teams instance "${id}" was not found`)
   if (instance.status !== 'active') throw new Error(`global Agent Teams instance "${id}" is stale; its runtime state no longer exists`)
   return instance
@@ -346,7 +355,7 @@ export function steerCaptainReport(captain: Pick<Agent, 'steer'>, from: string, 
   try {
     captain.steer(createUserMessage({
       content: [{ type: 'text', text: `AgentTeams message from member ${from}:\n\n${content}` }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
+      source: { kind: 'plugin:dsh-agent-teams' },
     }))
     return true
   } catch {
@@ -379,7 +388,7 @@ export function steerSubmittedTaskReport(
         type: 'text',
         text: `AgentTeams submitted-task event:\n${details}\n\nThe downstream result woke this requester asynchronously. Do not poll or sleep. Use agent_teams_get_submitted_task at most once per listed task only if authoritative state is still needed, then respond to the user or end the turn.`,
       }],
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
+      source: { kind: 'plugin:dsh-agent-teams' },
     }))
     return true
   } catch {
@@ -444,13 +453,17 @@ function settlementKeyForMessage(team: TeamState, memberName: string, content: s
  * @param ctx - the plugin context (injects `tools`).
  * @param config - resolved tool config.
  */
-export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void {
+export function registerAgentTeamsTools(ctx: Context, suppliedConfig: ToolsConfig): void {
+  const config: ToolsConfig = { ...suppliedConfig, stateRuntime: suppliedConfig.stateRuntime ?? teamStateRuntime(ctx) }
   installRetiredMemberGuard(ctx, config.stateDir)
   installAgentTeamsReportDeliveryGuard(ctx, config.stateDir)
+  installMemberComposition(ctx, config.stateDir)
   const memberSelections = config.memberSelectionRuntime ?? installMemberSelectionRuntime(ctx, config.stateDir)
   const scheduler = installTeamScheduler(ctx, {
     stateDir: config.stateDir,
     maxTaskAttempts: config.maxTaskAttempts,
+    stateRuntime: config.stateRuntime,
+    claude: config.claude,
   }, memberSelections)
   const captainWakes = new CaptainWakeCoalescer()
   const requesterWakes = new CaptainWakeCoalescer()
@@ -484,7 +497,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     if (status !== 'idle' || !captainWakes.has(agent.id)) return
     void (async () => {
       captainWakes.release(agent.id)
-      const workspace = workspaceOf(agent)
+      const workspace = workspaceOf(agent, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await findTeamByCaptain(stateRoot, agent.id)
       if (team === undefined || team.stoppedAt !== undefined || isTeamCaptainStopped(agent)) return
@@ -535,7 +548,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
     if (decision.kind !== 'accept' || result.isError || exec.agent === undefined) return decision
-    const workspace = workspaceOf(exec.agent)
+    const workspace = workspaceOf(exec.agent, config)
     const stateRoot = stateRootOf(workspace, config)
     const located = await findTeamByParticipant(stateRoot, exec.agent.id)
     if (located === undefined || located.controlledWorkflow !== true
@@ -587,7 +600,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     async execute(_args, exec) {
       requireCaptain(exec)
       if (config.catalogDir === undefined) throw new Error('global expert-team catalog is not configured')
-      const instances = await listRuntimeInstances(config.catalogDir)
+      const instances = await listRuntimeInstances(config.catalogDir, config.stateRuntime)
       return { instances: instances.map(runtimeInstanceMetadata) }
     },
   }))
@@ -821,7 +834,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         const scope = groupScope(ctx, String(captain.id))
         assertGroupCoordinator(scope)
         if (scope !== undefined && args.template_id !== scope.templateId) throw new Error('Use only the task-scoped group template')
-        const workspace = workspaceOf(captain)
+        const workspace = workspaceOf(captain, config)
         const stateRoot = stateRootOf(workspace, config)
         const teamName = args.name.trim()
         if (teamName === '') throw new Error('team name must not be empty')
@@ -875,7 +888,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
             }
             await createTeamDir(stateRoot, state)
             if (config.catalogDir !== undefined) {
-              await registerRuntimeInstance(config.catalogDir, stateRoot, workspace, state)
+              await registerRuntimeInstance(config.catalogDir, stateRoot, workspace, state, config.stateRuntime)
             }
             appendTeamEvent(ctx, captain.session, 'agent-teams/team-created', {
               teamId: state.id,
@@ -961,7 +974,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       if (config.catalogDir === undefined) throw new Error('global expert-team catalog is not configured')
       const catalogDir = config.catalogDir
       return withCatalogGeneration(ctx, catalogDir, 'write', async () => {
-        const workspace = workspaceOf(captain)
+        const workspace = workspaceOf(captain, config)
         const team = await requireCaptainTeam(workspace, config, captain)
         const template = await writeTeamTemplate(catalogDir, {
           id: args.template_id,
@@ -1011,7 +1024,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       const scope = groupScope(ctx, String(captain.id))
@@ -1116,7 +1129,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       const revoked = await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -1189,7 +1202,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       const created = await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -1280,8 +1293,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       render: (_args, value) => [{ type: 'text', text: String(value['display']) }] },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const stateRoot = stateRootOf(workspaceOf(captain), config)
-      const team = await requireCaptainTeam(workspaceOf(captain), config, captain)
+      const stateRoot = stateRootOf(workspaceOf(captain, config), config)
+      const team = await requireCaptainTeam(workspaceOf(captain, config), config, captain)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
         const fresh = await requireFreshCaptainTeam(stateRoot, team.id, captain.id)
         const revision = groupInputRevision(ctx, String(captain.id), fresh.inputRevision)
@@ -1302,8 +1315,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       render: (_args, value) => [{ type: 'text', text: String(value['display']) }] },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
-      const stateRoot = stateRootOf(workspaceOf(captain), config)
-      const team = await requireCaptainTeam(workspaceOf(captain), config, captain)
+      const stateRoot = stateRootOf(workspaceOf(captain, config), config)
+      const team = await requireCaptainTeam(workspaceOf(captain, config), config, captain)
       const activity = await memberActivity(ctx, team.captainSessionId)
       if (team.members.some(member => activity.get(member.id) === 'running')) throw new Error('A member is still running; wait for its settlement before finalizing')
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -1336,7 +1349,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       let opened = false
@@ -1399,7 +1412,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       const target = args.assignee.trim()
@@ -1513,7 +1526,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -1630,7 +1643,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       let submittedTaskNotice: { requesterSessionId: string; notice: SubmittedTaskNotice } | undefined
@@ -1767,7 +1780,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       const to = args.to.trim()
@@ -1955,7 +1968,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config)
       const stateRoot = stateRootOf(workspace, config)
       const located = await requireParticipantTeam(workspace, config, caller)
       if (located.captainSessionId === caller.id) {
@@ -2069,7 +2082,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
       if (groupScope(ctx, String(captain.id)) !== undefined) throw new Error('Preserve the group task team and assistance ledger until the platform task ends; model-side deletion cannot reset user-input blockers')
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       const members = await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -2108,7 +2121,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         // mailboxes stay on disk for later review and dependency rebuilds.
         await archiveTeamDir(stateRoot, fresh.id)
         if (config.catalogDir !== undefined) {
-          await unregisterRuntimeInstance(config.catalogDir, stateRoot, fresh.id, fresh.captainSessionId)
+          await unregisterRuntimeInstance(config.catalogDir, stateRoot, fresh.id, fresh.captainSessionId, config.stateRuntime)
         }
       })
       return { deleted: true, team_name: team.name }

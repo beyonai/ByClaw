@@ -137,7 +137,9 @@ describe('the pending-notice channel', () => {
     const ctx = new Context()
     ctx.provide('shell', {
       resolve: (request: unknown) => request,
-      run: () => Promise.resolve({ exitCode, stdout: { text: 'violation output' }, stderr: { text: '' } }),
+      execute: () => Promise.resolve({
+        result: () => Promise.resolve({ exitCode, stdout: { text: 'violation output' }, stderr: { text: '' } }),
+      }),
     })
     applyCheck(ctx, CONFIG)
     return ctx
@@ -186,7 +188,7 @@ describe('the pending-notice channel', () => {
     await preStep(ctx, agent, () => Promise.resolve({ kind: 'enter', messages: [] }))
     expect(injected).toHaveLength(1)
     expect(((injected[0]?.content[0] ?? { text: '' }) as { text: string }).text).toContain('automatic continuation has stopped: [red]')
-    expect(injected[0]?.source).toEqual({ kind: 'plugin', plugin: 'devflow-iron-rules' })
+    expect(injected[0]?.source).toEqual({ kind: 'plugin:devflow-iron-rules' })
 
     // Delivery cleared the queue: the next pre-step injects nothing.
     await preStep(ctx, agent, () => Promise.resolve({ kind: 'enter', messages: [] }))

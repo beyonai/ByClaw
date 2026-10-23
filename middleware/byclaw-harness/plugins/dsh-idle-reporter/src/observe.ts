@@ -25,7 +25,7 @@ export interface ActivityObservation {
  *   pair, keyed by the request id and attributed to the session (= Agent) id.
  * - Ask-user waits: a prepended `user-questions/request` waterfall listener
  *   that always delegates and counts the request around `next()`.
- * - Jobs: `onJobsChanged` while the optional `jobs` service exists.
+ * - Jobs: the registry's lifecycle events while the optional `jobs` service exists.
  *
  * Waits are counted per request, so overlapping waits on one Agent do not
  * clear each other. Waits already pending before this plugin loaded are not
@@ -54,7 +54,10 @@ export function observeActivity(ctx: Context, onChange: () => void): ActivityObs
     }
   }
 
-  ctx.on('agent/created', () => { onChange() })
+  ctx.on('agent/created', () => {
+    onChange()
+    return undefined
+  })
   ctx.on('agent/status', ({ agent, status }) => {
     // Both waits live inside an open turn, so an idle Agent waits on nothing;
     // this bounds a missed `approval/decided` (failed append) to one turn.
@@ -86,7 +89,12 @@ export function observeActivity(ctx: Context, onChange: () => void): ActivityObs
     }
   }, { prepend: true })
   ctx.inject(['jobs'], (jobsCtx) => {
-    jobsCtx.jobs.onJobsChanged(() => { onChange() })
+    // Visible-set changes only (the 0.1.5 `onJobsChanged` set): output appends
+    // and progress-line updates do not change what `list()` returns. The
+    // subscription is scoped to `jobsCtx` and drops with it.
+    jobsCtx.jobs.events.subscribe({ owners: 'all' }, (event) => {
+      if (event.type !== 'output' && event.type !== 'progress') onChange()
+    })
     onChange()
   })
 
@@ -146,7 +154,7 @@ function runningJobs(ctx: Context, agents: readonly Agent[]): number {
   const jobs = ctx.get('jobs')
   if (jobs === undefined) return 0
   const live = new Set<string>()
-  for (const view of [jobs.list(), ...agents.map(agent => jobs.list(agent))]) {
+  for (const view of [jobs.list(), ...agents.map(agent => jobs.list(agent.id))]) {
     for (const job of view) {
       if (job.status === 'running' || job.status === 'stopping') live.add(job.id)
     }

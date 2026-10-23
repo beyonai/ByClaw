@@ -10,7 +10,7 @@ import { prepareRuntime, prepareRuntimeSources, supportedDshVersion } from './pr
 // A compact executable fixture retains the release's admission/retry structure
 // and patch anchors. It never imports or writes a real DSH installation.
 const originalLoop = `
-// The real module imports UserMessage, renderContextSections, joinContextSections and assembleContextFor.
+// The real module imports renderContextSections, joinContextSections and assembleContextFor.
 class FixtureAgent {
   private async step(decision: FixtureDecision): Promise<unknown> {
     const { signal } = this
@@ -21,6 +21,10 @@ class FixtureAgent {
     let firstAttempt = true
     while (true) {
       const { config, preparedCall } = await this.prepareRequest(turn, step, signal)
+      const currentContext = this.loopCtx.systemPrompt.refreshContext(assembly, assembleContextFor(this, signal))
+      const sections = renderContextSections(currentContext)
+      const context = this.runtimeContext.project(joinContextSections(sections), sections)
+      signal.throwIfAborted()
       const startsRequestSeries = firstAttempt && decision.startsRequestSeries === true
       const commits = this.systemPrompt.project(renderedPrompt, { startsSeries: startsRequestSeries })
       for (const { message, intent } of commits) {
@@ -31,8 +35,11 @@ class FixtureAgent {
           this.session.append('user/message', message, { surfaceOp: 'append' })
         }
       }
+      if (context !== undefined) {
+        this.session.append('user/message', context, { surfaceOp: 'append' })
+      }
       firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, startsRequestSeries, signal)
+      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
       const live = new AssistantStreamAttempt(
         this.nextFinish(),
         (frame) => { this.dispatch.emit('agent/assistant-stream', { frame }) },
@@ -55,6 +62,7 @@ class FixtureAgent {
 `
 const originalTypes = `export type RequestErrorAction = { kind: 'retry' } | undefined\n`
 const originalEntry = `import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
+import type {} from './runtime-context.ts'
 
 export class AgentLoop extends Service implements AgentFactory {
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
@@ -97,7 +105,7 @@ test('explicit workspace is mandatory; check is read-only and apply is idempoten
   assert.equal(first.manifests.length, 2)
   const prepared = await f.read()
   assert.match(prepared.entry, /export const byclawRequestReassembly = true/)
-  assert.match(prepared.entry, /readonly byclawRequestReassembly = true/)
+  assert.match(prepared.entry, /readonly byclawRequestReassembly: true = true/)
   assert.match(prepared.types, /reassemble\?: true/)
   assert.equal((await prepareRuntime(f.root)).changed, 0)
   assert.equal((await prepareRuntime(f.root, { check: true })).ready, true)
@@ -108,7 +116,7 @@ test('unsupported package versions and source drift fail before any source is wr
   const f = await fixture(t)
   const manifest = join(f.root, 'packages/core/agent-loop/package.json')
   await writeFile(manifest, JSON.stringify({ name: '@deepseek-ai/dsh-agent-loop', version: '0.1.1-rc.2' }))
-  await assert.rejects(prepareRuntime(f.root), /expected .*0\.1\.5-rc\.2/)
+  await assert.rejects(prepareRuntime(f.root), /expected .*0\.2\.1-rc\.2/)
   assert.deepEqual(await f.read(), sources())
   await writeFile(manifest, JSON.stringify({ name: '@deepseek-ai/dsh-agent-loop', version: supportedDshVersion }))
   await writeFile(f.paths.loop, originalLoop.replace('const renderedPrompt = renderPrompt(assembly)', 'const renderedPrompt = differentRender(assembly)'))
@@ -139,7 +147,6 @@ test('workspace symlinks cannot redirect changes to another checkout', async t =
 test('reassembly retries preserve admitted input and tool results while refreshing prompt, tools and context', async () => {
   const patched = prepareRuntimeSources(sources()).loop.source
     .replace('private async step(decision: FixtureDecision): Promise<unknown>', 'async step(decision)')
-    .replace('let recoveryContext: UserMessage | undefined', 'let recoveryContext')
   const FixtureAgent = new Function('renderPrompt', 'renderContextSections', 'joinContextSections', 'assembleContextFor', 'AssistantStreamAttempt', 'LlmError', `${patched}; return FixtureAgent`)(
     assembly => `Use ${assembly.id}`,
     assembly => [{ text: `context ${assembly.id}` }],
@@ -162,7 +169,7 @@ test('reassembly retries preserve admitted input and tool results while refreshi
     return [{ message: prompt, intent: {} }]
   } }
   agent.runtimeContext = { project: text => ({ role: 'user', context: text }) }
-  agent.loopCtx = { systemPrompt: { assemble: async ({ signal }) => {
+  agent.loopCtx = { systemPrompt: { refreshContext: assembly => assembly, assemble: async ({ signal }) => {
     signal.throwIfAborted()
     agent.activeAssembly = replacements.shift()
     assert.ok(agent.activeAssembly, 'recovery must stay bounded by available fixtures')
@@ -183,6 +190,7 @@ test('reassembly retries preserve admitted input and tool results while refreshi
   assert.deepEqual(calls.map(call => call.events.findLast(event => event.type === 'system/message').data.message), ['Use a', 'Use b', 'Use c'])
   assert.equal(events.filter(event => event.type === 'user/message' && event.data.content === 'do the task').length, 1)
   assert.equal(events.filter(event => event.type === 'tool/result').length, 1)
-  assert.deepEqual(events.filter(event => event.data.context).map(event => event.data.context), ['context b', 'context c'])
+  // The release admits refreshed runtime context on every attempt; reassembly makes it follow the new assembly.
+  assert.deepEqual(events.filter(event => event.data.context).map(event => event.data.context), ['context a', 'context b', 'context c'])
   assert.deepEqual(projectionInputs.map(input => input.startsSeries), [false, true, true])
 })

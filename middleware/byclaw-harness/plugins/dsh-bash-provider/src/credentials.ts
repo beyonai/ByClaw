@@ -1,15 +1,20 @@
 /** Host credential provider backed by the same Redis environment reader as Bash. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
-import { LocalCredentialProvider, type Config } from '@deepseek-ai/dsh-credentials-local'
+import { LocalCredentialProvider, type Config as LocalConfig } from '@deepseek-ai/dsh-credentials-local'
 import { createRuntimeRedisClient, RedisRuntimeEnvironment } from './index.ts'
+
+/** Local credential config plus the user whose Redis references resolve (defaults to `USER_CODE`). */
+export type Config = LocalConfig & { userCode?: string }
 
 /** Resolve Redis references for host plugins while retaining the original credential store and metadata-only descriptions. */
 export default class ByClawCredentialProvider extends LocalCredentialProvider {
   private readonly runtimeEnvironment: RedisRuntimeEnvironment
+  private readonly userCode: string
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
+    this.userCode = config.userCode ?? process.env['USER_CODE'] ?? ''
     this.runtimeEnvironment = new RedisRuntimeEnvironment({
       createClient: createRuntimeRedisClient,
       logger: ctx.logger,
@@ -18,7 +23,7 @@ export default class ByClawCredentialProvider extends LocalCredentialProvider {
   }
 
   private async redisValue(ref: CredentialRef): Promise<string | undefined> {
-    await this.runtimeEnvironment.refresh(process.env['USER_CODE'] ?? '')
+    await this.runtimeEnvironment.refresh(this.userCode)
     const value = this.runtimeEnvironment.current()[ref]
     return value !== undefined && value.length > 0 ? value : undefined
   }

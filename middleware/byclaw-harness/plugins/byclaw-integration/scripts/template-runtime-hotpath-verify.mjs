@@ -67,6 +67,10 @@ try {
           variables.set(name, value)
           return () => variables.delete(name)
         },
+        getSectionOrder(name) {
+          assert.equal(name, 'DEPLOYMENT_PERSONA_PREFIX')
+          return 17
+        },
       },
     }
     const session = {
@@ -90,6 +94,9 @@ try {
     assert.equal(live.has(id), false, 'composition ran after publication')
     assert.equal(state.sections.has('byclaw:session-workspace'), true)
     assert.equal(state.sections.has('byclaw-template:report-policy'), true)
+    // 0.2.1 start requests carry no persona; the template child installs its own persona section.
+    assert.equal(state.sections.get('deployment:persona-prefix')?.text, '直接回复。')
+    assert.equal(state.sections.get('deployment:persona-prefix')?.order, 17)
     assert.equal(state.variables.get('file_preview_prefix')(), '{{file_preview_prefix}}')
     assert.equal(workspaceRegistry.get(id)?.cwd, root)
     const assembled = await state.listeners.get('system-prompt/assemble')({}, {}, async () => ({ variables: {} }))
@@ -127,7 +134,9 @@ try {
       },
     },
     subagents: {
-      async startContinuable(options) {
+      async startActivation(options) {
+        assert.equal(options.delivery, 'parent', 'template children settle into their parent')
+        assert.equal(options.request.persona, undefined, '0.2.1 start requests carry no persona')
         assert.deepEqual(options.request.agentOptions, selection)
         const handle = await ctx.agents.create({
           sessionId: options.childId,
@@ -145,7 +154,7 @@ try {
           },
         })
         handles.set(options.childId, handle)
-        return { childId: options.childId }
+        return { childId: options.childId, result: new Promise(() => {}), dispose: async () => {} }
       },
       async [deliverSubagentPrompt](parent, childId, content, source, receivedSignal, delivery) {
         assert.equal(parent.id, 'root-parent')

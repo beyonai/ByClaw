@@ -15,11 +15,12 @@
  * @module @zhchxiao123/dsh-devflow-iron-rules/record
  */
 
-import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { ResolvedConfig } from './index.ts'
 import { buildAddition, digestRules } from './inject.ts'
 import { loadRules, rulesByteSize, validateRuleId, workspaceOf } from './rules.ts'
@@ -61,6 +62,7 @@ export function triageDiagnostic(input: RecordInput): string | undefined {
  * @param agent - the agent whose workspace and context receive the rule.
  * @param input - the rule to write, including any ids it replaces.
  * @param config - the resolved plugin configuration.
+ * @param io - where the workspace is written; this process's filesystem by default.
  * @returns whether the rule was written, with text for the calling surface.
  */
 export async function recordRule(
@@ -68,6 +70,7 @@ export async function recordRule(
   agent: Agent,
   input: RecordInput,
   config: ResolvedConfig,
+  io: WorkspaceIo = localWorkspaceIo,
 ): Promise<RecordOutcome> {
   const diagnostic = validateRuleId(input.id)
   if (diagnostic !== undefined) return { ok: false, text: diagnostic }
@@ -75,7 +78,7 @@ export async function recordRule(
   const triage = triageDiagnostic(input)
   if (triage !== undefined) return { ok: false, text: triage }
 
-  const { rules, rulesDir } = await loadRules(workspaceOf(agent, config))
+  const { rules, rulesDir } = await loadRules(workspaceOf(agent, config), io)
 
   // Everything below this line validates BEFORE the first write. A half-applied
   // replacement — new rule written, old one still there — would leave exactly
@@ -124,15 +127,15 @@ export async function recordRule(
     '---',
   ].join('\n')
   try {
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'RULE.md'), `${frontmatter}\n\n${input.body}\n`, 'utf8')
+    await io.mkdir(dir, { recursive: true })
+    await io.writeFile(join(dir, 'RULE.md'), `${frontmatter}\n\n${input.body}\n`)
     if (input.enforcement === 'script' && input.check !== undefined) {
-      await writeFile(join(dir, 'check.sh'), input.check.endsWith('\n') ? input.check : `${input.check}\n`, 'utf8')
+      await io.writeFile(join(dir, 'check.sh'), input.check.endsWith('\n') ? input.check : `${input.check}\n`)
     }
     // Delete only after the replacement exists. git carries the history, so a
     // removal here is recoverable and reviewable as an ordinary diff.
     for (const id of replaces) {
-      if (id !== input.id) await rm(join(rulesDir, id), { recursive: true, force: true })
+      if (id !== input.id) await io.rm(join(rulesDir, id), { recursive: true, force: true })
     }
   } catch (error: unknown) {
     return { ok: false, text: `writing the rule failed: ${String(error)}` }
@@ -181,10 +184,11 @@ export function presentRecordCall(args: { id: string; title: string }): { card: 
  * registry is composed and unwinds with it.
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param io - where the workspace is read and written.
  */
-export function applyRecord(ctx: Context, config: ResolvedConfig): void {
+export function applyRecord(ctx: Context, config: ResolvedConfig, io: WorkspaceIo = localWorkspaceIo): void {
   ctx.effect(() => ctx.provide('devflowIronRules', {
-    record: async (agent: Agent, input: RecordInput) => await recordRule(ctx, agent, input, config),
+    record: async (agent: Agent, input: RecordInput) => await recordRule(ctx, agent, input, config, io),
   }))
 
   ctx.inject(['tools'], (toolCtx) => {
@@ -254,7 +258,7 @@ export function applyRecord(ctx: Context, config: ResolvedConfig): void {
           ...args.check !== undefined ? { check: args.check } : {},
           ...args.watches !== undefined ? { watches: args.watches } : {},
           ...args.replaces !== undefined ? { replaces: args.replaces } : {},
-        }, config)
+        }, config, io)
         return { id: args.id, recorded: outcome.ok, detail: outcome.text }
       },
       presentCall: presentRecordCall,

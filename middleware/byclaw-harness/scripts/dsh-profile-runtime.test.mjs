@@ -1,55 +1,61 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 
 const dockerfiles = await Promise.all(['Dockerfile', 'Dockerfile.extensions'].map(name =>
   readFile(new URL(`../${name}`, import.meta.url), 'utf8')))
-const healCommand = /node --import tsx\/esm --input-type=module -e "([^"]*healProfilesModuleFallback[^\"]*)"/
+const linkScript = fileURLToPath(new URL('./link-dsh-installation-peers.mjs', import.meta.url))
+const linkCommand = /DSH_HOME="\$\{BYCLAW_DSH_MANAGED_HOME\}" node --import tsx\/esm \/tmp\/link-dsh-installation-peers\.mjs \/workspace web;/
 const importCommand = /node --input-type=module -e "([^"]*Profile resolved an unpatched DSH agent loop[^\"]*)"/
 
-test('both image builds heal installation peers after plugin install and before the runtime guard', () => {
-  assert.equal(dockerfiles[0].match(healCommand)?.[1], dockerfiles[1].match(healCommand)?.[1])
+test('both image builds link installation peers after plugin install and before the runtime guard', () => {
   assert.equal(dockerfiles[0].match(importCommand)?.[1], dockerfiles[1].match(importCommand)?.[1])
   for (const source of dockerfiles) {
+    assert.doesNotMatch(source, /healProfilesModuleFallback/)
+    assert.match(source, /COPY [^\n]*scripts\/link-dsh-installation-peers\.mjs \/tmp\/link-dsh-installation-peers\.mjs\n/)
     const install = source.indexOf('pnpm dsh plugin --profile web add')
-    const heal = source.search(healCommand)
+    const link = source.search(linkCommand)
     const guard = source.search(importCommand)
-    assert.ok(install >= 0 && heal > install && guard > heal)
-    assert.match(source.slice(install, heal), /DSH_HOME="\$\{BYCLAW_DSH_MANAGED_HOME\}"/)
-    assert.match(source.match(healCommand)[1], /installAnchor:'\/workspace\/apps\/cli\/package.json'/)
+    assert.ok(install >= 0 && link > install && guard > link)
   }
 })
 
 // Run inside the pinned DSH builder workspace with:
-// DSH_ROOT=/workspace node --import tsx/esm --test scripts/dsh-profile-runtime.test.mjs
-// The test uses DSH's real fallback implementation and isolated business packages.
-test('official fallback makes the packed loop importable and retains the capability guard', {
+// DSH_ROOT=/workspace node --test scripts/dsh-profile-runtime.test.mjs
+// The test uses DSH's real runtime resolution and isolated business packages.
+test('linked installation peers make the packed loop importable and retain the capability guard', {
   skip: !process.env.DSH_ROOT && 'DSH_ROOT is required for the upstream API integration check',
 }, async t => {
-  const workspace = resolve(process.env.DSH_ROOT)
-  const manifest = JSON.parse(await readFile(join(workspace, 'packages/boot/app-boot/package.json'), 'utf8'))
-  assert.equal(manifest.version, '0.1.5-rc.2', 'test the base image release')
-  const { healProfilesModuleFallback } = await import(pathToFileURL(join(workspace, 'packages/boot/app-boot/src/profile.ts')))
+  const dshRoot = resolve(process.env.DSH_ROOT)
+  const manifest = JSON.parse(await readFile(join(dshRoot, 'packages/boot/app-boot/package.json'), 'utf8'))
+  assert.equal(manifest.version, '0.2.1-rc.2', 'test the base image release')
   const root = await mkdtemp(join(tmpdir(), 'byclaw-profile-runtime-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const home = join(root, 'managed')
   const profile = join(home, 'profiles/web')
+  // A stand-in DSH workspace: its own CLI anchor and installation, with DSH's real app-boot sources.
   const installation = join(root, 'installation')
   async function file(path, contents) {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, contents)
   }
-  await file(join(installation, 'package.json'), JSON.stringify({
-    name: 'fixture-dsh', dependencies: { '@deepseek-ai/cordis': '4.0.1' },
+  await file(join(installation, 'packages/boot/app-boot/package.json'), JSON.stringify({ type: 'module' }))
+  await file(join(installation, 'packages/boot/app-boot/src/profile.ts'),
+    `export * from ${JSON.stringify(join(dshRoot, 'packages/boot/app-boot/src/profile.ts'))}\n`)
+  await file(join(installation, 'apps/cli/package.json'), JSON.stringify({
+    name: 'fixture-dsh', version: '0.2.1-rc.2', dependencies: { '@deepseek-ai/cordis': '4.0.5' },
   }))
-  await file(join(installation, 'node_modules/@deepseek-ai/cordis/package.json'), JSON.stringify({
-    name: '@deepseek-ai/cordis', version: '4.0.1', type: 'module', exports: './index.js',
+  await file(join(installation, 'apps/cli/node_modules/@deepseek-ai/cordis/package.json'), JSON.stringify({
+    name: '@deepseek-ai/cordis', version: '4.0.5', type: 'module', exports: './index.js',
   }))
-  await file(join(installation, 'node_modules/@deepseek-ai/cordis/index.js'), 'export class Service {}\n')
+  await file(join(installation, 'apps/cli/node_modules/@deepseek-ai/cordis/index.js'), 'export class Service {}\n')
+  await file(join(profile, 'package.json'), JSON.stringify({
+    name: 'dsh-profile-web', private: true, dependencies: {}, dsh: { profile: { bundles: [] } },
+  }))
   await file(join(profile, 'node_modules/@byclaw/byclaw-model-router/package.json'), JSON.stringify({
     name: '@byclaw/byclaw-model-router', type: 'module', exports: { './dsh': './dsh.js' },
   }))
@@ -67,12 +73,17 @@ test('official fallback makes the packed loop importable and retains the capabil
   assert.match(before.stderr, /ERR_MODULE_NOT_FOUND.*|Cannot find package/)
   assert.match(before.stderr, /@deepseek-ai\/cordis/)
   for (let attempt = 0; attempt < 2; attempt++) {
-    await healProfilesModuleFallback({ home, installAnchor: join(installation, 'package.json') })
+    const linked = spawnSync(process.execPath, ['--import', 'tsx/esm', linkScript, installation, 'web'], {
+      cwd: dshRoot, encoding: 'utf8', env: { ...process.env, DSH_HOME: home },
+    })
+    assert.equal(linked.status, 0, linked.stderr)
+    assert.match(linked.stdout, /linked \d+ DSH installation packages/)
+    assert.ok((await lstat(join(home, 'profiles/node_modules/@deepseek-ai/cordis'))).isSymbolicLink())
     const after = probe()
     assert.equal(after.status, 0, after.stderr)
   }
   const runtime = await import(pathToFileURL(loop))
-  const host = await import(pathToFileURL(join(installation, 'node_modules/@deepseek-ai/cordis/index.js')))
+  const host = await import(pathToFileURL(join(installation, 'apps/cli/node_modules/@deepseek-ai/cordis/index.js')))
   assert.equal(runtime.Service, host.Service, 'profile and host must share the same Cordis instance')
   await file(loop, loopSource.replace('Reassembly=true', 'Reassembly=false'))
   const unpatched = probe()

@@ -34,6 +34,7 @@ checker 获得一个按卡片工作区定域的合成父代理。该父代理显
 |---|---|---|
 | `edges` | `{}` | 每条 `from->to` 边的准入检查：checker 启动所用的 subagent `provider`、内联进 prompt 的 `inputs` 产物 kind（可选；未登记的 kind 跳过）、以及作为评判依据的 `prompt` 指令。没有表项的边不检查。 |
 | `checkTimeoutMs` | `600000` | 一个 checker 从派发到裁决允许的毫秒数；超时按 fail closed 处理。 |
+| `workspaceOnToolEnvironment` | `false` | 通过上下文的 `ctx.fs` / `ctx.subprocess` 读取输入并保存报告与裁决缓存，而不是本进程。 |
 
 配置错误加载即失败并点名配置项：边键不是已知位置名的 `<from>-><to>` 形式、`provider` 或 `prompt` 为空白、input kind 超出缝的 kind 语法（小写字母数字与连字符、字母数字开头）、`checkTimeoutMs` 非正数。
 

@@ -22,6 +22,10 @@ dsh --profile web --dump-config
 
 `Dockerfile.base` 通过 `ARG CODEGRAPH_VERSION` 声明并校验实际安装版本。扩展镜像构建期间，`verify:runtime` 会把继承到的 `codegraph --version` 与插件清单比较，完成真实 MCP 初始化，并要求 `tools/list` 与插件声明的工具面完全一致；任何不一致都会中止镜像构建。升级 CodeGraph 时，必须同时更新 Docker 参数、插件契约、系统策略和预期 MCP 工具面。
 
+## 工具环境
+
+DSH 的 MCP stdio 传输由 MCP SDK 在本机直接拉起服务进程，不经过 `ctx.subprocess`，因此 `codegraph-mcp` 行总是在 DSH 所在主机上运行 CodeGraph。工作区位于独立工具沙箱时，禁用该行，并在 `dsh-codegraph` 上设置 `workspaceOnToolEnvironment: true` 和私有的 `stateDir`。插件会为每个 MCP 连接通过 `ctx.subprocess` 启动 `command args`（默认 `codegraph serve --mcp`，工作目录 `cwd` 默认 `/by`），并挂载自己的 `codegraph` MCP 客户端；客户端经 `bridge/stdio-socket.mjs` 和 `stateDir` 中权限为 `0600` 的 Unix socket 连到该进程。工具名不变。服务进程的数据流会让工具沙箱在上下文存续期间保持唤醒，且工具沙箱镜像中必须安装 `codegraph`。
+
 ## 验证
 
 ```sh

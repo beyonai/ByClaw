@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createElement } from 'react'
 import clsx from 'clsx'
-import { IconCheckOutline16, IconFolderOpen16, IconRefreshOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutlineRegular, IconFolderOpenRegular, IconRefreshOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '../context-types.ts'
 import { api, mediaUrl, type SessionScope } from './api.ts'
 import { BinaryDownload } from './binary-download.tsx'
@@ -428,7 +428,7 @@ export function EditorHost(props: {
             title={`${t('save')} (Ctrl/Cmd+S)`}
             onClick={() => { controlsRef.current?.save() }}
           >
-            <IconCheckOutline16 size={14} />
+            <IconCheckOutlineRegular size={14} />
           </button>
         )}
         {saveLabel !== '' && (
@@ -442,7 +442,7 @@ export function EditorHost(props: {
             title={t('refresh')}
             onClick={refreshFile}
           >
-            <IconRefreshOutline14 size={14} />
+            <IconRefreshOutlineRegular size={14} />
           </button>
         )}
         <button
@@ -453,7 +453,7 @@ export function EditorHost(props: {
           aria-pressed={treeOpen}
           onClick={toggleTree}
         >
-          <IconFolderOpen16 size={14} />
+          <IconFolderOpenRegular size={14} />
         </button>
       </div>
       <div className={css.editorBody}>

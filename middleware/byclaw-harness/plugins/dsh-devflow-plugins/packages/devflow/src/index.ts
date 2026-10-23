@@ -48,6 +48,8 @@ export { DEFAULT_SERVICE_CLASS, DEV_STAGES, DevflowCardId, SERVICE_CLASSES, isCa
 export type { TransitionContext } from './stages.ts'
 export { decodeJournalEntry, foldArtifactRecords, foldJournal } from './journal.ts'
 export type { JournalFoldState } from './journal.ts'
+export { localWorkspaceIo, toolEnvironmentWorkspaceIo, workspaceIo } from './workspace.ts'
+export type { WorkspaceEntry, WorkspaceExecResult, WorkspaceIo, WorkspaceStats } from './workspace.ts'
 
 /** JSON Schema for the Definition-owned artifact registration record. */
 export const ARTIFACT_RECORD_SCHEMA = {

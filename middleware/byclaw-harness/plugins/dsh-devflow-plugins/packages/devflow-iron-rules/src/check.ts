@@ -25,6 +25,8 @@ import type { MessageSource } from '@deepseek-ai/dsh-llm'
 // `declare module` target is only merged once the module enters the program.
 import type {} from '@deepseek-ai/dsh-shell'
 import type { ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { ResolvedConfig } from './index.ts'
 import { loadRules, watchStatus, workspaceOf } from './rules.ts'
 import type { IronRule } from './types.ts'
@@ -33,7 +35,7 @@ import type { IronRule } from './types.ts'
  * Stamped on every message this plugin contributes so the durable record can
  * never be mistaken for something the user typed.
  */
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'devflow-iron-rules' }
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin:devflow-iron-rules' }
 
 /** First-party tools whose success means the turn produced a code change. */
 const MUTATING_TOOLS = new Set(['write', 'edit'])
@@ -170,7 +172,7 @@ async function runCheckScript(
       timeoutMs: config.checkTimeoutMs,
       signal: AbortSignal.any([signal, timeout]),
     })
-    const result = await ctx.shell.run(spec)
+    const result = await (await ctx.shell.execute(spec)).result()
     return {
       passed: result.exitCode === 0,
       output: result.stdout.text.trim().length > 0 ? result.stdout.text : result.stderr.text,
@@ -199,8 +201,9 @@ function checkableRules(rules: readonly IronRule[]): CheckableRule[] {
  * and a restarted process correctly starts counting again.
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param io - where the rules are read; the scripts themselves run through `ctx.shell`.
  */
-export function applyCheck(ctx: Context, config: ResolvedConfig): void {
+export function applyCheck(ctx: Context, config: ResolvedConfig, io: WorkspaceIo = localWorkspaceIo): void {
   /** Agents whose current turn has landed a file change. */
   const dirty = new WeakSet<Agent>()
   /** Consecutive forced continuations per agent. */
@@ -252,7 +255,7 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
 
     const attempt = (retries.get(agent) ?? 0) + 1
     const workspace = workspaceOf(agent, config)
-    const { rules, warnings, projectRoot, rulesDir } = await loadRules(workspace)
+    const { rules, warnings, projectRoot, rulesDir } = await loadRules(workspace, io)
     for (const warning of warnings) ctx.logger.warn(`devflow-iron-rules: ${warning}`)
 
     const checkable = checkableRules(rules)
@@ -281,7 +284,7 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
     const watched = await Promise.all(
       outcomes
         .filter(({ outcome }) => outcome.passed)
-        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot) })),
+        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot, io) })),
     )
     const zombies = watched.filter(({ status }) => status?.stale === true).map(({ id }) => id)
     if (zombies.length > 0) {

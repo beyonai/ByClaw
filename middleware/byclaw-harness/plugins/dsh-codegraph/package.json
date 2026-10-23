@@ -15,6 +15,7 @@
   },
   "files": [
     "lib",
+    "bridge",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md"
@@ -26,20 +27,25 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify": "pnpm build && pnpm run verify:contract && pnpm run verify:runtime-fixtures",
+    "verify": "pnpm build && pnpm run verify:contract && pnpm run verify:runtime-fixtures && pnpm run verify:tool-environment",
     "verify:contract": "node scripts/verify.mjs",
     "verify:runtime": "node scripts/verify.mjs --runtime",
-    "verify:runtime-fixtures": "node scripts/verify-runtime-fixtures.mjs"
+    "verify:runtime-fixtures": "node scripts/verify-runtime-fixtures.mjs",
+    "verify:tool-environment": "node scripts/verify-tool-environment.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
-    "@deepseek-ai/dsh-mcp-client": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2"
+    "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "3.18.5",
     "@types/node": "24.13.3",
     "js-yaml": "4.2.0",
     "typescript": "5.9.3"

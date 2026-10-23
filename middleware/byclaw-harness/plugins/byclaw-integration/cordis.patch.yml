@@ -17,6 +17,7 @@
           default: -1
           byclaw-dsh: 2
           byclaw-idle-reporter: 2
+          byclaw-tool-env: 2
 
     - id: byclaw-dsh
       name: '@byclaw/dsh-integration'

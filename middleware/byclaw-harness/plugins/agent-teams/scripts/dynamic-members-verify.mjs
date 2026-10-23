@@ -45,12 +45,12 @@ const ctx = {
   } },
   subagents: {
     async sendMessage(parent, childId, content, options) { return this[deliverSubagentPrompt](parent, childId, content, { kind: 'subagent', sessionId: parent.id }, options.signal, 'steer') },
-    getProvider() { return { prepareContinuable() {}, inheritsParentContext: false, capabilities: { persona: true, toolFilter: true } } },
+    getProvider() { return { prepareContinuable() {}, inheritsParentContext: false, capabilities: { agentOptions: true, agentPreset: true, outputSchema: false, depthLimit: true } } },
     list() { return ['spawn'] },
-    async startContinuable(request) {
+    async startActivation(request) {
       if (failSpawn) throw new Error('spawn failed')
       starts.push({ ...request, leaseDepth })
-      return { childId: `child-${starts.length}`, messageId: `welcome-${starts.length}` }
+      return { childId: `child-${starts.length}`, messageId: `welcome-${starts.length}`, result: new Promise(() => {}), async dispose() {} }
     },
     async listChildren() { return [] },
     async listDescendants() { return [] },

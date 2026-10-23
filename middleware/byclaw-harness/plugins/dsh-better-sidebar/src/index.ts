@@ -4,9 +4,9 @@
  * preview route, the /sidebar/bundle lazy-chunk route (client code splits),
  * and the terminal WebSocket upgrade. Every route passes the same
  * browser-trust fence as the /api gateway — Host-header loopback or the
- * web runtime's `trustedHosts` (LAN IP literals sampled at boot plus
- * `--trusted-host` authorities), read per request from the live service
- * value so the fence tracks the same trust source the /api gateway derives
+ * listener's bind IP literal or the `webStartup` service's `trustedHosts`
+ * (`--trusted-host` authorities), read per request from the live service
+ * values so the fence tracks the same trust source the /api gateway derives
  * its list from.
  *
  * All operations are conversation-scoped: requests carry a sessionId, the
@@ -21,13 +21,14 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { Context, SidebarHttpRequest } from './context-types.ts'
 import {
   Config,
-  PrefsSchema,
+  readSidebarPrefs,
   resolveSidebarConfig,
   SIDEBAR_PREFS_DEFAULTS,
   SIDEBAR_PREFS_NS,
   type ResolvedSidebarConfig,
   type SidebarConfig,
   type SidebarPrefs,
+  type SidebarPrefsConfig,
 } from './config.ts'
 import { parentOf, requireAbsolute, listDirectory, rootLabel } from './fs-tree.ts'
 import { writeWorkspaceUpload } from './fs-operations.ts'
@@ -39,14 +40,22 @@ import { isTrustedApiRequest, isLoopbackHostname } from './trust-fence.ts'
 import { registerBundleRoute } from './bundle-route.ts'
 import { launchExternal } from './open-external.ts'
 import * as git from './git.ts'
+import { createGitOps, type GitOps } from './git.ts'
 import {
-  discoverGitWorkspace,
-  resolveGitTarget,
+  createGitWorkspaces,
   type GitTarget,
+  type GitWorkspaces,
   type ResolvedGitTarget,
 } from './git-workspaces.ts'
+import {
+  localGitHost,
+  ToolEnvironmentWorkspace,
+  type WorkspaceFileSystem,
+  type WorkspaceSubprocess,
+} from './workspace-host.ts'
+import { createRemotePtySpawner, remoteDefaultShell, type RemoteTerminalService } from './remote-terminal.ts'
 import { SettingsConflictError } from '@deepseek-ai/dsh-settings'
-import { defaultShell, ensureSpawnHelper, PtyManager, shellDisplayName } from './pty-manager.ts'
+import { defaultShell, ensureSpawnHelper, hostPtyEnvironment, PtyManager, shellDisplayName, type PtyEnvironment, type PtySpawner } from './pty-manager.ts'
 import { AgentPtyRegistry } from './agent-pty.ts'
 import {
   DSH_NODE_PTY_RANGE,
@@ -83,8 +92,8 @@ export type {
 /** Plugin identity for cordis.yml rows. */
 export const name = 'dsh-better-sidebar'
 
-/** Services required before mounting: the webserver routes, the session store, the web runtime's trusted hosts, and the tool registry. */
-export const inject = ['webServer', 'sessions', 'webRuntime', 'tools']
+/** Services required before mounting: the webserver routes, the session store, the web startup's trusted hosts, and the tool registry. */
+export const inject = ['webServer', 'sessions', 'webStartup', 'tools']
 
 /** Content types for the media route, by extension. */
 const MEDIA_TYPES: Record<string, string> = {
@@ -230,17 +239,21 @@ function gitLogQueryOf(payload: unknown): git.GitLogQuery {
  * paths pass through; relative ones join the repo root (falling back to the
  * cwd when the root cannot be resolved, e.g. a bare directory).
  */
-async function resolveGitPath(cwd: string, raw: string, selected?: string): Promise<string> {
+async function resolveGitPath(cwd: string, raw: string, selected: string | undefined, scope: SidebarWorkspaceScope): Promise<string> {
   if (isAbsolute(raw)) return requireAbsolute(raw)
+  const remote = scope.remote
+  const exists = (path: string): Promise<boolean> => remote === undefined
+    ? stat(path).then(() => true).catch(() => false)
+    : remote.stat(path).then(info => info !== undefined).catch(() => false)
   // Prefer the session-relative interpretation when it names an existing
   // path. Git status reports repository-root-relative names, but the sidebar
   // security boundary is the session workspace; this preference keeps files
   // inside a nested session readable without reopening the repository root.
   const sessionPath = requireAbsolute(join(cwd, raw))
-  if (await stat(sessionPath).then(() => true).catch(() => false)) return sessionPath
-  const root = await git.repoRoot(cwd, selected).catch(() => cwd)
+  if (await exists(sessionPath)) return sessionPath
+  const root = await scope.git.repoRoot(cwd, selected).catch(() => cwd)
   const repoPath = requireAbsolute(join(root, raw))
-  if (await stat(repoPath).then(() => true).catch(() => false)) return repoPath
+  if (await exists(repoPath)) return repoPath
 
   // A published plugin can be mounted inside a larger host checkout. In
   // that layout Git reports the host repository root, while an untracked
@@ -249,9 +262,9 @@ async function resolveGitPath(cwd: string, raw: string, selected?: string): Prom
   // fence below still decides whether the resolved file is readable.
   for (let ancestor = dirname(cwd); ancestor !== dirname(ancestor); ancestor = dirname(ancestor)) {
     const packagePath = join(ancestor, 'package.json')
-    if (!await stat(packagePath).then(() => true).catch(() => false)) continue
+    if (!await exists(packagePath)) continue
     const packageRelativePath = requireAbsolute(join(ancestor, raw))
-    if (await stat(packageRelativePath).then(() => true).catch(() => false)) return packageRelativePath
+    if (await exists(packageRelativePath)) return packageRelativePath
   }
   return repoPath
 }
@@ -262,13 +275,14 @@ const READ_HEAD_LIMIT = 4096
 /** Text read of a file with the size cap; binary detection via NUL probe.
  *  Binary reads also return the first {@link READ_HEAD_LIMIT} bytes (base64)
  *  so the client can re-match viewers by content (`detect`). */
-async function readText(path: string, readLimit: number): Promise<{
+async function readText(path: string, readLimit: number, remote?: ToolEnvironmentWorkspace): Promise<{
   content: string
   truncated: boolean
   binary: boolean
   size: number
   head?: string
 }> {
+  if (remote !== undefined) return readToolEnvironmentText(remote, path, readLimit)
   const info = await stat(path).catch((error: unknown) => {
     throw new SidebarError('fs-error', `cannot read "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
   })
@@ -298,6 +312,50 @@ async function readText(path: string, readLimit: number): Promise<{
   } finally {
     await handle.close()
   }
+}
+
+/** {@link readText} through the tool environment's `ctx.fs`. */
+async function readToolEnvironmentText(remote: ToolEnvironmentWorkspace, path: string, readLimit: number): Promise<{
+  content: string
+  truncated: boolean
+  binary: boolean
+  size: number
+  head?: string
+}> {
+  const failure = (error: unknown): never => {
+    throw new SidebarError('fs-error', `cannot read "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
+  }
+  const info = await remote.stat(path).catch(failure)
+  if (info === undefined) failure(new Error('no such file or directory'))
+  if (info!.type === 'directory') throw new SidebarError('fs-error', `"${path}" is a directory`, 400)
+  const size = info!.size
+  const slice = await remote.readHead(path, Math.min(size, readLimit)).catch(failure)
+  const binary = slice.includes(0)
+  return {
+    content: binary ? '' : slice.toString('utf8'),
+    truncated: size > readLimit,
+    binary,
+    size,
+    head: binary ? slice.subarray(0, Math.min(slice.length, READ_HEAD_LIMIT)).toString('base64') : undefined,
+  }
+}
+
+/**
+ * Where one plugin instance's workspace operations run, and the instance's
+ * own Git caches. Default mode: this host (`remote` undefined). Shared-host
+ * mode (`workspaceOnToolEnvironment`): the user's tool environment.
+ */
+interface SidebarWorkspaceScope {
+  /** The tool-environment workspace; undefined = this host's filesystem and git. */
+  remote?: ToolEnvironmentWorkspace
+  /** Per-instance Git operations (own discovery cache). */
+  git: GitOps
+  /** Per-instance Git inventory (own inventory cache). */
+  gitWorkspaces: GitWorkspaces
+  /** Working directory before a session has one. */
+  cwdFallback: () => string
+  /** Display shell for terminal tab titles. */
+  shell: () => Promise<string>
 }
 
 /** One API method dispatch table entry. */
@@ -371,20 +429,21 @@ function buildApi(
   ptyManager: PtyManager | null,
   agentPtyRegistry: AgentPtyRegistry | null,
   resolved: ResolvedSidebarConfig,
-  terminalShell: string,
   getSettings: () => SidebarSettingsFace | undefined,
+  scope: SidebarWorkspaceScope,
 ): Record<string, ApiMethod> {
+  const { remote, git: gitOps, gitWorkspaces } = scope
   const cwdOf = (payload: unknown): { sessionId: string; cwd: string } => {
     const sessionId = requireString(payload, 'sessionId')
     const record = payload as { cwd?: unknown } | null
     const clientCwd = typeof record?.cwd === 'string' && record.cwd !== '' ? record.cwd : undefined
-    return { sessionId, cwd: sessionCwdOf(ctx, sessionId, clientCwd) }
+    return { sessionId, cwd: sessionCwdOf(ctx, sessionId, clientCwd, scope.cwdFallback) }
   }
   /** Resolve one request target against the session's authoritative inventory. */
   const gitOperationOf = async (payload: unknown): Promise<{ cwd: string; resolved: ResolvedGitTarget }> => {
     const { cwd } = cwdOf(payload)
     try {
-      return { cwd, resolved: await resolveGitTarget(cwd, gitTargetOf(payload)) }
+      return { cwd, resolved: await gitWorkspaces.resolveGitTarget(cwd, gitTargetOf(payload)) }
     } catch (error) {
       if (error instanceof git.GitCommandError && error.code === 'git-target') {
         throw new SidebarError('bad-request', error.message)
@@ -410,8 +469,8 @@ function buildApi(
     'fs.tree': async (payload) => {
       const { cwd } = cwdOf(payload)
       const record = payload as { path?: unknown }
-      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'))
-      return listDirectory(target, resolved.listLimit)
+      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'), remote)
+      return listDirectory(target, resolved.listLimit, remote)
     },
     'fs.search': async (payload) => {
       // The editor side panel's global name search: rooted at the session
@@ -419,7 +478,7 @@ function buildApi(
       // must never escape the workspace), budgeted inside searchFiles.
       const { cwd } = cwdOf(payload)
       const query = requireString(payload, 'query')
-      return searchFiles(cwd, query)
+      return searchFiles(cwd, query, {}, remote)
     },
     'fs.read': async (payload) => {
       const { cwd } = cwdOf(payload)
@@ -428,15 +487,22 @@ function buildApi(
       // child-repo path is relative to the selected repoRoot, not the session
       // cwd; thread it so the path resolves inside the authorized workspace.
       const selected = selectedRepoOf(payload)
-      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected))
-      const { content, truncated, binary, size, head } = await readText(path, resolved.readLimit)
+      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected, scope), remote)
+      const { content, truncated, binary, size, head } = await readText(path, resolved.readLimit, remote)
       if (binary) return { kind: 'binary', size, truncated, head }
       return { kind: 'text', content, truncated }
     },
     'fs.write': async (payload) => {
       const { cwd } = cwdOf(payload)
-      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'))
+      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'), remote)
       const content = requireString(payload, 'content')
+      if (remote !== undefined) {
+        // The provider writes atomically and creates missing parents.
+        await remote.writeText(path, content).catch((error: unknown) => {
+          throw new SidebarError('fs-error', `cannot write "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
+        })
+        return { ok: true }
+      }
       const tmp = `${path}.dsh-sidebar-tmp-${process.pid}`
       try {
         await mkdir(dirname(path), { recursive: true })
@@ -454,30 +520,30 @@ function buildApi(
       if (record?.refresh !== undefined && typeof record.refresh !== 'boolean') {
         throw new SidebarError('bad-request', 'invalid "refresh"')
       }
-      return discoverGitWorkspace(cwd, { refresh: record?.refresh === true })
+      return gitWorkspaces.discoverGitWorkspace(cwd, { refresh: record?.refresh === true })
     },
     'git.status': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      return git.status(resolved.worktree.path)
+      return gitOps.status(resolved.worktree.path)
     },
     'git.diff': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
       const record = payload as { path?: unknown; staged?: unknown }
       const path = record.path === undefined ? undefined : requireGitRelativePath(payload, 'path')
-      return { diff: await git.diff(resolved.worktree.path, path, record.staged === true) }
+      return { diff: await gitOps.diff(resolved.worktree.path, path, record.staged === true) }
     },
     'git.stage': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
       const record = payload as { path?: unknown }
       const path = record.path === undefined ? undefined : requireGitRelativePath(payload, 'path')
-      await git.stage(resolved.worktree.path, path)
+      await gitOps.stage(resolved.worktree.path, path)
       return { ok: true }
     },
     'git.unstage': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
       const record = payload as { path?: unknown }
       const path = record.path === undefined ? undefined : requireGitRelativePath(payload, 'path')
-      await git.unstage(resolved.worktree.path, path)
+      await gitOps.unstage(resolved.worktree.path, path)
       return { ok: true }
     },
     'git.stage-paths': async (payload) => {
@@ -485,58 +551,58 @@ function buildApi(
       // invalid member cannot partially apply the preceding valid paths.
       const paths = requireGitRelativePaths(payload, 'paths')
       const { resolved } = await gitOperationOf(payload)
-      await git.stagePaths(resolved.worktree.path, paths)
+      await gitOps.stagePaths(resolved.worktree.path, paths)
       return { ok: true }
     },
     'git.unstage-paths': async (payload) => {
       const paths = requireGitRelativePaths(payload, 'paths')
       const { resolved } = await gitOperationOf(payload)
-      await git.unstagePaths(resolved.worktree.path, paths)
+      await gitOps.unstagePaths(resolved.worktree.path, paths)
       return { ok: true }
     },
     'git.commit': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
       const message = requireString(payload, 'message')
-      await git.commit(resolved.worktree.path, message)
+      await gitOps.commit(resolved.worktree.path, message)
       return { ok: true }
     },
     'git.branch': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      return git.branches(resolved.worktree.path)
+      return gitOps.branches(resolved.worktree.path)
     },
     'git.checkout': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      await git.checkout(resolved.worktree.path, requireString(payload, 'branch'))
+      await gitOps.checkout(resolved.worktree.path, requireString(payload, 'branch'))
       return { ok: true }
     },
     'git.log': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      return git.logPage(resolved.worktree.path, gitLogQueryOf(payload))
+      return gitOps.logPage(resolved.worktree.path, gitLogQueryOf(payload))
     },
     'git.commit-diff': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      return { diff: await git.commitDiff(resolved.worktree.path, requireString(payload, 'hash')) }
+      return { diff: await gitOps.commitDiff(resolved.worktree.path, requireString(payload, 'hash')) }
     },
     'git.discard': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      await git.discard(resolved.worktree.path, requireGitRelativePath(payload, 'path'))
+      await gitOps.discard(resolved.worktree.path, requireGitRelativePath(payload, 'path'))
       return { ok: true }
     },
     'git.revert': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      await git.revert(resolved.worktree.path, requireString(payload, 'hash'))
+      await gitOps.revert(resolved.worktree.path, requireString(payload, 'hash'))
       return { ok: true }
     },
     'git.cherry-pick': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
-      await git.cherryPick(resolved.worktree.path, requireString(payload, 'hash'))
+      await gitOps.cherryPick(resolved.worktree.path, requireString(payload, 'hash'))
       return { ok: true }
     },
     'git.show': async (payload) => {
       const { resolved } = await gitOperationOf(payload)
       const path = requireGitRelativePath(payload, 'path')
       const rev = requireString(payload, 'rev')
-      return { content: await git.show(resolved.worktree.path, rev, path) }
+      return { content: await gitOps.show(resolved.worktree.path, rev, path) }
     },
     // Release a terminal immediately. The WebSocket close frame already does
     // this while the socket is open; this route covers the tab-close that
@@ -563,7 +629,8 @@ function buildApi(
     // reason `pty-deps-missing` the client fetches the full repair details
     // here — the close reason itself is capped at 123 bytes, too small for
     // the pasteable command.
-    'terminal.deps': () => depsStatus(),
+    // Tool-environment terminals do not use node-pty on this host.
+    'terminal.deps': () => remote === undefined ? depsStatus() : { ok: true },
     // Background jobs: read one job's output (a REPLAY of what the model
     // has read so far, from the owner session's event log — the model's
     // job_output cursor is never touched, so the human pane can never steal
@@ -579,7 +646,10 @@ function buildApi(
     // this to title terminal tabs with the shell name instead of a numbered
     // "Terminal N" label; the shell itself is configured through
     // `cordis.patch.yml` (`config.shell`) or resolved by the host default.
-    'shell.get': () => ({ shell: terminalShell, name: shellDisplayName(terminalShell) }),
+    'shell.get': async () => {
+      const shell = await scope.shell()
+      return { shell, name: shellDisplayName(shell) }
+    },
     // The side card preferences. The settings service is optional in the
     // composition; while absent the routes report undefined and the client
     // keeps the schema defaults. Writes are revision-guarded: a stale editor
@@ -696,6 +766,11 @@ function buildApi(
     'open.external': (payload) => {
       const record = payload as { action?: unknown } | null
       const action = record?.action
+      // The OS launcher runs on this host, which cannot see the tool
+      // environment's files (and is shared between users on a shared host).
+      if (remote !== undefined) {
+        throw new SidebarError('bad-request', 'opening with an external application is unavailable when the workspace runs in a tool environment', 400)
+      }
       if (action === 'reveal') return launchExternal('reveal', requireString(payload, 'path'))
       if (action === 'url') return launchExternal('url', requireString(payload, 'url'))
       throw new SidebarError('bad-request', 'action must be "reveal" or "url"')
@@ -713,31 +788,66 @@ function buildApi(
 
 /**
  * Plugin body: mount the fenced routes and the pty lifecycle.
- * @param ctx - host plugin context (webServer, sessions, webRuntime).
+ * @param ctx - host plugin context (webServer, sessions, webStartup).
  * @param config - deployment-provided limits; the Loader validates against
  * {@link Config} and fills defaults, direct callers get them from
  * {@link resolveSidebarConfig}.
  */
-export function apply(ctx: Context, config?: SidebarConfig): void {
+export function apply(ctx: Context, config?: SidebarConfig & SidebarPrefsConfig): void {
+  const resolved = resolveSidebarConfig(config)
+  // Shared-host mode: the user workspace lives in the tool environment, so
+  // files go through ctx.fs, git and uploads through ctx.subprocess, and
+  // terminals through ctx.subprocess.spawnTerminal. Default mode keeps this
+  // host's node-pty, fs and git.
+  const remote = resolved.workspaceOnToolEnvironment
+    ? new ToolEnvironmentWorkspace(() => ({
+      fs: ctx.get('fs') as WorkspaceFileSystem | undefined,
+      subprocess: ctx.get('subprocess') as WorkspaceSubprocess | undefined,
+    }))
+    : undefined
+  const terminalService = (): RemoteTerminalService => remote!.subprocess() as unknown as RemoteTerminalService
   // pnpm strips the executable bit from node-pty's prebuilt spawn-helper;
   // restore it before any terminal can spawn (idempotent).
-  ensureSpawnHelper()
-  const resolved = resolveSidebarConfig(config)
+  if (remote === undefined) ensureSpawnHelper()
   // One shell resolution feeds BOTH terminal surfaces: the UI tabs and the
   // model-facing terminal_* tools. They must stay in lockstep, otherwise a
   // configured shell fixes one surface and silently leaves the other on the
-  // platform default.
-  const terminalShell = defaultShell({ explicit: resolved.shell })
-  // The web runtime's bind-derived trust list (boot-sampled LAN literals
-  // plus --trusted-host authorities) — the authoritative source the /api
-  // gateway fence derives its list from. Read per request from the live
-  // service value; a replaced list takes effect without a plugin restart.
-  const fence = (req: SidebarHttpRequest): boolean => isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
+  // platform default. In tool-environment mode an empty shell means "the
+  // tool environment's shell", resolved remotely at spawn time — this
+  // host's $SHELL / passwd entry says nothing about the user's sandbox.
+  const terminalShell = remote === undefined ? defaultShell({ explicit: resolved.shell }) : resolved.shell
+  const remoteShell = remote === undefined ? undefined : remoteDefaultShell(terminalService)
+  // Per-instance workspace scope: every cache is owned by this plugin
+  // instance (a shared host runs one instance per user, and users share
+  // workspace paths such as /by).
+  const gitHost = remote ?? localGitHost
+  const workspaceScope: SidebarWorkspaceScope = {
+    remote,
+    git: createGitOps(gitHost),
+    gitWorkspaces: createGitWorkspaces(gitHost),
+    cwdFallback: remote === undefined
+      ? () => process.cwd()
+      : () => { throw new SidebarError('bad-request', 'the session has no working directory yet') },
+    shell: async () => terminalShell !== '' ? terminalShell : await remoteShell!().catch(() => '/bin/bash'),
+  }
+  // The invocation's --trusted-host authorities (webStartup) plus the
+  // listener's own bind IP literal — the same sources the DSH 0.2.1 /api
+  // gateway fence accepts (0.2.1 replaced the webRuntime service and its
+  // bind-derived LAN list with these). Read per request from the live
+  // service values; a replaced list takes effect without a plugin restart.
+  const fence = (req: SidebarHttpRequest): boolean =>
+    isTrustedApiRequest(req, ctx.webStartup.trustedHosts, ctx.webServer.host)
   // node-pty is loaded lazily, never at module top level (issue #140): a
   // missing or broken install must degrade THIS plugin — terminal tab shows
   // a repair command, agent terminal tools stay unregistered — instead of
   // failing the plugin load and taking the whole `dsh web` server down.
-  const nodePty = loadNodePty()
+  const nodePty: PtySpawner | null = remote === undefined
+    ? loadNodePty()
+    : createRemotePtySpawner(terminalService, remoteShell!)
+  // The terminal environment: the host process environment (default), or
+  // nothing from this host in tool-environment mode — the provider supplies
+  // the sandbox's own scrubbed base plus TERM.
+  const ptyEnvironment: PtyEnvironment = remote === undefined ? hostPtyEnvironment : () => ({})
   if (nodePty === null) {
     const status = depsStatus()
     const detail = status.ok
@@ -746,7 +856,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     ctx.logger?.warn(`[dsh-better-sidebar] node-pty (${DSH_NODE_PTY_RANGE}) failed to load: ${detail}`)
   }
   const ptyManager = nodePty !== null
-    ? new PtyManager(terminalShell, resolved.terminalsPerSession, resolved.shellArgs, nodePty)
+    ? new PtyManager(terminalShell, resolved.terminalsPerSession, resolved.shellArgs, nodePty, ptyEnvironment)
     : null
   // The agent-owned terminal registry: parallel to the UI-tab ptyManager,
   // keyed by uuid (the model's opaque handle) instead of `${sessionId}:${tabId}`,
@@ -754,7 +864,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   // through the terminal_create tool; the sidebar view attaches through the
   // same /sidebar/ws/terminal upgrade with ?uuid=... instead of ?tab=...
   const agentPtyRegistry = nodePty !== null
-    ? new AgentPtyRegistry(terminalShell, resolved.shellArgs, nodePty)
+    ? new AgentPtyRegistry(terminalShell, resolved.shellArgs, nodePty, ptyEnvironment, remote === undefined)
     : null
   // The model-facing open-request registry: queues `sidebar_open` requests
   // per session and pushes them to connected sidebar views over the
@@ -763,10 +873,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   const agentOpenRegistry = new AgentOpenRegistry()
 
   // ── User-facing "Side card" preferences ──────────────────────────────────
-  // Register the namespace with the settings provider so the Settings page
-  // (client half) can render and persist the new-conversation defaults. The
-  // DSH settings RPC domain (api-proxy) only serves allowlisted namespaces to
-  // configuration clients, so the client reaches this namespace through the
+  // The preferences are volatile fields of this row's Config (DSH 0.2.1
+  // replaced settings.register with volatile row config): the settings
+  // service describes and writes them under this plugin's profile entry id,
+  // the Loader commits writes into the running references and emits
+  // `loader/volatile-update`. The client reaches the namespace through the
   // plugin's own fenced routes below ('settings.get'/'settings.update'),
   // which call the seam in-process. Deployments without a settings service
   // simply never fill the face and the client falls back to the defaults.
@@ -786,7 +897,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         // Degraded mode (node-pty unavailable): never register the terminal
         // tools — every one of them would fail at spawn time.
         if (agentPtyRegistry === null) return
-        toolsDisposers = registerTools(ctx, agentPtyRegistry, (sessionId) => sessionCwdOf(ctx, sessionId), () => shellOverridesOf(() => settingsFace))
+        toolsDisposers = registerTools(ctx, agentPtyRegistry, (sessionId) => sessionCwdOf(ctx, sessionId, undefined, workspaceScope.cwdFallback), () => shellOverridesOf(() => settingsFace))
       }
     } else if (toolsDisposers !== null) {
       toolsDisposers()
@@ -798,14 +909,13 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     }
   }
   ctx.inject(['settings'], (sctx) => {
-    const ns = SIDEBAR_PREFS_NS
-    // The structural settings mirror types `schema` as unknown, so the
-    // generic is not inferred here; the real service resolves it from the
-    // schemastery schema (PrefsSchema) — narrow the owner scope explicitly.
-    const scope = sctx.settings.register(ns, PrefsSchema) as {
-      get(): SidebarPrefs
-      watch(callback: (next: SidebarPrefs, prev: SidebarPrefs) => void): () => void
-    }
+    // The settings namespace is this plugin's profile entry id (the bundle
+    // row's `better-sidebar`, or an aggregate's own id); direct callers
+    // without a Loader entry keep the historical namespace name.
+    const entry = (ctx.fiber as { entry?: { options?: { id?: unknown } } } | undefined)?.entry
+    const ns = typeof entry?.options?.id === 'string' ? entry.options.id : SIDEBAR_PREFS_NS
+    // The live preferences: the row config's volatile references.
+    const scope = { get: (): SidebarPrefs => readSidebarPrefs(config) }
     const viewOf = (): { value?: unknown; revision?: number } => {
       const descriptor = sctx.settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === ns)
       return descriptor === undefined
@@ -845,7 +955,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
           openToolsDisposers = registerOpenTool(
             ctx,
             agentOpenRegistry,
-            (sessionId) => sessionCwdOf(ctx, sessionId),
+            (sessionId) => sessionCwdOf(ctx, sessionId, undefined, workspaceScope.cwdFallback),
             () => {
               const view = settingsFace?.get()
               const value = view?.value
@@ -853,6 +963,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
                 ? value as SidebarPrefs
                 : SIDEBAR_PREFS_DEFAULTS
             },
+            remote,
           )
         }
       } else if (openToolsDisposers !== null) {
@@ -864,12 +975,15 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     syncOpenToolsGate()
     // ONE watch subscription drives both gates: settings commits re-evaluate
     // the terminal tools AND the open tool together (each gate is idempotent
-    // and owns its own disposer).
-    scope.watch(() => { syncToolsGate(scope); syncOpenToolsGate() })
+    // and owns its own disposer). The Loader delivers `loader/volatile-update`
+    // only to listeners of the owning fiber, so the listener sits on the
+    // plugin context; the effect ties it to this settings child's lifetime.
+    sctx.effect(() => ctx.on('loader/volatile-update', () => { syncToolsGate(scope); syncOpenToolsGate() }),
+      'dsh-better-sidebar: side card preference watch')
   })
 
   // ── JSON API ────────────────────────────────────────────────────────────
-  const api = buildApi(ctx, ptyManager, agentPtyRegistry, resolved, terminalShell, () => settingsFace)
+  const api = buildApi(ctx, ptyManager, agentPtyRegistry, resolved, () => settingsFace, workspaceScope)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: '/sidebar/api',
@@ -927,13 +1041,14 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         if (sessionId === null || dir === null || relativePath === null || relativePath.trim() === '') {
           throw new SidebarError('bad-request', 'sessionId, dir, and relativePath are required')
         }
-        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined, workspaceScope.cwdFallback)
         const { path, size } = await writeWorkspaceUpload({
           cwd,
           dir,
           relativePath,
           chunks: req,
           limit: resolved.uploadLimit,
+          workspace: remote,
         })
         writeOk(res, { path, size })
       } catch (error) {
@@ -968,14 +1083,10 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         const sessionId = url.searchParams.get('sessionId')
         const raw = url.searchParams.get('path')
         if (sessionId === null || raw === null) throw new SidebarError('bad-request', 'sessionId and path are required')
-        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
-        const path = await ensureWorkspacePath(cwd, raw)
-        const info = await stat(path)
-        if (!info.isFile() || info.size > resolved.mediaLimit) {
-          throw new SidebarError('fs-error', 'not a file or too large', 400)
-        }
+        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined, workspaceScope.cwdFallback)
+        const path = await ensureWorkspacePath(cwd, raw, remote)
+        const body = await readMediaFile(path, resolved.mediaLimit, remote)
         const type = mediaTypeForPath(path)
-        const body = await readFile(path)
         // Raw bytes either way (binary-safe); ?download=1 switches the
         // disposition so the browser saves the file instead of showing it.
         const headers: Record<string, string> = { 'content-type': type, 'cache-control': 'no-cache' }
@@ -1027,14 +1138,10 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         // back to the process cwd and is normally refused by the workspace
         // real-path guard, with the same semantics as the media route's
         // fallback.
-        const cwd = sessionCwdOf(ctx, sessionId)
-        const absolute = await ensureWorkspacePath(cwd, path)
-        const info = await stat(absolute)
-        if (!info.isFile() || info.size > resolved.mediaLimit) {
-          throw new SidebarError('fs-error', 'not a file or too large', 400)
-        }
+        const cwd = sessionCwdOf(ctx, sessionId, undefined, workspaceScope.cwdFallback)
+        const absolute = await ensureWorkspacePath(cwd, path, remote)
+        const body = await readMediaFile(absolute, resolved.mediaLimit, remote)
         const type = mediaTypeForPath(absolute)
-        const body = await readFile(absolute)
         res.writeHead(200, {
           'content-type': type === 'text/html' ? 'text/html; charset=utf-8' : type,
           'cache-control': 'no-cache',
@@ -1076,6 +1183,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
           ctx, ptyManager, agentPtyRegistry, ws, req, resolved,
           () => shellOverridesOf(() => settingsFace),
           () => pluginDisposing,
+          { gitWorkspaces: workspaceScope.gitWorkspaces, cwdFallback: workspaceScope.cwdFallback },
         )
       })
     },
@@ -1134,6 +1242,22 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     agentListWss.close()
     agentOpenWss.close()
   }, 'dsh-better-sidebar: teardown')
+}
+
+/** Whole regular file for the media/HTML routes, refused above `limit`. */
+async function readMediaFile(path: string, limit: number, remote: ToolEnvironmentWorkspace | undefined): Promise<Buffer> {
+  if (remote === undefined) {
+    const info = await stat(path)
+    if (!info.isFile() || info.size > limit) {
+      throw new SidebarError('fs-error', 'not a file or too large', 400)
+    }
+    return readFile(path)
+  }
+  const info = await remote.stat(path)
+  if (info === undefined || info.type !== 'file' || info.size > limit) {
+    throw new SidebarError('fs-error', 'not a file or too large', 400)
+  }
+  return remote.readFile(path, limit)
 }
 
 /** Push queued `sidebar_open` requests for one session to a connected view. */

@@ -699,12 +699,12 @@ await spawnMember(
     subagents: {
       getProvider: () => ({
         prepareContinuable: () => undefined,
-        capabilities: { persona: true, toolFilter: true },
+        capabilities: { agentOptions: true, agentPreset: true, outputSchema: false, depthLimit: true },
       }),
       list: () => ['spawn'],
-      startContinuable: async (spec) => {
+      startActivation: async (spec) => {
         startSpec = spec
-        return { childId: 'spawned-member', messageId: 'welcome-message' }
+        return { childId: 'spawned-member', messageId: 'welcome-message', result: new Promise(() => {}), async dispose() {} }
       },
     },
   },

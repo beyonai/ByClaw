@@ -3,6 +3,7 @@
 import { createCipheriv } from 'node:crypto'
 import { createServer } from 'node:http'
 import assert from 'node:assert/strict'
+import { normalizeContext } from '@earendil-works/pi-ai'
 import * as ModelRuntime from '../lib/model-runtime.js'
 
 const {
@@ -928,7 +929,8 @@ try {
     const profile = adapter.config.profiles().get(selection.provider)
     for await (const _event of profile.piProvider.streamSimple(
       profile.piProvider.getModels()[0],
-      { messages: [{ role: 'user', content: 'hello', timestamp: 0 }], tools: devflowTools },
+      // pi-ai 1.x providers take a normalized transcript; tools ride its leading system message.
+      normalizeContext({ messages: [{ role: 'user', content: 'hello', timestamp: 0 }], tools: devflowTools }),
       { apiKey: record.authToken, maxRetries: 0 },
     )) { /* consume the response so the request reaches the wire server */ }
     const wireTools = wireRequests.at(-1).body.tools

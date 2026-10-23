@@ -29,6 +29,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from './context-types.ts'
 import type { SidebarPrefs } from './prefs-shared.ts'
+import type { ToolEnvironmentWorkspace } from './workspace-host.ts'
 
 /** What the model asked to open. */
 export type AgentOpenKind = 'file' | 'folder' | 'url'
@@ -132,7 +133,7 @@ function textRender<T>(fn: (value: T) => string): (_args: unknown, value: unknow
 }
 
 /** Classify a raw target: http(s) URL or a local path (stat-driven). */
-async function classifyTarget(raw: string, cwd: string): Promise<{ kind: AgentOpenKind; target: string; title: string }> {
+async function classifyTarget(raw: string, cwd: string, workspace?: ToolEnvironmentWorkspace): Promise<{ kind: AgentOpenKind; target: string; title: string }> {
   if (/^https?:\/\//i.test(raw)) {
     let parsed: URL
     try {
@@ -153,6 +154,14 @@ async function classifyTarget(raw: string, cwd: string): Promise<{ kind: AgentOp
     throw new Error('sidebar_open only accepts http:// and https:// URLs; use a local path for files')
   }
   const target = resolve(isAbsolute(raw) ? raw : join(cwd, raw))
+  if (workspace !== undefined) {
+    const remote = await workspace.stat(target).catch((error: unknown) => {
+      throw new Error(`cannot open "${target}": ${error instanceof Error ? error.message : String(error)}`)
+    })
+    if (remote === undefined) throw new Error(`"${raw}" does not exist (resolved to "${target}")`)
+    const remoteTitle = basenameOf(target)
+    return { kind: remote.type === 'directory' ? 'folder' : 'file', target, title: remoteTitle === '' ? raw : remoteTitle }
+  }
   let info
   try {
     info = await stat(target)
@@ -190,6 +199,7 @@ function isWindowsDrivePrefix(raw: string): boolean {
  * @param registry - the open-request registry (per-session queue + views).
  * @param resolveCwd - live cwd resolver for one session id.
  * @param readPrefs - live resolved side card prefs (for tab enable gates).
+ * @param workspace - the tool-environment workspace; omitted = this host's filesystem.
  * @returns a disposer that unregisters the tool.
  */
 export function registerOpenTool(
@@ -197,6 +207,7 @@ export function registerOpenTool(
   registry: AgentOpenRegistry,
   resolveCwd: (sessionId: string) => string,
   readPrefs: () => SidebarPrefs,
+  workspace?: ToolEnvironmentWorkspace,
 ): () => void {
   return ctx.tools.register(defineTool({
     name: 'sidebar_open',
@@ -246,7 +257,7 @@ export function registerOpenTool(
       exec.signal.throwIfAborted()
       const sessionId = sessionIdOf(exec)
       const cwd = resolveCwd(sessionId)
-      const { kind, target, title: defaultTitle } = await classifyTarget(args.target, cwd)
+      const { kind, target, title: defaultTitle } = await classifyTarget(args.target, cwd, workspace)
       // A disabled target tab type would make the client no-op the open:
       // report the real cause to the model instead of a silent success.
       const prefs = readPrefs()

@@ -10,6 +10,7 @@
 import { opendir, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { SidebarError } from './wire.ts'
+import type { ToolEnvironmentWorkspace } from './workspace-host.ts'
 
 /** One explorer row. */
 export interface SidebarFsEntry {
@@ -40,10 +41,12 @@ export function compareEntries(a: SidebarFsEntry, b: SidebarFsEntry): number {
  * List one directory level.
  * @param path - absolute directory path.
  * @param maxEntries - row bound of one level (extra rows flag `truncated`).
+ * @param workspace - the tool-environment workspace; omitted = this host's filesystem.
  * @returns the sorted listing.
  * @throws {SidebarError} fs-error when the level is unreadable or not a directory.
  */
-export async function listDirectory(path: string, maxEntries = 1000): Promise<SidebarFsListing> {
+export async function listDirectory(path: string, maxEntries = 1000, workspace?: ToolEnvironmentWorkspace): Promise<SidebarFsListing> {
+  if (workspace !== undefined) return listToolEnvironmentDirectory(workspace, path, maxEntries)
   let level
   try {
     level = await opendir(path)
@@ -80,6 +83,27 @@ export async function listDirectory(path: string, maxEntries = 1000): Promise<Si
   await probeSymlinkTargets(rows)
   rows.sort(compareEntries)
   return { path, entries: rows, truncated: overflow > 0 }
+}
+
+/** One level listed through the tool environment's `ctx.fs` (links already followed by the provider). */
+async function listToolEnvironmentDirectory(workspace: ToolEnvironmentWorkspace, path: string, maxEntries: number): Promise<SidebarFsListing> {
+  let entries
+  try {
+    entries = await workspace.listDir(path)
+  } catch (error) {
+    if (error instanceof SidebarError) throw error
+    throw new SidebarError('fs-error', `cannot list "${path}": ${messageOf(error)}`, 400)
+  }
+  const rows: SidebarFsEntry[] = entries.slice(0, maxEntries).map(entry => ({
+    name: entry.name,
+    path: join(path, entry.name),
+    isDir: entry.isDir,
+    isSymlink: entry.isSymlink,
+    broken: entry.broken,
+    hidden: entry.name.startsWith('.'),
+  }))
+  rows.sort(compareEntries)
+  return { path, entries: rows, truncated: entries.length > maxEntries }
 }
 
 /** How many symlink target stats run in flight during one level listing. */

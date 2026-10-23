@@ -17,6 +17,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { localWorkspaceIo } from '@zhchxiao123/dsh-devflow'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 import type { ResolvedConfig } from './index.ts'
 import { loadRules, rulesByteSize, workspaceOf } from './rules.ts'
 import type { DevflowIronRulesSource, IronRule } from './types.ts'
@@ -216,8 +218,9 @@ export function buildAddition(rule: IronRule, digest: string, superseded: readon
  * Mount the residency half of the plugin.
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param io - where the rules are read.
  */
-export function applyInject(ctx: Context, config: ResolvedConfig): void {
+export function applyInject(ctx: Context, config: ResolvedConfig, io: WorkspaceIo = localWorkspaceIo): void {
   ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
     // DELEGATE FIRST. Returning `enter` without calling next() short-circuits
     // every later pre-step listener — `dsh-agent-instructions` and
@@ -226,7 +229,7 @@ export function applyInject(ctx: Context, config: ResolvedConfig): void {
     const downstream = await next()
     if (downstream.kind !== 'enter') return downstream
 
-    const { rules, warnings } = await loadRules(workspaceOf(agent, config))
+    const { rules, warnings } = await loadRules(workspaceOf(agent, config), io)
     for (const warning of warnings) ctx.logger.warn(`devflow-iron-rules: ${warning}`)
     if (rules.length === 0) return downstream
 

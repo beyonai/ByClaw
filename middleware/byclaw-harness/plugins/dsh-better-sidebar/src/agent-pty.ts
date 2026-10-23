@@ -12,9 +12,8 @@
  * Both registries share the same shell resolver and spawn-helper fix.
  */
 import { randomUUID } from 'node:crypto'
-import type { IPty } from 'node-pty'
-import { ensureSpawnHelper, shellSpawnArgs } from './pty-manager.ts'
-import { loadRequiredNodePty, type NodePtyModule } from './pty-deps.ts'
+import { ensureSpawnHelper, hostPtyEnvironment, shellSpawnArgs, type PtyEnvironment, type PtyProcess, type PtySpawner } from './pty-manager.ts'
+import { loadRequiredNodePty } from './pty-deps.ts'
 import { SidebarError } from './wire.ts'
 
 /** Per-agent-terminal transcript bound (bytes kept for replay and reads). */
@@ -107,7 +106,7 @@ export interface AgentTerminalHandle {
   /** The working directory the process was spawned with. */
   cwd: string
   /** The live pty process. */
-  pty: IPty
+  pty: PtyProcess
   /** Output accumulated since spawn (bounded; head dropped when over the limit). */
   transcript: string
   /** Whether the top-level process exited (transcript stays replayable). */
@@ -193,10 +192,14 @@ export class AgentPtyRegistry {
   constructor(
     private readonly shell: string,
     private readonly shellArgs: string[] = [],
-    /** The loaded node-pty module (injected so a broken install degrades instead of crashing the plugin). */
-    private readonly nodePty: NodePtyModule = loadRequiredNodePty(),
+    /** The loaded node-pty module (injected so a broken install degrades instead of crashing the plugin), or a remote terminal spawner. */
+    private readonly nodePty: PtySpawner = loadRequiredNodePty(),
+    /** Environment of each spawned terminal (default: the host process environment). */
+    private readonly environment: PtyEnvironment = hostPtyEnvironment,
+    /** Whether terminals are node-pty processes on this host (the spawn-helper fix applies only then). */
+    hostPty = true,
   ) {
-    ensureSpawnHelper()
+    if (hostPty) ensureSpawnHelper()
   }
 
   /**
@@ -224,7 +227,7 @@ export class AgentPtyRegistry {
       cols: dims.cols,
       rows: dims.rows,
       cwd,
-      env: { ...process.env },
+      env: this.environment(),
     })
     const handle: AgentTerminalHandle = {
       uuid,

@@ -11,6 +11,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture from '../../../tests/working-directory-fixture'
 import AgentRuntime from '@deepseek-ai/dsh-agent'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
@@ -119,6 +120,7 @@ async function boot(options: {
   await ctx.plugin(LocalBashExecutor).await()
   await ctx.plugin(AgentRuntime).await()
   await ctx.plugin(AgentDefaultModel, { provider: 'test-provider', model: 'test-model' }).await()
+  await ctx.plugin(WorkingDirectoryFixture)
   await ctx.plugin(SubagentRuntime).await()
   const calls: CheckerCall[] = []
   if (options.withProvider !== false) {

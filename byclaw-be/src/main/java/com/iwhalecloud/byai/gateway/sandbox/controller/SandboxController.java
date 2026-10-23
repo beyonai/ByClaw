@@ -381,8 +381,10 @@ public class SandboxController {
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
                 () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
 
-            // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射
-            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+            // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
+            // 未对登录开放的规格（enabled=0，例如工具沙箱）只是被按需启动，不是用户的选择，不写入首选。
+            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
+                && sandboxService.isServiceKeyEnabled(finalServiceKey)) {
                 sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
             } else if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
                 sandboxService.removePreferredServiceKey(userCode);
