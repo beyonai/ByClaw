@@ -321,4 +321,33 @@ describe('TaskExecutionPlan', () => {
       preserveAgentContext: true,
     });
   });
+
+  it('does not render empty execution placeholders as a first attempt', () => {
+    render(
+      <TaskExecutionPlan
+        taskPlan={{
+          planId: 'plan-empty-execution',
+          version: 1,
+          title: 'Plan',
+          status: 'COMPLETED',
+          sessionId: 'root',
+          messageId: 'root-message',
+          tasks: [
+            {
+              taskId: 'task-1',
+              teamId: 'team-1',
+              position: 1,
+              title: 'Review',
+              status: 'COMPLETED',
+              executions: [{ attempt: 1, attemptId: 'attempt-1', runs: [] }],
+            },
+          ],
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
+    expect(screen.queryByText('Run 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('messageList.taskPlan.noExecution')).not.toBeInTheDocument();
+  });
 });

@@ -146,7 +146,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
             const status = task.status || 'PENDING';
             const statusLabel = intl.formatMessage({ id: `messageList.taskPlan.status.${status}` });
             const reason = task.statusReason?.message;
-            const executions = task.executions || [];
+            const executions = (task.executions || []).filter((execution) => execution.runs.length > 0);
             const latestExecution = executions[executions.length - 1];
             const latestTarget = latestExecution?.runs[latestExecution.runs.length - 1];
             const teamTask =
@@ -273,10 +273,6 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                           )}
                         </span>
                       ))}
-                    </span>
-                  ) : task.teamId ? (
-                    <span className={styles.executionUnavailable}>
-                      {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
                     </span>
                   ) : null}
                 </span>
