@@ -204,7 +204,26 @@ export function getResponseAgentInfoByMessage(
     }
   }
 
-  return getResponseAgentInfo(agentDatas, message?.metadata);
+  const agentInfo = getResponseAgentInfo(agentDatas, message?.metadata);
+  if (agentInfo) return agentInfo;
+
+  // 外部子会话只携带 child_name，员工 ID 由子会话上下文维护；按名称回查员工资料，
+  // 这样历史消息和实时投影都能使用数字员工自己的头像，而不是系统默认头像。
+  try {
+    const metadata = typeof message?.metadata === 'string' ? JSON.parse(message.metadata || '{}') : message?.metadata;
+    const childName = metadata?.session_scope === 'child' ? metadata?.child_name : undefined;
+    if (!childName) return null;
+    const matchedAgent = [...(agentDatas.employeesList || []), ...(agentDatas.agentList || [])].find(
+      (item) => item.name === childName || item.resourceName === childName
+    );
+    if (!matchedAgent) return null;
+    return getResponseAgentInfo(
+      agentDatas,
+      JSON.stringify({ agentId: matchedAgent.agentId || matchedAgent.id || matchedAgent.resourceCode })
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function getDigitalEmployeeMentionItem(agentInfo?: MentionableAgentInfo | null) {

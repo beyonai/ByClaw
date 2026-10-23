@@ -76,4 +76,28 @@ describe('MessageList utils', () => {
       resourceDesc: 'Creates product plans and code reviews',
     });
   });
+
+  it('resolves scoped child avatar from child_name metadata', () => {
+    const agentInfo = getResponseAgentInfoByMessage(
+      {
+        agentList: [],
+        employeesList: [
+          {
+            id: '11222640',
+            agentId: '11222640',
+            resourceCode: 'BYAI_DIG_EMPLOYEE_11222640',
+            name: '质量哨兵·严求真',
+            chatAvatar: '/commonFile/preview?style=file&bucketName=byai',
+          },
+        ],
+      } as any,
+      {
+        agentName: '质量哨兵·严求真',
+        metadata: JSON.stringify({ session_scope: 'child', child_name: '质量哨兵·严求真' }),
+      }
+    );
+
+    expect(agentInfo).toMatchObject({ agentId: '11222640', name: '质量哨兵·严求真' });
+    expect(agentInfo?.chatAvatar).toBe('/commonFile/preview?style=file&bucketName=byai');
+  });
 });

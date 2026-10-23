@@ -164,18 +164,19 @@ export const fetchMessageHandler = (item: any) => {
     taskPlan,
   } = item;
 
+  let metadataObject: Record<string, any> = {};
+  try {
+    metadataObject = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : metadata || {};
+  } catch (e) {
+    // Invalid metadata remains on the legacy history parsing path.
+  }
+
   // usage： 1-用户 2-大模型 3-追问 4-转发消息 5-交互消息
   const isMyMessage = `${creatorId}` === `${userId}` && ['1', '4'].includes(`${usage}`);
   const fromOtherUser = `${creatorId}` !== `${userId}` && ['1', '4'].includes(`${usage}`);
   const isSystemMessage = ['5', '3'].includes(`${usage}`);
   const fromBeyond = !isMyMessage && !fromOtherUser;
-  let isV2Message = false;
-  try {
-    const metadataObject = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : metadata || {};
-    isV2Message = metadataObject.messageRenderVersion === 'v2';
-  } catch (e) {
-    // Invalid metadata remains on the legacy history parsing path.
-  }
+  const isV2Message = metadataObject.messageRenderVersion === 'v2';
 
   const myMessage: IMessage & { text: string } = {
     creatorId,
@@ -199,6 +200,10 @@ export const fetchMessageHandler = (item: any) => {
     imageList: [],
     taskPlan: taskPlan || undefined,
   };
+
+  if (fromBeyond && metadataObject.session_scope === 'child' && metadataObject.child_name) {
+    myMessage.agentName = metadataObject.child_name;
+  }
 
   // 用户消息
   if (!fromBeyond) {

@@ -59,6 +59,20 @@ describe('utils/messgae', () => {
     expect(initAnswerMessage(message).finalContent).toBe('**最终答复**');
   });
 
+  it('uses the scoped child name as the response agent name', () => {
+    const message = fetchMessageHandler({
+      usage: '2',
+      messageId: 'child-answer',
+      metadata: JSON.stringify({
+        session_scope: 'child',
+        child_name: '质量哨兵·严求真',
+        external_session_id: 'child-session-id',
+      }),
+    });
+
+    expect(message.agentName).toBe('质量哨兵·严求真');
+  });
+
   it.each(['', '  ', '[DONE]', { title: 'card' }])('rejects invalid historical final bodies: %s', (finalContent) => {
     const message = fetchMessageHandler({ usage: '2', messageId: 'empty', finalContent });
     expect(message.finalContent).toBeUndefined();

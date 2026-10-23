@@ -423,6 +423,7 @@ export default function useRender({
       if (fromBeyond || isSuperAssistant) {
         leftName =
           agentInfo?.name ||
+          messageAgentName ||
           getSystemConfigByStorage().title ||
           intl.formatMessage({ id: 'messageList.defaultAIName' });
       } else {
