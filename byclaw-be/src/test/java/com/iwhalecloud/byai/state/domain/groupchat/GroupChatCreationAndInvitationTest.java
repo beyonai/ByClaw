@@ -101,6 +101,8 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         service = new GroupChatApplicationService(sessions, sequence, authorization, members,
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
             events, sessionExt);
+        ReflectionTestUtils.setField(service, "workgroupHooks",
+            mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks.class));
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
         ReflectionTestUtils.setField(service, "resourceService", resources);
         ReflectionTestUtils.setField(service, "authApplicationService", authService);

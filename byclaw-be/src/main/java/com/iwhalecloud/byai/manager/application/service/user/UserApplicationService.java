@@ -17,6 +17,8 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Transactional;
+import com.iwhalecloud.byai.common.hook.HookPublisher;
 import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -103,6 +105,9 @@ public class UserApplicationService extends BaseUserApplicationService {
 
     @Autowired
     private UserBucketProvisioningService userBucketProvisioningService;
+
+    @Autowired
+    private HookPublisher hookPublisher;
 
     /**
      * 新增用户
@@ -912,6 +917,7 @@ public class UserApplicationService extends BaseUserApplicationService {
      * @return Users
      */
 
+    @Transactional(rollbackFor = Exception.class)
     public Users registerByPhone(String phone) {
 
         Users users = new Users();
@@ -945,8 +951,22 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         userBucketProvisioningService.ensureUserBucketQuietly(users.getUserCode());
 
+        publishRegistrationHook(users, "phone");
+
         return users;
 
+    }
+
+    /**
+     * 只发布注册结果的白名单快照；通知在事务提交后异步执行。
+     * 管理员新增用户和已有账号登录不会进入此触发点。
+     */
+    private void publishRegistrationHook(Users users, String registrationSource) {
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("userId", users.getUserId().toString());
+        data.put("displayName", users.getUserName());
+        data.put("registrationSource", registrationSource);
+        hookPublisher.publish("user.registered", 1, data);
     }
 
     /** Base62 字符集：0-9、A-Z、a-z，用于编码 */
@@ -1008,6 +1028,7 @@ public class UserApplicationService extends BaseUserApplicationService {
      * @return Users
      */
 
+    @Transactional(rollbackFor = Exception.class)
     public Users registerIosByPhone(String phone, AppleLoginService.AppleUserInfo appleUserInfo) {
 
         phone = Sm4Util.encrypt(phone);
@@ -1041,6 +1062,8 @@ public class UserApplicationService extends BaseUserApplicationService {
         this.saveUserAfter(users, Collections.emptyList());
 
         userBucketProvisioningService.ensureUserBucketQuietly(users.getUserCode());
+
+        publishRegistrationHook(users, "apple");
 
         return users;
 
@@ -1225,6 +1248,7 @@ public class UserApplicationService extends BaseUserApplicationService {
      * @return Users
      */
 
+    @Transactional(rollbackFor = Exception.class)
     public Users registerByCasTicketUser(CasTicketUser casTicketUser) {
 
         Users users = new Users();
@@ -1250,6 +1274,8 @@ public class UserApplicationService extends BaseUserApplicationService {
         this.saveUserAfter(users, Collections.emptyList());
 
         userBucketProvisioningService.ensureUserBucketQuietly(users.getUserCode());
+
+        publishRegistrationHook(users, "cas");
 
         return users;
 

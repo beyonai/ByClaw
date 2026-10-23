@@ -18,6 +18,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantGroupCreationService {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks workgroupHooks;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService projectMembers;
     private final TenantNodeClient node;
     private final TenantGroupData data;
@@ -38,6 +40,7 @@ public class TenantGroupCreationService {
         this.grants = grants;
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public JsonNode create(TenantRequestContext tenant, GroupChatCreateRequest request) {
         var userIds = new LinkedHashSet<>(request.getUserIds() == null ? List.<Long>of() : request.getUserIds());
         userIds.remove(tenant.userId());
@@ -73,6 +76,9 @@ public class TenantGroupCreationService {
             userIds.add(tenant.userId());
             for (Long user : userIds) grants.grantDigitalEmployeesToUser(new ArrayList<>(agentIds), user);
         }
-        return data.read(tenant, "group-chats/" + id);
+        JsonNode response = data.read(tenant, "group-chats/" + id);
+        // Node 创建、授权和详情读取成功后登记通知；投递等待 BE 当前事务提交。
+        workgroupHooks.created(id, project.getProjectName(), tenant.enterpriseId(), project.getProjectId(), tenant.userId());
+        return response;
     }
 }

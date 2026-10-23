@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.hook.HookPublisher;
 import java.util.List;
 import java.util.Map;
 import java.time.LocalDateTime;
@@ -26,12 +27,14 @@ public class TenantAdminTenantService {
     private final TenantAdminTenantMapper tenantMapper;
     private final SequenceService sequenceService;
     private final ObjectMapper objectMapper;
+    private final HookPublisher hookPublisher;
 
     public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
-                                    ObjectMapper objectMapper) {
+                                    ObjectMapper objectMapper, HookPublisher hookPublisher) {
         this.tenantMapper = tenantMapper;
         this.sequenceService = sequenceService;
         this.objectMapper = objectMapper;
+        this.hookPublisher = hookPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -112,6 +115,15 @@ public class TenantAdminTenantService {
         insertConfig(enterpriseId, "PACKAGE_CONTENT_SNAPSHOT", selectedPackage.getPackageContent());
         insertConfig(enterpriseId, "PROVISION_STATE", state);
         tenantMapper.insertOwner(sequenceService.nextVal(), enterpriseId, userId);
+        // 仅新建租户发布事件；幂等请求已在前面返回，HTTP 由 Hook 机制在事务提交后异步执行。
+        hookPublisher.publish("tenant.created", 1, Map.of(
+            "enterpriseId", Long.toString(enterpriseId),
+            "enterpriseName", name,
+            "packageId", Long.toString(packageId),
+            "packageName", selectedPackage.getPackageName(),
+            "createdBy", userId.toString(),
+            "requestId", requestId,
+            "provisionState", "RESERVED"));
         return new TenantView(Long.toString(enterpriseId), name, selectedPackage.getPackageName(), "RESERVED",
             "RESERVED", null, null, null);
     }
