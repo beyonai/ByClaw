@@ -47,6 +47,8 @@ class TenantGroupChatRoutingAspectTest {
     @BeforeEach
     void setUp() {
         originalEnvironment = System.getProperty("BE_ENV");
+        // 固定默认路由环境，避免宿主机 BE_ENV 使 Node 用例进入开发模式分支。
+        System.setProperty("BE_ENV", "production");
         ReflectionTestUtils.setField(aspect, "creation", creation);
         ReflectionTestUtils.setField(aspect, "management", management);
     }
