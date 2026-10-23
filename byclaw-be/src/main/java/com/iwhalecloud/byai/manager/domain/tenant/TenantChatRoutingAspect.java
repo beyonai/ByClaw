@@ -56,7 +56,8 @@ public class TenantChatRoutingAspect {
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.manage.AssistantManController.*(..))"
-        + " || execution(* com.iwhalecloud.byai.manager.interfaces.controller.devloop.ProjectController.listSessionsByProject(..))")
+        + " || execution(* com.iwhalecloud.byai.manager.interfaces.controller.devloop.ProjectController.listSessionsByProject(..))"
+        + " || execution(* com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.getMessageCountAndPosition(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
         if (context == null) return call.proceed();
@@ -163,6 +164,19 @@ public class TenantChatRoutingAspect {
                     "/internal/v1/assiman/getMessages", body, new TypeReference<Page<MessageView>>() { });
                 TenantChatHistoryProjection.project(page.list());
                 return ResponseUtil.successResponse(page);
+            }
+            case "getMessageCountAndPosition": {
+                MessageQo query = (MessageQo) args[0];
+                if (query.getSessionId() == null || query.getSessionId() <= 0 || query.getMessageId() == null
+                    || query.getMessageId() <= 0) throw badRequest();
+                List<MessageOutline> outline = node.request(context, "POST",
+                    "/internal/v1/assiman/getMessageOutline", new SessionRef(query.getSessionId().toString()),
+                    new TypeReference<List<MessageOutline>>() { });
+                MessageOutline target = outline.stream()
+                    .filter(message -> query.getMessageId().toString().equals(message.messageId()))
+                    .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+                return ResponseUtil.successResponse(java.util.Map.of("position", target.position(),
+                    "totalCount", target.totalCount()));
             }
             case "getMessageOutline": {
                 MessageQo query = (MessageQo) args[0];

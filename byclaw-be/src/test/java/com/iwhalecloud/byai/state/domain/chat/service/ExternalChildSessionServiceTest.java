@@ -156,6 +156,43 @@ class ExternalChildSessionServiceTest {
         verify(sessionService, never()).save(any(ByaiSession.class));
     }
 
+    @Test
+    void runBindingsRemainDistinctAndSurviveServiceRestart() {
+        ByaiSession child = parentSession(300L, 900L);
+        child.setParentSessionId(100L);
+        when(sessionExtService.selectListByParamCodeAndValue("external_session_id", "worker-child-1"))
+            .thenReturn(List.of(ext(1L, 300L, "external_session_id", "worker-child-1")));
+        when(sessionService.findById(300L)).thenReturn(child);
+        java.util.Map<String, ByaiSessionExt> extensions = new java.util.HashMap<>();
+        extensions.put("external_message_id", ext(2L, 300L, "external_message_id", "301"));
+        when(sessionExtService.findOneByExtParamCode(org.mockito.ArgumentMatchers.eq(300L), any(String.class)))
+            .thenAnswer(call -> extensions.get(call.getArgument(1)));
+        org.mockito.Mockito.doAnswer(call -> {
+            ByaiSessionExt value = call.getArgument(0);
+            extensions.put(value.getExtParamCode(), value);
+            return null;
+        }).when(sessionExtService).save(any());
+        when(sequenceService.nextVal()).thenReturn(401L, 402L, 403L, 404L, 405L);
+
+        JSONObject first = childMetadata("worker-child-1");
+        first.put("child_run_id", "worker-child-1:1");
+        first.put("child_turn", 1);
+        JSONObject second = new JSONObject(new java.util.LinkedHashMap<>(first));
+        second.put("child_run_id", "worker-child-1:2");
+        second.put("child_turn", 2);
+        ExternalChildSessionBinding firstBinding = service.ensureRunBinding(100L, first);
+        ExternalChildSessionBinding secondBinding = service.ensureRunBinding(100L, second);
+        assertThat(firstBinding.messageId()).isEqualTo(401L);
+        assertThat(secondBinding.messageId()).isEqualTo(403L);
+        assertThat(service.ensureRunBinding(100L, first)).isSameAs(firstBinding);
+        assertThat(service.isStaleRun(secondBinding, second)).isFalse();
+
+        ExternalChildSessionService restarted = new ExternalChildSessionService(sessionService, sessionExtService,
+            sequenceService, transactionManager);
+        assertThat(restarted.ensureRunBinding(100L, first).messageId()).isEqualTo(401L);
+        assertThat(restarted.isStaleRun(firstBinding, first)).isTrue();
+    }
+
     private JSONObject childMetadata(String externalSessionId) {
         JSONObject metadata = new JSONObject();
         metadata.put("session_scope", "child");

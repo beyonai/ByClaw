@@ -39,6 +39,24 @@ class MemoryMessageServiceTest {
     }
 
     @Test
+    void executionLocationUsesTheSameDescendingPositionAsHistoryPages() {
+        var query = new com.iwhalecloud.byai.state.common.dto.MessageQo();
+        query.setSessionId(3L);
+        query.setMessageId(21L);
+        var message = new ByaiMessageHotDto();
+        message.setSessionId(3L);
+        when(byaiMessageHotService.findById(21L)).thenReturn(message);
+        when(byaiMessageHotService.countBySessionId(3L)).thenReturn(40L);
+        var outline = new com.iwhalecloud.byai.common.message.entity.ConversationOutlineItem();
+        outline.setMessageId(21L);
+        outline.setPosition(22L);
+        outline.setTotalCount(40L);
+        when(byaiMessageHotService.selectConversationOutline(3L)).thenReturn(java.util.List.of(outline));
+        assertThat(memoryMessageService.getMessageCountAndPosition(query))
+            .containsEntry("position", 22L).containsEntry("totalCount", 40L);
+    }
+
+    @Test
     void voiceMetadataSurvivesUserPersistenceWithoutMarkingAssistantRepliesAsVoice() {
         AssistantChatDto chat = new AssistantChatDto();
         chat.setMetadata("{\"mode\":\"smart\"}");

@@ -56,7 +56,14 @@ export class TraditionalHistory extends HistoryAccess {
           resourceList: forwardResources(meta),
         });
         projected.relatedResources = JSON.stringify({
-          files: relatedResourceAttachments(row),
+          // Legacy snapshots have no validated destination-copy provenance.
+          files: publicForward(meta)?.forwardId
+            ? relatedResourceAttachments(row)
+            : relatedResourceAttachments(row).map(({ fileName, mediaType, size }) => ({
+                fileName,
+                mediaType,
+                size,
+              })),
           resourceList: forwardResources(meta),
         });
         result.push(projected);

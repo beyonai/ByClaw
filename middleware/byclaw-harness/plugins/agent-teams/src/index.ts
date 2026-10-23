@@ -43,6 +43,7 @@ export {
   AGENT_TEAMS_MODEL_OVERRIDES,
   type AgentTeamsModelOverrideService,
 } from './model-overrides.ts'
+export { AGENT_TEAMS_EXECUTION_LOCATION, type AgentTeamsExecutionLocationService } from './task-executions.ts'
 
 /** Register the AgentTeams model guidance for the lifetime of the plugin fiber. */
 export function registerAgentTeamsUsageSection(ctx: Context, toolNames: string, order: number): void {

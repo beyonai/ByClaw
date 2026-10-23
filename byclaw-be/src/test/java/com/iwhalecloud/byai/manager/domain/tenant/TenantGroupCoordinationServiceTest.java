@@ -215,7 +215,7 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
 
         String result = service.decorate(executionContext(request), "hello", new HashMap<>()).toString();
 
-        assertThat(result).contains("TASK 还是 CHAT", "\"dispatchId\":\"70\"", "只有判定为 TASK 时才适用", "group-members.json")
+        assertThat(result).contains("[群聊协议]", "group_request_assistance", "只有判定为 TASK 时才适用", "group-members.json")
             .doesNotContain("平台确定为 GROUP_TASK", "处理自己的任务", "\"dispatchId\":\"999\"");
         assertThat(request.getExtParams()).containsEntry("tenantGroupCandidate", true)
             .containsEntry("groupDispatch", candidate(target));
@@ -361,7 +361,7 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
 
         String result = service.decorate(executionContext(request(42L)), "hello", new HashMap<>()).toString();
 
-        assertThat(result).contains("group-members.json", "\"dispatchId\":\"70\"")
+        assertThat(result).contains("group-members.json", "[群聊协议]", "group_request_assistance")
             .doesNotContain("群内昵称", "文案员工", "检索员工", "未选员工", "HUMAN_20");
         ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
         verify(files).prepareGroupMemberSnapshot(eq("user-20"), any(), eq("trace-60"), eq(60L), any(), roster.capture());

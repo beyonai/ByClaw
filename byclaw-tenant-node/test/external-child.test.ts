@@ -53,6 +53,11 @@ function setup() {
       if (extension) extension.ext_param_value = params[0];
       return [];
     }
+    if (sql.startsWith("UPDATE byai.byai_session SET last_seq")) {
+      const session = tables.byai_session.find((row) => row.session_id === params[1]);
+      if (session) session.last_seq = params[0];
+      return session ? [{ ...session }] : [];
+    }
     if (sql.includes("FROM byai.byai_message m JOIN byai.byai_session s")) {
       const rows = tables.byai_message.filter(
         (row) => row.enterprise_id === params[0] && row.session_id === params[1],
@@ -154,6 +159,69 @@ describe("tenant external child binding", () => {
     expect(second.data.message.messageId).toBe(first.data.message.messageId);
     expect(tables.byai_session).toHaveLength(2);
     expect(tables.byai_message).toHaveLength(1);
+  });
+  it("allocates one durable assistant message per child run while reusing the run binding", async () => {
+    const { service, command, tables, history } = setup();
+    const first = await service.execute(command("binding"));
+    const firstRun = command("run-1");
+    firstRun.payload = { ...firstRun.payload, childRunId: "dsh-child:1" };
+    const firstRunBinding = await service.execute(firstRun);
+    const retry = command("run-1-retry");
+    retry.payload = { ...retry.payload, childRunId: "dsh-child:1" };
+    const retriedBinding = await service.execute(retry);
+    const secondRun = command("run-2");
+    secondRun.payload = { ...secondRun.payload, childRunId: "dsh-child:2" };
+    const secondRunBinding = await service.execute(secondRun);
+
+    expect(firstRunBinding.data.session.sessionId).toBe(first.data.session.sessionId);
+    expect(retriedBinding.data.message.messageId).toBe(firstRunBinding.data.message.messageId);
+    expect(secondRunBinding.data.message.messageId).not.toBe(
+      firstRunBinding.data.message.messageId,
+    );
+    expect(secondRunBinding.data.message.createdSeq).toBe("3");
+    expect(tables.byai_message).toHaveLength(3);
+    const page = await history.traditional("20", first.data.session.sessionId, 1, 20);
+    expect(page.total).toBe(3);
+  });
+  it("reuses the first run on replay and refuses old runs after a newer projection", async () => {
+    const { service, command, tables } = setup();
+    const ensure = async (request: string, turn: number) => {
+      const cmd = command(request);
+      cmd.payload = { ...cmd.payload, childRunId: `dsh-child:${turn}`, childTurn: turn };
+      return service.execute(cmd);
+    };
+    const first = await ensure("first-run", 1);
+    const replay = await ensure("first-run-replay", 1);
+    expect(replay.data.message.messageId).toBe(first.data.message.messageId);
+    expect(tables.byai_message).toHaveLength(1);
+    const second = await ensure("second-run", 2);
+    const write = async (request: string, bound: any, turn: number) => {
+      const cmd = command(request);
+      cmd.operation = "SAVE_EXTERNAL_CHILD" as TenantCommand["operation"];
+      cmd.payload = {
+        childSessionId: bound.data.session.sessionId,
+        messageId: bound.data.message.messageId,
+        expectedStreamId: null,
+        streamId: `${turn}-0`,
+        messageContent: `run ${turn}`,
+        messageStruct: [],
+        inferLog: [],
+        metadata: { child_run_id: `dsh-child:${turn}`, child_turn: turn },
+        complete: true,
+      };
+      return service.execute(cmd);
+    };
+    await write("save-current", second, 2);
+    const late = await write("late-old", first, 1);
+    expect(late.data.staleRun).toBe(true);
+    expect(
+      tables.byai_message.find((row) => row.message_id === second.data.message.messageId)
+        ?.message_content,
+    ).toBe("run 2");
+    expect(
+      tables.byai_session_ext.find((row) => row.ext_param_code === "external_session_status")
+        ?.ext_param_value,
+    ).toBe("completed");
   });
   it("does not bind a foreign tenant parent", async () => {
     const { service, command, tables } = setup();

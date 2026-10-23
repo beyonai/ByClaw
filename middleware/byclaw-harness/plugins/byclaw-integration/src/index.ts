@@ -32,6 +32,7 @@ import { parseByClawDigitalEmployee } from './resources.ts'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defaultCatalogDir } from '@byclaw/dsh-agent-teams/catalog'
+import { AGENT_TEAMS_EXECUTION_LOCATION } from '@byclaw/dsh-agent-teams'
 import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
@@ -1072,6 +1073,9 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       },
       templateRuntime,
       onActivityChange: () => sandboxBusy?.activityChanged(),
+    })
+    ctx.provide(AGENT_TEAMS_EXECUTION_LOCATION, {
+      get: (agentSessionId: string) => sessions?.taskExecutionLocation(agentSessionId),
     })
     sandboxBusy = new ByClawDshSandboxBusyPublisher({
       redis,

@@ -1385,6 +1385,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     })
   }
 
+  taskExecutionLocation(agentSessionId: string): { sessionId: string; messageId: string } | undefined {
+    const turn = this.foreground.get(agentSessionId) ?? this.active.get(agentSessionId)
+    return turn === undefined ? undefined : {
+      sessionId: normalizeByClawSessionId(turn.context.sessionId),
+      messageId: turn.rootMessageId,
+    }
+  }
+
   private readonly voiceRequests = new Map<string, { fingerprint: string; promise: Promise<ByClawDshAskResult> }>()
   private readonly voiceControllers = new Map<string, AbortController>()
   private readonly voiceSummaryStreams = new WeakMap<ActiveTurn, Map<string, VoiceSummaryStreamFilter>>()
@@ -3165,7 +3173,27 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   ): Promise<void> {
     if (team.tasks.length === 0) return
     const teamMessagePrefix = `${turn.rootMessageId}:team:${team.teamId}`
-    const parentPlan = taskPlanProjection(teamTaskPlanTodos(team.tasks), {
+    const planTasks = team.tasks.map(task => {
+      return {
+        ...task,
+        teamId: team.teamId,
+        attempt: task.attempt,
+        attemptId: task.attemptId,
+        executions: (task.executions ?? []).map(execution => ({
+          attempt: execution.attempt,
+          attemptId: execution.attemptId,
+          assignee: execution.assignee,
+          status: execution.status,
+          runs: execution.runs.map(run => ({
+            externalSessionId: run.externalSessionId,
+            childTurn: run.childTurn,
+            childSessionId: run.byclawSessionId,
+            childMessageId: run.byclawMessageId,
+          })),
+        })),
+      }
+    })
+    const parentPlan = taskPlanProjection(teamTaskPlanTodos(planTasks), {
       sessionId: turn.rootSessionId,
       rootSessionId: turn.rootSessionId,
       externalParentSessionId: normalizeByClawSessionId(turn.context.sessionId),
@@ -3186,7 +3214,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     )
     for (const member of team.members) {
       if (member.id === '') continue
-      const tasks = team.tasks.filter((task) => task.assignee === member.name)
+      const tasks = planTasks.filter((task) => task.assignee === member.name)
       if (tasks.length === 0) continue
       const childMessageId = this.externalMessageId(turn, member.id)
       const childPlan = taskPlanProjection(teamTaskPlanTodos(tasks), {

@@ -571,8 +571,13 @@ public class MemoryMessageService {
                 if (!sessionId.equals(targetMessage.getSessionId())) {
                     throw new MemoryRuntimeException(I18nUtil.get("memory.message.service.message.not.belong.session"));
                 }
-                long position = byaiMessageHotService.countPositionInSession(sessionId, messageId);
-                result.put("position", position);
+                // History pages are ordered newest first; allocation order of ids is not execution order.
+                var target = byaiMessageHotService.selectConversationOutline(sessionId).stream()
+                    .filter(item -> messageId.equals(item.getMessageId()))
+                    .findFirst().orElseThrow(() -> new MemoryRuntimeException(
+                        I18nUtil.get("memory.message.service.message.not.exist", messageId)));
+                result.put("position", target.getPosition());
+                result.put("totalCount", target.getTotalCount());
             }
             return result;
         }

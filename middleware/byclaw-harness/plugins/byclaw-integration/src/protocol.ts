@@ -34,24 +34,52 @@ export function extractByClawUserText(value: unknown): string {
 }
 
 /** Payload used to render a DSH todo snapshot as a ByClaw task card. */
-export function taskPlanCard(todos: ReadonlyArray<{ content: string; status: string }>): {
+export interface TaskPlanTodo {
+  content: string
+  status: string
+  teamId?: string
+  taskId?: string
+  attempt?: number
+  attemptId?: string
+  assignee?: string
+  externalSessionId?: string
+  childRunId?: string
+  childSessionId?: string
+  childMessageId?: string
+  executions?: ReadonlyArray<{
+    attempt: number
+    attemptId: string
+    assignee: string
+    status: string
+    runs: ReadonlyArray<{
+      externalSessionId?: string
+      childTurn?: number
+      childSessionId?: string
+      childMessageId?: string
+    }>
+  }>
+}
+
+export function taskPlanCard(todos: ReadonlyArray<TaskPlanTodo>): {
   contentType: '2008'
   content: string
 } {
+  const teamId = todos.find((todo) => todo.teamId)?.teamId
   return {
     contentType: '2008',
     content: JSON.stringify({
       source: 'DSH',
       schemaVersion: 1,
-      planId: createHash('sha256').update(JSON.stringify(todos)).digest('hex').slice(0, 24),
+      planId: teamId ? `team:${teamId}` : createHash('sha256').update(JSON.stringify(todos)).digest('hex').slice(0, 24),
       updatedAt: new Date().toISOString(),
       files: [],
       task_description: 'DSH 任务计划',
+      team_id: teamId,
       steps: [{
         step_topic: '任务计划',
         collapsed: false,
         sub_steps: todos.map((todo, index) => ({
-          id: String(index + 1),
+          id: todo.taskId ?? String(index + 1),
           step_name: `步骤 ${index + 1}`,
           reference_steps: [],
           step_description: todo.content,
@@ -59,6 +87,30 @@ export function taskPlanCard(todos: ReadonlyArray<{ content: string; status: str
           output_path: '',
           tool: '',
           tool_metadata: { status: todo.status },
+          task_id: todo.taskId,
+          attempt: todo.attempt,
+          attempt_id: todo.attemptId,
+          assignee: todo.assignee,
+          external_session_id: todo.externalSessionId,
+          child_run_id: todo.childRunId,
+          child_session_id: todo.childSessionId,
+          child_message_id: todo.childMessageId,
+          team_id: todo.teamId,
+          executions: todo.executions?.map((execution) => ({
+            attempt: execution.attempt,
+            attempt_id: execution.attemptId,
+            assignee: execution.assignee,
+            status: execution.status,
+            runs: execution.runs.map((run) => ({
+              external_session_id: run.externalSessionId,
+              child_turn: run.childTurn,
+              child_session_id: run.childSessionId,
+              child_message_id: run.childMessageId,
+              ...(run.externalSessionId === undefined || run.childTurn === undefined ? {} : {
+                child_run_id: `${run.externalSessionId}:${run.childTurn}`,
+              }),
+            })),
+          })),
           updateDesc: '',
           updateTag: false,
           invalidErrors: [],

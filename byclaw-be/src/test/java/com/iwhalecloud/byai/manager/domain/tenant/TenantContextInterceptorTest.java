@@ -27,7 +27,8 @@ class TenantContextInterceptorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"/chat/superAgentChat", "/chat/runningStatus", "/chat/runningSnapshot",
-        "/api/v1/sessionResources/query", "/chat/stopChat", "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus"})
+        "/api/v1/sessionResources/query", "/chat/stopChat", "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus",
+        "/showcase/messages/count"})
     void supportedChatRoutesReceiveValidatedTenantContext(String path) {
         TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
         when(service.validate("123", "context-token")).thenReturn(context);

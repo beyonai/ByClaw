@@ -47,6 +47,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             && !knowledgeFileCopy
             && !"/api/v1/sessionResources/query".equals(path)
             && !"/project/session/listByQo".equals(path)
+            && !"/showcase/messages/count".equals(path)
             && !"/api/v2/digitEmploy/queryMyCreatedAndSubscribedAgents".equals(path)
             && !path.equals("/group-chats") && !path.startsWith("/group-chats/")
             && !path.startsWith("/group-chat/tasks/")

@@ -128,6 +128,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 - 工具开始与结果 -> `reasoningLogDelta/3015` 的状态化工具卡，使用 `objectType=tool_call` 和同一个工具调用消息 ID；JSON 内容遵循当前 FE 的 `title/input/output/status/description` 结构
 - `ask_user_question` -> `contentType=3014` 的结构化 ByClaw 提问卡片；`ResumeCommand` 回填并唤醒原调用
 - `todo_write` 与兼容工具名 `task_plan` -> `todo/write` 会话事件 -> `contentType=2008` 的任务计划卡片；计划事件使用 `<入站消息ID>:plan`，并把入站消息 ID 作为 `parent_message_id`
+- Agent Teams 的计划使用稳定 `team:<teamId>` 标识，并携带任务负责人、attempt 及真实执行会话轮次。成员会话复用时，后端为每轮映射独立消息供历史定位；团长自执行记录使用当前 ByClaw 入站消息。未建立真实执行绑定的旧任务或外部 Worker 任务不推断为最新成员会话。
 - 子 Agent 创建、运行、等待、完成或失败 -> `reasoningLogDelta/3009` 的状态化节点；子 Agent 的思考、正文和工具事件都挂在该节点下
 - DSH 会话 ID、父会话 ID、委派深度、原始事件类型和序号只进入诊断 metadata，不再占用工具卡展示内容
 - Ask 请求成功后，将选中的最终回复正文放入 `AgentTaskResult.content`，由 by-framework 在完成信号之前发送一条 `finalAnswer/1002`。答案仅取负责回复的 Agent 在正常结束轮次的最后一个 Step 中已结算、未中断且不含工具调用块的 Assistant 文本。

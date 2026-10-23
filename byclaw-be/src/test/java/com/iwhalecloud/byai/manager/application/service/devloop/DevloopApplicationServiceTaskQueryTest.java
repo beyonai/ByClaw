@@ -92,6 +92,7 @@ class DevloopApplicationServiceTaskQueryTest extends com.iwhalecloud.byai.common
         originalMessageSource = (MessageSource) ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
         StaticMessageSource messageSource = new StaticMessageSource();
         messageSource.addMessage("devloop.task.type.invalid", Locale.US, "invalid task type");
+        messageSource.setParentMessageSource(originalMessageSource);
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.US);
         // 单元测试未加载 MyBatis 容器，初始化实体元数据后才能将 Lambda 条件转换为 SQL 字段。
