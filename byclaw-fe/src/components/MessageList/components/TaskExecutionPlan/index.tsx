@@ -5,12 +5,16 @@ import {
   LoadingOutlined,
   MinusCircleOutlined,
   RightOutlined,
+  ArrowRightOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Tooltip } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIntl } from '@umijs/max';
-import type { TaskPlanSnapshot, TaskPlanTaskStatus } from '@/typescript/message';
+import type { TaskPlanSnapshot, TaskPlanTask, TaskPlanTaskStatus } from '@/typescript/message';
+import useLocateMessage from '@/hooks/useLocateMessage';
+import useGlobal from '@/hooks/useGlobal';
+import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import styles from './index.module.less';
 
 type Props = {
@@ -37,18 +41,33 @@ const getStatusIcon = (status: TaskPlanTaskStatus) => {
 
 const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   const intl = useIntl();
+  const locateMessage = useLocateMessage();
+  const { setSessionId } = useGlobal();
+  const teamSnapshot = useAgentTeamsSnapshot(taskPlan.sessionId);
   const [collapsed, setCollapsed] = useState(true);
   const tasks = useMemo(
     () => [...(taskPlan.tasks || [])].sort((left, right) => left.position - right.position),
     [taskPlan.tasks]
   );
+  const navigationTeam = useMemo(() => {
+    const team = teamSnapshot?.team;
+    if (!team) return undefined;
+    if (taskPlan.teamId) return team.teamId === taskPlan.teamId ? team : undefined;
+    // Old team plans only carried numbered steps. Match the entire unique task list before using its members.
+    const teamTasks = team.tasks || [];
+    const matchesLegacyPlan =
+      teamTasks.length === tasks.length &&
+      new Set(tasks.map((task) => task.title)).size === tasks.length &&
+      tasks.every((task) => teamTasks.filter((candidate) => candidate.subject === task.title).length === 1);
+    return matchesLegacyPlan ? team : undefined;
+  }, [taskPlan.teamId, tasks, teamSnapshot]);
 
   useEffect(() => {
+    // Snapshot refreshes may replace planId; only changing conversations resets the user's choice.
     setCollapsed(true);
-  }, [taskPlan.planId]);
+  }, [taskPlan.sessionId]);
 
-  if (!tasks.length) return null;
-
+  const hasRunningTask = tasks.some((task) => task.status === 'IN_PROGRESS');
   const progress = statusOrder
     .map((status) => ({
       status,
@@ -57,6 +76,16 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     .filter(({ count }) => count > 0)
     .map(({ status, count }) => intl.formatMessage({ id: `messageList.taskPlan.summary.${status}` }, { count }))
     .join(' · ');
+  const openExecution = useCallback(
+    (execution: NonNullable<TaskPlanTask['executions']>[number]) => {
+      const target = execution.runs[execution.runs.length - 1];
+      if (target?.sessionId && target.messageId)
+        void locateMessage({ sessionId: target.sessionId, messageId: target.messageId, preserveAgentContext: true });
+    },
+    [locateMessage]
+  );
+
+  if (!tasks.length) return null;
 
   return (
     <section className={styles.taskPlan} aria-label={intl.formatMessage({ id: 'messageList.taskPlan.title' })}>
@@ -68,10 +97,14 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
         onClick={() => setCollapsed((value) => !value)}
       >
         <span className={styles.headerTitle}>
-          <UnorderedListOutlined className={styles.headerIcon} />
+          {hasRunningTask ? (
+            <LoadingOutlined spin className={styles.runningHeaderIcon} />
+          ) : (
+            <UnorderedListOutlined className={styles.headerIcon} />
+          )}
           <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
         </span>
-        <span className={styles.progress}>{progress}</span>
+        <span className={`${styles.progress} ${hasRunningTask ? styles.runningProgress : ''}`}>{progress}</span>
         <span className={styles.chevron} aria-hidden="true">
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </span>
@@ -82,6 +115,15 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
             const status = task.status || 'PENDING';
             const statusLabel = intl.formatMessage({ id: `messageList.taskPlan.status.${status}` });
             const reason = task.statusReason?.message;
+            const executions = task.executions || [];
+            const latestExecution = executions[executions.length - 1];
+            const latestTarget = latestExecution?.runs[latestExecution.runs.length - 1];
+            const teamTask =
+              navigationTeam?.tasks?.find((candidate) => candidate.id === task.taskId) ||
+              navigationTeam?.tasks?.find((candidate) => candidate.subject === task.title);
+            const assignee = task.assignee || teamTask?.assignee;
+            const member = navigationTeam?.members?.find((candidate) => candidate.name === assignee);
+            const memberSessionId = member?.byclawSessionId;
             return (
               <li className={styles.taskItem} key={task.taskId || task.position} data-status={status}>
                 <Tooltip title={reason || statusLabel}>
@@ -90,9 +132,125 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                   </span>
                 </Tooltip>
                 <span className={styles.taskContent}>
-                  <span className={styles.taskTitle}>{task.title}</span>
-                  {task.description ? <span className={styles.taskDescription}> · {task.description}</span> : null}
-                  {reason ? <span className={styles.taskReason}> · {reason}</span> : null}
+                  <span className={styles.taskHeading}>
+                    {status === 'IN_PROGRESS' || status === 'PENDING' ? (
+                      <span className={`${styles.statusLabel} ${styles[`statusLabel${status}`]}`}>{statusLabel}</span>
+                    ) : null}
+                    {latestTarget?.sessionId && latestTarget.messageId ? (
+                      <button
+                        type="button"
+                        className={styles.taskLink}
+                        aria-label={`${task.title} ${intl.formatMessage({ id: 'messageList.taskPlan.latestAttempt' })}`}
+                        onClick={() => openExecution(latestExecution!)}
+                      >
+                        {task.title}
+                      </button>
+                    ) : memberSessionId ? (
+                      <Tooltip title={intl.formatMessage({ id: 'messageList.taskPlan.memberConversationHint' })}>
+                        <button
+                          type="button"
+                          className={styles.taskLink}
+                          aria-label={`${task.title} ${intl.formatMessage({
+                            id: 'messageList.taskPlan.openMemberConversation',
+                          })}`}
+                          onClick={() => setSessionId?.(`${memberSessionId}`)}
+                        >
+                          {task.title}
+                          <span className={styles.memberConversationLabel}>
+                            {intl.formatMessage({ id: 'messageList.taskPlan.memberConversation' })}
+                            <ArrowRightOutlined />
+                          </span>
+                        </button>
+                      </Tooltip>
+                    ) : (
+                      <span className={styles.taskTitle}>{task.title}</span>
+                    )}
+                  </span>
+                  {task.description || assignee || task.teamId || reason ? (
+                    <span className={styles.taskMetadata}>
+                      {task.description ? <span className={styles.taskDescription}> · {task.description}</span> : null}
+                      {assignee || task.teamId ? (
+                        <span className={styles.taskDescription}>
+                          {' · '}
+                          {assignee === 'captain'
+                            ? intl.formatMessage({ id: 'messageList.taskPlan.captain' })
+                            : assignee || intl.formatMessage({ id: 'messageList.taskPlan.unassigned' })}
+                        </span>
+                      ) : null}
+                      {reason ? <span className={styles.taskReason}> · {reason}</span> : null}
+                    </span>
+                  ) : null}
+                  {executions.length ? (
+                    <span className={styles.executionLinks}>
+                      {executions.map((execution) =>
+                        execution.runs.length ? (
+                          execution.runs.map((run, index) =>
+                            run.sessionId && run.messageId ? (
+                              <button
+                                type="button"
+                                key={`${execution.attemptId || execution.attempt}:${
+                                  run.runId || `${run.sessionId}:${run.messageId}`
+                                }`}
+                                aria-label={`${task.title} ${intl.formatMessage(
+                                  { id: 'messageList.taskPlan.attempt' },
+                                  { attempt: execution.attempt }
+                                )} ${intl.formatMessage(
+                                  { id: 'messageList.taskPlan.executionTurn' },
+                                  { turn: index + 1 }
+                                )}`}
+                                title={execution.assignee}
+                                onClick={() =>
+                                  void locateMessage({
+                                    sessionId: run.sessionId!,
+                                    messageId: run.messageId!,
+                                    preserveAgentContext: true,
+                                  })
+                                }
+                              >
+                                {intl.formatMessage(
+                                  { id: 'messageList.taskPlan.attempt' },
+                                  { attempt: execution.attempt }
+                                )}
+                                {execution.runs.length > 1 && (
+                                  <>
+                                    {' · '}
+                                    {intl.formatMessage(
+                                      { id: 'messageList.taskPlan.executionTurn' },
+                                      { turn: index + 1 }
+                                    )}
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <span
+                                key={`${execution.attemptId || execution.attempt}:${run.runId || index}`}
+                                className={styles.executionUnavailable}
+                              >
+                                {intl.formatMessage(
+                                  { id: 'messageList.taskPlan.attempt' },
+                                  { attempt: execution.attempt }
+                                )}
+                                {' · '}
+                                {intl.formatMessage({ id: 'messageList.taskPlan.executionTurn' }, { turn: index + 1 })}
+                                {' · '}
+                                {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
+                              </span>
+                            )
+                          )
+                        ) : (
+                          <span key={execution.attemptId || execution.attempt} className={styles.executionUnavailable}>
+                            {intl.formatMessage({ id: 'messageList.taskPlan.attempt' }, { attempt: execution.attempt })}
+                            {' · '}
+                            {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
+                          </span>
+                        )
+                      )}
+                    </span>
+                  ) : task.teamId ? (
+                    <span className={styles.executionUnavailable}>
+                      {intl.formatMessage({ id: 'messageList.taskPlan.noExecution' })}
+                    </span>
+                  ) : null}
                 </span>
               </li>
             );

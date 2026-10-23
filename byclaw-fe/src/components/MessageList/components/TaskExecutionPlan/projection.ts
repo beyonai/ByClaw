@@ -13,6 +13,24 @@ type LegacyPlanTask = {
   step_name?: string;
   step_description?: string;
   tool_metadata?: { status?: string };
+  task_id?: string;
+  attempt?: number;
+  attempt_id?: string;
+  assignee?: string;
+  child_session_id?: string;
+  child_message_id?: string;
+  team_id?: string;
+  executions?: Array<{
+    attempt?: number;
+    attempt_id?: string;
+    assignee?: string;
+    runs?: Array<{
+      child_session_id?: string;
+      child_message_id?: string;
+      child_run_id?: string;
+      child_turn?: number;
+    }>;
+  }>;
 };
 
 type LegacyPlanStep = {
@@ -22,6 +40,7 @@ type LegacyPlanStep = {
 
 type LegacyPlanPayload = {
   planId?: string;
+  team_id?: string;
   createdAt?: string;
   updatedAt?: string;
   task_description?: string;
@@ -102,6 +121,31 @@ const selectMessagePlan = (
   return reconnectBaseline;
 };
 
+const normalizeExecutions = (task: LegacyPlanTask): TaskPlanTask['executions'] => {
+  if (task.executions?.length) {
+    return task.executions.map((execution) => ({
+      attempt: Number(execution.attempt) || 1,
+      ...(execution.attempt_id ? { attemptId: execution.attempt_id } : {}),
+      ...(execution.assignee ? { assignee: execution.assignee } : {}),
+      runs: (execution.runs || []).map((run) => ({
+        ...(run.child_session_id ? { sessionId: run.child_session_id } : {}),
+        ...(run.child_message_id ? { messageId: run.child_message_id } : {}),
+        ...(run.child_run_id ? { runId: run.child_run_id } : {}),
+        ...(run.child_turn ? { childTurn: run.child_turn } : {}),
+      })),
+    }));
+  }
+  if (!task.child_session_id || !task.child_message_id) return undefined;
+  return [
+    {
+      attempt: Number(task.attempt) || 1,
+      ...(task.attempt_id ? { attemptId: task.attempt_id } : {}),
+      ...(task.assignee ? { assignee: task.assignee } : {}),
+      runs: [{ sessionId: task.child_session_id, messageId: task.child_message_id }],
+    },
+  ];
+};
+
 export const normalizeTaskPlanItem = (
   item: IMessageListItem,
   message: IMessage,
@@ -114,19 +158,23 @@ export const normalizeTaskPlanItem = (
   const tasks = (payload.steps || [])
     .flatMap((step) => step.sub_steps || [])
     .map((task, index) => ({
-      taskId: `${task.id ?? index + 1}`,
+      taskId: `${task.task_id ?? task.id ?? index + 1}`,
+      ...(task.team_id || payload.team_id ? { teamId: task.team_id || payload.team_id } : {}),
       position: index + 1,
       title: task.step_description?.trim() || task.step_name?.trim() || `Task ${index + 1}`,
       description:
         task.step_description?.trim() && task.step_name?.trim() && task.step_name !== task.step_description
           ? task.step_name
           : undefined,
+      ...(task.assignee ? { assignee: task.assignee } : {}),
       status: normalizeTaskStatus(task.tool_metadata?.status),
+      executions: normalizeExecutions(task),
     }));
   if (tasks.length === 0) return undefined;
 
   return {
     planId: `${payload.planId || item.uuid || message.messageId || message.msgId}`,
+    ...(payload.team_id ? { teamId: payload.team_id } : {}),
     version,
     title: payload.task_description?.trim() || payload.steps?.[0]?.step_topic?.trim() || 'Task plan',
     status: derivePlanStatus(payload.status, tasks),
@@ -148,6 +196,7 @@ export const selectLatestTaskPlan = (
   let latestMessageOrder = -1;
   let messageOrder = 0;
   let version = 0;
+  const executionHistory = new Map<string, NonNullable<TaskPlanTask['executions']>>();
 
   messages.forEach((message) => {
     const currentMessageOrder = messageOrder;
@@ -156,11 +205,16 @@ export const selectLatestTaskPlan = (
     if (selectedSessionId && messageSessionId && messageSessionId !== `${selectedSessionId}`) return;
 
     let streamedPlan: TaskPlanSnapshot | undefined;
+    const streamedPlans: TaskPlanSnapshot[] = [];
     [...(message.thinkList || []), ...(message.messageList || [])]
       .sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0))
       .forEach((item) => {
         version += 1;
-        streamedPlan = normalizeTaskPlanItem(item, message, version) || streamedPlan;
+        const normalized = normalizeTaskPlanItem(item, message, version);
+        if (normalized) {
+          streamedPlan = normalized;
+          streamedPlans.push(normalized);
+        }
       });
 
     const reconnectBaseline =
@@ -168,8 +222,41 @@ export const selectLatestTaskPlan = (
       (!selectedSessionId || !message.taskPlan.sessionId || `${message.taskPlan.sessionId}` === `${selectedSessionId}`)
         ? message.taskPlan
         : undefined;
-    const messagePlan = selectMessagePlan(reconnectBaseline, streamedPlan);
-    if (!messagePlan) return;
+    const latestPlan = selectMessagePlan(reconnectBaseline, streamedPlan);
+    if (!latestPlan) return;
+    const historyPlans =
+      latestPlan === reconnectBaseline
+        ? [...streamedPlans, reconnectBaseline!]
+        : [...(reconnectBaseline ? [reconnectBaseline] : []), ...streamedPlans];
+    historyPlans.forEach((plan) => {
+      plan.tasks.forEach((task) => {
+        if (!task.executions?.length) return;
+        const teamId = task.teamId || plan.teamId;
+        if (!teamId) return;
+        const key = `${teamId}:${task.taskId}`;
+        const executions = executionHistory.get(key) || [];
+        task.executions.forEach((execution) => {
+          const key = execution.attemptId || `${execution.attempt}`;
+          const index = executions.findIndex((entry) => (entry.attemptId || `${entry.attempt}`) === key);
+          if (index < 0) executions.push(execution);
+          else {
+            const current = executions[index]!;
+            const runs = [...current.runs];
+            execution.runs.forEach((run) => {
+              const runIndex = runs.findIndex((entry) =>
+                run.runId && entry.runId
+                  ? entry.runId === run.runId
+                  : !!run.messageId && entry.messageId === run.messageId && entry.sessionId === run.sessionId
+              );
+              if (runIndex < 0) runs.push(run);
+              else runs[runIndex] = { ...runs[runIndex], ...run };
+            });
+            executions[index] = { ...current, ...execution, runs };
+          }
+        });
+        executionHistory.set(key, executions);
+      });
+    });
 
     // The answer message time identifies the conversation turn. Plan version
     // is only meaningful inside one plan and must not decide between turns.
@@ -179,11 +266,19 @@ export const selectLatestTaskPlan = (
       (messageTime !== undefined && (latestMessageTime === undefined || messageTime >= latestMessageTime)) ||
       (messageTime === undefined && latestMessageTime === undefined && currentMessageOrder >= latestMessageOrder);
     if (isNewerMessage) {
-      latest = messagePlan;
+      latest = latestPlan;
       latestMessageTime = messageTime;
       latestMessageOrder = currentMessageOrder;
     }
   });
 
-  return latest;
+  if (!latest?.teamId) return latest;
+  const teamId = latest.teamId;
+  return {
+    ...latest,
+    tasks: latest.tasks.map((task) => {
+      const executions = executionHistory.get(`${teamId}:${task.taskId}`);
+      return executions?.length ? { ...task, executions: [...executions].sort((a, b) => a.attempt - b.attempt) } : task;
+    }),
+  };
 };

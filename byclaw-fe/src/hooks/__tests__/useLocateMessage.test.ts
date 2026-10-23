@@ -2,7 +2,10 @@ jest.mock('@umijs/max', () => ({
   useDispatch: jest.fn(),
   useNavigate: jest.fn(),
   useSelector: jest.fn(),
+  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
 }));
+
+jest.mock('antd', () => ({ message: { warning: jest.fn() } }));
 
 jest.mock('@/service/common/request', () => ({
   POST: jest.fn(),
@@ -21,11 +24,14 @@ jest.mock('@/utils/agent', () => ({
   getAgentPath: jest.fn(() => '/employees/1'),
 }));
 
+const mockEmit = jest.fn();
+
 import { renderHook, act } from '@testing-library/react';
 import { POST } from '@/service/common/request';
 import { useDispatch, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '../useGlobal';
 import useLocateMessage from '../useLocateMessage';
+import { message } from 'antd';
 
 const mockPOST = POST as jest.MockedFunction<typeof POST>;
 const mockUseDispatch = useDispatch as jest.Mock;
@@ -50,6 +56,7 @@ describe('hooks/useLocateMessage', () => {
     mockUseGlobal.mockReturnValue({
       setSessionId: jest.fn(),
       setAgentId: jest.fn(),
+      EventEmitter: { emit: mockEmit },
     } as any);
   });
 
@@ -124,5 +131,43 @@ describe('hooks/useLocateMessage', () => {
 
     expect(navigate).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it('rejects missing history instead of navigating to the latest conversation', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockPOST.mockResolvedValue({ position: 0, totalCount: 25 } as any);
+    const { result } = renderHook(() => useLocateMessage());
+    await act(async () => {
+      await result.current({ sessionId: 'child-1', messageId: 'missing', preserveAgentContext: true });
+    });
+    expect(mockUseDispatch.mock.results[0].value).not.toHaveBeenCalled();
+    expect(message.warning).toHaveBeenCalledWith('messageList.taskPlan.executionUnavailable');
+    expect(mockEmit).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('reloads the exact message and scrolls without changing the employee context', async () => {
+    const dispatch = mockUseDispatch.mock.results[0]?.value || mockUseDispatch();
+    mockPOST.mockResolvedValue({ position: 17, totalCount: 25 } as any);
+    const { result } = renderHook(() => useLocateMessage());
+
+    await act(async () => {
+      await result.current({ sessionId: 'child-1', messageId: 'run-message-2', preserveAgentContext: true });
+    });
+
+    expect(dispatch).toHaveBeenNthCalledWith(1, {
+      type: 'messageStore/setInitialSessionDataToLocateMsg',
+      payload: { sessionId: 'child-1', index: 17, total: 25, targetMessageId: 'run-message-2' },
+    });
+    expect(dispatch).toHaveBeenNthCalledWith(2, {
+      type: 'messageStore/getSessionMessage',
+      payload: { sessionId: 'child-1' },
+    });
+    expect(mockEmit).toHaveBeenCalledWith('scrollToMsgOnSessionChanged', {
+      sessionId: 'child-1',
+      targetMessageId: 'run-message-2',
+    });
+    expect((mockUseGlobal.mock.results[0]?.value as any).setAgentId).not.toHaveBeenCalled();
+    expect(mockUseNavigate.mock.results[0]?.value).not.toHaveBeenCalled();
   });
 });
