@@ -20,7 +20,7 @@ it.each(['zh-CN', 'en-US'])('localizes missing API error messages in %s', async 
       <EmployeeGroupMembers candidateLoader={loader} addText="Add member" />
     </ConfigProvider>
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Add member' }));
+  fireEvent.click(screen.getByRole('button', { name: /Add member/ }));
   const intl = jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(locale);
   await waitFor(() =>
     expect(notify).toHaveBeenCalledWith(intl.formatMessage({ id: 'employeeDetail.groupMember.loadFailed' }))

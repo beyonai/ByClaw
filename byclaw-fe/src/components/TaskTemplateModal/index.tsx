@@ -335,7 +335,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
   initialTitle,
   onCancel,
   onApply,
-  applyText = intl.formatMessage({ id: 'taskTemplate.apply' }),
+  applyText,
   applying = false,
   initialDescription,
   knowledgeOptions = [],
@@ -683,7 +683,7 @@ const TaskTemplateModal: React.FC<TaskTemplateModalProps> = ({
               loading={applying || applyingTemplate}
               onClick={() => void applyTemplate()}
             >
-              {applyText}
+              {applyText ?? intl.formatMessage({ id: 'taskTemplate.apply' })}
             </Button>,
           ]
           : null

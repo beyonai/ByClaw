@@ -370,7 +370,9 @@ const SharedModelFormModal: React.FC<Props> = ({
     }
   };
 
-  const handleValuesChange = (changedValues: any, allValues: any, fromPreset = false) => {
+  const handleValuesChange = (changedValues: any, registeredValues: any, fromPreset = false) => {
+    // onValuesChange 只返回已注册字段，保留预设中未挂载的嵌套参数，避免误判为手动修改。
+    const allValues = { ...registeredValues, ...form.getFieldsValue(true) };
     const changedKeys = Object.keys(changedValues || {});
     let syncedValues = allValues;
     if (type === 'add' && typeof changedValues?.reasoningConfig?.enabled === 'boolean') {
