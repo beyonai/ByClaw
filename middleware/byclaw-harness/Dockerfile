@@ -4,7 +4,7 @@
 #   docker build -f middleware/byclaw-harness/Dockerfile.base -t byclaw/dsh-base:latest .
 # Then build this business-extension image:
 #   docker build -f middleware/byclaw-harness/Dockerfile.extensions -t byclaw/dsh:latest .
-ARG BASE_IMAGE=10.10.168.203:9080/byclaw/dsh-base:2026.9.8
+ARG BASE_IMAGE=byclaw/harness-base:2026.9.8
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 

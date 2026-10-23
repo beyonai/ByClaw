@@ -123,7 +123,7 @@ Playwright 驱动使用原子 DOM 快照：一次浏览器内执行同步读取�
 | `BYCLAW_BROWSER_VNC_WEB_PORT` | `8081` | 按 `sessionId` 路由的统一 noVNC 网关。 |
 | `BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS` | `0.0.0.0` | noVNC 网关地址；默认免鉴权，应限制在可信网络或外层代理后。 |
 
-root Supervisor 创建私有运行目录后，会先取得持久 Chromium profile 的排他咨询锁，再以 `byclaw` 用户依次启动 byCLI daemon 和 browserd。持锁期间，browserd 会在每次启动前清理非正常退出遗留的 Chromium singleton 文件；若另一个容器正在使用同一 profile，则第二个容器会直接失败，不会删除活动实例的文件。`shared-novnc` 下，只有 `bycli daemon status --json` 同时报告 `state=ready`、daemon `running`、extension `connected` 后才会启动 DSH。运行期每 30 秒被动检查一次；一次失败按瞬时抖动处理，连续两次失败会重启 daemon 并等待扩展重连，恢复超时则让容器非零退出，交给容器编排器重启。browserd 同时会在常驻 Chromium 意外断开后，以 0.5–5 秒退避自动重建同一持久 profile；启动失败日志会保留 Playwright 原始错误的单行限长摘要。随机 secret 仍通过两个独立继承 FD 分别一次性交付。
+root Supervisor 创建私有运行目录后，会先取得持久 Chromium profile 的排他咨询锁，再以 `byclaw` 用户依次启动 byCLI daemon 和 browserd。持锁期间，browserd 会在每次启动前清理非正常退出遗留的 Chromium singleton 文件；若另一个容器正在使用同一 profile，则第二个容器会直接失败，不会删除活动实例的文件。`shared-novnc` 下，每次 Chromium 启动都从本地扩展目录加载代码，扩展连接后由 supervisor 自动运行 `bycli doctor --json`，确认 `extensionBuildVerified: true`、`uploadReady: true`、`dialog-policy-v1` 及正常连通性；不联网升级。默认按需模式在首次浏览器调用时完成校验后才标记浏览器就绪；eager 模式在通过校验后才启动 DSH。运行期每 30 秒被动检查一次；一次失败按瞬时抖动处理，连续两次失败会重启 daemon 并等待扩展重连，恢复超时则让容器非零退出，交给容器编排器重启。browserd 同时会在常驻 Chromium 意外断开后，以 0.5–5 秒退避自动重建同一持久 profile；启动失败日志会保留 Playwright 原始错误的单行限长摘要。随机 secret 仍通过两个独立继承 FD 分别一次性交付。
 
 `shared-novnc` 使用稳定入口 `http://HOST:8081/?hideHeader=true&sessionId=shared`，省略 `sessionId` 会重定向到该地址；单个租约关闭不会拆除路由或桌面。Browser 工具通过 broker 操作该 Chromium 的持久 Context，byCLI 通过加载在同一 Chromium 中的扩展操作页面，所以两类工具的页面跳转、点击和输入都会显示在这个 VNC 桌面中；byCLI 不应另起浏览器或使用独立 profile。旧 `novnc` 仍按编码后的 DSH session ID 选择独立桌面。外层 Sandbox 代理需要 token 时可继续透传。browserd 默认不验证 token；任何能访问 8081 的客户端都能控制共享桌面，因此生产环境必须限制网络入口。
 

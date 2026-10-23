@@ -149,8 +149,8 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.69
-ARG BYCLI_EXTENSION_VERSION=2.1.25
+ARG BYCLI_VERSION=2.1.74
+ARG BYCLI_EXTENSION_VERSION=2.1.28
 
 ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_DSH_CLI_ENTRY=apps/cli/lib/bin.js \
@@ -257,6 +257,7 @@ RUN set -eux; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+devflow-artifact-gate[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+devflow-agent-gate[[:space:]]*$' /tmp/dsh-web-config.yml; \
     grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+byclaw-browser-use[[:space:]]*$' /tmp/dsh-web-config.yml; \
+    grep -Eq -- '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]+byclaw-idle-reporter[[:space:]]*$' /tmp/dsh-web-config.yml; \
     ! grep -q -- "baseUrl:" /tmp/dsh-web-config.yml; \
     rm -f /tmp/dsh-web-config.yml
 
@@ -284,6 +285,19 @@ RUN python -m pip install --no-cache-dir \
     && groksearchcli --help >/dev/null \
     && callcli --help >/dev/null \
     && dbcli --help >/dev/null
+
+# knowledge-collection's no-key search provider is a runtime dependency,
+# not part of the copied skill payload or the generic DSH base.
+COPY middleware/byclaw-harness/scripts/install-search-runtime.sh middleware/byclaw-harness/scripts/searxng-cli-constraints.txt /tmp/byclaw-search-runtime/
+COPY middleware/byclaw-harness/scripts/searxng-cli/ /tmp/byclaw-search-runtime/searxng-cli/
+# Optional mounted wheelhouse; versions remain constrained by the lock-derived file.
+ARG SEARXNG_WHEELHOUSE
+RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
+        /tmp/byclaw-search-runtime/searxng-cli/searxng_pack_settings.yml \
+        /tmp/byclaw-search-runtime/searxng-cli-constraints.txt \
+    && /opt/searxng-cli-venv/bin/python -m pip check \
+    && su -s /bin/sh byclaw -c 'searxng-cli --list-engines >/dev/null' \
+    && rm -rf /tmp/byclaw-search-runtime
 
 COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@wecom/ /opt/nvm/current/lib/node_modules/@wecom/
 COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/nvm/current/lib/node_modules/@larksuite/
