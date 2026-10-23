@@ -97,6 +97,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
   private readonly launchRetryWindowMs: number
+  /** Timeout handed to the most recent BE request; tests read it to check the retry budget. */
+  lastRequestTimeoutMs = 0
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -158,30 +160,39 @@ export class ByClawBeBackend implements ToolEnvBackend {
     }
   }
 
-  /** `launch()`, repeated while it fails until `windowMs` has passed; the last failure is thrown. */
+  /**
+   * `launch()`, repeated while it fails until `windowMs` has passed; the last
+   * failure is thrown. The first attempt gets the full request timeout (creating
+   * B can take that long); a retry never outlives the window, so the operation
+   * waiting for B is back within `windowMs` plus one request.
+   */
   private async launchWithin(windowMs: number): Promise<ToolEnvEndpoint> {
     const deadline = this.now() + windowMs
+    let timeoutMs = this.config.requestTimeoutMs
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.launch()
+        return await this.launch(timeoutMs)
       } catch (error) {
         const remaining = deadline - this.now()
         if (remaining <= 0 || !retryableLaunchFailure(error)) throw error
         const delay = Math.min(LAUNCH_RETRY.intervalMs, remaining)
         this.log(`tool environment launch attempt ${String(attempt)} failed (${message(error)}); retrying in ${String(delay / 1000)} s`)
         await this.sleep(delay)
+        const budget = deadline - this.now()
+        if (budget <= 0) throw error
+        timeoutMs = Math.min(this.config.requestTimeoutMs, budget)
       }
     }
   }
 
-  private async launch(): Promise<ToolEnvEndpoint> {
+  private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }) as LaunchData | undefined
+    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
-      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }) as InfoEntry[] | undefined) ?? []
+      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === serviceKey)
       const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
       sandboxId ??= entry?.sandboxId
@@ -243,12 +254,13 @@ export class ByClawBeBackend implements ToolEnvBackend {
     return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
   }
 
-  private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST'): Promise<unknown> {
+  private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST', timeoutMs = this.config.requestTimeoutMs): Promise<unknown> {
     const headers: Record<string, string> = { 'beyond-token': this.config.token }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (this.config.systemCode !== '') headers['system-code'] = this.config.systemCode
+    this.lastRequestTimeoutMs = timeoutMs
     const response = await fetch(`${this.config.baseUrl.replace(/\/+$/u, '')}${path}`, {
-      method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+      method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(timeoutMs),
     })
     const text = await response.text()
     if (!response.ok) throw new Error(`ByClaw BE ${method} ${path} -> ${String(response.status)} ${text.slice(0, 300)}`)

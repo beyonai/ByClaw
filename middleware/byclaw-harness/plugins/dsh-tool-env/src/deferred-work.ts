@@ -18,12 +18,17 @@ export class DeferredToolEnvironmentWork {
   }
 
   /**
-   * Directories whose queued creation has run on B. They outlive the connection
+   * Directories this host created on B, queued or directly. They outlive the connection
    * (B's data volume persists across restarts), so a later probe while B is down
    * can describe them without starting it.
    */
   createdDirectories(): string[] {
     return [...this.created]
+  }
+
+  /** Record that the work behind `key` ran, whether queued here or run directly because B was up. */
+  noteDone(key: string): void {
+    if (key.startsWith('mkdir:')) this.created.add(key.slice('mkdir:'.length))
   }
 
   /** Remember `operation` under `key`, replacing an earlier operation with the same key. */
@@ -39,7 +44,7 @@ export class DeferredToolEnvironmentWork {
       this.pending.delete(key)
       try {
         await operation()
-        if (key.startsWith('mkdir:')) this.created.add(key.slice('mkdir:'.length))
+        this.noteDone(key)
       } catch (error) {
         this.log(`deferred tool environment work "${key}" failed: ${error instanceof Error ? error.message : String(error)}`)
       }

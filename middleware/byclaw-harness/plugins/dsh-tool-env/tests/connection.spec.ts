@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
-import { answerWhileDown } from '../src/pending-directories.ts'
+import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
 describe('scrubEnvironment', () => {
   it('drops tool-environment settings from forwarded process environments', () => {
@@ -33,6 +33,10 @@ describe('DeferredToolEnvironmentWork', () => {
     await work.run()
     expect(work.pendingDirectories()).toEqual([])
     expect(work.createdDirectories()).toEqual(['/by/.sessions/1'])
+    // Directories created directly while B was up count the same; other keys do not.
+    work.noteDone('mkdir:/by/.sessions/3')
+    work.noteDone('write:/by/.sessions/3/a')
+    expect(work.createdDirectories()).toEqual(['/by/.sessions/1', '/by/.sessions/3'])
   })
   it('keeps the latest operation per key, runs in order and survives failures', async () => {
     const logs: string[] = []
@@ -97,6 +101,9 @@ describe('answerWhileDown', () => {
     expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/41', displayPath: 'x' } }, [], [], created)).toBeUndefined()
   })
   it('treats cleanup of processes and streams as done when no connection is up', () => {
+    expect(isCleanupRequest('process.terminate')).toBe(true)
+    expect(isCleanupRequest('fs.streamClose')).toBe(true)
+    expect(isCleanupRequest('fs.stat')).toBe(false)
     expect(answerWhileDown('process.terminate', { id: 'p1' }, [], [])).toBeNull()
     expect(answerWhileDown('fs.streamClose', { id: 's1' }, [], [])).toBeNull()
     expect(answerWhileDown('process.signal', { id: 'p1', value: 'SIGTERM' }, [], [])).toBeUndefined()
