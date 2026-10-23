@@ -108,7 +108,7 @@ export class ToolEnvConnection extends Service {
     // A turn resolves its session directory and probes for files (git roots, cwd) before the model
     // runs; answer those without B: queued directories are empty directories, the rest is absent.
     if (!this.connected && this.current === undefined && !this.closed) {
-      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories())
+      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)

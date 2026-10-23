@@ -1360,6 +1360,47 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void onDemandSpec_launchedSandboxIsKeptUntilReleasedByHand() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+        when(gateway.params(any(), any(), any(), any())).thenReturn(Map.of());
+        SsSandboxRecord tools = new SsSandboxRecord();
+        tools.setId(12442L);
+        tools.setUserCode("user001");
+        tools.setSandboxType("byclaw-dsh-tools");
+        tools.setSandboxId("byclaw-sandbox--tools");
+        tools.setStatus("RUNNING");
+        tools.setAutoRelease(1);
+        SsSandboxRecord manual = new SsSandboxRecord();
+        manual.setId(12443L);
+        manual.setAutoRelease(0);
+        when(recordMapper.selectRunningByUserAndSandboxType("user001", "byclaw-dsh-tools"))
+            .thenReturn(List.of(tools, manual));
+
+        // The tool spec is not open for login (no spec mapper here): the sandbox it starts is on demand.
+        sandboxService.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools");
+
+        verify(gateway).service(eq("launch"), any());
+        verify(gateway).params("id", 12442L, "autoRelease", 0);
+        verify(gateway).service(eq("update-id"), any());
+        verify(gateway, never()).params("id", 12443L, "autoRelease", 0);
+
+        // Locally the record itself is switched, with its lock version.
+        SsSandboxRecordMapper localMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService local = new SandboxService();
+        ReflectionTestUtils.setField(local, "sandboxRecordMapper", localMapper);
+        tools.setLockVersion(3);
+        when(localMapper.selectRunningByUserAndSandboxType("user001", "byclaw-dsh-tools")).thenReturn(List.of(tools));
+        when(localMapper.selectById(12442L)).thenReturn(tools);
+        when(localMapper.updateAutoRelease(12442L, 0, 3)).thenReturn(1);
+        local.keepOnDemandSandbox("user001", "byclaw-dsh-tools");
+        verify(localMapper).updateAutoRelease(12442L, 0, 3);
+    }
+
+    @Test
     void residentHost_removeIsADeleteOnTheHostAndNothingElseForThatType() {
         SharedDshHostContexts contexts = contexts("user001");
         SharedDshHostClient client = (SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client");
