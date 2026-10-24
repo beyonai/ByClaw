@@ -50,10 +50,25 @@ The patch inserts the host row `byclaw-idle-reporter`. Disable it with `disabled
 | `maxLen` | `10000` | — | Approximate stream cap (`MAXLEN ~`) |
 | `idleTimeoutMs` | `1800000` (30 min) | `BYCLAW_DSH_IDLE_TIMEOUT_MS` | Idle time before `releasable` |
 | `heartbeatMs` | `30000` | — | Interval between snapshot entries |
+| `reportSelf` | `true` | `BYCLAW_DSH_IDLE_REPORT_SELF` (`0` disables) | Report this process's own sandbox; off on a shared DSH host, whose user contexts have none |
+| `environmentIdleTimeoutMs` | `idleTimeoutMs` | `BYCLAW_TOOL_ENV_IDLE_REPORT_MS` | Idle time before a tool environment is `releasable` |
 
 `byclaw-be` injects `BYAI_WORKER_ID` (`byclaw-dsh-<userCode>`) and `USER_CODE` into every sandbox it launches, so the identity is stable across relaunches of the same user's sandbox; outside ByClaw the identity falls back to the hostname and `userCode` is empty.
 
 Every numeric value must be a positive integer and every string except `userCode` non-empty. An invalid value, or a Redis client that cannot be constructed (for example an invalid `REDIS_MODE`), logs one error and leaves the plugin inert; DSH still starts.
+
+## Tool environments
+
+When `@byclaw/dsh-tool-env` runs the user's commands in separate sandboxes
+(`ctx.toolEnvironments`), each started environment gets a reporter of its own.
+Its entries carry B's sandbox id (`sandboxId`), `kind: tool-env`, the
+environment name and `sandboxType` (the BE spec or image). Busy means: an
+Agent bound to that environment runs a turn and is not blocked on the user, or
+owns a running job, or the connection has requests or process streams open or
+a start under way; the default environment also takes the jobs nobody owns.
+The usual idle time applies per environment (`environmentIdleTimeoutMs`). A
+released environment (its id gone) stops being reported; a relaunch is a new
+identity. The connection's own use is sampled with the heartbeat.
 
 ## Stream entries
 
@@ -67,6 +82,9 @@ XADD <streamKey> MAXLEN ~ <maxLen> * \
   agents        integer: Agents doing work (diagnostic)
   jobs          integer: running or stopping jobs (diagnostic)
   pid           integer: DSH process id
+  kind          tool-env for a tool environment reported by its DSH host; absent otherwise
+  environment   tool environment name (tool-env entries only)
+  sandboxType   tool environment spec or image (tool-env entries only)
   at            RFC 3339 time this entry was produced
 ```
 

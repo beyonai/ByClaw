@@ -13,7 +13,13 @@ public enum SandboxLeasePolicy {
     /**
      * The sandbox is kept alive locally and only released by explicit user/admin action.
      */
-    MANUAL;
+    MANUAL,
+
+    /**
+     * Released only on what the DSH host reports about the sandbox on the activity stream (tool sandboxes
+     * started on demand for a DSH host): never by access-time idling, never by the platform's sweep.
+     */
+    DSH_REPORTED;
 
     public static SandboxLeasePolicy fromDbValue(String value) {
         if (value == null || value.isBlank()) {

@@ -69,6 +69,26 @@ class DshActivityStreamListenerTest {
     }
 
     @Test
+    void toolEnvironmentEntriesKeepTheirTypeAndKind() {
+        Map<String, String> values = entry("byclaw-sandbox--tools-1", "user001", "busy");
+        values.put("sandboxType", " byclaw-dsh-tools-media ");
+        values.put("kind", "tool-env");
+        values.put("environment", "media");
+
+        assertThat(listener.handle(values, "1700000000000-5", 0L)).isFalse();
+
+        ArgumentCaptor<DshActivity> recorded = ArgumentCaptor.forClass(DshActivity.class);
+        verify(store).record(org.mockito.ArgumentMatchers.eq("byclaw-sandbox--tools-1"), recorded.capture());
+        assertThat(recorded.getValue().sandboxType()).isEqualTo("byclaw-dsh-tools-media");
+        assertThat(recorded.getValue().isToolEnvironment()).isTrue();
+        // A sandbox's own entry carries neither.
+        listener.handle(entry("byclaw-dsh-user001", "user001", "busy"), "1700000000000-6", 0L);
+        verify(store).record(org.mockito.ArgumentMatchers.eq("byclaw-dsh-user001"), recorded.capture());
+        assertThat(recorded.getValue().sandboxType()).isNull();
+        assertThat(recorded.getValue().isToolEnvironment()).isFalse();
+    }
+
+    @Test
     void unparsableStreamIdFallsBackToTheBackendReceiveTime() {
         long before = System.currentTimeMillis();
 

@@ -33,6 +33,11 @@ describe('resolveConfig', () => {
       maxLen: 10_000,
       idleTimeoutMs: 1_800_000,
       heartbeatMs: 30_000,
+      reportSelf: true,
+      environmentIdleTimeoutMs: 1_800_000,
+    })
+    expect(resolveConfig({ idleTimeoutMs: 600_000, environmentIdleTimeoutMs: 120_000, reportSelf: false }, 'host-1')).toMatchObject({
+      idleTimeoutMs: 600_000, environmentIdleTimeoutMs: 120_000, reportSelf: false,
     })
   })
 

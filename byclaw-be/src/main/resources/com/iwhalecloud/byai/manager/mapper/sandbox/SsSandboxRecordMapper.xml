@@ -206,6 +206,22 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectRunningByLeasePolicy" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'USER'
+          AND status = 'RUNNING'
+          AND lease_policy = #{leasePolicy,jdbcType=VARCHAR}
+        ORDER BY create_time ASC
+    </select>
+
+    <update id="updateLeasePolicy">
+        UPDATE ss_sandbox_record
+        SET lease_policy = #{leasePolicy,jdbcType=VARCHAR},
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id,jdbcType=BIGINT}
+    </update>
+
     <select id="selectRunningAutoscaleRecords" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record

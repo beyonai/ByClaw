@@ -345,9 +345,9 @@ class DshActivitySandboxServiceTest extends I18nTestSupport {
         Map<String, DshActivity> entries = new LinkedHashMap<>();
         entries.put(WORKER_ID, activity("busy", 5 * MINUTE, 1));
         entries.put("byclaw-dsh-user002", new DshActivity("user002", "busy", System.currentTimeMillis() - 5 * MINUTE,
-            "1700000000000-1", null, null));
+            "1700000000000-1", null, null, null, null));
         entries.put("byclaw-dsh-user003", new DshActivity("user003", "releasable", System.currentTimeMillis() - 1_000L,
-            "1700000000000-1", null, null));
+            "1700000000000-1", null, null, null, null));
         when(store.entries()).thenReturn(entries);
 
         SandboxLifecycleJobReport report = service.releaseSilentDshSandboxes();
@@ -417,6 +417,83 @@ class DshActivitySandboxServiceTest extends I18nTestSupport {
         verifyNoInteractions(store, listener);
     }
 
+    // ---- tool sandboxes released on what the DSH host reports ----
+
+    @Test
+    void reportedToolSandbox_freshReleasableIsReleased() {
+        SsSandboxRecord record = toolRecord(10 * MINUTE);
+        when(mapper.selectRunningByLeasePolicy("DSH_REPORTED")).thenReturn(List.of(record));
+        when(store.find("sb-media")).thenReturn(toolActivity("releasable", 5_000L, "byclaw-dsh-tools-media"));
+
+        SandboxLifecycleJobReport report = service.releaseReportedToolSandboxes();
+
+        verify(mapper).markReleasing(eq(7L), eq("release.dsh.releasable"), any(Date.class), eq(3));
+        verify(store).remove("sb-media");
+        assertThat(report.getTotalCandidates()).isEqualTo(1);
+    }
+
+    @Test
+    void reportedToolSandbox_freshBusyOrForeignEntriesOrNoEntryAreKept() {
+        SsSandboxRecord record = toolRecord(10 * MINUTE);
+        when(mapper.selectRunningByLeasePolicy("DSH_REPORTED")).thenReturn(List.of(record));
+
+        when(store.find("sb-media")).thenReturn(toolActivity("busy", 5_000L, "byclaw-dsh-tools-media"));
+        service.releaseReportedToolSandboxes();
+        // An entry about another spec under the same id is not this record's.
+        when(store.find("sb-media")).thenReturn(toolActivity("releasable", 5_000L, "byclaw-dsh-tools"));
+        service.releaseReportedToolSandboxes();
+        // An entry older than the record belongs to a previous sandbox with the same id.
+        when(store.find("sb-media")).thenReturn(toolActivity("releasable", 11 * MINUTE, "byclaw-dsh-tools-media"));
+        service.releaseReportedToolSandboxes();
+        // Never reported: the host's own idle handling decides.
+        when(store.find("sb-media")).thenReturn(null);
+        SandboxLifecycleJobReport report = service.releaseReportedToolSandboxes();
+
+        verify(mapper, never()).markReleasing(anyLong(), anyString(), any(Date.class), anyInt());
+        assertThat(report.getSkippedCount()).isEqualTo(1);
+    }
+
+    @Test
+    void reportedToolSandbox_silentIsReleasedOnlyAfterTheListenerHasReadCleanlyLongEnough() {
+        SsSandboxRecord record = toolRecord(10 * MINUTE);
+        when(mapper.selectRunningByLeasePolicy("DSH_REPORTED")).thenReturn(List.of(record));
+        when(store.find("sb-media")).thenReturn(toolActivity("busy", 5 * MINUTE, "byclaw-dsh-tools-media"));
+
+        when(listener.isSilentCheckReady(anyLong())).thenReturn(false);
+        SandboxLifecycleJobReport notReady = service.releaseReportedToolSandboxes();
+        verify(mapper, never()).markReleasing(anyLong(), anyString(), any(Date.class), anyInt());
+        assertThat(notReady.getSkippedCount()).isEqualTo(1);
+
+        when(listener.isSilentCheckReady(anyLong())).thenReturn(true);
+        service.releaseReportedToolSandboxes();
+        verify(mapper).markReleasing(eq(7L), eq("release.dsh.silent"), any(Date.class), eq(3));
+    }
+
+    @Test
+    void reportedToolSandbox_isNeverReleasedByTheAccessTimeSweep() {
+        // The access-time sweep only selects auto_release=1 rows; a DSH_REPORTED record is auto_release=0 and absent.
+        SsSandboxRecord record = toolRecord(10 * MINUTE);
+        when(mapper.countExpiredSandboxes(30)).thenReturn(0);
+        when(store.find("sb-media")).thenReturn(toolActivity("releasable", 5_000L, "byclaw-dsh-tools-media"));
+        service.cleanupExpiredSandboxes();
+        verify(mapper, never()).markReleasing(anyLong(), anyString(), any(Date.class), anyInt());
+        assertThat(record.getAutoRelease()).isZero();
+    }
+
+    private SsSandboxRecord toolRecord(long createdAgoMillis) {
+        SsSandboxRecord record = dshRecord(createdAgoMillis);
+        record.setSandboxType("byclaw-dsh-tools-media");
+        record.setSandboxId("sb-media");
+        record.setAutoRelease(0);
+        record.setLeasePolicy("DSH_REPORTED");
+        return record;
+    }
+
+    private DshActivity toolActivity(String state, long receivedAgoMillis, String sandboxType) {
+        return new DshActivity("user001", state, System.currentTimeMillis() - receivedAgoMillis, "1700000000000-9",
+            null, null, sandboxType, "tool-env");
+    }
+
     private SsSandboxRecord dshRecord(long createdAgoMillis) {
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(7L);
@@ -437,7 +514,7 @@ class DshActivitySandboxServiceTest extends I18nTestSupport {
 
     private DshActivity activity(String state, long receivedAgoMillis, int seq) {
         return new DshActivity("user001", state, System.currentTimeMillis() - receivedAgoMillis, "1700000000000-" + seq,
-            null, null);
+            null, null, null, null);
     }
 
     private void reported(DshActivity activity) {

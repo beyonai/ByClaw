@@ -49,6 +49,10 @@
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
  *                                  plugin's cordis.patch.yml.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
+ *   BYCLAW_TOOL_ENV_ENVIRONMENTS   JSON object of further environments by logical name, e.g.
+ *                                  {"media":{"serviceKey":"byclaw-dsh-tools-media"}}; the default is implicit.
+ *   BYCLAW_TOOL_ENV_RELEASE_ON_IDLE `1` releases an idle B (byclaw-be) instead of keeping it.
+ *   BYCLAW_TOOL_ENV_IDLE_REPORT_MS  idle time before a B is reported releasable (default: the reporter's).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
  *
@@ -113,7 +117,11 @@ export const USER_ROW_OVERLAYS = {
     // Only what commands legitimately need from the host; secrets stay on A.
     forwardHostEnvironment: { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] },
   }),
-  'byclaw-idle-reporter': (user, home, spec) => ({ sandboxId: spec.sandboxId }),
+  // A user context has no sandbox of its own to release; its tool environments are reported instead.
+  'byclaw-idle-reporter': (user, home, spec) => ({
+    sandboxId: spec.sandboxId, userCode: user, reportSelf: false,
+    ...(spec.toolEnvIdleReportMs === undefined ? {} : { environmentIdleTimeoutMs: spec.toolEnvIdleReportMs }),
+  }),
   'byclaw-dsh': (user, home) => ({
     userCode: user,
     workerId: `byclaw-dsh-multi-${createHash('sha256').update(user).digest('hex').slice(0, 12)}-${user}`,
@@ -153,6 +161,8 @@ export const USER_ROW_OVERLAYS = {
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
+    environments: spec.toolEnvEnvironments ?? {},
+    releaseOnIdle: spec.toolEnvReleaseOnIdle === true,
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
       ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
@@ -327,6 +337,8 @@ export function readHostConfig(env) {
   const toolEnvTemplate = env.BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE ?? '{}'
   JSON.parse(toolEnvTemplate.replaceAll('{user}', 'probe'))
   const toolEnvBe = toolEnvBackend === 'byclaw-be' ? readToolEnvBeConfig(env) : undefined
+  const toolEnvEnvironments = JSON.parse(env.BYCLAW_TOOL_ENV_ENVIRONMENTS || '{}')
+  if (typeof toolEnvEnvironments !== 'object' || toolEnvEnvironments === null || Array.isArray(toolEnvEnvironments)) throw new Error('BYCLAW_TOOL_ENV_ENVIRONMENTS must be a JSON object of environment names')
   return {
     token,
     port,
@@ -343,6 +355,9 @@ export function readHostConfig(env) {
     toolEnvTemplate,
     toolEnvBe,
     toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
+    toolEnvEnvironments,
+    toolEnvReleaseOnIdle: env.BYCLAW_TOOL_ENV_RELEASE_ON_IDLE === '1',
+    toolEnvIdleReportMs: env.BYCLAW_TOOL_ENV_IDLE_REPORT_MS ? Number(env.BYCLAW_TOOL_ENV_IDLE_REPORT_MS) : undefined,
   }
 }
 
@@ -1040,6 +1055,9 @@ async function bootUserContext(config, user, request, hooks) {
     toolEnvTemplate: config.toolEnvTemplate,
     toolEnvBe: config.toolEnvBe,
     toolEnvIdleMs: config.toolEnvIdleMs,
+    toolEnvEnvironments: config.toolEnvEnvironments,
+    toolEnvReleaseOnIdle: config.toolEnvReleaseOnIdle,
+    toolEnvIdleReportMs: config.toolEnvIdleReportMs,
     publicUrl: userPublicUrl(config.publicBase, user),
   }
   const entries = composeEntries([readProfilePatches(BIN, base, profile)])

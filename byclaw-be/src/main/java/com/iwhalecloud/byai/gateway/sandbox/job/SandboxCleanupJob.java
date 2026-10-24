@@ -26,6 +26,27 @@ public class SandboxCleanupJob {
     private SandboxService sandboxService;
 
     /**
+     * 按 DSH 宿主的活动上报释放工具沙箱。与超时清理不同，这一步在平台远程模式下也由本服务执行：
+     * 远程平台不知道这类租约，释放经 remove-record 转发即可。
+     */
+    @Scheduled(fixedDelayString = "${sandbox.cleanup.fixed-delay:60000}",
+        initialDelayString = "${sandbox.cleanup.tool-env-initial-delay:50000}",
+        scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
+    public void releaseReportedToolSandboxes() {
+        try {
+            SandboxLifecycleJobReport report = sandboxService.releaseReportedToolSandboxes();
+            if (report.getTotalCandidates() > 0) {
+                LOGGER.debug("工具沙箱按上报释放检查完成，候选 {} 个，释放 {} 个，跳过 {} 个，失败 {} 个，释放记录：{}，失败记录：{}",
+                    report.getTotalCandidates(), report.getAffectedCount(), report.getSkippedCount(),
+                    report.getFailedCount(), report.getAffectedSandboxes(), report.getFailedSandboxes());
+            }
+        }
+        catch (Exception e) {
+            LOGGER.error("工具沙箱按上报释放检查执行异常", e);
+        }
+    }
+
+    /**
      * 定时清理超时沙箱，默认每分钟检测一次。
      */
     @Scheduled(fixedDelayString = "${sandbox.cleanup.fixed-delay:60000}",

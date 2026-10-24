@@ -442,6 +442,7 @@ export async function projectByClawResourcesToTemplates(options: {
           const path = skillPaths.get(skill.code)
           return path === undefined ? [] : [{ code: skill.code, path, ...(options.deferSkillSync ? { ref: skill } : {}) }]
         }),
+        ...employee.toolEnvironment === undefined ? {} : { toolEnvironment: employee.toolEnvironment },
         source: {
           system: 'byclaw',
           resourceId: employee.id,

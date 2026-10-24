@@ -18,7 +18,8 @@ import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerWhileDown } from './pending-directories.ts'
+import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import type { ToolEnvironmentStatus } from './environments.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -46,7 +47,14 @@ export class ToolEnvConnection extends Service {
   private idleTimer: NodeJS.Timeout | undefined
   private closed = false
   private pausing: Promise<void> | undefined
-  private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
+  private lastActiveAt = Date.now()
+  /**
+   * The context this connection was mounted on. `this.ctx` is the accessing
+   * context when a consumer reaches the service through `ctx.ssh`; lifecycle
+   * work (inner connections, logging) must stay on the mounting one.
+   */
+  private readonly home: Context
+  private readonly deferred = new DeferredToolEnvironmentWork(message => { this.home.logger('byclaw-tool-env').warn(message) })
 
   constructor(
     ctx: Context,
@@ -55,6 +63,7 @@ export class ToolEnvConnection extends Service {
     private readonly identity: ToolEnvIdentity,
   ) {
     super(ctx, 'ssh')
+    this.home = ctx
     ctx.effect(() => () => { void this.close() })
   }
 
@@ -73,12 +82,38 @@ export class ToolEnvConnection extends Service {
     const detail = params !== null && typeof params === 'object' ? params as Record<string, unknown> : {}
     const target = detail['target'] as { displayPath?: string } | undefined
     const where = target?.displayPath ?? detail['path'] ?? detail['cwd'] ?? (Array.isArray(detail['argv']) ? (detail['argv'] as unknown[])[0] : undefined) ?? detail['endpoint'] ?? ''
-    this.ctx.logger('byclaw-tool-env').info(`tool environment start requested by ${method} ${typeof where === 'string' ? where : JSON.stringify(where)}`)
+    this.home.logger('byclaw-tool-env').info(`tool environment start requested by ${method} ${typeof where === 'string' ? where : JSON.stringify(where)}`)
   }
 
   /** Whether B is connected right now; `false` never starts it. */
   get connected(): boolean {
     return this.live !== undefined && !isBroken(this.live.connection)
+  }
+
+  /** Facts about this environment for status views and the idle reporter; never starts B. */
+  status(): Omit<ToolEnvironmentStatus, 'name'> {
+    return {
+      serviceKey: this.backend.serviceKey ?? '',
+      sandboxId: this.backend.sandboxId,
+      connected: this.connected,
+      starting: !this.connected && this.current !== undefined,
+      inflight: this.inflight + this.streams.size,
+      lastActiveAt: this.lastActiveAt,
+    }
+  }
+
+  /** B is in use right now: a request in flight, a process stream open, or a start under way. */
+  get busy(): boolean {
+    return this.inflight > 0 || this.streams.size > 0 || (!this.connected && this.current !== undefined)
+  }
+
+  /**
+   * Give B up now (idle fast path or an explicit release): drop the connection
+   * and let the backend release it; the next operation starts a fresh B.
+   */
+  async release(): Promise<void> {
+    if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
+    await this.pauseIdle()
   }
 
   /**
@@ -87,8 +122,21 @@ export class ToolEnvConnection extends Service {
    * key is replaced, so repeated writes to one path cost one write.
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
-    if (this.connected) { await operation(); return }
+    if (this.connected) {
+      await operation()
+      this.deferred.noteDone(key)
+      return
+    }
     this.deferred.defer(key, operation)
+  }
+
+  /**
+   * Forget a connection whose transport is gone, so that "down" below means down:
+   * after a successful open `current` keeps the settled lease, and a transport
+   * loss alone does not clear it until the next lease() would.
+   */
+  private reconcile(): void {
+    if (this.live !== undefined && isBroken(this.live.connection)) void this.drop(this.live)
   }
 
   /** Remote PTC launch; static, so PTC can be configured before the tool environment exists. */
@@ -97,6 +145,11 @@ export class ToolEnvConnection extends Service {
   }
 
   async request<T>(method: string, params: unknown, result: z.ZodType<T>, signal?: AbortSignal, wait = false): Promise<T> {
+    this.reconcile()
+    // Cleanup of a process or stream belongs to the connection it lived on. With that
+    // connection gone there is nothing left to do, whether or not a new one is being
+    // opened for someone else: never wait for B, never start it, never fail for it.
+    if (!this.connected && !this.closed && isCleanupRequest(method)) return result.parse(null)
     // Preparing a turn's shell asks where `bash` lives; that must not start B. Same image build, same answer.
     if (method === 'executable' && !this.connected && this.current === undefined && !this.closed) {
       const input = params as { command?: unknown; env?: Readonly<Record<string, string | null>> }
@@ -108,7 +161,7 @@ export class ToolEnvConnection extends Service {
     // A turn resolves its session directory and probes for files (git roots, cwd) before the model
     // runs; answer those without B: queued directories are empty directories, the rest is absent.
     if (!this.connected && this.current === undefined && !this.closed) {
-      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories())
+      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)
@@ -170,10 +223,10 @@ export class ToolEnvConnection extends Service {
     }
     if (this.closed) { lease.fiber.dispose(); throw new Error('Tool environment connection is closed') }
     this.live = lease
-    this.ctx.logger('byclaw-tool-env').info(`tool environment connected: ${endpoint.hostName}:${String(endpoint.port)}`)
+    this.home.logger('byclaw-tool-env').info(`tool environment connected: ${endpoint.hostName}:${String(endpoint.port)}`)
     // Everything a context queued for B while B was down (session directories, projections) lands before any tool runs.
     if (this.deferred.size > 0) {
-      this.ctx.logger('byclaw-tool-env').info(`running ${String(this.deferred.size)} deferred operation(s) on the tool environment`)
+      this.home.logger('byclaw-tool-env').info(`running ${String(this.deferred.size)} deferred operation(s) on the tool environment`)
       await this.deferred.run()
     }
     return lease
@@ -183,7 +236,7 @@ export class ToolEnvConnection extends Service {
     // The inner connection registers itself as `ssh`; isolating that name keeps
     // it out of the providers' view, which must only ever see this facade.
     const started = Promise.withResolvers<SshConnection>()
-    const fiber = this.ctx.isolate('ssh').plugin({
+    const fiber = this.home.isolate('ssh').plugin({
       name: 'byclaw-tool-env-connection',
       apply: (inner: Context) => {
         try { started.resolve(new SshConnection(inner, { ...this.options.ssh, host: this.identity.alias })) } catch (error) { started.reject(error) }
@@ -200,6 +253,7 @@ export class ToolEnvConnection extends Service {
   }
 
   private touch(): void {
+    this.lastActiveAt = Date.now()
     if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
     if (this.closed || this.options.idleMs <= 0 || this.inflight > 0 || this.streams.size > 0) return
     if (this.live === undefined && this.current === undefined) return
@@ -209,7 +263,7 @@ export class ToolEnvConnection extends Service {
 
   private async pauseIdle(): Promise<void> {
     if (this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
-    const logger = this.ctx.logger('byclaw-tool-env')
+    const logger = this.home.logger('byclaw-tool-env')
     this.pausing = (async () => {
       await this.drop()
       await this.backend.pause()

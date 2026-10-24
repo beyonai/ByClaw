@@ -41,7 +41,7 @@ class DshActivityStateStoreTest {
     @SuppressWarnings("unchecked")
     void recordHandsJsonAndStreamIdToTheAtomicCompareAndSetScript() {
         DshActivity activity = new DshActivity("user001", "busy", 1_000L, "1700000000000-1",
-            "2026-10-15T08:00:00.000Z", "2026-10-15T07:59:00.000Z");
+            "2026-10-15T08:00:00.000Z", "2026-10-15T07:59:00.000Z", null, null);
         when(redis.execute(any(RedisScript.class), eq(List.of(KEY)), eq("byclaw-dsh-user001"), anyString(),
             eq("1700000000000-1"))).thenReturn(1L);
 
@@ -59,7 +59,7 @@ class DshActivityStateStoreTest {
     @Test
     @SuppressWarnings("unchecked")
     void recordReportsAnEntryTheScriptRejectedAsOutOfOrder() {
-        DshActivity older = new DshActivity("user001", "releasable", 3_000L, "1700000000004-9", null, null);
+        DshActivity older = new DshActivity("user001", "releasable", 3_000L, "1700000000004-9", null, null, null, null);
         when(redis.execute(any(RedisScript.class), eq(List.of(KEY)), eq("w"), anyString(), eq("1700000000004-9")))
             .thenReturn(0L);
 
@@ -69,9 +69,9 @@ class DshActivityStateStoreTest {
     @Test
     void malformedOrOwnerlessValuesReadAsNeverReported() {
         Map<Object, Object> values = new LinkedHashMap<>();
-        values.put("good", json(new DshActivity("u1", "busy", 1L, "1-0", null, null)));
+        values.put("good", json(new DshActivity("u1", "busy", 1L, "1-0", null, null, null, null)));
         values.put("broken", "{not json");
-        values.put("ownerless", json(new DshActivity("", "busy", 1L, "1-0", null, null)));
+        values.put("ownerless", json(new DshActivity("", "busy", 1L, "1-0", null, null, null, null)));
         when(hash.entries(KEY)).thenReturn(values);
         when(hash.get(KEY, "broken")).thenReturn("{not json");
 
@@ -83,7 +83,7 @@ class DshActivityStateStoreTest {
     @Test
     @SuppressWarnings("unchecked")
     void removeIfUnchangedComparesTheStreamIdInsideRedis() {
-        DshActivity seen = new DshActivity("u1", "busy", 1L, "1-0", null, null);
+        DshActivity seen = new DshActivity("u1", "busy", 1L, "1-0", null, null, null, null);
         when(redis.execute(any(RedisScript.class), eq(List.of(KEY)), eq("w"), eq("1-0"))).thenReturn(0L, 1L);
 
         assertThat(store.removeIfUnchanged("w", seen)).isFalse();
@@ -94,7 +94,7 @@ class DshActivityStateStoreTest {
 
     @Test
     void freshnessAndStreamIdTime() {
-        DshActivity activity = new DshActivity("u1", "releasable", 10_000L, "5-3", null, null);
+        DshActivity activity = new DshActivity("u1", "releasable", 10_000L, "5-3", null, null, null, null);
 
         assertThat(activity.isFresh(100_000L, 90_000L)).isTrue();
         assertThat(activity.isFresh(100_001L, 90_000L)).isFalse();

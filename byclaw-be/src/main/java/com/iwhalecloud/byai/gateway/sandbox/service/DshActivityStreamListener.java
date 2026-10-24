@@ -154,7 +154,8 @@ public class DshActivityStreamListener
         long entryMillis = DshActivity.streamIdMillis(streamId);
         long receivedAt = entryMillis > 0 ? entryMillis : fallbackReceivedAt;
         DshActivity activity = new DshActivity(userCode, state, receivedAt, streamId,
-            values.get("at"), values.get("lastActiveAt"));
+            values.get("at"), values.get("lastActiveAt"),
+            StringUtils.trimToNull(values.get("sandboxType")), StringUtils.trimToNull(values.get("kind")));
         return stateStore.record(sandboxId, activity);
     }
 

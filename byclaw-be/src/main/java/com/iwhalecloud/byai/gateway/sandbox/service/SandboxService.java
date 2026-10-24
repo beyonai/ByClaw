@@ -299,6 +299,19 @@ public class SandboxService {
     @Value("${byclaw.sandbox.dsh-activity.silent-max-per-round:10}")
     private int dshActivitySilentMaxPerRound = 10;
 
+    /**
+     * 按需（工具）沙箱拉起后的租约策略：{@code DSH_REPORTED} 只按 DSH 宿主在活动 Stream 上的上报释放；
+     * {@code MANUAL} 只由人释放（回退值）。两种都不参与访问时间空闲回收。
+     */
+    @Value("${byclaw.sandbox.tool-env.lease-policy:DSH_REPORTED}")
+    private String toolEnvLeasePolicy = SandboxLeasePolicy.DSH_REPORTED.name();
+
+    /** 系统参数：逻辑工具环境名到沙箱规格 serviceKey 的映射，JSON 对象或 {@code name=key;name2=key2}。 */
+    static final String PARAM_TOOL_ENV_SPECS = "BYCLAW_TOOL_ENV_SPECS";
+
+    /** 系统参数：每个用户同时运行的按需（工具）沙箱上限；空或 0 不限制。 */
+    static final String PARAM_TOOL_ENV_MAX_PER_USER = "BYCLAW_TOOL_ENV_MAX_PER_USER";
+
     @Lazy
     @Autowired
     private WorkerRegistry gatewayWorkerRegistry;
@@ -328,7 +341,140 @@ public class SandboxService {
         }
         SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
             SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        return launchSandboxInternal(userCode, null, routing);
+        SandboxLaunchData data = launchSandboxInternal(userCode, null, routing);
+        if (!isServiceKeyEnabled(serviceKey)) {
+            keepOnDemandSandbox(userCode, serviceKey);
+        }
+        return data;
+    }
+
+    /**
+     * 按需沙箱（未对登录开放的规格，例如常驻 DSH 宿主为用户拉起的工具沙箱）由其使用方负责释放，
+     * 不参与空闲超时回收：使用方通过 SSH 使用它时不会刷新 {@code last_access_time}，
+     * 否则空闲清理会在任务执行中途把它释放掉。拉起（或复用）后把记录改为手动释放；
+     * 平台托管模式下同样读共享库里的记录，再经平台更新，保持其版本号一致。
+     */
+    void keepOnDemandSandbox(String userCode, String sandboxType) {
+        if (sandboxRecordMapper == null) {
+            return;
+        }
+        String policy = resolveToolEnvLeasePolicy().name();
+        try {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode, sandboxType);
+            if (records == null) {
+                return;
+            }
+            for (SsSandboxRecord record : records) {
+                if (record == null || record.getId() == null) {
+                    continue;
+                }
+                if (AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())) {
+                    updateSandboxById(record.getId(), AUTO_RELEASE_MANUAL);
+                    LOGGER.info("按需沙箱退出空闲回收：userCode={}, sandboxType={}, recordId={}, sandboxId={}",
+                        userCode, sandboxType, record.getId(), record.getSandboxId());
+                }
+                if (!policy.equals(record.getLeasePolicy())) {
+                    sandboxRecordMapper.updateLeasePolicy(record.getId(), policy);
+                    LOGGER.info("按需沙箱租约策略改为 {}：userCode={}, sandboxType={}, recordId={}, sandboxId={}",
+                        policy, userCode, sandboxType, record.getId(), record.getSandboxId());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("按需沙箱租约策略更新失败，空闲回收仍可能释放它：userCode={}, sandboxType={}, reason={}",
+                userCode, sandboxType, e.getMessage());
+        }
+    }
+
+    private SandboxLeasePolicy resolveToolEnvLeasePolicy() {
+        SandboxLeasePolicy policy = SandboxLeasePolicy.fromDbValue(toolEnvLeasePolicy);
+        return policy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE ? SandboxLeasePolicy.DSH_REPORTED : policy;
+    }
+
+    /**
+     * 逻辑工具环境名解析为沙箱规格：系统参数 {@value #PARAM_TOOL_ENV_SPECS}（JSON 对象或 {@code name=key;name2=key2}）。
+     * 空环境名或未映射的 {@code default} 用调用方给的规格；其他未知名字拒绝，让宿主把错误报回给工具调用。
+     */
+    public String resolveToolEnvironmentSpec(String environment, String fallbackServiceKey) {
+        String name = StringUtils.trimToNull(environment);
+        if (name == null) {
+            return fallbackServiceKey;
+        }
+        Map<String, String> specs = toolEnvironmentSpecs();
+        String resolved = specs.get(name);
+        if (StringUtils.isNotBlank(resolved)) {
+            return resolved.trim();
+        }
+        if ("default".equals(name) && StringUtils.isNotBlank(fallbackServiceKey)) {
+            return fallbackServiceKey;
+        }
+        throw new IllegalArgumentException("unknown tool environment " + name + "; configure it in " + PARAM_TOOL_ENV_SPECS);
+    }
+
+    Map<String, String> toolEnvironmentSpecs() {
+        String raw;
+        try {
+            raw = byaiSystemConfigService == null ? null : byaiSystemConfigService.getDcSystemConfigValueByCode(PARAM_TOOL_ENV_SPECS);
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取系统参数 {} 失败，按无映射处理：{}", PARAM_TOOL_ENV_SPECS, e.getMessage());
+            return Map.of();
+        }
+        if (StringUtils.isBlank(raw)) {
+            return Map.of();
+        }
+        String text = raw.trim();
+        Map<String, String> specs = new LinkedHashMap<>();
+        if (text.startsWith("{")) {
+            try {
+                Map<?, ?> parsed = new ObjectMapper().readValue(text, Map.class);
+                parsed.forEach((key, value) -> {
+                    if (key != null && value != null) {
+                        specs.put(key.toString().trim(), value.toString().trim());
+                    }
+                });
+            }
+            catch (JsonProcessingException e) {
+                LOGGER.warn("系统参数 {} 不是合法 JSON：{}", PARAM_TOOL_ENV_SPECS, e.getMessage());
+            }
+            return specs;
+        }
+        for (String pair : text.split("[,;\\s]+")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && eq < pair.length() - 1) {
+                specs.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return specs;
+    }
+
+    /**
+     * 每个用户的按需（工具）沙箱上限（系统参数 {@value #PARAM_TOOL_ENV_MAX_PER_USER}）：
+     * 已在运行的其他类型按需沙箱达到上限时拒绝再拉一个；复用同类型不受影响。
+     */
+    public void checkToolEnvironmentQuota(String userCode, String serviceKey) {
+        int limit;
+        try {
+            String raw = byaiSystemConfigService == null ? null : byaiSystemConfigService.getDcSystemConfigValueByCode(PARAM_TOOL_ENV_MAX_PER_USER);
+            limit = StringUtils.isBlank(raw) ? 0 : Integer.parseInt(raw.trim());
+        }
+        catch (Exception e) {
+            LOGGER.warn("读取系统参数 {} 失败，不限制工具沙箱数量：{}", PARAM_TOOL_ENV_MAX_PER_USER, e.getMessage());
+            return;
+        }
+        if (limit <= 0 || sandboxRecordMapper == null) {
+            return;
+        }
+        List<SsSandboxRecord> running = sandboxRecordMapper.selectRunningByUser(userCode);
+        if (running == null) {
+            return;
+        }
+        long others = running.stream()
+            .filter(record -> record != null && !StringUtils.equals(record.getSandboxType(), serviceKey))
+            .filter(record -> !isServiceKeyEnabled(record.getSandboxType()))
+            .count();
+        if (others >= limit) {
+            throw new IllegalStateException("用户工具沙箱数量已达上限 " + limit + "，请先释放不用的工具环境");
+        }
     }
 
     /**
@@ -1760,8 +1906,20 @@ public class SandboxService {
      * 只有在记录创建之后收到的上报才属于该记录，避免同一用户上一个沙箱的状态影响新沙箱。
      */
     DshActivity dshActivityFor(SsSandboxRecord record) {
-        if (!dshActivityEnabled || record == null
-            || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
+        if (!dshActivityEnabled || record == null) {
+            return null;
+        }
+        if (isDshReported(record)) {
+            // A tool sandbox is reported by the DSH host under the sandbox's own id.
+            if (StringUtils.isBlank(record.getSandboxId())) {
+                return null;
+            }
+            DshActivity activity = dshActivityStateStore.find(record.getSandboxId());
+            return belongsToRecord(activity, record)
+                && (activity.sandboxType() == null || StringUtils.equals(activity.sandboxType(), record.getSandboxType()))
+                ? activity : null;
+        }
+        if (!SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
             return null;
         }
         String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
@@ -1877,8 +2035,109 @@ public class SandboxService {
         return TimeUnit.SECONDS.toMillis(dshActivitySilentSeconds);
     }
 
+    private static boolean isDshReported(SsSandboxRecord record) {
+        return record != null && SandboxLeasePolicy.DSH_REPORTED.name().equals(record.getLeasePolicy());
+    }
+
+    /**
+     * 按活动上报释放的工具沙箱（{@code lease_policy = DSH_REPORTED}）：新鲜的 releasable 释放，新鲜的 busy 保留，
+     * 上报过但静默的走静默护栏后释放；从未上报的交给宿主自己的空闲处理。没有"前端空闲"维度。
+     * 两种执行模式下都由本服务执行（远程模式的释放经平台 remove-record）。
+     */
+    public SandboxLifecycleJobReport releaseReportedToolSandboxes() {
+        SandboxLifecycleJobReport report = new SandboxLifecycleJobReport("tool-env");
+        if (!dshActivityEnabled || sandboxRecordMapper == null) {
+            return report;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByLeasePolicy(SandboxLeasePolicy.DSH_REPORTED.name());
+        if (records == null || records.isEmpty()) {
+            return report;
+        }
+        report.setTotalCandidates(records.size());
+        report.addScannedCount(records.size());
+        long now = System.currentTimeMillis();
+        long silentMillis = dshSilentMillis();
+        List<SsSandboxRecord> silent = new ArrayList<>();
+        for (SsSandboxRecord record : records) {
+            try {
+                DshActivity activity = dshActivityFor(record);
+                if (activity == null) {
+                    report.addSkippedSandbox(sandboxRef(record));
+                    continue;
+                }
+                if (!activity.isFresh(now, silentMillis)) {
+                    silent.add(record);
+                    continue;
+                }
+                if (!activity.isReleasable()) {
+                    report.addSkippedSandbox(sandboxRef(record));
+                    continue;
+                }
+                LOGGER.info("命中工具沙箱可释放：{}，receivedAt：{}，lastActiveAt：{}", sandboxRef(record),
+                    new Date(activity.receivedAt()), activity.lastActiveAt());
+                doRemoveSandbox(record, RELEASE_REASON_DSH_RELEASABLE);
+                removeDshActivityState(record);
+                report.addAffectedSandbox(sandboxRef(record));
+            }
+            catch (Exception e) {
+                report.addFailedSandbox(sandboxRef(record));
+                LOGGER.error("工具沙箱按上报释放失败：{}", sandboxRef(record), e);
+            }
+        }
+        if (silent.isEmpty()) {
+            return report;
+        }
+        if (!isDshSilentCheckReady(now)) {
+            silent.forEach(record -> report.addSkippedSandbox(sandboxRef(record)));
+            LOGGER.debug("DSH 活动 Stream 尚未连续消费满静默阈值，跳过 {} 个静默工具沙箱", silent.size());
+            return report;
+        }
+        if (dshActivitySilentMaxPerRound > 0 && silent.size() > dshActivitySilentMaxPerRound) {
+            silent.forEach(record -> report.addSkippedSandbox(sandboxRef(record)));
+            LOGGER.warn("静默的工具沙箱 {} 个超过单轮熔断阈值 {}，疑似上报链路整体中断，本轮不释放", silent.size(),
+                dshActivitySilentMaxPerRound);
+            return report;
+        }
+        for (SsSandboxRecord record : silent) {
+            try {
+                long recheck = System.currentTimeMillis();
+                if (isDshSilenceSuspended(record.getSandboxId(), record, recheck)) {
+                    report.addSkippedSandbox(sandboxRef(record));
+                    continue;
+                }
+                DshActivity latest = dshActivityFor(record);
+                if (latest == null || latest.isFresh(recheck, silentMillis)) {
+                    report.addSkippedSandbox(sandboxRef(record));
+                    continue;
+                }
+                LOGGER.info("命中工具沙箱静默释放：{}，receivedAt：{}，state：{}", sandboxRef(record),
+                    new Date(latest.receivedAt()), latest.state());
+                doRemoveSandbox(record, RELEASE_REASON_DSH_SILENT);
+                removeDshActivityState(record);
+                report.addAffectedSandbox(sandboxRef(record));
+            }
+            catch (Exception e) {
+                report.addFailedSandbox(sandboxRef(record));
+                LOGGER.error("工具沙箱静默释放失败：{}", sandboxRef(record), e);
+            }
+        }
+        return report;
+    }
+
     private void removeDshActivityState(SsSandboxRecord record) {
-        if (!dshActivityEnabled || !SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
+        if (!dshActivityEnabled) {
+            return;
+        }
+        if (isDshReported(record)) {
+            try {
+                dshActivityStateStore.remove(record.getSandboxId());
+            }
+            catch (Exception e) {
+                LOGGER.warn("清理工具沙箱活动状态失败，sandboxId：{}，原因：{}", record.getSandboxId(), e.getMessage());
+            }
+            return;
+        }
+        if (!SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(record.getSandboxType())) {
             return;
         }
         String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());

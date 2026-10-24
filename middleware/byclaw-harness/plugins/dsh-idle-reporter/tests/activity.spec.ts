@@ -61,3 +61,31 @@ describe('computeActivity', () => {
     expect(activity([], 0, 1)).toEqual({ busy: false, waitingUser: 1, agents: 0, jobs: 0 })
   })
 })
+
+describe('computeActivity with a scope', () => {
+  it('counts only the Agents in scope and their jobs; the default scope also takes unowned jobs and unattributed waits', () => {
+    const facts = {
+      agents: [
+        agent('video', 'running'),
+        { ...agent('helper', 'idle', { owners: ['video'] }), jobs: 2 },
+        agent('writer', 'running', { waiting: true }),
+      ],
+      runningJobs: 3,
+      unownedJobs: 1,
+      unattributedWaits: 1,
+    }
+    const media = { includes: (id: string) => id === 'video' || id === 'helper', includeUnowned: false }
+    expect(computeActivity(facts, media)).toEqual({ busy: true, waitingUser: 0, agents: 1, jobs: 2 })
+    const byDefault = { includes: (id: string) => id === 'writer', includeUnowned: true }
+    expect(computeActivity(facts, byDefault)).toEqual({ busy: true, waitingUser: 2, agents: 0, jobs: 1 })
+    expect(computeActivity({ ...facts, unownedJobs: 0 }, byDefault)).toEqual({ busy: false, waitingUser: 2, agents: 0, jobs: 0 })
+  })
+  it('a parent outside the scope waiting on a child inside it still blocks that parent, not the child', () => {
+    const facts = {
+      agents: [agent('parent', 'running'), agent('child', 'running', { owners: ['parent'], waiting: true })],
+      runningJobs: 0, unownedJobs: 0, unattributedWaits: 0,
+    }
+    expect(computeActivity(facts, { includes: id => id === 'parent', includeUnowned: true })).toEqual({ busy: false, waitingUser: 0, agents: 0, jobs: 0 })
+    expect(computeActivity(facts, { includes: id => id === 'child', includeUnowned: false })).toEqual({ busy: false, waitingUser: 1, agents: 0, jobs: 0 })
+  })
+})
