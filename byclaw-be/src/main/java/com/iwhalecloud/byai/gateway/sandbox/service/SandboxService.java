@@ -328,7 +328,40 @@ public class SandboxService {
         }
         SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
             SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        return launchSandboxInternal(userCode, null, routing);
+        SandboxLaunchData data = launchSandboxInternal(userCode, null, routing);
+        if (!isServiceKeyEnabled(serviceKey)) {
+            keepOnDemandSandbox(userCode, serviceKey);
+        }
+        return data;
+    }
+
+    /**
+     * 按需沙箱（未对登录开放的规格，例如常驻 DSH 宿主为用户拉起的工具沙箱）由其使用方负责释放，
+     * 不参与空闲超时回收：使用方通过 SSH 使用它时不会刷新 {@code last_access_time}，
+     * 否则空闲清理会在任务执行中途把它释放掉。拉起（或复用）后把记录改为手动释放；
+     * 平台托管模式下同样读共享库里的记录，再经平台更新，保持其版本号一致。
+     */
+    void keepOnDemandSandbox(String userCode, String sandboxType) {
+        if (sandboxRecordMapper == null) {
+            return;
+        }
+        try {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode, sandboxType);
+            if (records == null) {
+                return;
+            }
+            for (SsSandboxRecord record : records) {
+                if (record == null || record.getId() == null || !AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())) {
+                    continue;
+                }
+                updateSandboxById(record.getId(), AUTO_RELEASE_MANUAL);
+                LOGGER.info("按需沙箱改为手动释放：userCode={}, sandboxType={}, recordId={}, sandboxId={}",
+                    userCode, sandboxType, record.getId(), record.getSandboxId());
+            }
+        } catch (Exception e) {
+            LOGGER.warn("按需沙箱改为手动释放失败，空闲回收仍可能释放它：userCode={}, sandboxType={}, reason={}",
+                userCode, sandboxType, e.getMessage());
+        }
     }
 
     /**

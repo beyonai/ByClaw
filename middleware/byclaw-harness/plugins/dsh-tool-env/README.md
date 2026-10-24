@@ -70,14 +70,21 @@ those itself: path resolution only normalizes, queued directories are empty
 directories with nothing inside, `.git` and instruction-file probes
 (`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
 directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
-`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, and `executable`
-lookups resolve on this host (same image build). What tools do (stat, list,
-read, write of real paths; processes) still goes to B and starts it. The
-trade-off: until a session's first tool call, its prompt sees no
-session-local Skills and no instruction files from the user tree.
-After a failed launch the `byclaw-be` backend waits before trying again
-(1 s, doubling to 30 s) and reports the cause instead of calling BE on every
-operation.
+`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, directories this
+host already created on B still exist (B's volume outlives B), cleanup of a
+process or stream of a connection that is gone (`process.terminate`,
+`fs.streamClose`) is already done, and `executable` lookups resolve on this
+host (same image build). What tools do (stat, list, read, write of real
+paths; processes) still goes to B and starts it. The trade-off: until a
+session's first tool call, its prompt sees no session-local Skills and no
+instruction files from the user tree.
+A launch that BE refuses (for example while the platform is still releasing
+or creating the sandbox: "Sandbox is being created") is retried every 3 s for
+up to 60 s inside the operation that needs B, so one transient refusal does not
+fail a tool call or a turn. Only after that window does the `byclaw-be` backend
+give up; it then waits before trying again (1 s, doubling to 30 s) and reports
+the cause instead of calling BE on every operation. A spec without an ssh
+endpoint is a configuration error and fails at once.
 
 ## Backends
 
@@ -251,9 +258,12 @@ out of the global spec: it would reach every A.
 - **Idle pause/resume.** BE has no pause API, so `pause()` is a no-op and B keeps
   running between turns. OpenSandbox's pause/resume is reachable through BE's
   `/v1/sandboxes/**` passthrough if this is wanted later.
-- **Releasing B.** Nothing removes B when A is released. BE's idle cleanup and
-  the DSH silent release only cover A's own sandbox type; B needs either an
-  explicit `removeSandbox` on A's shutdown or its own heartbeat and reclaim rule.
+- **Releasing B.** Nothing removes B when A is released, and nothing on the BE
+  side may either: BE marks sandboxes started through `launchByUserCode` for a
+  spec that is not open for login (the tool sandbox) as manual-release, because
+  A's use of B never refreshes the record's `last_access_time` and the idle
+  sweep would otherwise release B in the middle of a task. B is released by
+  hand (or by `removeSandbox`) until B gets its own heartbeat and reclaim rule.
 
 ## Building B's image
 

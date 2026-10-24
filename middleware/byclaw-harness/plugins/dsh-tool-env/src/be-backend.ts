@@ -72,18 +72,44 @@ const SUCCESS = 0
 /** Delay before the next launch attempt after a failure: doubles from the first value up to the cap. */
 export const LAUNCH_BACKOFF_MS = { first: 1000, max: 30_000 } as const
 
+/**
+ * One `ensure()` keeps asking BE for this long before it gives up: a launch that
+ * fails because B is still being released or created (the platform answers
+ * "Sandbox is being created") settles within this window, so the tool call that
+ * needed B waits instead of failing.
+ */
+export const LAUNCH_RETRY = { windowMs: 60_000, intervalMs: 3_000 } as const
+
+/** Time source and sleep, injectable for tests. */
+export interface ByClawBeBackendClock {
+  now?: () => number
+  sleep?: (ms: number) => Promise<void>
+  /** Overrides {@link LAUNCH_RETRY}'s window; `0` makes every launch failure final at once. */
+  launchRetryWindowMs?: number
+}
+
 export class ByClawBeBackend implements ToolEnvBackend {
   private operation: Promise<unknown> = Promise.resolve()
   private backoffMs = 0
   private nextAttemptAt = 0
   private lastFailure = ''
 
+  private readonly now: () => number
+  private readonly sleep: (ms: number) => Promise<void>
+  private readonly launchRetryWindowMs: number
+  /** Timeout handed to the most recent BE request; tests read it to check the retry budget. */
+  lastRequestTimeoutMs = 0
+
   constructor(
     private readonly config: ByClawBeBackendConfig,
     private readonly identity: ToolEnvIdentity,
     private readonly log: (message: string) => void,
-    private readonly now: () => number = Date.now,
-  ) {}
+    clock: ByClawBeBackendClock = {},
+  ) {
+    this.now = clock.now ?? Date.now
+    this.sleep = clock.sleep ?? (ms => new Promise(resolve => { setTimeout(resolve, ms).unref() }))
+    this.launchRetryWindowMs = clock.launchRetryWindowMs ?? LAUNCH_RETRY.windowMs
+  }
 
   /**
    * Every operation that finds the connection down calls this, so a B that cannot
@@ -119,7 +145,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     // B's sshd reads the keys from A's state directory, so they must exist before B starts.
     const keys = await this.identity.keys()
     if (this.config.publishKeys) await this.publishKeys(keys)
-    const first = await this.launch()
+    const first = await this.launchWithin(this.launchRetryWindowMs)
     try {
       await waitForEndpoint(first, this.config.readyTimeoutMs)
       return first
@@ -128,20 +154,45 @@ export class ByClawBeBackend implements ToolEnvBackend {
       // Release that record once and launch again before giving up.
       this.log(`tool environment at ${describe(first)} is unreachable (${message(error)}); releasing it and launching again`)
       await this.remove()
-      const second = await this.launch()
+      const second = await this.launchWithin(this.launchRetryWindowMs)
       await waitForEndpoint(second, this.config.readyTimeoutMs)
       return second
     }
   }
 
-  private async launch(): Promise<ToolEnvEndpoint> {
+  /**
+   * `launch()`, repeated while it fails until `windowMs` has passed; the last
+   * failure is thrown. The first attempt gets the full request timeout (creating
+   * B can take that long); a retry never outlives the window, so the operation
+   * waiting for B is back within `windowMs` plus one request.
+   */
+  private async launchWithin(windowMs: number): Promise<ToolEnvEndpoint> {
+    const deadline = this.now() + windowMs
+    let timeoutMs = this.config.requestTimeoutMs
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.launch(timeoutMs)
+      } catch (error) {
+        const remaining = deadline - this.now()
+        if (remaining <= 0 || !retryableLaunchFailure(error)) throw error
+        const delay = Math.min(LAUNCH_RETRY.intervalMs, remaining)
+        this.log(`tool environment launch attempt ${String(attempt)} failed (${message(error)}); retrying in ${String(delay / 1000)} s`)
+        await this.sleep(delay)
+        const budget = deadline - this.now()
+        if (budget <= 0) throw error
+        timeoutMs = Math.min(this.config.requestTimeoutMs, budget)
+      }
+    }
+  }
+
+  private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }) as LaunchData | undefined
+    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
-      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }) as InfoEntry[] | undefined) ?? []
+      const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType: serviceKey }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === serviceKey)
       const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
       sandboxId ??= entry?.sandboxId
@@ -203,12 +254,13 @@ export class ByClawBeBackend implements ToolEnvBackend {
     return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
   }
 
-  private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST'): Promise<unknown> {
+  private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST', timeoutMs = this.config.requestTimeoutMs): Promise<unknown> {
     const headers: Record<string, string> = { 'beyond-token': this.config.token }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (this.config.systemCode !== '') headers['system-code'] = this.config.systemCode
+    this.lastRequestTimeoutMs = timeoutMs
     const response = await fetch(`${this.config.baseUrl.replace(/\/+$/u, '')}${path}`, {
-      method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+      method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(timeoutMs),
     })
     const text = await response.text()
     if (!response.ok) throw new Error(`ByClaw BE ${method} ${path} -> ${String(response.status)} ${text.slice(0, 300)}`)
@@ -253,6 +305,11 @@ export function parseEndpoint(raw: string, defaultPort: number, baseUrl = ''): T
   const colon = value.lastIndexOf(':')
   if (colon > 0 && /^\d+$/u.test(value.slice(colon + 1))) return { hostName: value.slice(0, colon), port: Number(value.slice(colon + 1)) }
   return { hostName: value, port: defaultPort }
+}
+
+/** BE refusals and transport errors pass; a spec without an ssh endpoint is configuration and final. */
+function retryableLaunchFailure(error: unknown): boolean {
+  return !(error instanceof Error && error.message.startsWith('ByClaw BE returned no '))
 }
 
 function bridge(url: string, defaultPort: number): ToolEnvEndpoint | undefined {

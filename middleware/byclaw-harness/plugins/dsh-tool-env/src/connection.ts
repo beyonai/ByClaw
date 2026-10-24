@@ -18,7 +18,7 @@ import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerWhileDown } from './pending-directories.ts'
+import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -87,8 +87,21 @@ export class ToolEnvConnection extends Service {
    * key is replaced, so repeated writes to one path cost one write.
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
-    if (this.connected) { await operation(); return }
+    if (this.connected) {
+      await operation()
+      this.deferred.noteDone(key)
+      return
+    }
     this.deferred.defer(key, operation)
+  }
+
+  /**
+   * Forget a connection whose transport is gone, so that "down" below means down:
+   * after a successful open `current` keeps the settled lease, and a transport
+   * loss alone does not clear it until the next lease() would.
+   */
+  private reconcile(): void {
+    if (this.live !== undefined && isBroken(this.live.connection)) void this.drop(this.live)
   }
 
   /** Remote PTC launch; static, so PTC can be configured before the tool environment exists. */
@@ -97,6 +110,11 @@ export class ToolEnvConnection extends Service {
   }
 
   async request<T>(method: string, params: unknown, result: z.ZodType<T>, signal?: AbortSignal, wait = false): Promise<T> {
+    this.reconcile()
+    // Cleanup of a process or stream belongs to the connection it lived on. With that
+    // connection gone there is nothing left to do, whether or not a new one is being
+    // opened for someone else: never wait for B, never start it, never fail for it.
+    if (!this.connected && !this.closed && isCleanupRequest(method)) return result.parse(null)
     // Preparing a turn's shell asks where `bash` lives; that must not start B. Same image build, same answer.
     if (method === 'executable' && !this.connected && this.current === undefined && !this.closed) {
       const input = params as { command?: unknown; env?: Readonly<Record<string, string | null>> }
@@ -108,7 +126,7 @@ export class ToolEnvConnection extends Service {
     // A turn resolves its session directory and probes for files (git roots, cwd) before the model
     // runs; answer those without B: queued directories are empty directories, the rest is absent.
     if (!this.connected && this.current === undefined && !this.closed) {
-      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories())
+      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)
