@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { listTenants } from '@/pages/manager/service/TenantMgr';
 import SandboxMgr from '../index';
@@ -158,7 +158,12 @@ test('running endpoints show named links and expand the complete list without na
   expect(screen.getByRole('link', { name: 'openclaw' })).toHaveAttribute('href', 'https://sandbox.example/chat');
   expect(screen.getByRole('link', { name: 'vnc' })).toHaveAttribute('href', 'https://sandbox.example/vnc');
   fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.endpoint.more/ }));
-  expect(await screen.findByRole('link', { name: 'bycli' })).toHaveAttribute('href', 'https://sandbox.example/cli');
+  const menu = await screen.findByRole('menu', { hidden: true });
+  await waitFor(() => expect(menu).toBeVisible());
+  expect(within(menu).getByRole('link', { name: 'bycli', hidden: true })).toHaveAttribute(
+    'href',
+    'https://sandbox.example/cli'
+  );
   expect(screen.queryByText(/\{"openclaw"/)).not.toBeInTheDocument();
 });
 

@@ -123,6 +123,11 @@ it.each(['personal', 'readonly', 'manager'] as const)(
     const owner = card === 'personal' ? user : { ...user, userCode: 'adminvip' };
     await seed(failure(scope), owner);
     render(<Page card={card} scope={scope} owner={owner} />);
+    // 登录后的自动检查是独立流程；等待其完成，再验证打开缓存详情不会额外探测。
+    await waitFor(() =>
+      expect((POST as jest.Mock).mock.calls.some(([url]) => url.endsWith('/healthCheck'))).toBe(true)
+    );
+    (POST as jest.Mock).mockClear();
     expect(screen.getByRole('status')).toHaveTextContent(
       `Last check: 2 issue(s) in ${scope === 'PERSONAL' ? 'Personal models' : 'Public models'}`
     );

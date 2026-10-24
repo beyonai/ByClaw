@@ -34,6 +34,14 @@ jest.mock('../useModelTypeOptions', () => () => [
 ]);
 jest.mock('../ModelDebugPanel', () => ({ debugInput }: any) => <pre data-testid="debug-input">{debugInput}</pre>);
 
+// 精确文本定位后校验原生按钮，避免对整个复杂表单反复计算可访问名称。
+function getButton(name: string): HTMLButtonElement {
+  const button = screen.getByText(name).closest('button');
+  if (!button) throw new Error(`Button not found: ${name}`);
+  expect(button).toBeVisible();
+  return button;
+}
+
 async function renderForm(type: 'add' | 'edit' = 'add', detail: Record<string, any> = {}) {
   const saveModelRequest = jest.fn().mockResolvedValue({ data: { id: '42' } });
   const props = {
@@ -71,12 +79,12 @@ async function change(label: string, value: string) {
   await act(async () => {
     // 接入地址已移入更多配置，手动填写时先模拟用户展开所在分组。
     if (label === 'apiEndpoint') {
-      const more = screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' });
+      const more = getButton('modelMgr.modal.moreConfig');
       if (more.getAttribute('aria-expanded') === 'false') fireEvent.click(more);
     }
     const input =
       label === 'quickPreset'
-        ? screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' })
+        ? screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' })
         : screen.getByLabelText(`modelMgr.modal.${label}`);
     fireEvent.change(input, { target: { value } });
   });
@@ -84,7 +92,7 @@ async function change(label: string, value: string) {
 
 async function clickSave(name = 'modelMgr.modal.saveAndClose') {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name }));
+    fireEvent.click(getButton(name));
   });
 }
 
@@ -126,12 +134,12 @@ describe('new model quick setup', () => {
     const save = await renderForm();
     await change('modelCode', 'MiniMax-M3');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' }));
+      fireEvent.click(getButton('modelMgr.modal.basicConfig'));
     });
     expect(screen.getByLabelText('modelMgr.modal.apiToken')).not.toBeVisible();
     await clickSave();
     expect(await screen.findByText('modelMgr.modal.apiTokenRequired')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' })).toHaveAttribute('aria-expanded', 'true');
+    expect(getButton('modelMgr.modal.basicConfig')).toHaveAttribute('aria-expanded', 'true');
     expect(save).not.toHaveBeenCalled();
     await change('apiToken', 'test-token');
     await clickSave();
@@ -143,7 +151,7 @@ describe('new model quick setup', () => {
     await renderForm();
     expect(screen.queryByText('modelMgr.modal.identityGroup')).not.toBeInTheDocument();
     expect(screen.queryByText('modelMgr.modal.quickPresetHint')).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' })).toBeInTheDocument();
+    expect(screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' })).toBeInTheDocument();
 
     await change('modelCode', 'text-embedding-v4');
     expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('text-embedding-v4');
@@ -189,7 +197,7 @@ describe('new model quick setup', () => {
   it('preserves a cleared application scope across model changes and save-and-continue', async () => {
     const save = await renderForm();
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreBasicSettings' }));
+      fireEvent.click(getButton('modelMgr.modal.moreBasicSettings'));
     });
     const abilitySelect = screen.getByLabelText('modelMgr.modal.ability').closest('.ant-select')! as HTMLElement;
     expect(abilitySelect).toBeVisible();
@@ -198,7 +206,7 @@ describe('new model quick setup', () => {
     });
     expect(within(abilitySelect).queryByTitle('Chat model')).not.toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreBasicSettings' }));
+      fireEvent.click(getButton('modelMgr.modal.moreBasicSettings'));
     });
     expect(abilitySelect).not.toBeVisible();
     await change('modelCode', 'MiniMax-M3');
@@ -219,14 +227,14 @@ describe('new model quick setup', () => {
   ])('offers localized official templates without arbitrary saved names: %s', async (locale, expectedLabel) => {
     mockIntl.locale = locale;
     await renderForm('add', { displayName: 'Example test model', modelCode: 'model2' });
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
+    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' }));
     await change('quickPreset', 'model2');
     expect(screen.queryByText('Example test model')).not.toBeInTheDocument();
     expect(screen.queryByText('model2')).not.toBeInTheDocument();
     await change('quickPreset', 'qwen3.6-plus');
     expect(await screen.findByText(expectedLabel)).toBeInTheDocument();
     await act(async () => {
-      fireEvent.keyDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }), {
+      fireEvent.keyDown(screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' }), {
         key: 'Escape',
         keyCode: 27,
       });
@@ -279,7 +287,7 @@ describe('new model quick setup', () => {
     'saves %s from its public template with only a user-supplied key',
     async (search, label, modelCode, contextTokens, maxTokens, enabled) => {
       const save = await renderForm();
-      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
+      fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' }));
       await change('quickPreset', search);
       await selectOption(label);
       await change('apiToken', 'test-token');
@@ -341,11 +349,11 @@ describe('new model quick setup', () => {
 
   it('starts with advanced settings collapsed and saves a selected Seedream preset with only a key', async () => {
     const save = await renderForm();
-    expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'false');
+    expect(getButton('modelMgr.modal.moreConfig')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByLabelText('modelMgr.modal.connectTimeoutSec')).not.toBeVisible();
     expect(screen.getByLabelText('modelMgr.modal.apiEndpoint')).not.toBeVisible();
     expect(screen.getByLabelText('modelMgr.modal.systemTags')).not.toBeVisible();
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'modelMgr.modal.quickPreset' }));
+    fireEvent.mouseDown(screen.getByLabelText('modelMgr.modal.quickPreset', { selector: 'input' }));
     await change('quickPreset', 'doubao-seedream-4-0-250828');
     await selectOption('doubao-seedream-4-0-250828 · 字节跳动（火山方舟接入）');
     await change('apiToken', 'test-token');
@@ -409,7 +417,7 @@ describe('new model quick setup', () => {
     await change('modelCode', 'deepseek-flash');
     await change('apiToken', 'test-token');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+      fireEvent.click(getButton('modelMgr.modal.moreConfig'));
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('switch', { name: 'modelMgr.modal.reasoningEnabled' }));
@@ -436,7 +444,7 @@ describe('new model quick setup', () => {
     await change('modelCode', 'MiniMax-M3');
     await change('apiToken', 'test-token');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+      fireEvent.click(getButton('modelMgr.modal.moreConfig'));
     });
     await change('contextTokens', '2000000');
     await clickSave();
@@ -473,21 +481,19 @@ describe('new model quick setup', () => {
     expect(screen.getByText('modelMgr.modal.unknownModelHint')).toBeInTheDocument();
     await change('contextTokens', '');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+      fireEvent.click(getButton('modelMgr.modal.moreConfig'));
     });
     expect(screen.getByLabelText('modelMgr.modal.contextTokens')).not.toBeVisible();
     await clickSave();
     expect(save).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'true')
-    );
+    await waitFor(() => expect(getButton('modelMgr.modal.moreConfig')).toHaveAttribute('aria-expanded', 'true'));
     await change('contextTokens', '8192');
     expect(screen.getByLabelText('modelMgr.modal.maxTokens')).toHaveValue('8192');
     await change('maxTokens', '1024');
     await change('temperature', '0.7');
     await change('connectTimeoutSec', '45');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+      fireEvent.click(getButton('modelMgr.modal.moreConfig'));
     });
     // 合并后的连接和参数字段收起后仍注册在表单中，保存不能丢失手动填写的值。
     expect(screen.getByLabelText('modelMgr.modal.connectTimeoutSec')).not.toBeVisible();
@@ -551,8 +557,8 @@ describe('new model quick setup', () => {
     };
     const save = await renderForm('edit', detail);
     await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue('Existing'));
-    expect(screen.getByRole('button', { name: 'modelMgr.modal.basicConfig' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' })).toHaveAttribute('aria-expanded', 'true');
+    expect(getButton('modelMgr.modal.basicConfig')).toHaveAttribute('aria-expanded', 'true');
+    expect(getButton('modelMgr.modal.moreConfig')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByLabelText('modelMgr.modal.quickPreset')).not.toBeInTheDocument();
     await change('displayName', 'Renamed');
     await clickSave('common.confirm');
@@ -567,7 +573,7 @@ describe('new model quick setup', () => {
     await clickSave('modelMgr.modal.saveAndContinue');
     await waitFor(() => expect(screen.queryByLabelText('modelMgr.modal.quickPreset')).not.toBeInTheDocument());
     await change('modelCode', 'private-alias');
-    fireEvent.click(screen.getByRole('button', { name: 'modelMgr.modal.moreConfig' }));
+    fireEvent.click(getButton('modelMgr.modal.moreConfig'));
     await change('temperature', '0.4');
     await clickSave();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
