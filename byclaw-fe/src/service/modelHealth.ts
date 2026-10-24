@@ -60,14 +60,25 @@ async function api(action: string, params: Record<string, unknown>) {
   return report;
 }
 
-function publish(user: HealthUser, scope: ModelHealthReport['scope'], report?: ModelHealthReport) {
+function publish(
+  user: HealthUser,
+  scope: ModelHealthReport['scope'],
+  report?: ModelHealthReport,
+  options: { silent?: boolean } = {}
+) {
   const current = snapshots.get(cacheKey(user, scope));
   if (report && current && current.checkedAt > report.checkedAt) return;
   if (report) snapshots.set(cacheKey(user, scope), report);
   else snapshots.delete(cacheKey(user, scope));
   window.dispatchEvent(
     new CustomEvent(MODEL_HEALTH_EVENT, {
-      detail: { userId: user.userId ?? user.id, enterpriseId: user.enterpriseId, scope, report },
+      detail: {
+        userId: user.userId ?? user.id,
+        enterpriseId: user.enterpriseId,
+        scope,
+        report,
+        silent: options.silent,
+      },
     })
   );
 }
@@ -93,7 +104,7 @@ export function refreshCachedModelHealth(user?: HealthUser, scope?: ModelHealthR
       if (!isCurrentAuthSnapshot(auth) || revision !== (revisions.get(key) || 0))
         return getCachedModelHealth(user, actualScope);
       if (report && report.scope !== actualScope) return getCachedModelHealth(user, actualScope);
-      publish(user, actualScope, report || undefined);
+      publish(user, actualScope, report || undefined, { silent: true });
       return report || undefined;
     })
     .catch(() => getCachedModelHealth(user, actualScope))

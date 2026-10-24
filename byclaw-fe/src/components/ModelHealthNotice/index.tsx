@@ -62,8 +62,17 @@ export default function ModelHealthNotice({ user }: Props) {
         void refreshCachedModelHealth(user, manualScope.current);
         return;
       }
-      if (`${detail.userId}` === `${userId}` && `${detail.enterpriseId ?? ''}` === `${user?.enterpriseId ?? ''}`)
-        accept(detail.report);
+      if (`${detail.userId}` !== `${userId}` || `${detail.enterpriseId ?? ''}` !== `${user?.enterpriseId ?? ''}`)
+        return;
+      if (detail.silent) {
+        // Refresh an existing notice without opening or navigating to a new one.
+        setReport((previous) => {
+          if (!previous || previous.scope !== detail.scope) return previous;
+          return detail.report ? { ...detail.report, dismissed: previous.dismissed } : undefined;
+        });
+        return;
+      }
+      accept(detail.report);
     };
     const open = async (event: Event) => {
       const detail = (event as CustomEvent).detail;

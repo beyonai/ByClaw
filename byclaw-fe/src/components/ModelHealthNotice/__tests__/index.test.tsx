@@ -143,3 +143,19 @@ it('updates after a deletion or successful save without redirecting to an unrela
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(mockNavigate).not.toHaveBeenCalled();
 });
+
+it('does not present a global notice when a chat model picker only reads cached health', async () => {
+  check.mockResolvedValue({ ...report, healthy: true, models: [] });
+  render(<ModelHealthNotice user={user} />);
+  await waitFor(() => expect(check).toHaveBeenCalled());
+  mockNavigate.mockClear();
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent(MODEL_HEALTH_EVENT, {
+        detail: { userId: user.userId, silent: true, report },
+      })
+    )
+  );
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(mockNavigate).not.toHaveBeenCalled();
+});

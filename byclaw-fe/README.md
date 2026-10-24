@@ -36,6 +36,8 @@ PC 输入框发送按钮旁点击“发语音”开始录音，右下角录音�
 
 模型管理支持 ASR、TTS、文生图等模型类型，每种类型可独立设置一个已启用的默认模型。请先填写真实接口、令牌和模型代码，保存并调试成功后启用、设为对应类型默认；示例值不能代替可用模型配置。ASR 调试可直接上传 MP3，TTS 调试输入文本后返回调用结果。
 
+聊天模型选择器根据 Redis 中的最近检查结果显示告警图标；当前模型检查失败时使用 Ant Design Select 的 error 状态标红。选择模型时不自动弹出提示，仅在悬停或点击告警图标时查看详情。选择模型仅使用缓存，不发起模型检查，也不改变 24 小时检查期限；检查恢复正常后红框自动消失。
+
 类型选项来自系统参数 `SYSTEM_MODEL_TYPE`。ASR、TTS、文生图及后续新增类型的提供商分别从 `SYSTEM_MODEL_<类型>_PROVIDER_NAME` 加载；现有 LLM、Embedding、Rerank 继续共用 `SYSTEM_MODEL_PROVIDER_NAME`。每项的 `paramValue` 是提供商标识，名称由 `paramName` / `paramEnName` 展示，`paramDesc` 可包含 JSON 元数据：`adapter`、`modelProtocol`、`apiEndpoint`、`modelCode`、`logo`、`options`。选择提供商后自动填充协议、地址、模型代码和扩展参数；可继续修改后保存。无效或旧版普通文本描述不会覆盖连接设置。提供商图标遵循前端部署的 `publicPath`，缺少图标时显示通用图标。
 
 ## 租户数据源工作台
