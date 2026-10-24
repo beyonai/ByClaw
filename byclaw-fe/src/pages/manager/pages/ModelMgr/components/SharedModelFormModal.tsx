@@ -36,6 +36,7 @@ type Option = { label: string; value: string };
 
 type DebugRequestParams = {
   modelId: string | number;
+  modelName?: string;
   input: string;
   modelType?: any;
   signal: AbortSignal;
@@ -128,6 +129,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     intl,
     open,
     currentModelType,
+    currentModelName: currentDisplayName,
     currentProviderName,
     currentModelProtocol,
     getCurrentModelId,

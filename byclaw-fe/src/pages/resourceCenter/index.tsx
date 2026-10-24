@@ -7,6 +7,7 @@ import AntdIcon from '@/components/AntdIcon';
 import Resources from '@/components/Resources';
 // import FilesPage from '@/pages/files';
 import ModelsPage from '@/pages/models';
+import ModelHealthMenuBadge from '@/components/ModelHealthStatus/ModelHealthMenuBadge';
 import styles from './index.module.less';
 
 type ResourceTabKey = 'knowledge' | 'tool' | 'skill' | 'model';
@@ -39,7 +40,12 @@ const ResourceCenter: React.FC = () => {
     },
     {
       key: 'model',
-      label: intl.formatMessage({ id: 'common.model' }),
+      label: (
+        <span className={styles.modelTabLabel}>
+          {intl.formatMessage({ id: 'common.model' })}
+          <ModelHealthMenuBadge />
+        </span>
+      ),
       icon: <AntdIcon type="icon-a-Braindanao" />,
     },
     // 资源中心暂时停用文件模块，保留入口配置以便后续恢复。

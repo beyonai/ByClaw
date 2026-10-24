@@ -1,9 +1,10 @@
 import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import React, { useCallback, useMemo } from 'react';
-import { useDispatch, useIntl } from '@umijs/max';
+import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import type { ModalStore } from '@/pages/manager/hooks/useShowModal';
 import SharedModelFormModal from './SharedModelFormModal';
+import { checkModelHealth, runModelDebugWithHealth } from '@/service/modelHealth';
 import {
   dispatchModelActionWithResult,
   extractModelId,
@@ -21,6 +22,7 @@ type Props = ModalStore<any> & {
 const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
   const dispatch = useDispatch();
   const intl = useIntl();
+  const currentUser = useSelector(({ user }: any) => user?.userInfo);
 
   const statusOptions = useMemo(
     () => [
@@ -43,8 +45,14 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
   );
 
   const saveModelRequest = useCallback(
-    (payload: any) => dispatchWithResult('modelMgr/upsertModel', payload),
-    [dispatchWithResult]
+    async (payload: any) => {
+      const result = await dispatchWithResult('modelMgr/upsertModel', payload);
+      const modelId = extractModelId(result);
+      if (modelId !== undefined && modelId !== null)
+        void checkModelHealth(currentUser, { modelId, scope: 'PUBLIC', force: true });
+      return result;
+    },
+    [currentUser, dispatchWithResult]
   );
 
   const querySavedModelId = useCallback(
@@ -106,7 +114,8 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
   );
 
   const runDebugRequest = useCallback(
-    ({ modelId, input, modelType, signal, onDelta }: any) => {
+    (params: any) => {
+      const { modelId, input, modelType, signal, onDelta } = params;
       const currentType = normalizeModelType(modelType);
       let effectType = 'modelMgr/debugModel';
       if (currentType === 'RERANK') effectType = 'modelMgr/debugModelRerank';
@@ -115,18 +124,20 @@ const ModelFormModal: React.FC<Props> = ({ onCancel, reload, ...props }) => {
       if (currentType === 'ASR') effectType = 'modelMgr/debugModelAsr';
       if (currentType === 'TTS') effectType = 'modelMgr/debugModelTts';
 
-      return dispatchWithResult(
-        effectType,
-        {
-          id: `${modelId}`,
-          input: `${input}`,
-          signal,
-          onDelta,
-        },
-        getModelDebugDispatchTimeoutMs(currentType)
+      return runModelDebugWithHealth(currentUser, { ...params, scope: 'PUBLIC' }, () =>
+        dispatchWithResult(
+          effectType,
+          {
+            id: `${modelId}`,
+            input: `${input}`,
+            signal,
+            onDelta,
+          },
+          getModelDebugDispatchTimeoutMs(currentType)
+        )
       );
     },
-    [dispatchWithResult]
+    [currentUser, dispatchWithResult]
   );
 
   const formatDebugError = useCallback((error: any) => {

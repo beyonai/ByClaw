@@ -5,20 +5,35 @@ import commonStyles from '@/pages/manager/less/commonTabList.less';
 import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import ModelMgr from '../../index';
 import styles from '../../index.module.less';
+import { getCachedModelHealth, openCachedModelHealth, removeCachedModelHealth } from '@/service/modelHealth';
 
 const mockDispatch = jest.fn();
 const mockIntl = { formatMessage: ({ id }: { id: string }) => id };
+let mockLocation: { state: Record<string, any> | null; search: string; key?: string } = { state: null, search: '' };
+const mockHandleShow = jest.fn();
+const mockNavigate = jest.fn();
+const mockUser = { userId: 17, userCode: 'adminvip' };
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => mockIntl,
   getLocale: () => 'zh-CN',
   useDispatch: () => mockDispatch,
-  useSelector: () => false,
+  useLocation: () => ({ pathname: '/manager/systemParams/modal', ...mockLocation }),
+  useNavigate: () => mockNavigate,
+  useSelector: (selector: any) => selector({ user: { userInfo: mockUser }, loading: { effects: {} } }),
+}));
+jest.mock('@/service/modelHealth', () => ({
+  getCachedModelHealth: jest.fn(),
+  refreshCachedModelHealth: jest.fn(),
+  openCachedModelHealth: jest.fn(),
+  removeCachedModelHealth: jest.fn(),
+  MODEL_HEALTH_EVENT: 'byclaw:model-health',
 }));
 jest.mock('@/pages/manager/service/System', () => ({
-  getByParamGroupCode: () => Promise.resolve({
-    data: { byaiSystemConfigLists: [{ paramValue: 'CUSTOM', paramName: '自定义类型' }] },
-  }),
+  getByParamGroupCode: () =>
+    Promise.resolve({
+      data: { byaiSystemConfigLists: [{ paramValue: 'CUSTOM', paramName: '自定义类型' }] },
+    }),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfigListByStandType: () => Promise.resolve({ data: [] }),
@@ -27,11 +42,16 @@ jest.mock('@/pages/manager/service/OrgMgr', () => ({ getSourceSystemList: jest.f
 const mockLoadSystems = getSourceSystemList as jest.Mock;
 jest.mock('@/pages/manager/hooks/useShowModal', () => ({
   __esModule: true,
-  default: () => [{}, { handleShow: jest.fn(), onCancel: jest.fn() }],
+  default: () => [{}, { handleShow: mockHandleShow, onCancel: jest.fn() }],
 }));
 jest.mock('../ModelFormModal', () => () => null);
-jest.mock('../ModelCardItem', () => ({ record, onSetDefault }: any) => (
-  <button onClick={() => onSetDefault(record)}>Set default {record.id}</button>
+jest.mock('../ModelCardItem', () => ({ record, onSetDefault, onDelete, onEdit, healthIndicator, className }: any) => (
+  <div className={className}>
+    {healthIndicator}
+    <button onClick={() => onEdit(record)}>Edit {record.id}</button>
+    <button onClick={() => onSetDefault(record)}>Set default {record.id}</button>
+    <button onClick={() => onDelete(record)}>Delete {record.id}</button>
+  </div>
 ));
 // 保留真实列表容器，验证滚动监听与 ref 确实绑定到列表区域。
 jest.mock('@/pages/manager/components/CardList', () => ({ dataSource, cardItemFn }: any) => (
@@ -50,6 +70,12 @@ jest.mock('../ModelHeroPanel', () => ({ onReset, activeFilterCount }: any) => (
 describe('model list queries and scrolling', () => {
   beforeEach(() => {
     mockDispatch.mockClear();
+    mockHandleShow.mockClear();
+    mockNavigate.mockClear();
+    (getCachedModelHealth as jest.Mock).mockReset();
+    (openCachedModelHealth as jest.Mock).mockClear();
+    (removeCachedModelHealth as jest.Mock).mockClear();
+    mockLocation = { state: null, search: '' };
     mockLoadSystems.mockReset().mockResolvedValue({ data: [] });
     // 同步执行首屏响应后的滚动复位，避免动画帧影响触底场景。
     jest.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -59,6 +85,116 @@ describe('model list queries and scrolling', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('shows a dismissed public failure on direct page entry and opens details only after a click', async () => {
+    (getCachedModelHealth as jest.Mock).mockReturnValue({
+      scope: 'PUBLIC',
+      checkedAt: 1000,
+      healthy: false,
+      dismissed: true,
+      models: [
+        { modelId: '42', modelName: 'Public model', modelType: 'LLM', status: 'FAILED', errorCode: 'AUTH_FAILED' },
+      ],
+    });
+    render(<ModelMgr />);
+    await act(async () => {});
+    const request = mockDispatch.mock.calls.find(([action]) => action.payload?.pageSize === 12)![0];
+    act(() => request.success({ rows: [{ id: '42' }], total: 1 }));
+    expect(screen.getByText('modelMgr.health.cachedScopeSummary')).toBeInTheDocument();
+    expect(mockHandleShow).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'modelMgr.health.statusLabel' }));
+    expect(openCachedModelHealth).toHaveBeenCalledWith(mockUser, 'PUBLIC', '42');
+  });
+
+  it('positions the exact public model from a health link without opening its editor, including after refresh', async () => {
+    mockLocation = { state: null, search: '?healthModelId=42' };
+    const view = render(<ModelMgr />);
+    await act(async () => {});
+    const request = mockDispatch.mock.calls.find(([action]) => action.payload?.pageSize === 12)![0];
+    expect(request.payload).toMatchObject({ modelId: '42', pageNum: 1 });
+    act(() => request.success({ rows: [{ id: '42' }], total: 1 }));
+    expect(screen.getByRole('button', { name: 'Edit 42' }).parentElement).toHaveClass('healthTarget');
+    expect(mockHandleShow).not.toHaveBeenCalled();
+    mockLocation = { state: null, search: '?healthModelId=43' };
+    view.rerender(<ModelMgr />);
+    expect(mockDispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ modelId: '43' }) })
+    );
+    expect(mockHandleShow).not.toHaveBeenCalled();
+    view.unmount();
+    render(<ModelMgr />);
+    expect(mockHandleShow).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen an editor when a failed save navigates to the same positioning URL', async () => {
+    mockLocation = { state: null, search: '?healthModelId=42', key: 'first-check' };
+    const view = render(<ModelMgr />);
+    await act(async () => {});
+    mockLocation = { ...mockLocation, key: 'saved-check' };
+    view.rerender(<ModelMgr />);
+    expect(mockHandleShow).not.toHaveBeenCalled();
+  });
+
+  it('consumes an explicit edit action so refresh does not reopen the form', async () => {
+    mockLocation = { state: { editModelId: '42', editModelRequestId: 1 }, search: '?healthModelId=42' };
+    const view = render(<ModelMgr />);
+    await act(async () => {});
+    expect(mockHandleShow).toHaveBeenCalledWith('edit', { id: '42' });
+    expect(mockNavigate).toHaveBeenCalledWith('/manager/systemParams/modal?healthModelId=42', {
+      replace: true,
+      state: {},
+    });
+    mockHandleShow.mockClear();
+    mockLocation = { state: {}, search: '?healthModelId=42', key: 'consumed' };
+    view.rerender(<ModelMgr />);
+    view.unmount();
+    render(<ModelMgr />);
+    expect(mockHandleShow).not.toHaveBeenCalled();
+  });
+
+  it('opens the editor only when a model edit button is clicked', async () => {
+    render(<ModelMgr />);
+    await act(async () => {});
+    const request = mockDispatch.mock.calls.find(([action]) => action.payload?.pageSize === 12)![0];
+    act(() => request.success({ rows: [{ id: '42' }], total: 1 }));
+    expect(mockHandleShow).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit 42' }));
+    expect(mockHandleShow).toHaveBeenCalledWith('edit', { id: '42' });
+  });
+
+  it('cleans a missing public target only after a successful empty lookup', async () => {
+    mockLocation = { state: null, search: '?healthModelId=42' };
+    render(<ModelMgr />);
+    await act(async () => {});
+    const request = mockDispatch.mock.calls.find(([action]) => action.payload?.pageSize === 12)![0];
+    act(() => request.fail());
+    expect(removeCachedModelHealth).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    act(() => request.success({ rows: [], total: 0 }));
+    expect(removeCachedModelHealth).toHaveBeenCalledWith('42');
+    expect(mockNavigate).toHaveBeenCalledWith('/manager/systemParams/modal', { replace: true, state: null });
+    expect(mockHandleShow).not.toHaveBeenCalled();
+  });
+
+  it('clears the public repair link after deleting its target model', async () => {
+    mockLocation = { state: null, search: '?healthModelId=42' };
+    render(<ModelMgr />);
+    await act(async () => {});
+    const request = mockDispatch.mock.calls.find(([action]) => action.payload?.pageSize === 12)![0];
+    act(() => request.success({ rows: [{ id: '42' }], total: 1 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 42' }));
+    const deletion = mockDispatch.mock.calls.find(([action]) => action.type === 'modelMgr/deleteModel')![0];
+    act(() => deletion.success(true));
+    expect(mockNavigate).toHaveBeenCalledWith('/manager/systemParams/modal', { replace: true, state: null });
+  });
+
+  it('opens public model creation when the failure has no model ID', async () => {
+    mockLocation = { state: { createModel: true }, search: '' };
+    render(<ModelMgr />);
+    await act(async () => {});
+    expect(mockHandleShow).toHaveBeenCalledWith('add');
+  });
 
   it.each([null, undefined, '', '   ', 'LLM'])('preserves the default-model type group for %s', async (modelType) => {
     render(<ModelMgr />);
@@ -83,43 +219,46 @@ describe('model list queries and scrolling', () => {
     );
   });
 
-  it.each(['百应', 'ByAI'])('uses the configured system name %s in previews, dropdowns and selections', async (label) => {
-    mockLoadSystems.mockResolvedValue({
-      data: [
-        { systemCode: 'BYAI', systemName: label },
-        { systemCode: 'UNUSED', systemName: 'Unused system' },
-      ],
-    });
-    const { container } = render(<ModelMgr />);
-    await act(async () => {});
-    expect(mockLoadSystems).toHaveBeenCalledWith({ types: ['DIG_EMPLOYEE'] });
-    const overviewRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 2000)![0];
-    act(() => overviewRequest.success({ rows: [{ systems: ['BYAI', 'BYAI', 'custom_system'] }] }));
-    const group = within(screen.getByRole('group', { name: 'modelMgr.filterSystem' }));
-    expect(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
-    expect(group.queryByText('BYAI')).not.toBeInTheDocument();
-    expect(group.queryByText('Unused system')).not.toBeInTheDocument();
-    expect(group.getAllByText('custom_system').find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
+  it.each(['百应', 'ByAI'])(
+    'uses the configured system name %s in previews, dropdowns and selections',
+    async (label) => {
+      mockLoadSystems.mockResolvedValue({
+        data: [
+          { systemCode: 'BYAI', systemName: label },
+          { systemCode: 'UNUSED', systemName: 'Unused system' },
+        ],
+      });
+      const { container } = render(<ModelMgr />);
+      await act(async () => {});
+      expect(mockLoadSystems).toHaveBeenCalledWith({ types: ['DIG_EMPLOYEE'] });
+      const overviewRequest = mockDispatch.mock.calls.find(([request]) => request.payload?.pageSize === 2000)![0];
+      act(() => overviewRequest.success({ rows: [{ systems: ['BYAI', 'BYAI', 'custom_system'] }] }));
+      const group = within(screen.getByRole('group', { name: 'modelMgr.filterSystem' }));
+      expect(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
+      expect(group.queryByText('BYAI')).not.toBeInTheDocument();
+      expect(group.queryByText('Unused system')).not.toBeInTheDocument();
+      expect(group.getAllByText('custom_system').find((item) => !item.closest('[aria-hidden="true"]'))).toBeVisible();
 
-    fireEvent.mouseEnter(group.getByText('modelMgr.filterSystem').parentElement!);
-    const option = await screen.findByText(label, { selector: 'div.text' });
-    fireEvent.click(option);
-    expect(group.getByText(label)).toBeVisible();
-    const latestRequest = () => mockDispatch.mock.calls[mockDispatch.mock.calls.length - 1][0];
-    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: 'BYAI' });
+      fireEvent.mouseEnter(group.getByText('modelMgr.filterSystem').parentElement!);
+      const option = await screen.findByText(label, { selector: 'div.text' });
+      fireEvent.click(option);
+      expect(group.getByText(label)).toBeVisible();
+      const latestRequest = () => mockDispatch.mock.calls[mockDispatch.mock.calls.length - 1][0];
+      expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: 'BYAI' });
 
-    // 显示名称不能替代查询编码，触底分页也必须继续透传编码。
-    act(() => latestRequest().success({ rows: [{ id: 'model-1' }], total: 13, pageIndex: 1, pageSize: 12 }));
-    fireEvent.scroll(container.querySelector(`.${styles.cardList}`)!);
-    expect(latestRequest().payload).toMatchObject({ pageNum: 2, system: 'BYAI' });
+      // 显示名称不能替代查询编码，触底分页也必须继续透传编码。
+      act(() => latestRequest().success({ rows: [{ id: 'model-1' }], total: 13, pageIndex: 1, pageSize: 12 }));
+      fireEvent.scroll(container.querySelector(`.${styles.cardList}`)!);
+      expect(latestRequest().payload).toMatchObject({ pageNum: 2, system: 'BYAI' });
 
-    fireEvent.click(group.getByRole('img', { name: 'close-circle' }));
-    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
-    fireEvent.click(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))!);
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
-    expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
-  });
+      fireEvent.click(group.getByRole('img', { name: 'close-circle' }));
+      expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
+      fireEvent.click(group.getAllByText(label).find((item) => !item.closest('[aria-hidden="true"]'))!);
+      fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+      expect(latestRequest().payload).toMatchObject({ pageNum: 1, system: undefined });
+      expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
+    }
+  );
 
   it('updates an already selected system when its configured name arrives after the model list', async () => {
     let resolveSystems!: (response: any) => void;
@@ -151,7 +290,8 @@ describe('model list queries and scrolling', () => {
       if (scenario === 'failed') {
         mockLoadSystems.mockRejectedValue(new Error('unavailable'));
       } else {
-        const data = scenario === 'invalid' ? {} : scenario === 'blank name' ? [{ systemCode: 'BYAI', systemName: ' ' }] : [];
+        const data =
+          scenario === 'invalid' ? {} : scenario === 'blank name' ? [{ systemCode: 'BYAI', systemName: ' ' }] : [];
         mockLoadSystems.mockResolvedValue({ data });
       }
       render(<ModelMgr />);

@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.application.service.aimodel.ModelConfigCompl
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugImageGenerationApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugRerankApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelHealthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.RerankDebugResult;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelConfigCompleteResponse;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
@@ -65,6 +66,9 @@ public class ModelManagementController {
 
     @Autowired
     private ModelDebugSpeechApplicationService modelDebugSpeechApplicationService;
+
+    @Autowired
+    private ModelHealthApplicationService modelHealthApplicationService;
 
     /**
      * 模型列表（分页+过滤）
@@ -247,6 +251,44 @@ public class ModelManagementController {
 
     public ResponseUtil<String> getDefaultModelId() {
         return ResponseUtil.successResponse(modelManagementApplicationService.getDefaultModelId());
+    }
+
+    public record HealthRequest(Long id, String scope, boolean force, long checkedAt, boolean dismissed,
+                                long revision, boolean success) { }
+
+    @ApiOperation("模型健康检查")
+    @PostMapping(value = "/healthCheck", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<ModelHealthApplicationService.Report> healthCheck(
+        @RequestBody(required = false) HealthRequest request) {
+        return ResponseUtil.success(modelHealthApplicationService.check(request == null ? null : request.id(),
+            request != null && request.force()));
+    }
+
+    @PostMapping("/healthCache")
+    public ResponseUtil<ModelHealthApplicationService.Report> healthCache(@RequestBody HealthRequest request) {
+        return ResponseUtil.success(modelHealthApplicationService.cached(request.scope()));
+    }
+
+    @PostMapping("/healthNotice")
+    public ResponseUtil<Boolean> healthNotice(@RequestBody HealthRequest request) {
+        modelHealthApplicationService.acknowledge(request.scope(), request.checkedAt(), request.dismissed());
+        return ResponseUtil.success(true);
+    }
+
+    @PostMapping("/healthRemoveDeleted")
+    public ResponseUtil<Boolean> healthRemoveDeleted(@RequestBody HealthRequest request) {
+        modelHealthApplicationService.removeDeleted(request.id().toString());
+        return ResponseUtil.success(true);
+    }
+
+    @PostMapping("/healthDebugBegin")
+    public ResponseUtil<Long> healthDebugBegin(@RequestBody HealthRequest request) {
+        return ResponseUtil.success(modelHealthApplicationService.beginDebug(request.id()));
+    }
+
+    @PostMapping("/healthDebugComplete")
+    public ResponseUtil<ModelHealthApplicationService.Report> healthDebugComplete(@RequestBody HealthRequest request) {
+        return ResponseUtil.success(modelHealthApplicationService.completeDebug(request.id(), request.revision(), request.success()));
     }
 
     /**

@@ -10,6 +10,7 @@ import { setUserToken, initAdminVipList } from '@/utils/auth';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import { getDcSystemConfigValueByCodes as getDcSystemConfigValueByCodesService } from '@/service/layout';
 import { SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
+import ModelHealthNotice from '@/components/ModelHealthNotice';
 import useGlobalChatRuntime from '@/hooks/useGlobalChatRuntime';
 import { MULTI_TENANCY_CONFIG_CODE, setMultiTenancyConfig, useMultiTenancy } from '@/utils/multiTenancy';
 
@@ -149,7 +150,14 @@ const CommonLayout = () => {
         {pageTitle && <title>{pageTitle}</title>}
         <link rel="shortcut icon" href={favicon} />
       </Helmet>
-      <QueryClientProvider client={queryClient}>{multiTenancyLoaded && <Outlet />}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {multiTenancyLoaded && (
+          <>
+            <Outlet />
+            <ModelHealthNotice user={userInfo} />
+          </>
+        )}
+      </QueryClientProvider>
     </div>
   );
 };

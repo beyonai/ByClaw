@@ -157,11 +157,8 @@ export default {
     *debugModel({ payload, success, fail }, { call }) {
       try {
         const response = unwrapResponse(yield call(debugModelStream, payload));
-        if (response.code === 0 || response.code === 50010) {
+        if (response.code === 0 && response.success !== false) {
           success?.(response.data ?? response);
-          if (response.code !== 0) {
-            fail?.(response || {});
-          }
         } else {
           message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});

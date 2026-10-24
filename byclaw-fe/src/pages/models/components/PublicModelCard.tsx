@@ -8,6 +8,7 @@ import styles from './PublicModelCard.module.less';
 type Props = {
   record: any;
   current?: boolean;
+  healthIndicator?: React.ReactNode;
 };
 
 const STATUS_MAP: Record<string, { className?: string; label: string }> = {
@@ -15,7 +16,7 @@ const STATUS_MAP: Record<string, { className?: string; label: string }> = {
   DISABLED: { label: 'personalModel.action.disable' },
 };
 
-const PublicModelCard: React.FC<Props> = ({ record, current }) => {
+const PublicModelCard: React.FC<Props> = ({ record, current, healthIndicator }) => {
   const intl = useIntl();
   const { modelType, displayName, status, modelCode, providerName, contextTokens, updatedAt } = record || {};
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.DISABLED;
@@ -39,6 +40,7 @@ const PublicModelCard: React.FC<Props> = ({ record, current }) => {
               {providerName || '-'}
             </span>
           </div>
+          {healthIndicator}
         </div>
         {current ? (
           <Tag className={styles.currentTag}>{intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })}</Tag>

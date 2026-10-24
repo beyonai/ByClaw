@@ -4,6 +4,75 @@ import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/en-US';
 import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/en-US';
 
 export default {
+  'modelMgr.health.menuFailures': '{count} models failed their checks. Open Models for details.',
+  'modelMgr.health.cachedSummary': 'Last check: {count} issue(s) in total',
+  'modelMgr.health.cachedScopeSummary': 'Last check: {count} issue(s) in {scope}',
+  'modelMgr.health.scopeIssues': '{scope}: {count} issue(s) · View details',
+  'modelMgr.health.cachedFailure': 'Last check failed',
+  'modelMgr.health.statusUnknown': 'Check incomplete',
+  'modelMgr.health.statusLabel': 'View check details for {name}',
+  'modelMgr.health.viewDiagnostics': 'View issue details',
+  'modelMgr.health.contactAdmin': 'Contact an administrator to fix the public model configuration.',
+  'modelMgr.health.addModel': 'Add model',
+  'modelMgr.health.title': '{count} model configuration(s) need attention',
+  'modelMgr.health.public': 'Public models',
+  'modelMgr.health.personal': 'Personal models',
+  'modelMgr.health.intro':
+    'The check makes a real call using the configured endpoint, credentials, and protocol. For LLMs it sends “Reply OK”, limits output to 16 tokens, and disables optional thinking where possible. Valid text or reasoning without API errors passes this basic check; answer quality is not evaluated. Embedding requires a non-empty vector and Rerank a non-empty result. Issues from the last check are listed below.',
+  'modelMgr.health.missingModel': 'No available {type} model configured',
+  'modelMgr.health.checkService': 'Model status could not be verified',
+  'modelMgr.health.configure': 'Edit configuration',
+  'modelMgr.health.details': 'Show details',
+  'modelMgr.health.hideDetails': 'Hide details',
+  'modelMgr.health.retry': 'Check again',
+  'modelMgr.health.checkedAt': 'Checked at {time}',
+  'modelMgr.health.dismiss': 'Dismiss this notice',
+  'modelMgr.health.modelId': 'Model ID',
+  'modelMgr.health.endpoint': 'Service address',
+  'modelMgr.health.httpStatus': 'HTTP status',
+  'modelMgr.health.errorCode': 'Error code',
+  'modelMgr.health.viewModels': 'View affected models',
+  'modelMgr.health.focused': 'Showing the model that needs attention',
+  'modelMgr.health.showAll': 'Show all models',
+  'modelMgr.health.retryUnavailable':
+    'This check could not complete. Try again later; the model configuration may still be valid.',
+  'modelMgr.health.reason.MODEL_NOT_CONFIGURED':
+    'No enabled model of this type exists in this scope. Add, debug and enable a model.',
+  'modelMgr.health.reason.INVALID_URL': 'The service address is invalid. Enter a complete HTTP or HTTPS URL.',
+  'modelMgr.health.reason.MODEL_CODE_MISSING':
+    'The model code is missing. Enter the model name provided by your service.',
+  'modelMgr.health.reason.AUTH_FAILED':
+    'Authentication was rejected. Check the API key, its expiry and permission to use this model.',
+  'modelMgr.health.reason.QUOTA_EXCEEDED':
+    'The provider account has insufficient quota. Check its balance and usage limits.',
+  'modelMgr.health.reason.MODEL_OR_ENDPOINT_NOT_FOUND':
+    'The model or API endpoint was not found. Check the model code and service address.',
+  'modelMgr.health.reason.RATE_LIMITED':
+    'The provider is rate limiting requests or the account quota is exhausted. Check usage and try again later.',
+  'modelMgr.health.reason.PROVIDER_UNAVAILABLE':
+    'The model service is temporarily unavailable. Try again later or contact the provider.',
+  'modelMgr.health.reason.REQUEST_REJECTED':
+    'The provider rejected the test request. Check the protocol, model code and parameters.',
+  'modelMgr.health.reason.TIMEOUT':
+    'The model service timed out. Check the network and service address, or try again later.',
+  'modelMgr.health.reason.CONNECTION_FAILED':
+    'Cannot reach the model service. Check the address, network, proxy and whether the service is running.',
+  'modelMgr.health.reason.INVALID_RESPONSE':
+    'The service returned an unexpected response. Check that the protocol matches the API endpoint.',
+  'modelMgr.health.reason.UPSTREAM_ERROR':
+    'The service responded with an API error or failure event. Run model debug for details, then check credentials, quota, and request parameters.',
+  'modelMgr.health.reason.EMPTY_RESPONSE':
+    'The service responded, but the check received no text or reasoning. Run model debug to verify output and check the streaming response format.',
+  'modelMgr.health.reason.PROBE_OUTPUT_LIMIT':
+    'The short check reached its 16-token limit without receiving text or reasoning, so availability is still unknown. Run model debug to confirm; this does not mean the protocol is misconfigured.',
+  'modelMgr.health.reason.INVALID_CONFIG_OR_RESPONSE':
+    'The configuration or response could not be parsed. Check the address, headers and model protocol.',
+  'modelMgr.health.reason.CHECK_UNAVAILABLE':
+    'The check could not complete, so model availability is unknown. Try again later.',
+  'modelMgr.health.reason.DEBUG_FAILED':
+    'The latest debug call failed. Check the debug request, endpoint, credentials and model protocol. See the debug output for the specific error.',
+  'modelMgr.error.invalidDebugResponse':
+    'The model did not return a valid streaming response. Check the model protocol and API endpoint.',
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,

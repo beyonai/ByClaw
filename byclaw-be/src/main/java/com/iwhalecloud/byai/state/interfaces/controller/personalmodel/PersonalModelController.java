@@ -68,7 +68,7 @@ public class PersonalModelController {
     public ResponseUtil<ModelListResponse> listPublic(@RequestBody ModelListRequest request) {
         request.setOwnerType("PUBLIC");
         request.setCreateBy(null);
-        request.setStatus("ENABLED");
+        if (!CurrentUserHolder.isAdminVip()) request.setStatus("ENABLED");
         ModelListResponse data = modelManagementApplicationService.getModelListByPage(request);
         return ResponseUtil.success(data);
     }

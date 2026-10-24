@@ -11,6 +11,7 @@ type Props = {
   onDebug: () => void;
   onDelete: () => void;
   onSetStatus?: (status: string) => void;
+  healthIndicator?: React.ReactNode;
 };
 
 const STATUS_MAP: Record<string, { className?: string; label: string }> = {
@@ -18,7 +19,7 @@ const STATUS_MAP: Record<string, { className?: string; label: string }> = {
   DISABLED: { label: 'personalModel.action.disable' },
 };
 
-const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, onSetStatus }) => {
+const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, onSetStatus, healthIndicator }) => {
   const intl = useIntl();
   const { modelType, displayName, status, modelCode, providerName, contextTokens } = data || {};
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.DISABLED;
@@ -43,6 +44,7 @@ const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, 
               {providerName || '-'}
             </span>
           </div>
+          {healthIndicator}
         </div>
         {current ? (
           <Tag className={styles.currentTag}>{intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })}</Tag>

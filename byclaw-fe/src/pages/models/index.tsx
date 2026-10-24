@@ -1,11 +1,14 @@
 import { Button, Empty, Input, message, Spin } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useIntl, useLocation, useSelector } from '@umijs/max';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIntl, useLocation, useSelector, useNavigate } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import CommonTabs from '@/components/CommonTabs';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
+import { removeCachedModelHealth } from '@/service/modelHealth';
+import useCachedModelHealth from '@/hooks/useCachedModelHealth';
+import { ModelHealthBadge, ModelHealthSummary } from '@/components/ModelHealthStatus';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import QuotaCard from './components/QuotaCard';
 import ModelCard from './components/ModelCard';
@@ -87,9 +90,23 @@ function sortModelList(list: any[], currentModelInfo?: CurrentModelInfo | null, 
 const ModelsPage: React.FC = () => {
   const intl = useIntl();
   const location = useLocation();
+  const navigate = useNavigate();
   const [formState, formAction] = useShowModal();
   const { handleShow } = formAction;
-  const [activeTab, setActiveTab] = useState<string>('mine');
+  const healthParams = new URLSearchParams(location.search);
+  const healthModelId = healthParams.get('healthModelId') || undefined;
+  const healthTab = healthParams.get('tab');
+  const clearHealthTarget = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete('healthModelId');
+    navigate(`${location.pathname}?${params}`, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+  const personalRequest = useRef(0);
+  const publicRequest = useRef(0);
+  const [activeTab, setActiveTab] = useState<string>(healthTab === 'public' ? 'public' : 'mine');
+  useEffect(() => {
+    if (healthTab === 'mine' || healthTab === 'public') setActiveTab(healthTab);
+  }, [healthTab, healthModelId]);
 
   const { agentId } = useGlobal();
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
@@ -100,6 +117,9 @@ const ModelsPage: React.FC = () => {
     () => `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
     [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
   );
+  const personalHealthReport = useCachedModelHealth(userInfo, 'PERSONAL');
+  const publicHealthReport = useCachedModelHealth(userInfo, 'PUBLIC');
+  const healthReport = activeTab === 'public' ? publicHealthReport : personalHealthReport;
   const [currentModelInfo, setCurrentModelInfo] = useState<CurrentModelInfo | null>(null);
 
   const [list, setList] = useState<any[]>([]);
@@ -131,12 +151,23 @@ const ModelsPage: React.FC = () => {
 
   const fetchList = useCallback(
     async (page = 1, append = false) => {
+      const request = ++personalRequest.current;
       setLoading(true);
       try {
-        const res = await getMyModels({ pageNum: page, pageSize: PAGE_SIZE, keyword });
+        const res = await getMyModels({
+          pageNum: page,
+          pageSize: PAGE_SIZE,
+          keyword: healthTab === 'mine' && healthModelId ? undefined : keyword,
+          modelId: healthTab === 'mine' ? healthModelId : undefined,
+        });
+        if (request !== personalRequest.current) return;
         const data = res?.data;
         if (data) {
           const rows = data.rows || data.list || [];
+          if (res.code === 0 && res.success !== false && healthTab === 'mine' && healthModelId && !rows.length) {
+            removeCachedModelHealth(healthModelId);
+            clearHealthTarget();
+          }
           const total = Number(data.total ?? data.totalCount ?? 0);
           setList((prev) => (append ? [...prev, ...rows] : rows));
           setPagination((prev) => ({
@@ -147,20 +178,31 @@ const ModelsPage: React.FC = () => {
           }));
         }
       } finally {
-        setLoading(false);
+        if (request === personalRequest.current) setLoading(false);
       }
     },
-    [keyword]
+    [keyword, healthModelId, healthTab, clearHealthTarget]
   );
 
   const fetchPublicList = useCallback(
     async (page = 1, append = false) => {
+      const request = ++publicRequest.current;
       setPublicLoading(true);
       try {
-        const res = await getPublicModels({ pageNum: page, pageSize: PAGE_SIZE, keyword: publicKeyword });
+        const res = await getPublicModels({
+          pageNum: page,
+          pageSize: PAGE_SIZE,
+          keyword: healthTab === 'public' && healthModelId ? undefined : publicKeyword,
+          modelId: healthTab === 'public' ? healthModelId : undefined,
+        });
+        if (request !== publicRequest.current) return;
         const data = res?.data;
         if (data) {
           const rows = data.rows || data.list || [];
+          if (res.code === 0 && res.success !== false && healthTab === 'public' && healthModelId && !rows.length) {
+            removeCachedModelHealth(healthModelId);
+            clearHealthTarget();
+          }
           const total = Number(data.total ?? data.totalCount ?? 0);
           setPublicList((prev) => (append ? [...prev, ...rows] : rows));
           setPublicPagination((prev) => ({
@@ -171,10 +213,10 @@ const ModelsPage: React.FC = () => {
           }));
         }
       } finally {
-        setPublicLoading(false);
+        if (request === publicRequest.current) setPublicLoading(false);
       }
     },
-    [publicKeyword]
+    [publicKeyword, healthModelId, healthTab, clearHealthTarget]
   );
 
   const fetchQuota = useCallback(async () => {
@@ -220,6 +262,10 @@ const ModelsPage: React.FC = () => {
   const sortedPublicList = useMemo(() => {
     return sortModelList(publicList, currentModelInfo);
   }, [publicList, currentModelInfo]);
+  const hasHealthTarget =
+    healthModelId &&
+    activeTab === healthTab &&
+    (activeTab === 'public' ? publicList : list).some((model) => `${model.id}` === healthModelId);
 
   useEffect(() => {
     if (activeTab === 'public') {
@@ -246,11 +292,24 @@ const ModelsPage: React.FC = () => {
   );
 
   useEffect(() => {
-    const state = (location.state || {}) as { editModelId?: string | number; editModelRequestId?: number };
-    if (!state.editModelId) return;
+    const state = (location.state || {}) as {
+      [key: string]: unknown;
+      editModelId?: string | number;
+      editModelRequestId?: number;
+      createModel?: boolean;
+    };
+    if (!state.editModelId && !state.createModel) return;
+    const { editModelId, createModel, ...rest } = state;
+    delete rest.editModelRequestId;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
+    if (createModel) {
+      setActiveTab('mine');
+      handleShow('add');
+      return;
+    }
     setActiveTab('mine');
-    handleEdit({ id: state.editModelId });
-  }, [handleEdit, location.state]);
+    handleEdit({ id: editModelId });
+  }, [handleEdit, handleShow, location.state]);
 
   const handleDebug = async (record: any) => {
     try {
@@ -266,12 +325,13 @@ const ModelsPage: React.FC = () => {
   const handleDelete = async (record: any) => {
     try {
       const res = await deleteMyModel({ id: record.id });
-      if (res?.code !== 0 || res?.success === false) {
+      if (res?.code !== 0 || res?.success === false || res?.data === false) {
         message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
         return;
       }
       message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
-      fetchList(pagination.pageNum);
+      if (healthTab === 'mine' && healthModelId === `${record.id}`) clearHealthTarget();
+      else fetchList(pagination.pageNum);
     } catch (error: any) {
       const errorMsg =
         error?.response?.data?.msg ||
@@ -314,6 +374,15 @@ const ModelsPage: React.FC = () => {
   return (
     <div id="models-scroll-container" className={styles.container}>
       <QuotaCard quota={quota} />
+      <ModelHealthSummary user={userInfo} reports={[personalHealthReport, publicHealthReport]} />
+      {hasHealthTarget && (
+        <div className={styles.healthHint}>
+          {intl.formatMessage({ id: 'modelMgr.health.focused' })}
+          <Button type="link" onClick={clearHealthTarget}>
+            {intl.formatMessage({ id: 'modelMgr.health.showAll' })}
+          </Button>
+        </div>
+      )}
 
       <div className={styles.headerBar}>
         <CommonTabs
@@ -372,9 +441,10 @@ const ModelsPage: React.FC = () => {
                 >
                   <div className={styles.grid}>
                     {sortedList.map((item) => (
-                      <div key={item.id}>
+                      <div key={item.id} className={healthModelId === `${item.id}` ? styles.healthTarget : undefined}>
                         <ModelCard
                           data={item}
+                          healthIndicator={<ModelHealthBadge user={userInfo} report={healthReport} modelId={item.id} />}
                           current={isCurrentModel(item, currentModelInfo)}
                           onEdit={() => handleEdit(item)}
                           onDebug={() => handleDebug(item)}
@@ -415,8 +485,12 @@ const ModelsPage: React.FC = () => {
                 >
                   <div className={styles.grid}>
                     {sortedPublicList.map((item) => (
-                      <div key={item.id}>
-                        <PublicModelCard record={item} current={isCurrentModel(item, currentModelInfo)} />
+                      <div key={item.id} className={healthModelId === `${item.id}` ? styles.healthTarget : undefined}>
+                        <PublicModelCard
+                          record={item}
+                          current={isCurrentModel(item, currentModelInfo)}
+                          healthIndicator={<ModelHealthBadge user={userInfo} report={healthReport} modelId={item.id} />}
+                        />
                       </div>
                     ))}
                   </div>

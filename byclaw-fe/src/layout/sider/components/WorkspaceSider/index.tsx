@@ -14,6 +14,7 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import { Badge, Tag } from 'antd';
 import useApprovalPendingCounts from '@/hooks/useApprovalPendingCounts';
+import ModelHealthMenuBadge from '@/components/ModelHealthStatus/ModelHealthMenuBadge';
 import AntdIcon from '@/components/AntdIcon';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
@@ -890,6 +891,7 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         >
           <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
+          <ModelHealthMenuBadge className={styles.approvalBadge} />
         </button>
         <button
           type="button"
