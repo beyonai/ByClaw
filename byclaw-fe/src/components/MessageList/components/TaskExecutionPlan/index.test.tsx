@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { TaskPlanSnapshot } from '@/typescript/message';
 import type { AgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/AgentTeamsActivity';
 import TaskExecutionPlan from './index';
@@ -39,9 +40,62 @@ jest.mock('@umijs/max', () => ({
 
 describe('TaskExecutionPlan', () => {
   beforeEach(() => {
+    chatSessionRuntimeManager.clear();
     mockLocateMessage.mockClear();
     mockSetSessionId.mockClear();
     mockTeamSnapshot = undefined;
+  });
+
+  it('tracks captain summarization live without confusing child work, waiting, or another turn', () => {
+    const plan: TaskPlanSnapshot = {
+      planId: 'plan',
+      version: 1,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 'root',
+      messageId: '100',
+      traceId: 'trace',
+      tasks: [{ taskId: '1', position: 1, title: 'Task', status: 'COMPLETED' }],
+    };
+    const view = render(<TaskExecutionPlan taskPlan={plan} />);
+    const label = 'messageList.taskPlan.captainSummarizing';
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
+    let revision = 0;
+    const update = (overrides = {}) =>
+      act(() => {
+        revision += 1;
+        chatSessionRuntimeManager.applySessionRuntime({
+          sessionId: 'root',
+          traceId: 'trace',
+          status: 'running',
+          rootActive: true,
+          activeAgentCount: 1,
+          activeChildCount: 0,
+          waitingInteractionCount: 0,
+          revision,
+          changedAt: revision,
+          ...overrides,
+        });
+      });
+    update();
+    expect(screen.getByRole('status')).toHaveTextContent(label);
+    for (const overrides of [
+      { rootActive: false },
+      { activeChildCount: 1 },
+      { waitingInteractionCount: 1 },
+      { status: 'waiting_user' },
+      { status: 'idle' },
+      { status: 'failed' },
+      { traceId: 'next-turn' },
+    ]) {
+      update(overrides);
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    update();
+    for (const status of ['IN_PROGRESS', 'PENDING', 'FAILED'] as const) {
+      view.rerender(<TaskExecutionPlan taskPlan={{ ...plan, tasks: [{ ...plan.tasks[0], status }] }} />);
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
   });
 
   it('maximizes a collapsed plan, restores it expanded, and resets on conversation change', () => {

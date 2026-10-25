@@ -2113,6 +2113,7 @@ export default {
   'messageList.taskPlan.executionTurn': '对话 {turn}',
   'messageList.taskPlan.noExecution': '暂无执行记录',
   'messageList.taskPlan.executionUnavailable': '暂时无法打开该轮执行记录，请稍后重试',
+  'messageList.taskPlan.captainSummarizing': '团长正在汇总',
   'messageList.taskPlan.captain': '团长',
   'messageList.taskPlan.unassigned': '未分配',
   'messageList.askUser.title': '需要你的回答',

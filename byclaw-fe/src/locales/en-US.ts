@@ -2206,6 +2206,7 @@ export default {
   'messageList.taskPlan.executionTurn': 'Conversation {turn}',
   'messageList.taskPlan.noExecution': 'No execution record',
   'messageList.taskPlan.executionUnavailable': 'Unable to open this execution. Please try again later.',
+  'messageList.taskPlan.captainSummarizing': 'Captain is summarizing',
   'messageList.taskPlan.captain': 'Captain',
   'messageList.taskPlan.unassigned': 'Unassigned',
   'messageList.askUser.title': 'Your answer is needed',

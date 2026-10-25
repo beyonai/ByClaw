@@ -232,3 +232,5 @@ Copyright 2026 beyondAI
 - 语音制品同时从正文路径和结构化工具结果提取，规范化路径后去重；即使最终正文只列文件名，多段语音仍展示各自可播放、可转写的气泡。
 
 回归测试：`pnpm exec jest src/components/MessageList/components/VoiceMessage src/components/MessageList/components/ReplyFileArtifacts src/pages/settings/__tests__/index.test.tsx src/utils/__tests__/imageArtifacts.test.ts --runInBand`。
+
+任务步骤全部完成后，若同一回合的团长仍在运行且没有执行中的子代理或待用户处理的交互，计划标题栏显示“团长正在汇总”。该提示订阅现有会话运行状态，不新增轮询；团长结束、失败或等待用户输入后自动隐藏。缺少回合匹配证据时不推断汇总状态。

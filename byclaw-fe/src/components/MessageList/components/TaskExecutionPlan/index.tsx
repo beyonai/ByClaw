@@ -11,13 +11,16 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Modal, Tooltip } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useIntl } from '@umijs/max';
 import type { TaskPlanSnapshot, TaskPlanTask, TaskPlanTaskStatus } from '@/typescript/message';
 import useLocateMessage from '@/hooks/useLocateMessage';
 import useGlobal from '@/hooks/useGlobal';
 import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import styles from './index.module.less';
+
+const subscribeRuntime = (listener: () => void) => chatSessionRuntimeManager.subscribe(listener);
 
 type Props = {
   taskPlan: TaskPlanSnapshot;
@@ -80,7 +83,34 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     setMaximized(false);
   }, [taskPlan.sessionId]);
 
+  const captainSummarizing = useSyncExternalStore(
+    subscribeRuntime,
+    () => {
+      const runtime = chatSessionRuntimeManager.getSessionRuntime(taskPlan.sessionId);
+      const requests = chatSessionRuntimeManager.getAllBySession(taskPlan.sessionId);
+      let sameTurn = runtime?.traceId === taskPlan.traceId;
+      if (!taskPlan.traceId) {
+        sameTurn = requests.some(
+          (request) => request.answerMessageId === taskPlan.messageId && request.traceId === runtime?.traceId
+        );
+      }
+      return Boolean(
+        sameTurn &&
+          runtime?.status === 'running' &&
+          runtime.rootActive === true &&
+          runtime.activeChildCount === 0 &&
+          runtime.waitingInteractionCount === 0
+      );
+    },
+    () => false
+  );
+  const isSummarizing =
+    captainSummarizing &&
+    !['CANCELLING', 'CANCELLED', 'FAILED'].includes(taskPlan.status) &&
+    tasks.length > 0 &&
+    tasks.every((task) => task.status === 'COMPLETED');
   const hasRunningTask = tasks.some((task) => task.status === 'IN_PROGRESS');
+  const isWorking = hasRunningTask || isSummarizing;
   const progress = statusOrder
     .map((status) => ({
       status,
@@ -122,14 +152,19 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
           }}
         >
           <span className={styles.headerTitle}>
-            {hasRunningTask ? (
+            {isWorking ? (
               <LoadingOutlined spin className={styles.runningHeaderIcon} />
             ) : (
               <UnorderedListOutlined className={styles.headerIcon} />
             )}
             <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
           </span>
-          <span className={`${styles.progress} ${hasRunningTask ? styles.runningProgress : ''}`}>{progress}</span>
+          <span className={`${styles.progress} ${isWorking ? styles.runningProgress : ''}`}>{progress}</span>
+          {isSummarizing && (
+            <span className={styles.runningProgress} role="status">
+              {intl.formatMessage({ id: 'messageList.taskPlan.captainSummarizing' })}
+            </span>
+          )}
           <span className={styles.chevron} aria-hidden="true">
             {collapsed ? <RightOutlined /> : <DownOutlined />}
           </span>
