@@ -291,6 +291,7 @@ interface DurableQuestionStore {
     userCode: string
     agentSessionId: string
     parentAgentSessionId?: string
+    rootMessageId?: string
     questions: ByClawQuestion[]
   }): Promise<void>
   get(interactionId: string): Promise<{
@@ -357,6 +358,7 @@ export class ByClawQuestionBroker {
     userCode?: string
     agentSessionId?: string
     parentAgentSessionId?: string
+    rootMessageId?: string
     questions: ByClawQuestion[]
     emit(event: AskUserEvent): Promise<void>
     signal?: AbortSignal
@@ -395,6 +397,7 @@ export class ByClawQuestionBroker {
           userCode: options.userCode,
           agentSessionId: options.agentSessionId,
           ...options.parentAgentSessionId === undefined ? {} : { parentAgentSessionId: options.parentAgentSessionId },
+          ...options.rootMessageId === undefined ? {} : { rootMessageId: options.rootMessageId },
           questions: options.questions,
         })
       }

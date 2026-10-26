@@ -1,3 +1,5 @@
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import type { ByClawQuestion, ByClawQuestionAnswer } from './protocol.ts'
 
 export type ByClawInteractionStatus = 'PENDING' | 'ANSWERED' | 'CONSUMED'
@@ -9,6 +11,7 @@ export interface ByClawInteractionRecord {
   userCode: string
   agentSessionId: string
   parentAgentSessionId?: string
+  rootMessageId?: string
   questions: ByClawQuestion[]
   status: ByClawInteractionStatus
   createdAt: number
@@ -42,6 +45,127 @@ interface ColdRecoveryTurnIdentity {
   contextSessionId: string
   userCode: string
   rootMessageId: string
+}
+
+interface ParkedColdRecoveryAsk {
+  sessionId: string
+  userCode: string
+  messageId: string
+  setStreamFinished(finished: boolean): void
+}
+
+/** Park a reclaimed ASK before Harness repairs its open tool call as outcome-unknown. */
+export class ColdRecoveryAskParking {
+  private readonly parked = new Map<string, {
+    request: ParkedColdRecoveryAsk
+    resolve(result: { answer: string; dshSessionId: string }): void
+  }>()
+
+  private key(sessionId: string, userCode: string, messageId: string): string {
+    return `${sessionId}\0${userCode}\0${messageId}`
+  }
+
+  has(sessionId: string, userCode: string, messageId: string): boolean {
+    return this.parked.has(this.key(sessionId, userCode, messageId))
+  }
+
+  park(request: ParkedColdRecoveryAsk): Promise<{ answer: string; dshSessionId: string }> {
+    const key = this.key(request.sessionId, request.userCode, request.messageId)
+    const existing = this.parked.get(key)
+    if (existing !== undefined) throw new Error('Cold recovery ASK is already parked')
+    return new Promise(resolve => {
+      this.parked.set(key, { request, resolve })
+    })
+  }
+
+  release(sessionId: string, userCode: string, messageId: string): boolean {
+    const key = this.key(sessionId, userCode, messageId)
+    const parked = this.parked.get(key)
+    if (parked === undefined) return false
+    this.parked.delete(key)
+    parked.request.setStreamFinished(true)
+    parked.resolve({ answer: '', dshSessionId: sessionId })
+    return true
+  }
+}
+
+function persistedEvents(
+  value: readonly SessionEvent[] | { readonly events: readonly SessionEvent[] },
+): readonly SessionEvent[] {
+  return 'events' in value ? value.events : value
+}
+
+function questionIdsFromArguments(raw: string): string[] | undefined {
+  try {
+    const value = JSON.parse(raw) as { questions?: Array<{ id?: unknown }> }
+    if (!Array.isArray(value.questions)) return
+    const ids = value.questions.map(question => question.id)
+    return ids.every(id => typeof id === 'string') ? ids as string[] : undefined
+  } catch {
+    return
+  }
+}
+
+/** Complete the original durable tool call before AgentRegistry.resume applies unknown-outcome repair. */
+export async function repairColdAskUserQuestionSession(
+  persistence: Pick<SessionPersistence, 'open'>,
+  agentSessionId: string,
+  interaction: Pick<ByClawInteractionRecord, 'questions' | 'answer'>,
+): Promise<boolean> {
+  if (interaction.answer === undefined) return false
+  const handle = await persistence.open(agentSessionId as never, 'write')
+  try {
+    const events = persistedEvents(await handle.read())
+    let openTurn: number | undefined
+    let openStep: number | undefined
+    const completed = new Set<string>()
+    for (const event of events) {
+      if (event.type === 'turn/start') openTurn = event.data.turn
+      else if (event.type === 'turn/end') { openTurn = undefined; openStep = undefined }
+      else if (event.type === 'step/start' && openTurn === event.data.turn) openStep = event.data.step
+      else if (event.type === 'step/end' && openTurn === event.data.turn) openStep = undefined
+      else if (event.type === 'tool/result') completed.add(String(event.data.message.source.callId))
+    }
+    if (openTurn === undefined || openStep === undefined) return false
+    const expectedIds = interaction.questions.map(question => question.id)
+    const candidates = events.filter((event): event is Extract<SessionEvent, { type: 'tool/call' }> =>
+      event.type === 'tool/call'
+        && event.data.turn === openTurn
+        && event.data.step === openStep
+        && event.data.name === 'ask_user_question'
+        && !completed.has(String(event.data.callId))
+        && JSON.stringify(questionIdsFromArguments(event.data.arguments)) === JSON.stringify(expectedIds)
+    )
+    if (candidates.length !== 1) return false
+    const call = candidates[0]!
+    const last = events.at(-1)
+    if (last === undefined) return false
+    let sequence = Number(last.seq) + 1
+    const result = {
+      type: 'tool/result', seq: sequence++ as never, time: last.time,
+      data: {
+        turn: openTurn, step: openStep,
+        message: {
+          id: `byclaw-recovered-tool-result-${String(call.data.callId)}-${sequence}` as never,
+          role: 'tool' as const,
+          toolCallId: call.data.callId,
+          isError: false,
+          source: { kind: 'tool' as const, callId: call.data.callId },
+          content: [{ type: 'text' as const, text: JSON.stringify(interaction.answer) }],
+        },
+      },
+      surfaceOp: 'append' as const,
+      sourceEventSeqs: [call.seq],
+    } satisfies SessionEvent<'tool/result'>
+    const closers: SessionEvent[] = [
+      { type: 'step/end', seq: sequence++ as never, time: last.time, data: { turn: openTurn, step: openStep } },
+      { type: 'turn/end', seq: sequence as never, time: last.time, data: { turn: openTurn, reason: { kind: 'interrupted' } } },
+    ]
+    await handle.append([result, ...closers])
+    return true
+  } finally {
+    await handle.close()
+  }
 }
 
 /** Match only the reclaimed command that would occupy the cold recovery queue. */
@@ -244,6 +368,22 @@ export class ByClawInteractionStore {
     if (record?.status !== 'ANSWERED' || record.sessionId !== sessionId || record.userCode !== userCode
       || record.answer === undefined) return
     return record
+  }
+
+  async findPending(
+    sessionId: string,
+    userCode: string,
+    rootMessageId?: string,
+  ): Promise<ByClawInteractionRecord | undefined> {
+    const interactionIds = await this.redis.zrange(sessionIndexKey(this.prefix, sessionId, userCode), 0, -1)
+    for (const interactionId of interactionIds) {
+      const record = await this.get(interactionId)
+      if (record?.status === 'PENDING'
+        && record.sessionId === sessionId
+        && record.userCode === userCode
+        && (rootMessageId === undefined || record.rootMessageId === rootMessageId)) return record
+    }
+    return
   }
 
   async answer(input: {

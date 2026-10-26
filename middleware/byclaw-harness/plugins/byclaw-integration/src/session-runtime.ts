@@ -110,6 +110,8 @@ import {
   buildRecoveredAskPayload,
   interactionAgentSessionId,
   isColdRecoveryBlockingTurn,
+  ColdRecoveryAskParking,
+  repairColdAskUserQuestionSession,
   releaseColdRecoveryBlockingTurn,
   shouldSettleRecoveredInteraction,
   shouldReleaseWaitingInteractionAfterAsk,
@@ -1330,6 +1332,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly foregroundQueues = new Map<string, Promise<unknown>>()
   private readonly messageAgents = new Map<string, Agent>()
   private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly coldRecoveryParking = new ColdRecoveryAskParking()
   private readonly disposeSessionEvents: () => void
   private readonly disposeAgentStatusEvents: () => void
   private readonly disposeAssistantStreamEvents: () => void
@@ -1493,6 +1496,23 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
     try {
+      const externalSessionId = normalizeByClawSessionId(command.header.sessionId)
+      const pendingInteraction = command.extraPayload['byclaw_recovered_interaction_id'] === undefined
+        ? await this.options.interactionStore?.findPending(
+            externalSessionId, command.header.userCode, command.header.messageId,
+          )
+        : undefined
+      if (pendingInteraction !== undefined) {
+        this.ctx.logger.info(
+          `[ASK_USER_QUESTION_RECOVERY_TRACE] PARK_RECLAIMED interaction=${pendingInteraction.interactionId} session=${externalSessionId} message=${command.header.messageId}`,
+        )
+        return await this.coldRecoveryParking.park({
+          sessionId: externalSessionId,
+          userCode: command.header.userCode,
+          messageId: command.header.messageId,
+          setStreamFinished: finished => context.setStreamFinished(finished),
+        })
+      }
       const opening = this.options.sessionOpening
       if (opening !== undefined) {
         const headerId = normalizeByClawSessionId(command.header.sessionId)
@@ -1738,6 +1758,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       userCode: command.header.userCode,
       rootMessageId: command.header.messageId,
     }
+    const parkedAskReleased = this.coldRecoveryParking.release(
+      recoveryIdentity.contextSessionId,
+      recoveryIdentity.userCode,
+      recoveryIdentity.rootMessageId,
+    )
     const blockingTurn = [...this.active.values()].find(turn => isColdRecoveryBlockingTurn({
       contextSessionId: normalizeByClawSessionId(turn.context.sessionId),
       userCode: turn.userCode,
@@ -1781,6 +1806,15 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       )
     }
     if (record?.answer === undefined) return false
+    const originalCallRepaired = parkedAskReleased && await repairColdAskUserQuestionSession(
+      this.ctx.sessionPersistence, record.agentSessionId, record,
+    ).catch(error => {
+      this.ctx.logger.warn(`byclaw-dsh failed to repair recovered ask_user_question call: ${sanitizeByClawOperationalLog(error)}`)
+      return false
+    })
+    this.ctx.logger.info(
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] ORIGINAL_CALL_REPAIR interaction=${recoveredInteractionId} session=${command.header.sessionId} parked=${parkedAskReleased} repaired=${originalCallRepaired}`,
+    )
     const recovered = buildRecoveredAskPayload(record)
     this.ctx.logger.info(
       `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
@@ -2227,6 +2261,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                 sessionId: normalizeByClawSessionId(active.context.sessionId),
                 userCode: active.userCode,
                 agentSessionId: durableAgentSessionId,
+                rootMessageId: active.rootMessageId,
                 ...(exec.agent?.session.header.parentSession === undefined ? {} : {
                   parentAgentSessionId: String(exec.agent.session.header.parentSession),
                 }),
