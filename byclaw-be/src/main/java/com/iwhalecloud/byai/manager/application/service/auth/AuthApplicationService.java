@@ -815,7 +815,9 @@ public class AuthApplicationService {
     /** 追加缺失的 USER/FORCE_USE，不调用全量名单对账，保留其他人员、黑名单及原授权有效期。 */
     @Transactional(rollbackFor = Exception.class)
     public void appendDigitalEmployeeResourceUsePrivileges(SsResource resource, Collection<Long> userIds) {
+        long started = System.nanoTime();
         Set<Long> addedUserIds = new LinkedHashSet<>();
+        List<PrivilegeGrant> additions = new ArrayList<>();
         for (Long userId : new LinkedHashSet<>(userIds)) {
             if (hasResourceUsePermission(resource, userId)) continue;
             validateDigitalEmployeeResourceUseGrant(resource, userId);
@@ -825,11 +827,22 @@ public class AuthApplicationService {
             PrivilegeGrant grant = buildAuth(GrantType.FORCE_USE, resource.getResourceBizType(), resource.getResourceId(),
                 List.of(target), Color.RED, Constants.NOT_ALLOW_UNSUBSCRIBE).get(0);
             grant.setStatusCd("A");
-            privilegeGrantService.save(grant);
-            writeRedis(GrantType.FORCE_USE, buildPrivilegeGrantKey(grant), buildPrivilegeGrantValue(grant));
+            additions.add(grant);
             addedUserIds.add(userId);
         }
         if (!addedUserIds.isEmpty()) {
+            long checked = System.nanoTime();
+            privilegeGrantService.saveBatch(additions);
+            Map<String, Set<String>> redisAdditions = new LinkedHashMap<>();
+            for (PrivilegeGrant grant : additions) {
+                redisAdditions.computeIfAbsent(buildPrivilegeGrantKey(grant), ignored -> new LinkedHashSet<>())
+                    .add(buildPrivilegeGrantValue(grant));
+            }
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                AuthorizationCommitBatch.current(this, authRedisSyncService).addSetMembers(redisAdditions);
+            } else {
+                RedisUtil.addSets(redisAdditions);
+            }
             ResourceMemberSettingQo granted = new ResourceMemberSettingQo();
             granted.setRedList(addedUserIds.stream().map(id -> {
                 AuthDTO target = new AuthDTO();
@@ -839,6 +852,9 @@ public class AuthApplicationService {
             }).collect(Collectors.toList()));
             autoCancelPendingApplyForGrantedUsers(resource, granted);
             syncAuthChangedUsersAfterCommit(addedUserIds, GrantType.FORCE_USE);
+            logger.info("关联资源补授权 resourceId={}, candidates={}, inserted={}, checkMs={}, persistMs={}",
+                resource.getResourceId(), userIds.size(), additions.size(), (checked - started) / 1_000_000,
+                (System.nanoTime() - checked) / 1_000_000);
         }
     }
 
@@ -878,15 +894,18 @@ public class AuthApplicationService {
         updates.setStatusCd("X");
         updates.setUpdateDate(new Date());
 
-        LambdaUpdateWrapper<PrivilegeGrant> uw = new LambdaUpdateWrapper<>();
-        uw.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType())
-            .eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId())
-            .eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE)
-            .eq(PrivilegeGrant::getGrantToType, Color.RED)
-            .eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER)
-            .in(PrivilegeGrant::getGrantToObjId, grantedUserIds)
-            .eq(PrivilegeGrant::getStatusCd, USE_APPLY_PENDING_STATUS);
-        privilegeGrantMapper.update(updates, uw);
+        List<Long> ids = new ArrayList<>(grantedUserIds);
+        for (int offset = 0; offset < ids.size(); offset += 500) {
+            LambdaUpdateWrapper<PrivilegeGrant> uw = new LambdaUpdateWrapper<>();
+            uw.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType())
+                .eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId())
+                .eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE)
+                .eq(PrivilegeGrant::getGrantToType, Color.RED)
+                .eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER)
+                .in(PrivilegeGrant::getGrantToObjId, ids.subList(offset, Math.min(offset + 500, ids.size())))
+                .eq(PrivilegeGrant::getStatusCd, USE_APPLY_PENDING_STATUS);
+            privilegeGrantMapper.update(updates, uw);
+        }
     }
 
     /**
@@ -2469,22 +2488,14 @@ public class AuthApplicationService {
     }
 
     private void syncAuthChangedUsersAfterCommit(Set<Long> involvedUserIds, String grantType) {
-        Set<Long> syncUserIds = new HashSet<>(involvedUserIds);
-        Runnable task = () -> {
-            logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", syncUserIds.size());
-            this.authRedisSyncService.asyncSyncAuthChangedUsers(syncUserIds, grantType);
-            this.authRedisSyncService.asyncSyncManageAuthChangedUsers(syncUserIds, grantType);
-        };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    task.run();
-                }
-            });
-        } else {
-            task.run();
+            AuthorizationCommitBatch.current(this, authRedisSyncService).refreshUsers(involvedUserIds, grantType);
+            return;
         }
+        Set<Long> syncUserIds = new HashSet<>(involvedUserIds);
+        logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", syncUserIds.size());
+        this.authRedisSyncService.asyncSyncAuthChangedUsers(syncUserIds, grantType);
+        this.authRedisSyncService.asyncSyncManageAuthChangedUsers(syncUserIds, grantType);
     }
 
     /**

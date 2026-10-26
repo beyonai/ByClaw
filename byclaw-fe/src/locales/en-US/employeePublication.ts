@@ -27,6 +27,12 @@ export default {
   'employeePublication.status.PENDING': 'Pending review',
   'employeePublication.status.APPLYING': 'Publishing',
   'employeePublication.status.PUBLISHED': 'Published',
+  'employeePublication.status.PARTIALLY_PUBLISHED': 'Partially published',
+  'employeePublication.status.APPROVED': 'Review approved',
+  'employeePublication.audience.organizationPublished': 'Published successfully within your organization [{orgNames}]',
+  'employeePublication.audience.partiallyPublished': 'Published successfully within organizations [{orgNames}]',
+  'employeePublication.audience.updateApproved':
+    'Approved by organizations [{orgNames}]. The shared version will update after all organizations approve.',
   'employeePublication.status.REJECTED': 'Rejected',
   'employeePublication.status.WITHDRAWN': 'Withdrawn',
   'employeePublication.status.FAILED': 'Publication failed',

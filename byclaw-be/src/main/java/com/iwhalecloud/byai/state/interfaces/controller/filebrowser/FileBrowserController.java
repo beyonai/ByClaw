@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
@@ -46,6 +48,8 @@ import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserSaveToKnowled
 @RestController
 @RequestMapping("/fileBrowser")
 public class FileBrowserController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FileBrowserController.class);
 
     @Autowired
     private FileBrowserApplicationService fileBrowserService;
@@ -141,6 +145,10 @@ public class FileBrowserController {
             return ResponseUtil.successResponse(
                 knowledgeTransferApplicationService.saveToPersonalKnowledge(userCode, request));
         } catch (Exception e) {
+            LOGGER.error("过程文件保存到个人知识库失败: userCode={}, sourceResourceId={}, targetResourceId={}, sourcePath={}",
+                userCode, request == null ? null : request.getResourceId(),
+                request == null ? null : request.getTargetResourceId(),
+                request == null ? null : request.getSourcePath(), e);
             return ResponseUtil.fail(e.getMessage());
         }
     }
@@ -383,6 +391,8 @@ public class FileBrowserController {
             fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
+            LOGGER.error("初始化文件目录失败: userCode={}, resourceId={}, path={}",
+                userCode, request.getResourceId(), request.getPath(), e);
             return ResponseUtil.fail("创建文件夹失败: " + e.getMessage());
         }
     }

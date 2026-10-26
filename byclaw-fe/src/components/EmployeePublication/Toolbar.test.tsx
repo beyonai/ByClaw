@@ -79,12 +79,70 @@ describe('employee publication controls', () => {
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
     jest.spyOn(message, 'warning').mockImplementation(jest.fn());
+    jest.spyOn(message, 'info').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
 
   it('uses the enterprise publication label in the toolbar', () => {
     render(<PublicationToolbar detail={candidate} dirty={false} onChange={jest.fn()} onSave={jest.fn()} />);
     expect(screen.getByText('发布到企业')).toBeInTheDocument();
+  });
+
+  it.each(['PENDING', 'PUBLISHED'])(
+    'announces successful publication within the approved organization when the request is %s',
+    async (status) => {
+      const before: PublicationDetail = {
+        ...candidate,
+        canEdit: false,
+        canSubmit: false,
+        canReview: true,
+        publication: {
+          ...candidate.publication,
+          status: 'PENDING',
+          targets: [{ orgId: '10', orgName: '研发中心', status: 'PENDING', canReview: true }],
+        },
+      };
+      const after: PublicationDetail = {
+        ...before,
+        canReview: false,
+        publication: {
+          ...before.publication,
+          status,
+          officialId: '90',
+          targets: [{ orgId: '10', orgName: '研发中心', status: 'APPROVED', canReview: false }],
+        },
+      };
+      jest.mocked(previewPublication).mockResolvedValue(before);
+      jest.mocked(publicationAction).mockResolvedValue(after);
+      const view = render(<PublicationToolbar detail={before} dirty={false} onSave={jest.fn()} onChange={jest.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: '通过本组织' }));
+      await continuePublication();
+      await waitFor(() => expect(message.success).toHaveBeenCalledWith('本组织【研发中心】内发布成功'));
+      expect(message.error).not.toHaveBeenCalled();
+      view.rerender(<PublicationToolbar detail={after} dirty={false} onSave={jest.fn()} onChange={jest.fn()} />);
+      expect(screen.getByText('本组织【研发中心】内发布成功')).toBeInTheDocument();
+      expect(screen.getByText('已发布')).toBeInTheDocument();
+      expect(screen.queryByText('待审核')).not.toBeInTheDocument();
+    }
+  );
+
+  it('shows shared update approval as waiting for the other organizations, without announcing publication', () => {
+    const detail: PublicationDetail = {
+      ...candidate,
+      canEdit: false,
+      canSubmit: false,
+      publication: {
+        ...candidate.publication,
+        status: 'PENDING',
+        officialId: '90',
+        scopeUpdate: true,
+        targets: [{ orgId: '10', orgName: '研发中心', status: 'APPROVED' }],
+      },
+    };
+    render(<PublicationToolbar detail={detail} dirty={false} onSave={jest.fn()} onChange={jest.fn()} />);
+    expect(screen.getByText('组织【研发中心】已审核通过，待所有组织审核通过后统一更新。')).toBeInTheDocument();
+    expect(screen.getByText('审核已通过')).toBeInTheDocument();
+    expect(screen.queryByText('已发布')).not.toBeInTheDocument();
   });
 
   it('shows refreshed resource scope before publishing and returns to the saved configuration without submitting', async () => {

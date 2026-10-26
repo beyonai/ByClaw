@@ -223,7 +223,7 @@ public class FeignPythonBuildService {
             String requestPath = resolvePath(kbFileImport, KnowledgeServiceOperation.UPLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileImport);
             if (endpoint.isDirectUrl()) {
-                return directUpload(endpoint.getBaseUrl(), requestPath, originalFilename, multipartFile, formFields,
+                return directUpload(endpoint.getBaseUrl(), requestPath, originalFilename, multipartFile, formFields, headers,
                     new TypeReference<PythonBuildResponse<KbImportResult>>() {
                     });
             }
@@ -237,7 +237,7 @@ public class FeignPythonBuildService {
             throw e;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("调用 Python 构建服务失败: ", e);
+            throw new BaseException("调用 Python 构建服务失败: " + e.getMessage(), e);
         }
     }
 
@@ -262,7 +262,7 @@ public class FeignPythonBuildService {
             String requestPath = resolvePath(kbFileUpdate, KnowledgeServiceOperation.UPDATE_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileUpdate);
             if (endpoint.isDirectUrl()) {
-                return directUpload(endpoint.getBaseUrl(), requestPath, originalFilename, multipartFile, formFields,
+                return directUpload(endpoint.getBaseUrl(), requestPath, originalFilename, multipartFile, formFields, headers,
                     new TypeReference<PythonBuildResponse<KbFileUpdateResult>>() {
                     });
             }
@@ -533,18 +533,15 @@ public class FeignPythonBuildService {
         String requestPath = resolvePath(payload, operation);
         KnowledgeServiceEndpoint endpoint = resolveRoute(payload);
         if (endpoint.isDirectUrl()) {
-            return directPost(endpoint.getBaseUrl(), requestPath, payload, type);
+            return directPost(endpoint.getBaseUrl(), requestPath, payload, type, headers);
         }
 
-        if (headers == null) {
-            headers = new HashMap<String, String>();
-        }
-
-        headers.put("Content-Type", "application/json");
-        this.addAuth(headers);
+        // 调用方可能传 Map.of/Collections.emptyMap，不能修改其请求上下文。
+        Map<String, String> requestHeaders = buildAuthHeaders(headers);
+        requestHeaders.put("Content-Type", "application/json");
 
         HttpResponse response = discoveryHttpClient
-            .post(endpoint.getServiceName(), requestPath, headers, payload, null)
+            .post(endpoint.getServiceName(), requestPath, requestHeaders, payload, null)
             .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
         return parseResponse(response, type, requestPath);
     }
@@ -582,7 +579,8 @@ public class FeignPythonBuildService {
         String requestPath = resolvePath(payload, operation);
         KnowledgeServiceEndpoint endpoint = resolveRoute(payload);
         if (endpoint.isDirectUrl()) {
-            return directPost(endpoint.getBaseUrl(), requestPath, payload, type);
+            return directPost(endpoint.getBaseUrl(), requestPath, payload, type,
+                addResourceContext(new HashMap<>(), resourceId));
         }
         HttpResponse response = discoveryHttpClient
             .post(endpoint.getServiceName(), requestPath, buildHeaders(resourceId), payload, null)
@@ -705,11 +703,12 @@ public class FeignPythonBuildService {
      * 第三方知识库模式下的 JSON 直连 POST。
      */
     private <T> PythonBuildResponse<T> directPost(String baseUrl, String path, Object payload,
-                                                  TypeReference<PythonBuildResponse<T>> type) {
+                                                  TypeReference<PythonBuildResponse<T>> type,
+                                                  Map<String, String> headers) {
         String requestUrl = concatUrl(baseUrl, path);
         RequestBody requestBody = RequestBody.create(JSON.toJSONString(payload), JSON_MEDIA_TYPE);
         Request.Builder builder = new Request.Builder().url(requestUrl).post(requestBody);
-        buildHeaders().forEach(builder::addHeader);
+        buildAuthHeaders(headers).forEach(builder::addHeader);
         try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
             return parseDirectResponse(response, type, path);
         } catch (IOException e) {
@@ -721,19 +720,23 @@ public class FeignPythonBuildService {
      * 第三方知识库模式下的 multipart 文件上传。
      */
     private <T> PythonBuildResponse<T> directUpload(String baseUrl, String path, String fileName,
-                                                    MultipartFile multipartFile, Map<String, String> formFields, TypeReference<PythonBuildResponse<T>> type) {
+                                                    MultipartFile multipartFile, Map<String, String> formFields,
+                                                    Map<String, String> headers, TypeReference<PythonBuildResponse<T>> type) {
         String requestUrl = concatUrl(baseUrl, path);
         MultipartBody.Builder bodyBuilder = new MultipartBody.Builder().setType(MultipartBody.FORM);
         formFields.forEach(bodyBuilder::addFormDataPart);
+        // 服务端自行构造的 MultipartFile 没有 contentType，MediaType.parse 不接受 null。
+        String contentType = StringUtil.isEmpty(multipartFile.getContentType()) ? "application/octet-stream"
+            : multipartFile.getContentType();
         try {
             bodyBuilder.addFormDataPart("fileContent", fileName,
-                RequestBody.create(multipartFile.getBytes(), MediaType.parse(multipartFile.getContentType())));
+                RequestBody.create(multipartFile.getBytes(), MediaType.parse(contentType)));
         } catch (IOException e) {
             throw new BaseException("读取上传文件失败", e);
         }
 
         Request.Builder builder = new Request.Builder().url(requestUrl).post(bodyBuilder.build());
-        buildAuthHeaders().forEach(builder::addHeader);
+        buildAuthHeaders(headers).forEach(builder::addHeader);
         try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
             return parseDirectResponse(response, type, path);
         } catch (IOException e) {
@@ -901,8 +904,15 @@ public class FeignPythonBuildService {
      * 构造第三方 multipart 上传用的认证请求头。
      */
     private Map<String, String> buildAuthHeaders() {
-        Map<String, String> headers = new HashMap<>();
-        return addAuth(headers);
+        return buildAuthHeaders(null);
+    }
+
+    /** 保留资源、用户与会话上下文；长度及 Content-Type 由实际请求体生成，multipart 必须包含正确 boundary。 */
+    private Map<String, String> buildAuthHeaders(Map<String, String> headers) {
+        Map<String, String> resolvedHeaders = headers == null ? new HashMap<>() : new HashMap<>(headers);
+        resolvedHeaders.keySet().removeIf(key -> "Content-Type".equalsIgnoreCase(key)
+            || "Content-Length".equalsIgnoreCase(key));
+        return addAuth(resolvedHeaders);
     }
 
     /**

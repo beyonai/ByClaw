@@ -98,6 +98,7 @@ export class ByClawBeOrchestratorRuntimeProvider
         orchestratorId: input.orchestrator.id,
       },
       label: "orchestrator runtime",
+      fallbackOnNetworkError: true,
       toError: (message, statusCode) =>
         new ByClawBeOrchestratorRuntimeError(message, statusCode),
     });

@@ -2314,12 +2314,15 @@ class AuthApplicationServiceTest {
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             service.appendDigitalEmployeeResourceUsePrivileges(bound, List.of(2L, 3L, 3L));
-            ArgumentCaptor<PrivilegeGrant> captured = ArgumentCaptor.forClass(PrivilegeGrant.class);
-            verify(grants, times(1)).save(captured.capture());
-            assertThat(captured.getValue().getGrantToObjId()).isEqualTo(3L);
-            assertThat(captured.getValue().getGrantType()).isEqualTo(GrantType.FORCE_USE);
-            assertThat(captured.getValue().getGrantToType()).isEqualTo(Color.RED);
-            assertThat(captured.getValue().getStatusCd()).isEqualTo("A");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<PrivilegeGrant>> captured = ArgumentCaptor.forClass(List.class);
+            verify(grants, times(1)).saveBatch(captured.capture());
+            assertThat(captured.getValue()).singleElement().satisfies(grant -> {
+                assertThat(grant.getGrantToObjId()).isEqualTo(3L);
+                assertThat(grant.getGrantType()).isEqualTo(GrantType.FORCE_USE);
+                assertThat(grant.getGrantToType()).isEqualTo(Color.RED);
+                assertThat(grant.getStatusCd()).isEqualTo("A");
+            });
             verify(grants, never()).findPrivilegeGrant(any(), any(), any(), any());
             verify(grants, never()).remove(any());
             verify(grants, never()).update(any());
@@ -2336,6 +2339,30 @@ class AuthApplicationServiceTest {
         } finally {
             org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    @Test
+    void retryOfCommittedBoundResourceGrantDoesNotInsertAgain() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
+        SsResource resource = enterpriseResource(607L, 1L);
+        Set<Long> persisted = new java.util.HashSet<>(Set.of(2L));
+        org.mockito.Mockito.doAnswer(call -> persisted.contains(call.getArgument(1)))
+            .when(service).hasResourceUsePermission(eq(resource), any(Long.class));
+        doNothing().when(service).validateDigitalEmployeeResourceUseGrant(eq(resource), any(Long.class));
+        org.mockito.Mockito.doAnswer(call -> {
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            batch.forEach(grant -> persisted.add(grant.getGrantToObjId()));
+            return null;
+        }).when(grants).saveBatch(any());
+        mockRedisSetWrite();
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        verify(grants).saveBatch(argThat(batch -> batch.size() == 1 && batch.getFirst().getGrantToObjId().equals(3L)));
+        assertThat(persisted).containsExactlyInAnyOrder(2L, 3L);
     }
 
     @Test
@@ -2414,11 +2441,13 @@ class AuthApplicationServiceTest {
             return null;
         }).when(service).handleAuth(any());
         org.mockito.Mockito.doAnswer(call -> {
-            PrivilegeGrant grant = call.getArgument(0);
-            if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
-            jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            for (PrivilegeGrant grant : batch) {
+                if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
+                jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            }
             return null;
-        }).when(grants).save(any());
+        }).when(grants).saveBatch(any());
         mockRedisSetWrite();
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.setProxyTargetClass(true);
@@ -2437,7 +2466,7 @@ class AuthApplicationServiceTest {
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(6);
             assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3 ORDER BY resource_id", Long.class))
                 .containsExactly(100L, 200L, 201L);
-            verify(cache, times(2)).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
+            verify(cache).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
         }
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants WHERE user_id=999", Integer.class)).isEqualTo(1);
     }

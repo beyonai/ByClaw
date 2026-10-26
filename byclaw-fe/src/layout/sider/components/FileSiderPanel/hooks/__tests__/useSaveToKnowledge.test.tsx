@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { message } from 'antd';
 import { listResourceUseAuth, queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
 import { buildDataset, checkUploadFileConflicts, queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import { downloadFile, listFiles, saveToPersonalKnowledge } from '@/service/fileBrowser';
@@ -197,4 +198,23 @@ test('keeps save-only mode after a failed upload and prevents duplicate submissi
   await act(async () => result.current.handleConfirmKnowledgeUpload(false));
   expect(saveToPersonalKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ buildAfterSave: false }));
   expect(result.current.knowledgeUploadConfirmOpen).toBe(false);
+});
+
+test('preserves the request layer string error and keeps the upload available for retry', async () => {
+  const error = jest.spyOn(message, 'error').mockImplementation(() => undefined as any);
+  try {
+    const { result } = hook();
+    act(() => result.current.openSaveToKnowledge(file));
+    act(() => result.current.handleSelectKnowledgeBase(kb));
+    await waitFor(() => expect(result.current.knowledgeFolderReady).toBe(true));
+    await act(async () => result.current.handleConfirmSaveToKnowledge(true));
+    mocked(saveToPersonalKnowledge).mockRejectedValueOnce('知识服务暂不可用，请稍后重试');
+    await act(async () => result.current.handleConfirmKnowledgeUpload(false));
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith('知识服务暂不可用，请稍后重试');
+    expect(result.current.knowledgeUploadConfirmOpen).toBe(true);
+    expect(result.current.savingToKnowledge).toBe(false);
+  } finally {
+    error.mockRestore();
+  }
 });

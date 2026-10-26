@@ -208,8 +208,7 @@ public class FileBrowserApplicationService {
 
     private boolean folderExists(FileBrowserProvider provider, String userCode, Long resourceId, String parentPath,
         String folderName) {
-        return provider.list(userCode, resourceId, parentPath).stream()
-            .anyMatch(item -> item.isDir() && folderName.equals(item.getName()));
+        return provider.folderExists(userCode, resourceId, parentPath, folderName);
     }
 
     private List<String> splitPath(String path) {

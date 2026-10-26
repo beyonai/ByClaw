@@ -4,6 +4,36 @@
 
 <mapper namespace="com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper">
 
+    <sql id="batchGrantValues">
+        #{grant.privilegeGrantId,jdbcType=BIGINT}, #{grant.grantType,jdbcType=VARCHAR}, #{grant.operType,jdbcType=VARCHAR},
+        #{grant.grantObjType,jdbcType=VARCHAR}, #{grant.grantObjId,jdbcType=BIGINT}, #{grant.effDate,jdbcType=TIMESTAMP},
+        #{grant.expDate,jdbcType=TIMESTAMP}, #{grant.statusCd,jdbcType=VARCHAR}, #{grant.createStaff,jdbcType=BIGINT},
+        #{grant.createDate,jdbcType=TIMESTAMP}, #{grant.updateStaff,jdbcType=BIGINT}, #{grant.updateDate,jdbcType=TIMESTAMP},
+        #{grant.grantToType,jdbcType=VARCHAR}, #{grant.grantToObjId,jdbcType=BIGINT}, #{grant.grantToObjType,jdbcType=VARCHAR},
+        #{grant.allowUnsubscribe,jdbcType=VARCHAR}
+    </sql>
+
+    <insert id="insertBatch">
+        INSERT INTO au_privilege_grant (
+            privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+            eff_date, exp_date, status_cd, create_staff, create_date, update_staff, update_date,
+            grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+        )
+        <choose>
+            <when test="dbType != null and dbType.equalsIgnoreCase('oracle')">
+                <foreach collection="grants" item="grant" separator=" UNION ALL ">
+                    SELECT <include refid="batchGrantValues"/> FROM dual
+                </foreach>
+            </when>
+            <otherwise>
+                VALUES
+                <foreach collection="grants" item="grant" separator=",">
+                    (<include refid="batchGrantValues"/>)
+                </foreach>
+            </otherwise>
+        </choose>
+    </insert>
+
     <resultMap id="privilegeGrantResultMap" type="com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant">
         <result column="privilege_grant_id" property="privilegeGrantId"/>
         <result column="grant_type" property="grantType"/>

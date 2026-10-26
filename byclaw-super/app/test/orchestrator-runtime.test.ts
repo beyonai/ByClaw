@@ -103,6 +103,34 @@ describe("ByClaw BE orchestrator runtime provider", () => {
       }),
     ).rejects.toBeInstanceOf(ByClawBeOrchestratorRuntimeError);
   });
+
+  it("falls back once when a discovered BE cannot serve the runtime query", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(Response.json({ code: 0, data: runtimeResponse() }));
+    const provider = new ByClawBeOrchestratorRuntimeProvider({
+      baseUrl: "http://configured.internal:8086",
+      endpointResolver: { resolve: async () => "http://unreachable.internal:8086" },
+      timeoutMs: 1_000,
+      fetchImpl,
+      llmProvider: { resolveByModelId: vi.fn(async () => modelConfig()) },
+    });
+
+    const result = await provider.resolve({
+      orchestrator: {
+        schemaVersion: "byclaw.orchestrator-ref/v1",
+        kind: "EXPERT_TEAM",
+        id: "90001",
+      },
+      beyondToken: "run-token",
+    });
+
+    expect(result.orchestrator.id).toBe("90001");
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://unreachable.internal:8086/byaiService/internal/v1/orchestrators/resolve-runtime",
+      "http://configured.internal:8086/byaiService/internal/v1/orchestrators/resolve-runtime",
+    ]);
+  });
 });
 
 function runtimeResponse() {

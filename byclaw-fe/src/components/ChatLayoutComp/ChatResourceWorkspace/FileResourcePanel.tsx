@@ -65,6 +65,7 @@ import { filterSessionRootItems } from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -408,8 +409,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const rows =
         destination === 'project'
           ? await queryProjectCloudDrive(projectCloudResourceId!, path, language)
-          : unwrapListResponse<FileBrowserItem>(await listFiles({ resourceId: resourceId!, path, language }));
-      return rows
+          : await listFiles({ resourceId: resourceId!, path, language }, { hideErrorTips: true });
+      return unwrapListResponse<FileBrowserItem>(rows)
         .filter(isDirectory)
         .map((item) => ({ title: item.name, key: ensureDirectoryPath(item.path), isLeaf: false }));
     },
@@ -431,7 +432,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setSaveTreeData([]);
       setSaveTreeLoading(true);
       try {
-        if (destination === 'shared') await ensureFolder({ resourceId, path: targetRootPath });
+        if (destination === 'shared') {
+          await ensureFolder({ resourceId, path: targetRootPath }, { hideErrorTips: true });
+        }
         const children = await loadSaveDirectories(targetRootPath, destination);
         setSaveTreeData([
           {
@@ -445,7 +448,13 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setSaveExpandedKeys([targetRootPath]);
       } catch (error: any) {
         setSaveTarget(null);
-        message.error(error?.message || intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }));
+        message.error(
+          localizeErrorMessage(
+            typeof error === 'string' ? error : error?.message,
+            intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }),
+            intl.locale
+          )
+        );
       } finally {
         setSaveTreeLoading(false);
       }

@@ -65,6 +65,8 @@ export interface PostByClawBeJsonInput {
   body: unknown;
   /** 额外请求头（如 discover 的 `language`）。 */
   extraHeaders?: Record<string, string>;
+  /** 仅无副作用的查询可在网络错误后换用配置地址重试一次，写操作默认不重放。 */
+  fallbackOnNetworkError?: boolean;
   /** 用于拼接错误文案的业务标签，如 "discover" / "group chat"。 */
   label: string;
   /** 把网络/上游/外壳异常转换为本客户端的错误类型。 */
@@ -84,9 +86,8 @@ export async function postByClawBeJson(input: PostByClawBeJsonInput): Promise<un
     fallbackBaseUrl: input.fallbackBaseUrl,
   });
   const url = appendPath(base, input.path);
-  let response: Response;
-  try {
-    response = await input.fetchImpl(url, {
+  const fetchResponse = (target: URL) =>
+    input.fetchImpl(target, {
       method: "POST",
       headers: beyondTokenHeaders({
         beyondToken: input.beyondToken,
@@ -96,6 +97,17 @@ export async function postByClawBeJson(input: PostByClawBeJsonInput): Promise<un
       body: JSON.stringify(input.body),
       signal: AbortSignal.timeout(input.timeoutMs),
     });
+  let response: Response;
+  try {
+    try {
+      response = await fetchResponse(url);
+    } catch (error) {
+      const fallbackUrl = appendPath(input.fallbackBaseUrl, input.path);
+      if (!input.fallbackOnNetworkError || fallbackUrl.href === url.href) {
+        throw error;
+      }
+      response = await fetchResponse(fallbackUrl);
+    }
   } catch (error) {
     throw input.toError(
       error instanceof Error

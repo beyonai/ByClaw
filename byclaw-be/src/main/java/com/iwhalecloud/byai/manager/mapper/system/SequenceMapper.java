@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.mapper.system;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.system.Sequence;
 import org.apache.ibatis.annotations.Param;
+import java.util.List;
 
 /**
  * 序列管理数据访问层接口提供不同数据库类型的序列生成和操作方法
@@ -36,6 +37,8 @@ public interface SequenceMapper extends BaseMapper<Sequence> {
      * @return 下一个序列值
      */
     Long nextValForPostgreSql(@Param("sequenceName") String sequenceName);
+
+    List<Long> nextValuesForPostgreSql(@Param("sequenceName") String sequenceName, @Param("count") int count);
 
     /**
      * 获取MySQL数据库的自增序列值通过插入临时记录获取自增ID，然后删除该记录

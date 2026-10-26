@@ -18,6 +18,7 @@ import { publicationErrorMessage } from '@/utils/publicationError';
 import PublicationResourceSummary from './ResourceSummary';
 import usePublicationConfirmation from './usePublicationConfirmation';
 import UpdateTargetNotice from './UpdateTargetNotice';
+import { publicationApprovalFeedback, publicationPresentation } from './presentation';
 import styles from './Toolbar.module.less';
 
 type PublicationAction = 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'revise' | 'refreshTarget';
@@ -104,7 +105,10 @@ export default function PublicationToolbar({
       if (action === 'revise') history.replace(publicationUrl(next));
       setRejecting(false);
       setReviewOrgIds(undefined);
-      if (next.publication.status === 'FAILED')
+      if (action === 'approve' || (action === 'submit' && publicationPresentation(next.publication).scopeMessage)) {
+        const feedback = publicationApprovalFeedback(next.publication);
+        message[feedback.kind](feedback.error || intl.formatMessage({ id: feedback.messageId }, feedback.values));
+      } else if (next.publication.status === 'FAILED')
         message.error(next.publication.publishError || intl.formatMessage({ id: 'employeePublication.publishFailed' }));
       else message.success(intl.formatMessage({ id: `employeePublication.status.${next.publication.status}` }));
     } catch (error: any) {
@@ -121,13 +125,16 @@ export default function PublicationToolbar({
   // 编辑后允许先保存并重新校验，避免名称等旧校验结果阻塞提交。
   const publicationDisabled = busy || (dirty ? !detail.canEdit : blockers.length > 0);
   const reviewed = ['REJECTED', 'PUBLISHED'].includes(detail.publication.status);
+  const presentation = publicationPresentation(detail.publication);
   const reviewTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
   return (
     <div className={styles.toolbar}>
       <section className={styles.overview} aria-label={intl.formatMessage({ id: 'employeePublication.toolbar.title' })}>
         <Space wrap>
           <strong>{intl.formatMessage({ id: 'resource.publishToEnterprise' })}</strong>
-          <Tag>{intl.formatMessage({ id: `employeePublication.status.${detail.publication.status}` })}</Tag>
+          <Tag color={['PUBLISHED', 'PARTIALLY_PUBLISHED'].includes(presentation.status) ? 'success' : undefined}>
+            {intl.formatMessage({ id: `employeePublication.status.${presentation.status}` })}
+          </Tag>
           {detail.publication.requiresAdminVipReview && (
             <Tag color="gold">{intl.formatMessage({ id: 'employeePublication.toolbar.adminVipOnly' })}</Tag>
           )}
@@ -240,6 +247,13 @@ export default function PublicationToolbar({
           )}
           {dirty && <span>{intl.formatMessage({ id: 'employeePublication.toolbar.dirtyHint' })}</span>}
         </Space>
+        {presentation.scopeMessage && (
+          <Alert
+            type={presentation.status === 'APPROVED' ? 'info' : 'success'}
+            showIcon
+            message={intl.formatMessage({ id: presentation.scopeMessage.messageId }, presentation.scopeMessage.values)}
+          />
+        )}
         <PublicationAudience
           targets={targets}
           editable={detail.canEdit && detail.publication.status === 'DRAFT'}

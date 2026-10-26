@@ -363,7 +363,7 @@ export default function useSaveToKnowledge({
       } catch (error: any) {
         message.error(
           localizeErrorMessage(
-            error?.message,
+            typeof error === 'string' ? error : error?.message,
             intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
             intl.locale
           )
@@ -428,7 +428,7 @@ export default function useSaveToKnowledge({
       } catch (error: any) {
         message.error(
           localizeErrorMessage(
-            error?.message,
+            typeof error === 'string' ? error : error?.message,
             intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }),
             intl.locale
           )

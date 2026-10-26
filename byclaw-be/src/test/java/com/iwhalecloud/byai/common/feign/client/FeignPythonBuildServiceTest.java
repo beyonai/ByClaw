@@ -14,6 +14,42 @@ import org.springframework.test.util.ReflectionTestUtils;
 class FeignPythonBuildServiceTest {
 
     @Test
+    void uploadLetsTheHttpClientSupplyTheMultipartBoundary() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        var contentType = new java.util.concurrent.atomic.AtomicReference<String>();
+        var body = new java.util.concurrent.atomic.AtomicReference<String>();
+        var resource = new java.util.concurrent.atomic.AtomicReference<String>();
+        server.createContext("/upload", exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            resource.set(exchange.getRequestHeaders().getFirst(FeignPythonBuildService.RESOURCE_ID_HEADER));
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        var service = new FeignPythonBuildService();
+        Map<String, String> original = Map.of("content-type", "application/json",
+            FeignPythonBuildService.RESOURCE_ID_HEADER, "20");
+        Map<String, String> headers = ReflectionTestUtils.invokeMethod(service, "buildUploadHeaders", original);
+        try (var client = com.iwhaleai.byai.framework.util.http.ByHttpClient.builder()
+                .baseUrl("http://127.0.0.1:" + server.getAddress().getPort()).timeout(5).build()) {
+            client.upload("/upload", "random_hello.txt", "fileContent",
+                () -> new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)), headers,
+                Map.of("knCode", "personal-test", "filePath", "/random_hello.txt"))
+                .get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(contentType.get()).contains("multipart/form-data", "boundary=");
+            String boundary = contentType.get().split("boundary=", 2)[1].replace("\"", "");
+            assertThat(body.get()).contains("--" + boundary, "random_hello.txt", "hello", "personal-test");
+            assertThat(resource.get()).isEqualTo("20");
+            assertThat(original).containsEntry("content-type", "application/json");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void updateKnowledgeItem_usesCanonicalOperationAndPath() {
         assertThat(KnowledgeServiceOperation.UPDATE_FILE.getOperationId()).isEqualTo("updateFile");
         assertThat(KnowledgeServiceOperation.UPDATE_FILE.getLocalPath()).isEqualTo("/api/v1/knowledgeItems/update");

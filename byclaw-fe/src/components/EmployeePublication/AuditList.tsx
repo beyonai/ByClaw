@@ -24,12 +24,15 @@ import dayjs from 'dayjs';
 import styles from './AuditList.module.less';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import usePublicationConfirmation from './usePublicationConfirmation';
+import { publicationApprovalFeedback, publicationPresentation } from './presentation';
 
 const statusAppearance = {
   DRAFT: { color: 'default', icon: <EditOutlined /> },
   PENDING: { color: 'processing', icon: <ClockCircleOutlined /> },
   APPLYING: { color: 'processing', icon: <SyncOutlined spin /> },
   PUBLISHED: { color: 'success', icon: <CheckCircleOutlined /> },
+  PARTIALLY_PUBLISHED: { color: 'success', icon: <CheckCircleOutlined /> },
+  APPROVED: { color: 'processing', icon: <ClockCircleOutlined /> },
   REJECTED: { color: 'error', icon: <CloseCircleOutlined /> },
   WITHDRAWN: { color: 'default', icon: <MinusCircleOutlined /> },
   FAILED: { color: 'error', icon: <ExclamationCircleOutlined /> },
@@ -89,11 +92,14 @@ function EnabledPublicationAuditList({
   const reviewPlaceholder: Record<string, string> = {
     DRAFT: intl.formatMessage({ id: 'employeePublication.audit.notSubmitted' }),
     PENDING: intl.formatMessage({ id: 'employeePublication.audit.awaitingReview' }),
+    PUBLISHED: intl.formatMessage({ id: 'employeePublication.audience.APPROVED' }),
+    PARTIALLY_PUBLISHED: intl.formatMessage({ id: 'employeePublication.status.PARTIALLY_PUBLISHED' }),
+    APPROVED: intl.formatMessage({ id: 'employeePublication.audience.APPROVED' }),
   };
   const detailLabel = (row: Publication, review: boolean, administrator?: boolean) => {
     if (row.status === 'DRAFT' && !review)
       return intl.formatMessage({ id: 'employeePublication.audit.continueEditing' });
-    if (['REJECTED', 'WITHDRAWN', 'PUBLISHED'].includes(row.status))
+    if (['REJECTED', 'WITHDRAWN', 'PUBLISHED', 'APPROVED'].includes(publicationPresentation(row).status))
       return intl.formatMessage({ id: 'employeePublication.audit.viewResult' });
     if (row.status === 'PENDING' && administrator && row.canReview)
       return intl.formatMessage({ id: 'employeePublication.audit.viewOrEdit' });
@@ -159,15 +165,11 @@ function EnabledPublicationAuditList({
       }
       if (decision !== 'publish') return;
       const result = await publicationAction('approve', current.publication);
-      if (result.publication.status === 'PUBLISHED') {
-        message.success(intl.formatMessage({ id: 'employeePublication.approvedAndPublished' }));
-        if (result.dependencies.some((dependency) => dependency.warning)) {
-          message.warning(intl.formatMessage({ id: 'employeePublication.resourceWarning' }));
-        }
-      } else
-        message.error(
-          result.publication.publishError || intl.formatMessage({ id: 'employeePublication.publishFailedRetry' })
-        );
+      const feedback = publicationApprovalFeedback(result.publication);
+      message[feedback.kind](feedback.error || intl.formatMessage({ id: feedback.messageId }, feedback.values));
+      if (feedback.kind === 'success' && result.dependencies.some((dependency) => dependency.warning)) {
+        message.warning(intl.formatMessage({ id: 'employeePublication.resourceWarning' }));
+      }
     } catch (error: any) {
       message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.approvalFailed' })));
     } finally {
@@ -284,11 +286,14 @@ function EnabledPublicationAuditList({
                 title: intl.formatMessage({ id: 'employeePublication.audit.status' }),
                 dataIndex: 'status',
                 width: 110,
-                render: (status) => (
-                  <Tag {...statusAppearance[status as keyof typeof statusAppearance]}>
-                    {intl.formatMessage({ id: `employeePublication.status.${status}`, defaultMessage: status })}
-                  </Tag>
-                ),
+                render: (_, row) => {
+                  const { status } = publicationPresentation(row);
+                  return (
+                    <Tag {...statusAppearance[status as keyof typeof statusAppearance]}>
+                      {intl.formatMessage({ id: `employeePublication.status.${status}`, defaultMessage: status })}
+                    </Tag>
+                  );
+                },
               },
               {
                 title: intl.formatMessage({ id: 'employeePublication.audit.reviewInfo' }),
@@ -308,9 +313,10 @@ function EnabledPublicationAuditList({
                       </>
                     ) : (
                       <span className={styles.secondary}>
-                        {row.requiresAdminVipReview && ['PENDING', 'FAILED'].includes(row.status)
+                        {row.requiresAdminVipReview &&
+                        ['PENDING', 'FAILED'].includes(publicationPresentation(row).status)
                           ? intl.formatMessage({ id: 'employeePublication.audit.awaitingAdminVip' })
-                          : reviewPlaceholder[row.status] ||
+                          : reviewPlaceholder[publicationPresentation(row).status] ||
                             intl.formatMessage({ id: 'employeePublication.audit.noReview' })}
                       </span>
                     )}
@@ -325,9 +331,17 @@ function EnabledPublicationAuditList({
                     {row.comment && <PublicationNote text={row.comment} />}
                     {!row.publishError && !row.comment && (
                       <span className={styles.secondary}>
-                        {row.status === 'PUBLISHED'
-                          ? intl.formatMessage({ id: 'employeePublication.publishedDescription' })
-                          : statusDescription[row.status] || '—'}
+                        {(() => {
+                          const presentation = publicationPresentation(row);
+                          if (presentation.scopeMessage)
+                            return intl.formatMessage(
+                              { id: presentation.scopeMessage.messageId },
+                              presentation.scopeMessage.values
+                            );
+                          return row.status === 'PUBLISHED'
+                            ? intl.formatMessage({ id: 'employeePublication.publishedDescription' })
+                            : statusDescription[row.status] || '—';
+                        })()}
                       </span>
                     )}
                   </div>

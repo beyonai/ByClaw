@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipOutputStream;
 
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -72,6 +73,23 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             return requestItemList(userCode, relativePath);
         } catch (Exception e) {
             throw new IllegalStateException("Cannot read source directory: " + relativePath, e);
+        }
+    }
+
+    @Override
+    public boolean folderExists(String userCode, Long resourceId, String parentPath, String folderName) {
+        String targetPath = ensureDirectoryPath(parentPath) + folderName;
+        try {
+            // /list 同时接受文件路径；同名文件不能被误判成已存在的目录。
+            return requestItemList(userCode, targetPath).stream()
+                .noneMatch(item -> !item.isDir()
+                    && targetPath.equals(StringUtils.removeEnd(item.getPath(), "/")));
+        } catch (FileBrowserHttpException e) {
+            if (e.statusCode == 404) {
+                return false;
+            }
+            // 权限、网络及服务错误必须继续抛出，不能据此创建或报告目录初始化成功。
+            throw e;
         }
     }
 
@@ -242,7 +260,8 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
         try (Response response = httpClient.newCall(request).execute()) {
             String body = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
-                throw new RuntimeException("OpenClaw请求失败: " + request.url() + ", status=" + response.code() + ", body=" + body);
+                throw new FileBrowserHttpException(response.code(),
+                    "OpenClaw请求失败: " + request.url() + ", status=" + response.code() + ", body=" + body);
             }
             return body;
         } catch (IOException e) {
@@ -255,6 +274,15 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             return java.net.URLEncoder.encode(value, "UTF-8");
         } catch (Exception e) {
             return value;
+        }
+    }
+
+    private static final class FileBrowserHttpException extends RuntimeException {
+        private final int statusCode;
+
+        private FileBrowserHttpException(int statusCode, String message) {
+            super(message);
+            this.statusCode = statusCode;
         }
     }
 
