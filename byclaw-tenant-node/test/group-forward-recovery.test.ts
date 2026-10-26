@@ -1,3 +1,5 @@
+import { disposableRedis } from "./support/disposable-redis.js";
+import type { RedisLease } from "../src/infrastructure/coordination/redis-leases.js";
 import { describe, it, expect } from "vitest";
 import { pendingMessages, recordDelivery } from "../src/application/group-forward-maintenance.js";
 
@@ -24,6 +26,7 @@ import { GroupForwardRecoveryStore } from "../src/infrastructure/persistence/gro
 const { Pool } = createRequire(import.meta.url)("pg");
 const pg = process.env.FORWARD_TEST_PG;
 describe.skipIf(!pg)("real owning-db recovery", () => {
+  let coordination: Awaited<ReturnType<typeof disposableRedis>>;
   let pool: any, store: GroupForwardRecoveryStore;
   const locator = { enterpriseId: "1", requestId: "100", backend: "TENANT" as const };
   const sql = async (q: string, a: unknown[] = []) => (await pool.query(q, a)).rows;
@@ -35,13 +38,15 @@ describe.skipIf(!pg)("real owning-db recovery", () => {
       address.pathname !== "/byclaw_forward_test"
     )
       throw new Error("isolated forwarding DB only");
+    coordination = await disposableRedis();
     pool = new Pool({ connectionString: pg, max: 5 });
-    await sql(
-      "CREATE SCHEMA IF NOT EXISTS byai; DROP TABLE IF EXISTS byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request CASCADE",
-    );
+    await sql("DROP SCHEMA IF EXISTS byai CASCADE");
     await sql(
       await readFile(
-        new URL("../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__ddl.sql", import.meta.url),
+        new URL(
+          "../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
+          import.meta.url,
+        ),
         "utf8",
       ),
     );
@@ -55,13 +60,19 @@ describe.skipIf(!pg)("real owning-db recovery", () => {
       {
         write: async (work: any) => {
           const c = await pool.connect();
+          const held = new Map<string, RedisLease>();
           try {
             await c.query("BEGIN");
             const r = await work({
+              lock: async (key: string) => {
+                if (!held.has(key))
+                  held.set(key, await coordination.locks.acquire(`tenant:1:${key}`));
+              },
               query: async (q: string, a?: unknown[]) => {
                 return (await c.query(q, a)).rows;
               },
             });
+            for (const lease of held.values()) await lease.check();
             await c.query("COMMIT");
             return r;
           } catch (e) {
@@ -69,6 +80,7 @@ describe.skipIf(!pg)("real owning-db recovery", () => {
             throw e;
           } finally {
             c.release();
+            for (const lease of [...held.values()].reverse()) await lease.release();
           }
         },
       },
@@ -77,6 +89,7 @@ describe.skipIf(!pg)("real owning-db recovery", () => {
   });
   afterAll(async () => {
     await pool?.end();
+    await coordination?.close();
   });
   beforeEach(async () => {
     await sql(`TRUNCATE byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request,byai.byai_session,byai.byai_session_member,byai.byai_message;

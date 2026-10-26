@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { ConnectionManager } from "../../application/connection-manager.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type {
@@ -34,15 +35,20 @@ class SqlMirrorTransaction implements MirrorTransaction {
   private readonly answerWriter: MirrorAnswerWriter;
   async lock(sessionId: string): Promise<void> {
     const candidate = await readGroupCandidate(this.db, sessionId);
-    if (candidate)
-      // Group lifecycle/recall commands lock the group first; use the same order before promotion.
-      await this.db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        `session:${candidate.groupSessionId}`,
-      ]);
-    await this.db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${sessionId}`]);
+    const task = candidate
+      ? null
+      : await first(
+          this.db,
+          "SELECT t.group_session_id FROM byai.byai_group_chat_task t JOIN byai.byai_session s ON s.session_id=t.task_session_id WHERE t.task_session_id=$1 AND s.enterprise_id=$2",
+          [sessionId, this.enterpriseId],
+        );
+    const groupId = candidate?.groupSessionId ?? task?.groupSessionId;
+    // Group lifecycle/recall commands lock the group first, including legacy tasks without candidates.
+    if (groupId) await lockBusiness(this.db, `session:${groupId}`);
+    await lockBusiness(this.db, `session:${sessionId}`);
     const session = await first(
       this.db,
-      "SELECT enterprise_id FROM byai.byai_session WHERE session_id=$1 FOR UPDATE",
+      "SELECT enterprise_id FROM byai.byai_session WHERE session_id=$1",
       [sessionId],
     );
     if (!session) throw new DomainError("SESSION_NOT_COMMITTED");

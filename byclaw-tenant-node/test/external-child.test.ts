@@ -75,7 +75,8 @@ function setup() {
     return [];
   };
   const connection = {
-    write: async (work: (db: { query: typeof query }) => unknown) => work({ query }),
+    write: async (work: (db: { query: typeof query }) => unknown) =>
+      work({ query, lock: async () => {} }),
   };
   const service = new CommandService(
     new SqlCommandTransactions(connection as unknown as ConnectionManager),
@@ -101,7 +102,10 @@ function setup() {
     service,
     command,
     tables,
-    history: new HistoryService("10", new SqlHistoryRepository({ query }, "10")),
+    history: new HistoryService(
+      "10",
+      new SqlHistoryRepository({ query, lock: async () => {} }, "10"),
+    ),
   };
 }
 

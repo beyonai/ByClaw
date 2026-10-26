@@ -1,4 +1,5 @@
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { disposableRedis, heldLeases } from "./support/disposable-redis.js";
+import { beforeAll, afterAll, beforeEach, afterEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { GroupForwardRepository } from "../src/infrastructure/persistence/group-forward-repository.js";
@@ -10,6 +11,8 @@ const { Client } = require("pg");
 const url = process.env.FORWARD_TEST_PG;
 // Integration fixtures never connect to application configuration or upgrade tenant databases.
 describe.skipIf(!url)("forward persistence constraints and fencing", () => {
+  let coordination: Awaited<ReturnType<typeof disposableRedis>>;
+  let leases: ReturnType<typeof heldLeases>;
   let client: any, db: SqlSession, repository: GroupForwardRepository;
   const tenant = "1",
     requestId = "9007199254741001",
@@ -22,12 +25,21 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
       address.pathname !== "/byclaw_forward_test"
     )
       throw new Error("isolated local test database required");
+    coordination = await disposableRedis();
+    leases = heldLeases(coordination.locks);
     client = new Client({ connectionString: url });
     await client.connect();
-    db = { query: async (sql, parameters) => (await client.query(sql, parameters)).rows };
+    db = {
+      lock: (key) => leases.lock(key),
+      query: async (sql, parameters) => (await client.query(sql, parameters)).rows,
+    };
+    await db.query("DROP SCHEMA IF EXISTS byai CASCADE");
     await db.query(
       await readFile(
-        new URL("../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__ddl.sql", import.meta.url),
+        new URL(
+          "../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
+          import.meta.url,
+        ),
         "utf8",
       ),
     );
@@ -35,6 +47,11 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
   });
   afterAll(async () => {
     await client?.end();
+    await coordination?.close();
+  });
+  afterEach(async () => {
+    await client.query("ROLLBACK");
+    await leases.release();
   });
   beforeEach(async () => {
     await db.query("DELETE FROM byai.byai_group_chat_forward_item");
@@ -692,14 +709,10 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
       };
       const blocker = new Client({ connectionString: url });
       await blocker.connect();
-      const [identity] = await db.query("SELECT pg_backend_pid() AS pid");
+      await leases.release();
+      const gate = await coordination.locks.acquire(`tenant:1:forward-target:${targetId}`);
       let pending: Promise<{ value?: unknown; error?: any }> | undefined;
       try {
-        await blocker.query("BEGIN");
-        await blocker.query(
-          "UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE target_id=$1",
-          [targetId],
-        );
         await db.query("BEGIN");
         pending = (
           operation === "succeed"
@@ -719,24 +732,12 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
           (value) => ({ value }),
           (error) => ({ error }),
         );
-        let waiting = false;
-        for (let attempt = 0; attempt < 30; attempt++) {
-          const result = await blocker.query(
-            "SELECT wait_event_type='Lock' AS waiting FROM pg_stat_activity WHERE pid=$1",
-            [identity!.pid],
-          );
-          if (result.rows[0]?.waiting) {
-            waiting = true;
-            break;
-          }
-          await blocker.query("SELECT pg_sleep(0.01)");
-        }
-        expect(waiting).toBe(true);
+        await expect.poll(() => leases.pending.has(`forward-target:${targetId}`)).toBe(true);
         await blocker.query(
           "SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (lease_until-clock_timestamp())))+0.05) FROM byai.byai_group_chat_forward_target WHERE target_id=$1",
           [targetId],
         );
-        await blocker.query("COMMIT");
+        await gate.release();
         const outcome = await pending;
         if (operation === "bind") expect(outcome.value).toBe(false);
         else expect(outcome.error).toMatchObject({ code: "FORWARD_LEASE_LOST" });
@@ -748,80 +749,72 @@ describe.skipIf(!url)("forward persistence constraints and fencing", () => {
           messageIdsJson: "[]",
         });
       } finally {
-        await blocker.query("ROLLBACK");
+        await gate.release();
         await pending;
         await db.query("ROLLBACK");
         await blocker.end();
       }
     },
   );
-  it.each(["freeze", "renew"])(
-    "requestUpdateWaitCannotAuthorizeExpired%s",
-    async (operation) => {
-      await repository.claimRequest(requestId, "resolver", 1000);
-      const requestLease: RequestLease = {
-        requestId,
-        actor: { userId: "30", enterpriseId: "1" },
-        owner: "resolver",
-        fencingVersion: "1",
-        leaseUntil: until(),
-      };
-      const blocker = new Client({ connectionString: url });
-      await blocker.connect();
-      const [identity] = await db.query("SELECT pg_backend_pid() AS pid");
-      let pending: Promise<{ value?: unknown; error?: any }> | undefined;
-      try {
-        await blocker.query("BEGIN");
-        await blocker.query(
-          "UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE request_id=$1",
-          [requestId],
+  it.each(["freeze", "renew"])("requestUpdateWaitCannotAuthorizeExpired%s", async (operation) => {
+    await repository.claimRequest(requestId, "resolver", 1000);
+    const requestLease: RequestLease = {
+      requestId,
+      actor: { userId: "30", enterpriseId: "1" },
+      owner: "resolver",
+      fencingVersion: "1",
+      leaseUntil: until(),
+    };
+    const blocker = new Client({ connectionString: url });
+    await blocker.connect();
+    const [identity] = await db.query("SELECT pg_backend_pid() AS pid");
+    let pending: Promise<{ value?: unknown; error?: any }> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        "UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE request_id=$1",
+        [requestId],
+      );
+      await db.query("BEGIN");
+      pending = (
+        operation === "freeze"
+          ? repository.freezeSources(requestId, "resolver", "1", '[{"sourceId":"must-not-freeze"}]')
+          : repository.renewRequest(requestLease, 3000)
+      ).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+      let waiting = false;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const result = await blocker.query(
+          "SELECT wait_event_type='Lock' AS waiting FROM pg_stat_activity WHERE pid=$1",
+          [identity!.pid],
         );
-        await db.query("BEGIN");
-        pending = (
-          operation === "freeze"
-            ? repository.freezeSources(
-                requestId,
-                "resolver",
-                "1",
-                '[{"sourceId":"must-not-freeze"}]',
-              )
-            : repository.renewRequest(requestLease, 3000)
-        ).then(
-          (value) => ({ value }),
-          (error) => ({ error }),
-        );
-        let waiting = false;
-        for (let attempt = 0; attempt < 30; attempt++) {
-          const result = await blocker.query(
-            "SELECT wait_event_type='Lock' AS waiting FROM pg_stat_activity WHERE pid=$1",
-            [identity!.pid],
-          );
-          if (result.rows[0]?.waiting) {
-            waiting = true;
-            break;
-          }
-          await blocker.query("SELECT pg_sleep(0.01)");
+        if (result.rows[0]?.waiting) {
+          waiting = true;
+          break;
         }
-        expect(waiting).toBe(true);
-        await blocker.query(
-          "SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (lease_until-clock_timestamp())))+0.05) FROM byai.byai_group_chat_forward_request WHERE request_id=$1",
-          [requestId],
-        );
-        await blocker.query("COMMIT");
-        expect((await pending).error).toMatchObject({ code: "FORWARD_LEASE_LOST" });
-        expect(await repository.request(requestId)).toMatchObject({
-          state: "RUNNING",
-          leaseOwner: "resolver",
-          fencingVersion: "1",
-          sourcesFrozen: false,
-          sourceManifestJson: "[]",
-        });
-      } finally {
-        await blocker.query("ROLLBACK");
-        await pending;
-        await db.query("ROLLBACK");
-        await blocker.end();
+        await blocker.query("SELECT pg_sleep(0.01)");
       }
-    },
-  );
+      expect(waiting).toBe(true);
+      await blocker.query(
+        "SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (lease_until-clock_timestamp())))+0.05) FROM byai.byai_group_chat_forward_request WHERE request_id=$1",
+        [requestId],
+      );
+      await blocker.query("COMMIT");
+      expect((await pending).error).toMatchObject({ code: "FORWARD_LEASE_LOST" });
+      expect(await repository.request(requestId)).toMatchObject({
+        state: "RUNNING",
+        leaseOwner: "resolver",
+        fencingVersion: "1",
+        sourcesFrozen: false,
+        sourceManifestJson: "[]",
+      });
+    } finally {
+      await blocker.query("ROLLBACK");
+      await pending;
+      await db.query("ROLLBACK");
+      await blocker.end();
+    }
+  });
 });

@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
@@ -6,9 +7,10 @@ import { first } from "./sql-utils.js";
 /** 先持久化取消，迟到回答不得再次发布；停止运行由 BE 在提交后完成。 */
 export async function cancelTask(context: CommandContext) {
   const { db, command } = context;
+  await lockBusiness(db, `task:${requireId(command.payload.taskSessionId)}`);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [requireId(command.payload.taskSessionId), command.sessionId],
   );
   if (!task) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -29,16 +31,17 @@ export async function checkpointPublication(context: CommandContext) {
   const { command, db } = context;
   const p = command.payload;
   const taskId = requireId(p.taskSessionId);
+  await lockBusiness(db, `task:${requireId(command.payload.taskSessionId)}`);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task || task.initiatorUserId !== command.userId || task.status !== "ACTIVE")
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
   const pending = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
     [taskId],
   );
   if (!pending || pending.pendingPublicationId !== requireId(p.pendingPublicationId))

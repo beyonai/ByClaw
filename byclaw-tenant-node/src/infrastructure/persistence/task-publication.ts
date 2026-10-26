@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
@@ -10,9 +11,10 @@ export async function publishTask(context: CommandContext): Promise<Record<strin
   const { db, command } = context,
     p = command.payload,
     taskId = requireId(p.taskSessionId);
+  await lockBusiness(db, `task:${requireId(command.payload.taskSessionId)}`);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task || task.initiatorUserId !== command.userId)
@@ -44,7 +46,7 @@ export async function publishTask(context: CommandContext): Promise<Record<strin
   if (p.pendingPublicationId !== undefined) {
     const pending = await first(
       db,
-      "SELECT pending_publication_id FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1 FOR UPDATE",
+      "SELECT pending_publication_id FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
       [taskId],
     );
     if (pending?.pendingPublicationId !== requireId(p.pendingPublicationId))

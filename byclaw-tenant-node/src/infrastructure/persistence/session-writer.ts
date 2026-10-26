@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import {
   objectJson,
   recallIdentity,
@@ -21,9 +22,7 @@ export async function createSession(context: CommandContext): Promise<void> {
   if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
   if (group) {
     // Different session IDs can still compete for one name; serialize the availability check and insert.
-    await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-      `group-name:${command.enterpriseId}:${command.userId}:${name}`,
-    ]);
+    await lockBusiness(db, `group-name:${command.enterpriseId}:${command.userId}:${name}`);
     if (await groupNameExists(db, command.enterpriseId, command.userId, name))
       throw new DomainError("GROUP_NAME_EXISTS");
   }

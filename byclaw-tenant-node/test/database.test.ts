@@ -30,8 +30,11 @@ import { CommandContext } from "../src/infrastructure/persistence/command-contex
 import { nextSequence } from "../src/infrastructure/persistence/message-fields.js";
 import { claimTask } from "../src/infrastructure/persistence/task-writer.js";
 import { command, snapshot } from "./fixtures.js";
+const lease = { check: vi.fn(), release: vi.fn() };
+const locks = { acquire: vi.fn(async () => lease) };
 beforeEach(() => {
   vi.resetAllMocks();
+  locks.acquire.mockResolvedValue(lease);
   fake.runner.query.mockResolvedValue([]);
   fake.runner.isTransactionActive = true;
 });
@@ -44,7 +47,7 @@ describe("database transaction adapter without a database", () => {
       expected: [{ message_id: "40" }, { message_id: "41" }],
     },
   ])("exposes rows rather than TypeORM affected-row tuples: $raw", async ({ raw, expected }) => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.query.mockResolvedValue(raw);
     expect(await db.query("query")).toEqual(expected);
     fake.runner.query.mockResolvedValue(raw);
@@ -53,7 +56,7 @@ describe("database transaction adapter without a database", () => {
     });
   });
   it("claims a task once through the real transaction adapter", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.runner.query.mockImplementation(async (sql: string) =>
       sql.includes("RETURNING task_session_id") ? [[{ task_session_id: "60" }], 1] : [],
     );
@@ -67,14 +70,14 @@ describe("database transaction adapter without a database", () => {
     });
   });
   it("retains the returned message sequence inside a transaction", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.runner.query.mockImplementation(async (sql: string) =>
       sql.includes("RETURNING last_seq") ? [[{ last_seq: "2" }], 1] : [],
     );
     expect(await db.transaction((sql) => nextSequence(sql, "10", "30"))).toBe("2");
   });
   it("rolls back a failed authority check before COMMIT", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     await expect(
       db.transaction(
         async () => "written",
@@ -88,32 +91,31 @@ describe("database transaction adapter without a database", () => {
     expect(fake.runner.release).toHaveBeenCalledOnce();
   });
   it("keeps COMMIT uncertainty even if rollback fails", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.runner.commitTransaction.mockRejectedValue(new Error("network"));
     fake.runner.rollbackTransaction.mockRejectedValue(new Error("also network"));
     await expect(db.transaction(async () => "written")).rejects.toThrow("COMMIT_UNCERTAIN");
     expect(fake.runner.release).toHaveBeenCalledOnce();
   });
   it("uses shared schema locks for ordinary writes", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     await db.transaction(async (sql) => {
       await sql.query("UPDATE mock SET value=$1", [1]);
     });
     expect(fake.runner.query.mock.calls[0]?.[0]).toContain("search_path");
-    expect(fake.runner.query.mock.calls[1]?.[0]).toContain("pg_advisory_xact_lock_shared");
+    expect(locks.acquire).toHaveBeenCalledWith("schema:10", "read");
     expect(fake.runner.commitTransaction).toHaveBeenCalledOnce();
   });
   it("holds a dedicated schema lock across version transactions", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     await db.exclusive(async (locked) => {
       await locked.transaction(async () => {});
     });
-    expect(fake.runner.query.mock.calls[0]?.[0]).toContain("pg_advisory_lock");
-    expect(fake.runner.query.mock.calls.at(-1)?.[0]).toContain("pg_advisory_unlock");
-    expect(fake.runner.query.mock.calls.filter(([sql]) => sql.includes("_shared"))).toHaveLength(0);
+    expect(locks.acquire).toHaveBeenCalledExactlyOnceWith("schema:10");
+    expect(lease.release).toHaveBeenCalledOnce();
   });
   it("preserves COMMIT uncertainty when releasing the schema connection fails", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.runner.commitTransaction.mockRejectedValue(new Error("network"));
     fake.runner.release.mockRejectedValue(new Error("release"));
     await expect(
@@ -121,12 +123,52 @@ describe("database transaction adapter without a database", () => {
     ).rejects.toThrow("COMMIT_UNCERTAIN");
   });
   it("reports a failed schema lock cleanup after successful work", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.runner.release.mockRejectedValue(new Error("release"));
     await expect(db.exclusive(async () => "done")).rejects.toThrow("SCHEMA_LOCK_RELEASE_FAILED");
   });
+  it("rolls back when a Redis business lease is lost before commit", async () => {
+    const db = await Database.open(snapshot(), "test", locks);
+    const business = {
+      check: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new Error("LOCK_LOST")),
+      release: vi.fn(),
+    };
+    locks.acquire.mockResolvedValueOnce(lease).mockResolvedValueOnce(business);
+    await expect(
+      db.transaction(async (sql) => {
+        await sql.lock!("session:30");
+      }),
+    ).rejects.toThrow("LOCK_LOST");
+    expect(fake.runner.commitTransaction).not.toHaveBeenCalled();
+    expect(fake.runner.rollbackTransaction).toHaveBeenCalledOnce();
+    expect(business.release).toHaveBeenCalledOnce();
+    expect(fake.runner.rollbackTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      business.release.mock.invocationCallOrder[0]!,
+    );
+  });
+  it("holds one business lease through commit even when requested twice", async () => {
+    const db = await Database.open(snapshot(), "test", locks);
+    await db.transaction(async (sql) => {
+      await sql.lock!("session:30");
+      await sql.lock!("session:30");
+    });
+    expect(locks.acquire.mock.calls).toEqual([["schema:10", "read"], ["tenant:10:session:30"]]);
+    expect(fake.runner.commitTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      lease.release.mock.invocationCallOrder[0]!,
+    );
+  });
+  it("reports commit uncertainty if the Redis lease is lost while COMMIT is in flight", async () => {
+    const db = await Database.open(snapshot(), "test", locks);
+    fake.runner.commitTransaction.mockImplementation(async () => {
+      fake.runner.isTransactionActive = false;
+      lease.check.mockRejectedValue(new Error("LOCK_LOST"));
+    });
+    await expect(db.transaction(async () => "written")).rejects.toThrow("COMMIT_UNCERTAIN");
+    expect(fake.runner.rollbackTransaction).not.toHaveBeenCalled();
+    expect(lease.release).toHaveBeenCalledOnce();
+  });
   it("checks actual database/user/schema privileges", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.query.mockResolvedValue([
       {
         database: "byclaw_t_11",
@@ -139,7 +181,7 @@ describe("database transaction adapter without a database", () => {
     await expect(db.verifyIdentity()).rejects.toThrow("DATABASE_IDENTITY_MISMATCH");
   });
   it("accepts a fresh tenant database when its owner can create the missing schema", async () => {
-    const db = await Database.open(snapshot(), "test");
+    const db = await Database.open(snapshot(), "test", locks);
     fake.query.mockResolvedValue([
       {
         database: "byclaw_t_10",

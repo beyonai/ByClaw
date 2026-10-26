@@ -6,7 +6,7 @@ import {
 } from "./group-forward-query.js";
 import { SqlHistoryRepository } from "./history-repository.js";
 import { commitForward } from "./group-forward-commit.js";
-import { lockSessions } from "./session-locks.js";
+import { lockSessions, lockBusiness } from "./session-locks.js";
 import type { ConnectionManager } from "../../application/connection-manager.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type {
@@ -148,12 +148,12 @@ export class SqlGroupForwardStore {
   ): Promise<{ group: GroupIdentity | null; member: boolean }> {
     const group = await first(
       db,
-      `UPDATE byai.byai_session SET session_id=session_id WHERE session_id=$1 RETURNING session_id,enterprise_id,session_type,state`,
+      `SELECT session_id,enterprise_id,session_type,state FROM byai.byai_session WHERE session_id=$1`,
       [id],
     );
     const member = await first(
       db,
-      `UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 RETURNING mem_obj_id`,
+      `SELECT mem_obj_id FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3`,
       [id, actor.userId, actor.enterpriseId],
     );
     return { group: group as unknown as GroupIdentity | null, member: member !== null };
@@ -274,8 +274,9 @@ export class SqlGroupForwardStore {
       const messages = [];
       for (const id of order) {
         // 按历史顺序串行处理源消息，防止快照读取期间被撤回或删除。
+        await lockBusiness(db, `message:${id}`);
         const selected = await db.query(
-          "UPDATE byai.byai_message SET message_id=message_id WHERE session_id=$1 AND message_id=$2 RETURNING message_id",
+          "SELECT message_id FROM byai.byai_message WHERE session_id=$1 AND message_id=$2",
           [sourceId, id],
         );
         if (selected.length !== 1) denied();

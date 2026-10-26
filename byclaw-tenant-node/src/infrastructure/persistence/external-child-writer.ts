@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { CommandContext } from "./command-context.js";
 import { CommandContext as ChildContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
@@ -176,9 +177,10 @@ export async function saveExternalChild(context: CommandContext) {
     "SELECT * FROM byai.byai_session WHERE session_id=$1 AND enterprise_id=$2",
     [childId, command.enterpriseId],
   );
+  await lockBusiness(db, `message:${messageId}`);
   const message = await first(
     db,
-    "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2",
     [messageId, command.enterpriseId],
   );
   if (

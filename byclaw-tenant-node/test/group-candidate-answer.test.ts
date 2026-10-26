@@ -52,7 +52,7 @@ function setup() {
     metadata?: Record<string, unknown>,
   ) =>
     projectGroupTaskAnswer(
-      { query },
+      { query, lock: async () => {} },
       "10",
       event({
         sessionId: "50",
@@ -68,7 +68,7 @@ describe("tenant single-mention classification", () => {
   it("does not publish an empty CHAT reply or fall back to private progress", async () => {
     const { query, messages, tasks, candidate } = setup();
     await projectGroupTaskAnswer(
-      { query },
+      { query, lock: async () => {} },
       "10",
       event({ sessionId: "50", eventType: "TERMINAL" }),
       answer({ content: "先读取历史。", finalContent: "" }),
@@ -211,20 +211,20 @@ describe("tenant single-mention classification", () => {
       answerMessageId: "202",
       payload: { id: "200", userId: "20", messageContent: "继续做视频" },
     });
-    const writer = new MirrorInputWriter({ query }, "10");
+    const writer = new MirrorInputWriter({ query, lock: async () => {} }, "10");
     await writer.assertInputAccess(input);
     await writer.insertInput(input);
     expect(task.turn_status).toBe("RUNNING");
     const previousMessageCount = messages().length;
     await projectGroupTaskAnswer(
-      { query },
+      { query, lock: async () => {} },
       "10",
       event({ sessionId: "50", eventType: "TERMINAL" }),
       answer(),
     );
     expect(task.turn_status).toBe("RUNNING");
     await projectGroupTaskAnswer(
-      { query },
+      { query, lock: async () => {} },
       "10",
       event({
         sessionId: "50",

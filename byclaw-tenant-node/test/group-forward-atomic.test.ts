@@ -1,3 +1,5 @@
+import { disposableRedis, heldLeases } from "./support/disposable-redis.js";
+import type { RedisLease } from "../src/infrastructure/coordination/redis-leases.js";
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -14,6 +16,7 @@ import type {
 const { Pool } = createRequire(import.meta.url)("pg");
 const url = process.env.FORWARD_TEST_PG;
 describe.skipIf(!url)("atomic owning forwarding transactions", () => {
+  let coordination: Awaited<ReturnType<typeof disposableRedis>>;
   let pool: any, store: SqlGroupForwardStore;
   const actor = { userId: "30", enterpriseId: "1" };
   const input = (key = "key"): ForwardInput => ({
@@ -31,13 +34,15 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
       address.pathname !== "/byclaw_forward_test"
     )
       throw new Error("isolated forwarding DB only");
+    coordination = await disposableRedis();
     pool = new Pool({ connectionString: url, max: 5 });
-    await sql(
-      `CREATE SCHEMA IF NOT EXISTS byai; DROP TABLE IF EXISTS byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request CASCADE;`,
-    );
+    await sql("DROP SCHEMA IF EXISTS byai CASCADE");
     await sql(
       await readFile(
-        new URL("../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__ddl.sql", import.meta.url),
+        new URL(
+          "../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
+          import.meta.url,
+        ),
         "utf8",
       ),
     );
@@ -51,11 +56,17 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
       {
         write: async (work: any) => {
           const client = await pool.connect();
+          const held = new Map<string, RedisLease>();
           try {
             await client.query("BEGIN");
             const result = await work({
+              lock: async (key: string) => {
+                if (!held.has(key))
+                  held.set(key, await coordination.locks.acquire(`tenant:1:${key}`));
+              },
               query: async (q: string, a?: unknown[]) => (await client.query(q, a)).rows,
             });
+            for (const lease of held.values()) await lease.check();
             await client.query("COMMIT");
             return result;
           } catch (e) {
@@ -63,6 +74,7 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
             throw e;
           } finally {
             client.release();
+            for (const lease of [...held.values()].reverse()) await lease.release();
           }
         },
       },
@@ -71,6 +83,7 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
   });
   afterAll(async () => {
     await pool?.end();
+    await coordination?.close();
   });
   beforeEach(async () => {
     await sql(`TRUNCATE byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request,byai.byai_message,byai.byai_session_member,byai.byai_session;
@@ -331,7 +344,9 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
     await store.prepare(actor, "10", input("second"));
     const page = await store.discoverWork(null, 20, first.requestId);
     expect(page.candidates).toHaveLength(2);
-    expect(page.candidates.every((candidate) => candidate.locator.requestId === first.requestId)).toBe(true);
+    expect(
+      page.candidates.every((candidate) => candidate.locator.requestId === first.requestId),
+    ).toBe(true);
   });
   it("completionAndRetrySerializeAggregateFromCurrentBranches", async () => {
     const { operation, targets } = await frozen();
@@ -349,10 +364,11 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
       [targets[1].target_id],
     );
     const client = await pool.connect();
+    const leases = heldLeases(coordination.locks);
     try {
       await client.query("BEGIN");
       const repo = new GroupForwardRepository(
-        { query: async (q, a) => (await client.query(q, a)).rows },
+        { lock: leases.lock, query: async (q, a) => (await client.query(q, a)).rows },
         "1",
       );
       const request = (await repo.lockRequest(operation.requestId))!;
@@ -368,12 +384,14 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
       ]);
       await store.recompute(repo, request);
       await client.query("COMMIT");
+      await leases.release();
       const result = await retry;
       expect(result.state).toBe("RUNNING");
       expect(result.targets.map((t) => t.state)).toEqual(["SUCCEEDED", "PENDING"]);
     } finally {
       await client.query("ROLLBACK");
       client.release();
+      await leases.release();
     }
   });
   it("realConnectionManagerPrecommitFenceRollsBackPreparedRows", async () => {
@@ -387,9 +405,11 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
       exclusive: async (work) => work(database),
       transaction: async (work, guard) => {
         const client = await pool.connect();
+        const leases = heldLeases(coordination.locks);
         try {
           await client.query("BEGIN");
           const value = await work({
+            lock: leases.lock,
             query: async (q, args) => (await client.query(q, args)).rows,
           });
           await guard?.();
@@ -400,6 +420,7 @@ describe.skipIf(!url)("atomic owning forwarding transactions", () => {
           throw error;
         } finally {
           client.release();
+          await leases.release();
         }
       },
     };
