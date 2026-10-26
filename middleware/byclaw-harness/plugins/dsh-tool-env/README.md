@@ -277,6 +277,15 @@ out of the global spec: it would reach every A.
   its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
   host cannot mount the user's volume.
 
+## Several environments, one workspace
+
+All of a user's environments mount the same workspace volume (`/by`), so work
+queued while no B is up (session directories, projection writes) belongs to
+the user, not to one environment: the pool hands every connection one deferred
+queue. A session directory queued before the turn's Agent is known is created
+by whichever environment that Agent's first tool starts, and every environment
+answers turn-start probes for queued directories without starting B.
+
 ## Lifecycle of B with `byclaw-be`
 
 - **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` without
