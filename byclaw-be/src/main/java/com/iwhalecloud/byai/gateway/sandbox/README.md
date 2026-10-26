@@ -101,11 +101,9 @@ mvn -B -f byclaw-be/pom.xml verify
 
 ### 工具沙箱：多种环境与按上报释放
 
-- **环境类型**：`launchByUserCode` 接受 `environment`（逻辑名，如 `media`），BE 按系统参数 `BYCLAW_TOOL_ENV_SPECS`
-  （JSON 对象 `{"media":"byclaw-dsh-tools-media"}` 或 `media=byclaw-dsh-tools-media;gpu=…`）解析为规格；未映射的 `default`
-  用请求里的 `serviceKey`；未知名字拒绝。响应带 `sandboxType`（实际拉起的规格），宿主之后对该 B 的查询/释放都用它。
-  同一用户、同一类型只有一个 B；不同类型并存。系统参数 `BYCLAW_TOOL_ENV_MAX_PER_USER` 限制一个用户同时运行的
-  按需沙箱种类数（复用已在运行的类型不计）。
+- **多种沙箱**：数字员工上选一个工具规格（员工 `advancedSettings.toolSandbox` = 规格的 `service_key`），宿主就按该
+  规格 `launchByUserCode`；没选的员工用宿主的默认工具规格。BE 这一侧不需要新接口或参数：`launchByUserCode` 还是收
+  `serviceKey`。同一用户、同一规格只有一个 B；不同规格并存。
 - **租约策略**：经 `launchByUserCode` 拉起（或复用）的未开放规格沙箱在拉起后 `auto_release=0`（平台远程模式经平台
   `update-id`），并把 `lease_policy` 改为 `DSH_REPORTED`（`byclaw.sandbox.tool-env.lease-policy`，回退值 `MANUAL`）。
   宿主通过 SSH 使用 B 不会刷新 `last_access_time`，所以这类记录不参与访问时间空闲回收。
@@ -114,7 +112,7 @@ mvn -B -f byclaw-be/pom.xml verify
   新鲜 `releasable` → 释放（`release.dsh.releasable`）；新鲜 `busy` → 保留；上报过但静默 → 沿用 byclaw-dsh 的静默
   护栏（连续消费就绪、单轮熔断、变配保护）后释放（`release.dsh.silent`）；从未上报 → 不动。这一步**不受**
   "仅本地执行模式才跑清理"的门禁限制，远程模式下释放经平台 `remove-record`。宿主侧还有快路径：B 空闲
-  `BYCLAW_TOOL_ENV_IDLE_MS` 后由宿主直接 `removeSandbox`（`BYCLAW_TOOL_ENV_RELEASE_ON_IDLE=1`）。
+  `BYCLAW_TOOL_ENV_IDLE_MS`（默认 10 分钟）后由宿主直接 `removeSandbox`。
 - **存量**：已有的手动释放记录在下一次 `launchByUserCode` 复用时切换到 `DSH_REPORTED`。
 
 决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），

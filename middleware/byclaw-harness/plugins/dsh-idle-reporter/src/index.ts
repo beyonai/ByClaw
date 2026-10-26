@@ -50,8 +50,6 @@ export interface Config {
    * are still reported.
    */
   reportSelf?: boolean
-  /** Idle time after which a tool environment is releasable; defaults to `idleTimeoutMs`. */
-  environmentIdleTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -62,7 +60,6 @@ export const Config: z<Config> = z.object({
   idleTimeoutMs: z.number().default(DEFAULT_IDLE_TIMEOUT_MS),
   heartbeatMs: z.number().default(DEFAULT_HEARTBEAT_MS),
   reportSelf: z.boolean().default(true),
-  environmentIdleTimeoutMs: z.number(),
 })
 
 export interface ResolvedConfig {
@@ -73,7 +70,6 @@ export interface ResolvedConfig {
   idleTimeoutMs: number
   heartbeatMs: number
   reportSelf: boolean
-  environmentIdleTimeoutMs: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -116,16 +112,14 @@ export function resolveConfig(raw: unknown, defaultSandboxId: string = hostname(
     if (typeof value !== 'boolean') throw new Error(`${name}: config.${key} must be a boolean, got ${JSON.stringify(value)}`)
     return value
   }
-  const idleTimeoutMs = positive('idleTimeoutMs', DEFAULT_IDLE_TIMEOUT_MS)
   return {
     sandboxId: text('sandboxId', defaultSandboxId),
     userCode: optionalText('userCode'),
     streamKey: text('streamKey', DEFAULT_STREAM_KEY),
     maxLen: positive('maxLen', DEFAULT_MAX_LEN),
-    idleTimeoutMs,
+    idleTimeoutMs: positive('idleTimeoutMs', DEFAULT_IDLE_TIMEOUT_MS),
     heartbeatMs: positive('heartbeatMs', DEFAULT_HEARTBEAT_MS),
     reportSelf: flag('reportSelf', true),
-    environmentIdleTimeoutMs: positive('environmentIdleTimeoutMs', idleTimeoutMs),
   }
 }
 
@@ -213,7 +207,7 @@ export function apply(ctx: Context, config: Config): void {
       userCode: resolved.userCode,
       streamKey: resolved.streamKey,
       maxLen: resolved.maxLen,
-      idleTimeoutMs: resolved.environmentIdleTimeoutMs,
+      idleTimeoutMs: resolved.idleTimeoutMs,
       heartbeatMs: resolved.heartbeatMs,
       logger: ctx.logger,
     })

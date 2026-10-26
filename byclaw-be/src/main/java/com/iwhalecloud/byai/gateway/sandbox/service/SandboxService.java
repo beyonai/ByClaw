@@ -306,11 +306,6 @@ public class SandboxService {
     @Value("${byclaw.sandbox.tool-env.lease-policy:DSH_REPORTED}")
     private String toolEnvLeasePolicy = SandboxLeasePolicy.DSH_REPORTED.name();
 
-    /** 系统参数：逻辑工具环境名到沙箱规格 serviceKey 的映射，JSON 对象或 {@code name=key;name2=key2}。 */
-    static final String PARAM_TOOL_ENV_SPECS = "BYCLAW_TOOL_ENV_SPECS";
-
-    /** 系统参数：每个用户同时运行的按需（工具）沙箱上限；空或 0 不限制。 */
-    static final String PARAM_TOOL_ENV_MAX_PER_USER = "BYCLAW_TOOL_ENV_MAX_PER_USER";
 
     @Lazy
     @Autowired
@@ -390,92 +385,6 @@ public class SandboxService {
         return policy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE ? SandboxLeasePolicy.DSH_REPORTED : policy;
     }
 
-    /**
-     * 逻辑工具环境名解析为沙箱规格：系统参数 {@value #PARAM_TOOL_ENV_SPECS}（JSON 对象或 {@code name=key;name2=key2}）。
-     * 空环境名或未映射的 {@code default} 用调用方给的规格；其他未知名字拒绝，让宿主把错误报回给工具调用。
-     */
-    public String resolveToolEnvironmentSpec(String environment, String fallbackServiceKey) {
-        String name = StringUtils.trimToNull(environment);
-        if (name == null) {
-            return fallbackServiceKey;
-        }
-        Map<String, String> specs = toolEnvironmentSpecs();
-        String resolved = specs.get(name);
-        if (StringUtils.isNotBlank(resolved)) {
-            return resolved.trim();
-        }
-        if ("default".equals(name) && StringUtils.isNotBlank(fallbackServiceKey)) {
-            return fallbackServiceKey;
-        }
-        throw new IllegalArgumentException("unknown tool environment " + name + "; configure it in " + PARAM_TOOL_ENV_SPECS);
-    }
-
-    Map<String, String> toolEnvironmentSpecs() {
-        String raw;
-        try {
-            raw = byaiSystemConfigService == null ? null : byaiSystemConfigService.getDcSystemConfigValueByCode(PARAM_TOOL_ENV_SPECS);
-        }
-        catch (Exception e) {
-            LOGGER.warn("读取系统参数 {} 失败，按无映射处理：{}", PARAM_TOOL_ENV_SPECS, e.getMessage());
-            return Map.of();
-        }
-        if (StringUtils.isBlank(raw)) {
-            return Map.of();
-        }
-        String text = raw.trim();
-        Map<String, String> specs = new LinkedHashMap<>();
-        if (text.startsWith("{")) {
-            try {
-                Map<?, ?> parsed = new ObjectMapper().readValue(text, Map.class);
-                parsed.forEach((key, value) -> {
-                    if (key != null && value != null) {
-                        specs.put(key.toString().trim(), value.toString().trim());
-                    }
-                });
-            }
-            catch (JsonProcessingException e) {
-                LOGGER.warn("系统参数 {} 不是合法 JSON：{}", PARAM_TOOL_ENV_SPECS, e.getMessage());
-            }
-            return specs;
-        }
-        for (String pair : text.split("[,;\\s]+")) {
-            int eq = pair.indexOf('=');
-            if (eq > 0 && eq < pair.length() - 1) {
-                specs.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
-            }
-        }
-        return specs;
-    }
-
-    /**
-     * 每个用户的按需（工具）沙箱上限（系统参数 {@value #PARAM_TOOL_ENV_MAX_PER_USER}）：
-     * 已在运行的其他类型按需沙箱达到上限时拒绝再拉一个；复用同类型不受影响。
-     */
-    public void checkToolEnvironmentQuota(String userCode, String serviceKey) {
-        int limit;
-        try {
-            String raw = byaiSystemConfigService == null ? null : byaiSystemConfigService.getDcSystemConfigValueByCode(PARAM_TOOL_ENV_MAX_PER_USER);
-            limit = StringUtils.isBlank(raw) ? 0 : Integer.parseInt(raw.trim());
-        }
-        catch (Exception e) {
-            LOGGER.warn("读取系统参数 {} 失败，不限制工具沙箱数量：{}", PARAM_TOOL_ENV_MAX_PER_USER, e.getMessage());
-            return;
-        }
-        if (limit <= 0 || sandboxRecordMapper == null) {
-            return;
-        }
-        List<SsSandboxRecord> running = sandboxRecordMapper.selectRunningByUser(userCode);
-        if (running == null) {
-            return;
-        }
-        long others = running.stream()
-            .filter(record -> record != null && !StringUtils.equals(record.getSandboxType(), serviceKey))
-            .filter(record -> !isServiceKeyEnabled(record.getSandboxType()))
-            .count();
-        if (others >= limit) {
-            throw new IllegalStateException("用户工具沙箱数量已达上限 " + limit + "，请先释放不用的工具环境");
-        }
-    }
 
     /**
      * 保存用户首选 serviceKey 到 Redis

@@ -13,8 +13,8 @@
  * keys reach B through A's state directory, which the B spec mounts read-only
  * (see scripts/tool-env-sshd.sh).
  *
- * Not implemented for this backend yet, by decision (README "Follow-ups"):
- * pausing/resuming an idle B, and releasing B when A goes away.
+ * BE cannot pause a sandbox, so idling releases B (`pause()`); A's shutdown does
+ * the same. What this process cannot see is left to BE's reclaim rule.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import { createHash } from 'node:crypto'
@@ -31,16 +31,8 @@ export interface ByClawBeBackendConfig {
   token: string
   /** Optional `system-code` header; empty sends none. */
   systemCode: string
-  /** `sandbox_service_spec.service_key` of the tool sandbox; the default environment's spec. */
+  /** `sandbox_service_spec.service_key` of the tool sandbox this connection serves. */
   serviceKey: string
-  /**
-   * Logical environment name sent with the launch (`environment`), which BE maps
-   * to a spec; empty launches `serviceKey` directly. BE answers with the
-   * resolved `sandboxType`, used for every later call about this B.
-   */
-  environment: string
-  /** `pause()` releases B instead of keeping it: the idle fast path of the reclaim design. */
-  releaseOnIdle: boolean
   /** Key in `instanceEndpoints` that carries B's sshd address. */
   sshInstance: string
   /**
@@ -71,7 +63,7 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; sandboxType?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
+interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
 interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string> }
 
 /** `ResponseUtil.SUCCESS` in ByClaw BE; failures are `-1` with `msg`. */
@@ -107,12 +99,10 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private readonly launchRetryWindowMs: number
   /** Timeout handed to the most recent BE request; tests read it to check the retry budget. */
   lastRequestTimeoutMs = 0
-  /** The spec BE resolved for this environment; the configured serviceKey until a launch says otherwise. */
-  private sandboxType: string
   private currentId: string | undefined
 
   get sandboxId(): string | undefined { return this.currentId }
-  get serviceKey(): string { return this.sandboxType }
+  get serviceKey(): string { return this.config.serviceKey }
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -123,7 +113,6 @@ export class ByClawBeBackend implements ToolEnvBackend {
     this.now = clock.now ?? Date.now
     this.sleep = clock.sleep ?? (ms => new Promise(resolve => { setTimeout(resolve, ms).unref() }))
     this.launchRetryWindowMs = clock.launchRetryWindowMs ?? LAUNCH_RETRY.windowMs
-    this.sandboxType = config.serviceKey
   }
 
   /**
@@ -152,12 +141,11 @@ export class ByClawBeBackend implements ToolEnvBackend {
   }
 
   /**
-   * BE has no pause: with `releaseOnIdle` an idle B is released and the next
-   * operation starts a fresh one (user data lives on the shared volume);
-   * otherwise B keeps running until BE's reclaim rule or an operator releases it.
+   * BE has no pause, so an idle B is released and the next operation starts a
+   * fresh one; user data lives on the shared volume, only B's own `/tmp` goes.
+   * BE's reclaim rule covers the cases this process cannot (it died, Redis blips).
    */
   pause(): Promise<void> {
-    if (!this.config.releaseOnIdle) return Promise.resolve()
     return this.serial(async () => {
       if (this.currentId === undefined) return
       await this.remove()
@@ -212,12 +200,9 @@ export class ByClawBeBackend implements ToolEnvBackend {
   }
 
   private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
-    const { userCode, serviceKey, environment, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', {
-      userCode, serviceKey, ...(environment === '' ? {} : { environment }),
-    }, 'POST', timeoutMs) as LaunchData | undefined
-    if (typeof data?.sandboxType === 'string' && data.sandboxType !== '') this.sandboxType = data.sandboxType
-    const sandboxType = this.sandboxType
+    const { userCode, serviceKey, sshInstance } = this.config
+    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
+    const sandboxType = serviceKey
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
@@ -241,8 +226,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
   }
 
   private async remove(): Promise<void> {
-    const { userCode } = this.config
-    const sandboxType = this.sandboxType
+    const { userCode, serviceKey: sandboxType } = this.config
     try {
       await this.call('/sandbox/removeSandbox', { userCode, sandboxType })
       this.log(`released tool environment of type ${sandboxType}`)

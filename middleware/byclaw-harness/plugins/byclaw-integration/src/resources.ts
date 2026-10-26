@@ -127,7 +127,7 @@ export function parseByClawDigitalEmployee(value: unknown): ByClawDigitalEmploye
   const persona = employeeInstructions(snapshot)
   const capabilities = joinedValues(snapshot['coreCompetencies'], ['coreCompetency', 'description'])
   const modelId = text(parsedRecord(snapshot['prologue'])?.['modelId'])
-  const toolEnvironment = text(snapshot['toolEnvironment']) || text(parsedRecord(snapshot['advancedSettings'])?.['toolEnvironment'])
+  const toolSandbox = text(snapshot['toolSandbox']) || text(parsedRecord(snapshot['advancedSettings'])?.['toolSandbox'])
   return {
     id,
     code: text(snapshot['resourceCode']) || `DIG_EMPLOYEE_${id}`,
@@ -139,7 +139,7 @@ export function parseByClawDigitalEmployee(value: unknown): ByClawDigitalEmploye
     ...(text(snapshot['createType']) === '' ? {} : { createType: text(snapshot['createType']) }),
     ...(text(snapshot['integrationType']) === '' ? {} : { integrationType: text(snapshot['integrationType']) }),
     ...modelId === '' ? {} : { modelId },
-    ...toolEnvironment === '' ? {} : { toolEnvironment },
+    ...toolSandbox === '' ? {} : { toolSandbox },
     ...text(snapshot['configVersion'] ?? snapshot['resourceRVerid'] ?? snapshot['resourceDVerid']) === ''
       ? {}
       : { version: text(snapshot['configVersion'] ?? snapshot['resourceRVerid'] ?? snapshot['resourceDVerid']) },

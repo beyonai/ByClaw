@@ -31,8 +31,6 @@ test('overlays merge per-user additions into the composed row config', () => {
   const byId = Object.fromEntries(overlays.map(row => [row.id, row]))
   // The context reports its tool environments, not itself: it has no sandbox of its own to release.
   assert.deepEqual(byId['byclaw-idle-reporter'].config, { streamKey: 's', sandboxId: 'sbx-1', userCode: 'u1', reportSelf: false })
-  assert.deepEqual(byId['byclaw-tool-env'].config.environments, {})
-  assert.equal(byId['byclaw-tool-env'].config.releaseOnIdle, false)
   assert.deepEqual(byId['storage-json'].config, { root: '/r/users/u1/dsh-home/storages', other: true })
   assert.equal(byId['byclaw-tool-env'].config.keep, 1)
   assert.deepEqual(byId['byclaw-tool-env'].config.openSandbox, { baseUrl: 'http://os', volumes: ['/data/u1'] })
@@ -50,12 +48,7 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   assert.equal(row.config.openSandbox, undefined)
   assert.deepEqual(row.config.byclawBe, { ...beSpec.toolEnvBe, userCode: 'u1', token: 'jwt-u1' })
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
-  // Further environments, idle release and the reporter's idle time come from the host settings.
-  const multi = { ...beSpec, toolEnvEnvironments: { media: { serviceKey: 'byclaw-dsh-tools-media' } }, toolEnvReleaseOnIdle: true, toolEnvIdleReportMs: 120000 }
-  const rows = Object.fromEntries(composeUserOverlays([...entries, { id: 'byclaw-idle-reporter', name: 'r', config: {} }], 'u1', '/r/users/u1/dsh-home', multi).map(row => [row.id, row]))
-  assert.deepEqual(rows['byclaw-tool-env'].config.environments, { media: { serviceKey: 'byclaw-dsh-tools-media' } })
-  assert.equal(rows['byclaw-tool-env'].config.releaseOnIdle, true)
-  assert.deepEqual(rows['byclaw-idle-reporter'].config, { sandboxId: 'sbx-1', userCode: 'u1', reportSelf: false, environmentIdleTimeoutMs: 120000 })
+
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
   assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)

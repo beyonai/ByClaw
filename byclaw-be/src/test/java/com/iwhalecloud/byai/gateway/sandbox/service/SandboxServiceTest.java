@@ -1404,58 +1404,6 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
-    void toolEnvironment_logicalNamesResolveThroughTheSystemParameter() {
-        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
-            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
-        SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
-
-        when(systemConfigService.getDcSystemConfigValueByCode("BYCLAW_TOOL_ENV_SPECS"))
-            .thenReturn("{\"media\": \"byclaw-dsh-tools-media\", \"default\": \"byclaw-dsh-tools\"}");
-        assertThat(sandboxService.resolveToolEnvironmentSpec("media", "byclaw-dsh-tools")).isEqualTo("byclaw-dsh-tools-media");
-        assertThat(sandboxService.resolveToolEnvironmentSpec("default", "x")).isEqualTo("byclaw-dsh-tools");
-        assertThat(sandboxService.resolveToolEnvironmentSpec(" ", "byclaw-dsh-tools")).isEqualTo("byclaw-dsh-tools");
-        assertThatThrownBy(() -> sandboxService.resolveToolEnvironmentSpec("quantum", "byclaw-dsh-tools"))
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("quantum");
-
-        // The pair form, and an unmapped default falling back to the caller's spec.
-        when(systemConfigService.getDcSystemConfigValueByCode("BYCLAW_TOOL_ENV_SPECS"))
-            .thenReturn("media=byclaw-dsh-tools-media; gpu=byclaw-dsh-tools-gpu");
-        assertThat(sandboxService.resolveToolEnvironmentSpec("gpu", "byclaw-dsh-tools")).isEqualTo("byclaw-dsh-tools-gpu");
-        assertThat(sandboxService.resolveToolEnvironmentSpec("default", "byclaw-dsh-tools")).isEqualTo("byclaw-dsh-tools");
-
-        // No parameter: only the default resolves.
-        when(systemConfigService.getDcSystemConfigValueByCode("BYCLAW_TOOL_ENV_SPECS")).thenReturn(null);
-        assertThat(sandboxService.resolveToolEnvironmentSpec("default", "byclaw-dsh-tools")).isEqualTo("byclaw-dsh-tools");
-        assertThatThrownBy(() -> sandboxService.resolveToolEnvironmentSpec("media", "byclaw-dsh-tools"))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void toolEnvironment_perUserQuotaCountsOtherOnDemandTypesOnly() {
-        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
-            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
-        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
-        SandboxService sandboxService = new SandboxService();
-        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
-        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
-        SsSandboxRecord media = new SsSandboxRecord();
-        media.setSandboxType("byclaw-dsh-tools-media");
-        media.setStatus("RUNNING");
-        when(recordMapper.selectRunningByUser("user001")).thenReturn(List.of(media));
-
-        // No limit configured: nothing is checked.
-        sandboxService.checkToolEnvironmentQuota("user001", "byclaw-dsh-tools");
-        when(systemConfigService.getDcSystemConfigValueByCode("BYCLAW_TOOL_ENV_MAX_PER_USER")).thenReturn("1");
-        // Reusing the running type is fine; a second type exceeds the limit of one.
-        sandboxService.checkToolEnvironmentQuota("user001", "byclaw-dsh-tools-media");
-        assertThatThrownBy(() -> sandboxService.checkToolEnvironmentQuota("user001", "byclaw-dsh-tools"))
-            .isInstanceOf(IllegalStateException.class).hasMessageContaining("1");
-        when(systemConfigService.getDcSystemConfigValueByCode("BYCLAW_TOOL_ENV_MAX_PER_USER")).thenReturn("2");
-        sandboxService.checkToolEnvironmentQuota("user001", "byclaw-dsh-tools");
-    }
-
-    @Test
     void residentHost_removeIsADeleteOnTheHostAndNothingElseForThatType() {
         SharedDshHostContexts contexts = contexts("user001");
         SharedDshHostClient client = (SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client");

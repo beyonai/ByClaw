@@ -1024,16 +1024,16 @@ async function activate(ctx: Context, config: Config): Promise<void> {
 
     ctx.tools.register(defineTool({
       name: 'tool_environments',
-      description: 'Read-only: the tool environments (sandboxes) this user has for running commands, with their state. Which environment an employee uses is fixed by its template; use this to explain waits or tell the user which sandbox is active, never to choose one.',
+      description: 'Read-only: the tool sandboxes this user has for running commands, with their state. Which sandbox an employee uses is fixed on the employee; use this to explain waits or tell the user which sandbox is active, never to choose one.',
       parameters: {},
       output: {
         schema: { type: 'object', additionalProperties: false, properties: { json: { type: 'string', required: true } } },
         render: (_args, value) => [{ type: 'text', text: value.json }],
       },
       execute: async () => {
-        const pool = ctx.get('toolEnvironments') as { names: readonly string[]; defaultName: string; list(): unknown[] } | undefined
-        if (pool === undefined) return { json: JSON.stringify({ environments: [], note: 'commands run on this host; no separate tool environment' }) }
-        return { json: JSON.stringify({ default: pool.defaultName, configured: pool.names, environments: pool.list() }) }
+        const pool = ctx.get('toolEnvironments') as { defaultName: string; list(): unknown[] } | undefined
+        if (pool === undefined) return { json: JSON.stringify({ sandboxes: [], note: 'commands run on this host; no separate tool sandbox' }) }
+        return { json: JSON.stringify({ default: pool.defaultName, sandboxes: pool.list() }) }
       },
     }))
 

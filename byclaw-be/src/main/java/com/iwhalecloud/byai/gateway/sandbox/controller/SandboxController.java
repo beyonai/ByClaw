@@ -376,18 +376,9 @@ public class SandboxController {
         if (serviceKey != null && serviceKey.isEmpty()) {
             serviceKey = null;
         }
-        // A DSH host names the tool environment it wants (e.g. "media"); BE maps the name to a spec.
-        Object environmentObj = params.get("environment");
-        String environment = environmentObj != null ? environmentObj.toString().trim() : null;
 
         try {
-            if (environment != null && !environment.isEmpty()) {
-                serviceKey = sandboxService.resolveToolEnvironmentSpec(environment, serviceKey);
-            }
             String finalServiceKey = serviceKey;
-            if (finalServiceKey != null && !sandboxService.isServiceKeyEnabled(finalServiceKey)) {
-                sandboxService.checkToolEnvironmentQuota(userCode, finalServiceKey);
-            }
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
                 () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
 
@@ -406,8 +397,6 @@ public class SandboxController {
             Map<String, Object> result = new HashMap<>();
             result.put("endpoint", data.getEndpoint());
             result.put("sandboxId", data.getSandboxId());
-            // The spec actually launched; a host that asked by environment name uses this for later calls.
-            result.put("sandboxType", finalServiceKey != null ? finalServiceKey : SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
             return ResponseUtil.successResponse(result);

@@ -34,11 +34,8 @@ describe('resolveConfig', () => {
       idleTimeoutMs: 1_800_000,
       heartbeatMs: 30_000,
       reportSelf: true,
-      environmentIdleTimeoutMs: 1_800_000,
     })
-    expect(resolveConfig({ idleTimeoutMs: 600_000, environmentIdleTimeoutMs: 120_000, reportSelf: false }, 'host-1')).toMatchObject({
-      idleTimeoutMs: 600_000, environmentIdleTimeoutMs: 120_000, reportSelf: false,
-    })
+    expect(resolveConfig({ idleTimeoutMs: 600_000, reportSelf: false }, 'host-1')).toMatchObject({ idleTimeoutMs: 600_000, reportSelf: false })
   })
 
   it('takes the configured identity and owner over the defaults', () => {

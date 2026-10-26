@@ -9,27 +9,11 @@
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
 # Build context is the repository root, like the other harness Dockerfiles.
 ARG HARNESS_IMAGE=byclaw/dsh:latest
-# Which environment this B image serves: `media` keeps A's whole toolchain
-# (ffmpeg, libreoffice, …); `default` drops the media packages so the sandbox
-# every employee starts with is smaller and faster to pull.
-#   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg TOOL_ENV_PROFILE=default -t byclaw/dsh-tools:<tag> .
-#   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg TOOL_ENV_PROFILE=media   -t byclaw/dsh-tools-media:<tag> .
-ARG TOOL_ENV_PROFILE=media
 
 
 # --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---
 FROM ${HARNESS_IMAGE} AS trimmed
-ARG TOOL_ENV_PROFILE
 USER root
-RUN set -eux; \
-    case "${TOOL_ENV_PROFILE}" in \
-      media) ;; \
-      default) \
-        apt-get remove -y --purge ffmpeg libreoffice libreoffice-core libreoffice-common 2>/dev/null || true; \
-        apt-get autoremove -y --purge; rm -rf /var/lib/apt/lists/*; \
-        ! command -v ffmpeg; ! command -v libreoffice ;; \
-      *) echo "TOOL_ENV_PROFILE must be media or default, got ${TOOL_ENV_PROFILE}" >&2; exit 1 ;; \
-    esac
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge

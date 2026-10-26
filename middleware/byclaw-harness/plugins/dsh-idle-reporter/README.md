@@ -50,8 +50,7 @@ The patch inserts the host row `byclaw-idle-reporter`. Disable it with `disabled
 | `maxLen` | `10000` | — | Approximate stream cap (`MAXLEN ~`) |
 | `idleTimeoutMs` | `1800000` (30 min) | `BYCLAW_DSH_IDLE_TIMEOUT_MS` | Idle time before `releasable` |
 | `heartbeatMs` | `30000` | — | Interval between snapshot entries |
-| `reportSelf` | `true` | `BYCLAW_DSH_IDLE_REPORT_SELF` (`0` disables) | Report this process's own sandbox; off on a shared DSH host, whose user contexts have none |
-| `environmentIdleTimeoutMs` | `idleTimeoutMs` | `BYCLAW_TOOL_ENV_IDLE_REPORT_MS` | Idle time before a tool environment is `releasable` |
+| `reportSelf` | `true` | — (the shared-host launcher sets `false`) | Report this process's own sandbox; a shared DSH host's user contexts have none |
 
 `byclaw-be` injects `BYAI_WORKER_ID` (`byclaw-dsh-<userCode>`) and `USER_CODE` into every sandbox it launches, so the identity is stable across relaunches of the same user's sandbox; outside ByClaw the identity falls back to the hostname and `userCode` is empty.
 
@@ -66,7 +65,7 @@ environment name and `sandboxType` (the BE spec or image). Busy means: an
 Agent bound to that environment runs a turn and is not blocked on the user, or
 owns a running job, or the connection has requests or process streams open or
 a start under way; the default environment also takes the jobs nobody owns.
-The usual idle time applies per environment (`environmentIdleTimeoutMs`). A
+The usual idle time (`idleTimeoutMs`) applies per environment. A
 released environment (its id gone) stops being reported; a relaunch is a new
 identity. The connection's own use is sampled with the heartbeat.
 

@@ -39,7 +39,7 @@ async function pool(options: { owners?: Record<string, string | undefined>; runn
     name: 'pool',
     apply: (ctx: Context) => {
       environments = new ToolEnvironments(ctx, {
-        names: options.names ?? ['media'],
+        accepts: name => (options.names ?? ['media']).includes(name),
         create: name => { const connection = fakeConnection(name, name === 'media' ? 'sb-media' : undefined); connections.set(name, connection); return connection },
         lineage: () => lineage(options.owners ?? {}, current),
       })
@@ -53,12 +53,16 @@ async function pool(options: { owners?: Record<string, string | undefined>; runn
 describe('ToolEnvironments', () => {
   it('serves the default environment to unbound Agents and to agentless callers', async () => {
     const { environments } = await pool({ owners: { a: undefined } })
-    expect(environments.names).toEqual([DEFAULT_ENVIRONMENT, 'media'])
+    expect(environments.has(DEFAULT_ENVIRONMENT)).toBe(true)
+    expect(environments.has('media')).toBe(true)
+    expect(environments.has('quantum')).toBe(false)
+    expect(environments.has(' ')).toBe(false)
     expect(environments.environmentOf(undefined)).toBe(DEFAULT_ENVIRONMENT)
     expect(environments.environmentOf('a')).toBe(DEFAULT_ENVIRONMENT)
     expect(environments.get().status().serviceKey).toBe('spec-default')
     // Creation is lazy and does not start anything; only touched environments are listed.
     expect(environments.list().map(status => status.name)).toEqual([DEFAULT_ENVIRONMENT])
+    expect(environments.names).toEqual([DEFAULT_ENVIRONMENT])
   })
 
   it('binds an Agent to an environment; descendants inherit it, siblings do not, an unknown name is the default', async () => {

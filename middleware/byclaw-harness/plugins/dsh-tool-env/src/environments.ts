@@ -2,10 +2,11 @@
  * Several tool environments (B) per user, selected per Agent.
  *
  * One process (A) may run employees with different needs: a video employee
- * wants a media toolchain, a writer a small image. Each need is a named
- * environment backed by its own `ToolEnvConnection`; an Agent is bound to one
- * name (its template's declaration), its descendants inherit the binding, and
- * everything else uses the default. Only one B exists per environment name.
+ * wants a media toolchain, a writer a small image. An environment is a sandbox
+ * spec (BE's `service_key`) backed by its own `ToolEnvConnection`; an Agent is
+ * bound to one (the spec its employee selects), its descendants inherit the
+ * binding, and everything else uses the default spec. Only one B exists per
+ * spec and user.
  *
  * DSH runs an Agent's whole driver, tool executions included, inside
  * `agents.withInitiator(agent, …)`, so every file, process or sandbox request a
@@ -44,10 +45,12 @@ export interface AgentLineage {
 }
 
 export interface ToolEnvironmentsOptions {
-  /** Known environment names and how to build their connection, lazily. */
+  /** Build the connection for a spec, lazily; creation does not start B. */
   create: (name: string) => ToolEnvConnection
-  names: readonly string[]
+  /** The spec unbound Agents use. */
   defaultName?: string
+  /** Whether a non-default spec can be served (only backends that take a spec per launch); default: none. */
+  accepts?: (name: string) => boolean
   lineage?: () => AgentLineage | undefined
 }
 
@@ -59,17 +62,20 @@ export class ToolEnvironments extends Service {
   private readonly connections = new Map<string, ToolEnvConnection>()
   private readonly bindings = new Map<string, string>()
   readonly defaultName: string
-  readonly names: readonly string[]
 
   constructor(ctx: Context, private readonly options: ToolEnvironmentsOptions) {
     super(ctx, 'toolEnvironments')
     this.defaultName = options.defaultName ?? DEFAULT_ENVIRONMENT
-    this.names = [...new Set([this.defaultName, ...options.names])]
   }
 
-  /** Whether `name` is configured; unknown names fall back to the default with a warning at bind time. */
+  /** Whether this process can serve `name`; what it cannot falls back to the default at bind time. */
   has(name: string): boolean {
-    return this.names.includes(name)
+    return name === this.defaultName || (name.trim() !== '' && (this.options.accepts?.(name) ?? false))
+  }
+
+  /** Specs that have been touched so far, the default first once it exists. */
+  get names(): string[] {
+    return [...this.connections.keys()]
   }
 
   /** The connection for `name`, created on first use (creation does not start B). */

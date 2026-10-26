@@ -36,8 +36,8 @@ export interface DshAgentTemplate {
   description: string
   persona: string
   skills: DshAgentTemplateSkill[]
-  /** Logical tool-environment name declared on the employee; absent = infer from Skills, else the default. */
-  toolEnvironment?: string
+  /** Sandbox spec selected on the employee; absent = the default tool sandbox. */
+  toolSandbox?: string
   source: {
     system: 'byclaw'
     resourceId: string
@@ -91,7 +91,7 @@ function assertTemplate(value: unknown): DshAgentTemplate {
     || typeof candidate.description !== 'string'
     || typeof candidate.persona !== 'string'
     || !Array.isArray(candidate.skills)
-    || (candidate.toolEnvironment !== undefined && typeof candidate.toolEnvironment !== 'string')
+    || (candidate.toolSandbox !== undefined && typeof candidate.toolSandbox !== 'string')
     || typeof candidate.source !== 'object'
     || candidate.source === null) {
     throw new Error('invalid agent template fields')
