@@ -65,12 +65,12 @@ if [[ "$(jq -r '.rowCount' <<<"$claim")" == "0" ]]; then
   exit 30
 fi
 
-# Lock in stable order to reduce deadlock risk and verify both accounts exist and are active.
-locked=$(dbcli_json sql "${common_args[@]}" \
-  --file "${SKILL_DIR}/sql/lock-accounts.sql" \
+# Check availability; conditional debit/credit and affected-row validation enforce the transaction.
+accounts=$(dbcli_json sql "${common_args[@]}" \
+  --file "${SKILL_DIR}/sql/check-accounts.sql" \
   --params "$params")
 
-if [[ "$(jq -r '.rowCount' <<<"$locked")" != "2" ]]; then
+if [[ "$(jq -r '.rowCount' <<<"$accounts")" != "2" ]]; then
   printf '%s\n' '{"ok":false,"error":{"code":"ACCOUNT_NOT_AVAILABLE","message":"both accounts must exist and be active"}}' >&2
   exit 31
 fi
