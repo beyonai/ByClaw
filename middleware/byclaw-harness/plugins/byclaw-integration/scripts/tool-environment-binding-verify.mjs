@@ -29,6 +29,10 @@ assert.ok(log.infos.some(line => line.includes('spec=byclaw-dsh-tools-media')))
 
 // parseByClawDigitalEmployee reads the selection from advancedSettings or a top-level field.
 const base = { resourceId: '11', resourceName: 'Video', workerAgentType: 'BYCLAW_EXE' }
+assert.equal(parseByClawDigitalEmployee({ ...base, advancedSettings: JSON.stringify([{ key: 'other', value: 'x' }, { key: 'toolSandbox', value: ' byclaw-dsh-tools-media ' }]) }).toolSandbox, 'byclaw-dsh-tools-media')
+assert.equal(parseByClawDigitalEmployee({ ...base, advancedSettings: [{ key: 'toolSandbox', value: 'byclaw-dsh-tools-media' }] }).toolSandbox, 'byclaw-dsh-tools-media')
+assert.equal(parseByClawDigitalEmployee({ ...base, advancedSettings: '[{"key":"toolSandbox","value":""}]' }).toolSandbox, undefined)
+assert.equal(parseByClawDigitalEmployee({ ...base, advancedSettings: '{broken' }).toolSandbox, undefined)
 assert.equal(parseByClawDigitalEmployee({ ...base, advancedSettings: JSON.stringify({ toolSandbox: 'byclaw-dsh-tools-media', other: 1 }) }).toolSandbox, 'byclaw-dsh-tools-media')
 assert.equal(parseByClawDigitalEmployee({ ...base, toolSandbox: 'gpu', advancedSettings: JSON.stringify({ toolSandbox: 'media' }) }).toolSandbox, 'gpu')
 assert.equal(parseByClawDigitalEmployee(base).toolSandbox, undefined)

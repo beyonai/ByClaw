@@ -638,6 +638,8 @@ export default {
   'employeeDetail.imageModelRetry': '重试',
   'employeeDetail.ttsModel': '语音模型',
   'employeeDetail.ttsModelConfiguration': '语音模型配置',
+  'employeeDetail.toolSandbox': '沙箱类型',
+  'employeeDetail.toolSandboxDefault': '默认沙箱',
   'employeeDetail.ttsModelLoadError': '语音模型加载失败',
   'employeeDetail.ttsModelRetry': '重试',
   'employeeDetail.moreModels': '更多模型',

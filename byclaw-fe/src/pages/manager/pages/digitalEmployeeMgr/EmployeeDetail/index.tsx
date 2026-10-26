@@ -37,6 +37,8 @@ import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import ImageModelSelect from './ImageModelSelect';
+import ToolSandboxSelect from './ToolSandboxSelect';
+import { readToolSandbox, writeToolSandbox } from './toolSandboxUtils';
 import getInitialQaModel from './getInitialQaModel';
 import { applyImageModelId, normalizeImageModelId } from './imageModelUtils';
 import { isSuperAssistant, preserveSuperAssistantResourceConfiguration } from './resourceConfiguration';
@@ -511,6 +513,7 @@ const EmployeeDetail = ({ loading }) => {
   const [form] = Form.useForm();
   const selectedImageModelId = Form.useWatch('imageModelId', { form, preserve: true });
   const selectedTtsModelId = Form.useWatch('ttsModelId', { form, preserve: true });
+  const selectedToolSandbox = Form.useWatch('toolSandbox', { form, preserve: true });
 
   // 新建场景：根据 URL query 覆盖 ConfigForm 默认值
   useEffect(() => {
@@ -1008,6 +1011,8 @@ const EmployeeDetail = ({ loading }) => {
               imageModelId: normalizeImageModelId(detailImageModelId),
               ttsModelId: detailTtsModelId,
               advancedSettings: advancedSettingsParsed,
+              // 工具沙箱选择保存在高级配置的一条记录里；没有就是默认沙箱
+              toolSandbox: readToolSandbox(advancedSettingsParsed),
               // 为受控的必填项提供初始值以回显
               coreAbility: res?.ability || '',
               abilityBoundary: res?.constraints || '',
@@ -1552,8 +1557,10 @@ const EmployeeDetail = ({ loading }) => {
           catalogId: catalogId ?? undefined,
           // 归属类型
           ownerType: formOwnerType || effectiveOwnerType,
-          // 高级配置（数组 JSON 字符串）
-          advancedSettings: JSON.stringify(Array.isArray(advancedSettings) ? advancedSettings : []),
+          // 高级配置（数组 JSON 字符串），含工具沙箱选择这一条
+          advancedSettings: JSON.stringify(
+            writeToolSandbox(Array.isArray(advancedSettings) ? advancedSettings : [], form.getFieldValue('toolSandbox')),
+          ),
           // 配置记忆列表
           memoryConfigList: memoryRules.map((rule) => ({
             ruleName: rule.ruleName,
@@ -2163,6 +2170,16 @@ const EmployeeDetail = ({ loading }) => {
                     disabled={readOnly}
                     onChange={(value) => {
                       form.setFieldValue('ttsModelId', value);
+                      onValuesChange();
+                    }}
+                  />
+                }
+                toolSandboxSelect={
+                  <ToolSandboxSelect
+                    value={selectedToolSandbox}
+                    disabled={readOnly}
+                    onChange={(value) => {
+                      form.setFieldValue('toolSandbox', value);
                       onValuesChange();
                     }}
                   />

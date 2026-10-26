@@ -655,6 +655,8 @@ export default {
   'employeeDetail.imageModelRetry': 'Retry',
   'employeeDetail.ttsModel': 'Voice model',
   'employeeDetail.ttsModelConfiguration': 'Voice model configuration',
+  'employeeDetail.toolSandbox': 'Tool sandbox',
+  'employeeDetail.toolSandboxDefault': 'Default sandbox',
   'employeeDetail.ttsModelLoadError': 'Failed to load voice models',
   'employeeDetail.ttsModelRetry': 'Retry',
   'employeeDetail.moreModels': 'More models',

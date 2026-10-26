@@ -604,6 +604,7 @@ const ConfigForm = (props) => {
     setEmployeeGroupMembers,
     // imageModelSelect,
     // ttsModelSelect,
+    toolSandboxSelect,
   } = props;
 
   const intl = useIntl();
@@ -2523,6 +2524,12 @@ const ConfigForm = (props) => {
                   </button>
                 </>
               )} */}
+              {toolSandboxSelect && (
+                <div className={styles.modelConfigItem}>
+                  <span className={styles.modelConfigLabel}>{intl.formatMessage({ id: 'employeeDetail.toolSandbox' })}</span>
+                  {toolSandboxSelect}
+                </div>
+              )}
             </div>
 
             {/* 数字员工/数字员工组类型 */}

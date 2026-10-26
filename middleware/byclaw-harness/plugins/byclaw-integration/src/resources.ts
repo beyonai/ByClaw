@@ -117,6 +117,26 @@ function skillRefs(snapshot: Record<string, unknown>): ByClawSkillRef[] {
   return [...unique.values()]
 }
 
+/**
+ * The employee's tool sandbox selection: the ByClaw editor keeps it as one entry
+ * `{ key: 'toolSandbox', value: '<service_key>' }` of the advanced-settings
+ * array; an object with a `toolSandbox` field is accepted too.
+ */
+function toolSandboxFromAdvancedSettings(raw: unknown): string {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw) } catch { return '' }
+  }
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed) {
+      const item = record(entry)
+      if (item?.['key'] === 'toolSandbox') return text(item['value'])
+    }
+    return ''
+  }
+  return text(record(parsed)?.['toolSandbox'])
+}
+
 /** Parse one non-group digital employee snapshot. */
 export function parseByClawDigitalEmployee(value: unknown): ByClawDigitalEmployee {
   const snapshot = record(value)
@@ -127,7 +147,7 @@ export function parseByClawDigitalEmployee(value: unknown): ByClawDigitalEmploye
   const persona = employeeInstructions(snapshot)
   const capabilities = joinedValues(snapshot['coreCompetencies'], ['coreCompetency', 'description'])
   const modelId = text(parsedRecord(snapshot['prologue'])?.['modelId'])
-  const toolSandbox = text(snapshot['toolSandbox']) || text(parsedRecord(snapshot['advancedSettings'])?.['toolSandbox'])
+  const toolSandbox = text(snapshot['toolSandbox']) || toolSandboxFromAdvancedSettings(snapshot['advancedSettings'])
   return {
     id,
     code: text(snapshot['resourceCode']) || `DIG_EMPLOYEE_${id}`,
