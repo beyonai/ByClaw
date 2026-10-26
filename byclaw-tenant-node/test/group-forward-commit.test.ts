@@ -1,3 +1,5 @@
+import { disposableRedis } from "./support/disposable-redis.js";
+import type { RedisLease } from "../src/infrastructure/coordination/redis-leases.js";
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -16,6 +18,7 @@ const { Pool } = createRequire(import.meta.url)("pg");
 const url = process.env.FORWARD_TEST_PG;
 describe.skipIf(!url)("atomic final forwarding publication", () => {
   let pool: any, store: SqlGroupForwardStore;
+  let coordination: Awaited<ReturnType<typeof disposableRedis>>;
   const actor = { userId: "30", enterpriseId: "1" };
   const input = (key = "key"): ForwardInput => ({
     clientRequestId: key,
@@ -32,13 +35,15 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
       address.pathname !== "/byclaw_forward_test"
     )
       throw new Error("isolated forwarding DB only");
+    coordination = await disposableRedis();
     pool = new Pool({ connectionString: url, max: 5 });
-    await sql(
-      `CREATE SCHEMA IF NOT EXISTS byai; DROP TABLE IF EXISTS byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request CASCADE;`,
-    );
+    await sql("DROP SCHEMA IF EXISTS byai CASCADE");
     await sql(
       await readFile(
-        new URL("../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__ddl.sql", import.meta.url),
+        new URL(
+          "../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
+          import.meta.url,
+        ),
         "utf8",
       ),
     );
@@ -52,11 +57,17 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
       {
         write: async (work: any) => {
           const client = await pool.connect();
+          const held = new Map<string, RedisLease>();
           try {
             await client.query("BEGIN");
             const result = await work({
+              lock: async (key: string) => {
+                if (!held.has(key))
+                  held.set(key, await coordination.locks.acquire(`tenant:1:${key}`));
+              },
               query: async (q: string, a?: unknown[]) => (await client.query(q, a)).rows,
             });
+            for (const lease of held.values()) await lease.check();
             await client.query("COMMIT");
             return result;
           } catch (e) {
@@ -64,6 +75,7 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
             throw e;
           } finally {
             client.release();
+            for (const lease of [...held.values()].reverse()) await lease.release();
           }
         },
       },
@@ -72,6 +84,7 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
   });
   afterAll(async () => {
     await pool?.end();
+    await coordination?.close();
   });
   beforeEach(async () => {
     await sql(`TRUNCATE byai.byai_group_chat_forward_item,byai.byai_group_chat_forward_target,byai.byai_group_chat_forward_request,byai.byai_message,byai.byai_session_member,byai.byai_session;
@@ -364,12 +377,9 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
   });
   it("expiredLeaseAfterWaitingForTheRealGroupLockCannotPublish", async () => {
     const { lease } = await ready();
-    const blocker = await pool.connect();
+    const blocker = await coordination.locks.acquire("tenant:1:session:10");
     let pending: Promise<unknown> | undefined;
     try {
-      await blocker.query("BEGIN");
-      const pid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-      await blocker.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["session:10"]);
       await sql(
         "UPDATE byai.byai_group_chat_forward_target SET lease_until=clock_timestamp()+interval '500 milliseconds' WHERE target_id=$1",
         [lease.targetId],
@@ -382,20 +392,6 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
       await expect
         .poll(
           async () =>
-            Number(
-              (
-                await sql(
-                  "SELECT count(*) AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))",
-                  [pid],
-                )
-              )[0].n,
-            ),
-          { timeout: 3000 },
-        )
-        .toBe(1);
-      await expect
-        .poll(
-          async () =>
             (
               await sql(
                 "SELECT lease_until<clock_timestamp() AS expired FROM byai.byai_group_chat_forward_target WHERE target_id=$1",
@@ -405,7 +401,7 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
           { timeout: 3000 },
         )
         .toBe(true);
-      await blocker.query("ROLLBACK");
+      await blocker.release();
       expect(await pending).toMatchObject({ error: { code: "FORWARD_LEASE_LOST" } });
       expect(await sql("SELECT * FROM byai.byai_message WHERE session_id=20")).toHaveLength(0);
       expect(
@@ -417,8 +413,7 @@ describe.skipIf(!url)("atomic final forwarding publication", () => {
         )[0],
       ).toEqual({ state: "READY", pending_delivery: false });
     } finally {
-      await blocker.query("ROLLBACK");
-      blocker.release();
+      await blocker.release();
       await pending;
     }
   });

@@ -14,7 +14,10 @@ export interface CommandTransactions {
 }
 /** 在同一事务内完成会话串行化、权限判断、业务写入和幂等结果记录。 */
 export class CommandService {
-  constructor(private readonly transactions: CommandTransactions) {}
+  constructor(
+    private readonly transactions: CommandTransactions,
+    private readonly requireExecution: () => Promise<void> = async () => {},
+  ) {}
   execute(command: TenantCommand): Promise<Record<string, any>> {
     return this.transactions.run(async (tx) => {
       await tx.lock(command.sessionId);
@@ -25,6 +28,7 @@ export class CommandService {
           throw new DomainError("IDEMPOTENCY_CONFLICT");
         return previous.result;
       }
+      await this.requireExecution();
       await tx.authorize(command);
       const result = await tx.apply(command);
       await tx.record(command, result);

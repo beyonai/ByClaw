@@ -9,10 +9,11 @@ it("oppositeDirectionsAcquireSameNumericOrderWithoutNumberCoercion", async () =>
     const keys: string[] = [];
     await lockSessions(
       {
-        query: async (sql, args) => {
-          expect(sql).toContain("pg_advisory_xact_lock");
-          keys.push(String(args![0]));
-          return [];
+        query: async () => {
+          throw new Error("locking must not query the database");
+        },
+        lock: async (key) => {
+          keys.push(key);
         },
       },
       ids,

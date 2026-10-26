@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { InputState } from "../../application/mirror-ports.js";
 import type { AnswerState, MirrorEnvelope } from "../../domain/mirror.js";
@@ -13,9 +14,10 @@ export class MirrorAnswerWriter {
     private readonly enterpriseId: string,
   ) {}
   async answer(event: MirrorEnvelope): Promise<AnswerState | null> {
+    await lockBusiness(this.db, `message:${event.answerMessageId}`);
     const row = await first(
       this.db,
-      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2 FOR UPDATE",
+      "SELECT * FROM byai.byai_message WHERE message_id=$1 AND enterprise_id=$2",
       [event.answerMessageId, this.enterpriseId],
     );
     if (!row) return null;

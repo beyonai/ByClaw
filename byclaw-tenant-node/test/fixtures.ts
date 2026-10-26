@@ -47,6 +47,7 @@ export function snapshot(overrides: Partial<TenantSnapshot> = {}): TenantSnapsho
 export function database(): TenantDatabase {
   const db: TenantDatabase = {
     query: vi.fn(async () => []),
+    lock: vi.fn(async () => {}),
     verifyIdentity: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
     fresh: vi.fn(async () => db),

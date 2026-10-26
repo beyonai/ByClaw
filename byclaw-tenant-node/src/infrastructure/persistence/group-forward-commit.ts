@@ -18,7 +18,7 @@ import { projectText } from "../../application/group-forward-snapshot.js";
 import { createHash } from "node:crypto";
 import { DomainError } from "../../domain/errors.js";
 import { GroupForwardRepository, type ForwardRequestRow } from "./group-forward-repository.js";
-import { lockSessions } from "./session-locks.js";
+import { lockSessions, lockBusiness } from "./session-locks.js";
 import { first, nextId, insert } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 import { indexGroupMessage } from "./group-message-index.js";
@@ -66,12 +66,12 @@ export async function commitForward(
   )) {
     const group = await first(
       db,
-      "UPDATE byai.byai_session SET session_id=session_id WHERE session_id=$1 RETURNING session_id,enterprise_id,session_type,state,project_id",
+      "SELECT session_id,enterprise_id,session_type,state,project_id FROM byai.byai_session WHERE session_id=$1",
       [id],
     );
     const member = await first(
       db,
-      "UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 RETURNING mem_obj_id,mem_name",
+      "SELECT mem_obj_id,mem_name FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3",
       [id, r.actorUserId, tenant],
     );
     groups.set(id, { group, member });
@@ -100,11 +100,12 @@ export async function commitForward(
   )
     return lost();
   const selected: string[] = JSON.parse(r.frozenJson).selectedMessageIds;
-  // These outer rows also serialize generic direct UPDATE/DELETE writers that do not use advisory locks.
+  // Session Redis locks coordinate lifecycle writers; message locks coordinate answer projections.
   for (const id of [...selected].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))) {
+    await lockBusiness(db, `message:${id}`);
     const m = await first(
       db,
-      "UPDATE byai.byai_message SET message_id=message_id WHERE session_id=$1 AND message_id=$2 RETURNING usage,recalled_at,archived_at",
+      "SELECT usage,recalled_at,archived_at FROM byai.byai_message WHERE session_id=$1 AND message_id=$2",
       [r.sourceSessionId, id],
     );
     if (!m || m.recalledAt || m.archivedAt || ![1, 2].includes(m.usage)) return denied();

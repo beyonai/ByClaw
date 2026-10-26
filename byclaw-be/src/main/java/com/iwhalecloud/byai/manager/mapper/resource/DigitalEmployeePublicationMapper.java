@@ -5,6 +5,7 @@ package com.iwhalecloud.byai.manager.mapper.resource;
  * @date 2026-09-27 22:38:38
  */
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -15,13 +16,15 @@ import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface DigitalEmployeePublicationMapper extends BaseMapper<DigitalEmployeePublication> {
-    @Select("select * from byai.ss_resource where resource_id = #{id} and com_acct_id = #{tenantId} for update")
+    @Select("select * from byai.ss_resource where resource_id = #{id} and com_acct_id = #{tenantId}")
+    @RedisTransactionLock(value = "resource", parameters = {"id"})
     SsResource lockResource(@Param("id") Long id, @Param("tenantId") Long tenantId);
 
     @Select("select user_name from byai.po_users where user_id = #{id}")
     String creatorName(@Param("id") Long id);
 
-    @Select("select * from byai.digital_employee_publication where request_id = #{id} and tenant_id = #{tenantId} for update")
+    @Select("select * from byai.digital_employee_publication where request_id = #{id} and tenant_id = #{tenantId}")
+    @RedisTransactionLock(value = "employee-publication", parameters = {"id"})
     DigitalEmployeePublication lock(@Param("id") Long id, @Param("tenantId") Long tenantId);
 
     @Select("select * from byai.ss_resource where publication_source_id = #{sourceId} and com_acct_id = #{tenantId} "

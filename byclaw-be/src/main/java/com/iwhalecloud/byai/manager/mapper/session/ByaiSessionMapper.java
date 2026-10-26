@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.session;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.dto.session.TemplateSessionQueryRequestDto;
@@ -27,6 +28,7 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
         return selectById(sessionId);
     }
 
+    @RedisTransactionLock(value = "session", parameters = {"sessionId"})
     int serializeById(@Param("sessionId") Long sessionId);
 
     /**

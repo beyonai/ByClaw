@@ -544,6 +544,37 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void sharedInventoryReadsOnlyItsCurrentGenerationWorkerHeartbeat() {
+        WorkerRegistry registry = mock(WorkerRegistry.class);
+        RedisClient redis = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        var shared = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "gatewayWorkerRegistry", registry);
+        ReflectionTestUtils.setField(service, "redisClient", redis);
+        ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
+        String route = "BYCLAW_DSH_SHARED_context_9";
+        SandboxInfo info = SandboxInfo.builder().isShared(true).userCode("alice")
+            .sandboxType("custom-assistant").serviceKey("shared-host")
+            .mappingId("mapping-9").workerAgentType(route).build();
+        when(shared.infos("alice")).thenReturn(List.of(info));
+        when(registry.hasOnlineAgentType(route, true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of("worker-9")));
+        when(registry.getWorker("worker-9")).thenReturn(Map.of("last_seen", 8_000L));
+        when(redis.getCommands()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("worker-9"))).thenReturn(25L);
+
+        List<SandboxInfo> result = ReflectionTestUtils.invokeMethod(service, "withSharedHostContext", "alice", List.of());
+        assertThat(result).containsExactly(info);
+        assertThat(info.getWorkerOnline()).isTrue();
+        assertThat(info.getWorkerId()).isEqualTo("worker-9");
+        assertThat(info.getWorkerLastSeen()).isEqualTo(8_000L);
+        assertThat(info.getWorkerLeaseTtlSeconds()).isEqualTo(25L);
+        verify(registry, never()).getWorker("byclaw-dsh-alice");
+        verify(jedis).close();
+    }
+
+    @Test
     void buildRecordViewReadsWorkerLeaseWithoutInventingSandboxLifecycleFields() {
         WorkerRegistry workerRegistry = mock(WorkerRegistry.class);
         RedisClient redisClient = mock(RedisClient.class);
@@ -1410,4 +1441,20 @@ class SandboxServiceTest extends I18nTestSupport {
         assertThat(sandboxService.heartbeatDshSandbox("user001")).isTrue();
         verify(recordMapper, never()).selectRunningByUserAndSandboxType(any(), any());
     }
+    @Test
+    void managedSharedPoolLaunchAndHeartbeatUsePlatformMapping() {
+        SandboxService service = new SandboxService();
+        var shared = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
+        var legacy = remoteGateway(service);
+        SandboxLaunchData hosted = new SandboxLaunchData();
+        hosted.setSandboxId("shared-instance-1");
+        when(shared.tryAcquire("user001", "byclaw-dsh")).thenReturn(hosted);
+        when(shared.heartbeat("user001", "byclaw-dsh")).thenReturn(true);
+        assertThat(service.launchSandboxWithServiceKey("user001", "byclaw-dsh").getSandboxId())
+            .isEqualTo("shared-instance-1");
+        assertThat(service.heartbeatDshSandbox("user001")).isTrue();
+        verify(legacy, never()).service(any(), any());
+    }
+
 }

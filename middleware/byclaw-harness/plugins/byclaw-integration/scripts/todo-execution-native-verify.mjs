@@ -34,7 +34,9 @@ try {
   const chunks = []
   const runtime = { options: { sourceAgentType: 'BYCLAW_DSH', emitter: { async emitChunk(...args) { chunks.push(args) } } } }
   const turn = { context: { sessionId: 'host', traceId: 'trace' }, rootSessionId: 'native-todo', rootMessageId: 'answer' }
-  for (const event of events) await ByClawDshSessionRuntime.prototype.emitPlan.call(runtime, turn, event.data.todos)
+  for (const event of events) await ByClawDshSessionRuntime.prototype.emitPlan.call(runtime, turn, {
+    id: agent.id, ownEvents: () => agent.session.ownEvents().filter(item => item.seq <= event.seq),
+  })
   assert.equal(chunks.length, 2)
   for (const [, , , options] of chunks) {
     assert.equal(options.contentType, '2008')
@@ -42,6 +44,7 @@ try {
     assert.equal(options.parentMessageId, 'answer')
     assert.equal(options.eventType, 'answerDelta')
   }
+  assert.equal(chunks[0][2].metadata.event_kind, 'plan', 'ordinary plans use the existing backend execution-binding path')
   const payload = JSON.parse(chunks[1][2].content)
   assert.deepEqual(payload.steps[0].sub_steps.map(step => step.tool_metadata.status), ['completed', 'in_progress'])
   ctx.todoExecution.suspendForOrchestration(agent)

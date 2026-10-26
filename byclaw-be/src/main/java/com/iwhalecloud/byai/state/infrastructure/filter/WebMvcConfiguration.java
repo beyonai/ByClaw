@@ -266,6 +266,22 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
     public void extendMessageConverters(List<HttpMessageConverter<?>> converters) {
         FastJsonHttpMessageConverter fastJsonConverter = new FastJsonHttpMessageConverter() {
             @Override
+            public boolean canRead(java.lang.reflect.Type type, Class<?> contextClass, MediaType mediaType) {
+                return contextClass != com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController.class
+                    && super.canRead(type, contextClass, mediaType);
+            }
+
+            @Override
+            public boolean canWrite(java.lang.reflect.Type type, Class<?> clazz, MediaType mediaType) {
+                return !isInternalServiceRequest() && super.canWrite(type, clazz, mediaType);
+            }
+
+            @Override
+            public boolean canWrite(Class<?> clazz, MediaType mediaType) {
+                return !isInternalServiceRequest() && super.canWrite(clazz, mediaType);
+            }
+
+            @Override
             protected boolean supports(Class<?> clazz) {
                 // 只处理你的业务对象，不处理 springdoc-openapi 的对象
                 String packageName = clazz.getPackageName();
@@ -295,8 +311,43 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
             SerializerFeature.WriteMapNullValue, SerializerFeature.WriteNonStringKeyAsString);
         fastJsonConverter.setFastJsonConfig(fastJsonConfig);
         fastJsonConverter.setSupportedMediaTypes(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN));
-        // 添加到 converters 列表最前面
+        // Keep existing endpoints on their established Fastjson representation.
         converters.add(0, fastJsonConverter);
+        // The internal contract uses Jackson trees and numeric envelope/status codes. Fastjson's
+        // generic reader otherwise tests the controller context and tries to instantiate JsonNode.
+        var internalJson = new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter() {
+            @Override
+            public boolean canRead(java.lang.reflect.Type type, Class<?> contextClass, MediaType mediaType) {
+                return contextClass == com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController.class
+                    && super.canRead(type, contextClass, mediaType);
+            }
+
+            @Override
+            public boolean canRead(Class<?> clazz, MediaType mediaType) {
+                return false;
+            }
+
+            @Override
+            public boolean canWrite(java.lang.reflect.Type type, Class<?> clazz, MediaType mediaType) {
+                return isInternalServiceRequest() && super.canWrite(type, clazz, mediaType);
+            }
+
+            @Override
+            public boolean canWrite(Class<?> clazz, MediaType mediaType) {
+                return isInternalServiceRequest() && super.canWrite(clazz, mediaType);
+            }
+        };
+        // Preserve the existing converter identity/order for legacy consumers.
+        converters.add(1, internalJson);
+    }
+
+    /** Select serialization only; this route check never grants service authentication. */
+    private static boolean isInternalServiceRequest() {
+        var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) return false;
+        var request = servlet.getRequest();
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return com.iwhalecloud.byai.common.integration.security.InternalServiceRoutes.matches(request.getMethod(), path);
     }
 
 }

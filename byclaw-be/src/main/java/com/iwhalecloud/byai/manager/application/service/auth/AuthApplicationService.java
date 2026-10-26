@@ -126,6 +126,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Service
 public class AuthApplicationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
 
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService employeeGovernance;
@@ -958,8 +961,9 @@ public class AuthApplicationService {
     }
 
     private SsResource getRequiredResourceForUpdate(Long resourceId) {
+        businessLocks.acquire("resource:" + resourceId);
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResource::getResourceId, resourceId).last("FOR UPDATE");
+        queryWrapper.eq(SsResource::getResourceId, resourceId);
         SsResource ssResource = ssResourceMapper.selectOne(queryWrapper);
         if (ssResource == null) {
             throw new BaseException(I18nUtil.get("resource.not.found"));

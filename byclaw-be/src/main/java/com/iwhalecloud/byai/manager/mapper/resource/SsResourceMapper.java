@@ -33,6 +33,11 @@ import org.apache.ibatis.annotations.Param;
  */
 @Mapper
 public interface SsResourceMapper extends BaseMapper<SsResource> {
+    /** All entity updates cooperate with resource lifecycle and publication locks. */
+    @Override
+    @com.iwhalecloud.byai.common.lock.RedisTransactionLock(value = "resource", parameters = {"et.resourceId"})
+    int updateById(@org.apache.ibatis.annotations.Param("et") SsResource entity);
+
 
     List<ResourcePageDto> getResourceListByPage(Page<ResourcePageDto> page, @Param("query") ResourceQueryRequest query);
 

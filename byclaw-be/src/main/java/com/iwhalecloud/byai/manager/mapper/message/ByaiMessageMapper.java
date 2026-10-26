@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.message;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
@@ -31,10 +32,12 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
     /** 群行锁后读取最新状态，避免事务内旧查询缓存覆盖撤回判断。 */
     ByaiMessage selectForRecall(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId);
 
+    @RedisTransactionLock(value = "message", parameters = {"messageId"})
     int recallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
         @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt);
 
     /** 原撤回身份、时间和有效窗口必须同时匹配，避免竞争更新恢复了错误的一次撤回。 */
+    @RedisTransactionLock(value = "message", parameters = {"messageId"})
     int undoRecallGroupMessage(@Param("sessionId") Long sessionId, @Param("messageId") Long messageId,
         @Param("operatorId") Long operatorId, @Param("recalledAt") Date recalledAt,
         @Param("now") Date now, @Param("earliest") Date earliest, @Param("metadata") String metadata);
@@ -81,6 +84,7 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @param sessionId 会话ID
      * @return 删除行数
      */
+    @RedisTransactionLock(value = "session", parameters = {"sessionId"})
     int deleteBySessionId(@Param("sessionId") Long sessionId);
 
     /**
@@ -100,6 +104,7 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @param messageId 消息ID
      * @return 删除行数
      */
+    @RedisTransactionLock(value = "message", parameters = {"messageId"})
     int deleteByMessageId(@Param("messageId") Long messageId);
 
     /**
@@ -108,6 +113,7 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      * @param item 消息热度对象
      * @return 更新行数
      */
+    @RedisTransactionLock(value = "message", parameters = {"item.messageId"})
     int updateByMessageId(@Param("item") ByaiMessageHotDto item);
 
     /**

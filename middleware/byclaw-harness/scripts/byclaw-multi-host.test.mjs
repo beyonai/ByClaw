@@ -4,10 +4,10 @@ import net from 'node:net'
 import test from 'node:test'
 import {
   webStartupValues,
-  authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, DISABLED_BY_DESIGN, disabledRule,
+  authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, rewriteLocation, toolEnvUserToken, upstreamHeaders, userPublicUrl,
-  UserRegistry, webPrefix,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
+  userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
 const spec = {
@@ -20,6 +20,19 @@ const beSpec = {
 }
 
 // --- overlays ---------------------------------------------------------------
+
+test('browser sockets fit managed context paths and remain isolated by context and host root', () => {
+  const entries = [{ id: 'byclaw-browser-use', name: '@byclaw/dsh-browser-use' }]
+  const homes = [
+    `/data/multi-host/users/ctx_${'a'.repeat(64)}/dsh-home`,
+    `/data/multi-host/users/ctx_${'b'.repeat(64)}/dsh-home`,
+    `/data/other-host/users/ctx_${'a'.repeat(64)}/dsh-home`,
+  ]
+  const dirs = homes.map(home => composeUserOverlays(entries, 'same-user', home, spec)[0].config.runtimeDir)
+  assert.equal(new Set(dirs).size, homes.length)
+  for (const dir of dirs) assert.ok(Buffer.byteLength(`${dir}/browserd.sock`) <= 107, dir)
+  assert.equal(composeUserOverlays(entries, 'same-user', homes[0], spec)[0].config.runtimeDir, dirs[0])
+})
 
 test('overlays merge per-user additions into the composed row config', () => {
   const entries = [
@@ -241,6 +254,59 @@ test('concurrent ensures share one boot', async () => {
   assert.equal(await registry.ensure('u1', { sandboxId: 's', env: {} }), a)
   assert.equal(boots, 1)
   assert.match(a.webToken, /^[A-Za-z0-9_-]{43}$/)
+})
+
+test('a PUT for a running context is handed to its handle; boot and starting contexts are not', async () => {
+  const gate = deferred()
+  const renewed = []
+  const log = []
+  const registry = new UserRegistry({
+    boot: async () => { await gate.promise; return { ...fakeHandle('u1', []), renew(request) { renewed.push(request.env) } } },
+    log: (...parts) => log.push(parts.join(' ')),
+  })
+  const first = registry.ensure('u1', { sandboxId: 's', env: { BEYOND_TOKEN: 'jwt-1' } })
+  // While the context starts, a second PUT shares the boot; the boot's own env is current enough.
+  const second = registry.ensure('u1', { sandboxId: 's', env: { BEYOND_TOKEN: 'jwt-2' } })
+  gate.resolve()
+  await Promise.all([first, second])
+  assert.deepEqual(renewed, [])
+  await registry.ensure('u1', { sandboxId: 's', env: { BEYOND_TOKEN: 'jwt-3' } })
+  await registry.ensure('u1', { sandboxId: 's', env: {} })
+  assert.deepEqual(renewed, [{ BEYOND_TOKEN: 'jwt-3' }, {}])
+  // A handle without renew (other boots) and a failing renew leave the PUT successful.
+  const plain = new UserRegistry({ boot: async () => fakeHandle('u2', []) })
+  await plain.ensure('u2', { sandboxId: 's', env: {} })
+  assert.equal((await plain.ensure('u2', { sandboxId: 's', env: { BEYOND_TOKEN: 'x' } })).status, 'ready')
+  const failing = new UserRegistry({
+    boot: async () => ({ ...fakeHandle('u3', []), renew() { throw new Error('no service') } }),
+    log: (...parts) => log.push(parts.join(' ')),
+  })
+  await failing.ensure('u3', { sandboxId: 's', env: {} })
+  assert.equal((await failing.ensure('u3', { sandboxId: 's', env: {} })).status, 'ready')
+  assert.ok(log.some(line => line.includes('user u3: applying the PUT to the running context failed: no service')))
+})
+
+test('currentUserToken reads the login state BE keeps in Redis', async () => {
+  const store = { 'SHARE_BFM_USER_CODE_u1': '42', 'SHARE_BFM_USER_CODE_u2': '43' }
+  const hashes = { 'user:42:login:auth': { 'Beyond-Token': ' jwt-42 ', 'Sso-Token': 's' }, 'user:43:login:auth': {} }
+  const redis = { get: async key => store[key] ?? null, hget: async (key, field) => hashes[key]?.[field] ?? null }
+  assert.equal(await currentUserToken(redis, 'u1'), 'jwt-42')
+  assert.equal(await currentUserToken(redis, 'u2'), undefined)
+  assert.equal(await currentUserToken(redis, 'nobody'), undefined)
+})
+
+test('renewUserToken hands the PUT token to the byclaw-be backend only', () => {
+  const renewed = []
+  const ctx = { get: name => (name === 'ssh' ? { renewBeToken: token => renewed.push(token) } : undefined) }
+  assert.equal(renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: ' jwt-9 ' }), true)
+  assert.deepEqual(renewed, ['jwt-9'])
+  assert.equal(renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, {}), false)
+  assert.equal(renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, undefined), false)
+  assert.equal(renewUserToken(ctx, { toolEnvBackend: 'opensandbox' }, { BEYOND_TOKEN: 'jwt-9' }), false)
+  // A context whose plugin build predates renewal, or that failed to mount it.
+  assert.equal(renewUserToken({ get: () => undefined }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
+  assert.equal(renewUserToken({ get: () => ({}) }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
+  assert.deepEqual(renewed, ['jwt-9'])
 })
 
 test('a failed boot marks the user failed and the next ensure retries', async () => {

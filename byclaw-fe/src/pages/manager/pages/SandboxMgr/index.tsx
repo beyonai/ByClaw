@@ -1,47 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import classNames from 'classnames';
-import {
-  DashboardOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  DeleteOutlined,
-  InfoCircleOutlined,
-  ReloadOutlined,
-  SettingOutlined,
-  PlusOutlined,
-  EditOutlined,
-  RocketOutlined,
-  ClearOutlined,
-  ThunderboltOutlined,
-  FormatPainterOutlined,
-  CopyOutlined,
-  FullscreenOutlined,
-  FullscreenExitOutlined,
-} from '@ant-design/icons';
-import { trim } from 'lodash';
-import {
-  message,
-  Table,
-  Button,
-  Input,
-  Space,
-  Popconfirm,
-  Select,
-  Typography,
-  Tooltip,
-  Row,
-  Col,
-  Switch,
-  Tag,
-  Drawer,
-  Form,
-  InputNumber,
-  Modal,
-  Tabs,
-} from 'antd';
-import { useIntl, useDispatch, useSelector } from '@umijs/max';
-import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
+import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -49,15 +7,59 @@ import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { hasAnyUserRole } from '@/utils/userRole';
 import {
+  ClearOutlined,
+  CopyOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FormatPainterOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RocketOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
+import { useDispatch, useIntl, useSelector } from '@umijs/max';
+import {
+  Button,
+  Col,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
+import classNames from 'classnames';
+import { trim } from 'lodash';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
+import {
   buildServiceSpecPayload,
   formatJsonIfValid,
   isServiceSpecAutoStartEnabled,
   type ServiceSpecConfig,
 } from './serviceSpecUtils';
-import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 
-import RecoveryPanel from './RecoveryPanel';
 import EndpointLinks from './EndpointLinks';
+import RecoveryPanel from './RecoveryPanel';
+import SharedConfigPanel from './SharedConfig';
+import SharedResources from './SharedResources';
 import { primarySandboxEndpoint } from './endpointUtils';
 import styles from './index.module.less';
 
@@ -262,6 +264,17 @@ const SandboxMgr = () => {
   }, []);
   const canManageRecovery = userInfo?.userCode?.toLowerCase() === 'adminvip' && brandVersion === 'openSource';
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const isPlatformManager = hasAnyUserRole(
+    userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+    ['PLAT_MAN']
+  );
+  const canViewShared =
+    isPlatformManager ||
+    hasAnyUserRole(
+      userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+      ['BUSINESS_MAN']
+    );
   const canViewTenantResources =
     multiTenancyEnabled &&
     hasAnyUserRole(
@@ -2028,17 +2041,19 @@ const SandboxMgr = () => {
 
   const scopeTabs = (
     <Tabs
-      activeKey={recoveryOpen && canManageRecovery ? 'RECOVERY' : ownerScope}
+      activeKey={sharedOpen && canViewShared ? 'SHARED' : recoveryOpen && canManageRecovery ? 'RECOVERY' : ownerScope}
       items={[
         ...(canViewTenantResources
           ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
           : []),
         { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
+        ...(canViewShared ? [{ key: 'SHARED', label: intl.formatMessage({ id: 'sandboxMgr.shared.title' }) }] : []),
         ...(canManageRecovery ? [{ key: 'RECOVERY', label: '恢复任务' }] : []),
       ]}
       onChange={(key) => {
         setRecoveryOpen(key === 'RECOVERY');
-        if (key === 'RECOVERY') return;
+        setSharedOpen(key === 'SHARED');
+        if (key === 'RECOVERY' || key === 'SHARED') return;
         const scope = key as 'TENANT' | 'USER';
         setOwnerScope(scope);
         setEnterpriseId(undefined);
@@ -2046,6 +2061,17 @@ const SandboxMgr = () => {
       }}
     />
   );
+  if (sharedOpen && canViewShared) {
+    return (
+      <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+        {scopeTabs}
+        <SharedResources
+          key={String(userInfo?.enterpriseId) + String(isPlatformManager)}
+          canManage={isPlatformManager}
+        />
+      </div>
+    );
+  }
   if (recoveryOpen && canManageRecovery) {
     return (
       <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
@@ -2645,6 +2671,7 @@ const SandboxMgr = () => {
                 </div>
               ),
             },
+            ...(isPlatformManager ? [{ key: 'shared', label: '共享沙箱配置', children: <SharedConfigPanel /> }] : []),
           ]}
         />
       </Drawer>

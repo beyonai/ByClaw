@@ -53,6 +53,20 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
     menuItems = sandboxes.map((sandbox) => {
       const itemStatus = getSandboxItemStatus(sandbox);
       const workerStatus = getWorkerLivenessStatus(sandbox);
+      let serviceName = sandbox.sandboxType;
+      if (sandbox.isShared) {
+        serviceName = intl.formatMessage(
+          { id: 'sandbox.shared.resource' },
+          { sandboxType: sandbox.serviceKey || sandbox.sandboxType }
+        );
+      }
+      let heartbeatTitle: string | undefined;
+      if (sandbox.workerLastSeen) {
+        heartbeatTitle = intl.formatMessage(
+          { id: 'sandbox.worker.lastHeartbeat' },
+          { time: new Date(sandbox.workerLastSeen).toLocaleString(intl.locale) }
+        );
+      }
       return {
         key: `${sandbox.sandboxType}-${sandbox.sandboxId}`,
         label: (
@@ -64,10 +78,14 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
                 [styles.stopped]: itemStatus === 'stopped',
               })}
             />
-            <span className={styles.serviceName}>{sandbox.sandboxType}</span>
+            <span className={styles.serviceName}>{serviceName}</span>
             <span className={styles.serviceState}>{getItemStatusText(itemStatus)}</span>
-            <span className={styles.workerState}>{intl.formatMessage({ id: `sandbox.worker.${workerStatus}` })}</span>
-            <span className={styles.serviceAction}>{intl.formatMessage({ id: 'sandbox.action.restart' })}</span>
+            <Tooltip title={heartbeatTitle}>
+              <span className={styles.workerState}>{intl.formatMessage({ id: `sandbox.worker.${workerStatus}` })}</span>
+            </Tooltip>
+            <span className={styles.serviceAction}>
+              {intl.formatMessage({ id: sandbox.isShared ? 'sandbox.action.reconnect' : 'sandbox.action.restart' })}
+            </span>
           </div>
         ),
         onClick: () => handleRestart(sandbox),
@@ -119,11 +137,15 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
         </Tooltip>
       </Dropdown>
       <Modal
-        title={intl.formatMessage({ id: 'sandbox.restart.confirm.title' })}
+        title={intl.formatMessage({
+          id: restartTarget?.isShared ? 'sandbox.shared.reconnect.title' : 'sandbox.restart.confirm.title',
+        })}
         open={!!restartTarget}
         onOk={handleRestartConfirm}
         onCancel={() => setRestartTarget(null)}
-        okText={intl.formatMessage({ id: 'sandbox.restart.confirm.ok' })}
+        okText={intl.formatMessage({
+          id: restartTarget?.isShared ? 'sandbox.shared.reconnect.ok' : 'sandbox.restart.confirm.ok',
+        })}
         cancelText={intl.formatMessage({ id: 'sandbox.restart.confirm.cancel' })}
         confirmLoading={isRestarting}
         cancelButtonProps={{ disabled: isRestarting }}
@@ -131,8 +153,8 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
         closable={!isRestarting}
       >
         {intl.formatMessage(
-          { id: 'sandbox.restart.confirm.content' },
-          { sandboxType: restartTarget?.sandboxType || '' }
+          { id: restartTarget?.isShared ? 'sandbox.shared.reconnect.content' : 'sandbox.restart.confirm.content' },
+          { sandboxType: (restartTarget?.isShared && restartTarget.serviceKey) || restartTarget?.sandboxType || '' }
         )}
       </Modal>
     </>

@@ -23,5 +23,11 @@ public class KnowledgeMetadataSearchItem {
 
     private String filePath;
 
+    /** ByKC 同时返回 file 和 directory，不能从扩展名推断目录。 */
+    private String type;
+
+    /** 门户根据可信 userCode 解析的展示名称，历史无账号数据允许为空。 */
+    private String createStaffName;
+
     private Map<String, Object> metadata = new LinkedHashMap<>();
 }

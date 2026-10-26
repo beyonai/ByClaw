@@ -199,7 +199,7 @@ public class GroupChatTaskService {
         sessionService.lockById(task.getGroupSessionId());
         taskAuthorizationService.requireInitiator(taskId);
         // 文件转存及最终提交共用任务行锁；继续对话、取消和替换必须等待本次发布结束。
-        task = taskMapper.selectForUpdate(taskId);
+        task = taskMapper.selectWithRedisLock(taskId);
         Long pendingId = request == null ? null : request.getPendingPublicationId();
         if (pendingId != null && (request.getText() != null
             || (request.getFiles() != null && !request.getFiles().isEmpty()))) {
@@ -294,7 +294,7 @@ public class GroupChatTaskService {
 
     /** 撤回事务已验证群权限；只取消由指定轮次创建的活动任务。 */
     public ByaiGroupChatTask cancelForRecall(Long taskId, Long dispatchId) {
-        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
         if (task == null || !Objects.equals(dispatchId, task.getDispatchId()) || !"ACTIVE".equals(task.getStatus())) {
             return null;
         }
@@ -313,7 +313,7 @@ public class GroupChatTaskService {
 
     private ByaiGroupChatTask requireActiveCancellation(Long taskId) {
         taskAuthorizationService.requireCanceller(taskId);
-        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
         if (task == null || !"ACTIVE".equals(task.getStatus())) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.noLongerActive"));
         }

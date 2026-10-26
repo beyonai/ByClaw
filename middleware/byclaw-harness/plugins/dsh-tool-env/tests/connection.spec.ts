@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
-import { answerWhileDown } from '../src/pending-directories.ts'
+import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
 describe('scrubEnvironment', () => {
   it('drops tool-environment settings from forwarded process environments', () => {
@@ -23,6 +23,21 @@ describe('scrubEnvironment', () => {
 })
 
 describe('DeferredToolEnvironmentWork', () => {
+  it('remembers which queued directories it created, not the ones that failed', async () => {
+    const work = new DeferredToolEnvironmentWork(() => {})
+    work.defer('mkdir:/by/.sessions/1', async () => {})
+    work.defer('mkdir:/by/.sessions/2', async () => { throw new Error('nope') })
+    work.defer('write:/by/.sessions/1/a', async () => {})
+    expect(work.pendingDirectories()).toEqual(['/by/.sessions/1', '/by/.sessions/2'])
+    expect(work.createdDirectories()).toEqual([])
+    await work.run()
+    expect(work.pendingDirectories()).toEqual([])
+    expect(work.createdDirectories()).toEqual(['/by/.sessions/1'])
+    // Directories created directly while B was up count the same; other keys do not.
+    work.noteDone('mkdir:/by/.sessions/3')
+    work.noteDone('write:/by/.sessions/3/a')
+    expect(work.createdDirectories()).toEqual(['/by/.sessions/1', '/by/.sessions/3'])
+  })
   it('keeps the latest operation per key, runs in order and survives failures', async () => {
     const logs: string[] = []
     const work = new DeferredToolEnvironmentWork(message => logs.push(message))
@@ -77,6 +92,21 @@ describe('answerWhileDown', () => {
     expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/AGENTS.md', displayPath: 'x' } }, [], [])).toBeNull()
     expect(answerWhileDown('fs.lstat', { path: 'CLAUDE.local.md', cwd: '/by/.sessions' }, [], [])).toBeNull()
     expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/notes/AGENTS.txt', displayPath: 'x' } }, [], [])).toBeUndefined()
+  })
+  it('keeps directories it created on B as existing while B is down; their contents still need B', () => {
+    const created = ['/by/.sessions/41/']
+    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/.sessions/41', displayPath: 'x' } }, [], [], created)).toEqual({ version: 'pending', type: 'directory' })
+    expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/41' }, [], [], created)).toEqual({ version: 'pending', type: 'directory' })
+    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/.sessions/41/notes.md', displayPath: 'x' } }, [], [], created)).toBeUndefined()
+    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/41', displayPath: 'x' } }, [], [], created)).toBeUndefined()
+  })
+  it('treats cleanup of processes and streams as done when no connection is up', () => {
+    expect(isCleanupRequest('process.terminate')).toBe(true)
+    expect(isCleanupRequest('fs.streamClose')).toBe(true)
+    expect(isCleanupRequest('fs.stat')).toBe(false)
+    expect(answerWhileDown('process.terminate', { id: 'p1' }, [], [])).toBeNull()
+    expect(answerWhileDown('fs.streamClose', { id: 's1' }, [], [])).toBeNull()
+    expect(answerWhileDown('process.signal', { id: 'p1', value: 'SIGTERM' }, [], [])).toBeUndefined()
   })
   it('leaves what tools do to B: stat, list and read of real paths, processes', () => {
     expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/projects/1/README.md', displayPath: 'x' } }, pending)).toBeUndefined()

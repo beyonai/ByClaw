@@ -73,6 +73,7 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     const team = teamSnapshot?.team;
     if (!team) return undefined;
     if (taskPlan.teamId) return team.teamId === taskPlan.teamId ? team : undefined;
+    if (taskPlan.planId.startsWith('todo:')) return undefined;
     // Old team plans only carried numbered steps. Match the entire unique task list before using its members.
     const teamTasks = team.tasks || [];
     const matchesLegacyPlan =
@@ -80,7 +81,8 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
       new Set(tasks.map((task) => task.title)).size === tasks.length &&
       tasks.every((task) => teamTasks.filter((candidate) => candidate.subject === task.title).length === 1);
     return matchesLegacyPlan ? team : undefined;
-  }, [taskPlan.teamId, tasks, teamSnapshot]);
+  }, [taskPlan.planId, taskPlan.teamId, tasks, teamSnapshot]);
+  const isTeamPlan = Boolean(taskPlan.teamId || navigationTeam);
 
   useEffect(() => {
     // Snapshot refreshes may replace planId; only changing conversations resets the user's choice.
@@ -120,18 +122,16 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   const hasRunningTask = tasks.some((task) => task.status === 'IN_PROGRESS');
   const allTasksTerminal = tasks.every((task) => ['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(task.status));
   const hasWorkingMember = Boolean(
-    runtime?.activeChildCount || teamSnapshot?.team.members?.some((member) => member.activity === 'working')
+    runtime?.activeChildCount || navigationTeam?.members?.some((member) => member.activity === 'working')
   );
   const workingMemberCount =
-    runtime?.activeChildCount ||
-    teamSnapshot?.team.members?.filter((member) => member.activity === 'working').length ||
-    0;
+    runtime?.activeChildCount || navigationTeam?.members?.filter((member) => member.activity === 'working').length || 0;
   const hasBlockedTask = Boolean(navigationTeam?.tasks?.some((task) => task.state === 'blocked'));
   const isWaitingForUser = runtime?.status === 'waiting_user' || Boolean(runtime?.waitingInteractionCount);
   const isRuntimeFailure = runtime?.status === 'failed' || taskPlan.status === 'FAILED';
   const isRuntimeCancelled = runtime?.status === 'cancelled' || ['CANCELLING', 'CANCELLED'].includes(taskPlan.status);
   const isStaleRunningTask = hasRunningTask && runtime?.status === 'idle';
-  const teamStillActive = teamSnapshot?.team.lifecycle === 'running' && !allTasksTerminal;
+  const teamStillActive = navigationTeam?.lifecycle === 'running' && !allTasksTerminal;
   const isWorking =
     !isRuntimeFailure &&
     !isRuntimeCancelled &&
@@ -150,13 +150,22 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.statusSyncing' });
   } else if (!isSummarizing && hasWorkingMember && runtime?.rootActive) {
     overallStatus = intl.formatMessage(
-      { id: 'messageList.taskPlan.captainAndMembersWorking' },
+      {
+        id: isTeamPlan
+          ? 'messageList.taskPlan.captainAndMembersWorking'
+          : 'messageList.taskPlan.agentAndSubagentsWorking',
+      },
       { count: workingMemberCount }
     );
   } else if (!isSummarizing && hasWorkingMember) {
-    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.membersWorking' }, { count: workingMemberCount });
+    overallStatus = intl.formatMessage(
+      { id: isTeamPlan ? 'messageList.taskPlan.membersWorking' : 'messageList.taskPlan.subagentsWorking' },
+      { count: workingMemberCount }
+    );
   } else if (!isSummarizing && runtime?.rootActive) {
-    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.captainWorking' });
+    overallStatus = intl.formatMessage({
+      id: isTeamPlan ? 'messageList.taskPlan.captainWorking' : 'messageList.taskPlan.agentWorking',
+    });
   } else if (teamStillActive) {
     overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.dispatching' });
   }
@@ -216,7 +225,9 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
           )}
           {isSummarizing && (
             <span className={styles.runningProgress} role="status">
-              {intl.formatMessage({ id: 'messageList.taskPlan.captainSummarizing' })}
+              {intl.formatMessage({
+                id: isTeamPlan ? 'messageList.taskPlan.captainSummarizing' : 'messageList.taskPlan.agentSummarizing',
+              })}
             </span>
           )}
           <span className={styles.chevron} aria-hidden="true">

@@ -70,14 +70,21 @@ those itself: path resolution only normalizes, queued directories are empty
 directories with nothing inside, `.git` and instruction-file probes
 (`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
 directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
-`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, and `executable`
-lookups resolve on this host (same image build). What tools do (stat, list,
-read, write of real paths; processes) still goes to B and starts it. The
-trade-off: until a session's first tool call, its prompt sees no
-session-local Skills and no instruction files from the user tree.
-After a failed launch the `byclaw-be` backend waits before trying again
-(1 s, doubling to 30 s) and reports the cause instead of calling BE on every
-operation.
+`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, directories this
+host already created on B still exist (B's volume outlives B), cleanup of a
+process or stream of a connection that is gone (`process.terminate`,
+`fs.streamClose`) is already done, and `executable` lookups resolve on this
+host (same image build). What tools do (stat, list, read, write of real
+paths; processes) still goes to B and starts it. The trade-off: until a
+session's first tool call, its prompt sees no session-local Skills and no
+instruction files from the user tree.
+A launch that BE refuses (for example while the platform is still releasing
+or creating the sandbox: "Sandbox is being created") is retried every 3 s for
+up to 60 s inside the operation that needs B, so one transient refusal does not
+fail a tool call or a turn. Only after that window does the `byclaw-be` backend
+give up; it then waits before trying again (1 s, doubling to 30 s) and reports
+the cause instead of calling BE on every operation. A spec without an ssh
+endpoint is a configuration error and fails at once.
 
 ## Backends
 
@@ -189,6 +196,7 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
+| `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` | `21600000` | processes left on B (`cmd &`) keep it past idle for at most this long |
 | `BYCLAW_TOOL_ENV_HOST`, `BYCLAW_TOOL_ENV_PORT` | `static` backend sshd endpoint |
 | `BYCLAW_TOOL_ENV_WS_URL` | `static` backend: B's WebSocket bridge URL instead of a TCP endpoint |
 | `BYCLAW_TOOL_ENV_WORKSPACE` | remote default workspace (default `/by`) |
@@ -243,17 +251,47 @@ out of the global spec: it would reach every A.
 - The shared DSH host (`scripts/byclaw-multi-host.mjs`) configures the
   `opensandbox` backend per user context unless `BYCLAW_DSH_TOOL_ENV=byclaw-be`
   is set on the host; then each context uses the `BEYOND_TOKEN` BE passed in
-  its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
-  host cannot mount the user's volume.
+  its PUT (renewed on every later PUT, see "Lifecycle of B"), and
+  `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the host cannot
+  mount the user's volume.
 
-## Follow-ups (`byclaw-be`, deliberately not done yet)
+## Lifecycle of B with `byclaw-be`
 
-- **Idle pause/resume.** BE has no pause API, so `pause()` is a no-op and B keeps
-  running between turns. OpenSandbox's pause/resume is reachable through BE's
-  `/v1/sandboxes/**` passthrough if this is wanted later.
-- **Releasing B.** Nothing removes B when A is released. BE's idle cleanup and
-  the DSH silent release only cover A's own sandbox type; B needs either an
-  explicit `removeSandbox` on A's shutdown or its own heartbeat and reclaim rule.
+The plugin owns B's lifetime; BE only creates and removes records on request.
+
+- **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10
+  minutes) without operations or open streams the connection calls `pause()`,
+  which releases B (`/sandbox/removeSandbox`). Before that it checks two more
+  things (src/busy.ts): whether DSH itself has work in progress on A (an Agent
+  in a turn, a background job), and whether processes the user left on B
+  (`cmd &`, `nohup`) are still running, asked over the connection's own `ssh`
+  alias. Either postpones the release by another idle period; residual
+  processes do so for at most `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` (default
+  6 h), after which B is released anyway. The next operation launches a fresh
+  B; the user's files are on the shared workspace volume, only B's own `/tmp`
+  goes.
+- **A goes away.** Closing the connection (the context is disposed, the host
+  shuts down) releases B the same way, with a short grace period.
+- **Credentials.** The `BEYOND_TOKEN` BE injected is the user's JWT and expires,
+  while a context on the shared host stays resident for days. The host therefore
+  hands every later PUT's token to the context (`ToolEnv.renewBeToken`; BE mints a
+  new one per PUT), and provides `byclawBeTokenSource`, the user's current login
+  token from Redis, which the backend asks when BE answers 401. A launch BE
+  rejects is logged as `tool environment launch rejected: this context's
+  Beyond-Token expired …` (not `launch failed …`), retried once with the source's
+  token when that differs, and its backoff ends as soon as a different token
+  arrives.
+- **A launch BE refuses** because B is still being released or created (the
+  platform answers "Sandbox is being created") is retried every 3 s for up to
+  60 s inside the operation that needed B, then the usual backoff applies. A
+  spec without an ssh endpoint fails at once.
+- **B is gone while A believes it is up** (the platform removed it): the in-flight
+  operation fails with the connection's own error; cleanup requests
+  (`process.terminate`, `fs.streamClose`) are answered locally, directories A
+  created on B are still reported as existing (B's volume survives), and the
+  next real operation launches a fresh B.
+- **What this process cannot see** (it died with B running) is left to the
+  platform's own reclaim of the record.
 
 ## Building B's image
 

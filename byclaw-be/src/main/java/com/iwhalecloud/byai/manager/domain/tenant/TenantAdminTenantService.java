@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.hook.HookPublisher;
 import java.util.List;
@@ -23,6 +26,21 @@ import org.springframework.web.server.ResponseStatusException;
 /** Platform administrator entry point for idempotent tenant reservation. */
 @Service
 public class TenantAdminTenantService {
+
+    private ObjectProvider<TenantExecutionPolicyService> tenantExecutionPolicies;
+
+    @Autowired(required = false)
+    public void setTenantExecutionPolicies(
+        ObjectProvider<TenantExecutionPolicyService> policies) {
+        this.tenantExecutionPolicies = policies;
+    }
+
+    private void requireLegacyCreationAllowed() {
+        if (tenantExecutionPolicies != null) {
+            var policy = tenantExecutionPolicies.getIfAvailable();
+            if (policy != null) policy.requireLegacyCreationAllowed();
+        }
+    }
 
     private final TenantAdminTenantMapper tenantMapper;
     private final SequenceService sequenceService;
@@ -81,6 +99,7 @@ public class TenantAdminTenantService {
 
     @Transactional
     public TenantView create(String name, long packageId, String requestId) {
+        requireLegacyCreationAllowed();
         requirePlatformAdmin();
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {

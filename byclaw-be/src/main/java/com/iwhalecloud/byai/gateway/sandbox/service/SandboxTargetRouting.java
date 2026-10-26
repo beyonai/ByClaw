@@ -9,7 +9,9 @@ public final class SandboxTargetRouting {
     public static SandboxLaunchRouting resolve(String userCode, String targetAgentType,
             Supplier<SandboxLaunchRouting> originalRouting) {
         if (userCode != null && !userCode.trim().isEmpty()) {
-            if (matches("BYCLAW_DSH", userCode, targetAgentType)
+            // Managed target is authenticated and selected by TargetAgentResolver before this routing helper.
+            if ((targetAgentType != null && targetAgentType.startsWith("BYCLAW_DSH_SHARED_"))
+                    || matches("BYCLAW_DSH", userCode, targetAgentType)
                     || matches("HARNESS", userCode, targetAgentType)) {
                 return new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
                     SandboxLaunchRouting.DEFAULT_RESOURCE_ID);

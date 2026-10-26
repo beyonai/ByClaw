@@ -88,7 +88,7 @@ class UserRegistrationHookTest {
             Users existing = new Users();
             existing.setUserId(42L);
             when(database.findAllByUserPhone("13800138000")).thenReturn(List.of(existing));
-            var service = new PhoneAccountRegistrationService(mock(JdbcTemplate.class), database,
+            var service = new PhoneAccountRegistrationService(mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class), database,
                 registrationService(context.getBean(HookPublisher.class), database, false));
             var tx = new TransactionTemplate(new HookIntegrationTest.TestTransactions());
             Users resolved = tx.execute(status -> service.resolveOrRegister("13800138000"));

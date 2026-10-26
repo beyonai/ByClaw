@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.groupchat;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import java.util.List;
 import java.util.Date;
 
@@ -13,10 +14,11 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 
 @Mapper
 public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
-    /** 与继续对话、取消及待发布替换共用任务行锁，避免上传期间内容发生变化。 */
+    /** 与继续对话、取消及待发布替换共用任务 Redis 事务锁，避免上传期间内容发生变化。 */
     @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
-    @Select("SELECT * FROM byai_group_chat_task WHERE task_session_id = #{taskId} FOR UPDATE")
-    ByaiGroupChatTask selectForUpdate(@Param("taskId") Long taskId);
+    @Select("SELECT * FROM byai_group_chat_task WHERE task_session_id = #{taskId}")
+    @RedisTransactionLock(value = "group-task", parameters = {"taskId"})
+    ByaiGroupChatTask selectWithRedisLock(@Param("taskId") Long taskId);
 
     List<ByaiGroupChatTask> selectByGroup(@Param("groupSessionId") Long groupSessionId);
 

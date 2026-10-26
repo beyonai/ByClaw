@@ -30,6 +30,9 @@ class ByaiMessageHotServiceTest {
     @Mock
     private ByaiMessageMapper byaiMessageMapper;
 
+    @Mock
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
     @InjectMocks
     private ByaiMessageHotService byaiMessageHotService;
 

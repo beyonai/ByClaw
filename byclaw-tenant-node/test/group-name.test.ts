@@ -33,7 +33,6 @@ describe("workgroup name reuse", () => {
       while (trim.has(name.at(-1)!)) name = name.slice(0, -1);
       return name;
     });
-    database.function("pg_advisory_xact_lock", (_value) => null);
   });
   afterEach(() => database.close());
   function oldGroup(state: string | null, enterprise = "10", creator = "20", name = "Team") {
@@ -64,10 +63,12 @@ describe("workgroup name reuse", () => {
       });
       return database.prepare(sqliteSql).all(...(bindings as any[])) as any[];
     });
+    const lock = vi.fn(async (_key: string) => {});
     return {
       query,
+      lock,
       context: new CommandContext(
-        { query },
+        { query, lock },
         command({
           operation: "CREATE_GROUP",
           payload: {
@@ -129,13 +130,14 @@ describe("workgroup name reuse", () => {
   it("locks the tenant, creator and normalized name before checking availability", async () => {
     const s = context();
     await createSession(s.context);
-    const lock = s.query.mock.calls.findIndex(([sql]) => sql.includes("pg_advisory_xact_lock"));
     const check = s.query.mock.calls.findIndex(
       ([sql]) => sql.includes("session_name") && sql.startsWith("SELECT"),
     );
-    expect(lock).toBeGreaterThanOrEqual(0);
-    expect(check).toBeGreaterThan(lock);
-    expect(s.query.mock.calls[lock]?.[1]).toEqual(["group-name:10:20:Team"]);
+    expect(check).toBeGreaterThanOrEqual(0);
+    expect(s.lock).toHaveBeenCalledWith("group-name:10:20:Team");
+    expect(s.lock.mock.invocationCallOrder[0]).toBeLessThan(
+      s.query.mock.invocationCallOrder[check]!,
+    );
   });
   it("uses the same Chinese-name limit for creation and availability checks", async () => {
     const s = context();

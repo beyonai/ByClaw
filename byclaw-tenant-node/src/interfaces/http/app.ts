@@ -15,8 +15,8 @@ import { commandRoutes } from "./command-routes.js";
 import { sessionRoutes } from "./session-routes.js";
 import { mirrorRoutes } from "./mirror-routes.js";
 import { schemaRoutes } from "./schema-routes.js";
-import type OperationsQueries from '../../application/OperationsQueries.js';
-import operationsRoutes from './operationsRoutes.js';
+import type OperationsQueries from "../../application/OperationsQueries.js";
+import operationsRoutes from "./operationsRoutes.js";
 
 import { forwardSourceRoutes } from "./group-forward-source-routes.js";
 import type { ForwardSourceAuthorityReader } from "../../application/group-forward-source-authority.js";
@@ -24,7 +24,25 @@ import type { ForwardSourceAuthorityReader } from "../../application/group-forwa
 import type { GroupForwardService } from "../../application/group-forward-service.js";
 import { groupForwardRoutes } from "./group-forward-routes.js";
 
+// Some existing read APIs use POST for structured pagination/filter bodies.
+const readOnlyPosts = new Set([
+  "/internal/v1/sessions/query",
+  "/internal/v1/sessions/:id/children/query",
+  "/internal/v1/group-chats/invitations/validate",
+  "/internal/v1/group-chats/name-check",
+  "/internal/v1/group-chats/project-access",
+  "/internal/v1/assiman/getMessages",
+  "/internal/v1/assiman/getMessageOutline",
+  "/internal/v1/assiman/getMessageByIds",
+  "/internal/v1/group-chats/:id/context",
+  "/internal/v1/group-chats/:id/messages/search",
+  "/internal/v1/operations/groups/query",
+  "/internal/v1/operations/groups/:id/members/query",
+  "/internal/v1/operations/groups/:id/conversations/query",
+]);
+
 export interface HttpServices {
+  requireExecution?(): Promise<void>;
   operations?: OperationsQueries;
   forwards?: GroupForwardService;
   forwardSources?: ForwardSourceAuthorityReader;
@@ -82,6 +100,12 @@ export function createApp(
     )
       return;
     const management = req.url.startsWith("/internal/v1/schema");
+    if (
+      !management &&
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      !(req.method === "POST" && readOnlyPosts.has(req.routeOptions.url ?? ""))
+    )
+      await services.requireExecution?.();
     if (!(management ? services.connected() : services.ready()))
       throw new ServiceError(503, "NOT_READY");
   });

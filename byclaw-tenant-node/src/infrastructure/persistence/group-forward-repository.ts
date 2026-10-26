@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
 import type {
@@ -382,22 +383,24 @@ export class GroupForwardRepository {
     if (!row) throw new DomainError("FORWARD_LEASE_LOST");
     return row;
   }
-  /** 写事务内先串行处理请求再处理目标；同值更新不消耗 fencing_version，持有至事务结束。 */
+  /** 写事务内先取得请求 Redis 锁再取得目标锁，均持有至事务结束。 */
   async lockRequest(requestId: string): Promise<ForwardRequestRow | null> {
+    await lockBusiness(this.db, `forward-request:${requestId}`);
     return (
       (
         await this.rows<ForwardRequestRow>(
-          `UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=$1 AND request_id=$2 RETURNING *`,
+          `SELECT * FROM byai.byai_group_chat_forward_request WHERE enterprise_id=$1 AND request_id=$2`,
           [this.tenantId, requestId],
         )
       )[0] ?? null
     );
   }
   async lockTarget(targetId: string): Promise<ForwardTargetRow | null> {
+    await lockBusiness(this.db, `forward-target:${targetId}`);
     return (
       (
         await this.rows<ForwardTargetRow>(
-          `UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=$1 AND target_id=$2 RETURNING *`,
+          `SELECT * FROM byai.byai_group_chat_forward_target WHERE enterprise_id=$1 AND target_id=$2`,
           [this.tenantId, targetId],
         )
       )[0] ?? null

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.enterprise;
 
+import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
+import org.springframework.beans.factory.ObjectProvider;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
@@ -35,6 +37,21 @@ import java.util.List;
  */
 @Service
 public class EnterpriseInfoApplicationService {
+
+    private ObjectProvider<TenantExecutionPolicyService> tenantExecutionPolicies;
+
+    @Autowired(required = false)
+    public void setTenantExecutionPolicies(
+        ObjectProvider<TenantExecutionPolicyService> policies) {
+        this.tenantExecutionPolicies = policies;
+    }
+
+    private void requireLegacyCreationAllowed() {
+        if (tenantExecutionPolicies != null) {
+            var policy = tenantExecutionPolicies.getIfAvailable();
+            if (policy != null) policy.requireLegacyCreationAllowed();
+        }
+    }
 
     /** 系统预置默认企业，不允许删除 */
     private static final Long DEFAULT_ENTERPRISE_ID = 1L;
@@ -92,13 +109,14 @@ public class EnterpriseInfoApplicationService {
     }
 
     /**
-     * 新增企业信息；任意登录用户可创建，创建成功后将当前用户设为该企业 OWNER。
+     * 新增企业信息；传统部署允许登录用户创建并设为 OWNER，SaaS 部署统一通过商业开通接口预留。
      *
      * @param enterpriseInfoDTO 新增入参
      * @return 新建企业标识
      */
     @Transactional(rollbackFor = Exception.class)
     public Long create(EnterpriseInfoDTO enterpriseInfoDTO) {
+        requireLegacyCreationAllowed();
         assertComAcctCodeUnique(enterpriseInfoDTO.getComAcctCode(), null);
 
         EnterpriseInfo enterpriseInfo = buildEnterpriseForCreate(enterpriseInfoDTO);

@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import type { LeaseManager, RedisLease } from "../coordination/redis-leases.js";
 import { DataSource, type QueryRunner } from "typeorm";
 import { DomainError } from "../../domain/errors.js";
 import type { TenantSnapshot } from "../../domain/tenant.js";
@@ -16,9 +17,15 @@ export class Database implements TenantDatabase {
   private constructor(
     private readonly source: DataSource,
     private readonly snapshot: TenantSnapshot,
+    private readonly locks: LeaseManager,
     private readonly locked?: QueryRunner,
+    private readonly schemaLease?: RedisLease,
   ) {}
-  static async open(snapshot: TenantSnapshot, password: string): Promise<Database> {
+  static async open(
+    snapshot: TenantSnapshot,
+    password: string,
+    locks: LeaseManager,
+  ): Promise<Database> {
     const source = new DataSource({
       type: "postgres",
       host: snapshot.host,
@@ -32,9 +39,10 @@ export class Database implements TenantDatabase {
       extra: { max: 8, connectionTimeoutMillis: 5000, statement_timeout: 30000 },
     });
     await source.initialize();
-    return new Database(source, snapshot);
+    return new Database(source, snapshot, locks);
   }
   async query(sql: string, parameters: unknown[] = []): Promise<SqlRow[]> {
+    await this.schemaLease?.check();
     return queryRows(
       await (this.locked ? this.locked.query(sql, parameters) : this.source.query(sql, parameters)),
     );
@@ -65,20 +73,36 @@ export class Database implements TenantDatabase {
     const runner = this.locked ?? this.source.createQueryRunner();
     let committing = false,
       failed = false;
+    let schema: RedisLease | undefined;
+    const held = new Map<string, RedisLease>();
+    const check = async () => {
+      await schema?.check();
+      for (const lease of held.values()) await lease.check();
+    };
     try {
+      schema =
+        this.schemaLease ??
+        (await this.locks.acquire(`schema:${this.snapshot.enterpriseId}`, "read"));
       await runner.connect();
       await runner.startTransaction();
       await runner.query("SET LOCAL search_path TO byai, pg_catalog");
-      if (!this.locked)
-        await runner.query("SELECT pg_advisory_xact_lock_shared(hashtext($1))", [
-          `tenant-schema:${this.snapshot.enterpriseId}`,
-        ]);
       const result = await work({
-        query: async (sql, args = []) => queryRows(await runner.query(sql, args)),
+        lock: async (key) => {
+          if (!held.has(key))
+            held.set(key, await this.locks.acquire(`tenant:${this.snapshot.enterpriseId}:${key}`));
+          await check();
+        },
+        query: async (sql, args = []) => {
+          await check();
+          return queryRows(await runner.query(sql, args));
+        },
       });
       await beforeCommit?.();
+      await check();
       committing = true;
       await runner.commitTransaction();
+      // A lost lease during COMMIT cannot undo the commit; preserve uncertainty for idempotent reconciliation.
+      await check();
       return result;
     } catch (error) {
       failed = true;
@@ -92,45 +116,59 @@ export class Database implements TenantDatabase {
       if (committing) throw new DomainError("COMMIT_UNCERTAIN");
       throw error;
     } finally {
+      let cleanupFailed = false;
+      // Rollback/commit completes before another node can acquire these business keys.
       if (!this.locked) {
         try {
           await runner.release();
         } catch {
-          if (!failed) throw new DomainError("COMMIT_UNCERTAIN");
+          cleanupFailed = true;
         }
       }
+      for (const lease of [...held.values()].reverse()) {
+        try {
+          await lease.release();
+        } catch {
+          cleanupFailed = true;
+        }
+      }
+      if (!this.schemaLease && schema) {
+        try {
+          await schema.release();
+        } catch {
+          cleanupFailed = true;
+        }
+      }
+      if (cleanupFailed && !failed) throw new DomainError("COMMIT_UNCERTAIN");
     }
   }
-  /** 独占锁绑定专用连接并覆盖整条版本链；链内每版仍使用自己的事务。 */
+  /** Redis 独占租约覆盖整条版本链；链内每版仍使用自己的 SQL 事务。 */
   async exclusive<T>(work: (database: TenantDatabase) => Promise<T>): Promise<T> {
     const runner = this.source.createQueryRunner();
-    let acquired = false,
-      failed = false;
+    let lease: RedisLease | undefined;
+    let failed = false;
     try {
+      lease = await this.locks.acquire(`schema:${this.snapshot.enterpriseId}`);
       await runner.connect();
-      await runner.query("SELECT pg_advisory_lock(hashtext($1))", [
-        `tenant-schema:${this.snapshot.enterpriseId}`,
-      ]);
-      acquired = true;
-      return await work(new Database(this.source, this.snapshot, runner));
+      const result = await work(
+        new Database(this.source, this.snapshot, this.locks, runner, lease),
+      );
+      await lease.check();
+      return result;
     } catch (error) {
       failed = true;
       throw error;
     } finally {
       let cleanupFailed = false;
       try {
-        if (acquired)
-          await runner.query("SELECT pg_advisory_unlock(hashtext($1))", [
-            `tenant-schema:${this.snapshot.enterpriseId}`,
-          ]);
+        await runner.release();
       } catch {
         cleanupFailed = true;
-      } finally {
-        try {
-          await runner.release();
-        } catch {
-          cleanupFailed = true;
-        }
+      }
+      try {
+        await lease?.release();
+      } catch {
+        cleanupFailed = true;
       }
       if (cleanupFailed && !failed) throw new DomainError("SCHEMA_LOCK_RELEASE_FAILED");
     }
@@ -139,7 +177,7 @@ export class Database implements TenantDatabase {
     const options = this.source.options;
     if (!("password" in options) || typeof options.password !== "string")
       throw new DomainError("NOT_READY");
-    return Database.open(this.snapshot, options.password);
+    return Database.open(this.snapshot, options.password, this.locks);
   }
   async close(): Promise<void> {
     if (this.source.isInitialized) await this.source.destroy();

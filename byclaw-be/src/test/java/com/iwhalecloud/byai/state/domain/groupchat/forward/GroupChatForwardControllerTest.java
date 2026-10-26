@@ -21,6 +21,8 @@ import java.io.*;
 import java.util.*;
 
 class GroupChatForwardControllerTest {
+    private GroupChatForwardServiceTest fixture;
+    @org.junit.jupiter.api.AfterEach void closeRedis() throws Exception { if (fixture != null) fixture.closeRedis(); }
     GroupChatForwardService forwards=mock(GroupChatForwardService.class);
     GroupChatForwardTargetQueryService targets=mock(GroupChatForwardTargetQueryService.class);
     GroupChatForwardQueryService queries=mock(GroupChatForwardQueryService.class);
@@ -77,7 +79,7 @@ class GroupChatForwardControllerTest {
     }
 
     @Test void originalActorCanReadReceiptAfterSourceLeaveButOtherBindingsCannot() throws Exception {
-        var fixture=new GroupChatForwardServiceTest();fixture.setup();
+        fixture=new GroupChatForwardServiceTest();fixture.setup();
         var operation=fixture.store.prepare(actor,10,fixture.input("http-receipt"));
         fixture.db.update("DELETE FROM byai.byai_session_member WHERE session_id=10");
         var app=new GroupChatForwardService(fixture.store,null,null,mock(ForwardPlatformPolicy.class),null,null,null,null,null);

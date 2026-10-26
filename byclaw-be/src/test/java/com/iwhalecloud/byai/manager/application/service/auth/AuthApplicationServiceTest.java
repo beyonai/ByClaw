@@ -110,6 +110,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "skillPublicationService", publications);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         LoginInfo login = new LoginInfo();
         login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);
@@ -159,6 +160,7 @@ class AuthApplicationServiceTest {
         var resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         SsResource target = enterpriseResource(601L, 1L);
         target.setResourceBizType(bizType);
         var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
@@ -235,6 +237,7 @@ class AuthApplicationServiceTest {
         var publicationMapper = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
         var governance = mock(com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "employeePublications", publicationMapper);
         ReflectionTestUtils.setField(service, "employeeGovernance", governance);
         SsResource own = enterpriseResource(601L, 1L); own.setResourceBizType("DIG_EMPLOYEE"); own.setOwnerType("personal");
@@ -313,6 +316,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resources = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResExtSkillService",
             mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class));
@@ -412,6 +416,7 @@ class AuthApplicationServiceTest {
         SsResourceService resources = mock(SsResourceService.class);
         var skills = mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResExtSkillService", skills);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(source));
@@ -676,6 +681,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(220L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
         assertThat(service.queryResourceOperationPermissions(220L).isCanOnShelf()).isFalse();
@@ -722,6 +728,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resources = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         LoginInfo login = loginInfo(2L);
         login.setUserCode(identity);
@@ -797,6 +804,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource personalAssistant = new SsResource();
         personalAssistant.setResourceId(203L);
@@ -823,6 +831,7 @@ class AuthApplicationServiceTest {
                 SsResourceMapper resources = mock(SsResourceMapper.class);
                 PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
                 ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
                 ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
                 SsResource resource = enterpriseResource(203L, 1L);
                 resource.setOwnerType(owner); resource.setResourceBizType(bizType);
@@ -866,6 +875,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(203L)).thenReturn(resource);
         when(mapper.selectById(203L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
@@ -896,6 +906,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(203L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
         for (ResourceOperationPermissionsVo permission : List.of(service.queryResourceOperationPermissions(203L),
@@ -914,6 +925,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource personalObject = new SsResource();
         personalObject.setResourceId(204L);
@@ -940,6 +952,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService",
@@ -980,6 +993,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
         DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
         doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
@@ -1034,6 +1048,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
         DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
         doNothing().when(service).handleAuth(any());
@@ -1124,6 +1139,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         UsersMapper usersMapper = mock(UsersMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
 
@@ -1218,6 +1234,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(302L);
@@ -1252,6 +1269,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(601L);
@@ -1291,6 +1309,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(602L);
@@ -1540,6 +1559,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
 
@@ -1607,6 +1627,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         mockEmptyUsePermissionDependencies(service);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1637,6 +1658,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         LoginInfo login = loginInfo(2L);
         login.setUserCode(identity);
@@ -1795,6 +1817,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1816,6 +1839,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1839,6 +1863,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1860,6 +1885,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1879,6 +1905,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1890,11 +1917,13 @@ class AuthApplicationServiceTest {
         assertThat(service.applyUseIfNeeded(605L)).isEqualTo(UseApplyOutcome.PENDING);
 
         ArgumentCaptor<LambdaQueryWrapper<SsResource>> lockCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        InOrder order = inOrder(ssResourceMapper, privilegeGrantMapper);
+        var locks = (com.iwhalecloud.byai.common.lock.TransactionalRedisLockService) ReflectionTestUtils.getField(service, "businessLocks");
+        InOrder order = inOrder(locks, ssResourceMapper, privilegeGrantMapper);
+        order.verify(locks).acquire("resource:605");
         order.verify(ssResourceMapper).selectOne(lockCaptor.capture());
         order.verify(privilegeGrantMapper).selectOne(any());
         assertThat(String.valueOf(ReflectionTestUtils.getField(lockCaptor.getValue(), "lastSql")))
-            .containsIgnoringCase("FOR UPDATE");
+            .doesNotContainIgnoringCase("FOR UPDATE");
         verify(privilegeGrantService, never()).save(any());
     }
 
@@ -1904,6 +1933,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         mockEmptyUsePermissionDependencies(service);
         PrivilegeGrantService privilegeGrantService =
@@ -1938,6 +1968,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -2020,6 +2051,7 @@ class AuthApplicationServiceTest {
         SsResource resource = enterpriseResource(607L, 1L);
         SsResourceMapper resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.selectBatchIds(any())).thenReturn(List.of(resource));
         assertThat(service.hasResourceUsePermission(resource, 3L)).isFalse();
         assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L).isHasUsePermission()).isFalse();
@@ -2034,6 +2066,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper mapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
         CurrentUserHolder.setLoginInfo(loginInfo(1L));
@@ -2143,6 +2176,7 @@ class AuthApplicationServiceTest {
         DigitalEmployeeResourceAuthorizationService boundResources = mockEmployeeResourceSynchronization(service);
         SsResourceMapper resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
         doNothing().when(service).handleAuth(any());
@@ -2180,6 +2214,7 @@ class AuthApplicationServiceTest {
         var cache = mock(AuthRedisSyncService.class);
         ReflectionTestUtils.setField(service, "employeeResourceAuthorizationService", synchronization);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
@@ -2332,6 +2367,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_inheritsParentOrganizationAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2373,6 +2409,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_descendantOrganizationBlacklistOverridesParentAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2419,6 +2456,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_excludesRemovedResources() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2469,6 +2507,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2515,6 +2554,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2561,6 +2601,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2594,6 +2635,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2746,6 +2788,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "ssResExtSkillService", mock(SsResExtSkillService.class));
@@ -2830,6 +2873,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         when(mapper.selectBatchIds(any())).thenReturn(resources);
         Map<Long, ResourceOperationPermissionsVo> result = service.queryResourceOperationPermissionsBatch(

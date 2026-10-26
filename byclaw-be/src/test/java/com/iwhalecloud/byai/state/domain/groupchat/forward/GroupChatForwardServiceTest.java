@@ -61,7 +61,12 @@ class GroupChatForwardServiceTest {
     JdbcTemplate db;LegacyGroupChatForwardStore store;ByaiGroupChatForwardMapper rows;
     ForwardActor actor=new ForwardActor(30,1);
     ForwardInput input(String key){return new ForwardInput(key,ForwardMode.SINGLE,List.of(101L,102L),List.of(20L,21L));}
+    com.iwhalecloud.byai.common.lock.DisposableRedis redis;
+    com.iwhalecloud.byai.common.lock.TransactionalRedisLockService locks;
+    @org.junit.jupiter.api.AfterEach void closeRedis() throws Exception { if (redis != null) redis.close(); }
     @BeforeEach void setup()throws Exception{
+        redis = new com.iwhalecloud.byai.common.lock.DisposableRedis();
+        locks = new com.iwhalecloud.byai.common.lock.TransactionalRedisLockService(redis.registry(60_000L));
         var ds=new DriverManagerDataSource("jdbc:h2:mem:prepare"+System.nanoTime()+";MODE=PostgreSQL;DB_CLOSE_DELAY=-1","sa","");db=new JdbcTemplate(ds);
         db.execute("CREATE SCHEMA byai");db.execute("CREATE ALIAS clock_timestamp FOR \"com.iwhalecloud.byai.state.domain.groupchat.forward.GroupChatForwardStoreTest.clockTimestamp\"");
         db.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY,enterprise_id BIGINT,session_type VARCHAR,state VARCHAR)");db.execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT,session_id BIGINT,mem_obj_type VARCHAR,mem_obj_id BIGINT,com_acct_id BIGINT)");db.execute("CREATE TABLE byai.byai_message(message_id BIGINT PRIMARY KEY,enterprise_id BIGINT,session_id BIGINT,message_content VARCHAR,create_time TIMESTAMP)");
@@ -73,6 +78,7 @@ class GroupChatForwardServiceTest {
         var messages=mock(ByaiMessageMapper.class);when(messages.selectByMessageId(anyLong())).thenAnswer(inv->{var found=db.query("SELECT * FROM byai.byai_message WHERE message_id=?",(rs,i)->{var m=new ByaiMessage();m.setMessageId(rs.getLong("message_id"));m.setEnterpriseId(rs.getLong("enterprise_id"));m.setSessionId(rs.getLong("session_id"));m.setUsage(1);m.setCreatorId(30L);m.setCreatorName("sender");m.setMessageContent(rs.getString("message_content"));m.setCreateTime(rs.getTimestamp("create_time"));return m;},(Object)inv.getArgument(0));return found.isEmpty()?null:found.getFirst();});
         var source=new LegacyForwardSourceAuthorityReader(sessions,members,messages,mock(ByaiGroupChatTaskMapper.class),mock(ByaiGroupChatTaskPublicationMapper.class),mock(ByaiGroupChatPendingPublicationMapper.class),mock(ByaiGroupChatForwardSourceMapper.class),rows);
         var sequence=mock(SequenceService.class);var next=new AtomicLong(1000);when(sequence.nextVal()).thenAnswer(i->next.incrementAndGet());var props=new GroupChatForwardProperties();store=new LegacyGroupChatForwardStore(rows,db,new DataSourceTransactionManager(ds),new ObjectMapper().findAndRegisterModules(),sequence,sessions,members,source,mock(ForwardPlatformPolicy.class),new ForwardUploadReservation(props),props);
+        org.springframework.test.util.ReflectionTestUtils.setField(store, "businessLocks", locks);
     }
     @Test void prepareRollsBackAllRowsOnSnapshotFailure(){db.update("UPDATE byai.byai_message SET message_content='{{COMMON_FILE_missing}}' WHERE message_id=101");assertThatThrownBy(()->store.prepare(actor,10,input("key"))).hasMessage("FORWARD_RESOURCE_UNRESOLVABLE");assertThat(db.queryForObject("SELECT count(*) FROM byai.byai_group_chat_forward_request",Integer.class)).isZero();}
     @Test void sameRequestReplaysIdsAfterLeavingSource(){var operation=store.prepare(actor,10,input("key"));var target=rows.targets(1L,operation.requestId()).getFirst();db.update("UPDATE byai.byai_group_chat_forward_target SET state='SUCCEEDED',message_ids_json='[\"500\"]' WHERE target_id=?",target.getTargetId());db.update("DELETE FROM byai.byai_session_member WHERE session_id=10");assertThat(store.prepare(actor,10,input("key")).targets().getFirst().messageIds()).containsExactly("500");assertThat(store.status(actor,10,operation.requestId()).toString()).doesNotContain("earlier");}

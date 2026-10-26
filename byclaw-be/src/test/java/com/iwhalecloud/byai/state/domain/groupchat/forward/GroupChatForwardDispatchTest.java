@@ -18,8 +18,10 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class GroupChatForwardDispatchTest {
+    private GroupChatForwardServiceTest fixture;
+    @org.junit.jupiter.api.AfterEach void closeRedis() throws Exception { if (fixture != null) fixture.closeRedis(); }
     @Test void dispatchWaitsForCommitAndRollbackNeverDispatches() throws Exception {
-        var fixture=new GroupChatForwardServiceTest();fixture.setup();
+        fixture=new GroupChatForwardServiceTest();fixture.setup();
         var recovery=mock(GroupChatForwardRecoveryService.class);
         @SuppressWarnings("unchecked") var provider=(ObjectProvider<GroupChatForwardRecoveryService>)mock(ObjectProvider.class);
         when(provider.getObject()).thenReturn(recovery);

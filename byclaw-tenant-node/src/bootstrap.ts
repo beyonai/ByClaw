@@ -1,3 +1,4 @@
+import { requireExecutionPolicy } from "./application/execution-policy.js";
 import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
 import { Redis } from "ioredis";
@@ -9,6 +10,7 @@ import { SessionQueries } from "./application/session-queries.js";
 import { MirrorService } from "./application/mirror-service.js";
 import { SchemaTaskService } from "./application/schema/task-service.js";
 import { TenantRuntime } from "./application/runtime.js";
+import { RedisLeases } from "./infrastructure/coordination/redis-leases.js";
 import { Database } from "./infrastructure/persistence/database.js";
 import { SqlCommandTransactions } from "./infrastructure/persistence/command-repository.js";
 import { SqlMirrorTransactions } from "./infrastructure/persistence/mirror-repository.js";
@@ -27,7 +29,7 @@ import { Discovery } from "./infrastructure/discovery/by-framework-discovery.js"
 import { TenantWorker } from "./infrastructure/discovery/tenant-worker.js";
 import { SqlGroupForwardStore } from "./infrastructure/persistence/group-forward-prepare.js";
 import { createApp } from "./interfaces/http/app.js";
-import OperationsQueries from './application/OperationsQueries.js';
+import OperationsQueries from "./application/OperationsQueries.js";
 
 /** 组装应用端口与基础设施；连接池、Redis、HTTPS 客户端的关闭由这里统一负责。 */
 export async function bootstrap(config: Config) {
@@ -39,7 +41,7 @@ export async function bootstrap(config: Config) {
   const connection = new ConnectionManager(config, {
     snapshot: () => readTenantSnapshot(redis, config.enterpriseId),
     decrypt: (snapshot) => decryptPassword(client, config.kmsUrl, snapshot),
-    open: Database.open,
+    open: (snapshot, password) => Database.open(snapshot, password, new RedisLeases(redis)),
     readAuthority: () => state.read("authority.json"),
     saveAuthority: (snapshot) =>
       state.write("authority.json", {
@@ -55,7 +57,9 @@ export async function bootstrap(config: Config) {
     config.enterpriseId,
     new SqlHistoryRepository(read, config.enterpriseId),
   );
-  const commands = new CommandService(new SqlCommandTransactions(connection));
+  const commands = new CommandService(new SqlCommandTransactions(connection), () =>
+    requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
+  );
   const be = new BeSchemaClient(config, client),
     schemaState = new SchemaReadiness(connection, be);
   const schema = new SchemaTaskService(
@@ -90,6 +94,8 @@ export async function bootstrap(config: Config) {
     config,
     {
       commands,
+      requireExecution: () =>
+        requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
       forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,

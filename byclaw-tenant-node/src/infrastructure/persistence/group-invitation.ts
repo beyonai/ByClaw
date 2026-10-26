@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { CommandContext } from "./command-context.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
@@ -50,9 +51,7 @@ export async function createInvitation(context: CommandContext) {
   if (typeof token !== "string" || !/^[A-Za-z0-9]{8}$/.test(token))
     throw new DomainError("INVALID_INVITATION");
   // 跨群创建也串行化，确保同租户的邀请码唯一。
-  await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-    `invitation:${command.enterpriseId}`,
-  ]);
+  await lockBusiness(db, `invitation:${command.enterpriseId}`);
   let record = { token, inviterId: command.userId, expiresAt: Date.now() + 7 * 86400000 };
   await validate(db, command.enterpriseId, command.sessionId, record);
   const old = await first(

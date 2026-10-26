@@ -39,6 +39,9 @@ public class TenantSandboxService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformTenantFileRouting platformTenantFiles;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper tenantPolicyConfigs;
+
     private static final Logger LOG = LoggerFactory.getLogger(TenantSandboxService.class);
 
     private static final String DB_TYPE = "tenant-opengauss";
@@ -96,6 +99,12 @@ public class TenantSandboxService {
 
     public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
                                             long generation) {
+        return launchDataNode(enterpriseId, profileKey, dbRecordId, generation, null);
+    }
+
+    public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
+                                            long generation, String providerRequestKey) {
+        validateProviderRequestKey(providerRequestKey);
         if (enterpriseId <= 0 || dbRecordId <= 0 || generation <= 0
             || profileKey == null || !PROFILES.contains(profileKey)
             || nodeImage == null || nodeImage.isBlank() || volumeRoot == null || volumeRoot.isBlank()
@@ -149,6 +158,7 @@ public class TenantSandboxService {
         request.setProfileKey(profileKey);
         Map<String, String> envs = new LinkedHashMap<>();
         envs.put("TENANT_ID", Long.toString(enterpriseId));
+        envs.put("COMMERCIAL_MANAGED", Boolean.toString(commercialManaged(enterpriseId)));
         envs.put("TENANT_GENERATION", Long.toString(generation));
         envs.put("DB_SANDBOX_RECORD_ID", Long.toString(dbRecordId));
         envs.put("IMAGE_TENANT_NODE", nodeImage);
@@ -163,8 +173,8 @@ public class TenantSandboxService {
         envs.put("REDIS_USERNAME", redisUsername);
         envs.put("REDIS_PASSWORD", redisPassword);
         request.setEnvs(envs);
-        request.setMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
-            "recordId", Long.toString(record.getId())));
+        request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
+            "recordId", Long.toString(record.getId())), providerRequestKey));
         SandboxResponse<SandboxLaunchData> response = lifecycleFacade.launchSandbox(request);
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String reason = response == null ? "OpenSandbox did not return a response" : response.getMessage();
@@ -181,6 +191,12 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    private boolean commercialManaged(long enterpriseId) {
+        return tenantPolicyConfigs.selectConfigs(enterpriseId).stream()
+            .anyMatch(row -> "COMMERCIAL_MANAGED".equals(row.getParamsCode())
+                && "true".equals(row.getParamsValue()));
     }
 
     /** Recreates only the tenant Node sandbox from the configured image; the DB sandbox is retained. */
@@ -317,6 +333,12 @@ public class TenantSandboxService {
 
     public TenantSandboxView launchOpenGauss(long enterpriseId, String profileKey, String dbName,
                                              String dbUser, String dbPassword) {
+        return launchOpenGauss(enterpriseId, profileKey, dbName, dbUser, dbPassword, null);
+    }
+
+    public TenantSandboxView launchOpenGauss(long enterpriseId, String profileKey, String dbName,
+                                             String dbUser, String dbPassword, String providerRequestKey) {
+        validateProviderRequestKey(providerRequestKey);
         if (enterpriseId <= 0 || profileKey == null || !PROFILES.contains(profileKey)
             || !("byclaw_t_" + enterpriseId).equals(dbName)
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
@@ -380,8 +402,8 @@ public class TenantSandboxService {
         envs.put("IMAGE_OPENGAUSS", image);
         envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", volumeRoot);
         request.setEnvs(envs);
-        request.setMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
-            "recordId", Long.toString(record.getId()), "byclawTcpPort", "5432"));
+        request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
+            "recordId", Long.toString(record.getId()), "byclawTcpPort", "5432"), providerRequestKey));
 
         SandboxResponse<SandboxLaunchData> response = lifecycleFacade.launchSandbox(request);
         if (response == null || !response.isSuccess() || response.getData() == null) {
@@ -399,6 +421,19 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    private static void validateProviderRequestKey(String providerRequestKey) {
+        if (providerRequestKey != null && !providerRequestKey.matches("[A-Za-z0-9_.:-]{1,128}")) {
+            throw new IllegalArgumentException("invalid provider request key");
+        }
+    }
+
+    private static Map<String, String> correlatedMetadata(Map<String, String> ownership, String providerRequestKey) {
+        Map<String, String> metadata = new LinkedHashMap<>(ownership);
+        // Persisted command-step identity supports reconciliation without granting blind provider retries.
+        if (providerRequestKey != null) metadata.put("providerRequestKey", providerRequestKey);
+        return metadata;
     }
 
     private String toJson(Object value) {

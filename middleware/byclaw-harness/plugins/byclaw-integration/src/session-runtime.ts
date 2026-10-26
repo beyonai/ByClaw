@@ -11,6 +11,7 @@ import { installModelSelection, type Agent, type AgentHandle, type AssistantStre
 import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import { ordinaryTaskPlan } from './ordinary-task-plan.ts'
 import { queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
@@ -2595,7 +2596,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
     const projectedEditDiff = await this.forwardEditDiff(turn, session, event)
     const projectedPlan = event.type === 'todo/write' && root
-    if (projectedPlan) await this.emitPlan(turn, event.data.todos)
+    if (projectedPlan || (root && event.type === 'subagent/catalog')
+      || (!root && (event.type === 'turn/start' || event.type === 'turn/end'))) {
+      await this.emitPlan(turn, root ? session : this.ctx.root.sessions?.get(SessionId(turn.rootSessionId)),
+        root ? undefined : String(session.id))
+    }
     const description = projectedPlan || projectedEditDiff ? undefined : describeDshSessionEvent(event)
     if (description !== undefined) {
       const { eventKind, status, summary, ...details } = description
@@ -3091,13 +3096,23 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     )
   }
 
-  private async emitPlan(turn: ActiveTurn, todos: TodoItem[]): Promise<void> {
-    const card = taskPlanCard(todos)
+  private async emitPlan(turn: ActiveTurn, root: Session | undefined, triggerChildId?: string): Promise<void> {
+    if (root === undefined) return
+    const plan = await ordinaryTaskPlan(String(root.id), root.ownEvents(), async id => {
+      const live = this.ctx.root.sessions.get(SessionId(id))
+      if (live !== undefined) return { events: live.ownEvents(), label: dshChildPresentation(live, this.options.agentTemplateDir).label }
+      const stored = await loadPersistedSessionById(this.ctx.sessionPersistence, SessionId(id))
+      if (stored === undefined) return undefined
+      const events = stored.events.slice(stored.inheritedEventCount)
+      return { events, label: dshChildLabel(foldSubagentDescriptor(events)?.label, this.options.agentTemplateDir) }
+    }, triggerChildId)
+    if (plan === undefined) return
+    const card = taskPlanCard(plan.todos, plan.planId)
     await this.options.emitter.emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
       content: card.content,
       metadata: {
         event_source: 'dsh',
-        event_kind: 'todo/write',
+        event_kind: 'plan',
         session_scope: 'parent',
         external_session_id: turn.rootSessionId,
         external_root_session_id: turn.rootSessionId,

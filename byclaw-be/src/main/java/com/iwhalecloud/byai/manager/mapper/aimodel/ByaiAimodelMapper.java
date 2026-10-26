@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.aimodel;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
@@ -19,7 +20,8 @@ import org.apache.ibatis.annotations.Select;
 public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
 
     /** Serialize global default-tag mutations across backend instances until transaction completion. */
-    @Select("SELECT 1 FROM pg_advisory_xact_lock(73592368124601)")
+    @Select("SELECT 1")
+    @RedisTransactionLock(value = "model-default", parameters = {})
     Integer lockDefaultModels();
 
     /**

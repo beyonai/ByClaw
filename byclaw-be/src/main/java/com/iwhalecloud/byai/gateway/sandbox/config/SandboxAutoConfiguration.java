@@ -52,7 +52,8 @@ public class SandboxAutoConfiguration {
         OpenSandboxClient openSandboxClient,
         @Value("${file.storage.type:minio}") String storageType,
         com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway platformGateway,
-        ObjectProvider<ByaiSystemConfigService> systemConfigService) {
+        ObjectProvider<ByaiSystemConfigService> systemConfigService,
+        com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy sharedPolicy) {
         SandboxRuntimeProvider provider;
         if (StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
@@ -76,7 +77,8 @@ public class SandboxAutoConfiguration {
         GenericSandboxSpecProcessor specProcessor,
         SandboxServiceSpecRepository sandboxServiceSpecRepository,
         ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchContextFactory> launchContextFactory,
-        ObjectProvider<ByaiSystemConfigService> systemConfigService) {
+        ObjectProvider<ByaiSystemConfigService> systemConfigService,
+        com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy sharedPolicy) {
         SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
         String dshType = com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
         java.util.function.Function<String, java.util.Map<String, String>> launchEnv = userCode -> {
@@ -104,10 +106,7 @@ public class SandboxAutoConfiguration {
         });
         return new SharedDshHostContexts(new SharedDshHostClient(sharedDshHost),
             StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
-            SharedDshHostContexts.userFilter(() -> {
-                ByaiSystemConfigService service = systemConfigService.getIfAvailable();
-                return service == null ? null : service.getDcSystemConfigValueByCode(SharedDshHostContexts.USERS_PARAM);
-            }), launchEnv, prewarm);
+            sharedPolicy::eligible, launchEnv, prewarm);
     }
 
     @Bean

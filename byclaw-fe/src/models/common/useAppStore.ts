@@ -46,6 +46,9 @@ export type ISandboxesInfo = {
   userCode: string;
   sandboxType: string;
   sandboxId: string;
+  isShared?: boolean;
+  serviceKey?: string;
+  mappingId?: string;
   endpoints?: string[];
   instanceEndpoints?: Record<string, string>;
   token?: string;

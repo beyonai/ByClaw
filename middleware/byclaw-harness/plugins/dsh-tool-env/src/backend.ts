@@ -29,7 +29,7 @@ export interface ToolEnvBackend {
   ensure(): Promise<ToolEnvEndpoint>
   /** Release B's compute while idle; the next ensure() brings it back. */
   pause(): Promise<void>
-  /** Stop background work; B itself is left to its own expiry. */
+  /** Stop background work and release owned compute where the backend supports it. */
   dispose(): Promise<void>
 }
 

@@ -1,3 +1,4 @@
+import { disposableRedis } from "./support/disposable-redis.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, type HttpServices } from "../src/interfaces/http/app.js";
 import { SqlGroupForwardStore } from "../src/infrastructure/persistence/group-forward-prepare.js";
@@ -275,6 +276,7 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)("production forwarding bigint read
       throw new Error("isolated local forwarding DB required");
     const { Database } = await import("../src/infrastructure/persistence/database.js");
     const { snapshot } = await import("./fixtures.js");
+    const coordination = await disposableRedis();
     const database = await Database.open(
       snapshot({
         host: url.hostname,
@@ -283,6 +285,7 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)("production forwarding bigint read
         user: decodeURIComponent(url.username),
       }),
       decodeURIComponent(url.password),
+      coordination.locks,
     );
     const source = "9007199254740993",
       target = "9007199254740995",
@@ -416,6 +419,7 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)("production forwarding bigint read
         });
     } finally {
       await database.close();
+      await coordination.close();
     }
   });
 });

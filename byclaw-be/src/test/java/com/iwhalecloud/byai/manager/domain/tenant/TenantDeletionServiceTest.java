@@ -60,6 +60,18 @@ class TenantDeletionServiceTest {
     }
 
     @Test
+    void commercialTenantCannotUseLegacyDeletionEvenForPlatformAdmin() {
+        platformAdmin();
+        when(tenants.selectConfig(TENANT_ID, "COMMERCIAL_MANAGED")).thenReturn("true");
+        when(tenants.selectManagedEnterpriseName(TENANT_ID)).thenReturn("commercial");
+        assertThatThrownBy(() -> service.request(Long.toString(TENANT_ID), "commercial"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.operation.requiresDurableCommand");
+        verify(executor, never()).execute(any());
+        service.deleteNow(TENANT_ID);
+        verify(sandboxes, never()).deleteTenantResources(TENANT_ID);
+    }
+
+    @Test
     void confirmedDeletionMarksTenantInaccessibleAndSchedulesCleanup() {
         platformAdmin();
         when(tenants.selectManagedEnterpriseName(TENANT_ID)).thenReturn("中国移动01");

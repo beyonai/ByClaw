@@ -79,7 +79,7 @@ class GroupChatTaskCancellationTest extends I18nTestSupport {
         task.setTargetAgentId(4L);
         task.setStatus("ACTIVE");
         task.setTurnStatus("RUNNING");
-        when(tasks.selectForUpdate(60L)).thenReturn(task);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(task);
         when(tasks.cancel(eq(60L), any())).thenReturn(1);
     }
 
@@ -106,11 +106,11 @@ class GroupChatTaskCancellationTest extends I18nTestSupport {
         ArgumentCaptor<StopChatDto> dto = ArgumentCaptor.forClass(StopChatDto.class);
         InOrder order = inOrder(authorization, tasks, connection, chat, pending, events);
         order.verify(authorization).requireCanceller(60L);
-        order.verify(tasks).selectForUpdate(60L);
+        order.verify(tasks).selectWithRedisLock(60L);
         order.verify(connection).commit();
         order.verify(chat).stopChat(dto.capture());
         order.verify(authorization).requireCanceller(60L);
-        order.verify(tasks).selectForUpdate(60L);
+        order.verify(tasks).selectWithRedisLock(60L);
         order.verify(tasks).cancel(eq(60L), any());
         order.verify(pending).clear(task, null);
         order.verify(connection).commit();
@@ -172,7 +172,7 @@ class GroupChatTaskCancellationTest extends I18nTestSupport {
 
     @Test
     void missingLockedTaskRejectsBeforeStop() {
-        when(tasks.selectForUpdate(60L)).thenReturn(null);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(null);
         assertThatThrownBy(() -> service.cancel(60L)).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(chat, pending, events);
     }

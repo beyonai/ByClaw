@@ -63,6 +63,20 @@ class SharedDshHostContextsTest {
     }
 
     @Test
+    void ensureRendersTheLaunchEnvironmentOnEveryPutSoARunningContextGetsTheCurrentToken() {
+        java.util.concurrent.atomic.AtomicInteger minted = new java.util.concurrent.atomic.AtomicInteger();
+        SharedDshHostContexts renewing = new SharedDshHostContexts(client, "https://dsh.example.com/", user -> true,
+            user -> Map.of("USER_CODE", user, "BEYOND_TOKEN", "jwt-" + minted.incrementAndGet()), Runnable::run);
+        when(client.ensureUser(eq("u1"), eq("byclaw-dsh-u1"), any())).thenReturn(context("ready", "wt", "/u/u1/"));
+
+        renewing.ensure("u1");
+        renewing.ensure("u1");
+
+        verify(client).ensureUser("u1", "byclaw-dsh-u1", Map.of("USER_CODE", "u1", "BEYOND_TOKEN", "jwt-1"));
+        verify(client).ensureUser("u1", "byclaw-dsh-u1", Map.of("USER_CODE", "u1", "BEYOND_TOKEN", "jwt-2"));
+    }
+
+    @Test
     void ensureBuildsTheWebPathWhenTheHostOmitsIt() {
         when(client.ensureUser(eq("u 1"), any(), any())).thenReturn(context("ready", "wt", null));
         assertThat(contexts.ensure("u 1").getEndpoint()).isEqualTo("https://dsh.example.com/u/u%201/chat?token=wt");
@@ -105,17 +119,19 @@ class SharedDshHostContextsTest {
     }
 
     @Test
-    void userFilterReadsTheParameterOnEveryDecisionAndDefaultsToEveryone() {
+    void userFilterReadsTheParameterOnEveryDecisionAndDefaultsToNobody() {
         AtomicReference<String> value = new AtomicReference<>("u1, u2");
         var filter = SharedDshHostContexts.userFilter(value::get);
         assertThat(filter.test("u1")).isTrue();
         assertThat(filter.test("u3")).isFalse();
         value.set("*");
-        assertThat(filter.test("u3")).isTrue();
+        assertThat(filter.test("u3")).isFalse();
         value.set(null);
-        assertThat(filter.test("u3")).isTrue();
-        assertThat(SharedDshHostContexts.userFilter(() -> { throw new IllegalStateException("db"); }).test("u9")).isTrue();
+        assertThat(filter.test("u3")).isFalse();
+        assertThat(SharedDshHostContexts.userFilter(() -> { throw new IllegalStateException("db"); }).test("u9")).isFalse();
         assertThat(SharedDshHostContexts.allowsUser("a;b c", "b")).isTrue();
         assertThat(SharedDshHostContexts.allowsUser("a;b c", "d")).isFalse();
+        assertThat(SharedDshHostContexts.allowsUser("a,a;; b", "a")).isTrue();
+        assertThat(SharedDshHostContexts.allowsUser("user11", "user1")).isFalse();
     }
 }

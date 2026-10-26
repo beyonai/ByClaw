@@ -17,6 +17,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "byclaw.hooks", ignoreUnknownFields = false)
 public class HookProperties {
     private boolean enabled;
+    private Durable durable = new Durable();
+
+    @Getter
+    @Setter
+    public static class Durable {
+        private boolean enabled;
+        private long pollDelayMs = 1000;
+    }
+
     private Defaults defaults = new Defaults();
     private Map<String, Subscription> subscriptions = new LinkedHashMap<>();
 

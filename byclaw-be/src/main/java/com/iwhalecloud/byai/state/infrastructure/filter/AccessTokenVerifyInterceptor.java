@@ -150,6 +150,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // Only a verified identity from the dedicated filter can bypass browser authentication.
+        if (request.getAttribute(com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal.ATTRIBUTE)
+            instanceof com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal) {
+            CurrentUserHolder.clearLoginInfo();
+            return true;
+        }
+
         try {
             // 独立运营端点在匿名规则之前验证服务身份，不能借用普通登录态。
             if (com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication.PATH

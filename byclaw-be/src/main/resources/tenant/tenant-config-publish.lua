@@ -2,6 +2,12 @@
 -- KEYS[1] = TENANT_CONFIG_E; ARGV[1] = new state JSON; ARGV[2] = credential version;
 -- ARGV[3..] = alternating params_code and params_value pairs.
 local nextState = cjson.decode(ARGV[1])
+-- Recheck on Redis's clock after network transit; the Java precheck alone is insufficient.
+if nextState.commandLeaseUntilEpochSeconds then
+    local deadline = tonumber(nextState.commandLeaseUntilEpochSeconds)
+    local serverTime = redis.call('TIME')
+    if not deadline or deadline <= tonumber(serverTime[1]) then return 0 end
+end
 local nextGeneration = tonumber(nextState.generation)
 local nextFence = tonumber(nextState.fencingToken)
 local nextCredentialVersion = tonumber(ARGV[2])

@@ -58,6 +58,9 @@ public class TenantDeletionService {
         catch (NumberFormatException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid", e);
         }
+        if ("true".equals(tenants.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.operation.requiresDurableCommand");
+        }
         String actualName = tenants.selectManagedEnterpriseName(enterpriseId);
         if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
         if (!actualName.equals(confirmedName)) {
@@ -80,6 +83,8 @@ public class TenantDeletionService {
     }
 
     void deleteNow(long enterpriseId) {
+        // Retried legacy work cannot delete a commercial tenant outside its persistent operation authority.
+        if ("true".equals(tenants.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) return;
         String key = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, token, Duration.ofMinutes(30)))) return;

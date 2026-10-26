@@ -131,7 +131,7 @@ class GroupChatQueuedGatewayTest extends I18nTestSupport {
         session.setProjectId(11L);
         when(sessions.findById(60L)).thenReturn(session);
         when(turns.bindRuntime(eq(52L), any())).thenReturn(1);
-        when(turns.selectForUpdateById(52L)).thenReturn(turn);
+        when(turns.selectCurrentById(52L)).thenReturn(turn);
     }
 
     @Test
@@ -141,7 +141,7 @@ class GroupChatQueuedGatewayTest extends I18nTestSupport {
         ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
         ArgumentCaptor<ByaiMessageHotDtoDto> existing = ArgumentCaptor.forClass(ByaiMessageHotDtoDto.class);
         InOrder order = Mockito.inOrder(messages, turns, script);
-        order.verify(turns).selectForUpdateById(52L);
+        order.verify(turns).selectCurrentById(52L);
         order.verify(messages).selectByMessageId(71L);
         order.verify(messages).insert(persisted.capture());
         order.verify(turns).bindRuntime(52L, ScriptService.getTraceId(71L, 72L));

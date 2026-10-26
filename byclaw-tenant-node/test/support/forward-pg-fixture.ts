@@ -1,3 +1,4 @@
+import { disposableRedis } from "./disposable-redis.js";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { Database } from "../../src/infrastructure/persistence/database.js";
@@ -38,12 +39,24 @@ export async function forwardFixture() {
     credentialVersion: "1",
     passwordEnvelope: "fixture",
   };
+  const coordination = await disposableRedis();
+  const pendingLocks = new Set<string>();
+  const locks = {
+    acquire: async (key: string, mode?: "read" | "write") => {
+      pendingLocks.add(key);
+      try {
+        return await coordination.locks.acquire(key, mode);
+      } finally {
+        pendingLocks.delete(key);
+      }
+    },
+  };
   const connection = new ConnectionManager(state, {
     snapshot: async () => state,
     readAuthority: async () => undefined,
     saveAuthority: async () => {},
     decrypt: async () => "",
-    open: Database.open,
+    open: (snapshot, password) => Database.open(snapshot, password, locks),
   });
   await connection.refresh();
   connection.setSchemaReady(true);
@@ -53,6 +66,7 @@ export async function forwardFixture() {
       write: (work) =>
         connection.write((db) =>
           work({
+            lock: db.lock,
             query: async (q, args) => {
               if (q.startsWith("INSERT INTO byai.byai_message ") && beforePublish) {
                 const gate = beforePublish;
@@ -117,6 +131,7 @@ export async function forwardFixture() {
     );
   };
   return {
+    pendingLocks,
     pool,
     sql,
     connection,
@@ -131,6 +146,7 @@ export async function forwardFixture() {
     close: async () => {
       await connection.close();
       await pool.end();
+      await coordination.close();
     },
   };
 }

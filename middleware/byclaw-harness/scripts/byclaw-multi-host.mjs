@@ -12,7 +12,10 @@
  * context serves its own loopback web listener; one HTTP port carries both the
  * admin API and the browser gateway:
  *
- *   PUT    /v1/users/{userCode}   {sandboxId, env?} -> ensure the context runs (idempotent)
+ *   PUT    /v1/users/{userCode}   {sandboxId, env?} -> ensure the context runs (idempotent); a running
+ *                                  context takes the BEYOND_TOKEN of every PUT (BE mints a new one each time);
+ *                                  when BE rejects the token a context holds, the context reads the user's
+ *                                  current login token from Redis (user:<id>:login:auth) instead
  *   GET    /v1/users/{userCode}   -> {status: absent|starting|ready|failed}
  *   DELETE /v1/users/{userCode}   -> dispose the context, release the Redis claim (idempotent)
  *   GET    /v1/health             -> {ok, hostId, users}
@@ -61,6 +64,8 @@
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
+import { ManagedUserRegistry } from './byclaw-managed-host.mjs'
+export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
@@ -68,6 +73,7 @@ import http from 'node:http'
 import { createRequire } from 'node:module'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
+import { Transform } from 'node:stream'
 import { inspect } from 'node:util'
 import { pathToFileURL } from 'node:url'
 
@@ -114,9 +120,10 @@ export const USER_ROW_OVERLAYS = {
     forwardHostEnvironment: { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] },
   }),
   'byclaw-idle-reporter': (user, home, spec) => ({ sandboxId: spec.sandboxId }),
-  'byclaw-dsh': (user, home) => ({
+  'byclaw-dsh': (user, home, spec) => ({
     userCode: user,
     workerId: `byclaw-dsh-multi-${createHash('sha256').update(user).digest('hex').slice(0, 12)}-${user}`,
+    ...(spec.managed ? { workerId: `byclaw-shared-${spec.instanceId}-${spec.mappingId}-${spec.generation}`, agentTypes: [spec.workerAgentType], stateDir: join(home, 'team-state') } : {}),
     dshHome: home,
     agentTemplateDir: join(home, 'agent-templates'),
     byRoot: '/by',
@@ -129,8 +136,9 @@ export const USER_ROW_OVERLAYS = {
   'better-sidebar': () => ({ workspaceOnToolEnvironment: true }),
   'byclaw-browser-use': (user, home) => ({
     ownsRuntime: true,
-    // Short: the broker socket path must fit in 107 bytes.
-    runtimeDir: join(home, '..', 'run', 'browser'),
+    // Managed context IDs are long; keep sockets outside the context directory.
+    // Hash the full home so the same user in different pools stays isolated.
+    runtimeDir: join(home, '..', '..', '..', 'run', createHash('sha256').update(home).digest('hex').slice(0, 24), 'browser'),
     dshHome: home,
     browserdEnv: Object.fromEntries(['BYCLAW_BROWSER_EXECUTABLE_PATH', 'BYCLAW_BROWSER_NOVNC_DIR', 'PLAYWRIGHT_BROWSERS_PATH']
       .filter(key => process.env[key]).map(key => [key, process.env[key]])),
@@ -149,14 +157,14 @@ export const USER_ROW_OVERLAYS = {
   'byclaw-tool-env': (user, home, spec) => ({
     backend: spec.toolEnvBackend ?? 'opensandbox',
     stateDir: join(home, 'byclaw-tool-env'),
-    alias: `byclaw-tool-env-${user}`,
+    alias: `byclaw-tool-env-${spec.managed ? spec.contextKey : user}`,
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
       ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
-      : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', user)) }),
+      : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
 }
 
@@ -165,6 +173,39 @@ export function toolEnvUserToken(env, user) {
   const token = env?.BEYOND_TOKEN?.trim()
   if (!token) throw new Error(`byclaw-be tool environment for ${user} needs BEYOND_TOKEN in the PUT env`)
   return token
+}
+
+/**
+ * Give a running context the BEYOND_TOKEN of a later PUT: the byclaw-be backend
+ * (behind the context's `ssh` service, dsh-tool-env's ToolEnv) calls BE with it from then on.
+ * Nothing to do for other backends or a PUT without a token.
+ * @param ctx - the context's root (anything with `get(name)`).
+ * @param config - host config ({ toolEnvBackend }).
+ * @param env - PUT `env`.
+ * @returns whether a token was handed over.
+ */
+/**
+ * The user's current Beyond-Token as BE keeps it in Redis for the login state
+ * (the same keys byclaw-integration reads): `SHARE_BFM_USER_CODE_<user>` gives
+ * the user id, `user:<id>:login:auth` the headers. `undefined` when the user is
+ * not logged in; the caller treats that as "no newer token".
+ * @param redis - ioredis-like ({ get, hget }).
+ */
+export async function currentUserToken(redis, user) {
+  const userId = String(await redis.get(`SHARE_BFM_USER_CODE_${user}`) ?? '').trim()
+  if (userId === '') return undefined
+  const token = String(await redis.hget(`user:${userId}:login:auth`, 'Beyond-Token') ?? '').trim()
+  return token === '' ? undefined : token
+}
+
+export function renewUserToken(ctx, config, env) {
+  if (config.toolEnvBackend !== 'byclaw-be') return false
+  const token = env?.BEYOND_TOKEN?.trim()
+  if (!token) return false
+  const toolEnv = ctx.get('ssh')
+  if (typeof toolEnv?.renewBeToken !== 'function') return false
+  toolEnv.renewBeToken(token)
+  return true
 }
 
 /**
@@ -242,6 +283,7 @@ export function disabledRule(row, lists = [DISABLED_BY_DESIGN, DISABLED_UNTIL_MU
  * @param tables - override tables (tests).
  */
 export function composeUserOverlays(entries, user, home, spec, tables = {}) {
+  if (spec.managed) user = spec.userCode
   const rowOverlays = tables.rowOverlays ?? USER_ROW_OVERLAYS
   const webRows = tables.webRows ?? WEB_LISTENER_ROWS
   const disabledLists = tables.disabled ?? [DISABLED_BY_DESIGN, DISABLED_UNTIL_MULTI_USER]
@@ -257,6 +299,7 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
   for (const row of rows.values()) {
     if (disabledRule(row, disabledLists) !== undefined) overlays.push({ id: row.id, disabled: true })
   }
+  if (spec.managed && rows.has('byclaw-idle-reporter')) overlays.push({ id: 'byclaw-idle-reporter', disabled: true })
   return overlays
 }
 
@@ -297,9 +340,9 @@ export function parseEnsureBody(body) {
  * The context's `process` launch-environment layer: host environment, then the
  * PUT `env`, then the user identity (which `env` cannot override).
  */
-export function launchEnvironmentValues(processEnv, env, user) {
+export function launchEnvironmentValues(processEnv, env, user, managed = false) {
   const values = {}
-  for (const [name, value] of Object.entries(processEnv)) if (typeof value === 'string') values[name] = value
+  for (const [name, value] of Object.entries(processEnv)) if (typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
   return { ...values, ...env, USER_CODE: user }
 }
 
@@ -312,6 +355,10 @@ export function readHostConfig(env) {
   if (!token) throw new Error('BYCLAW_MULTI_HOST_TOKEN is required; refusing to serve the admin API without it')
   const port = Number(env.BYCLAW_MULTI_HOST_PORT || 7300)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`BYCLAW_MULTI_HOST_PORT ${env.BYCLAW_MULTI_HOST_PORT} is invalid`)
+  const managed = env.BYCLAW_MULTI_HOST_MANAGED === '1'
+  const capacity = Number(env.BYCLAW_MULTI_HOST_CAPACITY)
+  if (managed && !/^[0-9a-f-]{36}$/i.test(env.BYCLAW_MULTI_HOST_ID ?? '')) throw new Error('BYCLAW_MULTI_HOST_ID must be a shared instance UUID')
+  if (managed && (!Number.isSafeInteger(capacity) || capacity < 1)) throw new Error('BYCLAW_MULTI_HOST_CAPACITY must be positive')
   const preloadUsers = (env.BYCLAW_MULTI_HOST_USERS ?? '').split(',').map(user => user.trim()).filter(Boolean)
   for (const user of preloadUsers) if (!isValidUserCode(user)) throw new Error(`BYCLAW_MULTI_HOST_USERS entry ${JSON.stringify(user)} is invalid`)
   let publicBase
@@ -333,7 +380,8 @@ export function readHostConfig(env) {
     listenHost: env.BYCLAW_MULTI_HOST_LISTEN_HOST || '0.0.0.0',
     hostId: env.BYCLAW_MULTI_HOST_ID || hostname(),
     root: env.BYCLAW_MULTI_HOST_ROOT ?? '/data/multi-host',
-    preloadUsers,
+    managed, capacity,
+    preloadUsers: managed ? [] : preloadUsers,
     publicBase,
     basePath: publicBase?.pathname ?? '/',
     secureCookies: env.BYCLAW_MULTI_HOST_COOKIE_SECURE === '1',
@@ -490,7 +538,7 @@ export function upstreamHeaders(headers, port, cookie, { upgrade = false } = {})
   const out = {}
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue
-    if (HOP_BY_HOP.has(name) || name === 'host' || name === 'cookie' || name === 'authorization'
+    if (HOP_BY_HOP.has(name) || name === 'host' || name === 'cookie' || name === 'authorization' || name === 'x-byclaw-host-token'
       || name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-')) continue
     out[name] = value
   }
@@ -592,8 +640,10 @@ async function withTimeout(task, ms, label) {
  * resources are gone; removal disposes only that user's context.
  *
  * `boot(user, request, hooks)` must resolve to a handle
- * `{ port, auth: { cookie(), invalidate() }, dispose() }` and may set
+ * `{ port, auth: { cookie(), invalidate() }, dispose(), renew?(request) }` and may set
  * `hooks.isPluginFailure(reason)` for rejections the context already tolerates.
+ * `renew` receives every later PUT for a ready context (its `env` carries the
+ * user's current credentials; the context itself is not restarted).
  * Boots run inside an AsyncLocalStorage scope holding the entry, so process-level
  * errors raised from asynchronous work a context started can be attributed to it.
  */
@@ -657,6 +707,7 @@ export class UserRegistry {
       if (current.request.sandboxId !== request.sandboxId) {
         this.log(`user ${user}: running with sandboxId ${current.request.sandboxId}; ignoring ${request.sandboxId} until it restarts`)
       }
+      if (current.status === 'ready') this.#renew(current, request)
       return current.ready
     }
     const entry = { user, status: 'starting', request, webToken: this.createToken(), hooks: {}, startedAt: Date.now() }
@@ -666,6 +717,17 @@ export class UserRegistry {
     entry.ready.catch(() => {})
     this.#entries.set(user, entry)
     return entry.ready
+  }
+
+  /** Hand a later PUT to the running context; a failure is the context's, logged, never the PUT's. */
+  #renew(entry, request) {
+    const renew = entry.handle?.renew
+    if (renew === undefined) return
+    try {
+      renew.call(entry.handle, request)
+    } catch (error) {
+      this.log(`user ${entry.user}: applying the PUT to the running context failed:`, errorMessage(error))
+    }
   }
 
   async #start(entry) {
@@ -817,12 +879,12 @@ function rejectUpgrade(socket, status, reason) {
 export function createHostServer({ registry, adminToken, hostId, basePath = '/', secureCookies = false, log = () => {} }) {
   const isAdmin = req => {
     const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')
-    return match !== null && safeEqual(match[1].trim(), adminToken)
+    return safeEqual(req.headers['x-byclaw-host-token'], adminToken) || (match !== null && safeEqual(match[1].trim(), adminToken))
   }
 
   const readyHandle = user => {
     const entry = registry.get(user)
-    return entry?.status === 'ready' && entry.handle !== undefined ? entry : undefined
+    return entry?.status === 'ready' && entry.handle !== undefined && (!registry.managed || registry.admitting(user)) ? entry : undefined
   }
 
   async function admin(req, res, route) {
@@ -832,6 +894,25 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
       return sendJson(res, 200, { ok: true, hostId, users: registry.list() })
     }
     const user = route.user
+    if (registry.managed) {
+      try {
+        let value
+        if (req.method === 'GET') {
+          const params = new URL(req.url, 'http://host').searchParams
+          value = { instanceId: params.get('instanceId'), mappingId: params.get('mappingId'), generation: Number(params.get('generation')) }
+          return sendJson(res, 200, await registry.describe(user, value))
+        }
+        if (req.method !== 'PUT' && req.method !== 'DELETE') return sendJson(res, 405, { error: 'method not allowed' })
+        value = await readJson(req)
+        if (req.method === 'PUT') {
+          await registry.ensure(user, value)
+          return sendJson(res, 200, await registry.describe(user, value))
+        }
+        await registry.remove(user, value)
+        return sendJson(res, 200, { managed: true, instanceId: value.instanceId, mappingId: value.mappingId,
+          generation: value.generation, status: 'absent', hostId })
+      } catch (error) { return sendJson(res, error.status ?? 503, { error: errorMessage(error) }) }
+    }
     if (req.method === 'GET') {
       const token = registry.webToken(user)
       return sendJson(res, 200, { ...registry.describe(user), hostId, ...token === undefined ? {} : { webPath: webPrefix(user, basePath), webToken: token } })
@@ -905,6 +986,8 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
     if (ready === undefined) return sendText(res, 503, `user context is ${entry.status}\n`)
     if (req.method !== 'GET' && req.method !== 'HEAD' && !isSameOriginRequest(req.headers)) return sendText(res, 403, 'forbidden\n')
     if (!ready.handle.port) return sendText(res, 503, 'user context has no web listener\n')
+    const done = registry.managed ? registry.beginWeb(route.user) : () => {}
+    res.once('close', done)
     const replayable = req.method === 'GET' || req.method === 'HEAD'
     const outcome = await proxyOnce(req, res, ready, decision.upstreamPath, await ready.handle.auth.cookie(), replayable)
     if (outcome === 'retry') await proxyOnce(req, res, ready, decision.upstreamPath, await ready.handle.auth.cookie(), false)
@@ -920,6 +1003,8 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
     const ready = readyHandle(route.user)
     const port = ready?.handle.port
     if (!port) return rejectUpgrade(socket, 503, 'Service Unavailable')
+    const done = registry.managed ? registry.beginWeb(route.user, () => socket.destroy()) : () => {}
+    socket.once('close', done)
     const cookie = await ready.handle.auth.cookie()
     const upstream = http.request({
       host: '127.0.0.1', port, method: req.method, path: decision.upstreamPath,
@@ -934,7 +1019,14 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
       if (remoteHead.length > 0) socket.write(remoteHead)
       if (head.length > 0) remote.write(head)
       remote.pipe(socket)
-      socket.pipe(remote)
+      if (registry.managed) {
+        const admission = new Transform({ transform(chunk, encoding, callback) {
+          if (!registry.admitting(route.user)) return callback(new Error('managed lease expired'))
+          callback(null, chunk)
+        } })
+        admission.on('error', () => { remote.destroy(); socket.destroy() })
+        socket.pipe(admission).pipe(remote)
+      } else socket.pipe(remote)
       const close = () => { remote.destroy(); socket.destroy() }
       remote.on('error', close)
       remote.on('close', close)
@@ -1010,8 +1102,30 @@ const mb = bytes => Math.round(bytes / 1024 / 1024)
 const memory = () => { const m = process.memoryUsage(); return `rss=${mb(m.rss)}MB heap=${mb(m.heapUsed)}MB` }
 const log = (...parts) => console.log(new Date().toISOString(), '[byclaw-multi-host]', ...parts)
 
-/** Boot one user's DSH context; resolves to a registry handle. */
-async function bootUserContext(config, user, request, hooks) {
+/** Snapshot actual context services, including AgentTeams children and owned jobs. */
+export function managedRuntimeActivity(ctx) {
+  try {
+    const runtime = ctx.get('byclawManagedRuntime')
+    const agents = ctx.get('agents')?.list()
+    if (!runtime?.ready || !Array.isArray(agents)) return { busy: true, activeRequests: 0 }
+    const work = runtime.activity()
+    if (typeof work.busy !== 'boolean' || !Number.isSafeInteger(work.activeRequests) || work.activeRequests < 0) return { busy: true, activeRequests: 0 }
+    const running = agents.filter(agent => agent.status !== 'idle').length
+    const jobs = ctx.get('jobs')
+    const activeJobs = new Set()
+    if (jobs) for (const view of [jobs.list(), ...agents.map(agent => jobs.list(agent.id))]) {
+      for (const job of view) if (job.status === 'running' || job.status === 'stopping') activeJobs.add(job.id)
+    }
+    const activeRequests = Math.max(work.activeRequests, running) + activeJobs.size
+    return { busy: work.busy || activeRequests > 0, activeRequests }
+  } catch { return { busy: true, activeRequests: 0 } }
+}
+
+/**
+ * Boot one user's DSH context; resolves to a registry handle.
+ * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
+ */
+async function bootUserContext(config, user, request, hooks, tokenSource) {
   const {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = await import('@deepseek-ai/dsh-app-boot')
@@ -1034,7 +1148,8 @@ async function bootUserContext(config, user, request, hooks) {
     cwd: '/by', home, overlays: [], telemetryDisabledEnv: '1',
   }
   const spec = {
-    sandboxId: request.sandboxId,
+    ...request,
+    contextKey: user,
     env: request.env,
     toolEnvBackend: config.toolEnvBackend,
     toolEnvTemplate: config.toolEnvTemplate,
@@ -1045,10 +1160,11 @@ async function bootUserContext(config, user, request, hooks) {
   const entries = composeEntries([readProfilePatches(BIN, base, profile)])
   const profileContext = { ...base, overlays: composeUserOverlays(entries, user, home, spec) }
   const environment = createLaunchEnvironmentSnapshot([
-    { source: 'process', values: launchEnvironmentValues(process.env, request.env, user) },
+    { source: 'process', values: launchEnvironmentValues(process.env, request.env, request.managed ? request.userCode : user, request.managed) },
   ])
   const started = Date.now()
   const ctx = await boot(BIN, join(dir, 'cordis.yml'), readProfilePatches(BIN, profileContext, profile), async (hostCtx) => {
+    if (request.managed) hostCtx.provide('byclawManagedAdmission', hooks.admission)
     hooks.isPluginFailure = reason => isLoaderFailure(hostCtx, reason)
     hostCtx.dshHomePath = (...parts) => join(home, ...parts)
     hostCtx.provide('profileContext', profileContext)
@@ -1057,6 +1173,8 @@ async function bootUserContext(config, user, request, hooks) {
     // that inject `webStartup` (e.g. better-sidebar's trusted-host fence) get the
     // listener values this host chose instead.
     hostCtx.provide('webStartup', webStartupValues(spec))
+    // The byclaw-be backend asks here when BE rejects the token it holds (see dsh-tool-env's BE_TOKEN_SOURCE).
+    if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
     await hostCtx.plugin(PluginPackages, { resolution })
   })
   const handle = {
@@ -1069,7 +1187,18 @@ async function bootUserContext(config, user, request, hooks) {
         return connection.authenticatedUrl(origin)
       },
     }),
+    activity: () => managedRuntimeActivity(ctx),
+    stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
     dispose: () => ctx.fiber.dispose(),
+    // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
+    // using the one from boot otherwise, which expires long before a resident
+    // context goes away (then every launch of B is a 401).
+    renew: request => { renewUserToken(ctx, config, request.env) },
+  }
+  if (request.managed) {
+    const deadline = Date.now() + 60_000
+    while (!ctx.get('byclawManagedRuntime')?.ready && Date.now() < deadline && hooks.admission.allowed()) await new Promise(resolve => setTimeout(resolve, 50))
+    if (!ctx.get('byclawManagedRuntime')?.ready) { await ctx.fiber.dispose(); throw new Error('managed worker did not become ready') }
   }
   if (!handle.port) {
     await ctx.fiber.dispose()
@@ -1079,22 +1208,45 @@ async function bootUserContext(config, user, request, hooks) {
   return handle
 }
 
+export function createHostRedis(Redis, env) {
+  if (env.REDIS_MODE === 'cluster' || env.REDIS_CLUSTER_HOST || env.REDIS_CLUSTER_NODES) {
+    throw new Error('Shared host Redis Cluster is not supported by this build; refusing standalone fallback')
+  }
+  return new Redis({ host: env.REDIS_HOST, port: Number(env.REDIS_PORT || 6379),
+    ...(env.REDIS_USERNAME ? { username: env.REDIS_USERNAME } : {}),
+    ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
+    db: Number(env.REDIS_DATABASE || 0), lazyConnect: false, maxRetriesPerRequest: 3 })
+}
+
+export function createManagedClaims(redis, instanceId) {
+  const nonce = randomBytes(16).toString('hex')
+  const key = (context, request) => `byclaw:dsh:managed-host:context:${context}:${request.generation}`
+  const owner = request => `${instanceId}:${request.mappingId}:${request.generation}:${nonce}`
+  return {
+    async claim(context, request) {
+      if (await redis.get(sharedHostKey(request.userCode))) throw new Error('legacy fixed host claim exists')
+      const result = await redis.eval("local v=redis.call('get',KEYS[1]); if not v or v==ARGV[1] then redis.call('set',KEYS[1],ARGV[1],'EX',ARGV[2]); return 1 else return 0 end", 1,
+        key(context, request), owner(request), SHARED_HOST_TTL_SECONDS)
+      if (result !== 1) throw new Error('managed context claim owned by another executor')
+    },
+    release: (context, request) => redis.eval(RELEASE_SCRIPT, 1, key(context, request), owner(request)),
+  }
+}
+
 async function main() {
   const config = readHostConfig(process.env)
   // Every context in this process runs its tools in a tool environment.
   process.env.BYCLAW_DSH_TOOL_ENV ??= 'opensandbox'
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
-  const redis = new Redis({
-    host: process.env.REDIS_HOST, port: Number(process.env.REDIS_PORT || 6379),
-    ...(process.env.REDIS_USERNAME ? { username: process.env.REDIS_USERNAME } : {}),
-    ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
-    db: Number(process.env.REDIS_DATABASE || 0), lazyConnect: false, maxRetriesPerRequest: 3,
-  })
+  const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))
-  const registry = new UserRegistry({
-    boot: (user, request, hooks) => bootUserContext(config, user, request, hooks),
-    claim: user => redis.set(sharedHostKey(user), config.hostId, 'EX', SHARED_HOST_TTL_SECONDS),
-    release: user => redis.eval(RELEASE_SCRIPT, 1, sharedHostKey(user), config.hostId),
+  const managedClaims = config.managed ? createManagedClaims(redis, config.hostId) : undefined
+  const Registry = config.managed ? ManagedUserRegistry : UserRegistry
+  const registry = new Registry({
+    root: config.root, hostId: config.hostId, capacity: config.capacity,
+    boot: (user, request, hooks) => bootUserContext(config, user, request, hooks, { current: () => currentUserToken(redis, user) }),
+    claim: managedClaims?.claim ?? (user => redis.set(sharedHostKey(user), config.hostId, 'EX', SHARED_HOST_TTL_SECONDS)),
+    release: managedClaims?.release ?? (user => redis.eval(RELEASE_SCRIPT, 1, sharedHostKey(user), config.hostId)),
     log,
   })
   // DSH's own launcher exits on these (installFailLoud); a shared host instead
@@ -1113,9 +1265,16 @@ async function main() {
 
   const renew = setInterval(() => {
     for (const user of registry.servedUsers()) {
-      void Promise.resolve(registry.claim(user)).catch(error => { log(`renew ${user} failed:`, error.message) })
+      void Promise.resolve(registry.claim(user, registry.get(user)?.request)).catch(error => {
+        log(`renew ${user} failed:`, error.message)
+        if (registry.managed) {
+          const entry = registry.get(user)
+          if (entry) { entry.draining = true; entry.handle?.stopAdmission?.(); void registry.sweep() }
+        }
+      })
     }
   }, SHARED_HOST_RENEW_MS)
+  const leaseSweep = config.managed ? setInterval(() => { void registry.sweep().catch(error => log('lease sweep:', error.message)) }, 250) : undefined
   const report = setInterval(() => { log(`alive; users=${JSON.stringify(registry.list())};`, memory()) }, 60_000)
 
   // Preload one at a time so startup memory stays flat; failures only mark the user.
@@ -1133,6 +1292,7 @@ async function main() {
       force.unref()
       clearInterval(renew)
       clearInterval(report)
+      clearInterval(leaseSweep)
       server.close()
       server.closeAllConnections?.()
       await registry.disposeAll()

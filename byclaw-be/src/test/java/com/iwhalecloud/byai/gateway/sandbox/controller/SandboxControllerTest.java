@@ -82,6 +82,30 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void getSandboxInfo_sharedContextUsesItsOwnHeartbeatWithoutAnExclusiveRecord() {
+        SandboxService sandboxService = mock(SandboxService.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", records);
+        when(sandboxService.sandboxInfo("alice")).thenReturn(List.of(SandboxInfo.builder()
+            .userCode("alice").sandboxType("custom-assistant").serviceKey("shared-host")
+            .sandboxId("shared-1").isShared(true).mappingId("mapping-1")
+            .workerId("current-generation-worker").workerOnline(true)
+            .workerLastSeen(5_000L).workerLeaseTtlSeconds(30L).build()));
+
+        ResponseUtil response = controller.getSandboxIdByUserCode(Map.of("userCode", "alice"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.getData();
+        assertThat(data).hasSize(1);
+        assertThat(data.get(0)).containsEntry("status", "RUNNING").containsEntry("isShared", true)
+            .containsEntry("serviceKey", "shared-host").containsEntry("mappingId", "mapping-1")
+            .containsEntry("workerId", "current-generation-worker").containsEntry("workerOnline", true)
+            .containsEntry("workerLastSeen", 5_000L).containsEntry("workerLeaseTtlSeconds", 30L);
+        verifyNoInteractions(records);
+    }
+
+    @Test
     void renewSandbox_returnsRenewedSandboxInfo() {
         SandboxService sandboxService = mock(SandboxService.class);
         SandboxController controller = controllerWithInventory();

@@ -86,9 +86,9 @@ public class GroupChatRecallCancellationService {
             sessions.add(selected.getCandidateSessionId());
             if (recalls.isRecalled(selected.getExecutionId())) continue;
             // 调度也锁 anchor -> turn；重新读取 trace，覆盖绑定运行态与撤回同时发生的窗口。
-            ByaiGroupChatExecution anchor = executions.selectForUpdateByCandidateSessionId(selected.getCandidateSessionId());
+            ByaiGroupChatExecution anchor = executions.selectCurrentByCandidateSessionId(selected.getCandidateSessionId());
             ByaiGroupChatExecution current = selected instanceof ByaiGroupChatTurn
-                ? turns.selectForUpdateById(selected.getExecutionId()) : anchor;
+                ? turns.selectCurrentById(selected.getExecutionId()) : anchor;
             if (current == null) throw new IllegalStateException(I18nUtil.get("groupchat.recall.executionMissing"));
             ByaiGroupChatTask task = tasks.cancelForRecall(current.getCandidateSessionId(), current.getExecutionId());
             ByaiGroupChatRecallStop stop = new ByaiGroupChatRecallStop();

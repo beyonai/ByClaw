@@ -18,7 +18,7 @@ import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerWhileDown } from './pending-directories.ts'
+import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -30,7 +30,22 @@ export interface ToolEnvConnectionOptions {
   ptcLaunch: { kind: 'node-script'; executable: string; bootstrapPath: string }
   /** Pause the tool environment after this long without operations or open streams; 0 disables. */
   idleMs: number
+  /**
+   * What else counts as busy once the connection itself is idle (see busy.ts):
+   * `dsh` answers whether A has an Agent in a turn or a job running; `residual`
+   * lists processes left on B that no stream watches. Both postpone the pause by
+   * another `idleMs`; residual processes do so for at most `residualMaxMs`
+   * (default 6 h), so a forgotten `sleep infinity` cannot keep B for good.
+   */
+  busy?: {
+    dsh?: () => boolean
+    residual?: () => Promise<ReadonlyArray<{ pid: number; comm: string }>>
+    residualMaxMs?: number
+  }
 }
+
+/** Residual processes postpone the pause for at most this long. */
+export const RESIDUAL_MAX_MS = 6 * 60 * 60 * 1000
 
 interface Lease {
   connection: SshConnection
@@ -46,6 +61,8 @@ export class ToolEnvConnection extends Service {
   private idleTimer: NodeJS.Timeout | undefined
   private closed = false
   private pausing: Promise<void> | undefined
+  /** When residual processes on B first postponed a pause; cleared by any operation or a release. */
+  private residualSince: number | undefined
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
 
   constructor(
@@ -87,8 +104,21 @@ export class ToolEnvConnection extends Service {
    * key is replaced, so repeated writes to one path cost one write.
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
-    if (this.connected) { await operation(); return }
+    if (this.connected) {
+      await operation()
+      this.deferred.noteDone(key)
+      return
+    }
     this.deferred.defer(key, operation)
+  }
+
+  /**
+   * Forget a connection whose transport is gone, so that "down" below means down:
+   * after a successful open `current` keeps the settled lease, and a transport
+   * loss alone does not clear it until the next lease() would.
+   */
+  private reconcile(): void {
+    if (this.live !== undefined && isBroken(this.live.connection)) void this.drop(this.live)
   }
 
   /** Remote PTC launch; static, so PTC can be configured before the tool environment exists. */
@@ -97,6 +127,11 @@ export class ToolEnvConnection extends Service {
   }
 
   async request<T>(method: string, params: unknown, result: z.ZodType<T>, signal?: AbortSignal, wait = false): Promise<T> {
+    this.reconcile()
+    // Cleanup of a process or stream belongs to the connection it lived on. With that
+    // connection gone there is nothing left to do, whether or not a new one is being
+    // opened for someone else: never wait for B, never start it, never fail for it.
+    if (!this.connected && !this.closed && isCleanupRequest(method)) return result.parse(null)
     // Preparing a turn's shell asks where `bash` lives; that must not start B. Same image build, same answer.
     if (method === 'executable' && !this.connected && this.current === undefined && !this.closed) {
       const input = params as { command?: unknown; env?: Readonly<Record<string, string | null>> }
@@ -108,7 +143,7 @@ export class ToolEnvConnection extends Service {
     // A turn resolves its session directory and probes for files (git roots, cwd) before the model
     // runs; answer those without B: queued directories are empty directories, the rest is absent.
     if (!this.connected && this.current === undefined && !this.closed) {
-      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories())
+      const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)
@@ -135,6 +170,7 @@ export class ToolEnvConnection extends Service {
 
   private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal): Promise<T> {
     this.inflight++
+    this.residualSince = undefined
     this.touch()
     try {
       signal?.throwIfAborted()
@@ -208,16 +244,51 @@ export class ToolEnvConnection extends Service {
   }
 
   private async pauseIdle(): Promise<void> {
-    if (this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
+    if (this.closed || this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
     const logger = this.ctx.logger('byclaw-tool-env')
+    if (await this.stillBusy()) { this.touch(); return }
     this.pausing = (async () => {
       await this.drop()
       await this.backend.pause()
+      this.residualSince = undefined
       logger.info(`tool environment idle for ${String(this.options.idleMs)} ms; paused`)
     })().catch((error: unknown) => {
       logger.warn(`tool environment pause failed: ${error instanceof Error ? error.message : String(error)}`)
+      // drop() already removed the SSH lease; touch() cannot schedule this retry.
+      // A new operation cancels this timer before leasing B again.
+      if (!this.closed && this.options.idleMs > 0) {
+        this.idleTimer = setTimeout(() => { void this.pauseIdle() }, this.options.idleMs)
+        this.idleTimer.unref()
+      }
     }).finally(() => { this.pausing = undefined })
     await this.pausing
+  }
+
+  /**
+   * The connection is idle; is B still in use by DSH's own account, or by
+   * processes left on it? Asked only when B is up and only on the idle timer, so
+   * the probe costs one `ssh` per idle period.
+   */
+  private async stillBusy(): Promise<boolean> {
+    const busy = this.options.busy
+    if (busy === undefined || this.live === undefined) return false
+    const logger = this.ctx.logger('byclaw-tool-env')
+    if (busy.dsh?.() === true) {
+      logger.info('tool environment idle on the connection but DSH has an Agent in a turn or a job running; keeping it')
+      return true
+    }
+    const residual = await busy.residual?.() ?? []
+    if (residual.length === 0) { this.residualSince = undefined; return false }
+    const now = Date.now()
+    this.residualSince ??= now
+    const limit = busy.residualMaxMs ?? RESIDUAL_MAX_MS
+    const summary = residual.slice(0, 3).map(process => `${process.comm}[${String(process.pid)}]`).join(', ') + (residual.length > 3 ? ', …' : '')
+    if (now - this.residualSince < limit) {
+      logger.info(`tool environment idle on the connection but ${String(residual.length)} process(es) still run on it (${summary}); keeping it`)
+      return true
+    }
+    logger.warn(`tool environment kept by ${String(residual.length)} process(es) (${summary}) for ${String(Math.round((now - this.residualSince) / 60000))} min, over the limit; releasing anyway`)
+    return false
   }
 
   private async close(): Promise<void> {

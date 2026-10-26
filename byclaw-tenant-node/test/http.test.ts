@@ -6,13 +6,14 @@ const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
-function setup(ready = true) {
+function setup(ready = true, requireExecution?: () => Promise<void>) {
   const execute = vi.fn(async () => ({ committed: true }));
   const apply = vi.fn(async () => undefined);
   const groupNameCheck = vi.fn(async () => ({ exists: false }));
   const groupProjectAccess = vi.fn(async () => ({ bound: true, canRead: true }));
   const services = {
     commands: { execute },
+    requireExecution,
     mirror: { apply },
     history: {
       detail: vi.fn(async () => ({ sessionId: "30" })),
@@ -34,6 +35,34 @@ function setup(ready = true) {
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("keeps POST history and permission queries available when execution is disabled", async () => {
+    const { app, groupNameCheck } = setup(true, async () => {
+      throw new Error("execution denied");
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/name-check",
+      headers,
+      payload: { name: "Existing group" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(groupNameCheck).toHaveBeenCalled();
+  });
+  it("blocks direct HTTP mutations with the commercial policy guard", async () => {
+    const { app, execute } = setup(true, async () => {
+      const { DomainError } = await import("../src/domain/errors.js");
+      throw new DomainError("POLICY_CAPABILITY_UNSUPPORTED");
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/welcome",
+      headers,
+      payload: command({ operation: "CLAIM_WELCOME", payload: {} }),
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("POLICY_CAPABILITY_UNSUPPORTED");
+    expect(execute).not.toHaveBeenCalled();
+  });
   it("routes welcome claims and rejects a different group, tenant or actor", async () => {
     const { app, execute } = setup();
     const payload = command({ operation: "CLAIM_WELCOME", payload: {} });

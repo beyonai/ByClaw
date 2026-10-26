@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
@@ -72,9 +73,10 @@ export async function changeTask(context: CommandContext): Promise<void> {
   const { command, db } = context,
     p = command.payload,
     taskId = requireId(p.taskSessionId);
+  await lockBusiness(db, `task:${requireId(command.payload.taskSessionId)}`);
   const task = await first(
     db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 FOR UPDATE",
+    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2",
     [taskId, command.sessionId],
   );
   if (!task && command.operation === "UPDATE_TASK" && p.turnStatus === "FAILED") {

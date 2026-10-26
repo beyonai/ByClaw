@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.resource;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -53,8 +54,9 @@ public interface ResourceSyncScopeMapper {
 
     @Select("""
         SELECT default_dig_employee_id FROM byai.suas_superassist
-        WHERE create_user = #{userId} AND com_acct_id = #{tenantId} AND status = '00' FOR UPDATE
+        WHERE create_user = #{userId} AND com_acct_id = #{tenantId} AND status = '00'
         """)
+    @RedisTransactionLock(value = "user-default-employee", parameters = {"tenantId", "userId"})
     List<Long> defaultEmployeesForUpdate(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
 
     /** Read by creator, never by superassist primary key; duplicate defaults are intentionally rejected. */

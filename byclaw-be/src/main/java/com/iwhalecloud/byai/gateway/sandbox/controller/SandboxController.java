@@ -244,9 +244,9 @@ public class SandboxController {
                 }
 
                 // 查询数据库记录获取完整状态
-                SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxId(
-                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId()
-                );
+                boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
+                SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
+                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
 
                 Map<String, Object> result = new HashMap<>();
                 result.put("userCode", userCode);
@@ -255,13 +255,17 @@ public class SandboxController {
                 result.put("endpoints", sandbox.getEndpoints());
                 result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
-                result.put("status", record != null ? record.getStatus() : "UNKNOWN");
+                result.put("isShared", shared);
+                result.put("serviceKey", sandbox.getServiceKey());
+                result.put("mappingId", sandbox.getMappingId());
+                // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
+                result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
                 SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
-                result.put("workerId", workerView == null ? null : workerView.getWorkerId());
-                result.put("workerOnline", workerView == null ? null : workerView.getWorkerOnline());
-                result.put("workerLastSeen", workerView == null ? null : workerView.getWorkerLastSeen());
+                result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
+                result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
+                result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
                 result.put("workerLeaseTtlSeconds",
-                    workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
+                    shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
                 data.add(result);
             }
         }

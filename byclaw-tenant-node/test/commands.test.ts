@@ -48,7 +48,7 @@ describe("command receipts", () => {
 });
 function context(operation: any, payload: Record<string, any> = {}, role = "MEMBER") {
   const query = vi.fn(async () => [] as any[]);
-  const ctx = new CommandContext({ query }, command({ operation, payload }));
+  const ctx = new CommandContext({ query, lock: async () => {} }, command({ operation, payload }));
   vi.spyOn(ctx, "session").mockResolvedValue({
     sessionType: "hs_as",
     enterpriseId: "10",
@@ -138,7 +138,7 @@ describe("group write permission", () => {
   });
   it("creates personal sessions with the existing project sentinel", async () => {
     const query = vi.fn(async () => []);
-    const ctx = new CommandContext({ query }, command());
+    const ctx = new CommandContext({ query, lock: async () => {} }, command());
     await createSession(ctx);
     const [sql, parameters] = query.mock.calls.at(-1)!;
     expect(sql).toContain("project_id");
@@ -147,7 +147,7 @@ describe("group write permission", () => {
   it("retains the selected agent and project when creating a tenant chat", async () => {
     const query = vi.fn(async () => []);
     const ctx = new CommandContext(
-      { query },
+      { query, lock: async () => {} },
       command({
         payload: {
           sessionName: "project chat",

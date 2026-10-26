@@ -1,3 +1,4 @@
+import { DomainError } from "../../domain/errors.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import { requireId } from "../../domain/values.js";
 
@@ -6,6 +7,11 @@ export async function lockSessions(db: SqlSession, ids: string[]): Promise<void>
   const ordered = [...new Set(ids.map(requireId))].sort((a, b) =>
     BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0,
   );
-  for (const id of ordered)
-    await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${id}`]);
+  for (const id of ordered) await lockBusiness(db, `session:${id}`);
+}
+
+/** Read-only adapters cannot silently execute a mutation requiring distributed exclusion. */
+export async function lockBusiness(db: SqlSession, key: string): Promise<void> {
+  if (!db.lock) throw new DomainError("LOCK_REQUIRES_TRANSACTION");
+  await db.lock(key);
 }

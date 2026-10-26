@@ -4,6 +4,7 @@ import type { TenantIdentity } from "./domain/tenant.js";
 
 export interface Config extends TenantIdentity {
   tenantId: string;
+  commercialManaged?: boolean;
   instanceId: string;
   host: string;
   port: number;
@@ -55,6 +56,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     enterpriseId,
     tenantId: enterpriseId,
+    commercialManaged: env.COMMERCIAL_MANAGED === "true",
     generation: requireId(required("TENANT_GENERATION")),
     dbSandboxRecordId: requireId(required("DB_SANDBOX_RECORD_ID")),
     instanceId: env.INSTANCE_ID ?? hostname(),

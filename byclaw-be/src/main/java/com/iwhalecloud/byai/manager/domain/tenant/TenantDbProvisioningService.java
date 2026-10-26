@@ -49,6 +49,13 @@ public class TenantDbProvisioningService {
     private final ObjectMapper objectMapper;
     private final Executor taskExecutor;
     private final String dbProbeHost;
+    private com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandStore commercialCommands;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCommercialCommands(com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandStore commands) {
+        this.commercialCommands = commands;
+    }
+
 
     public TenantDbProvisioningService(TenantAdminTenantMapper tenantMapper, TenantSandboxService sandboxService,
                                        TenantCredentialCrypto credentialCrypto, TenantConfigPublisher configPublisher,
@@ -81,11 +88,16 @@ public class TenantDbProvisioningService {
             if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, token, LOCK_TTL))) continue;
             try {
                 if (deletionRequested(enterpriseId)) continue;
+                boolean commercial = "true".equals(tenantMapper.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"));
+                if (commercial && (commercialCommands == null || !commercialCommands.canRenewTechnicalLease(enterpriseId))) continue;
                 Map<String, String> config = readConfig(enterpriseId);
                 var state = objectMapper.readTree(config.get("PROVISION_STATE"));
                 if (state == null || !"READY".equals(state.path("status").asText())) continue;
                 Instant lease = Instant.parse(state.path("leaseUntil").asText());
-                if (lease.isBefore(Instant.now().plus(Duration.ofHours(12)))) {
+                if (lease.isBefore(Instant.now().plus(Duration.ofHours(12))) || (commercial && state.has("commandLeaseUntilEpochSeconds"))) {
+                    // Completed-command transport deadlines must not expire authenticated history access.
+                    // Business admission still reads the independent execution policy on every new operation.
+                    if (commercial) ((com.fasterxml.jackson.databind.node.ObjectNode) state).remove("commandLeaseUntilEpochSeconds");
                     ((com.fasterxml.jackson.databind.node.ObjectNode) state).put("leaseUntil",
                         Instant.now().plus(Duration.ofHours(24)).toString());
                     String renewed = objectMapper.writeValueAsString(state);
@@ -111,6 +123,7 @@ public class TenantDbProvisioningService {
     }
 
     public void request(long enterpriseId) {
+        requireLegacyOperation(enterpriseId);
         if (deletionRequested(enterpriseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
@@ -118,6 +131,7 @@ public class TenantDbProvisioningService {
     }
 
     public void requestRestart(long enterpriseId, String sandboxType, long recordId) {
+        requireLegacyOperation(enterpriseId);
         if (deletionRequested(enterpriseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
@@ -185,6 +199,7 @@ public class TenantDbProvisioningService {
 
     /** Replace a READY tenant's Node with the configured image while keeping its database sandbox. */
     public TenantSandboxView recreateNode(long enterpriseId) {
+        requireLegacyOperation(enterpriseId);
         String lockKey = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL))) {
@@ -236,6 +251,7 @@ public class TenantDbProvisioningService {
     }
 
     public void provision(long enterpriseId) {
+        requireLegacyOperation(enterpriseId);
         String lockKey = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL))) return;
@@ -259,6 +275,78 @@ public class TenantDbProvisioningService {
         }
         finally {
             releaseLock(lockKey, token);
+        }
+    }
+
+    /** Executes a commercial reservation under database fencing, retaining every uncertain external intent. */
+    public void provisionDurably(long enterpriseId,
+        com.iwhalecloud.byai.manager.domain.tenant.integration.TenantProvisioningGuard guard) throws Exception {
+        Map<String, String> config = readConfig(enterpriseId);
+        if (!"true".equals(config.get("COMMERCIAL_MANAGED"))) {
+            throw new IllegalArgumentException("durable provisioning requires a commercial reservation");
+        }
+        if (deletionRequested(enterpriseId)) throw new IllegalStateException("tenant deletion in progress");
+        JsonNode spec = objectMapper.readTree(config.get("PACKAGE_CONTENT_SNAPSHOT"));
+        String profile = spec.path("profileKey").asText();
+        String dbName = "byclaw_t_" + enterpriseId;
+        String dbUser = "bc_t_" + enterpriseId + "_admin";
+        String envelope = config.get("DB_PASSWORD");
+        String password = envelope == null ? credentialCrypto.newPassword() : decrypt(enterpriseId, dbName, envelope);
+        String encrypted = envelope == null ? credentialCrypto.encrypt(enterpriseId, dbName, password) : envelope;
+        guard.local(() -> {
+            upsertConfig(enterpriseId, "DB_PASSWORD", encrypted);
+            upsertConfig(enterpriseId, "DB_CREDENTIAL_VERSION", "1");
+            upsertConfig(enterpriseId, "DB_NAME", dbName);
+            upsertConfig(enterpriseId, "DB_USER", dbUser);
+            upsertConfig(enterpriseId, "PROVISION_STATE", durableState("DB_CREATING", guard));
+        });
+        TenantSandboxView database = guard.external("DB_CREATE", TenantSandboxView.class,
+            () -> sandboxService.launchOpenGauss(enterpriseId, profile, dbName, dbUser, password, guard.providerRequestKey("DB_CREATE")));
+        // Probe is read-only. Persisting a STARTED intent still gives conservative recovery if the process dies.
+        HostPort endpoint = parseEndpoint(database.endpoint(), database.sandboxId());
+        guard.external("DB_PROBE", Boolean.class, () -> {
+            probeDatabase(endpoint, dbName, dbUser, password); return true;
+        });
+        guard.local(() -> {
+            upsertConfig(enterpriseId, "DB_HOST", endpoint.host());
+            upsertConfig(enterpriseId, "DB_PORT", Integer.toString(endpoint.port()));
+            upsertConfig(enterpriseId, "DB_SANDBOX_RECORD_ID", Long.toString(database.recordId()));
+            upsertConfig(enterpriseId, "PROVISION_STATE", durableState("ADMIN_ONLY", guard));
+        });
+        guard.projection("CONFIG_PUBLISH", () -> {
+            if (!configPublisher.publish(enterpriseId, readConfig(enterpriseId))) throw new IllegalStateException("snapshot rejected");
+            return true;
+        });
+        TenantSandboxView node = guard.external("NODE_CREATE", TenantSandboxView.class,
+            () -> sandboxService.launchDataNode(enterpriseId, profile, database.recordId(), 1, guard.providerRequestKey("NODE_CREATE")));
+        guard.local(() -> upsertConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID", Long.toString(node.recordId())));
+        guard.external("SCHEMA_INIT", Boolean.class, () -> {
+            if (!schemaService.initialized(enterpriseId)) {
+                schemaService.initialize(enterpriseId, 1, database.recordId(), node,
+                    config.get("PROVISION_REQUEST_ID"), guard.fencingToken());
+            }
+            return true;
+        });
+        guard.projection("READY_PUBLISH", () -> {
+            Map<String, String> ready = readConfig(enterpriseId);
+            ready.put("PROVISION_STATE", durableState("READY", guard));
+            if (!configPublisher.publish(enterpriseId, ready)) throw new IllegalStateException("snapshot rejected");
+            return true;
+        });
+        guard.local(() -> upsertConfig(enterpriseId, "PROVISION_STATE", durableState("READY", guard)));
+    }
+
+    private String durableState(String status, com.iwhalecloud.byai.manager.domain.tenant.integration.TenantProvisioningGuard guard) {
+        try {
+            return objectMapper.writeValueAsString(Map.of("status", status, "generation", "1",
+                "fencingToken", Long.toString(guard.fencingToken()), "leaseUntil", Instant.now().plus(Duration.ofHours(24)).toString(),
+                "commandLeaseUntilEpochSeconds", Long.toString(guard.leaseDeadlineEpochSeconds())));
+        } catch (Exception error) { throw new IllegalStateException("state serialization failed", error); }
+    }
+
+    private void requireLegacyOperation(long enterpriseId) {
+        if ("true".equals(tenantMapper.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.operation.requiresDurableCommand");
         }
     }
 

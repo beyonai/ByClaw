@@ -34,6 +34,8 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class ByaiMessageHotService {
+    @Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
 
     @Autowired
     private SequenceService sequenceService;
@@ -190,6 +192,8 @@ public class ByaiMessageHotService {
             log.warn("deleteByQo: 删除条件为空, 跳过执行");
             return;
         }
+        if (messageHotDelQo.getSessionId() != null) businessLocks.acquire("session:" + messageHotDelQo.getSessionId());
+        if (messageHotDelQo.getMessageId() != null) businessLocks.acquire("message:" + messageHotDelQo.getMessageId());
         byaiMessageMapper.deleteByQo(messageHotDelQo);
     }
 

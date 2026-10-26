@@ -381,7 +381,7 @@ public class GroupChatTurnCoordinator {
     public void tryDispatchSession(Long sessionId) {
         try {
             ByaiGroupChatTurn claimed = dispatchTransaction.execute(status -> {
-                anchors.selectForUpdateByCandidateSessionId(sessionId);
+                anchors.selectCurrentByCandidateSessionId(sessionId);
                 ByaiGroupChatTurn head = turns.selectFirstQueued(sessionId);
                 return head == null ? null : claim(head);
             });
@@ -402,7 +402,7 @@ public class GroupChatTurnCoordinator {
                 catch (RuntimeException error) {
                     log.warn("Unable to start group turn: turnId={}", turn.getExecutionId(), error);
                     dispatchTransaction.execute(status -> {
-                        ByaiGroupChatTurn persisted = turns.selectForUpdateById(turn.getExecutionId());
+                        ByaiGroupChatTurn persisted = turns.selectCurrentById(turn.getExecutionId());
                         if (persisted != null && "RUNNING".equals(persisted.getStatus())
                             && (persisted.getTraceId() == null || (isPreparationFailure(error)
                                 && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
@@ -453,8 +453,8 @@ public class GroupChatTurnCoordinator {
     }
 
     private ByaiGroupChatTurn resumeUnbound(ByaiGroupChatTurn snapshot) {
-        anchors.selectForUpdateByCandidateSessionId(snapshot.getCandidateSessionId());
-        ByaiGroupChatTurn turn = turns.selectForUpdateById(snapshot.getExecutionId());
+        anchors.selectCurrentByCandidateSessionId(snapshot.getCandidateSessionId());
+        ByaiGroupChatTurn turn = turns.selectCurrentById(snapshot.getExecutionId());
         if (turn == null || !"RUNNING".equals(turn.getStatus()) || turn.getTraceId() != null
             || !Objects.equals(turn.getCandidateSessionId(), snapshot.getCandidateSessionId())) {
             return null;

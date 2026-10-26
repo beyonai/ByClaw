@@ -1,3 +1,5 @@
+import { SqlMirrorTransactions } from "../src/infrastructure/persistence/mirror-repository.js";
+import { disposableRedis } from "./support/disposable-redis.js";
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { validateScript } from "../src/infrastructure/schema/script-validator.js";
@@ -56,6 +58,7 @@ describe.skipIf(!pgUrl)(
       await admin.connect();
       // A disposable unprivileged role mirrors tenant ownership; postgres itself owns system catalogs.
       const role = `forward_schema_fixture_${process.pid}`;
+      const coordination = await disposableRedis();
       let connection: ConnectionManager | undefined;
       let createdRole = false;
       try {
@@ -76,7 +79,7 @@ describe.skipIf(!pgUrl)(
           readAuthority: async () => undefined,
           saveAuthority: async () => {},
           decrypt: async () => "",
-          open: Database.open,
+          open: (snapshot, password) => Database.open(snapshot, password, coordination.locks),
         });
         await connection.refresh();
         const db = connection.database();
@@ -178,6 +181,7 @@ describe.skipIf(!pgUrl)(
         ).rejects.toMatchObject({ code: "23514" });
       } finally {
         await connection?.close();
+        await coordination.close();
         if (createdRole) {
           await admin.query("DROP SCHEMA IF EXISTS byai CASCADE");
           await admin.query(`REVOKE CREATE ON DATABASE byclaw_forward_test FROM ${role}`);
@@ -220,24 +224,55 @@ describe.skipIf(!pgUrl)("real two-connection publication boundaries", () => {
       )[0].n,
     ).toBe("2");
   });
+  it("legacy task mirrors wait for the owning group lifecycle Redis lock", async () => {
+    await f.sql(
+      "INSERT INTO byai.byai_session(session_id,enterprise_id,session_type,creator_id) VALUES(50,1,'h_as',30)",
+    );
+    await f.sql(
+      "INSERT INTO byai.byai_group_chat_task(task_session_id,group_session_id,source_message_id,dispatch_id,initiator_user_id,target_agent_id,task_name,status,turn_status) VALUES(50,10,101,500,30,42,'legacy','ACTIVE','RUNNING')",
+    );
+    let release!: () => void, acquired!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const lifecycle = f.connection.write(async (db) => {
+      await db.lock!("session:10");
+      acquired();
+      await gate;
+    });
+    await ready;
+    const mirror = new SqlMirrorTransactions(f.connection).run(async (tx) => {
+      await tx.lock("50");
+    });
+    try {
+      await expect.poll(() => f.pendingLocks.has("tenant:1:session:10")).toBe(true);
+    } finally {
+      release();
+      await lifecycle;
+      await mirror;
+    }
+  });
   it.each(["RECALL_MESSAGE", "REMOVE_MEMBER"] as const)(
     "%s writer blocks after final validation until publication commits",
     async (operation) => {
       const lease = await f.ready();
       let release!: () => void;
-      let observed!: (pid: number) => void;
-      const reached = new Promise<number>((resolve) => {
+      let observed!: () => void;
+      const reached = new Promise<void>((resolve) => {
         observed = resolve;
       });
       const hold = new Promise<void>((resolve) => {
         release = resolve;
       });
-      f.pausePublish(async (db) => {
-        observed(Number((await db.query("SELECT pg_backend_pid() AS pid"))[0].pid));
+      f.pausePublish(async () => {
+        observed();
         await hold;
       });
       const publishing = f.store.commit(lease);
-      const pid = await reached;
+      await reached;
       const commands = new CommandService(new SqlCommandTransactions(f.connection));
       const c = command({
         enterpriseId: "1",
@@ -257,19 +292,8 @@ describe.skipIf(!pgUrl)("real two-connection publication boundaries", () => {
       );
       try {
         await expect
-          .poll(
-            async () =>
-              Number(
-                (
-                  await f.sql(
-                    "SELECT count(*) AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))",
-                    [pid],
-                  )
-                )[0].n,
-              ),
-            { timeout: 3000 },
-          )
-          .toBe(1);
+          .poll(() => f.pendingLocks.has("tenant:1:session:10"), { timeout: 3000 })
+          .toBe(true);
       } finally {
         release();
       }

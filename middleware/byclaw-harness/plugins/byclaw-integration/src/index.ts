@@ -1,3 +1,4 @@
+import type { ManagedAdmissionLease } from './managed-admission.ts'
 import { createTtsDebugHttpHandler } from './tts-http.ts'
 import { ByClawVoiceRuntime } from './voice-runtime.ts'
 import { createVoiceHttpHandler, type VoiceWebHost } from './voice-http.ts'
@@ -101,7 +102,11 @@ export interface ByClawEmployeeRoots {
   prepare(templateId: string): Promise<{ setup(agent: Agent): void; authorize(): void }>
 }
 declare module '@deepseek-ai/cordis' {
-  interface Context { byclawEmployeeRoots: ByClawEmployeeRoots }
+  interface Context {
+    byclawEmployeeRoots: ByClawEmployeeRoots
+    byclawManagedAdmission: ManagedAdmissionLease
+    byclawManagedRuntime: { ready: boolean; activity(): { busy: boolean; activeRequests: number }; stopAdmission(): void }
+  }
 }
 
 export { BYCLAW_DSH_AGENT_TYPE, DEFAULT_BYCLAW_BE_BASE_URL }
@@ -1162,12 +1167,26 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     worker = new ByClawDshWorkerRuntime({
       redis,
       workerId: id,
+      admission: ctx.get('byclawManagedAdmission'),
       agentTypes,
       sessions,
     })
     startupPhase('worker-start')
     await worker.start(id)
     startupPhase('worker-ready')
+    if (ctx.get('byclawManagedAdmission')) {
+      const runtimeWorker = worker
+      const runtimeSessions = sessions
+      ctx.effect(() => ctx.provide('byclawManagedRuntime', {
+        ready: true,
+        activity: () => {
+          const snapshot = runtimeSessions.sandboxBusySnapshot()
+          const activeRequests = runtimeWorker.admission?.activeRequests ?? 0
+          return { busy: snapshot.busy || activeRequests > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount) }
+        },
+        stopAdmission: () => runtimeWorker.stopAdmission(),
+      }), 'byclaw-managed-runtime')
+    }
 
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 
