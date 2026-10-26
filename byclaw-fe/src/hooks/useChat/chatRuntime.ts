@@ -355,6 +355,46 @@ const findChatStreamContext = (
 
 export const hasChatStreamContext = (rawMessage: any, res?: any) => !!findChatStreamContext(rawMessage, res);
 
+const normalizedMessageIdentity = (message: IMessage) =>
+  [message.sessionId, message.messageId, message.queryMsgId].map((value) => `${value ?? ''}`.trim());
+
+const hasSameCompleteMessageIdentity = (left: IMessage, right: IMessage) => {
+  const leftIdentity = normalizedMessageIdentity(left);
+  const rightIdentity = normalizedMessageIdentity(right);
+  return (
+    leftIdentity.every(Boolean) &&
+    rightIdentity.every(Boolean) &&
+    leftIdentity.every((value, index) => value === rightIdentity[index])
+  );
+};
+
+/**
+ * Merge completed interaction cards into the newest answer held by an already-restored stream.
+ * Stream text and other state stay authoritative on the context so queued deltas cannot be lost.
+ */
+export const refreshChatStreamAnswerMessage = (rawMessage: any, answerMsg: IMessage, res?: any) => {
+  const context = findChatStreamContext(rawMessage, res);
+  if (!context || !hasSameCompleteMessageIdentity(context.answerMsg, answerMsg)) return false;
+
+  let interactionMatched = false;
+  const nextAnswerMsg = { ...context.answerMsg };
+  (['thinkList', 'messageList'] as const).forEach((listKey) => {
+    const freshItems = answerMsg[listKey] || [];
+    if (!freshItems.length || !context.answerMsg[listKey]?.length) return;
+    const freshItemsById = new Map(freshItems.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+    nextAnswerMsg[listKey] = context.answerMsg[listKey]?.map((item) => {
+      const freshItem = freshItemsById.get(item.uuid);
+      if (!freshItem) return item;
+      interactionMatched = true;
+      return { ...item, content: freshItem.content };
+    });
+  });
+  if (!interactionMatched) return false;
+
+  context.answerMsg = context.updateMessage(nextAnswerMsg, { isAssign: true });
+  return true;
+};
+
 const shouldApplyParsedStream = (parsed: ParsedChatStreamMessage) => {
   if (!parsed.streamId) return true;
   const targetSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);

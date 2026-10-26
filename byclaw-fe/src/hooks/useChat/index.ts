@@ -43,6 +43,7 @@ import {
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
   hasChatStreamContext,
+  refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -124,6 +125,9 @@ export type ISendProps = {
   /** 输入框展示给用户的文本，包含数字员工名称；queryQuestion 仍保留后端识别所需的占位符。 */
   displayText?: string;
   inheritQryMsgId?: IMessage['msgId'];
+
+  /** Cold resume 时由交互组件提供的最新回答消息，避免读取到尚未刷新的 messageListRef。 */
+  resumeAnswerMsg?: IMessage;
   payload?: Record<string, unknown>;
   msgOpt?: {
     queryMsg?: Record<string, unknown>;
@@ -147,6 +151,22 @@ function getAnswerClientMsgId(clientRequestId: string) {
 function getQueryClientMsgId(clientRequestId: string) {
   return clientRequestId.split('_')[0];
 }
+
+const isMatchingResumeAnswer = (
+  answer: IMessage | undefined,
+  expected: { sessionId?: string; messageId?: unknown; queryMsgId?: IMessage['msgId'] }
+) => {
+  const actualIds = [answer?.sessionId, answer?.messageId, answer?.queryMsgId].map((value) => `${value ?? ''}`.trim());
+  const expectedIds = [expected.sessionId, expected.messageId, expected.queryMsgId].map((value) =>
+    `${value ?? ''}`.trim()
+  );
+  return Boolean(
+    answer?.fromBeyond &&
+      actualIds.every(Boolean) &&
+      expectedIds.every(Boolean) &&
+      actualIds.every((value, index) => value === expectedIds[index])
+  );
+};
 
 const getPositiveNumber = (value: unknown) => {
   const numberValue = Number(value);
@@ -1056,7 +1076,7 @@ function useChat(props: IProps) {
         return false;
       }
     }
-    const isColdResume = isResumeChat && !isContinuingRunningTrace;
+    let isColdResume = isResumeChat && !isContinuingRunningTrace;
     if (isResumeChat) {
       console.info(
         '[ASK_USER_QUESTION_RESUME_TRACE]',
@@ -1102,6 +1122,7 @@ function useChat(props: IProps) {
     let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
     let resumeTargetAnswer: IMessage | undefined;
+    let hasFreshResumeTarget = false;
 
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
@@ -1133,14 +1154,31 @@ function useChat(props: IProps) {
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
       }
-      if (isColdResume) {
-        const llmMessageId = get(restPayload, 'llmMessageId');
-        resumeTargetAnswer = messageListRef.current.find(
-          (item) =>
-            item.fromBeyond &&
-            item.queryMsgId === inheritQryMsgId &&
-            (!llmMessageId || `${item.messageId}` === `${llmMessageId}`)
+      const llmMessageId = get(restPayload, 'llmMessageId');
+      hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
+        sessionId,
+        messageId: llmMessageId,
+        queryMsgId: inheritQryMsgId,
+      });
+      if (isContinuingRunningTrace && hasFreshResumeTarget && sendProps.resumeAnswerMsg) {
+        const refreshed = refreshChatStreamAnswerMessage(
+          { sessionId, traceId: payload.traceId },
+          sendProps.resumeAnswerMsg
         );
+        if (!refreshed) {
+          isContinuingRunningTrace = false;
+          isColdResume = true;
+        }
+      }
+      if (isColdResume) {
+        resumeTargetAnswer = hasFreshResumeTarget
+          ? sendProps.resumeAnswerMsg
+          : messageListRef.current.find(
+            (item) =>
+              item.fromBeyond &&
+                item.queryMsgId === inheritQryMsgId &&
+                (!llmMessageId || `${item.messageId}` === `${llmMessageId}`)
+          );
         console.info(
           '[ASK_USER_QUESTION_RESUME_TRACE]',
           JSON.stringify({
@@ -1441,7 +1479,8 @@ function useChat(props: IProps) {
 
     // 更新回答消息
     laneEntries.forEach((entry) => {
-      const nextAnswerMsg = isColdResume ? entry.answerMsg : updateMessage(entry.answerMsg, { isAssign: true });
+      const nextAnswerMsg =
+        isColdResume && !hasFreshResumeTarget ? entry.answerMsg : updateMessage(entry.answerMsg, { isAssign: true });
       entry.answerMsg = nextAnswerMsg;
       registerPendingChatContext({
         clientRequestId: entry.lane.clientRequestId,

@@ -55,7 +55,7 @@ export type IMessageListItemContent = {
 
 export type IProps = {
   message: IMessage;
-  updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
+  updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => IMessage | void;
   messageListItemContent: IMessageListItemContent;
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
@@ -564,12 +564,13 @@ export function AskUserQuestions(props: IProps) {
                   traceId: messageInfo.traceId,
                 });
 
-                updateMessageListItemContent(finishedContent);
+                const finishedAnswerMessage = updateMessageListItemContent(finishedContent);
                 EventEmitter.emit('beyond-chat-on-send-msg', {
                   sendProps: {
                     queryQuestion,
                     payload,
                     inheritQryMsgId: messageInfo.queryMsgId,
+                    resumeAnswerMsg: finishedAnswerMessage,
                     msgOpt: {
                       answerMsg: {
                         messageState: IMessageState.Query,
