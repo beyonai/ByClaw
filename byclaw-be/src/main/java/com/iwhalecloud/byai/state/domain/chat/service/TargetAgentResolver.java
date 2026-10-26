@@ -31,6 +31,9 @@ public class TargetAgentResolver {
     @Autowired
     private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway sharedSandboxGateway;
+
     @Value("${byclaw.super-enabled:false}")
     private boolean superEnabled;
 
@@ -62,7 +65,21 @@ public class TargetAgentResolver {
         if (!superEnabled && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
             targetAgentType = buildUserAgentType(WorkerAgentType.HARNESS, userCode);
         }
-        return resolveRuntimeAgentType(targetAgentType, userCode);
+        targetAgentType = resolveRuntimeAgentType(targetAgentType, userCode);
+        if (sharedSandboxGateway != null && StringUtils.startsWith(targetAgentType, "BYCLAW_DSH")) {
+            var shared = sharedSandboxGateway.tryAcquire(userCode, "byclaw-dsh");
+            if (shared != null) {
+                if (StringUtils.isBlank(shared.getWorkerAgentType())) {
+                    throw new IllegalStateException("共享沙箱映射缺少 Worker 路由");
+                }
+                return shared.getWorkerAgentType();
+            }
+            // 客户端不能用旧映射的 resume target 绕过当前用户路由。
+            if (targetAgentType.startsWith("BYCLAW_DSH_SHARED_")) {
+                return buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode);
+            }
+        }
+        return targetAgentType;
     }
 
     /**
@@ -107,7 +124,9 @@ public class TargetAgentResolver {
     }
 
     public boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
-        return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
+        return (sharedSandboxGateway != null && StringUtils.startsWith(targetAgentType, "BYCLAW_DSH_SHARED_")
+                && targetAgentType.equals(sharedSandboxGateway.currentWorkerTarget(userCode)))
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.HARNESS, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType,

@@ -90,6 +90,13 @@ public class SandboxService {
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper sandboxServiceSpecEntityMapper;
 
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway sharedSandboxGateway;
+
+    private SandboxLaunchData managedSharedLaunch(String userCode, String type) {
+        return sharedSandboxGateway == null ? null : sharedSandboxGateway.tryAcquire(userCode, type);
+    }
+
     /** 常驻（共享）DSH 宿主上的用户上下文；未配置 shared-dsh-host.base-url 时为空。 */
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
@@ -99,7 +106,8 @@ public class SandboxService {
      * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
      */
     private boolean sharedHostRoutes(String userCode, String sandboxType) {
-        return sharedDshHostContexts != null && sharedDshHostContexts.routes(userCode, sandboxType);
+        return sharedDshHostContexts != null && sharedDshHostContexts.routes(userCode, sandboxType)
+            && (sharedSandboxGateway == null || !sharedSandboxGateway.enabled());
     }
 
 
@@ -463,6 +471,8 @@ public class SandboxService {
         SandboxLaunchRouting resolvedRouting) {
         SandboxLaunchRouting routing = resolvedRouting != null ? resolvedRouting
             : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
+        if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) {
             SandboxLaunchData hosted = sharedDshHostContexts.ensure(userCode);
             if (waitForWorkerReady && StringUtils.isNotBlank(targetAgentType)) {
@@ -562,6 +572,8 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
+        if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
         if (platformRemote()) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
         String lockKey = buildLaunchLockKey(userCode, routing);
@@ -657,6 +669,8 @@ public class SandboxService {
      */
     public SandboxLaunchData launchSandboxAwait(String userCode, Long resourceId) {
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+        SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
+        if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
         if (platformRemote()) return platformGateway().convert(platformGateway().service("launch-await",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxLaunchData.class);
         if (sharedDshHost(userCode, routing) != null) {
@@ -1102,6 +1116,7 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxType(String userCode, String sandboxType) {
+        if (sharedSandboxGateway != null && sharedSandboxGateway.heartbeat(userCode, sandboxType)) return true;
         // A resident-host context has no record and no lease; the host keeps it alive by its own idle rule.
         if (sharedHostRoutes(userCode, sandboxType)) return true;
         if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode,"sandboxType",sandboxType)));
@@ -1154,11 +1169,12 @@ public class SandboxService {
     }
 
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
-        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode)));
+        boolean sharedTouched = sharedSandboxGateway != null && sharedSandboxGateway.heartbeat(userCode);
+        if (platformRemote()) return Boolean.TRUE.equals(platformGateway().service("heartbeat",platformGateway().params("userCode",userCode))) || sharedTouched;
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {
             LOGGER.debug("心跳跳过：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
-            return false;
+            return sharedTouched;
         }
         Date now = new Date();
         int updatedCount = 0;
@@ -1178,7 +1194,7 @@ public class SandboxService {
         }
         if (updatedCount == 0) {
             LOGGER.warn("沙箱心跳失败：运行中记录均未更新，用户编码：{}，资源ID：{}", userCode, resourceId);
-            return false;
+            return sharedTouched;
         }
         LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
             userCode, resourceId, records.size(), updatedCount, now);
@@ -1276,6 +1292,13 @@ public class SandboxService {
      * @return 最新沙箱信息；未命中运行中沙箱时返回 null
      */
     public SandboxInfo renewSandbox(String userCode, Long resourceId) {
+        if (sharedSandboxGateway != null) {
+            String service = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode).getSandboxType();
+            if (sharedSandboxGateway.heartbeat(userCode, service)) {
+                SandboxInfo shared = sharedSandboxGateway.info(userCode, service);
+                if (shared != null) return shared;
+            }
+        }
         if (platformRemote()) return platformGateway().convert(platformGateway().service("renew",platformGateway().params("userCode",userCode,"resourceId",resourceId)),SandboxInfo.class);
         if (StringUtils.isBlank(userCode)) {
             LOGGER.warn("沙箱续约失败：无法获取用户编码，资源ID：{}", resourceId);
@@ -1350,6 +1373,19 @@ public class SandboxService {
 
     /** The resident host's context for the user is not a record; listings read it from the host. */
     private List<SandboxInfo> withSharedHostContext(String userCode, List<SandboxInfo> infos) {
+        if (sharedSandboxGateway != null) {
+            List<SandboxInfo> shared = sharedSandboxGateway.infos(userCode);
+            if (shared != null && !shared.isEmpty()) {
+                shared.forEach(this::populateSharedWorkerLiveness);
+                java.util.Set<String> sharedTypes = shared.stream().map(SandboxInfo::getSandboxType)
+                    .collect(java.util.stream.Collectors.toSet());
+                List<SandboxInfo> merged = new ArrayList<>();
+                if (infos != null) infos.stream().filter(info -> info != null
+                    && !sharedTypes.contains(info.getSandboxType())).forEach(merged::add);
+                merged.addAll(shared);
+                return merged;
+            }
+        }
         if (!sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)) {
             return infos;
         }
@@ -1367,6 +1403,28 @@ public class SandboxService {
         return merged;
     }
 
+    private void populateSharedWorkerLiveness(SandboxInfo info) {
+        if (!Boolean.TRUE.equals(info.getIsShared()) || StringUtils.isBlank(info.getWorkerAgentType())) return;
+        try {
+            WorkerRegistry.OnlineAgentCheckResult online =
+                gatewayWorkerRegistry.hasOnlineAgentType(info.getWorkerAgentType(), true);
+            info.setWorkerOnline(online != null && online.exists);
+            String workerId = online == null || online.workerIds == null ? null : online.workerIds.stream()
+                .filter(StringUtils::isNotBlank).sorted().findFirst().orElse(null);
+            if (workerId == null) return;
+            info.setWorkerId(workerId);
+            Map<String, Object> worker = gatewayWorkerRegistry.getWorker(workerId);
+            if (worker != null) info.setWorkerLastSeen(toLong(worker.get("last_seen")));
+            Long ttl = WorkerLeaseTtlSupport.read(redisClient.getCommands(),
+                Constants.RegistryKeys.workerOnlineLease(workerId), info.getWorkerOnline());
+            if (ttl != null) info.setWorkerLeaseTtlSeconds(ttl);
+        }
+        catch (Exception unavailable) {
+            LOGGER.warn("读取共享上下文 Worker 心跳失败，mappingId={}，原因：{}", info.getMappingId(),
+                unavailable.getClass().getSimpleName());
+        }
+    }
+
     /**
      * 释放沙箱
      *
@@ -1382,6 +1440,12 @@ public class SandboxService {
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
         String requestedType = StringUtils.trimToNull(requestedSandboxType);
+        String resolvedType = resourceId == null ? requestedType
+            : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode).getSandboxType();
+        if (sharedSandboxGateway != null) {
+            if (resolvedType == null) sharedSandboxGateway.release(userCode);
+            else if (sharedSandboxGateway.release(userCode, resolvedType)) return;
+        }
         if (resourceId == null && (requestedType == null || SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(requestedType))
             && sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)) {
             // The user's assistant lives on the resident host: releasing it is a DELETE there, nothing else.

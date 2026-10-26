@@ -167,4 +167,40 @@ class TargetAgentResolverTest {
         assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_user001");
     }
 
+    @Test
+    void managedTargetOverridesClientResumeWithCurrentTenantMapping() {
+        var shared = org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        ReflectionTestUtils.setField(targetAgentResolver, "sharedSandboxGateway", shared);
+        var launch = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+        launch.setWorkerAgentType("BYCLAW_DSH_SHARED_tenantA_mapping1");
+        when(shared.tryAcquire("user001", "byclaw-dsh")).thenReturn(launch);
+        assertThat(targetAgentResolver.resolveAgentType("HARNESS", 1L, "BYCLAW_DSH_SHARED_tenantB_mapping2", "user001"))
+            .isEqualTo("BYCLAW_DSH_SHARED_tenantA_mapping1");
+    }
+
+    @Test
+    void revokedSharedEligibilityCannotBeBypassedByHistoricalResumeTarget() {
+        var client = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPlatformClient.class);
+        var policy = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy.class);
+        var users = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserInfoFactory.class);
+        var provider = new org.springframework.beans.factory.support.StaticListableBeanFactory(
+            java.util.Map.of("sharedClient", client)).getBeanProvider(
+                com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPlatformClient.class);
+        var shared = new com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway(
+            provider, policy, users, new com.fasterxml.jackson.databind.ObjectMapper());
+        ReflectionTestUtils.setField(targetAgentResolver, "sharedSandboxGateway", shared);
+        org.mockito.Mockito.lenient().when(users.build("user001"))
+            .thenReturn(java.util.Map.of("userCode", "user001", "userId", 1L, "enterpriseId", 10L));
+        org.mockito.Mockito.lenient().when(client.call(org.mockito.ArgumentMatchers.eq("lookup"),
+            org.mockito.ArgumentMatchers.anyMap())).thenReturn(java.util.Map.of("code", 0, "data",
+                java.util.Map.of("workerAgentType", "BYCLAW_DSH_SHARED_old_1")));
+
+        assertThat(targetAgentResolver.resolveAgentType("HARNESS", 1L, "BYCLAW_DSH_SHARED_old_1", "user001"))
+            .isEqualTo("BYCLAW_DSH_user001");
+        org.mockito.Mockito.verifyNoInteractions(client, users);
+    }
+
 }

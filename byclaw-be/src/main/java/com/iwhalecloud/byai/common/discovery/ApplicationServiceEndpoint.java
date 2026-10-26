@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.common.discovery;
 
+import java.net.URI;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
@@ -32,6 +33,9 @@ public class ApplicationServiceEndpoint implements ApplicationListener<ServletWe
     @Value("${server.servlet.context-path:}")
     private String contextPath;
 
+    @Value("${byclaw.platform.business-base-url:}")
+    private String businessBaseUrl;
+
     public ApplicationServiceEndpoint(ServiceRegistry serviceRegistry) {
         this.serviceRegistry = serviceRegistry;
     }
@@ -56,6 +60,16 @@ public class ApplicationServiceEndpoint implements ApplicationListener<ServletWe
      * 根据 by-framework 中的当前注册实例和应用上下文路径生成沙箱访问本应用的基础地址。
      */
     public String getBaseUrl() {
+        if (StringUtils.isNotBlank(businessBaseUrl)) {
+            String address = businessBaseUrl.trim();
+            URI uri = URI.create(address);
+            if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                || uri.getHost() == null || uri.getUserInfo() != null
+                || uri.getRawQuery() != null || uri.getFragment() != null) {
+                throw new IllegalArgumentException("Invalid business gateway base URL");
+            }
+            return StringUtils.removeEnd(address, "/");
+        }
         ServiceInstance instance = serviceRegistry.getCurrentInstance();
         if (instance == null) {
             throw new IllegalStateException("当前应用尚未向 by-framework 注册服务实例");

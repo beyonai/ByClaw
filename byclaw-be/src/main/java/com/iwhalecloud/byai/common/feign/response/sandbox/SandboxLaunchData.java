@@ -20,6 +20,15 @@ public class SandboxLaunchData {
     /** Runtime returned sandbox id. */
     private String sandboxId;
 
+    /** Managed shared context queue identity, including tenant and mapping generation. */
+    private String workerAgentType;
+
+    /** Shared host template and its logical business service alias. */
+    private String serviceKey;
+    private String requestedServiceKey;
+    private Boolean isShared;
+    private String mappingId;
+
     /** Gateway token bound to the sandbox instance. */
     private String gatewayToken;
 

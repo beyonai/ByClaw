@@ -33,7 +33,7 @@ public final class SharedDshHostContexts {
 
     private static final Logger log = LoggerFactory.getLogger(SharedDshHostContexts.class);
 
-    /** System parameter: user codes that run on the shared host; absent, blank or {@code *} = everyone. */
+    /** System parameter: user codes that run on the shared host; absent, blank or {@code *} = nobody. */
     public static final String USERS_PARAM = "BYCLAW_SHARED_DSH_HOST_USERS";
     public static final String WEB_INSTANCE = "openclaw";
     private static final Pattern USER_LIST_SEPARATOR = Pattern.compile("[,;\\s]+");
@@ -128,8 +128,7 @@ public final class SharedDshHostContexts {
 
     /**
      * User filter backed by the {@value #USERS_PARAM} system parameter, read on every decision so an
-     * administrator's change applies to the next request. Unreadable configuration keeps the default
-     * (everyone) and is logged.
+     * administrator's change applies to the next request. Unreadable configuration does not grant access.
      */
     public static Predicate<String> userFilter(Supplier<String> configuredUsers) {
         return userCode -> {
@@ -138,20 +137,20 @@ public final class SharedDshHostContexts {
                 value = configuredUsers.get();
             }
             catch (RuntimeException e) {
-                log.warn("读取系统参数 {} 失败，按全部用户使用常驻 DSH 宿主处理：{}", USERS_PARAM, e.getMessage());
-                return true;
+                log.warn("读取系统参数 {} 失败，不授予常驻 DSH 宿主访问：{}", USERS_PARAM, e.getMessage());
+                return false;
             }
             return allowsUser(value, userCode);
         };
     }
 
-    /** {@code null}, blank or {@code *} allows everyone; otherwise the comma/semicolon/space separated list. */
+    /** Exact comma/semicolon/space separated membership; empty and wildcard do not grant access. */
     static boolean allowsUser(String configuredUsers, String userCode) {
         String value = StringUtils.trimToEmpty(configuredUsers);
-        if (value.isEmpty() || "*".equals(value)) {
-            return true;
+        if (value.isEmpty() || "*".equals(value) || StringUtils.isBlank(userCode)) {
+            return false;
         }
-        Set<String> users = Set.of(USER_LIST_SEPARATOR.split(value));
+        Set<String> users = new java.util.HashSet<>(java.util.Arrays.asList(USER_LIST_SEPARATOR.split(value)));
         return users.contains(StringUtils.trimToEmpty(userCode));
     }
 
