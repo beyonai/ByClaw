@@ -243,17 +243,32 @@ out of the global spec: it would reach every A.
 - The shared DSH host (`scripts/byclaw-multi-host.mjs`) configures the
   `opensandbox` backend per user context unless `BYCLAW_DSH_TOOL_ENV=byclaw-be`
   is set on the host; then each context uses the `BEYOND_TOKEN` BE passed in
-  its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
-  host cannot mount the user's volume.
+  its PUT (renewed on every later PUT, see "Lifecycle of B"), and
+  `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the host cannot
+  mount the user's volume.
 
-## Follow-ups (`byclaw-be`, deliberately not done yet)
+## Lifecycle of B with `byclaw-be`
 
-- **Idle pause/resume.** BE has no pause API, so `pause()` is a no-op and B keeps
-  running between turns. OpenSandbox's pause/resume is reachable through BE's
-  `/v1/sandboxes/**` passthrough if this is wanted later.
-- **Releasing B.** Nothing removes B when A is released. BE's idle cleanup and
-  the DSH silent release only cover A's own sandbox type; B needs either an
-  explicit `removeSandbox` on A's shutdown or its own heartbeat and reclaim rule.
+The plugin owns B's lifetime; BE only creates and removes records on request.
+
+- **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10
+  minutes) without operations or open streams the connection calls `pause()`,
+  which releases B (`/sandbox/removeSandbox`). The next operation launches a
+  fresh B; the user's files are on the shared workspace volume, only B's own
+  `/tmp` goes.
+- **A goes away.** Closing the connection (the context is disposed, the host
+  shuts down) releases B the same way, with a short grace period.
+- **Credentials.** The `BEYOND_TOKEN` BE injected is the user's JWT and expires,
+  while a context on the shared host stays resident for days. The host therefore
+  hands every later PUT's token to the context (`ToolEnv.renewBeToken`; BE mints a
+  new one per PUT), and provides `byclawBeTokenSource`, the user's current login
+  token from Redis, which the backend asks when BE answers 401. A launch BE
+  rejects is logged as `tool environment launch rejected: this context's
+  Beyond-Token expired …` (not `launch failed …`), retried once with the source's
+  token when that differs, and its backoff ends as soon as a different token
+  arrives.
+- **What this process cannot see** (it died with B running) is left to the
+  platform's own reclaim of the record.
 
 ## Building B's image
 

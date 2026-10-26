@@ -4,7 +4,7 @@ import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ByClawBeBackend, parseEndpoint, type ByClawBeBackendConfig } from '../src/be-backend.ts'
+import { ByClawBeBackend, ByClawTokenRejectedError, parseEndpoint, type ByClawBeBackendConfig } from '../src/be-backend.ts'
 import { ToolEnvIdentity } from '../src/identity.ts'
 
 interface Recorded { path: string; body: Record<string, unknown>; token: string | undefined; systemCode: string | undefined }
@@ -18,14 +18,16 @@ class FakeByClawBe {
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  /** When set, any other `beyond-token` gets BE's JWT filter answer: HTTP 401 with its own envelope. */
+  acceptedToken: string | undefined
   /** The user's private parameters, as BE stores them: values never read back whole. */
   readonly privateParams = new Map<string, { paramId: number; value: string }>()
   private next = 1
   server!: Server
 
   async start(): Promise<string> {
-    this.server = createServer((request, response) => { void this.handle(request).then(body => {
-      response.writeHead(200, { 'Content-Type': 'application/json' })
+    this.server = createServer((request, response) => { void this.handle(request).then(([status, body]) => {
+      response.writeHead(status, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify(body))
     }) })
     await new Promise<void>(resolve => this.server.listen(0, '127.0.0.1', resolve))
@@ -36,11 +38,19 @@ class FakeByClawBe {
 
   async stop(): Promise<void> { await new Promise<void>(resolve => this.server.close(() => resolve())) }
 
-  private async handle(request: IncomingMessage): Promise<unknown> {
+  private async handle(request: IncomingMessage): Promise<[number, unknown]> {
     let raw = ''
     for await (const chunk of request) raw += String(chunk)
     const path = request.url ?? ''
     const token = request.headers['beyond-token'] as string | undefined
+    if (this.acceptedToken !== undefined && token !== this.acceptedToken) {
+      this.calls.push({ path, body: {}, token, systemCode: undefined })
+      return [401, { resultCode: 401, type: 1, resultMsg: 'Beyond-Token expiration' }]
+    }
+    return [200, await this.answer(request, path, raw, token)]
+  }
+
+  private async answer(request: IncomingMessage, path: string, raw: string, token: string | undefined): Promise<unknown> {
     if (request.method === 'GET' && path.startsWith('/byaiService/userPrivateParam/list?')) {
       this.calls.push({ path, body: {}, token, systemCode: request.headers['system-code'] as string | undefined })
       const keyword = new URL(path, 'http://be').searchParams.get('keyword') ?? ''
@@ -252,7 +262,7 @@ describe('ByClawBeBackend', () => {
   it('backs off after a failed launch instead of calling BE on every operation', async () => {
     let clock = 1_000_000
     fake.launchFailure = '沙箱启动失败: Sandbox is being created'
-    const backend = new ByClawBeBackend(config, identity, message => logs.push(message), () => clock)
+    const backend = new ByClawBeBackend(config, identity, message => logs.push(message), { now: () => clock })
     await expect(backend.ensure()).rejects.toThrow('Sandbox is being created')
     expect(fake.calls).toHaveLength(1)
     // Within the first second no request leaves A; the error names the cause and the wait.
@@ -276,18 +286,102 @@ describe('ByClawBeBackend', () => {
     ])
   })
 
+  it('an expired token is reported as rejected, not retried, and a renewed token lifts the backoff', async () => {
+    let clock = 1_000_000
+    // The user's JWT in A expired; BE's filter answers 401 to every call made with it, the
+    // private-parameter listing included (publishKeys runs before the launch).
+    fake.acceptedToken = 'jwt-u1-renewed'
+    const backend = new ByClawBeBackend({ ...config, publishKeys: true }, identity, message => logs.push(message), { now: () => clock })
+    const failure = await backend.ensure().catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ByClawTokenRejectedError)
+    expect((failure as Error).message).toBe(
+      'ByClaw BE rejected this context\'s Beyond-Token (GET /userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50 -> 401 {"resultCode":401,"type":1,"resultMsg":"Beyond-Token expiration"})')
+    expect(fake.calls).toHaveLength(1)
+    expect(logs).toEqual([
+      'tool environment launch rejected: this context\'s Beyond-Token expired (ByClaw BE rejected this context\'s Beyond-Token (GET /userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50 -> 401 {"resultCode":401,"type":1,"resultMsg":"Beyond-Token expiration"})); waiting for BE to renew it; next attempt in 1 s',
+    ])
+    // Until a new token arrives the backoff holds, as for any other failure.
+    await expect(backend.ensure()).rejects.toThrow(/not available \(ByClaw BE rejected .*Beyond-Token.*\); next launch attempt in 1 s/u)
+    expect(fake.calls).toHaveLength(1)
+
+    // The same token again changes nothing; BE's next PUT brings a new one, which ends the backoff at once.
+    backend.renewToken('jwt-u1')
+    await expect(backend.ensure()).rejects.toThrow(/next launch attempt in 1 s/u)
+    backend.renewToken('jwt-u1-renewed')
+    expect(logs.at(-1)).toBe('Beyond-Token renewed after BE rejected the previous one; the next operation launches the tool environment again')
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(fake.calls.slice(1).every(call => call.token === 'jwt-u1-renewed')).toBe(true)
+    expect(fake.calls.slice(1).map(call => call.path.split('/').pop()?.split('?')[0])).toEqual(['list', 'save', 'save', 'launchByUserCode'])
+    await backend.dispose()
+  })
+
+  it('asks the token source once when BE rejects the token and retries at once with a different one', async () => {
+    fake.acceptedToken = 'jwt-u1-login'
+    const asked: string[] = []
+    let known: string | undefined = 'jwt-u1-login'
+    const source = { current: async () => { asked.push('asked'); return known } }
+    const backend = new ByClawBeBackend(config, identity, message => logs.push(message), {}, source)
+    // The context's token expired; the user's login state in Redis holds the one their browser uses.
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(asked).toEqual(['asked'])
+    expect(fake.calls.map(call => [call.path.split('/').pop(), call.token])).toEqual([['launchByUserCode', 'jwt-u1'], ['launchByUserCode', 'jwt-u1-login']])
+    expect(logs[0]).toBe('BE rejected this context\'s Beyond-Token (POST /sandbox/launchByUserCode -> 401); using the user\'s current login token and launching again')
+    expect(logs.some(line => line.includes('launch rejected'))).toBe(false)
+
+    // The login token is what BE rejected, or nobody is logged in: nothing to retry with, the usual backoff.
+    await backend.pause()
+    fake.acceptedToken = 'jwt-u1-later'
+    await expect(backend.ensure()).rejects.toThrow(ByClawTokenRejectedError)
+    known = undefined
+    await expect(backend.ensure()).rejects.toThrow(/next launch attempt in/u)
+    expect(asked).toHaveLength(2)
+    expect(logs.filter(line => line.includes('launch rejected'))).toHaveLength(1)
+    // A source that fails is reported and treated as empty.
+    const failing = new ByClawBeBackend(config, identity, message => logs.push(message), {}, { current: async () => { throw new Error('redis down') } })
+    await expect(failing.ensure()).rejects.toThrow(ByClawTokenRejectedError)
+    expect(logs.some(line => line === 'reading the user\'s current Beyond-Token failed (redis down)')).toBe(true)
+  })
+
+  it('a renewed token is used from the next call on, without disturbing an unrelated backoff', async () => {
+    let clock = 1_000_000
+    const backend = new ByClawBeBackend(config, identity, message => logs.push(message), { now: () => clock })
+    await backend.ensure()
+    backend.renewToken(' jwt-u1-next ')
+    await backend.pause()
+    expect(fake.calls.map(call => call.token)).toEqual(['jwt-u1', 'jwt-u1-next'])
+    // A launch that failed for another reason keeps its delay when a token arrives: the token was not the problem.
+    fake.launchFailure = '沙箱启动失败: Sandbox is being created'
+    await expect(backend.ensure()).rejects.toThrow('Sandbox is being created')
+    backend.renewToken('jwt-u1-after')
+    await expect(backend.ensure()).rejects.toThrow(/next launch attempt in 1 s/u)
+    expect(logs.some(line => line.includes('Beyond-Token renewed'))).toBe(false)
+    clock += 1000
+    fake.launchFailure = undefined
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(fake.calls.at(-1)?.token).toBe('jwt-u1-after')
+  })
+
   it('surfaces BE failures with their message', async () => {
     fake.launchFailure = '沙箱启动失败: Unknown sandbox service key: byclaw-dsh-tools'
     const backend = new ByClawBeBackend(config, identity, () => {})
     await expect(backend.ensure()).rejects.toThrow(/launchByUserCode failed: 沙箱启动失败: Unknown sandbox service key/u)
   })
 
-  it('pause is a no-op for this backend', async () => {
-    const backend = new ByClawBeBackend(config, identity, () => {})
+  it('pause releases B through BE and forgets its id; the next ensure starts a new one', async () => {
+    const backend = new ByClawBeBackend(config, identity, message => logs.push(message))
     await backend.ensure()
+    expect(backend.sandboxId).toBe('sb1')
     await backend.pause()
-    expect(fake.calls).toHaveLength(1)
-    expect(fake.records.size).toBe(1)
+    expect(fake.calls.map(call => call.path.split('/').pop())).toEqual(['launchByUserCode', 'removeSandbox'])
+    expect(fake.calls[1]?.body).toEqual({ userCode: 'u1', sandboxType: 'byclaw-dsh-tools' })
+    expect(fake.records.size).toBe(0)
+    expect(backend.sandboxId).toBeUndefined()
+    // Nothing to release twice.
+    await backend.pause()
+    expect(fake.calls).toHaveLength(2)
+    expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+    expect(backend.sandboxId).toBe('sb2')
+    expect(logs).toContain('released tool environment of type byclaw-dsh-tools')
   })
 })
 

@@ -13,8 +13,17 @@
  * keys reach B through A's state directory, which the B spec mounts read-only
  * (see scripts/tool-env-sshd.sh).
  *
- * Not implemented for this backend yet, by decision (README "Follow-ups"):
- * pausing/resuming an idle B, and releasing B when A goes away.
+ * BE cannot pause a sandbox, so idling releases B (`pause()`), and so does A's
+ * shutdown; the next operation starts a fresh one. The user's files live on
+ * the shared workspace volume, only B's own `/tmp` goes.
+ *
+ * The token is the user's JWT and expires (`JWT_TOKEN_EXPIRED_HOUR`); a context
+ * that outlives it (a resident shared host) gets the current one through
+ * `renewToken()` on every PUT BE sends for the user, and may be given a
+ * `BeTokenSource` (the user's login state) to ask when BE rejects the token it
+ * has. A launch BE refuses with 401 is reported as a rejected token, retried once
+ * with a token from the source if that differs, otherwise not retried; the
+ * backoff it leaves behind is lifted when a new token arrives.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import { createHash } from 'node:crypto'
@@ -72,18 +81,80 @@ const SUCCESS = 0
 /** Delay before the next launch attempt after a failure: doubles from the first value up to the cap. */
 export const LAUNCH_BACKOFF_MS = { first: 1000, max: 30_000 } as const
 
+/**
+ * BE answered 401 (`{"resultCode":401,"resultMsg":"Beyond-Token expiration"}`):
+ * this context's token is no longer accepted. Only a new token can help; the
+ * next `renewToken()` lifts the backoff.
+ */
+export class ByClawTokenRejectedError extends Error {
+  override readonly name = 'ByClawTokenRejectedError'
+  constructor(readonly request: string, readonly status: number, readonly detail: string) {
+    super(`ByClaw BE rejected this context's Beyond-Token (${request} -> ${String(status)} ${detail})`)
+  }
+}
+
+export function isTokenRejected(error: unknown): error is ByClawTokenRejectedError {
+  return error instanceof ByClawTokenRejectedError
+}
+
+/**
+ * Where a current Beyond-Token for the user can be read when BE rejects the one
+ * in hand: on the shared host, the login state BE keeps in Redis
+ * (`user:<id>:login:auth`), which the user's own requests keep valid.
+ */
+export interface BeTokenSource {
+  /** The user's current token, or `undefined` when none is known. Errors are treated as none. */
+  current(): Promise<string | undefined>
+}
+
+/** Time source, injectable for tests. */
+export interface ByClawBeBackendClock {
+  now?: () => number
+}
+
 export class ByClawBeBackend implements ToolEnvBackend {
   private operation: Promise<unknown> = Promise.resolve()
   private backoffMs = 0
   private nextAttemptAt = 0
   private lastFailure = ''
+  private readonly now: () => number
+  /** The user's current Beyond-Token; starts as `config.token`, replaced by {@link renewToken}. */
+  private token: string
+  /** The last launch failed because BE rejected the token; cleared by a success or a new token. */
+  private tokenRejected = false
+  /** Id of the B this process launched or reused last, released by {@link pause}. */
+  private currentId: string | undefined
+
+  get sandboxId(): string | undefined { return this.currentId }
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
     private readonly identity: ToolEnvIdentity,
     private readonly log: (message: string) => void,
-    private readonly now: () => number = Date.now,
-  ) {}
+    clock: ByClawBeBackendClock = {},
+    private readonly tokenSource?: BeTokenSource,
+  ) {
+    this.now = clock.now ?? Date.now
+    this.token = config.token
+  }
+
+  /**
+   * Use `token` for every BE call from now on. BE mints a new JWT for the user on
+   * each PUT it sends the host, so a resident context calls this on every PUT.
+   * A token that differs from the one BE last rejected ends that backoff: the
+   * next operation launches at once instead of waiting out the delay.
+   */
+  renewToken(token: string): void {
+    const value = token.trim()
+    if (value === '' || value === this.token) return
+    this.token = value
+    if (!this.tokenRejected) return
+    this.tokenRejected = false
+    this.backoffMs = 0
+    this.nextAttemptAt = 0
+    this.lastFailure = ''
+    this.log('Beyond-Token renewed after BE rejected the previous one; the next operation launches the tool environment again')
+  }
 
   /**
    * Every operation that finds the connection down calls this, so a B that cannot
@@ -97,21 +168,58 @@ export class ByClawBeBackend implements ToolEnvBackend {
         throw new Error(`tool environment is not available (${this.lastFailure}); next launch attempt in ${String(Math.ceil(wait / 1000))} s`)
       }
       try {
-        const endpoint = await this.ensureOnce()
+        const endpoint = await this.ensureOnce().catch(async (error: unknown) => {
+          if (!isTokenRejected(error) || !await this.refreshRejectedToken(error)) throw error
+          return this.ensureOnce()
+        })
         this.backoffMs = 0
+        this.tokenRejected = false
         return endpoint
       } catch (error) {
         this.backoffMs = Math.min(this.backoffMs === 0 ? LAUNCH_BACKOFF_MS.first : this.backoffMs * 2, LAUNCH_BACKOFF_MS.max)
         this.nextAttemptAt = this.now() + this.backoffMs
         this.lastFailure = message(error)
-        this.log(`tool environment launch failed (${this.lastFailure}); next attempt in ${String(this.backoffMs / 1000)} s`)
+        this.tokenRejected = isTokenRejected(error)
+        const delay = `next attempt in ${String(this.backoffMs / 1000)} s`
+        this.log(this.tokenRejected
+          // Distinct from other launch failures: nothing on this side fixes it; BE's next PUT for the user does.
+          ? `tool environment launch rejected: this context's Beyond-Token expired (${this.lastFailure}); waiting for BE to renew it; ${delay}`
+          : `tool environment launch failed (${this.lastFailure}); ${delay}`)
         throw error
       }
     })
   }
 
-  /** Idle pause is not implemented for this backend yet; B keeps running. */
-  async pause(): Promise<void> {}
+  /**
+   * BE rejected the token in hand: take the user's current one from the source,
+   * if there is a source and it knows a different token. The user's own requests
+   * keep that one valid, so the launch is worth one immediate retry with it.
+   */
+  private async refreshRejectedToken(rejection: ByClawTokenRejectedError): Promise<boolean> {
+    if (this.tokenSource === undefined) return false
+    let fresh: string | undefined
+    try { fresh = (await this.tokenSource.current())?.trim() } catch (error) {
+      this.log(`reading the user's current Beyond-Token failed (${message(error)})`)
+      return false
+    }
+    if (fresh === undefined || fresh === '' || fresh === this.token) return false
+    this.token = fresh
+    this.log(`BE rejected this context's Beyond-Token (${rejection.request} -> ${String(rejection.status)}); using the user's current login token and launching again`)
+    return true
+  }
+
+  /**
+   * BE has no pause, so an idle B is released and the next operation starts a
+   * fresh one; user data lives on the shared volume, only B's own `/tmp` goes.
+   * The connection calls this after `idleMs` without operations and on A's shutdown.
+   */
+  pause(): Promise<void> {
+    return this.serial(async () => {
+      if (this.currentId === undefined) return
+      await this.remove()
+      this.currentId = undefined
+    })
+  }
 
   async dispose(): Promise<void> { await this.operation.catch(() => {}) }
 
@@ -154,6 +262,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     if (endpoint === undefined) {
       throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${serviceKey}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
+    this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     return endpoint
   }
@@ -204,13 +313,14 @@ export class ByClawBeBackend implements ToolEnvBackend {
   }
 
   private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST'): Promise<unknown> {
-    const headers: Record<string, string> = { 'beyond-token': this.config.token }
+    const headers: Record<string, string> = { 'beyond-token': this.token }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (this.config.systemCode !== '') headers['system-code'] = this.config.systemCode
     const response = await fetch(`${this.config.baseUrl.replace(/\/+$/u, '')}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(this.config.requestTimeoutMs),
     })
     const text = await response.text()
+    if (response.status === 401) throw new ByClawTokenRejectedError(`${method} ${path}`, response.status, text.slice(0, 300))
     if (!response.ok) throw new Error(`ByClaw BE ${method} ${path} -> ${String(response.status)} ${text.slice(0, 300)}`)
     let envelope: Envelope
     try { envelope = JSON.parse(text) as Envelope } catch { throw new Error(`ByClaw BE ${method} ${path} returned no JSON: ${text.slice(0, 300)}`) }
