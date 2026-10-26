@@ -935,6 +935,9 @@ export interface ByClawAsyncStall {
   isCurrent(): boolean
 }
 
+/** Inactivity interval before the captain receives an internal recovery check. */
+export const DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS = 5 * 60 * 1000;
+
 /** Hold one ByClaw command across captain pause/wake turns until its current task batch is quiescent. */
 export class ByClawAsyncTeamGate {
   waiting = false
@@ -966,7 +969,7 @@ export class ByClawAsyncTeamGate {
   private disposed = false
 
   constructor(
-    private readonly timeoutMs = 10 * 60 * 1000,
+    private readonly timeoutMs = DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS,
     private readonly quietWindowMs = 1_000,
     private readonly onStalled?: (notice: ByClawAsyncStall) => void | Promise<void>,
   ) {}

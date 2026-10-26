@@ -7,6 +7,7 @@ import TaskExecutionPlan from './index';
 const mockLocateMessage = jest.fn();
 const mockSetSessionId = jest.fn();
 let mockTeamSnapshot: AgentTeamsSnapshot | undefined;
+let mockEmployeesList: Array<{ agentId: string; id: string; name: string; chatAvatar: string }> = [];
 
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -23,6 +24,7 @@ jest.mock('@/hooks/useLocateMessage', () => ({
 }));
 
 jest.mock('@umijs/max', () => ({
+  useSelector: (selector: (state: unknown) => unknown) => selector({ employees: { employeesList: mockEmployeesList } }),
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }, values?: Record<string, number>) => {
       if (id === 'messageList.taskPlan.progress') return `${values?.completed}/${values?.total} completed`;
@@ -33,6 +35,15 @@ jest.mock('@umijs/max', () => ({
       if (id === 'messageList.taskPlan.summary.COMPLETED') return `${values?.count} completed`;
       if (id === 'messageList.taskPlan.summary.IN_PROGRESS') return `${values?.count} in progress`;
       if (id === 'messageList.taskPlan.summary.PENDING') return `${values?.count} pending`;
+      if (id === 'messageList.taskPlan.captainWorking') return 'Captain is working';
+      if (id === 'messageList.taskPlan.membersWorking') return `${values?.count} members working`;
+      if (id === 'messageList.taskPlan.waitingUser') return 'Waiting for your input';
+      if (id === 'messageList.taskPlan.captainAndMembersWorking') return `Captain and ${values?.count} members working`;
+      if (id === 'messageList.taskPlan.waitingDependency') return 'Waiting for a dependency or member report';
+      if (id === 'messageList.taskPlan.statusSyncing') return 'Syncing execution status';
+      if (id === 'messageList.taskPlan.executionFailed') return 'Execution failed';
+      if (id === 'messageList.taskPlan.executionCancelled') return 'Cancelled';
+      if (id === 'messageList.taskPlan.dispatching') return 'Dispatching tasks';
       return id;
     },
   }),
@@ -44,6 +55,7 @@ describe('TaskExecutionPlan', () => {
     mockLocateMessage.mockClear();
     mockSetSessionId.mockClear();
     mockTeamSnapshot = undefined;
+    mockEmployeesList = [];
   });
 
   it('tracks captain summarization live without confusing child work, waiting, or another turn', () => {
@@ -96,6 +108,72 @@ describe('TaskExecutionPlan', () => {
       view.rerender(<TaskExecutionPlan taskPlan={{ ...plan, tasks: [{ ...plan.tasks[0], status }] }} />);
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
+  });
+
+  it('shows the assigned digital employee avatar when the team snapshot identifies the employee', () => {
+    mockEmployeesList = [{ agentId: 'employee-1', id: 'employee-1', name: 'Engineer', chatAvatar: 'avatar.png' }];
+    mockTeamSnapshot = {
+      schemaVersion: 2,
+      eventKind: 'agent-teams/snapshot',
+      team: {
+        teamId: 'team-avatar',
+        captainSessionId: 'root',
+        members: [{ id: 'member-1', employeeId: 'employee-1', name: 'Engineer', byclawSessionId: '200' }],
+        tasks: [{ id: 'task-1', subject: 'Implement feature', assignee: 'Engineer' }],
+      },
+    };
+    render(
+      <TaskExecutionPlan
+        taskPlan={{
+          planId: 'plan-avatar',
+          version: 1,
+          title: 'Plan',
+          status: 'ACTIVE',
+          sessionId: 'root',
+          messageId: '100',
+          tasks: [{ taskId: 'task-1', position: 1, title: 'Implement feature', status: 'PENDING' }],
+        }}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
+    expect(screen.getByTitle('Engineer').querySelector('img')).toHaveAttribute('src', '/byaiService/avatar.png');
+  });
+
+  it('shows the overall state when task snapshots lag behind runtime activity', () => {
+    const plan: TaskPlanSnapshot = {
+      planId: 'plan-state',
+      version: 1,
+      title: 'Plan',
+      status: 'ACTIVE',
+      sessionId: 'root',
+      messageId: '100',
+      tasks: [{ taskId: '1', position: 1, title: 'Task', status: 'IN_PROGRESS' }],
+    };
+    const view = render(<TaskExecutionPlan taskPlan={plan} />);
+    let revision = 0;
+    const applyRuntime = (status: 'running' | 'waiting_user' | 'idle' | 'failed', activeChildCount = 0) =>
+      act(() =>
+        chatSessionRuntimeManager.applySessionRuntime({
+          sessionId: 'root',
+          traceId: 'trace',
+          status,
+          rootActive: status === 'running' && activeChildCount === 0,
+          activeAgentCount: activeChildCount,
+          activeChildCount,
+          waitingInteractionCount: status === 'waiting_user' ? 1 : 0,
+          revision: ++revision,
+          changedAt: revision,
+        })
+      );
+    applyRuntime('idle');
+    expect(screen.getByRole('status')).toHaveTextContent('Syncing execution status');
+    applyRuntime('running', 2);
+    expect(screen.getByRole('status')).toHaveTextContent('2 members working');
+    applyRuntime('waiting_user');
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your input');
+    applyRuntime('failed');
+    expect(screen.getByRole('status')).toHaveTextContent('Execution failed');
+    view.unmount();
   });
 
   it('maximizes a collapsed plan, restores it expanded, and resets on conversation change', () => {

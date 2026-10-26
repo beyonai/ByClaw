@@ -324,6 +324,19 @@ RUN python -m pip install --no-cache-dir \
     && callcli --help >/dev/null \
     && dbcli --help >/dev/null
 
+# Private content capabilities ship as a local wheel; no public byclaw-caps lookup.
+# PPT requirements also provide NumPy for video music helpers.
+COPY middleware/byclaw-harness/vendor/content-creation/ /tmp/byclaw-content-runtime/
+RUN cd /tmp/byclaw-content-runtime \
+    && sha256sum -c SHA256SUMS \
+    && python -m pip install --no-cache-dir \
+        "./byclaw_caps-0.7.6-py3-none-any.whl[documents]" \
+        -r ppt-requirements.txt \
+    && python -m pip check \
+    && python -c "import importlib; from importlib.metadata import version; assert version('byclaw-caps') == '0.7.6'; [importlib.import_module(m) for m in ('byclaw_caps.article', 'byclaw_caps.compile', 'byclaw_caps.image', 'byclaw_caps.tts', 'byclaw_caps.raster', 'pypdf', 'numpy', 'PIL', 'pptx', 'xlsxwriter', 'pathops', 'uharfbuzz', 'fitz', 'yaml', 'bs4', 'curl_cffi', 'ebooklib', 'edge_tts', 'flask', 'google.genai', 'mammoth', 'markdownify', 'nbconvert', 'openpyxl', 'requests')]" \
+    && cd / \
+    && rm -rf /tmp/byclaw-content-runtime
+
 # knowledge-collection's no-key search provider is a runtime dependency,
 # not part of the copied skill payload or the generic DSH base.
 COPY middleware/byclaw-harness/scripts/install-search-runtime.sh middleware/byclaw-harness/scripts/searxng-cli-constraints.txt /tmp/byclaw-search-runtime/
