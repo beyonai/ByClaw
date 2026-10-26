@@ -4,6 +4,12 @@
  * A owns both key pairs: the client key it logs in with and the host key B
  * serves. B receives them through its create request, so A can pin B's host key
  * without trusting first contact, and a recreated B keeps the same identity.
+ *
+ * The keys are the user's: every tool environment of one user (one per sandbox
+ * spec) shares them, since BE hands B the keys as the user's private parameters
+ * and there is one set of those. What differs per environment is the OpenSSH
+ * alias and its client configuration, so `keysDirectory` may be shared while
+ * `directory` is the environment's own.
  */
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
@@ -32,18 +38,24 @@ export class ToolEnvIdentity {
   private readonly knownHosts: string
   private readonly clientConfig: string
 
-  constructor(readonly directory: string, alias = 'byclaw-tool-env', private readonly user = 'byclaw') {
+  /** Where the key pairs live; the directory itself unless the keys are shared. */
+  readonly keysDirectory: string
+
+  constructor(readonly directory: string, alias = 'byclaw-tool-env', private readonly user = 'byclaw', keysDirectory = directory) {
     this.alias = alias
-    this.clientKey = join(directory, 'client_ed25519')
-    this.hostKey = join(directory, 'host_ed25519')
+    this.keysDirectory = keysDirectory
+    this.clientKey = join(keysDirectory, 'client_ed25519')
+    this.hostKey = join(keysDirectory, 'host_ed25519')
     this.knownHosts = join(directory, 'known_hosts')
     this.clientConfig = join(directory, 'ssh_config')
   }
 
   /** Create missing key pairs and return what B must be started with. */
   async keys(): Promise<ToolEnvKeys> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    await chmod(this.directory, 0o700)
+    for (const directory of new Set([this.keysDirectory, this.directory])) {
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      await chmod(directory, 0o700)
+    }
     for (const path of [this.clientKey, this.hostKey]) await ensureKey(path)
     const hostPublic = (await readFile(`${this.hostKey}.pub`, 'utf8')).trim().split(/\s+/).slice(0, 2).join(' ')
     await writeAtomic(this.knownHosts, `${this.alias} ${hostPublic}\n`, 0o600)

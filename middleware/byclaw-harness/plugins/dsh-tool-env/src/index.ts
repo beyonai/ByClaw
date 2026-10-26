@@ -158,14 +158,15 @@ export class ToolEnv extends ToolEnvironments {
  * later tick, and the pool needs the connection synchronously (`ctx.ssh.connected`,
  * `ptcLaunch` are read during startup). Creating the connection does not start
  * B. The default keeps the state directory and alias earlier versions used;
- * other specs get their own.
+ * other specs get their own alias and client configuration but share the
+ * user's key pairs (BE publishes one set of keys per user).
  */
 function mountEnvironment(ctx: Context, config: Config, shared: ToolEnvConnectionOptions, name: string): ToolEnvConnection {
   const isDefault = name === (config.backend === 'byclaw-be' ? config.byclawBe.serviceKey : DEFAULT_ENVIRONMENT)
   const slug = name.replace(/[^A-Za-z0-9._-]+/gu, '_')
   const identity = isDefault
     ? new ToolEnvIdentity(config.stateDir, config.alias)
-    : new ToolEnvIdentity(join(config.stateDir, 'specs', slug), `${config.alias}-${slug}`)
+    : new ToolEnvIdentity(join(config.stateDir, 'specs', slug), `${config.alias}-${slug}`, undefined, config.stateDir)
   const inner = ctx.isolate('ssh', Symbol(`byclaw-tool-env:${name}`))
   return new ToolEnvConnection(inner, shared, backendFor(inner, config, identity, name, isDefault), identity)
 }

@@ -247,7 +247,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
       [PUBLISHED_KEY_PARAMS.authorized]: keys.authorizedKey,
       [PUBLISHED_KEY_PARAMS.host]: Buffer.from(keys.hostPrivateKey).toString('base64'),
     }
-    const marker = join(this.identity.directory, 'published-keys.json')
+    // Next to the keys: every environment of the user publishes the same pair, so one record serves all.
+    const marker = join(this.identity.keysDirectory, 'published-keys.json')
     const fingerprint = createHash('sha256').update(JSON.stringify(wanted)).digest('hex')
     let published = ''
     try { published = (JSON.parse(await readFile(marker, 'utf8')) as { fingerprint?: string }).fingerprint ?? '' } catch { /* never published from this state */ }

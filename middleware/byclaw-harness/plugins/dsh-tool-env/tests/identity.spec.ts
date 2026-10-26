@@ -11,6 +11,23 @@ vi.mock('node:os', async (original) => {
 const { ToolEnvIdentity } = await import('../src/identity.ts')
 
 describe('ToolEnvIdentity', () => {
+  it('environments of one user share the key pairs but keep their own alias and client configuration', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tool-env-identity-shared-'))
+    const byDefault = new ToolEnvIdentity(root, 'byclaw-tool-env-u1')
+    const media = new ToolEnvIdentity(join(root, 'specs', 'media'), 'byclaw-tool-env-u1-media', undefined, root)
+    const first = await byDefault.keys()
+    const second = await media.keys()
+    expect(second).toEqual(first)
+    expect(media.keysDirectory).toBe(root)
+    await byDefault.writeClientConfig({ hostName: 'sandbox-a', port: 22 })
+    await media.writeClientConfig({ hostName: 'sandbox-b', port: 22 })
+    expect(await readFile(join(root, 'ssh_config'), 'utf8')).toContain('HostName sandbox-a')
+    expect(await readFile(join(root, 'specs', 'media', 'ssh_config'), 'utf8')).toContain('HostName sandbox-b')
+    expect(await readFile(join(root, 'specs', 'media', 'ssh_config'), 'utf8')).toContain(`IdentityFile ${join(root, 'client_ed25519')}`)
+    expect(await readFile(join(root, 'specs', 'media', 'known_hosts'), 'utf8')).toMatch(/^byclaw-tool-env-u1-media ssh-ed25519 /u)
+    await rm(root, { recursive: true, force: true })
+  })
+
   let dir: string
 
   beforeEach(async () => {
