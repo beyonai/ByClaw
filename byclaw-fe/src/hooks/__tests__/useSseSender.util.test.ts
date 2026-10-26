@@ -69,6 +69,30 @@ describe('hooks/useSseSender/util', () => {
     });
   });
 
+  it('preserves the DSH source agent type on ask-user-question cards', () => {
+    const card = {
+      source: 'DSH',
+      interactionId: 'interaction-1',
+      questions: [],
+    };
+
+    expect(
+      answerDeltaHandler({
+        contentType: SSEMessageType.askUserQuestions,
+        sourceAgentType: 'BYCLAW_DSH_0027029322',
+        metadata: JSON.stringify({ interaction_id: 'interaction-1' }),
+        choices: [{ delta: { content: JSON.stringify(card) } }],
+      })
+    ).toMatchObject({
+      message: {
+        content: {
+          sourceAgentType: 'BYCLAW_DSH_0027029322',
+          interactionId: 'interaction-1',
+        },
+      },
+    });
+  });
+
   it('marks reasoning logs done when text content is already JSON', () => {
     const result = reasoningLogHandler(
       {

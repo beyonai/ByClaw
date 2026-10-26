@@ -45,9 +45,22 @@ export function buildDshInteractionResumePayload(
 }
 
 /** Prefer routed metadata, but retain the protocol-level id embedded in the 3014 card. */
-export function resolveDshInteractionId(metadataInteractionId: unknown, cardInteractionId: unknown): string | undefined {
+export function resolveDshInteractionId(
+  metadataInteractionId: unknown,
+  cardInteractionId: unknown
+): string | undefined {
   for (const value of [metadataInteractionId, cardInteractionId]) {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return undefined;
+}
+
+export function resolveDshResumeRoute<T extends { parentRunId?: string; interactionId?: string }>(
+  metadataRoute: T,
+  cardInteractionId: unknown
+): T {
+  return {
+    ...metadataRoute,
+    interactionId: resolveDshInteractionId(metadataRoute.interactionId, cardInteractionId),
+  };
 }

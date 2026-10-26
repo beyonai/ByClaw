@@ -128,7 +128,7 @@ const approvalFormHandler = (sseDataObj: any) => {
 };
 
 const askUserQuestionsHandler = (sseDataObj: any) => {
-  const sourceAgentType = get(sseDataObj, 'agentId');
+  const sourceAgentType = get(sseDataObj, 'sourceAgentType') || get(sseDataObj, 'agentId');
   const metadata = get(sseDataObj, 'metadata');
 
   const content = get(sseDataObj, 'choices.0.delta.content', '');

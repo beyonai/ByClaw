@@ -20,7 +20,7 @@ import Md from '@/components/Preview/Md';
 import { updateMessageStructById } from '@/service/message';
 import styles from './index.module.less';
 import { IMessageState } from '@/constants/message';
-import { buildDshInteractionResumePayload, isDshInteractionResume } from './resumePayload';
+import { buildDshInteractionResumePayload, isDshInteractionResume, resolveDshResumeRoute } from './resumePayload';
 
 type IAskUserQuestion = {
   question: string;
@@ -236,7 +236,8 @@ export function AskUserQuestions(props: IProps) {
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
   // 会话重载后消息会被标记为历史消息；只要持久化表单仍未结束，快捷确认区仍需允许用户提交。
-  const isDisabled = (messageInfo.isHistoryMsg && props.presentation !== 'dock') || isFinished || isPreviewMode || submitting;
+  const isDisabled =
+    (messageInfo.isHistoryMsg && props.presentation !== 'dock') || isFinished || isPreviewMode || submitting;
 
   if (props.presentation !== 'dock') {
     if (!isFinished) return null;
@@ -471,7 +472,10 @@ export function AskUserQuestions(props: IProps) {
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
-              const resumeRoute = getUserInteractionResumeRoute(resumeMetadata);
+              const resumeRoute = resolveDshResumeRoute(
+                getUserInteractionResumeRoute(resumeMetadata),
+                get(messageListItemContent, 'substance.interactionId')
+              );
               const isDshResume = isDshInteractionResume(
                 sourceAgentType,
                 resumeRoute.interactionId,
