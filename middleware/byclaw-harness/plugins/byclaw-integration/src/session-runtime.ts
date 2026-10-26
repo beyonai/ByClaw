@@ -111,7 +111,9 @@ import {
   interactionAgentSessionId,
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
+  shouldSettleRecoveredInteraction,
   shouldReleaseWaitingInteractionAfterAsk,
+  waitForAdmittedTurnCompletion,
   type ByClawInteractionStore,
 } from './interaction-recovery.ts'
 
@@ -155,6 +157,7 @@ interface ActiveTurn {
   owner?: ActiveTurn
   steeredCurrentTurn?: boolean
   foregroundEnded?: (event: Extract<SessionEvent, { type: 'turn/end' }>) => void
+  foregroundStarted?: () => void
   userCode: string
   templateId?: string
   cancelReason?: string
@@ -1353,6 +1356,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       if (event.type === 'turn/start' && turn.modelError?.sessionId === String(session.id)) {
         turn.modelError = undefined
       }
+      if (event.type === 'turn/start' && String(session.id) === turn.responseSessionId) {
+        turn.foregroundStarted?.()
+      }
       // Observe activity before projection I/O. The projection queue can be
       // delayed while the underlying agent is still making real progress.
       turn.teamGate.recordActivity()
@@ -1625,8 +1631,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       fileChanges: new ByClawFileChangeAccumulator(), fileChangesEmitted: false,
     }
     let foregroundFailure: string | undefined
+    let startForeground!: () => void
     let finishForeground!: () => void
+    const started = new Promise<void>(resolve => { startForeground = resolve })
     const finished = new Promise<void>(resolve => { finishForeground = resolve })
+    turn.foregroundStarted = startForeground
     turn.foregroundEnded = event => {
       if (event.data.reason.kind === 'error') foregroundFailure = event.data.reason.error.message
       if (this.foreground.get(owner.responseSessionId) === turn) this.foreground.delete(owner.responseSessionId)
@@ -1654,9 +1663,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     try {
       if (steerWhileBusy) agent.steer(input)
       else agent.followup(input)
-      // Return after this turn, even if queued member reports keep the driver busy.
-      // whenIdle also covers cancellation before DSH opens a turn boundary.
-      await Promise.race([finished, agent.whenIdle()])
+      // Return after this admitted turn, even if queued member reports keep the driver busy.
+      // A pre-admission idle belongs to the gap between the previous turn and this one.
+      await waitForAdmittedTurnCompletion(finished, started, () => agent.whenIdle())
       if (steerWhileBusy && this.pendingForeground.get(owner.responseSessionId)?.turn === turn) {
         throw new Error('ByClaw steering input was not admitted before the captain became idle')
       }
@@ -1751,11 +1760,23 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.ctx.logger.info(
       `[ASK_USER_QUESTION_RECOVERY_TRACE] RECONSTRUCT_STREAM_OPEN session=${command.header.sessionId} message=${command.header.messageId}`,
     )
-    const record = await this.options.interactionStore.consume(
+    const recoverySessionId = normalizeByClawSessionId(command.header.sessionId)
+    let record = await this.options.interactionStore.peekAnswered(
       recoveredInteractionId,
-      normalizeByClawSessionId(command.header.sessionId),
+      recoverySessionId,
       command.header.userCode,
     )
+    if (record === undefined && await this.options.interactionStore.reopen(
+      recoveredInteractionId,
+      recoverySessionId,
+      command.header.userCode,
+    )) {
+      record = await this.options.interactionStore.peekAnswered(
+        recoveredInteractionId,
+        recoverySessionId,
+        command.header.userCode,
+      )
+    }
     if (record?.answer === undefined) return false
     const recovered = buildRecoveredAskPayload(record)
     this.ctx.logger.info(
@@ -1768,11 +1789,23 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       { ...command.extraPayload, ...recovered.extraPayload, byclaw_recovered_interaction_id: recoveredInteractionId },
     )
     try {
-      return await this.ask(recoveryCommand, context)
+      const result = await this.ask(recoveryCommand, context)
+      // If the reconstructed model did not replay ask_user_question, settle the
+      // durable answer here. An empty result can be the pre-admission idle race;
+      // keep the answer available so the replayed tool call consumes it instead
+      // of rendering a second interaction card.
+      if (shouldSettleRecoveredInteraction(result)) {
+        await this.options.interactionStore.consume(
+          recoveredInteractionId,
+          recoverySessionId,
+          command.header.userCode,
+        )
+      }
+      return result
     } catch (error) {
       await this.options.interactionStore.reopen(
         recoveredInteractionId,
-        normalizeByClawSessionId(command.header.sessionId),
+        recoverySessionId,
         command.header.userCode,
       ).catch(reopenError => {
         this.ctx.logger.warn(`byclaw-dsh failed to reopen recovered interaction: ${sanitizeByClawOperationalLog(reopenError)}`)

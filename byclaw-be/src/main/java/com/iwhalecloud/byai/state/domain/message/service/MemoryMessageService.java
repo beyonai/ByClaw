@@ -124,6 +124,23 @@ public class MemoryMessageService {
     }
 
     /**
+     * Persist a response produced while recovering an existing turn.
+     *
+     * <p>The recovered runtime only contains segments emitted after it was restarted. Replacing the existing row with
+     * that partial projection removes the original tool call and completed interaction card. When the answer row
+     * already exists, append the recovered segments to its persisted projection; retain save-or-update as the
+     * idempotent fallback for recovery before the original row has been committed.</p>
+     */
+    public ByaiMessageHotDto saveOrAppendRecovery(ChatProcessContext ctx, Long sessionId, Integer usage,
+        MessageContext messageStruct, AssistantChatDto assistantChatDto) {
+        ByaiMessageHotDto existing = byaiMessageHotService.findById(messageStruct.getMessageId());
+        if (existing != null) {
+            return updateTaskMessage(ctx, existing, messageStruct);
+        }
+        return saveOrUpdate(sessionId, usage, messageStruct, assistantChatDto);
+    }
+
+    /**
      * 生成消息对象
      *
      * @param sessionId 会话ID

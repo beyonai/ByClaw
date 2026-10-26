@@ -1211,7 +1211,8 @@ public class ScriptService extends AbstractChatProcess {
                 .filter(params -> params.containsKey("beyondTaskId"))
                 .ifPresent(params -> messageContext.setTaskId(MapParamUtil.getLongValue(params, "beyondTaskId"))); // 保存LLM应答的信息
             systemReponse = ctx.recoveryOnly
-                ? memoryMessageService.saveOrUpdate(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto)
+                ? memoryMessageService.saveOrAppendRecovery(ctx, sessionId, SYSTEM_RESPONSE.getCode(), messageContext,
+                    assistantChatDto)
                 : memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto);
         }
 

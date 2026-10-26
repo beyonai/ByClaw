@@ -164,4 +164,30 @@ class MemoryMessageServiceTest {
         assertThat(message.getMessageId()).isEqualTo(21L);
         verify(byaiMessageHotService).updateSelective(message);
     }
+
+    @Test
+    void recoveredResponseAppendsToTheExistingToolCardInsteadOfReplacingIt() {
+        var existing = new ByaiMessageHotDto();
+        existing.setMessageId(21L);
+        existing.setSessionId(3L);
+        existing.setMessageStruct("[{\"choices\":[{\"delta\":{\"content\":\"old ask_user_question card\"}}]}]");
+        existing.setInferLog("[{\"choices\":[{\"delta\":{\"content\":\"old reasoning\"}}]}]");
+        when(byaiMessageHotService.findById(21L)).thenReturn(existing);
+
+        MessageContext recovered = new MessageContext();
+        recovered.setMessageId(21L);
+        recovered.setTaskId(22L);
+        new PythonSseService().accumulateEvent(
+            "{\"event\":\"answerDelta\",\"data\":{\"contentType\":\"1001\",\"choices\":[{\"delta\":{\"content\":\"new final answer\"}}]}}",
+            recovered);
+        ChatProcessContext ctx = new ChatProcessContext(null, new AssistantChatDto());
+
+        memoryMessageService.saveOrAppendRecovery(ctx, 3L, ChatUseageEnum.SYSTEM_RESPONSE.getCode(), recovered,
+            ctx.getAssistantChatDto());
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ByaiMessageHotDto.class);
+        verify(byaiMessageHotService).updateSelective(captor.capture());
+        assertThat(captor.getValue().getMessageStruct()).contains("old ask_user_question card", "new final answer");
+        assertThat(captor.getValue().getInferLog()).contains("old reasoning");
+    }
 }

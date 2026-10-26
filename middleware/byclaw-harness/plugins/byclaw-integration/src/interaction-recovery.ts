@@ -85,6 +85,28 @@ export function shouldReleaseWaitingInteractionAfterAsk(options: {
   return !shouldRetainInteractionAfterAskFailure(options)
 }
 
+/** Do not consume the durable answer when DSH reports idle before the reconstructed turn is admitted. */
+export function shouldSettleRecoveredInteraction(result: {
+  answer?: string
+  finalAnswer?: string
+}): boolean {
+  return (result.answer?.trim() ?? '') !== '' || (result.finalAnswer?.trim() ?? '') !== ''
+}
+
+/** An idle Agent can mean "not admitted yet"; only trust idle after this turn starts. */
+export async function waitForAdmittedTurnCompletion(
+  finished: Promise<void>,
+  admitted: Promise<void>,
+  whenIdle: () => Promise<void>,
+): Promise<void> {
+  const outcome = await Promise.race([
+    finished.then(() => 'finished' as const),
+    admitted.then(() => 'admitted' as const),
+  ])
+  if (outcome === 'finished') return
+  await Promise.race([finished, whenIdle()])
+}
+
 const ANSWER_SCRIPT = `-- BYCLAW_INTERACTION_ANSWER
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
@@ -211,6 +233,17 @@ export class ByClawInteractionStore {
 
   async get(interactionId: string): Promise<ByClawInteractionRecord | undefined> {
     return parseRecord(await this.redis.get(interactionRecordKey(this.prefix, interactionId)))
+  }
+
+  async peekAnswered(
+    interactionId: string,
+    sessionId: string,
+    userCode: string,
+  ): Promise<ByClawInteractionRecord | undefined> {
+    const record = await this.get(interactionId)
+    if (record?.status !== 'ANSWERED' || record.sessionId !== sessionId || record.userCode !== userCode
+      || record.answer === undefined) return
+    return record
   }
 
   async answer(input: {

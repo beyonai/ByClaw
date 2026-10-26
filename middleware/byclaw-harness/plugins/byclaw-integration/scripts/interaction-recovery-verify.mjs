@@ -8,8 +8,10 @@ import {
   interactionRecordKey,
   isColdRecoveryBlockingTurn,
   releaseColdRecoveryBlockingTurn,
+  shouldSettleRecoveredInteraction,
   shouldRetainInteractionAfterAskFailure,
   shouldReleaseWaitingInteractionAfterAsk,
+  waitForAdmittedTurnCompletion,
 } from '../src/interaction-recovery.ts'
 
 assert.equal(
@@ -27,6 +29,26 @@ assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, reclaimedTurn), true)
 assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, rootMessageId: 'message-2' }), false)
 assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, contextSessionId: 'session-2' }), false)
 assert.equal(isColdRecoveryBlockingTurn(reclaimedTurn, { ...reclaimedTurn, userCode: 'user-2' }), false)
+
+assert.equal(shouldSettleRecoveredInteraction({ answer: '', dshSessionId: 'session-1' }), false,
+  'an early empty ASK result must not consume the durable answer before the replayed tool call starts')
+assert.equal(shouldSettleRecoveredInteraction({ answer: 'continued', dshSessionId: 'session-1' }), true)
+assert.equal(shouldSettleRecoveredInteraction({ answer: '', finalAnswer: 'continued', dshSessionId: 'session-1' }), true)
+
+let admitTurn
+let finishTurn
+const admitted = new Promise(resolve => { admitTurn = resolve })
+const finishedTurn = new Promise(resolve => { finishTurn = resolve })
+let completionSettled = false
+const completion = waitForAdmittedTurnCompletion(finishedTurn, admitted, () => Promise.resolve())
+  .then(() => { completionSettled = true })
+await new Promise(resolve => setImmediate(resolve))
+assert.equal(completionSettled, false,
+  'an idle observation before turn/start must not complete the reconstructed Resume')
+admitTurn()
+await completion
+assert.equal(completionSettled, true, 'idle may finish the turn only after turn/start was observed')
+finishTurn()
 
 const releaseEvents = []
 assert.equal(await releaseColdRecoveryBlockingTurn({
@@ -122,6 +144,11 @@ assert.equal(await secondProcess.answer({
   userCode: 'user-1',
   answer: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
 }), true, 'an identical Resume retry must be idempotent')
+
+const coldRecoveryRecord = await secondProcess.peekAnswered('interaction-1', 'session-1', 'user-1')
+assert.deepEqual(coldRecoveryRecord?.answer, { answers: [{ id: 'fruit', selected: ['苹果'] }] })
+assert.equal((await secondProcess.get('interaction-1'))?.status, 'ANSWERED',
+  'cold recovery must leave the answer available for a replayed ask_user_question')
 
 const recovered = await secondProcess.consumeAnswered('session-1', 'user-1')
 assert.deepEqual(recovered?.answer, { answers: [{ id: 'fruit', selected: ['苹果'] }] })
