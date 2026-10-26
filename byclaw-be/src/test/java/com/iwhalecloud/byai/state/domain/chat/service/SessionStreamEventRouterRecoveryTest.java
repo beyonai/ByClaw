@@ -105,6 +105,15 @@ class SessionStreamEventRouterRecoveryTest {
     }
 
     @Test
+    void reboundColdResumeStreamsNewEventsToTheRequester() {
+        ChatProcessContext ctx = recoveryCtx(null);
+        ctx.streamRecoveryToRequester = true;
+        router.dispatch(event("1-0"));
+        verify(pythonSseService).getContentFromPythonStreamV3(anyString(), any(), any(), any(), any());
+        verify(pythonSseService, never()).accumulateEvent(anyString(), any());
+    }
+
+    @Test
     void appliesRequestLocaleAndRestoresConsumerThreadLocale() {
         LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();
         try {

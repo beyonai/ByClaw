@@ -559,6 +559,10 @@ public class ScriptService extends AbstractChatProcess {
         }
         else if (ctx.recoveryOnly || ctx.res == null) {
             ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+            if (ctx.streamRecoveryToRequester && ctx.res != null) {
+                CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.appStreamResponse,
+                    JSON.toJSONString(ctx.chatResponse), ctx.sessionId);
+            }
             broadcastAppStreamResponse(ctx);
         }
         else {

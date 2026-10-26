@@ -165,6 +165,9 @@ public class ChatProcessContext {
      */
     public boolean recoveryOnly = false;
 
+    /** Cold RESUME rebound a fresh requester channel; persist as recovery, but stream new events to that requester. */
+    public boolean streamRecoveryToRequester = false;
+
     /**
      * 恢复 / 历史批次续聚合时的水位线：快照已聚合到的最后一条 Stream 消息 ID。
      * stream_id &lt;= 该值的事件已计入快照，续聚合时应跳过，避免重复拼接。

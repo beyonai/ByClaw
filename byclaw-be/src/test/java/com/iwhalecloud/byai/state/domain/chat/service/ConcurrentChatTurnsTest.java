@@ -122,6 +122,7 @@ class ConcurrentChatTurnsTest extends I18nTestSupport {
 
         assertThat(followup.sendByFrameworkMsgOnly).isFalse();
         assertThat(followup.recoveryOnly).isTrue();
+        assertThat(followup.streamRecoveryToRequester).isTrue();
         assertThat(outputs.getContext("10", "background")).isSameAs(followup);
         verify(streams).startSessionListener("10", followup);
         verify(running).markRunning(followup);
