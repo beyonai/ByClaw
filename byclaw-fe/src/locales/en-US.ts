@@ -4145,6 +4145,12 @@ export default {
   'sandbox.worker.online': 'Worker online',
   'sandbox.worker.offline': 'Worker offline',
   'sandbox.worker.unknown': 'Worker not reported',
+  'sandbox.worker.lastHeartbeat': 'Last heartbeat: {time}',
+  'sandbox.shared.resource': '{sandboxType} (shared)',
+  'sandbox.action.reconnect': 'Reconnect',
+  'sandbox.shared.reconnect.title': 'Reconnect shared sandbox',
+  'sandbox.shared.reconnect.ok': 'Reconnect',
+  'sandbox.shared.reconnect.content': 'Reconnect your shared context in {sandboxType}?',
   'sandbox.action.restart': 'Restart Sandbox',
   'sandbox.restart.confirm.title': 'Confirm Restart Sandbox',
   'sandbox.restart.confirm.content':
