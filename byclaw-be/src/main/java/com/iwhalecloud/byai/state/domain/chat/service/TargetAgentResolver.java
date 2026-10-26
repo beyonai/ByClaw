@@ -132,7 +132,8 @@ public class TargetAgentResolver {
 
     private String resolveRuntimeAgentType(String targetAgentType, String userCode) {
         // HARNESS 是数据库中的稳定逻辑类型；当前运行时使用 DeepSeek Harness（DSH），后续可替换为其他实现。
-        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())
+                || StringUtils.equals(targetAgentType, WorkerAgentType.BYCLAW_DSH.getCode())) {
             return buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode);
         }
         return targetAgentType;

@@ -102,6 +102,14 @@ class TargetAgentResolverTest {
         assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_user001");
     }
 
+    @Test
+    void resolveAgentType_scopesGenericDshResumeToCurrentUser() {
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.HARNESS.getCode(), 100L, WorkerAgentType.BYCLAW_DSH.getCode(), "0027029322");
+
+        assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_0027029322");
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(longs = {11001912L})
