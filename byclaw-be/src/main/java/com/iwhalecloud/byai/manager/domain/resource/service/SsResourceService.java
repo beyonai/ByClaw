@@ -53,6 +53,9 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class SsResourceService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
 
     /**
      * 序列服务，用于生成 {@link SsResource#getResourceId()}
@@ -145,6 +148,7 @@ public class SsResourceService {
         if (resourceId == null) {
             return;
         }
+        businessLocks.acquire("resource:" + resourceId);
         LambdaUpdateWrapper<SsResource> w = new LambdaUpdateWrapper<>();
         w.eq(SsResource::getResourceId, resourceId).set(SsResource::getResourceDVerid, null)
             .set(SsResource::getResourceRVerid, null);
@@ -157,6 +161,7 @@ public class SsResourceService {
      * @param resourceId 资源
      */
     public void removeById(Long resourceId) {
+        businessLocks.acquire("resource:" + resourceId);
         ssResourceMapper.deleteById(resourceId);
     }
 
@@ -170,8 +175,9 @@ public class SsResourceService {
 
     /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
     public SsResource findByIdForUpdate(Long resourceId) {
+        businessLocks.acquire("resource:" + resourceId);
         return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceId, resourceId).last("FOR UPDATE"));
+            .eq(SsResource::getResourceId, resourceId));
     }
 
     /**
@@ -449,6 +455,8 @@ public class SsResourceService {
      * @param parentResourceId 父资源标识
      */
     public void approvalByParentResourceId(Long parentResourceId) {
+        findByParentResourceId(parentResourceId).stream().map(SsResource::getResourceId).sorted()
+            .forEach(id -> businessLocks.acquire("resource:" + id));
 
         SsResource ssResource = new SsResource();
         ssResource.setAuthStatus("passed");

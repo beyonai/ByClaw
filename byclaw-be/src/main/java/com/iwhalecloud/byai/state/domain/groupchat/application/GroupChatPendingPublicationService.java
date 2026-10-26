@@ -40,7 +40,7 @@ public class GroupChatPendingPublicationService {
     @Transactional
     public GroupChatPendingPublicationResponse prepare(Long taskId, GroupChatPendingPublicationRequest request) {
         authorization.requireInitiator(taskId);
-        ByaiGroupChatTask task = tasks.selectForUpdate(taskId);
+        ByaiGroupChatTask task = tasks.selectWithRedisLock(taskId);
         if (task == null || !"ACTIVE".equals(task.getStatus())) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.inactive"));
         }

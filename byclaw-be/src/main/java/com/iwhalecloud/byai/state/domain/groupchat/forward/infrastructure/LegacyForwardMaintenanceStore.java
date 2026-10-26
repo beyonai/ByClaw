@@ -23,6 +23,9 @@ import java.util.function.Supplier;
 /** Short request-first transactions provide service authority independently of the original actor's membership. */
 @Component
 public class LegacyForwardMaintenanceStore implements ForwardMaintenanceStore {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
     private final JdbcTemplate db; private final ByaiGroupChatForwardMapper rows; private final ObjectMapper json;
     private final TransactionTemplate tx;private final SessionService sessions;private final SessionMemberService members;
     private final ByaiMessageMapper messages;private final GroupChatContextService projection;private final LegacyGroupChatForwardStore store;
@@ -41,9 +44,9 @@ public class LegacyForwardMaintenanceStore implements ForwardMaintenanceStore {
     private record Locked(ByaiGroupChatForwardRequest request,ByaiGroupChatForwardTarget target,Instant now,ObjectNode checkpoint) { }
     private Locked bound(ForwardOperationLocator l,long target){
         if(l.backend()!=ForwardBackend.LEGACY)throw denied();
-        db.update("UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=? AND request_id=?",l.enterpriseId(),l.requestId());
+        businessLocks.acquire("forward-request:" + l.requestId());
         var r=rows.request(l.enterpriseId(),l.requestId());
-        db.update("UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=? AND target_id=?",l.enterpriseId(),target);
+        businessLocks.acquire("forward-target:" + target);
         var t=rows.target(l.enterpriseId(),target);
         if(r==null||!"LEGACY".equals(r.getBackend())||t==null||t.getRequestId()!=l.requestId())throw denied();
         Instant now=db.queryForObject("SELECT clock_timestamp()",java.sql.Timestamp.class).toInstant();

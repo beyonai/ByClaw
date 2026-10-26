@@ -27,6 +27,9 @@ import static com.iwhalecloud.byai.state.domain.groupchat.forward.domain.Forward
 @Component
 public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
+    @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardCommitService> commits;
     @Override public void failTarget(TargetLease lease,String code,boolean retryable) {
         if(!code.matches("RESOURCE_NOT_ACCESSIBLE|FORWARD_[A-Z_]+"))throw denied();
@@ -87,9 +90,9 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
             throw new IllegalArgumentException("FORWARD_ENCODING_FAILED",e);
         }
     }
-    /** 同值更新持有到事务结束，不消耗租约版本；随后读取最新回执。 */
+    /** Redis 锁持有到事务结束，不消耗租约版本；随后读取最新回执。 */
     private ByaiGroupChatForwardRequest lock(long tenant,long id) {
-        db.update("UPDATE byai.byai_group_chat_forward_request SET request_id=request_id WHERE enterprise_id=? AND request_id=?",tenant,id);
+        businessLocks.acquire("forward-request:" + id);
         var r=rows.request(tenant,id);
         if(r==null||!"LEGACY".equals(r.getBackend()))throw denied();
         return r;
@@ -100,7 +103,7 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         return r;
     }
     private ByaiGroupChatForwardTarget lockTarget(long tenant,long id) {
-        db.update("UPDATE byai.byai_group_chat_forward_target SET target_id=target_id WHERE enterprise_id=? AND target_id=?",tenant,id);
+        businessLocks.acquire("forward-target:" + id);
         var t=rows.target(tenant,id);
         if(t==null)throw denied();
         return t;
@@ -119,10 +122,9 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
         policy.requireNewWork(actor,ForwardBackend.LEGACY);
         var groups=new TreeSet<Long>(targets);
         groups.add(r.getSourceSessionId());
-        // 在短事务内按固定顺序执行同值更新，串行处理请求、群状态与成员变更。
+        // 在短事务内按固定顺序获取 Redis 锁，串行处理请求、群状态与成员变更。
         for(long id:groups) {
-            db.update("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=?",id);
-            db.update("UPDATE byai.byai_session_member SET mem_obj_id=mem_obj_id WHERE session_id=? AND mem_obj_type='USER' AND mem_obj_id=?",id,actor.userId());
+            businessLocks.acquire("session:" + id);
         }
         var source=identity(r.getSourceSessionId());
         ForwardEligibility.requireSource(actor,source,members.findSessionMember(r.getSourceSessionId(),"USER",actor.userId())!=null);
@@ -177,7 +179,7 @@ public class LegacyGroupChatForwardStore implements GroupChatForwardStore {
             }
             status.releaseSavepoint(savepoint);
             var request=lock(actor.enterpriseId(),requestId);var valid=eligible(request,input.targetSessionIds(),true); String placeholders=String.join(",",Collections.nCopies(input.messageIds().size(),"?"));List<Object> parameters=new ArrayList<>(List.of(source));parameters.addAll(input.messageIds()); var ordered=db.queryForList("SELECT message_id FROM byai.byai_message WHERE session_id=? AND message_id IN ("+placeholders+") ORDER BY create_time ASC,message_id ASC",Long.class,parameters.toArray()); if(ordered.size()!=input.messageIds().size())throw denied();List<ForwardSnapshotFactory.SourceMessage> selected=new ArrayList<>();for(long id:ordered) {
-                if(db.update("UPDATE byai.byai_message SET message_id=message_id WHERE session_id=? AND message_id=?",source,id)!=1)throw denied();
+                businessLocks.acquire("message:" + id);
                 var m=sources.readMessage(actor,ForwardBackend.LEGACY,source,id);selected.add(new ForwardSnapshotFactory.SourceMessage(m.id(),selected.size(),m.content(),m.speaker(),m.createdAt(),m.resourceList(),m.relatedResources(),m.metadata(),m.mergedItems(),m.authority()));
             }
             var frozen=new ForwardSnapshotFactory().freeze(actor,source,selected);List<PreparedCandidate> candidates=new ArrayList<>();for(var c:frozen.candidates()) {

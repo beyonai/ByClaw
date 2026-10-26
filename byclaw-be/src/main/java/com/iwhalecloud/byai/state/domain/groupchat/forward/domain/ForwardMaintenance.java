@@ -6,7 +6,7 @@ import static com.iwhalecloud.byai.state.domain.groupchat.forward.domain.Forward
 import java.time.Instant;
 import java.util.*;
 
-/** Server-only maintenance extensions are merged into the current checkpoint under owning row locks. */
+/** Server-only maintenance extensions are merged into the current checkpoint under owning Redis transaction locks. */
 public final class ForwardMaintenance {
     private ForwardMaintenance() { }
     public enum Category { WORK, DELIVERY }

@@ -82,8 +82,8 @@ class GroupChatRecallCancellationTest extends I18nTestSupport {
         queued.setTraceId(null);
         var running = turn(2, 100, null);
         when(recalls.turns(10L)).thenReturn(List.of(queued, running));
-        when(turns.selectForUpdateById(1L)).thenReturn(queued);
-        when(turns.selectForUpdateById(2L)).thenReturn(running);
+        when(turns.selectCurrentById(1L)).thenReturn(queued);
+        when(turns.selectCurrentById(2L)).thenReturn(running);
         TransactionSynchronizationManager.initSynchronization();
         service.cancel(10L, 100L);
         var records = ArgumentCaptor.forClass(ByaiGroupChatRecallStop.class);
@@ -100,7 +100,7 @@ class GroupChatRecallCancellationTest extends I18nTestSupport {
         var finished = turn(1, 100, null);
         finished.setStatus("SUCCEEDED");
         when(recalls.turns(10L)).thenReturn(List.of(finished));
-        when(turns.selectForUpdateById(1L)).thenReturn(finished);
+        when(turns.selectCurrentById(1L)).thenReturn(finished);
         var task = new ByaiGroupChatTask();
         task.setTurnStatus("RUNNING");
         when(tasks.cancelForRecall(20L, 1L)).thenReturn(task);
@@ -120,7 +120,7 @@ class GroupChatRecallCancellationTest extends I18nTestSupport {
         task.setTurnStatus("WAITING_USER");
         when(tasks.cancelForRecall(20L, 1L)).thenReturn(task);
         when(recalls.turns(10L)).thenReturn(List.of(finished));
-        when(turns.selectForUpdateById(1L)).thenReturn(finished);
+        when(turns.selectCurrentById(1L)).thenReturn(finished);
         TransactionSynchronizationManager.initSynchronization();
         service.cancel(10L, 100L);
         var record = ArgumentCaptor.forClass(ByaiGroupChatRecallStop.class);

@@ -46,7 +46,7 @@
         LIMIT 1
     </select>
 
-    <select id="selectForUpdateByCandidateSessionId" resultMap="BaseResultMap">
+    <select id="selectCurrentByCandidateSessionId" resultMap="BaseResultMap">
         SELECT <include refid="BaseColumns" /> FROM byai_group_chat_execution
         WHERE candidate_session_id = #{candidateSessionId}
     </select>

@@ -19,6 +19,21 @@ import java.util.List;
  */
 @Service
 public class SuasSuperassistService {
+    @Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
+    private void lockDefault(SuasSuperassist value) {
+        if (value.getDefaultDigEmployeeId() == null) return;
+        SuasSuperassist identity = value;
+        if (identity.getCreateUser() == null || identity.getComAcctId() == null) {
+            identity = suasSuperassistMapper.selectById(value.getSuperassistId());
+        }
+        if (identity == null || identity.getCreateUser() == null || identity.getComAcctId() == null) {
+            throw new IllegalStateException("Default assistant owner is required");
+        }
+        businessLocks.acquire("user-default-employee:" + identity.getComAcctId() + ":" + identity.getCreateUser());
+    }
+
 
     @Autowired
     private SequenceService sequenceService;
@@ -31,7 +46,9 @@ public class SuasSuperassistService {
      *
      * @param suasSuperassist 直级助手信息
      */
+    @org.springframework.transaction.annotation.Transactional
     public void save(SuasSuperassist suasSuperassist) {
+        lockDefault(suasSuperassist);
         suasSuperassistMapper.insert(suasSuperassist);
     }
 
@@ -87,7 +104,9 @@ public class SuasSuperassistService {
      *
      * @param suasSuperassist 直级助手信息
      */
+    @org.springframework.transaction.annotation.Transactional
     public int updateById(SuasSuperassist suasSuperassist) {
+        lockDefault(suasSuperassist);
         return suasSuperassistMapper.updateById(suasSuperassist);
     }
 
@@ -97,6 +116,8 @@ public class SuasSuperassistService {
      * @param superassistId 超级助手
      */
     public void remove(Long superassistId) {
+        SuasSuperassist existing = suasSuperassistMapper.selectById(superassistId);
+        if (existing != null) lockDefault(existing);
         suasSuperassistMapper.deleteById(superassistId);
     }
 

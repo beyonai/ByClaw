@@ -34,6 +34,7 @@ class GroupChatForwardRecoveryTest {
             .hasMessage("FORWARD_MAINTENANCE_INVALID");
     }
     private GroupChatForwardServiceTest fixture;
+    @org.junit.jupiter.api.AfterEach void closeRedis() throws Exception { if (fixture != null) fixture.closeRedis(); }
     private com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.LegacyForwardMaintenanceStore maintenanceStore;
     private com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardPreparation.ForwardOperationLocator locator;
     private long target;
@@ -53,6 +54,7 @@ class GroupChatForwardRecoveryTest {
         org.mockito.Mockito.when(members.findSessionMembers(20L,"USER",null)).thenReturn(List.of(member));
         var projector=new com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService(messages,sessions,null);
         maintenanceStore=new com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.LegacyForwardMaintenanceStore(fixture.db,fixture.rows,new ObjectMapper().findAndRegisterModules(),new org.springframework.jdbc.datasource.DataSourceTransactionManager(fixture.db.getDataSource()),sessions,members,messages,projector,fixture.store);
+        org.springframework.test.util.ReflectionTestUtils.setField(maintenanceStore, "businessLocks", fixture.locks);
     }
     private void succeeded() {
         fixture.db.update("UPDATE byai.byai_group_chat_forward_target SET state='SUCCEEDED',pending_delivery=TRUE,message_ids_json='[\"901\",\"902\"]' WHERE target_id=?",target);

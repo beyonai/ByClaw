@@ -26,6 +26,7 @@ class GroupChatForwardCommitTest {
     GroupChatForwardServiceTest fixture;
     GroupChatForwardCommitService commits;
     ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    @AfterEach void closeRedis() throws Exception { if (fixture != null) fixture.closeRedis(); }
     @BeforeEach void setup() throws Exception {
         fixture = new GroupChatForwardServiceTest(); fixture.setup();
         var db = fixture.db;
@@ -39,11 +40,12 @@ class GroupChatForwardCommitTest {
             return db.update("INSERT INTO byai.byai_message(message_id,enterprise_id,session_id,message_content,create_time,topic_id,metadata,related_resources,creator_id,creator_name,message_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?)",m.getMessageId(),m.getEnterpriseId(),m.getSessionId(),m.getMessageContent(),m.getCreateTime(),m.getTopicId(),m.getMetadata(),m.getRelatedResources(),m.getCreatorId(),m.getCreatorName(),m.getMessageRef());
         });
         var sessions=mock(SessionService.class);
-        when(sessions.lockById(anyLong())).thenAnswer(inv->{db.update("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=?",(Object)inv.getArgument(0));return null;});
+        when(sessions.lockById(anyLong())).thenAnswer(inv->{fixture.locks.acquire("session:" + inv.getArgument(0));return null;});
         var topics=new GroupChatTopicService(messages,mock(ByaiGroupChatTopicMapper.class),sessions);
         var props=new GroupChatForwardProperties();
         commits=new GroupChatForwardCommitService(fixture.store,fixture.rows,db,new DataSourceTransactionManager(db.getDataSource()),json,
             (SequenceService)ReflectionTestUtils.getField(fixture.store,"ids"),topics,mock(ForwardPlatformPolicy.class),new ForwardUploadReservation(props),props);
+        org.springframework.test.util.ReflectionTestUtils.setField(commits, "businessLocks", fixture.locks);
     }
     @Test void plainTextCreateCompletesAndReplaysWithoutCopyWorkers() {
         @SuppressWarnings("unchecked") var provider=(org.springframework.beans.factory.ObjectProvider<GroupChatForwardCommitService>)mock(org.springframework.beans.factory.ObjectProvider.class);
@@ -67,9 +69,9 @@ class GroupChatForwardCommitTest {
         wireCommits();
         fixture.db.update("INSERT INTO byai.byai_message(message_id,enterprise_id,session_id,message_content,create_time) VALUES(201,1,20,'reverse',CURRENT_TIMESTAMP)");
         var operation=fixture.store.prepare(fixture.actor,20,new ForwardInput("reverse",ForwardMode.SINGLE,List.of(201L),List.of(10L)));
-        var observed=spy(fixture.db);var order=new ArrayList<Long>();
-        doAnswer(inv->{order.add(((Number)inv.getArgument(1)).longValue());return inv.callRealMethod();}).when(observed).update(eq("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=?"),any(Object.class));
-        ReflectionTestUtils.setField(fixture.store,"db",observed);
+        var observed=spy(fixture.locks);var order=new ArrayList<Long>();
+        doAnswer(inv->{String key=inv.getArgument(0); if(key.startsWith("session:")) order.add(Long.valueOf(key.substring(8))); return inv.callRealMethod();}).when(observed).acquire(anyString());
+        ReflectionTestUtils.setField(fixture.store,"businessLocks",observed);
         assertThat(fixture.store.completeText(fixture.actor,20,operation.requestId()).state()).isEqualTo(ForwardOperationState.SUCCEEDED);
         assertThat(order.getFirst()).isEqualTo(10L);
     }

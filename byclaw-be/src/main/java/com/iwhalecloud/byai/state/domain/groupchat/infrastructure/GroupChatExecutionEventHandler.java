@@ -188,14 +188,14 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         ByaiGroupChatExecution snapshot = executionMapper.selectByCandidateSessionId(candidateSessionId);
         if (snapshot == null) return null;
         topicService.lockGroup(snapshot.getGroupSessionId());
-        return executionMapper.selectForUpdateByCandidateSessionId(candidateSessionId);
+        return executionMapper.selectCurrentByCandidateSessionId(candidateSessionId);
     }
 
     private ByaiGroupChatTurn lockCurrentTurn(ByaiGroupChatTurn snapshot) {
         turnMapper.lockGroup(snapshot.getGroupSessionId());
-        executionMapper.selectForUpdateByCandidateSessionId(snapshot.getCandidateSessionId());
+        executionMapper.selectCurrentByCandidateSessionId(snapshot.getCandidateSessionId());
         // 普通查询可能缓存了等待锁之前的 RUNNING 状态，必须锁定读取最新 turn。
-        ByaiGroupChatTurn current = turnMapper.selectForUpdateById(snapshot.getExecutionId());
+        ByaiGroupChatTurn current = turnMapper.selectCurrentById(snapshot.getExecutionId());
         // 确认锁定的会话仍与读取快照一致，避免处理已变更的 turn。
         return current != null && Objects.equals(current.getGroupSessionId(), snapshot.getGroupSessionId())
             && Objects.equals(current.getCandidateSessionId(), snapshot.getCandidateSessionId()) ? current : null;

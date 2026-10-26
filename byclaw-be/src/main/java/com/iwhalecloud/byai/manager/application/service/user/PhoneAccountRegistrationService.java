@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.iwhalecloud.byai.common.lock.TransactionalRedisLockService;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,13 +18,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PhoneAccountRegistrationService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final TransactionalRedisLockService locks;
     private final UserService userService;
     private final UserApplicationService userApplicationService;
 
-    public PhoneAccountRegistrationService(JdbcTemplate jdbcTemplate, UserService userService,
+    public PhoneAccountRegistrationService(TransactionalRedisLockService locks, UserService userService,
         UserApplicationService userApplicationService) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.locks = locks;
         this.userService = userService;
         this.userApplicationService = userApplicationService;
     }
@@ -45,7 +45,7 @@ public class PhoneAccountRegistrationService {
             throw new BadCredentialsException(I18nUtil.get("login.phone.invalid"));
         }
         // 事务锁覆盖持锁后的查询和插入；多实例间可串行化这两条受控注册路径。
-        jdbcTemplate.queryForObject("SELECT pg_advisory_xact_lock(?)", Object.class, lockKey(normalized));
+        locks.acquire("phone-registration:" + lockKey(normalized));
         List<Users> matches = userService.findAllByUserPhone(normalized);
         if (matches.size() > 1) {
             throw new BadCredentialsException(I18nUtil.get("login.phone.multipleAccounts"));

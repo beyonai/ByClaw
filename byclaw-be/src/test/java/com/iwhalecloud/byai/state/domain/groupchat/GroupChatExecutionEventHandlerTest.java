@@ -77,7 +77,7 @@ class GroupChatExecutionEventHandlerTest {
         execution.setStatus("RUNNING");
         execution.setDisposition("TASK");
         execution.setTraceId(TraceIdCodec.encode(20L, 30L));
-        when(executions.selectForUpdateByCandidateSessionId(60L)).thenReturn(execution);
+        when(executions.selectCurrentByCandidateSessionId(60L)).thenReturn(execution);
         when(executions.selectByCandidateSessionId(60L)).thenReturn(execution);
         GroupChatTopicTestSupport.install(handler, messages, 1L, 2L);
         when(executions.decideDisposition(any(), any(), any(), any(), any())).thenReturn(1);
@@ -273,7 +273,7 @@ class GroupChatExecutionEventHandlerTest {
         second.setStatus("RUNNING");
         second.setDisposition("TASK");
         second.setTraceId(TraceIdCodec.encode(21L, 31L));
-        when(executions.selectForUpdateByCandidateSessionId(80L)).thenReturn(second);
+        when(executions.selectCurrentByCandidateSessionId(80L)).thenReturn(second);
         when(executions.selectByCandidateSessionId(80L)).thenReturn(second);
         ByaiMessage secondAnswer = new ByaiMessage();
         secondAnswer.setMessageId(31L);

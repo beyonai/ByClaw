@@ -209,7 +209,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
 
     private PreparedTurn prepareTurn(Long turnId) {
         // A repeated unbound claim may race a live worker; one transaction owns both input creation and trace binding.
-        ByaiGroupChatTurn turn = turnMapper.selectForUpdateById(turnId);
+        ByaiGroupChatTurn turn = turnMapper.selectCurrentById(turnId);
         if (turn == null || !"RUNNING".equals(turn.getStatus()) || turn.getTraceId() != null) {
             return null;
         }

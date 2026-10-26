@@ -80,3 +80,6 @@ ALTER TABLE byai.byai_session_member ADD COLUMN welcome_handled_at TIMESTAMP DEF
 ALTER TABLE byai.byai_session_member ALTER COLUMN welcome_handled_at DROP DEFAULT;
 
 COMMENT ON COLUMN byai.byai_session_member.welcome_handled_at IS '本次成员关系的个人欢迎资格处理时间，NULL 表示未处理；包含存量迁移跳过，不代表实际曝光';
+
+-- Group send/STOP exclusion is maintained by renewable Redis leases.
+DROP TABLE IF EXISTS byai.byai_group_chat_send_gate;

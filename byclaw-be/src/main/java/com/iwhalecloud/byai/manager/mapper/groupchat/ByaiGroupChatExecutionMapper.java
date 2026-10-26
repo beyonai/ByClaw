@@ -18,7 +18,8 @@ public interface ByaiGroupChatExecutionMapper extends BaseMapper<ByaiGroupChatEx
     ByaiGroupChatExecution selectBySourceAndAgent(@Param("sourceMessageId") Long sourceMessageId,
         @Param("targetAgentId") Long targetAgentId);
 
-    ByaiGroupChatExecution selectForUpdateByCandidateSessionId(@Param("candidateSessionId") Long candidateSessionId);
+    /** Plain read inside the caller's coordination boundary; does not acquire a database or Redis lock. */
+    ByaiGroupChatExecution selectCurrentByCandidateSessionId(@Param("candidateSessionId") Long candidateSessionId);
 
     int bindRuntime(@Param("executionId") Long executionId, @Param("traceId") String traceId);
 

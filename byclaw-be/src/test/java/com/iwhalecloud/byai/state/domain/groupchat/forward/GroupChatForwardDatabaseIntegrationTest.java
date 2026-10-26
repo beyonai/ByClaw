@@ -57,6 +57,9 @@ class GroupChatForwardDatabaseIntegrationTest {
     @AfterEach void restoreMessages() {
         ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class,"messageSource",originalMessages);
     }
+    com.iwhalecloud.byai.common.lock.DisposableRedis redis;
+    com.iwhalecloud.byai.common.lock.TransactionalRedisLockService locks;
+    @AfterEach void closeRedis() throws Exception { if (redis != null) redis.close(); }
     DriverManagerDataSource ds;JdbcTemplate db;DataSourceTransactionManager manager;
     LegacyGroupChatForwardStore store;ByaiGroupChatForwardMapper rows;
     GroupChatForwardCommitService commits;GroupChatMessageRecallService recalls;GroupChatApplicationService groups;
@@ -64,6 +67,8 @@ class GroupChatForwardDatabaseIntegrationTest {
     final ForwardActor actor=new ForwardActor(30,1);
 
     @BeforeEach void setup() throws Exception {
+        redis = new com.iwhalecloud.byai.common.lock.DisposableRedis();
+        locks = new com.iwhalecloud.byai.common.lock.TransactionalRedisLockService(redis.registry(60_000L));
         var uri=URI.create(System.getenv("FORWARD_TEST_PG"));
         assertThat(uri.getHost()).isEqualTo("127.0.0.1");assertThat(uri.getPort()).isEqualTo(15486);assertThat(uri.getPath()).isEqualTo("/byclaw_forward_test");
         ds=new DriverManagerDataSource("jdbc:postgresql://127.0.0.1:15486/byclaw_forward_test?currentSchema=byai","postgres","");db=new JdbcTemplate(ds);manager=new DataSourceTransactionManager(ds);
@@ -71,7 +76,7 @@ class GroupChatForwardDatabaseIntegrationTest {
         db.execute("INSERT INTO byai.byai_session(session_id,enterprise_id,session_type,state,creator_id) VALUES(10,1,'hs_as','ACTIVE',31),(20,1,'hs_as','ACTIVE',31)");
         for(long group:List.of(10L,20L))for(long user:List.of(30L,31L))db.update("INSERT INTO byai.byai_session_member(byai_session_member_id,session_id,mem_obj_type,mem_obj_id,com_acct_id,user_role,mem_name) VALUES(?,?,'USER',?,1,?,?)",group*100+user,group,user,user==31?"OWNER":"MEMBER",user==31?"Admin":"Human");
         for(long id:List.of(101L,102L,201L))db.update("INSERT INTO byai.byai_message(id,message_id,enterprise_id,session_id,usage,creator_id,creator_name,message_content,create_time) VALUES(?,?,1,?,1,30,'Human',?,CURRENT_TIMESTAMP)",id,id,id==201?20:10,id==102?"second":"first");
-        var config=new MybatisConfiguration();config.setMapUnderscoreToCamelCase(true);config.setLocalCacheScope(org.apache.ibatis.session.LocalCacheScope.STATEMENT);config.setEnvironment(new Environment("fixture",new SpringManagedTransactionFactory(),ds));
+        var config=new MybatisConfiguration();config.addInterceptor(new com.iwhalecloud.byai.common.lock.RedisTransactionLockInterceptor(locks));config.setMapUnderscoreToCamelCase(true);config.setLocalCacheScope(org.apache.ibatis.session.LocalCacheScope.STATEMENT);config.setEnvironment(new Environment("fixture",new SpringManagedTransactionFactory(),ds));
         config.addMapper(ByaiGroupChatForwardMapper.class);config.addMapper(ByaiSessionMapper.class);config.addMapper(ByaiMessageMapper.class);
         var session=new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(config));rows=session.getMapper(ByaiGroupChatForwardMapper.class);
         var sessions=spy(new SessionService());ReflectionTestUtils.setField(sessions,"byaiSessionMapper",session.getMapper(ByaiSessionMapper.class));
@@ -88,8 +93,11 @@ class GroupChatForwardDatabaseIntegrationTest {
         var source=new LegacyForwardSourceAuthorityReader(sessions,members,messages,mock(ByaiGroupChatTaskMapper.class),mock(ByaiGroupChatTaskPublicationMapper.class),mock(ByaiGroupChatPendingPublicationMapper.class),mock(ByaiGroupChatForwardSourceMapper.class),rows);
         var sequence=mock(SequenceService.class);var ids=new AtomicLong(1000);when(sequence.nextVal()).thenAnswer(i->ids.incrementAndGet());var props=new GroupChatForwardProperties();var json=new ObjectMapper().findAndRegisterModules();var policy=mock(ForwardPlatformPolicy.class);var locations=new ForwardUploadReservation(props);
         store=new LegacyGroupChatForwardStore(rows,db,manager,json,sequence,sessions,members,source,policy,locations,props);
+        ReflectionTestUtils.setField(store, "businessLocks", locks);
         var topics=new GroupChatTopicService(messages,mock(ByaiGroupChatTopicMapper.class),sessions);
-        commits=proxy(new GroupChatForwardCommitService(store,rows,db,manager,json,sequence,topics,policy,locations,props));
+        var commitTarget=new GroupChatForwardCommitService(store,rows,db,manager,json,sequence,topics,policy,locations,props);
+        ReflectionTestUtils.setField(commitTarget, "businessLocks", locks);
+        commits=proxy(commitTarget);
         var authorization=new GroupChatAuthorizationService(sessions,members,mock(SessionExtService.class));var events=mock(GroupChatEventPublisher.class);
         var recall=new GroupChatMessageRecallService(authorization,topics,messages,events);ReflectionTestUtils.setField(recall,"cancellations",mock(GroupChatRecallCancellationService.class));recalls=proxy(recall);
         groups=proxy(new GroupChatApplicationService(sessions,sequence,authorization,members,null,null,messages,null,events,mock(SessionExtService.class)));
@@ -132,14 +140,20 @@ class GroupChatForwardDatabaseIntegrationTest {
     @ParameterizedTest @ValueSource(strings={"recall","remove"}) void actualLifecycleWriterWaitsAfterFinalValidation(String kind)throws Exception{
         var lease=ready();var reached=new CountDownLatch(1);var release=new CountDownLatch(1);var pid=new AtomicInteger();
         beforePublish.set(()->{pid.set(db.queryForObject("SELECT pg_backend_pid()",Integer.class));reached.countDown();try{assertThat(release.await(5,TimeUnit.SECONDS)).isTrue();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}});
-        try(var workers=Executors.newFixedThreadPool(2)){var publishing=workers.submit(()->commits.commit(lease));assertThat(reached.await(4,TimeUnit.SECONDS)).isTrue();var mutation=workers.submit(()->mutate(kind));try{await(()->db.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE ?=ANY(pg_blocking_pids(pid))",Integer.class,pid.get())==1);}finally{release.countDown();}assertThat(publishing.get(5,TimeUnit.SECONDS).messageIds()).hasSize(2);mutation.get(5,TimeUnit.SECONDS);}
+        try(var workers=Executors.newFixedThreadPool(2)){var publishing=workers.submit(()->commits.commit(lease));assertThat(reached.await(4,TimeUnit.SECONDS)).isTrue();var mutation=workers.submit(()->mutate(kind));try{assertThatThrownBy(()->mutation.get(300,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);}finally{release.countDown();}assertThat(publishing.get(5,TimeUnit.SECONDS).messageIds()).hasSize(2);mutation.get(5,TimeUnit.SECONDS);}
         assertThat(db.queryForObject("SELECT count(*) FROM byai.byai_message WHERE session_id=20 AND usage=1",Integer.class)).isEqualTo(3);
     }
     @ParameterizedTest @ValueSource(strings={"recall","remove"}) void lifecycleWriterWinningFirstPreventsPublication(String kind){var lease=ready();mutate(kind);assertThatThrownBy(()->commits.commit(lease)).hasMessage("RESOURCE_NOT_ACCESSIBLE");assertThat(rows.target(1L,lease.targetId()).getState()).isEqualTo("READY");}
     @Test void groupLockWaitCannotExtendExpiredLease()throws Exception{
-        var lease=ready();try(Connection blocker=ds.getConnection();var workers=Executors.newSingleThreadExecutor()){blocker.setAutoCommit(false);try(var statement=blocker.createStatement()){statement.execute("UPDATE byai.byai_session SET session_id=session_id WHERE session_id=10");}
-            db.update("UPDATE byai.byai_group_chat_forward_target SET lease_until=clock_timestamp()+interval '300 milliseconds' WHERE target_id=?",lease.targetId());var pending=workers.submit(()->commits.commit(lease));
-            await(()->db.queryForObject("SELECT lease_until<clock_timestamp() FROM byai.byai_group_chat_forward_target WHERE target_id=?",Boolean.class,lease.targetId()));blocker.rollback();assertThatThrownBy(()->pending.get(5,TimeUnit.SECONDS)).hasRootCauseMessage("FORWARD_LEASE_LOST");}
+        var lease=ready();var blocker=redis.registry(60_000L).obtain("session:10");blocker.lock();
+        try(var workers=Executors.newSingleThreadExecutor()) {
+            db.update("UPDATE byai.byai_group_chat_forward_target SET lease_until=clock_timestamp()+interval '300 milliseconds' WHERE target_id=?",lease.targetId());
+            var pending=workers.submit(()->commits.commit(lease));
+            try { await(()->db.queryForObject("SELECT lease_until<clock_timestamp() FROM byai.byai_group_chat_forward_target WHERE target_id=?",Boolean.class,lease.targetId())); }
+            finally { blocker.unlock(); }
+            assertThatThrownBy(()->pending.get(5,TimeUnit.SECONDS)).hasRootCauseMessage("FORWARD_LEASE_LOST");
+        }
+
         assertThat(rows.target(1L,lease.targetId()).getMessageIdsJson()).isEqualTo("[]");
     }
     @Test void newClaimFencesPreviousReadyPublisher(){var old=ready();db.update("UPDATE byai.byai_group_chat_forward_target SET lease_until=clock_timestamp()-interval '1 second' WHERE target_id=?",old.targetId());var next=store.claimTarget(new ForwardOperationLocator(1,old.requestId(),ForwardBackend.LEGACY),old.targetId(),"replacement",Duration.ofMinutes(1));assertThat(next.fencingVersion()).isGreaterThan(old.fencingVersion());assertThatThrownBy(()->commits.commit(old)).hasMessage("FORWARD_LEASE_LOST");assertThat(commits.commit(next).messageIds()).hasSize(2);}
