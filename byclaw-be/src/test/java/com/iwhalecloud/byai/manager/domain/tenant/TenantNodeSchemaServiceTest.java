@@ -69,6 +69,49 @@ class TenantNodeSchemaServiceTest {
         }
     }
 
+    @Test
+    void reclaimedInitializationTransmitsCurrentFenceAndLegacyCallRetainsFirstFence() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        var captures = new java.util.concurrent.CopyOnWriteArrayList<com.fasterxml.jackson.databind.JsonNode>();
+        server.createContext("/internal/v1/health/db", exchange -> {
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.createContext("/internal/v1/schema-tasks", exchange -> {
+            String upload = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            int start = upload.indexOf("\r\n\r\n") + 4;
+            int end = upload.indexOf("\r\n--", start);
+            captures.add(new ObjectMapper().readTree(upload.substring(start, end)));
+            // Stop after the real task upload; audit polling is outside this transport contract.
+            exchange.sendResponseHeaders(409, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+            var service = new TenantNodeSchemaService(jdbc, new ObjectMapper(), "",
+                "http://127.0.0.1:" + server.getAddress().getPort(), "", "token");
+            var node = new com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.TenantSandboxView(1L, "node", "http://127.0.0.1:" + server.getAddress().getPort());
+            assertThrows(IllegalStateException.class, () -> service.initialize(12L, 3L, 20L, node, "command-41", 2L));
+            assertThrows(IllegalStateException.class, () -> service.initialize(12L, 3L, 20L, node, "legacy"));
+            assertEquals(2, captures.size());
+            assertEquals("2", captures.get(0).path("fencingToken").asText());
+            assertEquals("1", captures.get(1).path("fencingToken").asText());
+            assertEquals("3", captures.get(0).path("generation").asText());
+            assertEquals("command-41", captures.get(0).path("requestId").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void initializationRejectsInvalidFenceBeforeAuditOrProviderCalls() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var service = new TenantNodeSchemaService(jdbc, new ObjectMapper(), "", "http://sandbox", "", "token");
+        assertThrows(IllegalArgumentException.class, () -> service.initialize(12L, 3L, 20L, null, "request", 0L));
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
     private TenantNodeSchemaService service(String bundlePath) {
         return new TenantNodeSchemaService(null, new ObjectMapper(), bundlePath, "http://opensandbox:9005", "", "token");
     }

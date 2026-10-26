@@ -53,6 +53,13 @@ public class XssFilter implements Filter {
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
         throws IOException, ServletException {
         HttpServletRequest req = (HttpServletRequest) request;
+        // Preserve the exact authenticated payload; service controllers validate typed input.
+        if (req.getAttribute(com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal.ATTRIBUTE)
+            instanceof com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         HttpServletResponse resp = (HttpServletResponse) response;
         String requestURI = req.getRequestURI();
         // 防止目标服务器上存在可访问任意目录下文件的漏洞：edp/report/month/sysmonitor/rpt_report_visit_num_mon_../../../../WEB-INF/web.xml

@@ -31,6 +31,36 @@ import org.mockito.InOrder;
 import org.springframework.web.server.ResponseStatusException;
 
 class TenantSandboxServiceReplacementTest {
+    @org.junit.jupiter.api.Test
+    void commercialMarkerIsInjectedAsImmutableNodeEnvironment() throws Exception {
+        var lifecycle = mock(SandboxLifecycleFacade.class);
+        var specs = mock(SandboxServiceSpecRepository.class);
+        var records = mock(SsSandboxRecordMapper.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<SsSandboxRecord>getArgument(0).setId(31L);
+            return 1;
+        }).when(records).insert(any(SsSandboxRecord.class));
+        var service = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class),
+            specs, records, new ObjectMapper(), "db", "/tmp", "node", "localhost", "6379", "0", "default",
+            "password", "http://be", "token", "localhost");
+        var spec = new com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec();
+        spec.setOwnerScope("TENANT");
+        spec.setResourceLimits(java.util.Map.of("cpu", "1", "memory", "1Gi"));
+        when(specs.findByServiceKeyAndProfile("tenant-data-node", "s")).thenReturn(java.util.Optional.of(spec));
+        var mapper = mock(com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper.class);
+        var row = new com.iwhalecloud.byai.manager.mapper.tenant.TenantConfigRow();
+        row.setParamsCode("COMMERCIAL_MANAGED");
+        row.setParamsValue("true");
+        when(mapper.selectConfigs(12L)).thenReturn(java.util.List.of(row));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "tenantPolicyConfigs", mapper);
+        assertThatThrownBy(() -> service.launchDataNode(12L, "s", 20L, 1L))
+            .isInstanceOf(ResponseStatusException.class);
+        var request = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        verify(lifecycle).launchSandbox(request.capture());
+        assertThat(request.getValue().getEnvs()).containsEntry("COMMERCIAL_MANAGED", "true");
+
+    }
+
 
     @Test
     void preparesPrivateDatabaseDirectoryBeforeKubernetesCreatesRootOwnedSubPath(@TempDir Path root)

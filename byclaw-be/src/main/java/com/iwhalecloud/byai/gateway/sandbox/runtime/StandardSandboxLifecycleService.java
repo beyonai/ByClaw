@@ -349,7 +349,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
      */
     private static final Set<String> SYSTEM_ENV_KEYS = Set.of(
         "BYAI_SERVICE_BASE_URL",
-        "BYAI_WORKER_ID"
+        "BYAI_WORKER_ID",
+        "COMMERCIAL_MANAGED"
     );
 
     private static void mergeSystemEnvs(CreateSandboxRequest request, Map<String, String> launchEnvs) {

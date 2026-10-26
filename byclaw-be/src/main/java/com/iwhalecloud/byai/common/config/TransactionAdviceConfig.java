@@ -129,6 +129,15 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Tenant coordinators explicitly commit reservation/intent before remote work and recover duplicate receipts after rollback.
+                if (targetClass != null) {
+                    String owner = ClassUtils.getUserClass(targetClass).getName();
+                    if ("com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandService".equals(owner)
+                        || ("com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService".equals(owner)
+                            && "provisionDurably".equals(method.getName()))) {
+                        return notSurpportedTx;
+                    }
+                }
                 // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
                 if (targetClass != null && java.util.Set.of(
                     "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService",

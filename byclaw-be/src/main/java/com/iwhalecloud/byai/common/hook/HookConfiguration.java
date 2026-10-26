@@ -14,8 +14,28 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @Configuration(proxyBeanMethods = false)
 public class HookConfiguration {
     @Bean
-    public HookPublisher hookPublisher(ObjectProvider<HookDispatcher> dispatcher) {
-        return new HookPublisher(dispatcher);
+    public HookPublisher hookPublisher(ObjectProvider<HookDispatcher> dispatcher, ObjectProvider<DurableHookPublisher> durable) {
+        return new HookPublisher(dispatcher, durable.getIfAvailable());
+    }
+
+    /** Persistence is available independently of the optional outbound transport. */
+    @Bean
+    public DurableHookPublisher durableHookPublisher(@Qualifier("multipleDataSource") ObjectProvider<javax.sql.DataSource> sources,
+        ObjectProvider<HookProperties> properties, List<HookEventSchema> schemas) {
+        javax.sql.DataSource source = sources.getIfAvailable();
+        return source == null ? null : new DurableHookPublisher(source, properties.getIfAvailable(HookProperties::new), schemas);
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(prefix = "byclaw.hooks.durable", name = "enabled", havingValue = "true")
+    @EnableConfigurationProperties(HookProperties.class)
+    static class DurableHooks {
+        @Bean(destroyMethod = "close")
+        DurableHookWorker durableHookWorker(@Qualifier("dataSourceByai") javax.sql.DataSource source,
+            HookProperties properties, List<HookEventSchema> schemas) {
+            // Worker operations are isolated from tenant routing and run outside business transactions.
+            return new DurableHookWorker(source, properties, schemas);
+        }
     }
 
     /** No binding of URL/credential placeholders and no worker allocation when disabled. */

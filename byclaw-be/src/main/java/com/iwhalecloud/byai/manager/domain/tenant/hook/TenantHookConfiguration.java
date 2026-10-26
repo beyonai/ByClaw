@@ -13,4 +13,15 @@ public class TenantHookConfiguration {
         return new HookEventSchema("tenant.created", 1, Set.of("enterpriseId", "enterpriseName", "packageId",
             "packageName", "createdBy", "requestId", "provisionState"));
     }
+    @Bean
+    public HookEventSchema tenantProvisioningCompletedSchema() {
+        return new HookEventSchema("tenant.provisioning.completed", 1,
+            Set.of("enterpriseId", "commandId", "stage"));
+    }
+
+    @Bean
+    public HookEventSchema tenantProvisioningFailedSchema() {
+        return new HookEventSchema("tenant.provisioning.failed", 1,
+            Set.of("enterpriseId", "commandId", "stage", "errorCode"));
+    }
 }

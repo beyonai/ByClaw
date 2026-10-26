@@ -70,6 +70,12 @@ public class TenantNodeSchemaService {
 
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId) throws Exception {
+        initialize(enterpriseId, generation, dbRecordId, node, requestId, 1L);
+    }
+
+    public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
+                           String requestId, long fencingToken) throws Exception {
+        if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
         if (internalToken == null || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
             throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
         }
@@ -93,7 +99,8 @@ public class TenantNodeSchemaService {
         task.put("enterpriseId", Long.toString(enterpriseId));
         task.put("dbSandboxRecordId", Long.toString(dbRecordId));
         task.put("generation", Long.toString(generation));
-        task.put("fencingToken", "1");
+        // A reclaimed durable command must use its current authority rather than the original attempt's fence.
+        task.put("fencingToken", Long.toString(fencingToken));
         task.put("operationType", "INIT");
         task.put("triggerType", "AUTO_PROVISION");
         task.put("byclawReleaseVersion", metadata.version());
