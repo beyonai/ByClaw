@@ -23,6 +23,8 @@
  * has. A launch BE refuses with 401 is reported as a rejected token, retried once
  * with a token from the source if that differs, otherwise not retried within the
  * launch window; the backoff it leaves behind is lifted when a new token arrives.
+ * Idle and A-context disposal release only this user's configured tool service.
+ * The next runtime operation obtains a new B through the same get-or-create API.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import { createHash } from 'node:crypto'
@@ -140,6 +142,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private currentId: string | undefined
 
   get sandboxId(): string | undefined { return this.currentId }
+  private ownsSandbox = false
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -231,13 +234,13 @@ export class ByClawBeBackend implements ToolEnvBackend {
    */
   pause(): Promise<void> {
     return this.serial(async () => {
-      if (this.currentId === undefined) return
+      if (!this.ownsSandbox) return
       await this.remove()
       this.currentId = undefined
     })
   }
 
-  async dispose(): Promise<void> { await this.operation.catch(() => {}) }
+  async dispose(): Promise<void> { await this.pause() }
 
   private async ensureOnce(): Promise<ToolEnvEndpoint> {
     // B's sshd reads the keys from A's state directory, so they must exist before B starts.
@@ -287,6 +290,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     const { userCode, serviceKey, sshInstance } = this.config
     const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
     const sandboxType = serviceKey
+    if (data?.sandboxId) this.ownsSandbox = true
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints)
     if (endpoint === undefined) {
@@ -306,6 +310,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     }
     this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
+    this.ownsSandbox = true
     return endpoint
   }
 
@@ -313,9 +318,11 @@ export class ByClawBeBackend implements ToolEnvBackend {
     const { userCode, serviceKey: sandboxType } = this.config
     try {
       await this.call('/sandbox/removeSandbox', { userCode, sandboxType })
+      this.ownsSandbox = false
       this.log(`released tool environment of type ${sandboxType}`)
     } catch (error) {
       this.log(`release of tool environment ${sandboxType} failed: ${message(error)}`)
+      throw error
     }
   }
 

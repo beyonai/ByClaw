@@ -244,7 +244,7 @@ export class ToolEnvConnection extends Service {
   }
 
   private async pauseIdle(): Promise<void> {
-    if (this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
+    if (this.closed || this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
     const logger = this.ctx.logger('byclaw-tool-env')
     if (await this.stillBusy()) { this.touch(); return }
     this.pausing = (async () => {
@@ -254,6 +254,12 @@ export class ToolEnvConnection extends Service {
       logger.info(`tool environment idle for ${String(this.options.idleMs)} ms; paused`)
     })().catch((error: unknown) => {
       logger.warn(`tool environment pause failed: ${error instanceof Error ? error.message : String(error)}`)
+      // drop() already removed the SSH lease; touch() cannot schedule this retry.
+      // A new operation cancels this timer before leasing B again.
+      if (!this.closed && this.options.idleMs > 0) {
+        this.idleTimer = setTimeout(() => { void this.pauseIdle() }, this.options.idleMs)
+        this.idleTimer.unref()
+      }
     }).finally(() => { this.pausing = undefined })
     await this.pausing
   }

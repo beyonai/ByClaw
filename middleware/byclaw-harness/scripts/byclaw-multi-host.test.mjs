@@ -21,6 +21,19 @@ const beSpec = {
 
 // --- overlays ---------------------------------------------------------------
 
+test('browser sockets fit managed context paths and remain isolated by context and host root', () => {
+  const entries = [{ id: 'byclaw-browser-use', name: '@byclaw/dsh-browser-use' }]
+  const homes = [
+    `/data/multi-host/users/ctx_${'a'.repeat(64)}/dsh-home`,
+    `/data/multi-host/users/ctx_${'b'.repeat(64)}/dsh-home`,
+    `/data/other-host/users/ctx_${'a'.repeat(64)}/dsh-home`,
+  ]
+  const dirs = homes.map(home => composeUserOverlays(entries, 'same-user', home, spec)[0].config.runtimeDir)
+  assert.equal(new Set(dirs).size, homes.length)
+  for (const dir of dirs) assert.ok(Buffer.byteLength(`${dir}/browserd.sock`) <= 107, dir)
+  assert.equal(composeUserOverlays(entries, 'same-user', homes[0], spec)[0].config.runtimeDir, dirs[0])
+})
+
 test('overlays merge per-user additions into the composed row config', () => {
   const entries = [
     { id: 'byclaw-idle-reporter', name: '@byclaw/dsh-idle-reporter', config: { streamKey: 's', sandboxId: 'old' } },

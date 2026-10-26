@@ -12,6 +12,7 @@ import {
   ResumeCommand,
   type GatewayCommand,
 } from '@byclaw/by-framework'
+import type { ManagedAdmission } from './managed-admission.ts'
 import { byClawVoicePayload } from './voice-runtime.ts'
 import { extractByClawUserText } from './protocol.ts'
 
@@ -92,12 +93,15 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
     sessions: ByClawDshSessionPort
     redis: ConstructorParameters<typeof WorkerRegistry>[0]
     registry?: WorkerRegistry
+    admission?: ManagedAdmission
   }) {
     super(options.workerId, options.registry ?? new WorkerRegistry(options.redis), options.redis)
+    this.admission = options.admission
     this.agentTypes = [...new Set(options.agentTypes)]
     this.handler = new ByClawDshCommandHandler(options.sessions)
   }
 
+  private readonly admission: ManagedAdmission | undefined
   private readonly agentTypes: string[]
 
   getAgentTypes(): ReadonlyArray<string> {
@@ -105,7 +109,8 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
   }
 
   processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
-    return this.handler.process(command, context)
+    return this.admission === undefined ? this.handler.process(command, context)
+      : this.admission.run(() => this.handler.process(command, context))
   }
 
   async onCancelTask(command: unknown): Promise<void> {

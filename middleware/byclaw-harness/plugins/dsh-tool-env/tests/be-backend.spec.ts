@@ -18,6 +18,7 @@ class FakeByClawBe {
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  removeFailure: string | undefined
   /** The user's private parameters, as BE stores them: values never read back whole. */
   readonly privateParams = new Map<string, { paramId: number; value: string }>()
   /** When set, any other `beyond-token` gets BE's JWT filter answer: HTTP 401 with its own envelope. */
@@ -92,6 +93,7 @@ class FakeByClawBe {
       return { code: 0, msg: 'success', data }
     }
     if (path === '/byaiService/sandbox/removeSandbox') {
+      if (this.removeFailure !== undefined) return { code: -1, msg: this.removeFailure, data: null }
       this.records.delete(`${user}/${String(body['sandboxType'])}`)
       return { code: 0, msg: 'success', data: null }
     }
@@ -434,6 +436,47 @@ describe('ByClawBeBackend', () => {
     expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
     expect(backend.sandboxId).toBe('sb2')
     expect(logs).toContain('released tool environment of type byclaw-dsh-tools')
+  })
+
+  it('releases only its own B on idle and creates a fresh B on the next operation', async () => {
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    const key = `${config.userCode}/${config.serviceKey}`
+    const firstId = fake.records.get(key)?.sandboxId
+    fake.records.set('other-user/other-tools', { sandboxId: 'other', instanceEndpoints: {} })
+    await backend.pause()
+    expect(fake.records.has(key)).toBe(false)
+    expect(fake.records.has('other-user/other-tools')).toBe(true)
+    expect(fake.calls.at(-1)?.body).toEqual({ userCode: config.userCode, sandboxType: config.serviceKey })
+    await backend.pause()
+    expect(fake.calls.filter(call => call.path.endsWith('/removeSandbox'))).toHaveLength(1)
+    await backend.ensure()
+    expect(fake.records.get(key)?.sandboxId).not.toBe(firstId)
+  })
+
+  it('retains ownership and reports an unsuccessful idle release so it can be retried', async () => {
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    fake.removeFailure = 'provider outcome unknown'
+    await expect(backend.pause()).rejects.toThrow('provider outcome unknown')
+    expect(fake.records.size).toBe(1)
+    fake.removeFailure = undefined
+    await backend.pause()
+    expect(fake.records.size).toBe(0)
+  })
+
+  it('does not create or release a tool environment before the first runtime use', async () => {
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.pause()
+    await backend.dispose()
+    expect(fake.calls).toHaveLength(0)
+  })
+
+  it('releases a B it owns when its A context is disposed', async () => {
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    await backend.dispose()
+    expect(fake.records.size).toBe(0)
   })
 
 })
