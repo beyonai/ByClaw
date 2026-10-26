@@ -1,6 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
-import { scrubEnvironment } from '../src/connection.ts'
+import { z } from 'zod'
+import { scrubEnvironment, ToolEnvConnection, type ToolEnvConnectionOptions } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
+import { ToolEnvIdentity } from '../src/identity.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
@@ -52,6 +58,44 @@ describe('DeferredToolEnvironmentWork', () => {
     expect(ran).toEqual(['mkdir-1', 'write-a-new', 'mkdir-2'])
     expect(logs).toEqual(['deferred tool environment work "write:/by/b" failed: disk full'])
     expect(work.size).toBe(0)
+  })
+})
+
+describe('ToolEnvConnection with a shared queue', () => {
+  it('a directory queued on one environment is seen, and will be created, by whichever environment connects', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tool-env-shared-'))
+    const root = new Context()
+    const warnings: string[] = []
+    const deferred = new DeferredToolEnvironmentWork(message => warnings.push(message))
+    const options: ToolEnvConnectionOptions = {
+      ssh: { workspace: '/by' } as unknown as ToolEnvConnectionOptions['ssh'],
+      ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath: '/nowhere' },
+      idleMs: 0,
+      deferred,
+    }
+    const starts: string[] = []
+    const backend = (name: string) => ({
+      ensure: async () => { starts.push(name); throw new Error(`${name} must not start for a probe`) },
+      pause: async () => {}, dispose: async () => {},
+    })
+    const connectionOf = (name: string): ToolEnvConnection => {
+      let connection: ToolEnvConnection | undefined
+      const inner = root.isolate('ssh', Symbol(name))
+      connection = new ToolEnvConnection(inner, options, backend(name), new ToolEnvIdentity(join(dir, name), `alias-${name}`))
+      return connection
+    }
+    const byDefault = connectionOf('default')
+    const media = connectionOf('media')
+    // The session directory is queued before the turn's Agent, and so its environment, is known.
+    await byDefault.whenConnected('mkdir:/by/.sessions/7', async () => {})
+    // The Agent then runs on another environment: its turn-start probe sees the queued directory
+    // and does not start B for it; the queue will run on that environment once a tool starts it.
+    expect(await media.request('fs.stat', { target: { targetKey: '/by/.sessions/7' } }, z.any())).toEqual({ version: 'pending', type: 'directory' })
+    expect(await media.request('fs.list', { target: { targetKey: '/by/.sessions/7' } }, z.any())).toEqual([])
+    expect(starts).toEqual([])
+    expect(deferred.pendingDirectories()).toEqual(['/by/.sessions/7'])
+    expect(warnings).toEqual([])
+    await rm(dir, { recursive: true, force: true })
   })
 })
 

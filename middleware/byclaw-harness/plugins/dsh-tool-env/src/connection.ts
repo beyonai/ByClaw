@@ -31,6 +31,14 @@ export interface ToolEnvConnectionOptions {
   ptcLaunch: { kind: 'node-script'; executable: string; bootstrapPath: string }
   /** Pause the tool environment after this long without operations or open streams; 0 disables. */
   idleMs: number
+  /**
+   * Work queued for B while no connection is up (session directories, projection
+   * writes). A user's environments share one workspace volume, so a pool hands
+   * every connection the same store: whichever environment connects first runs
+   * the queue, and each one answers probes for queued directories. Default: a
+   * store of this connection's own.
+   */
+  deferred?: DeferredToolEnvironmentWork
 }
 
 interface Lease {
@@ -54,7 +62,7 @@ export class ToolEnvConnection extends Service {
    * work (inner connections, logging) must stay on the mounting one.
    */
   private readonly home: Context
-  private readonly deferred = new DeferredToolEnvironmentWork(message => { this.home.logger('byclaw-tool-env').warn(message) })
+  private readonly deferred: DeferredToolEnvironmentWork
 
   constructor(
     ctx: Context,
@@ -64,6 +72,7 @@ export class ToolEnvConnection extends Service {
   ) {
     super(ctx, 'ssh')
     this.home = ctx
+    this.deferred = options.deferred ?? new DeferredToolEnvironmentWork(message => { this.home.logger('byclaw-tool-env').warn(message) })
     ctx.effect(() => () => { void this.close() })
   }
 

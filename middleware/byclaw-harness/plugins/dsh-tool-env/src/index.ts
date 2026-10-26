@@ -19,6 +19,7 @@ import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
 import { ByClawBeBackend, parseEndpoint, type ByClawBeBackendConfig } from './be-backend.ts'
 import { ToolEnvConnection, type ToolEnvConnectionOptions } from './connection.ts'
+import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { DEFAULT_ENVIRONMENT, ToolEnvRouter, ToolEnvironments, type AgentLineage } from './environments.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
@@ -131,6 +132,9 @@ export class ToolEnv extends ToolEnvironments {
       },
       ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath },
       idleMs: config.idleMs,
+      // One queue for the user: a session directory queued before the turn's Agent (and so its
+      // environment) is known must be created by whichever environment the turn then starts.
+      deferred: new DeferredToolEnvironmentWork(message => { ctx.logger('byclaw-tool-env').warn(message) }),
     }
     super(ctx, {
       // With BE the environment is the sandbox spec an employee selects, served on demand; the
