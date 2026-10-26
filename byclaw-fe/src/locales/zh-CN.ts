@@ -599,6 +599,7 @@ export default {
   'common.import': '导入',
   'common.localFile': '本地文件',
   'common.remoteComputer': '远程电脑',
+  'common.remoteComputerUnavailable': '远程桌面暂不可用：助理的浏览器未打开或已关闭',
   'common.curlImport': 'Curl 导入',
   'common.pasteCurlCommand': '请粘贴 Curl 命令',
   'common.curlImportHint': '支持粘贴标准的 Curl 命令，系统会自动解析为工具配置',

@@ -689,6 +689,7 @@ function applyToolEnvironmentRuntime(ctx: Context, config: Config): void {
   const runtime = new ToolEnvironmentBrowserRuntime({
     socketPath: join(config.runtimeDir || join(home, '..', 'run', 'browser'), 'remote.sock'),
     contextId, subprocess, goalEnabled: browserGoalEnabled(),
+    log: message => { ctx.logger('byclaw-browser').warn(message) },
     idleBrowserMs: resolved(config).idleBrowserMs,
     readinessTimeoutMs: config.readinessTimeoutMs ?? 60_000,
     viewer: config.viewer ?? 'none', viewerPort: config.viewerPort ?? 8082,

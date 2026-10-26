@@ -56,7 +56,7 @@ B 以 root 启动 SSH/监督进程，浏览器和用户命令降权为 `byclaw`�
   "ports": [
     { "port": 22, "instance": "ssh", "protocol": "tcp" },
     { "port": 8081, "instance": "bycli-browser", "protocol": "http" },
-    { "port": 8082, "instance": "browser", "protocol": "http" }
+    { "port": 8082, "instance": "vnc", "protocol": "http" }
   ]
 }
 ```
@@ -66,10 +66,16 @@ A 的启动入口则应使用镜像默认 `byclaw-lean-entrypoint`；若现有�
 现有工具环境的 SSH-over-WebSocket 接入（通常端口 8022）仍可用，按原部署另行声明该端口。
 
 **浏览器访问地址必须切换到 B 的 endpoint**，A 不再提供 8081 浏览器服务。
+前端"远程电脑"抽屉取用户沙箱列表里第一个运行中、带 `instanceEndpoints.vnc` 的地址，所以 B 规格里原生浏览器桌面的端口（默认 8082）**实例名必须是 `vnc`**。
+前端在打开抽屉前先请求一次这个地址，代理返回 5xx（桌面还没起来）时最多等约 60 秒；手动点开时若没有可用桌面会提示"助理的浏览器未打开或已关闭"。
 原生 `browser` 默认使用 B:8082；`bycli` 使用 B:8081。它们有独立 profile、显示号和端口，不共享登录态，旧 A 上的登录态也不会自动复制。
 原生浏览器可在 A 上设置 `BYCLAW_TOOL_BROWSER_VIEWER=none` 关闭桌面，或设置 `BYCLAW_TOOL_BROWSER_VIEWER_PORT` 改端口。
 B 上 `BYCLAW_BYCLI_ENABLED=false` 可关闭 byCLI 浏览器监督，只保留原生远程浏览器。
-noVNC 仍应经过现有用户身份鉴权网关；本次未修改线上服务规格、数据库或前端入口路由。
+noVNC 仍应经过现有用户身份鉴权网关。
+
+旧的 `Dockerfile.tools` 生成的工具镜像不能跑浏览器：它删除了 `/ms-playwright`（Chromium），也没有设置 `BYCLAW_BROWSER_NOVNC_DIR` / `BYCLAW_BROWSER_EXECUTABLE_PATH`，
+桥接进程会以 `browser-remote-bridge-failed` 退出。浏览器放在 B 时请使用 `Dockerfile.tool_slim`。桥接失败的原因会出现在 A 的日志里：
+`byclaw-browser … browser bridge on the tool environment exited 1: …`。
 
 ## 浏览器执行与生命周期
 

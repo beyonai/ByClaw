@@ -72,6 +72,30 @@ describe('tool environment browser transport', () => {
     expect(f.spawned()).toBe(2)
     client.dispose()
   })
+  it('logs why the bridge on B failed instead of leaving only a closed connection', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'remote-browser-')); roots.push(root)
+    const logs: string[] = []
+    // B's bridge as it ends when browserd cannot start: message on stderr, exit code 1.
+    const failing = `process.stdin.once('data', () => { process.stderr.write('browserd-start-failed: browser-viewer-root-not-found\\nbrowser-remote-bridge-failed: browser-owned-runtime-exited:1\\n'); process.exit(1) })`
+    const subprocess: BrowserSubprocess = { spawn() {
+      const child = spawn(process.execPath, ['-e', failing], { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stderr = ''
+      child.stderr.on('data', chunk => { stderr += String(chunk) })
+      return { stdin: child.stdin, stdout: child.stdout,
+        done: new Promise(resolve => child.once('close', code => resolve({ exitCode: code, signal: null }))),
+        terminate: () => { child.kill() },
+        collected: { stderr: { readFrom: () => ({ text: stderr }) } },
+      }
+    } }
+    const runtime = new ToolEnvironmentBrowserRuntime({ socketPath: join(root, 'b.sock'), subprocess: () => subprocess, log: message => logs.push(message) })
+    runtimes.push(runtime)
+    await runtime.ensureStarted()
+    const client = new BrowserBrokerClient({ socketPath: runtime.socketPath, secret: runtime.secret })
+    await expect(client.status()).rejects.toThrow()
+    await expect.poll(() => logs.length).toBe(1)
+    expect(logs[0]).toBe('browser bridge on the tool environment exited 1: browserd-start-failed: browser-viewer-root-not-found | browser-remote-bridge-failed: browser-owned-runtime-exited:1')
+    client.dispose()
+  })
   it('rejects malformed JSON before starting B', async () => {
     const f = await fixture(); await f.runtime.ensureStarted()
     const socket = createConnection(f.runtime.socketPath)

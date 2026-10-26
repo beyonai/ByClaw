@@ -65,6 +65,9 @@ try {
     viewer: config.viewer as 'none' | 'novnc' | 'shared-novnc',
     viewerHost: '0.0.0.0', viewerPort: Number(config.viewerPort),
     displayRange: '200-299', rfbPortRange: '6201-6300', websockifyPortRange: '6401-6500',
+    // Stdout carries broker frames only; browserd's warnings (start failures name the
+    // missing piece: Chromium, noVNC root, display) go to stderr, which A reads back.
+    log: (level, message) => { if (level === 'warn') process.stderr.write(`${oneLine(message)}\n`) },
   })
   await runtime.ensureStarted()
   if (stopping) { await runtime.stop(); process.exit(0) }
@@ -114,9 +117,13 @@ try {
       idleTimer.unref()
     }
   })
-} catch {
-  // No payload, command arguments or secret in the diagnostic channel.
-  console.error('browser-remote-bridge-failed')
+} catch (error) {
+  // The error's own message only: no payload, command arguments or secret.
+  console.error(`browser-remote-bridge-failed: ${oneLine(error instanceof Error ? error.message : String(error))}`)
   await runtime?.stop()
   process.exit(1)
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').slice(0, 500)
 }
