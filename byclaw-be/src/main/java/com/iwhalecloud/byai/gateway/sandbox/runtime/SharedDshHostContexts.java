@@ -67,7 +67,14 @@ public final class SharedDshHostContexts {
         return SANDBOX_TYPE.equals(sandboxType) && !user.isEmpty() && sharedUsers.test(user);
     }
 
-    /** Idempotent: a running context answers at once, a missing one is booted with the user's launch environment. */
+    /**
+     * Idempotent: a running context answers at once, a missing one is booted with the user's launch environment.
+     *
+     * <p>The environment is rendered on every call, so each PUT carries a freshly minted {@code BEYOND_TOKEN}
+     * (user JWTs expire after {@code jwt.token.expired.hour}); the host hands it to the running context, whose
+     * tool-sandbox launches call BE as the user. Login auto-start and the worker-ready check before each
+     * question both come through here, so a resident context never keeps an expired token across turns.</p>
+     */
     public SandboxLaunchData ensure(String userCode) {
         String user = StringUtils.trimToEmpty(userCode);
         UserContext context = client.ensureUser(user, sharedSandboxId(user), launchEnv.apply(user));

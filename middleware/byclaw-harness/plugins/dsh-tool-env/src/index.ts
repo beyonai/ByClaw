@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
-import { ByClawBeBackend, parseEndpoint, type ByClawBeBackendConfig } from './be-backend.ts'
+import { ByClawBeBackend, parseEndpoint, type BeTokenSource, type ByClawBeBackendConfig } from './be-backend.ts'
+import { isDshBusy, probeResidualProcesses, type AgentsView, type JobsView } from './busy.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
@@ -22,8 +23,9 @@ export { ToolEnvConnection } from './connection.ts'
 export { OpenSandboxBackend, StaticBackend, waitForEndpoint, waitForHttp, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
 export { ToolEnvIdentity } from './identity.ts'
-export { ByClawBeBackend, parseEndpoint } from './be-backend.ts'
-export type { ByClawBeBackendConfig } from './be-backend.ts'
+export { isDshBusy, probeResidualProcesses, residualProcesses } from './busy.ts'
+export { ByClawBeBackend, ByClawTokenRejectedError, isTokenRejected, parseEndpoint } from './be-backend.ts'
+export type { BeTokenSource, ByClawBeBackendConfig } from './be-backend.ts'
 
 /** Plugin configuration; the profile patch fills it from the environment. */
 export interface Config {
@@ -40,6 +42,8 @@ export interface Config {
   workspace: string
   /** Pause B after this many idle milliseconds; 0 keeps it running. */
   idleMs: number
+  /** Processes left on B keep it alive past idle for at most this long. */
+  busyProcessMaxMs: number
   requestTimeoutMs: number
   leaseMs: number
   /** `static` backend endpoint; `wsUrl` (ws/wss/http/https) makes it a WebSocket bridge to sshd. */
@@ -70,13 +74,24 @@ const volume = schema.object({
   readOnly: schema.boolean(), uid: schema.natural(), gid: schema.natural(), mode: schema.string(),
 })
 
+/**
+ * Service name under which a host may provide a {@link BeTokenSource} for this
+ * context (`ctx.provide(BE_TOKEN_SOURCE, { current })`): consulted when BE
+ * rejects the token the backend holds.
+ */
+export const BE_TOKEN_SOURCE = 'byclawBeTokenSource'
+
 export class ToolEnv extends ToolEnvConnection {
+  /** The byclaw-be backend, when that is the configured one; for {@link renewBeToken}. */
+  private readonly beBackend: ByClawBeBackend | undefined
+
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
     stateDir: schema.string().required(),
     alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
     idleMs: schema.natural().default(600_000),
+    busyProcessMaxMs: schema.natural().default(6 * 60 * 60 * 1000),
     requestTimeoutMs: schema.natural().default(30_000),
     leaseMs: schema.natural().default(30_000),
     host: schema.string().default('127.0.0.1'),
@@ -112,6 +127,7 @@ export class ToolEnv extends ToolEnvConnection {
 
   constructor(ctx: Context, config: Config) {
     const identity = new ToolEnvIdentity(config.stateDir, config.alias)
+    const backend = backendFor(ctx, config, identity)
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
     const bootstrapPath = join(dirname(realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ptc-runtime-node')))), 'process.js')
     super(ctx, {
@@ -126,7 +142,25 @@ export class ToolEnv extends ToolEnvConnection {
       },
       ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath },
       idleMs: config.idleMs,
-    }, backendFor(ctx, config, identity), identity)
+      busy: {
+        // DSH's own account of work on A, read from its services when the timer fires.
+        dsh: () => isDshBusy(ctx.get('agents') as AgentsView | undefined, ctx.get('jobs') as JobsView | undefined),
+        // Processes on B that no stream watches (`cmd &`), asked over the connection's own alias.
+        residual: () => probeResidualProcesses(identity.alias),
+        residualMaxMs: config.busyProcessMaxMs,
+      },
+    }, backend, identity)
+    this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
+  }
+
+  /**
+   * The user's current Beyond-Token for the `byclaw-be` backend. The token BE
+   * injected at start expires; a process that lives longer (the shared DSH host)
+   * calls this with the token of every PUT BE sends for the user, so B can still
+   * be launched after the first token expired. Other backends ignore it.
+   */
+  renewBeToken(token: string): void {
+    this.beBackend?.renewToken(token)
   }
 }
 
@@ -143,7 +177,9 @@ function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): To
     for (const key of ['baseUrl', 'userCode', 'token', 'serviceKey'] as const) {
       if (be[key] === '') throw new Error(`byclaw-tool-env: byclawBe.${key} is required for the byclaw-be backend`)
     }
-    return new ByClawBeBackend({ ...be, port: config.port }, identity, message => { logger.info(message) })
+    // Resolved per call: the host provides the source before the plugins load, but a plain profile has none.
+    const source: BeTokenSource = { current: async () => (ctx.get(BE_TOKEN_SOURCE) as BeTokenSource | undefined)?.current() }
+    return new ByClawBeBackend({ ...be, port: config.port }, identity, message => { logger.info(message) }, {}, source)
   }
   const settings = config.openSandbox
   for (const key of ['baseUrl', 'apiKey', 'image'] as const) {

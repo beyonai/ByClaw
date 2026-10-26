@@ -92,7 +92,9 @@ mvn -B -f byclaw-be/pom.xml verify
 
 - 启动（登录自启动、问答前的 worker 就绪检查、`launchByUserCode`）= 对宿主做一次幂等的 `PUT /v1/users/{user}`，
   带上 `byclaw-dsh` 规格渲染后的环境；上下文已在时毫秒返回，不在时由宿主加载后返回。问答仍经 Gateway worker 注册转发，
-  宿主重启后下一次请求会重新 PUT，不会出现指向失效上下文的记录。
+  宿主重启后下一次请求会重新 PUT，不会出现指向失效上下文的记录。每次 PUT 的环境都重新渲染，`BEYOND_TOKEN` 是新签发的
+  JWT：常驻上下文的生命周期远长于 `jwt.token.expired.hour`，宿主把每次 PUT 的 token 交给运行中的上下文，工具沙箱（B）
+  以用户身份调 BE 时用的始终是最近一次问答的 token。
 - 释放（`removeSandbox` 不带 resourceId、类型为 `byclaw-dsh` 或不指定）= 宿主 `DELETE`；其他类型照旧走平台或本地。
 - 查询（`sandboxInfo`）把宿主上的上下文作为一条 `byclaw-dsh` 条目并入结果（宿主 `GET`），不读记录。
 - 心跳/续约/空闲回收对这类上下文不做任何事：宿主按自己的空闲规则回收。

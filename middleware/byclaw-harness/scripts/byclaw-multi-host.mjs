@@ -12,7 +12,10 @@
  * context serves its own loopback web listener; one HTTP port carries both the
  * admin API and the browser gateway:
  *
- *   PUT    /v1/users/{userCode}   {sandboxId, env?} -> ensure the context runs (idempotent)
+ *   PUT    /v1/users/{userCode}   {sandboxId, env?} -> ensure the context runs (idempotent); a running
+ *                                  context takes the BEYOND_TOKEN of every PUT (BE mints a new one each time);
+ *                                  when BE rejects the token a context holds, the context reads the user's
+ *                                  current login token from Redis (user:<id>:login:auth) instead
  *   GET    /v1/users/{userCode}   -> {status: absent|starting|ready|failed}
  *   DELETE /v1/users/{userCode}   -> dispose the context, release the Redis claim (idempotent)
  *   GET    /v1/health             -> {ok, hostId, users}
@@ -165,6 +168,39 @@ export function toolEnvUserToken(env, user) {
   const token = env?.BEYOND_TOKEN?.trim()
   if (!token) throw new Error(`byclaw-be tool environment for ${user} needs BEYOND_TOKEN in the PUT env`)
   return token
+}
+
+/**
+ * Give a running context the BEYOND_TOKEN of a later PUT: the byclaw-be backend
+ * (behind the context's `ssh` service, dsh-tool-env's ToolEnv) calls BE with it from then on.
+ * Nothing to do for other backends or a PUT without a token.
+ * @param ctx - the context's root (anything with `get(name)`).
+ * @param config - host config ({ toolEnvBackend }).
+ * @param env - PUT `env`.
+ * @returns whether a token was handed over.
+ */
+/**
+ * The user's current Beyond-Token as BE keeps it in Redis for the login state
+ * (the same keys byclaw-integration reads): `SHARE_BFM_USER_CODE_<user>` gives
+ * the user id, `user:<id>:login:auth` the headers. `undefined` when the user is
+ * not logged in; the caller treats that as "no newer token".
+ * @param redis - ioredis-like ({ get, hget }).
+ */
+export async function currentUserToken(redis, user) {
+  const userId = String(await redis.get(`SHARE_BFM_USER_CODE_${user}`) ?? '').trim()
+  if (userId === '') return undefined
+  const token = String(await redis.hget(`user:${userId}:login:auth`, 'Beyond-Token') ?? '').trim()
+  return token === '' ? undefined : token
+}
+
+export function renewUserToken(ctx, config, env) {
+  if (config.toolEnvBackend !== 'byclaw-be') return false
+  const token = env?.BEYOND_TOKEN?.trim()
+  if (!token) return false
+  const toolEnv = ctx.get('ssh')
+  if (typeof toolEnv?.renewBeToken !== 'function') return false
+  toolEnv.renewBeToken(token)
+  return true
 }
 
 /**
@@ -592,8 +628,10 @@ async function withTimeout(task, ms, label) {
  * resources are gone; removal disposes only that user's context.
  *
  * `boot(user, request, hooks)` must resolve to a handle
- * `{ port, auth: { cookie(), invalidate() }, dispose() }` and may set
+ * `{ port, auth: { cookie(), invalidate() }, dispose(), renew?(request) }` and may set
  * `hooks.isPluginFailure(reason)` for rejections the context already tolerates.
+ * `renew` receives every later PUT for a ready context (its `env` carries the
+ * user's current credentials; the context itself is not restarted).
  * Boots run inside an AsyncLocalStorage scope holding the entry, so process-level
  * errors raised from asynchronous work a context started can be attributed to it.
  */
@@ -657,6 +695,7 @@ export class UserRegistry {
       if (current.request.sandboxId !== request.sandboxId) {
         this.log(`user ${user}: running with sandboxId ${current.request.sandboxId}; ignoring ${request.sandboxId} until it restarts`)
       }
+      if (current.status === 'ready') this.#renew(current, request)
       return current.ready
     }
     const entry = { user, status: 'starting', request, webToken: this.createToken(), hooks: {}, startedAt: Date.now() }
@@ -666,6 +705,17 @@ export class UserRegistry {
     entry.ready.catch(() => {})
     this.#entries.set(user, entry)
     return entry.ready
+  }
+
+  /** Hand a later PUT to the running context; a failure is the context's, logged, never the PUT's. */
+  #renew(entry, request) {
+    const renew = entry.handle?.renew
+    if (renew === undefined) return
+    try {
+      renew.call(entry.handle, request)
+    } catch (error) {
+      this.log(`user ${entry.user}: applying the PUT to the running context failed:`, errorMessage(error))
+    }
   }
 
   async #start(entry) {
@@ -1010,8 +1060,11 @@ const mb = bytes => Math.round(bytes / 1024 / 1024)
 const memory = () => { const m = process.memoryUsage(); return `rss=${mb(m.rss)}MB heap=${mb(m.heapUsed)}MB` }
 const log = (...parts) => console.log(new Date().toISOString(), '[byclaw-multi-host]', ...parts)
 
-/** Boot one user's DSH context; resolves to a registry handle. */
-async function bootUserContext(config, user, request, hooks) {
+/**
+ * Boot one user's DSH context; resolves to a registry handle.
+ * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
+ */
+async function bootUserContext(config, user, request, hooks, tokenSource) {
   const {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = await import('@deepseek-ai/dsh-app-boot')
@@ -1057,6 +1110,8 @@ async function bootUserContext(config, user, request, hooks) {
     // that inject `webStartup` (e.g. better-sidebar's trusted-host fence) get the
     // listener values this host chose instead.
     hostCtx.provide('webStartup', webStartupValues(spec))
+    // The byclaw-be backend asks here when BE rejects the token it holds (see dsh-tool-env's BE_TOKEN_SOURCE).
+    if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
     await hostCtx.plugin(PluginPackages, { resolution })
   })
   const handle = {
@@ -1070,6 +1125,10 @@ async function bootUserContext(config, user, request, hooks) {
       },
     }),
     dispose: () => ctx.fiber.dispose(),
+    // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
+    // using the one from boot otherwise, which expires long before a resident
+    // context goes away (then every launch of B is a 401).
+    renew: request => { renewUserToken(ctx, config, request.env) },
   }
   if (!handle.port) {
     await ctx.fiber.dispose()
@@ -1092,7 +1151,7 @@ async function main() {
   })
   redis.on('error', error => log('redis:', error.message))
   const registry = new UserRegistry({
-    boot: (user, request, hooks) => bootUserContext(config, user, request, hooks),
+    boot: (user, request, hooks) => bootUserContext(config, user, request, hooks, { current: () => currentUserToken(redis, user) }),
     claim: user => redis.set(sharedHostKey(user), config.hostId, 'EX', SHARED_HOST_TTL_SECONDS),
     release: user => redis.eval(RELEASE_SCRIPT, 1, sharedHostKey(user), config.hostId),
     log,
