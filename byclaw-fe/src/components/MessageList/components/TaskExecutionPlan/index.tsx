@@ -12,8 +12,10 @@ import {
 } from '@ant-design/icons';
 import { Modal, Tooltip } from 'antd';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import type { TaskPlanSnapshot, TaskPlanTask, TaskPlanTaskStatus } from '@/typescript/message';
+import type { IAgentCache } from '@/typescript/agent';
+import { getAgentChatAvatar } from '@/utils/agent';
 import useLocateMessage from '@/hooks/useLocateMessage';
 import useGlobal from '@/hooks/useGlobal';
 import { useAgentTeamsSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
@@ -56,6 +58,9 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
   const intl = useIntl();
   const locateMessage = useLocateMessage();
   const { setSessionId } = useGlobal();
+  const employeesList = useSelector(
+    (state: { employees?: { employeesList?: IAgentCache[] } }) => state.employees?.employeesList || []
+  );
   const teamSnapshot = useAgentTeamsSnapshot(taskPlan.sessionId);
   const [collapsed, setCollapsed] = useState(true);
   const [maximized, setMaximized] = useState(false);
@@ -83,26 +88,29 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     setMaximized(false);
   }, [taskPlan.sessionId]);
 
-  const captainSummarizing = useSyncExternalStore(
+  const runtimeRevision = useSyncExternalStore(
     subscribeRuntime,
     () => {
       const runtime = chatSessionRuntimeManager.getSessionRuntime(taskPlan.sessionId);
-      const requests = chatSessionRuntimeManager.getAllBySession(taskPlan.sessionId);
-      let sameTurn = runtime?.traceId === taskPlan.traceId;
-      if (!taskPlan.traceId) {
-        sameTurn = requests.some(
-          (request) => request.answerMessageId === taskPlan.messageId && request.traceId === runtime?.traceId
-        );
-      }
-      return Boolean(
-        sameTurn &&
-          runtime?.status === 'running' &&
-          runtime.rootActive === true &&
-          runtime.activeChildCount === 0 &&
-          runtime.waitingInteractionCount === 0
-      );
+      return `${runtime?.traceId || ''}:${runtime?.revision || 0}`;
     },
-    () => false
+    () => ''
+  );
+  const runtime = chatSessionRuntimeManager.getSessionRuntime(taskPlan.sessionId);
+  const requests = chatSessionRuntimeManager.getAllBySession(taskPlan.sessionId);
+  let sameTurn = runtime?.traceId === taskPlan.traceId;
+  if (!taskPlan.traceId) {
+    sameTurn = requests.some(
+      (request) => request.answerMessageId === taskPlan.messageId && request.traceId === runtime?.traceId
+    );
+  }
+  const captainSummarizing = Boolean(
+    runtimeRevision &&
+      sameTurn &&
+      runtime?.status === 'running' &&
+      runtime.rootActive === true &&
+      runtime.activeChildCount === 0 &&
+      runtime.waitingInteractionCount === 0
   );
   const isSummarizing =
     captainSummarizing &&
@@ -110,7 +118,48 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
     tasks.length > 0 &&
     tasks.every((task) => task.status === 'COMPLETED');
   const hasRunningTask = tasks.some((task) => task.status === 'IN_PROGRESS');
-  const isWorking = hasRunningTask || isSummarizing;
+  const allTasksTerminal = tasks.every((task) => ['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(task.status));
+  const hasWorkingMember = Boolean(
+    runtime?.activeChildCount || teamSnapshot?.team.members?.some((member) => member.activity === 'working')
+  );
+  const workingMemberCount =
+    runtime?.activeChildCount ||
+    teamSnapshot?.team.members?.filter((member) => member.activity === 'working').length ||
+    0;
+  const hasBlockedTask = Boolean(navigationTeam?.tasks?.some((task) => task.state === 'blocked'));
+  const isWaitingForUser = runtime?.status === 'waiting_user' || Boolean(runtime?.waitingInteractionCount);
+  const isRuntimeFailure = runtime?.status === 'failed' || taskPlan.status === 'FAILED';
+  const isRuntimeCancelled = runtime?.status === 'cancelled' || ['CANCELLING', 'CANCELLED'].includes(taskPlan.status);
+  const isStaleRunningTask = hasRunningTask && runtime?.status === 'idle';
+  const teamStillActive = teamSnapshot?.team.lifecycle === 'running' && !allTasksTerminal;
+  const isWorking =
+    !isRuntimeFailure &&
+    !isRuntimeCancelled &&
+    !isStaleRunningTask &&
+    (hasRunningTask || isSummarizing || hasWorkingMember || runtime?.rootActive === true || teamStillActive);
+  let overallStatus: string | undefined;
+  if (isRuntimeFailure) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.executionFailed' });
+  } else if (isRuntimeCancelled) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.executionCancelled' });
+  } else if (isWaitingForUser) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.waitingUser' });
+  } else if (hasBlockedTask) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.waitingDependency' });
+  } else if (isStaleRunningTask) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.statusSyncing' });
+  } else if (!isSummarizing && hasWorkingMember && runtime?.rootActive) {
+    overallStatus = intl.formatMessage(
+      { id: 'messageList.taskPlan.captainAndMembersWorking' },
+      { count: workingMemberCount }
+    );
+  } else if (!isSummarizing && hasWorkingMember) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.membersWorking' }, { count: workingMemberCount });
+  } else if (!isSummarizing && runtime?.rootActive) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.captainWorking' });
+  } else if (teamStillActive) {
+    overallStatus = intl.formatMessage({ id: 'messageList.taskPlan.dispatching' });
+  }
   const progress = statusOrder
     .map((status) => ({
       status,
@@ -160,6 +209,11 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
             <span>{intl.formatMessage({ id: 'messageList.taskPlan.title' })}</span>
           </span>
           <span className={`${styles.progress} ${isWorking ? styles.runningProgress : ''}`}>{progress}</span>
+          {overallStatus && (
+            <span className={styles.runningProgress} role="status">
+              {overallStatus}
+            </span>
+          )}
           {isSummarizing && (
             <span className={styles.runningProgress} role="status">
               {intl.formatMessage({ id: 'messageList.taskPlan.captainSummarizing' })}
@@ -206,6 +260,11 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
               navigationTeam?.tasks?.find((candidate) => candidate.subject === task.title);
             const assignee = task.assignee || teamTask?.assignee;
             const member = navigationTeam?.members?.find((candidate) => candidate.name === assignee);
+            const employee = employeesList.find(
+              (candidate) =>
+                (member?.employeeId && `${candidate.agentId || candidate.id}` === `${member.employeeId}`) ||
+                `${candidate.name || ''}` === `${assignee || member?.name || ''}`
+            );
             const memberSessionId = member?.byclawSessionId;
             return (
               <li className={styles.taskItem} key={task.taskId || task.position} data-status={status}>
@@ -216,6 +275,11 @@ const TaskExecutionPlan: React.FC<Props> = ({ taskPlan }) => {
                 </Tooltip>
                 <span className={styles.taskContent}>
                   <span className={styles.taskHeading}>
+                    {employee?.chatAvatar ? (
+                      <span className={styles.assigneeAvatar} title={assignee || member?.name}>
+                        {getAgentChatAvatar(employee.chatAvatar)}
+                      </span>
+                    ) : null}
                     {status === 'IN_PROGRESS' || status === 'PENDING' ? (
                       <span className={`${styles.statusLabel} ${styles[`statusLabel${status}`]}`}>{statusLabel}</span>
                     ) : null}
