@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render as renderComponent, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, Modal, message } from 'antd';
 import ProjectDataSources from '../index';
+import { useProjectDataSourcesEnabled } from '../useProjectDataSourcesEnabled';
 import {
   listDataSources,
   querySessionDataSources,
@@ -10,6 +11,7 @@ import {
 
 const mockEmit = jest.fn();
 const mockIntl = { formatMessage: ({ id }: { id: string }) => id };
+jest.mock('../useProjectDataSourcesEnabled', () => ({ useProjectDataSourcesEnabled: jest.fn(() => true) }));
 jest.mock('@umijs/max', () => ({ useIntl: () => mockIntl }));
 jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: { emit: mockEmit } }));
 jest.mock('@/service/projectDataSources', () => ({
@@ -35,6 +37,15 @@ const render = (ui: Parameters<typeof renderComponent>[0]) =>
     wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>,
   });
 
+it('does not load or display data sources when the edition disables the feature', () => {
+  jest.clearAllMocks();
+  jest.mocked(useProjectDataSourcesEnabled).mockReturnValue(false);
+  const view = render(<ProjectDataSources projectId={1} sessionId="session-1" canManage />);
+  expect(view.container).toBeEmptyDOMElement();
+  expect(listDataSources).not.toHaveBeenCalled();
+  expect(querySessionDataSources).not.toHaveBeenCalled();
+});
+
 describe('ProjectDataSources', () => {
   // 编辑和解绑包含多步真实弹层交互，与已有资源卡片用例使用相同的总时间预算。
   jest.setTimeout(15000);
@@ -46,7 +57,10 @@ describe('ProjectDataSources', () => {
     });
   });
   afterAll(() => ConfigProvider.config({ holderRender: undefined }));
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(useProjectDataSourcesEnabled).mockReturnValue(true);
+  });
   afterEach(async () => {
     cleanup();
     await act(async () => {

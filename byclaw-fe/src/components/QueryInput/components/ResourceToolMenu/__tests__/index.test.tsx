@@ -4,6 +4,7 @@ import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResource
 import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
 import ProjectDataSources from '@/components/ProjectDataSources';
+import { useProjectDataSourcesEnabled } from '@/components/ProjectDataSources/useProjectDataSourcesEnabled';
 import { useSessionDataSourcesVisible } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourcesVisible';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import ResourceTabs from '../../../RichInput/mentionPopover/resourceTabsCompact';
@@ -27,6 +28,9 @@ jest.mock('@/components/AntdIcon', () => () => null);
 jest.mock('@/layout/sider/components/EmployeeList', () => () => null);
 jest.mock('@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel', () => jest.fn(() => null));
 jest.mock('@/components/ProjectDataSources', () => jest.fn(() => <div>project data content</div>));
+jest.mock('@/components/ProjectDataSources/useProjectDataSourcesEnabled', () => ({
+  useProjectDataSourcesEnabled: jest.fn(() => true),
+}));
 jest.mock('@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourcesVisible', () => ({
   useSessionDataSourcesVisible: jest.fn(() => false),
 }));
@@ -37,6 +41,17 @@ jest.mock('../../../RichInput/mentionPopover/resourceTabsCompact', () =>
 jest.mock('../FilePicker', () => ({ onSelect }: any) => (
   <button onClick={() => onSelect({ id: '/notes.md' }, 'COMMON_FILE')}>quote file</button>
 ));
+
+beforeEach(() => jest.mocked(useProjectDataSourcesEnabled).mockReturnValue(true));
+
+it.each([undefined, 'session-1'])('hides project data sources in commercial menus for session %s', (sessionId) => {
+  jest.mocked(useProjectDataSourcesEnabled).mockReturnValue(false);
+  jest.mocked(useSessionDataSourcesVisible).mockReturnValue(true);
+  jest.mocked(ProjectDataSources).mockClear();
+  render(<ResourceToolMenu projectId={42} sessionId={sessionId} activeKey="dataSources" onSelect={jest.fn()} />);
+  expect(screen.queryByRole('button', { name: 'dataSource.title' })).not.toBeInTheDocument();
+  expect(ProjectDataSources).not.toHaveBeenCalled();
+});
 
 describe('resource menu local shared tab', () => {
   it.each([undefined, 'existing-session'])('supports selecting files in session %s', (sessionId) => {

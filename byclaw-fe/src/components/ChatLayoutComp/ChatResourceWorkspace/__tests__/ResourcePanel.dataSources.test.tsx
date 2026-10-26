@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { querySessionDataSources } from '@/service/projectDataSources';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import ResourcePanel from '../ResourcePanel';
 import { DetailPanelContent, useDetailPanelState } from '@/layout/pcLayout/useDetailPanelState';
@@ -11,6 +12,7 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({ locale: 'zh-CN', formatMessage: ({ id }: { id: string }) => id }),
 }));
 jest.mock('@/service/projectDataSources', () => ({ querySessionDataSources: jest.fn() }));
+jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listAvailableProjectRepos: jest.fn().mockResolvedValue([]) }));
 jest.mock('../useChatResourceProject', () => ({ useChatResourceProject: () => ({ loading: false }) }));
 jest.mock('@/layout/sider/components/ActiveSiderAgentBar', () => ({
@@ -40,7 +42,21 @@ beforeEach(() => {
   mockActiveEmployeeId = undefined;
   // 清除上一用例未消费的一次性响应，避免延迟请求污染后续会话测试。
   query.mockReset();
+  jest.mocked(getDcSystemConfig).mockResolvedValue({ paramValue: 'openSource' });
 });
+
+it.each(['commercial', undefined])(
+  'does not query or expose session data sources for edition %s',
+  async (paramValue) => {
+    jest.mocked(getDcSystemConfig).mockResolvedValue({ paramValue });
+    query.mockResolvedValue(page(1));
+    await act(async () => {
+      render(panel());
+    });
+    expect(query).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tab', { name: 'dataSource.title' })).not.toBeInTheDocument();
+  }
+);
 
 it.each(['', 'session-1'])('hides project space and keeps the file tabs for session %s', async (sessionId) => {
   query.mockResolvedValue(page(0));
@@ -95,7 +111,10 @@ it('ignores a late response from the previous session', async () => {
       })
   );
   query.mockResolvedValueOnce(page(0));
-  const view = render(panel());
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(panel());
+  });
   await act(async () => {
     view.rerender(panel('session-2'));
   });
