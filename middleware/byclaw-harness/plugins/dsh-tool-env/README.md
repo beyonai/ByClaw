@@ -70,14 +70,21 @@ those itself: path resolution only normalizes, queued directories are empty
 directories with nothing inside, `.git` and instruction-file probes
 (`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
 directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
-`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, and `executable`
-lookups resolve on this host (same image build). What tools do (stat, list,
-read, write of real paths; processes) still goes to B and starts it. The
-trade-off: until a session's first tool call, its prompt sees no
-session-local Skills and no instruction files from the user tree.
-After a failed launch the `byclaw-be` backend waits before trying again
-(1 s, doubling to 30 s) and reports the cause instead of calling BE on every
-operation.
+`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, directories this
+host already created on B still exist (B's volume outlives B), cleanup of a
+process or stream of a connection that is gone (`process.terminate`,
+`fs.streamClose`) is already done, and `executable` lookups resolve on this
+host (same image build). What tools do (stat, list, read, write of real
+paths; processes) still goes to B and starts it. The trade-off: until a
+session's first tool call, its prompt sees no session-local Skills and no
+instruction files from the user tree.
+A launch that BE refuses (for example while the platform is still releasing
+or creating the sandbox: "Sandbox is being created") is retried every 3 s for
+up to 60 s inside the operation that needs B, so one transient refusal does not
+fail a tool call or a turn. Only after that window does the `byclaw-be` backend
+give up; it then waits before trying again (1 s, doubling to 30 s) and reports
+the cause instead of calling BE on every operation. A spec without an ssh
+endpoint is a configuration error and fails at once.
 
 ## Backends
 
@@ -267,6 +274,15 @@ The plugin owns B's lifetime; BE only creates and removes records on request.
   Beyond-Token expired …` (not `launch failed …`), retried once with the source's
   token when that differs, and its backoff ends as soon as a different token
   arrives.
+- **A launch BE refuses** because B is still being released or created (the
+  platform answers "Sandbox is being created") is retried every 3 s for up to
+  60 s inside the operation that needed B, then the usual backoff applies. A
+  spec without an ssh endpoint fails at once.
+- **B is gone while A believes it is up** (the platform removed it): the in-flight
+  operation fails with the connection's own error; cleanup requests
+  (`process.terminate`, `fs.streamClose`) are answered locally, directories A
+  created on B are still reported as existing (B's volume survives), and the
+  next real operation launches a fresh B.
 - **What this process cannot see** (it died with B running) is left to the
   platform's own reclaim of the record.
 
