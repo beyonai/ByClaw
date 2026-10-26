@@ -15,6 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import { OpenSandboxBackend, StaticBackend, type OpenSandboxBackendConfig, type OpenSandboxVolume, type ToolEnvBackend } from './backend.ts'
 import { ByClawBeBackend, parseEndpoint, type BeTokenSource, type ByClawBeBackendConfig } from './be-backend.ts'
+import { isDshBusy, probeResidualProcesses, type AgentsView, type JobsView } from './busy.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
@@ -22,6 +23,7 @@ export { ToolEnvConnection } from './connection.ts'
 export { OpenSandboxBackend, StaticBackend, waitForEndpoint, waitForHttp, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
 export { ToolEnvIdentity } from './identity.ts'
+export { isDshBusy, probeResidualProcesses, residualProcesses } from './busy.ts'
 export { ByClawBeBackend, ByClawTokenRejectedError, isTokenRejected, parseEndpoint } from './be-backend.ts'
 export type { BeTokenSource, ByClawBeBackendConfig } from './be-backend.ts'
 
@@ -40,6 +42,8 @@ export interface Config {
   workspace: string
   /** Pause B after this many idle milliseconds; 0 keeps it running. */
   idleMs: number
+  /** Processes left on B keep it alive past idle for at most this long. */
+  busyProcessMaxMs: number
   requestTimeoutMs: number
   leaseMs: number
   /** `static` backend endpoint; `wsUrl` (ws/wss/http/https) makes it a WebSocket bridge to sshd. */
@@ -87,6 +91,7 @@ export class ToolEnv extends ToolEnvConnection {
     alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
     idleMs: schema.natural().default(600_000),
+    busyProcessMaxMs: schema.natural().default(6 * 60 * 60 * 1000),
     requestTimeoutMs: schema.natural().default(30_000),
     leaseMs: schema.natural().default(30_000),
     host: schema.string().default('127.0.0.1'),
@@ -137,6 +142,13 @@ export class ToolEnv extends ToolEnvConnection {
       },
       ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath },
       idleMs: config.idleMs,
+      busy: {
+        // DSH's own account of work on A, read from its services when the timer fires.
+        dsh: () => isDshBusy(ctx.get('agents') as AgentsView | undefined, ctx.get('jobs') as JobsView | undefined),
+        // Processes on B that no stream watches (`cmd &`), asked over the connection's own alias.
+        residual: () => probeResidualProcesses(identity.alias),
+        residualMaxMs: config.busyProcessMaxMs,
+      },
     }, backend, identity)
     this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
   }

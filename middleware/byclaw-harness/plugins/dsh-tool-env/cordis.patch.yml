@@ -26,6 +26,7 @@
         stateDir: !!js dshHomePath('byclaw-tool-env')
         workspace: !!js "process.env.BYCLAW_TOOL_ENV_WORKSPACE || '/by'"
         idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 600000)"
+        busyProcessMaxMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS || 21600000)"
         host: !!js "process.env.BYCLAW_TOOL_ENV_HOST || '127.0.0.1'"
         port: !!js "Number(process.env.BYCLAW_TOOL_ENV_PORT || 22)"
         wsUrl: !!js "process.env.BYCLAW_TOOL_ENV_WS_URL || ''"

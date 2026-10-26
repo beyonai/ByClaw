@@ -196,6 +196,7 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
+| `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` | `21600000` | processes left on B (`cmd &`) keep it past idle for at most this long |
 | `BYCLAW_TOOL_ENV_HOST`, `BYCLAW_TOOL_ENV_PORT` | `static` backend sshd endpoint |
 | `BYCLAW_TOOL_ENV_WS_URL` | `static` backend: B's WebSocket bridge URL instead of a TCP endpoint |
 | `BYCLAW_TOOL_ENV_WORKSPACE` | remote default workspace (default `/by`) |
@@ -260,9 +261,15 @@ The plugin owns B's lifetime; BE only creates and removes records on request.
 
 - **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10
   minutes) without operations or open streams the connection calls `pause()`,
-  which releases B (`/sandbox/removeSandbox`). The next operation launches a
-  fresh B; the user's files are on the shared workspace volume, only B's own
-  `/tmp` goes.
+  which releases B (`/sandbox/removeSandbox`). Before that it checks two more
+  things (src/busy.ts): whether DSH itself has work in progress on A (an Agent
+  in a turn, a background job), and whether processes the user left on B
+  (`cmd &`, `nohup`) are still running, asked over the connection's own `ssh`
+  alias. Either postpones the release by another idle period; residual
+  processes do so for at most `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` (default
+  6 h), after which B is released anyway. The next operation launches a fresh
+  B; the user's files are on the shared workspace volume, only B's own `/tmp`
+  goes.
 - **A goes away.** Closing the connection (the context is disposed, the host
   shuts down) releases B the same way, with a short grace period.
 - **Credentials.** The `BEYOND_TOKEN` BE injected is the user's JWT and expires,
