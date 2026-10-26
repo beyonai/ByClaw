@@ -60,7 +60,7 @@ export interface TaskPlanTodo {
   }>
 }
 
-export function taskPlanCard(todos: ReadonlyArray<TaskPlanTodo>): {
+export function taskPlanCard(todos: ReadonlyArray<TaskPlanTodo>, planId?: string): {
   contentType: '2008'
   content: string
 } {
@@ -70,7 +70,7 @@ export function taskPlanCard(todos: ReadonlyArray<TaskPlanTodo>): {
     content: JSON.stringify({
       source: 'DSH',
       schemaVersion: 1,
-      planId: teamId ? `team:${teamId}` : createHash('sha256').update(JSON.stringify(todos)).digest('hex').slice(0, 24),
+      planId: planId ?? (teamId ? `team:${teamId}` : createHash('sha256').update(JSON.stringify(todos)).digest('hex').slice(0, 24)),
       updatedAt: new Date().toISOString(),
       files: [],
       task_description: 'DSH 任务计划',

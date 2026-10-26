@@ -36,6 +36,10 @@ jest.mock('@umijs/max', () => ({
       if (id === 'messageList.taskPlan.summary.IN_PROGRESS') return `${values?.count} in progress`;
       if (id === 'messageList.taskPlan.summary.PENDING') return `${values?.count} pending`;
       if (id === 'messageList.taskPlan.captainWorking') return 'Captain is working';
+      if (id === 'messageList.taskPlan.agentWorking') return 'Main agent is working';
+      if (id === 'messageList.taskPlan.subagentsWorking') return `${values?.count} subagents working`;
+      if (id === 'messageList.taskPlan.agentAndSubagentsWorking')
+        return `Main agent and ${values?.count} subagents working`;
       if (id === 'messageList.taskPlan.membersWorking') return `${values?.count} members working`;
       if (id === 'messageList.taskPlan.waitingUser') return 'Waiting for your input';
       if (id === 'messageList.taskPlan.captainAndMembersWorking') return `Captain and ${values?.count} members working`;
@@ -67,6 +71,7 @@ describe('TaskExecutionPlan', () => {
       sessionId: 'root',
       messageId: '100',
       traceId: 'trace',
+      teamId: 'team-1',
       tasks: [{ taskId: '1', position: 1, title: 'Task', status: 'COMPLETED' }],
     };
     const view = render(<TaskExecutionPlan taskPlan={plan} />);
@@ -168,12 +173,65 @@ describe('TaskExecutionPlan', () => {
     applyRuntime('idle');
     expect(screen.getByRole('status')).toHaveTextContent('Syncing execution status');
     applyRuntime('running', 2);
-    expect(screen.getByRole('status')).toHaveTextContent('2 members working');
+    expect(screen.getByRole('status')).toHaveTextContent('2 subagents working');
     applyRuntime('waiting_user');
     expect(screen.getByRole('status')).toHaveTextContent('Waiting for your input');
     applyRuntime('failed');
     expect(screen.getByRole('status')).toHaveTextContent('Execution failed');
     view.unmount();
+  });
+
+  it('uses agent terminology for ordinary delegation and team terminology only for team plans', () => {
+    const plan: TaskPlanSnapshot = {
+      planId: 'todo:root:10',
+      version: 1,
+      title: 'PR review',
+      status: 'ACTIVE',
+      sessionId: 'root',
+      messageId: '100',
+      traceId: 'trace',
+      tasks: [{ taskId: '1', position: 1, title: 'Review PR', status: 'IN_PROGRESS' }],
+    };
+    // An unrelated previous team must not turn an ordinary plan into a team plan.
+    mockTeamSnapshot = {
+      schemaVersion: 2,
+      eventKind: 'agent-teams/snapshot',
+      team: {
+        teamId: 'old-team',
+        captainSessionId: 'root',
+        members: [{ id: 'old-member', name: 'Engineer', activity: 'working' }],
+        tasks: [{ id: 'old-task', subject: 'Review PR' }],
+      },
+    };
+    const view = render(<TaskExecutionPlan taskPlan={plan} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    let revision = 0;
+    const update = (rootActive: boolean, activeChildCount: number) =>
+      act(() => {
+        chatSessionRuntimeManager.applySessionRuntime({
+          sessionId: 'root',
+          traceId: 'trace',
+          status: 'running',
+          rootActive,
+          activeAgentCount: activeChildCount + Number(rootActive),
+          activeChildCount,
+          waitingInteractionCount: 0,
+          revision: ++revision,
+          changedAt: revision,
+        });
+      });
+    update(true, 0);
+    expect(screen.getByRole('status')).toHaveTextContent('Main agent is working');
+    update(false, 1);
+    expect(screen.getByRole('status')).toHaveTextContent('1 subagents working');
+    update(true, 1);
+    expect(screen.getByRole('status')).toHaveTextContent('Main agent and 1 subagents working');
+    update(true, 0);
+    view.rerender(<TaskExecutionPlan taskPlan={{ ...plan, tasks: [{ ...plan.tasks[0], status: 'COMPLETED' }] }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('messageList.taskPlan.agentSummarizing');
+    update(false, 1);
+    view.rerender(<TaskExecutionPlan taskPlan={{ ...plan, teamId: 'team-1' }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('1 members working');
   });
 
   it('maximizes a collapsed plan, restores it expanded, and resets on conversation change', () => {
@@ -527,5 +585,62 @@ describe('TaskExecutionPlan', () => {
 
     resolveLocate();
     await waitFor(() => expect(executionButton).toBeEnabled());
+  });
+
+  it('opens ordinary subagent step executions and exact earlier turns without a team or member snapshot', async () => {
+    render(
+      <TaskExecutionPlan
+        taskPlan={{
+          planId: 'todo:root:10',
+          version: 1,
+          title: 'PR review',
+          status: 'ACTIVE',
+          sessionId: 'root',
+          messageId: '100',
+          tasks: [
+            { taskId: 'route', position: 1, title: 'Route the review', status: 'COMPLETED' },
+            {
+              taskId: 'review',
+              position: 2,
+              title: 'Delegate PR review',
+              status: 'IN_PROGRESS',
+              assignee: 'PR reviewer',
+              executions: [
+                {
+                  attempt: 1,
+                  attemptId: 'review:1',
+                  assignee: 'PR reviewer',
+                  runs: [
+                    { sessionId: 'ordinary-child', messageId: 'first-review', runId: 'reviewer:1', childTurn: 1 },
+                    { sessionId: 'ordinary-child', messageId: 'revised-review', runId: 'reviewer:2', childTurn: 2 },
+                  ],
+                },
+              ],
+            },
+            { taskId: 'summary', position: 3, title: 'Summarize the report', status: 'PENDING' },
+          ],
+        }}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'messageList.taskPlan.title' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delegate PR review Open latest execution' }));
+    await waitFor(() =>
+      expect(mockLocateMessage).toHaveBeenLastCalledWith({
+        sessionId: 'ordinary-child',
+        messageId: 'revised-review',
+        preserveAgentContext: true,
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delegate PR review Run 1 Conversation 1' }));
+    await waitFor(() =>
+      expect(mockLocateMessage).toHaveBeenLastCalledWith({
+        sessionId: 'ordinary-child',
+        messageId: 'first-review',
+        preserveAgentContext: true,
+      })
+    );
+    expect(screen.queryByRole('button', { name: /Route the review/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Summarize the report/ })).not.toBeInTheDocument();
+    expect(mockSetSessionId).not.toHaveBeenCalled();
   });
 });

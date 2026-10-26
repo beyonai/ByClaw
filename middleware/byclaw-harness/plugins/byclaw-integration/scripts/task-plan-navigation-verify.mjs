@@ -25,3 +25,4 @@ assert.deepEqual(task.executions[0].runs, [
 assert.deepEqual(task.executions[1].runs, [{ child_session_id: '100', child_message_id: '101' }])
 assert.equal(task.child_session_id, undefined, 'no inferred latest-member link')
 console.log('task plan navigation protocol verification passed')
+await import('./ordinary-task-plan-verify.mjs')

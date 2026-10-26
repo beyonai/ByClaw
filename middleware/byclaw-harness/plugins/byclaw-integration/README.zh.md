@@ -30,6 +30,10 @@ dsh --profile web --dump-config
 
 ## 运行结构
 
+普通 todo 计划也支持从步骤打开子代理：`ordinary-task-plan.ts` 回放父会话的 `todo/write` 和 `subagent/catalog`，把创建记录关联到当时唯一的进行中步骤，输出稳定的计划／步骤标识及真实 `child_turn` 执行记录。子代理开始和结束回合时重新投影，冷恢复时从只读持久化日志重建；使用 `plan` 事件进入后端已有的会话／消息绑定链路。没有唯一进行中步骤时不推断归属；修改或重排步骤会建立新计划，避免旧执行记录串到新步骤。前端沿用任务标题与历史轮次入口，标题栏不恢复子代理数量按钮。检查：`node --experimental-transform-types scripts/ordinary-task-plan-verify.mjs`。
+
+同一子代理收到新的人工或主代理指令时，新轮次不自动归入最初创建它的步骤；缺少新步骤绑定时保留“暂无执行记录”占位，旧轮次仍可查看，默认入口不会冒充最新记录打开旧消息。异步结算等内部唤醒仍保留原步骤关联。
+
 插件注册 `BYCLAW_DSH` Worker，并把 ByClaw 授权资源投影为两类可复用模板：
 
 - 数字员工：`byclaw-employee-<resourceId>`，调用时实例化一个普通 DSH 子 Agent，不创建团队。
