@@ -146,11 +146,15 @@ export class ToolEnv extends ToolEnvironments {
 }
 
 /**
- * One environment's connection in its own fiber under an isolated `ssh` key:
- * `ToolEnvConnection` registers itself as `ssh`, and that registration must stay
- * invisible to the rest of the process (the router is the process's `ssh`).
- * Creating the connection does not start B. The default keeps the state
- * directory and alias earlier versions used; other specs get their own.
+ * One environment's connection under an isolated `ssh` key: `ToolEnvConnection`
+ * registers itself as `ssh`, and that registration must stay invisible to the
+ * rest of the process (the router is the process's `ssh`), so it is built on
+ * `ctx.isolate('ssh', …)` of this plugin's own context. It is constructed
+ * directly, not through `ctx.plugin()`: cordis runs a plugin's `apply` on a
+ * later tick, and the pool needs the connection synchronously (`ctx.ssh.connected`,
+ * `ptcLaunch` are read during startup). Creating the connection does not start
+ * B. The default keeps the state directory and alias earlier versions used;
+ * other specs get their own.
  */
 function mountEnvironment(ctx: Context, config: Config, shared: ToolEnvConnectionOptions, name: string): ToolEnvConnection {
   const isDefault = name === (config.backend === 'byclaw-be' ? config.byclawBe.serviceKey : DEFAULT_ENVIRONMENT)
@@ -158,13 +162,8 @@ function mountEnvironment(ctx: Context, config: Config, shared: ToolEnvConnectio
   const identity = isDefault
     ? new ToolEnvIdentity(config.stateDir, config.alias)
     : new ToolEnvIdentity(join(config.stateDir, 'specs', slug), `${config.alias}-${slug}`)
-  let connection: ToolEnvConnection | undefined
-  ctx.isolate('ssh', Symbol(`byclaw-tool-env:${name}`)).plugin({
-    name: `byclaw-tool-env:${slug}`,
-    apply: (inner: Context) => { connection = new ToolEnvConnection(inner, shared, backendFor(inner, config, identity, name, isDefault), identity) },
-  })
-  if (connection === undefined) throw new Error(`byclaw-tool-env: environment "${name}" did not mount`)
-  return connection
+  const inner = ctx.isolate('ssh', Symbol(`byclaw-tool-env:${name}`))
+  return new ToolEnvConnection(inner, shared, backendFor(inner, config, identity, name, isDefault), identity)
 }
 
 function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity, name: string, isDefault: boolean): ToolEnvBackend {
