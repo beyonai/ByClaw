@@ -302,3 +302,5 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 数字员工的 `relResourceList` 通过 `baiying_call` 暴露给模型。关联资源增删、名称/描述/调用配置变化，
 以及授权过滤导致的可用资源变化，均参与工具快照刷新判断；即使原生 `relTools` 不变，也会更新内部 reload 标记。
 该标记仅存储调用元数据的摘要，不写入原始凭据。启动时也会核对上次保存的摘要，以更新已有会话的工具快照。
+
+旧运行镜像缺少 `unzip` 时，Hub 技能下载器会使用已有的 `python3` 标准库解压，并在写入前校验路径、拒绝符号链接及超限包；不会因 ZIP 损坏而切换解压器。两种工具都不可用时回执为 `RUNTIME_DEPENDENCY_MISSING`，不能误报技能包损坏。正式镜像仍应保留 Dockerfile 中已有的 `unzip` 依赖。

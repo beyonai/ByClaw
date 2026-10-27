@@ -1,8 +1,8 @@
+import { extractHubSkillZip } from "./skill-archive.js";
+export { validateHubSkillZipEntryName } from "./skill-archive.js";
 import { createWriteStream, promises as fs } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AdaptedManagedAgent, BaiyingHubSkillRef } from "./agent-adapter.js";
@@ -16,7 +16,6 @@ import {
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import { resolveStateDir } from "./workspace-paths.js";
 
-const execFileAsync = promisify(execFile);
 const HUB_SKILL_METADATA_FILE = ".baiying-hub-skill.json";
 const SKILL_DOC_FILE = "SKILL.md";
 
@@ -60,6 +59,7 @@ export function hubSkillVersionSignature(refs: BaiyingHubSkillRef[] = []): strin
   return refs.map(ref => `${ref.skillCode}:${downloadStates.get(ref.skillCode)?.version ?? ""}`).sort().join("|");
 }
 export function classifyHubSkillFailure(error: unknown): string {
+  if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "RUNTIME_DEPENDENCY_MISSING";
   const message = error instanceof Error ? error.message : String(error);
   if (/HTTP (401|403)/.test(message)) return "DOWNLOAD_UNAUTHORIZED";
   if (/HTTP 404/.test(message)) return "PACKAGE_NOT_FOUND";
@@ -284,29 +284,6 @@ async function hasSkillDoc(skillDir: string): Promise<boolean> {
   }
 }
 
-export function validateHubSkillZipEntryName(name: string): void {
-  const normalized = name.replace(/\\/g, "/");
-  if (!normalized || normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) {
-    throw new Error(`unsafe zip entry path: ${name}`);
-  }
-  const parts = normalized.split("/");
-  if (parts.some((part) => part === "..")) {
-    throw new Error(`unsafe zip entry path: ${name}`);
-  }
-}
-
-async function validateZipEntries(zipPath: string): Promise<void> {
-  const { stdout } = await execFileAsync("unzip", ["-Z", "-1", zipPath], {
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  for (const line of stdout.split(/\r?\n/)) {
-    const entry = line.trim();
-    if (entry) {
-      validateHubSkillZipEntryName(entry);
-    }
-  }
-}
-
 async function downloadToFile(params: {
   url: string;
   headers: Record<string, string>;
@@ -405,10 +382,7 @@ async function installDownloadedSkill(params: {
       timeoutMs: params.timeoutMs,
       filePath: zipPath,
     });
-    await validateZipEntries(zipPath);
-    await execFileAsync("unzip", ["-q", zipPath, "-d", extractDir], {
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    await extractHubSkillZip(zipPath, extractDir);
     const skillRoot = await findExtractedSkillRoot({ extractDir, skillCode: params.skillCode });
     await atomicReplaceSkillDir({ sourceDir: skillRoot, targetDir: params.targetDir });
     const metadata: HubSkillMetadata = {
