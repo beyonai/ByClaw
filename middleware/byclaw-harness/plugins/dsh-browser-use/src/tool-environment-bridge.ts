@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { BrowserBrokerClient } from './broker-client.js'
 import { BROWSER_BROKER_MAX_FRAME_BYTES } from './protocol.js'
 import { LocalBrowserdRuntime } from './owned-runtime.js'
+import { activateBrowser, attachTarget, swapSecret } from './tool-environment-attach.js'
 
 async function bootstrap(): Promise<{ config: Record<string, unknown>; rest: Buffer }> {
   return new Promise((resolve, reject) => {
@@ -53,25 +54,24 @@ try {
     || !Number.isSafeInteger(config.readinessTimeoutMs) || Number(config.readinessTimeoutMs) < 1) {
     throw new Error('browser-remote-invalid-bootstrap')
   }
-  // Only derived private paths; no host-side DSH directory or credentials are copied to B.
-  const home = join(process.env.BYCLAW_TOOL_BROWSER_ROOT || '/by/.browser', config.id)
-  const runtimeDir = join(home, 'r', randomUUID().slice(0, 8))
-  runtime = new LocalBrowserdRuntime({
-    runtimeDir, dshHome: home, secret: config.secret,
-    // The byCLI extension connects to a sandbox-wide daemon. Native sessions must
-    // not register with it or inherit its automation/goal environment.
-    browserdEnv: { BYCLAW_BROWSER_EXTENSIONS: '', BYCLAW_BYCLI_ENABLED: 'false', BYCLAW_BROWSER_JEV_ENABLED: config.goalEnabled ? 'true' : 'false' },
-    idleBrowserMs: Number(config.idleBrowserMs), readinessTimeoutMs: Number(config.readinessTimeoutMs),
-    viewer: config.viewer as 'none' | 'novnc' | 'shared-novnc',
-    viewerHost: '0.0.0.0', viewerPort: Number(config.viewerPort),
-    displayRange: '200-299', rfbPortRange: '6201-6300', websockifyPortRange: '6401-6500',
-    // Stdout carries broker frames only; browserd's warnings (start failures name the
-    // missing piece: Chromium, noVNC root, display) go to stderr, which A reads back.
-    log: (level, message) => { if (level === 'warn') process.stderr.write(`${oneLine(message)}\n`) },
-  })
-  await runtime.ensureStarted()
-  if (stopping) { await runtime.stop(); process.exit(0) }
-  const socket = createConnection(runtime.socketPath)
+  // The browser the user's own sandbox ran (supervised Chromium with byCLI, one
+  // profile, one desktop) when this sandbox has it; otherwise one of our own.
+  const attach = await attachTarget(process.env)
+  let socketPath: string
+  let brokerSecret: string
+  if (attach !== undefined) {
+    await activateBrowser(attach.socketPath, Number(config.readinessTimeoutMs))
+    socketPath = attach.socketPath
+    brokerSecret = attach.secret
+  } else {
+    runtime = await startOwnBrowser(config)
+    socketPath = runtime.socketPath
+    brokerSecret = runtime.secret
+  }
+  if (stopping) { await runtime?.stop(); process.exit(0) }
+  // A signs every frame with the secret it sent us; the supervisor's browserd takes its own.
+  const forward = attach === undefined ? undefined : swapSecret(String(config.secret), brokerSecret)
+  const socket = createConnection(socketPath)
   socket.on('error', () => { void stop() })
   socket.once('close', () => { void stop() })
   process.stdout.on('error', () => { void stop() })
@@ -91,11 +91,14 @@ try {
         if (buffer.length > BROWSER_BROKER_MAX_FRAME_BYTES) void stop()
       }
     }
-    const incoming = frames(frame => { if (frame.requestId && frame.type !== 'cancel') pending.add(frame.requestId) })
+    const incoming = frames(frame => {
+      if (frame.requestId && frame.type !== 'cancel') pending.add(frame.requestId)
+      if (forward !== undefined) socket.write(`${JSON.stringify(forward(frame as Record<string, unknown>))}\n`)
+    })
     process.stdin.on('data', incoming)
     socket.on('data', frames(frame => { if (frame.requestId) pending.delete(frame.requestId) }))
-    if (rest.length) { incoming(rest); socket.write(rest) }
-    process.stdin.pipe(socket)
+    if (rest.length) { incoming(rest); if (forward === undefined) socket.write(rest) }
+    if (forward === undefined) process.stdin.pipe(socket)
     socket.pipe(process.stdout)
     process.stdin.resume()
     // An open SSH stream prevents the tool environment's idle pause. Release it
@@ -103,7 +106,7 @@ try {
     // Live leases (including paused goals/manual takeover) are never idled out here.
     const idleMs = Number(config.idleBrowserMs)
     if (idleMs > 0) {
-      monitor = new BrowserBrokerClient({ socketPath: runtime!.socketPath, secret: runtime!.secret })
+      monitor = new BrowserBrokerClient({ socketPath, secret: brokerSecret })
       let lastActive = performance.now()
       let checking = false
       idleTimer = setInterval(() => {
@@ -122,6 +125,30 @@ try {
   console.error(`browser-remote-bridge-failed: ${oneLine(error instanceof Error ? error.message : String(error))}`)
   await runtime?.stop()
   process.exit(1)
+}
+
+/** A browser of the bridge's own, for a tool sandbox whose image runs no supervisor. */
+async function startOwnBrowser(config: Record<string, unknown>): Promise<LocalBrowserdRuntime> {
+  // Only derived private paths; no host-side DSH directory or credentials are copied to B.
+  const home = join(process.env.BYCLAW_TOOL_BROWSER_ROOT || '/by/.browser', String(config.id))
+  const runtimeDir = join(home, 'r', randomUUID().slice(0, 8))
+  const own = new LocalBrowserdRuntime({
+    runtimeDir, dshHome: home, secret: String(config.secret),
+    // The byCLI extension connects to a sandbox-wide daemon. Native sessions must
+    // not register with it or inherit its automation/goal environment.
+    browserdEnv: { BYCLAW_BROWSER_EXTENSIONS: '', BYCLAW_BYCLI_ENABLED: 'false', BYCLAW_BROWSER_JEV_ENABLED: config.goalEnabled ? 'true' : 'false' },
+    idleBrowserMs: Number(config.idleBrowserMs), readinessTimeoutMs: Number(config.readinessTimeoutMs),
+    viewer: config.viewer as 'none' | 'novnc' | 'shared-novnc',
+    viewerHost: '0.0.0.0', viewerPort: Number(config.viewerPort),
+    displayRange: '200-299', rfbPortRange: '6201-6300', websockifyPortRange: '6401-6500',
+    // Stdout carries broker frames only; browserd's warnings (start failures name the
+    // missing piece: Chromium, noVNC root, display) go to stderr, which A reads back.
+    log: (level, message) => { if (level === 'warn') process.stderr.write(`${oneLine(message)}\n`) },
+  })
+  // Registered before starting, so a signal during startup stops it.
+  runtime = own
+  await own.ensureStarted()
+  return own
 }
 
 function oneLine(text: string): string {

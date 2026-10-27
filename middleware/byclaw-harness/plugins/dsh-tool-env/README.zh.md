@@ -15,6 +15,7 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
 - **空闲：** 超过 `BYCLAW_TOOL_ENV_IDLE_MS`（默认 10 分钟）没有操作、也没有打开的流，就暂停 B。正在跑的命令和后台任务会占着流，所以不会被中途暂停。
 - **消失：** B 已删除或过期时，下次自动重建。
   - `/by` 是与 A 共用的宿主机卷，暂停、重建都不丢用户文件。
+  - B 还运行用户自己的沙箱原本运行的浏览器：规格把桌面（8081）声明为 `vnc` 实例（前端打开它），把 byCLI 守护进程（19825）声明为 `bycli` 实例（BE 的账号登录和录制器调用它）。浏览器按需启动：原生 browser 工具、B 上的 `bycli` 命令，或 BE 对 19825 的第一个请求才会把它拉起；在此之前监督进程替 byCLI 占着 19825，这第一个请求在浏览器就绪后照常得到回答。浏览器 profile 默认沿用用户自己的沙箱在用户卷上的路径（`/by/byclaw/.dsh/browser/user-data`），旧的登录状态直接保留；`BYCLAW_TOOL_BROWSER_USER_DATA_DIR` 可改路径，`BYCLAW_TOOL_BROWSER=0` 关闭浏览器。
   - B 的规格声明 `home` 卷（示例见英文 README 的规格）时，`/home/byclaw` 也持久保留（CLI 登录态、`~/.openclaw`、`~/.bycli`、用户级安装）：入口用镜像自带的家目录初始化，之后只补镜像新增的默认文件。B 根文件系统的其余部分（系统级安装、`/tmp`）重建即丢失，与拆分前沙箱重建时一致。
 - **身份：** A 在自己的私有 DSH 目录里生成客户端密钥和 B 的主机密钥，所以 A 能锁定 B 的主机密钥。`opensandbox` 模式随创建请求交给 B；`byclaw-be` 模式把 A 的这个目录只读挂进 B（`BYCLAW_TOOL_ENV_SEED_DIR`，默认 `/etc/byclaw-tool-env`）。
   - B 的 sshd 只接受这把钥匙登录 `byclaw` 用户。

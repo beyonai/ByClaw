@@ -73,8 +73,9 @@ A 的启动入口则应使用镜像默认 `byclaw-lean-entrypoint`；若现有�
 B 上 `BYCLAW_BYCLI_ENABLED=false` 可关闭 byCLI 浏览器监督，只保留原生远程浏览器。
 noVNC 仍应经过现有用户身份鉴权网关。
 
-旧的 `Dockerfile.tools` 生成的工具镜像不能跑浏览器：它删除了 `/ms-playwright`（Chromium），也没有设置 `BYCLAW_BROWSER_NOVNC_DIR` / `BYCLAW_BROWSER_EXECUTABLE_PATH`，
-桥接进程会以 `browser-remote-bridge-failed` 退出。浏览器放在 B 时请使用 `Dockerfile.tool_slim`。桥接失败的原因会出现在 A 的日志里：
+以上 8082 桌面和独立 profile 只适用于 `Dockerfile.tool_slim`。完整工具镜像 `Dockerfile.tools` 的 `tools` 入口运行与用户自己沙箱相同的浏览器监督进程：
+一个带 byCLI 扩展的 Chromium、一个 profile、一个桌面，桥接直接接入它，不再自起浏览器。此时 B 规格声明 8081 为 `vnc`、19825 为 `bycli`，
+见[工具环境配置](plugins/dsh-tool-env/README.md#configuration)。桥接失败的原因会出现在 A 的日志里：
 `byclaw-browser … browser bridge on the tool environment exited 1: …`。
 
 ## 浏览器执行与生命周期

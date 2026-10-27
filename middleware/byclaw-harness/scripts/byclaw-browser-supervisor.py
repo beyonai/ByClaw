@@ -14,6 +14,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from typing import Sequence
 
@@ -111,6 +112,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--bycli-health-interval", type=float, default=30.0)
     parser.add_argument("--bycli-command-timeout", type=float, default=3.0)
     parser.add_argument("--prepare-command", default="")
+    parser.add_argument("--secret-file", default="")
+    # On demand, hold byCLI's TCP port until first use: a client that reaches byCLI over
+    # the network (BE's account login and recorder) starts the browser like the socket does.
+    parser.add_argument("--activation-port", type=int, default=0)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     if options.command[:1] == ["--"]:
@@ -123,6 +128,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error("byCLI health interval must be positive")
     if options.bycli_command_timeout <= 0:
         parser.error("byCLI command timeout must be positive")
+    if not 0 <= options.activation_port <= 65535:
+        parser.error("activation port must be a TCP port")
     return options
 
 
@@ -157,6 +164,21 @@ def secret_pipe(secret: bytes) -> int:
     finally:
         os.close(write_fd)
     return read_fd
+
+
+def write_secret_file(path: Path, secret: bytes, account: pwd.struct_passwd) -> None:
+    """Leave the broker secret where SSH sessions of the browser user can read it.
+
+    A tool sandbox serves its browser to commands that arrive over SSH, which
+    cannot inherit the descriptor the supervisor hands to its own child.
+    """
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    try:
+        os.write(fd, secret)
+        os.fchown(fd, account.pw_uid, account.pw_gid)
+    finally:
+        os.close(fd)
 
 
 def spawn(
@@ -362,6 +384,55 @@ def wait_for_broker(
     raise RuntimeError("browser-supervisor-browserd-readiness-timeout")
 
 
+def accept_pending(listener: socket.socket) -> list[socket.socket]:
+    """Every connection already waiting on a non-blocking listener."""
+    accepted = []
+    while True:
+        try:
+            connection, _address = listener.accept()
+        except (BlockingIOError, InterruptedError):
+            return accepted
+        connection.setblocking(True)
+        accepted.append(connection)
+
+
+def relay_to_port(client: socket.socket, port: int, timeout: float) -> None:
+    """In the background, hand a held connection to whatever now listens on `port`."""
+
+    def pump(source: socket.socket, target: socket.socket) -> None:
+        try:
+            while data := source.recv(65536):
+                target.sendall(data)
+        except OSError:
+            pass
+        finally:
+            try:
+                target.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    def run() -> None:
+        deadline = time.monotonic() + timeout
+        upstream = None
+        while upstream is None:
+            try:
+                upstream = socket.create_connection(("127.0.0.1", port), timeout=1)
+            except OSError:
+                if time.monotonic() >= deadline:
+                    client.close()
+                    return
+                time.sleep(0.05)
+        upstream.settimeout(None)
+        back = threading.Thread(target=pump, args=(upstream, client), daemon=True)
+        back.start()
+        pump(client, upstream)
+        back.join()
+        client.close()
+        upstream.close()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def normalized_returncode(returncode: int | None) -> int:
     if returncode is None:
         return 1
@@ -381,6 +452,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if startup not in {"eager", "on-demand"}:
         raise RuntimeError("browser-supervisor-invalid-startup")
     activation_socket: socket.socket | None = None
+    activation_listener: socket.socket | None = None
     ready_path = Path(str(socket_path) + ".ready")
     activated_path = Path(str(socket_path) + ".activated")
     ready_path.unlink(missing_ok=True)
@@ -462,6 +534,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stderr.flush()
         secret.extend(secrets.token_urlsafe(32).encode("ascii"))
+        if options.secret_file:
+            write_secret_file(Path(options.secret_file), bytes(secret), browser_account)
         bycli_enabled = base_environment.get("BYCLAW_BYCLI_ENABLED", "false") in {
             "true",
             "1",
@@ -585,6 +659,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             os.chmod(socket_path, 0o600)
             os.chown(socket_path, browser_account.pw_uid, browser_account.pw_gid)
             activation_socket.listen(32)
+            if options.activation_port and bycli_enabled:
+                activation_listener = socket.create_server(
+                    ("0.0.0.0", options.activation_port), backlog=32
+                )
+                activation_listener.setblocking(False)
             sys.stderr.write("byclaw-browser-supervisor: browser/byCLI on-demand; DSH starting\n")
         else:
             start_browser()
@@ -622,8 +701,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                     terminate(browserd)
                 return normalized_returncode(dsh_code)
             if browserd is None:
-                if activation_socket is not None and select.select([activation_socket], [], [], 0.02)[0]:
-                    start_browser()
+                waiting = [
+                    listener
+                    for listener in (activation_socket, activation_listener)
+                    if listener is not None
+                ]
+                if waiting and select.select(waiting, [], [], 0.02)[0]:
+                    # byCLI binds its own port while starting: take the clients that
+                    # came first, and let it go.
+                    held: list[socket.socket] = []
+                    if activation_listener is not None:
+                        held = accept_pending(activation_listener)
+                        activation_listener.close()
+                        activation_listener = None
+                    try:
+                        start_browser()
+                    except BaseException:
+                        for connection in held:
+                            connection.close()
+                        raise
+                    for connection in held:
+                        relay_to_port(connection, options.activation_port, options.readiness_timeout)
                     secret[:] = b"\0" * len(secret)
                     next_bycli_check = time.monotonic() + options.bycli_health_interval
                 else:
