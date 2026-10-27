@@ -58,6 +58,7 @@ export class ByClawDshWorkerRuntime {
     agentTypes: string[]
     sessions: ByClawDshSessionRuntime
     admission?: ManagedAdmissionLease
+    startupId?: string
   }) {
     this.admission = options.admission === undefined ? undefined : new ManagedAdmission(options.admission, () => this.stopAdmission())
     this.registry = new WorkerRegistry(options.redis)
@@ -69,6 +70,7 @@ export class ByClawDshWorkerRuntime {
       redis: options.redis,
       registry: this.registry,
       admission: this.admission,
+      startupId: options.startupId,
     })
   }
 

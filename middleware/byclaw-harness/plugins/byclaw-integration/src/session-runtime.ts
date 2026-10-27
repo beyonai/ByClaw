@@ -1,6 +1,8 @@
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
 import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, byClawVoicePayload, voiceRequestFingerprint, withVoiceCancellation } from './voice-runtime.ts'
+import { instrumentChatEmitter } from './reply-log.ts'
+import { chatChain, measureChatStage, prepareChatTurn, type ByClawChatChain } from './chat-chain-log.ts'
 import { normalizeByClawSessionId } from './session-extensions.ts'
 import { byClawSessionCwd } from './session-cwd.ts'
 import type { Context } from '@deepseek-ai/cordis'
@@ -156,6 +158,7 @@ export interface ByClawDshSessionRuntimeOptions {
 }
 
 interface ActiveTurn {
+  initiation?: ByClawChatChain
   voiceInteraction?: boolean
   owner?: ActiveTurn
   steeredCurrentTurn?: boolean
@@ -1337,6 +1340,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly disposeSessionEvents: () => void
   private readonly disposeAgentStatusEvents: () => void
   private readonly disposeAssistantStreamEvents: () => void
+  private readonly disposeInboxEvents: () => void
   private readonly modelFailureCaptureInstalled = new WeakSet<object>()
   private readonly streams = new WeakMap<ActiveTurn, {
     attempts: Map<string, { id: string; turn: number; step: number; indexes: Set<number>; blocks: Map<number, ProjectedAssistantBlock> }>
@@ -1345,6 +1349,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   constructor(private readonly ctx: Context, private readonly options: ByClawDshSessionRuntimeOptions) {
     this.questions = new ByClawQuestionBroker(options.interactionStore)
+    this.disposeInboxEvents = ctx.root.on('agent/inbox/claimed', ({ agent, message, turn: turnNumber }) => {
+      const pending = this.pendingForeground.get(String(agent.id))
+      const turn = pending?.inputMessageId === String(message.id) ? pending.turn : this.activeTurnFor(agent.session)
+      if (turn?.responseSessionId === String(agent.id)) {
+        turn.initiation?.observeInputClaim(String(agent.id), String(message.id), turnNumber)
+      }
+    })
     this.disposeSessionEvents = ctx.root.on('session/event', (session, event) => {
       const pending = this.pendingForeground.get(String(session.id))
       if (event.type === 'user/message' && pending?.inputMessageId === String(event.data.id)) {
@@ -1360,6 +1371,15 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
       const turn = this.activeTurnFor(session)
       if (turn === undefined) return
+      if (event.type === 'step/start' || event.type === 'step/end') {
+        turn.initiation?.execution('harness.step', String(session.id), `${event.data.turn}:${event.data.step}`,
+          event.type === 'step/start' ? 'start' : 'end', { turn: event.data.turn, step: event.data.step })
+      } else if (event.type === 'tool/call') {
+        turn.initiation?.execution('harness.tool', String(session.id), String(event.data.callId), 'start', { toolName: event.data.name })
+      } else if (event.type === 'tool/result') {
+        const result = toolResultOf(event)
+        turn.initiation?.execution('harness.tool', String(session.id), result.toolCallId, 'end', { failed: result.isError })
+      }
       if (event.type === 'turn/start' && turn.modelError?.sessionId === String(session.id)) {
         turn.modelError = undefined
       }
@@ -1476,7 +1496,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       } catch (error) {
         if (context.isCancelRequested() || controller.signal.aborted) throw new TaskCancelledError('ByClaw task cancelled')
         if (!admitted) {
-          await emitByClawTurnFailure({ emitter: this.options.emitter, sessionId: normalizeByClawSessionId(context.sessionId),
+          await emitByClawTurnFailure({ emitter: this.emitterFor(), sessionId: normalizeByClawSessionId(context.sessionId),
             traceId: context.traceId, rootSessionId: route.externalRootSessionId, messageId: command.header.messageId,
             sourceAgentType: this.options.sourceAgentType,
             error: { schemaVersion: 1, domain: 'VOICE', retryable: false,
@@ -1496,6 +1516,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private async askPrepared(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
+    const endPreflight = chatChain()?.start('harness.preflight')
     try {
       const externalSessionId = normalizeByClawSessionId(command.header.sessionId)
       const pendingInteraction = command.extraPayload['byclaw_recovered_interaction_id'] === undefined
@@ -1504,6 +1525,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
           )
         : undefined
       if (pendingInteraction !== undefined) {
+        endPreflight?.('ok', { mode: 'waiting_user' })
         this.ctx.logger.info(
           `[ASK_USER_QUESTION_RECOVERY_TRACE] PARK_RECLAIMED interaction=${pendingInteraction.interactionId} session=${externalSessionId} message=${command.header.messageId}`,
         )
@@ -1529,14 +1551,17 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             && await loadPersistedSessionById(this.ctx.sessionPersistence, SessionId(headerId)) === undefined)
         }
       }
+      endPreflight?.()
       const background = this.waitingTurnFor(command, route)
       if (background !== undefined) {
         const previous = this.foregroundQueues.get(key) ?? Promise.resolve()
+        const endQueue = chatChain()?.start('harness.queue', { mode: 'foreground' })
         const operation = previous.catch(() => undefined).then(() => {
+          endQueue?.()
           if (this.active.get(background.turn.rootSessionId) !== background.turn || !background.turn.teamGate.waiting) {
             return this.queueAsk(command, context, key)
           }
-          return this.performForegroundAsk(background.turn, command, context, background.text)
+          return prepareChatTurn(ready => this.performForegroundAsk(background.turn, command, context, background.text, ready))
         })
         this.foregroundQueues.set(key, operation)
         try { return await operation } finally {
@@ -1545,10 +1570,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
       return await this.queueAsk(command, context, key)
     } catch (error: unknown) {
+      endPreflight?.('failed', { errorCode: 'PREFLIGHT_FAILED', errorType: error instanceof Error ? error.name : 'UnknownError' })
       if (error instanceof ByClawModelRequestError && !context.isCancelRequested()) {
         try {
           await emitByClawTurnFailure({
-            emitter: this.options.emitter,
+            emitter: this.emitterFor(),
             sessionId: normalizeByClawSessionId(context.sessionId),
             traceId: context.traceId,
             rootSessionId: route.externalRootSessionId,
@@ -1568,7 +1594,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   private async queueAsk(command: AskAgentCommand, context: AgentContext, key: string): Promise<ByClawDshAskResult> {
     const previous = this.queues.get(key) ?? Promise.resolve()
-    const operation = previous.catch(() => undefined).then(() => this.performAsk(command, context))
+    const endQueue = chatChain()?.start('harness.queue', { mode: 'session' })
+    const operation = previous.catch(() => undefined).then(() => {
+      endQueue?.()
+      return prepareChatTurn(ready => this.performAsk(command, context, ready))
+    })
     this.queues.set(key, operation)
     try {
       return await operation
@@ -1593,6 +1623,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   /** Give a new user exchange its own output route while the original team command stays alive. */
   private async performForegroundAsk(
     owner: ActiveTurn, command: AskAgentCommand, context: AgentContext, text: string,
+    ready: (fields?: Record<string, string>) => void = () => {},
   ): Promise<ByClawDshAskResult> {
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     if (text.trim() === '') throw new Error('ByClaw follow-up requires a non-empty task')
@@ -1641,10 +1672,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     owner.teamGate.assertHealthy()
     if (this.active.get(owner.rootSessionId) !== owner || !owner.teamGate.waiting) {
+      ready({ mode: 'requeue' })
       return this.queueAsk(command, context, `${command.header.userCode}\0${route.externalRootSessionId}`)
     }
     const turn: ActiveTurn = {
-      ...owner, owner, steeredCurrentTurn: steerWhileBusy,
+      ...owner, owner, steeredCurrentTurn: steerWhileBusy, initiation: chatChain(),
       voiceInteraction: command.extraPayload['voiceInteraction'] === true,
       context, rootMessageId: command.header.messageId, answer: '', forwarding: Promise.resolve(),
       // Foreground requests must not inherit the retained command's final answer.
@@ -1668,6 +1700,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const inboundTurn = buildByClawInboundTurnContext(command, resolve(this.options.byRoot ?? '/by'))
     const input = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+    turn.initiation?.expectInput(String(agent.id), String(input.id))
     if (steerWhileBusy) {
       // Keep the active step on the original trace. Its next admitted user
       // message switches the output route to this follow-up command.
@@ -1685,6 +1718,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     policy?.recordContext?.(owner.rootSessionId, command.extraPayload['groupContextSnapshot'])
     policy?.recordUserInput?.(owner.rootSessionId, command.header.messageId)
     try {
+      ready({ mode: steerWhileBusy ? 'steer' : 'foreground', dshSessionId: String(agent.id) })
       if (steerWhileBusy) agent.steer(input)
       else agent.followup(input)
       // Return after this admitted turn, even if queued member reports keep the driver busy.
@@ -1889,6 +1923,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.voiceControllers.clear()
     this.voiceRequests.clear()
     this.disposeSessionEvents()
+    this.disposeInboxEvents()
     this.disposeAssistantStreamEvents()
     this.disposeAgentStatusEvents()
     for (const turn of this.active.values()) turn.teamGate.cancel('ByClaw runtime closed')
@@ -1910,7 +1945,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     )
   }
 
-  private async performAsk(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
+  private async performAsk(command: AskAgentCommand, context: AgentContext,
+    ready: (fields?: Record<string, string>) => void = () => {},
+  ): Promise<ByClawDshAskResult> {
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const text = extractByClawUserText(command.content)
@@ -1940,12 +1977,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const override = byClawTurnModelOverride(command.extraPayload)
     const hasConversationModelOverride = override.modelId !== undefined
       || override.thinkingLevel !== undefined
-    const selection = await resolveByClawTurnModelSelection({
+    const selection = await measureChatStage('harness.model_resolve', () => resolveByClawTurnModelSelection({
       bindingId: `root:${command.header.userCode}:${route.externalRootSessionId}`,
       preparedSelection: preparedRoot?.selection,
       override,
       resolveModel: this.options.resolveModel,
-    })
+    }))
     const diagnostic = selection as ModelSelection & {
       sourceModelId?: string
       protocol?: string
@@ -1955,7 +1992,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
     await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(sessionRoot)
-    const entry = await this.handleFor(command, selection, preparedRoot)
+    const entry = await measureChatStage('harness.agent_open', () => this.handleFor(command, selection, preparedRoot))
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
     const teamModelOverrides = this.ctx.get(AGENT_TEAMS_MODEL_OVERRIDES) as AgentTeamsModelOverrideService | undefined
@@ -1996,6 +2033,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       )
     }
     const turn: ActiveTurn = {
+      initiation: chatChain(),
       voiceInteraction: command.extraPayload['voiceInteraction'] === true,
       userCode: command.header.userCode,
       ...entry.templateId === undefined ? {} : { templateId: entry.templateId },
@@ -2040,12 +2078,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       // the resumed captain can answer, even if no member status edge arrives.
       turn.teamSnapshots.request()
       await turn.teamSnapshots.flush()
-      const agent = directTarget === undefined
-        ? await this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
-        : (() => {
-            rootAgent.followup(createUserMessage({ content: [{ type: 'text', text: directTarget.text }], source: { kind: 'user' } }))
-            return rootAgent
-      })()
+      ready({ mode: entry.mode, dshSessionId: String(rootAgent.id) })
+      const agent = await measureChatStage('harness.input_submit', async () => {
+        if (directTarget === undefined) return this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
+        const input = createUserMessage({ content: [{ type: 'text', text: directTarget.text }], source: { kind: 'user' } })
+        turn.initiation?.expectInput(String(rootAgent.id), String(input.id))
+        rootAgent.followup(input)
+        return rootAgent
+      })
       this.messageAgents.set(command.header.messageId, agent)
       await agent.whenIdle()
       this.ctx.logger.info(
@@ -2112,7 +2152,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   ): Promise<Agent> {
     const targetSessionId = route.targetDshSessionId
     if (targetSessionId === undefined || targetSessionId === String(rootAgent.id)) {
-      rootAgent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+      const input = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+      chatChain()?.expectInput(String(rootAgent.id), String(input.id))
+      rootAgent.followup(input)
       return rootAgent
     }
     const parentSessionId = route.parentDshSessionId ?? (groupScope(this.ctx, String(rootAgent.id)) === undefined ? undefined
@@ -2144,7 +2186,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         ancestor = next
       }
     }
-    await queueHostSubagentPrompt(
+    const inputMessageId = await queueHostSubagentPrompt(
       this.ctx.subagents,
       parent,
       SessionId(targetSessionId),
@@ -2152,6 +2194,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       { kind: 'user' },
       new AbortController().signal,
     )
+    chatChain()?.expectInput(targetSessionId, String(inputMessageId))
     const target = this.ctx.agents.get(SessionId(targetSessionId))
     if (target === undefined) {
       throw new Error(`ByClaw target DSH session "${targetSessionId}" was accepted but is not live`)
@@ -2280,7 +2323,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
                     depth: askingSession.header.delegationDepth ?? 0,
                   },
                 )
-                await this.options.emitter.emitState(
+                await this.emitterFor(active).emitState(
                   normalizeByClawSessionId(active.context.sessionId),
                   active.context.traceId,
                   {
@@ -2675,7 +2718,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       status: phase === 'failed' ? 'failed' : phase === 'applied' ? 'completed' : 'running',
       parentMessageId: turn.rootMessageId,
     })
-    await emitByClawProjection(this.options.emitter, normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, projection, this.options.sourceAgentType)
+    await emitByClawProjection(this.emitterFor(turn), normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, projection, this.options.sourceAgentType)
     return true
   }
 
@@ -2687,7 +2730,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       ...(this.options.userFiles === undefined ? {} : { files: this.options.userFiles }),
     })
     if (payload === undefined) return
-    await this.options.emitter.emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
+    await this.emitterFor(turn).emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
       content: JSON.stringify(payload),
       metadata: {
         event_source: 'dsh', event_kind: 'file_changes', session_scope: 'parent',
@@ -2772,7 +2815,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       messageIdPrefix: turn.rootMessageId,
     })
     this.queueForwarding(turn, 'runtime projection', () => emitByClawProjection(
-      this.options.emitter,
+      this.emitterFor(turn),
       normalizeByClawSessionId(turn.context.sessionId),
       turn.context.traceId,
       projection,
@@ -2950,6 +2993,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     turn.chunkFlushTimer = undefined
   }
 
+  private emitterFor(turn?: ActiveTurn): GatewayDataEmitter {
+    return instrumentChatEmitter(this.options.emitter, turn === undefined ? chatChain() : turn.initiation)
+  }
+
   private async emitAnswerChunk(
     turn: ActiveTurn,
     session: Session,
@@ -2961,7 +3008,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const presentation = root
       ? { label: turn.rootLabel, task: undefined }
       : dshChildPresentation(session, this.options.agentTemplateDir)
-    await this.options.emitter.emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
+    await this.emitterFor(turn).emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
       content,
       metadata: {
         ...this.groupProjectionMetadata(String(session.id)),
@@ -3088,7 +3135,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       projection = sessionEventProjection(eventKind, status, summary, details, projectionContext(messageId))
     }
     await emitByClawProjection(
-      this.options.emitter,
+      this.emitterFor(turn),
       normalizeByClawSessionId(turn.context.sessionId),
       turn.context.traceId,
       projection,
@@ -3108,7 +3155,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }, triggerChildId)
     if (plan === undefined) return
     const card = taskPlanCard(plan.todos, plan.planId)
-    await this.options.emitter.emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
+    await this.emitterFor(turn).emitChunk(normalizeByClawSessionId(turn.context.sessionId), turn.context.traceId, {
       content: card.content,
       metadata: {
         event_source: 'dsh',
@@ -3254,7 +3301,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
           messageIdPrefix: turn.rootMessageId,
         })
         await emitByClawProjection(
-          this.options.emitter,
+          this.emitterFor(turn),
           normalizeByClawSessionId(turn.context.sessionId),
           turn.context.traceId,
           projection,
@@ -3309,7 +3356,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       messageIdPrefix: teamMessagePrefix,
     })
     await emitByClawProjection(
-      this.options.emitter,
+      this.emitterFor(turn),
       normalizeByClawSessionId(turn.context.sessionId),
       turn.context.traceId,
       parentPlan,
@@ -3336,7 +3383,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         messageIdPrefix: `${childMessageId}:team:${team.teamId}`,
       })
       await emitByClawProjection(
-        this.options.emitter,
+        this.emitterFor(turn),
         normalizeByClawSessionId(turn.context.sessionId),
         turn.context.traceId,
         childPlan,

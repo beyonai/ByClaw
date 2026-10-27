@@ -1,3 +1,5 @@
+import { observeReplyRedis } from './reply-log.ts'
+import { ByClawStartupLog } from './startup-log.ts'
 import type { ManagedAdmissionLease } from './managed-admission.ts'
 import { createTtsDebugHttpHandler } from './tts-http.ts'
 import { ByClawVoiceRuntime } from './voice-runtime.ts'
@@ -516,17 +518,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     () => installDefaultWebSearchPolicy(ctx.tools),
     'byclaw-dsh.disable-default-web-search',
   )
+  const startup = new ByClawStartupLog(config.userCode?.trim() || process.env['USER_CODE']?.trim() || '')
+  startup.point('plugin-apply')
   try {
-    await activate(ctx, config)
+    await activate(ctx, config, startup)
   } catch (error: unknown) {
+    startup.failed('plugin-apply', error)
     ctx.logger.error(`[byclaw-dsh] integration startup failed; plugin disabled while DSH continues: ${startupErrorDetail(error)}`)
   }
 }
 
 /** Activate resource synchronization and the by-framework Worker. */
-async function activate(ctx: Context, config: Config): Promise<void> {
+async function activate(ctx: Context, config: Config, startup: ByClawStartupLog): Promise<void> {
   const startupStarted = performance.now()
   const startupPhase = (phase: string): void => {
+    startup.point(phase)
     ctx.logger.info(`[byclaw-dsh] startup phase=${phase}; elapsedMs=${Math.round(performance.now() - startupStarted)}`)
   }
   startupPhase('activate')
@@ -582,7 +588,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   if (modelRouting.enabled) assertDshModelRoutingRuntime(ctx.get('agentLoop'))
   const projectionConcurrency = resolveByClawProjectionConcurrency(config.projectionConcurrency)
 
-  const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
+  const sessionMetadata = await startup.measure('session-metadata', () => ByClawSessionMetadataStore.open(ctx))
   startupPhase('session-metadata-ready')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
@@ -596,13 +602,13 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     retryDelayMs: config.skillSyncRetryDelayMs ?? 250,
     onError: (ref, error) => ctx.logger.error(`[byclaw-dsh] Lazy Skill ${ref.code} sync failed: ${startupErrorDetail(error)}`),
   })
-  const skillRuntime = await ByClawSkillRuntime.install(ctx, {
+  const skillRuntime = await startup.measure('builtin-skills', () => ByClawSkillRuntime.install(ctx, {
     builtinSkillDir: config.builtinSkillDir,
     agentSkillRoot,
     ...(userFiles === undefined ? {} : { files: userFiles }),
     ...(dshHome === undefined ? {} : { dshHome }),
     resolveDeferredTemplate: template => lazySkills.resolve(template),
-  })
+  }))
   startupPhase('builtin-skills-ready')
   const disposeAgentShellEnv = ctx.shellEnv.register({
     name: 'byclaw-agent-identity',
@@ -709,7 +715,10 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         generationLease,
         projectionConcurrency,
         deferSkillSync: true,
-        onPhase: (phase, elapsedMs) => ctx.logger.info(`[byclaw-dsh] projection reason=${resourceLogValue(reason)}; phase=${phase}; elapsedMs=${elapsedMs}`),
+        onPhase: (phase, elapsedMs) => {
+          if (reason === 'cold-start') startup.point(`projection:${phase}`, { operationElapsedMs: elapsedMs })
+          ctx.logger.info(`[byclaw-dsh] projection reason=${resourceLogValue(reason)}; phase=${phase}; elapsedMs=${elapsedMs}`)
+        },
         allowSkillSyncFailure: config.allowSkillSyncFailure ?? true,
         skillSyncTimeoutMs: config.skillSyncTimeoutMs ?? 60_000,
         skillSyncAttempts: config.skillSyncAttempts ?? 3,
@@ -783,8 +792,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     }
   }
   try {
-    await redis.ping()
-    baseUrl = await resolveByClawBaseUrl(config.baseUrl, process.env, redis, ctx.logger)
+    await startup.measure('redis-connect', () => redis.ping())
+    baseUrl = await startup.measure('backend-discovery', () => resolveByClawBaseUrl(config.baseUrl, process.env, redis, ctx.logger))
     models = new ByClawDynamicModelRuntime(ctx, redis, {
       provider: config.provider,
       model: config.model,
@@ -793,7 +802,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     })
     installBrowserText(ctx)
     if (modelRouting.enabled) {
-      await installByClawModelCatalog(ctx, models, modelRouting.modelIds)
+      await startup.measure('model-catalog', () => installByClawModelCatalog(ctx, models!, modelRouting.modelIds))
       modelRoutingBinding = installByClawModelRouting(ctx, models, modelRouting.modelIds)
       ctx.effect(() => () => modelRoutingBinding?.dispose())
     }
@@ -811,11 +820,12 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       },
     }
     const startupFallback = resources
-    resources = await synchronizeByClawResourcesAtStartup({
+    resources = await startup.measure('resource-sync', () => synchronizeByClawResourcesAtStartup({
       synchronize: () => synchronize('cold-start'),
       fallback: resources,
       logger: ctx.logger,
-    })
+    }))
+    startup.point('resource-sync-result', { degraded: resources === startupFallback })
     // Restore cached views only on startup sync failure. A successful sync has already
     // prepared and published the complete authorized generation; do not read it twice.
     if (resources === startupFallback) {
@@ -1066,7 +1076,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
 
     const agentTypes = resolveWorkerAgentTypes(config.agentTypes, userCode)
     const sourceAgentType = agentTypes[0] as string
-    const emitter = new GatewayDataEmitter(redis)
+    const emitter = new GatewayDataEmitter(observeReplyRedis(redis))
     const sessionHost: ByClawSessionHost = {
       baseUrl, userCode, byRoot,
       resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders,
@@ -1167,13 +1177,15 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     worker = new ByClawDshWorkerRuntime({
       redis,
       workerId: id,
+      startupId: startup.startupId,
       admission: ctx.get('byclawManagedAdmission'),
       agentTypes,
       sessions,
     })
     startupPhase('worker-start')
-    await worker.start(id)
+    await startup.measure('worker-registration', () => worker!.start(id))
     startupPhase('worker-ready')
+    startup.point('worker-route', { workerId: id, agentTypes: agentTypes.join(',') })
     if (ctx.get('byclawManagedAdmission')) {
       const runtimeWorker = worker
       const runtimeSessions = sessions
@@ -1191,6 +1203,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 
   } catch (error: unknown) {
+    startup.failed('activation', error)
     const cleanupFailures: unknown[] = []
     try { await close() } catch (cleanupError: unknown) { cleanupFailures.push(cleanupError) }
     // apply() intentionally absorbs startup failure, so explicitly remove the

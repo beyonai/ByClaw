@@ -229,6 +229,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     @Test
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setMetadata("{\"chatChain\":{\"invocationId\":\"forged\"},\"requestId\":\"forged\"}");
+        ctx.assistantChatDto.setExtParams(Map.of("requestId", "retry-root"));
         when(sequenceService.nextVal()).thenReturn(100L);
         when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
@@ -260,6 +262,17 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
                 anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
+        Map<String, Object> firstMetadata = metadataCaptor.getAllValues().get(0);
+        Map<String, Object> secondMetadata = metadataCaptor.getAllValues().get(1);
+        Map<?, ?> firstChain = (Map<?, ?>) firstMetadata.get("chatChain");
+        Map<?, ?> secondChain = (Map<?, ?>) secondMetadata.get("chatChain");
+        assertThat(firstMetadata).isNotSameAs(secondMetadata);
+        assertThat(firstChain.get("invocationId")).isEqualTo(secondChain.get("invocationId"));
+        assertThat(firstChain.get("invocationId")).isNotEqualTo("forged");
+        assertThat(firstChain.get("requestId")).isEqualTo("retry-root");
+        assertThat(firstChain.get("dispatchId")).isNotEqualTo(secondChain.get("dispatchId"));
+        assertThat(firstChain.get("attempt")).isEqualTo(1);
+        assertThat(secondChain.get("attempt")).isEqualTo(2);
         assertThat(output(ctx))
                 .contains("reasoningLogStart")
                 .contains("reasoningLogEnd")

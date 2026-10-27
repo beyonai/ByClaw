@@ -1,0 +1,3 @@
+- insert:
+    - id: byclaw-child-policy
+      name: '@byclaw/dsh-child-policy'

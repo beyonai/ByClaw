@@ -20,6 +20,7 @@ import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
+import { isChatCheckpoint, recordChatChain } from '@/utils/chatChainLog';
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
@@ -634,7 +635,7 @@ function useChat(props: IProps) {
       });
   });
 
-  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string) => {
+  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string, frame?: any) => {
     const projectionSessionId = `${projection?.sessionId || ''}`;
     if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
 
@@ -665,6 +666,15 @@ function useChat(props: IProps) {
     } else {
       updateMessage(message, { isAssign: true, allowCreateSession: false });
       commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    }
+    if (isChatCheckpoint(frame || projection)) {
+      recordChatChain('fe.reply_applied', {
+        ...(frame || projection),
+        streamId,
+        appliedSessionId: projectionSessionId,
+        appliedMessageId: message.messageId,
+        appliedTraceId: message.traceId,
+      });
     }
     scopedProjectionBasesRef.current.set(projectionKey, {
       projection: cloneDeep({ ...projection, sessionId: projectionSessionId }),
@@ -782,7 +792,7 @@ function useChat(props: IProps) {
       if (
         (isCurrentExternalChildSession || isScopedChildProjection(data)) &&
         `${messageSessionId}` === `${sessionId}` &&
-        (await applyScopedChildProjection(data, get(message, 'streamId')))
+        (await applyScopedChildProjection(data, get(message, 'streamId'), message))
       ) {
         return;
       }
@@ -854,7 +864,7 @@ function useChat(props: IProps) {
         await reconcileScopedChildProjection();
         return;
       }
-      await applyScopedChildProjection(next.projection, next.streamId);
+      await applyScopedChildProjection(next.projection, next.streamId, message);
     };
 
     webSocketManager.onMessage('SCOPED_MESSAGE_DELTA', handler);

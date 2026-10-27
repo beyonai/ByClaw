@@ -2,7 +2,13 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
-import { isChatTerminal, recordChatChain, flushChatChainLogs, recordChatConnection } from '@/utils/chatChainLog';
+import {
+  isChatCheckpoint,
+  isChatTerminal,
+  recordChatChain,
+  flushChatChainLogs,
+  recordChatConnection,
+} from '@/utils/chatChainLog';
 import { clearToken, getToken, loginRedirect } from './auth';
 import { getLocale } from '@umijs/max';
 
@@ -229,7 +235,8 @@ class WebSocketManager {
         }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          if (isChatTerminal(message)) recordChatChain('fe.final_received', message);
+          if (isChatCheckpoint(message))
+            recordChatChain(isChatTerminal(message) ? 'fe.final_received' : 'fe.reply_received', message);
           this.handleMessage(message);
         } catch (error) {
           console.error('WebSocket 消息解析失败:', error);
