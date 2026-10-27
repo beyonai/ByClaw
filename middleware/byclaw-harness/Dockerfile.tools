@@ -24,6 +24,8 @@ RUN set -eux; \
     chmod 0644 /etc/byclaw-tool-env.session-env; \
     # Runtime-only parts of A.
     rm -rf /ms-playwright /root/.local /root/.cache /root/.npm /home/byclaw/.cache /home/byclaw/.npm; \
+    # B's home may be a persistent volume; the entrypoint fills it from this copy of the image home.
+    cp -a /home/byclaw /usr/local/share/byclaw-tool-home; \
     # A's DSH installation: keep only the helper's closure, at the same paths.
     rm -rf /workspace; \
     mkdir -p /workspace; \

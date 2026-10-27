@@ -4,7 +4,19 @@ set -Eeuo pipefail
 # Tool environment (B) of a split deployment: serve DSH's SSH helper only. The
 # runtime (A) that started this sandbox owns the browser, Web UI and sessions.
 if [[ "${1:-}" == tools ]]; then
-    exec /usr/local/bin/byclaw-tool-env-sshd
+    # B's home may be a persistent per-user volume (credentials, CLI state and
+    # installs survive B being released). Start it from the image's own home and
+    # add defaults a newer image brings, without touching what the user changed.
+    tool_home="${BYCLAW_TOOL_HOME:-/home/byclaw}"
+    tool_home_seed="${BYCLAW_TOOL_HOME_SEED:-/usr/local/share/byclaw-tool-home}"
+    if [[ -d "${tool_home_seed}" ]]; then
+        mkdir -p "${tool_home}"
+        rsync -a --ignore-existing "${tool_home_seed}/" "${tool_home}/"
+        if ((EUID == 0)); then
+            chown byclaw:byclaw "${tool_home}"
+        fi
+    fi
+    exec "${BYCLAW_TOOL_ENV_SERVER:-/usr/local/bin/byclaw-tool-env-sshd}"
 fi
 
 # Shared DSH host: one process serving many users (scripts/byclaw-multi-host.mjs).

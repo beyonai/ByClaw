@@ -33,8 +33,12 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
   or open streams, B is paused. Running commands and background jobs hold
   streams open, so they are never paused underneath.
 - **Gone:** a deleted or expired B is recreated on the next lease. The workspace
-  is a host volume shared with A, so pausing or recreating B loses no files; only
-  B's own root filesystem (e.g. ad-hoc installs) is lost on recreation.
+  is a host volume shared with A, so pausing or recreating B loses no files.
+  With a `home` volume in B's spec (example below), `/home/byclaw` survives as
+  well (CLI logins, `~/.openclaw`, `~/.bycli`, user-level installs): the
+  entrypoint fills it from the image's home and later only adds new defaults.
+  The rest of B's root filesystem (system installs, `/tmp`) is lost on
+  recreation, as it was when the pre-split sandbox was recreated.
 - **Expiry:** A renews B's OpenSandbox expiry while it uses B. A B whose A
   disappeared without a graceful shutdown lives at most `timeoutSeconds`.
 - **Identity:** A owns both SSH key pairs (client and B's host key) in its
@@ -128,6 +132,8 @@ layout and are deployment-specific:
   "volumes": [
     { "key": "by", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/by",
       "mountPath": "/by", "uid": 1001, "gid": 1001, "mode": "0770" },
+    { "key": "home", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/tool-home",
+      "mountPath": "/home/byclaw", "uid": 1001, "gid": 1001, "mode": "0700" },
     { "key": "templates", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file",
       "subPath": "byclaw-dsh/byclaw-${user_code}/dsh-home/agent-templates",
       "mountPath": "/home/byclaw/.dsh/agent-templates", "readOnly": true },
