@@ -1021,6 +1021,17 @@ public class SandboxController {
      * @param userCode 用户工号
      * @return 首选 serviceKey，未配置时 data 为 null
      */
+    @GetMapping("/browserServiceKey")
+    @Operation(summary = "查询承载当前用户浏览器的沙箱 serviceKey",
+        description = "常驻 DSH 宿主上的用户，浏览器（远程桌面、byCLI）在其工具沙箱里；其他用户返回空，由调用方沿用默认沙箱")
+    public ResponseUtil getBrowserServiceKey() {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
+        }
+        return ResponseUtil.successResponse(sandboxService.browserServiceKey(userCode.trim()));
+    }
+
     @GetMapping("/preferredServiceKey")
     @Operation(summary = "查询用户首选沙箱 serviceKey", description = "查询 Redis 中缓存的用户首选沙箱 serviceKey")
     public ResponseUtil getPreferredServiceKey(@RequestParam("userCode") String userCode) {

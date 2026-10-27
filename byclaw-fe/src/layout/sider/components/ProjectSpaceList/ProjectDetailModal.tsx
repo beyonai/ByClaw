@@ -106,7 +106,7 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { queryAuthDoc as listAccessibleKnowledgeBases } from '@/service/knowledgeCenter';
-import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
+import { getBrowserServiceKey, getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import MarkdownField from './components/MarkdownField';
@@ -178,6 +178,7 @@ import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
+import { browserSandboxServiceKey } from './operation/accountUtils';
 
 type SourceType = 'dingtalk' | 'dingtalk_todo' | 'github_issue';
 
@@ -1956,7 +1957,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchOperationAccounts, handleCloseOperationAccountRemoteDesktop, intl, operationAccountLoginTarget?.id]
   );
 
-  // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
+  // 优先复用采集流程已经启动的沙箱；尚无带远程桌面的沙箱时拉起承载该用户浏览器的沙箱（常驻宿主用户为工具沙箱，其他用户为 openclaw）。
   const resolveOperationAccountSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
     const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
@@ -1970,7 +1971,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     useAppStore.setState({ sandboxesInfo: currentSandboxes });
 
     if (!userInfo?.userCode) throw new Error('missing_user_code');
-    const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
+    const launchedSandbox = await launchSandboxByUserCode({
+      userCode: userInfo.userCode,
+      serviceKey: browserSandboxServiceKey(await getBrowserServiceKey().catch(() => null)),
+    });
     const sandboxInfo: ISandboxesInfo = {
       ...launchedSandbox,
       userCode: userInfo.userCode,

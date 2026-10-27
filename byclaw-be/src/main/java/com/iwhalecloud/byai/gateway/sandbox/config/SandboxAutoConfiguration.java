@@ -106,7 +106,7 @@ public class SandboxAutoConfiguration {
         });
         return new SharedDshHostContexts(new SharedDshHostClient(sharedDshHost),
             StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
-            sharedPolicy::eligible, launchEnv, prewarm);
+            sharedPolicy::eligible, launchEnv, prewarm, sharedDshHost.getToolServiceKey());
     }
 
     @Bean
