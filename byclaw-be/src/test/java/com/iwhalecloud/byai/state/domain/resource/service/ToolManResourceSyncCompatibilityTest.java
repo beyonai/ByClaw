@@ -31,6 +31,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
@@ -194,6 +196,17 @@ class ToolManResourceSyncCompatibilityTest {
             .hasMessageContaining("资源管理员");
 
         verify(resources, never()).lockSkillImport(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    void contentOnlyImportsRequestRuntimeRefreshWithoutChangingAuthorization(String type) {
+        resource.setResourceBizType(type);
+        resource.setCreateBy(9L);
+        for (String fields : java.util.List.of("{}", "{\"autoAuthorize\":false}")) {
+            Map<String, Object> result = service.addToolFromThird(request(type, fields));
+            verify(sync).completeImport(eq(10L), any(), eq(true), same(result));
+        }
     }
 
     private String request(String type, String fields) {

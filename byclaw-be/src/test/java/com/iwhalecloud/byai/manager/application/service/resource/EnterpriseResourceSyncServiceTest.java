@@ -202,6 +202,21 @@ class EnterpriseResourceSyncServiceTest {
         verify((AuthApplicationService) ReflectionTestUtils.getField(service, "auth"), never()).syncUsersAuthToRedis(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    void contentOnlyUpdateQueuesRefreshButKeepsExistingGrantsAndBindings(String type) {
+        resource.setResourceBizType(type);
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), true, response);
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
+        assertThat(saved.getValue().getPackageChanged()).isTrue();
+        assertThat(saved.getValue().getAssociationMode()).isEqualTo("NONE");
+        assertThat(saved.getValue().getAuthScope()).isNull();
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        verifyNoInteractions(grants, writes);
+    }
+
     @Test void rolledBackImportDoesNotDispatchExternalRuntimeWork() {
         var dispatcher = mock(ResourceSyncDispatcher.class);
         ReflectionTestUtils.setField(service, "dispatcher", dispatcher);

@@ -9,7 +9,6 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
-import com.iwhalecloud.byai.manager.entity.resource.ResourceBindingSource;
 import com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -21,7 +20,8 @@ import java.util.UUID;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -37,9 +37,8 @@ import static org.mockito.Mockito.*;
 
 class ResourceSyncTransactionTest {
     @ParameterizedTest
-    @CsvSource({"success,false", "association-failure,false", "refresh-failure,false",
-        "success,true", "association-failure,true", "refresh-failure,true"})
-    void immediateAndScheduledProxiesCommitBeforeRefreshAndKeepFailuresRetryable(String mode, boolean immediate) {
+    @MethodSource("resourceSyncCases")
+    void immediateAndScheduledProxiesCommitBeforeRefreshAndKeepFailuresRetryable(String type, String mode, boolean immediate) {
         var dataSource = new DriverManagerDataSource(
             "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=250", "sa", "");
         var jdbc = new JdbcTemplate(dataSource);
@@ -67,7 +66,7 @@ class ResourceSyncTransactionTest {
             jdbc.update("UPDATE sync_job SET status=? WHERE id=100", job.getStatus()));
 
         var resource = new SsResource();
-        resource.setResourceId(10L); resource.setResourceBizType("SKILL");
+        resource.setResourceId(10L); resource.setResourceBizType(type);
         resource.setOwnerType("enterprise"); resource.setResourceStatus(2); resource.setThirdSyncRevision(1L);
         var employee = new SsResource(); employee.setResourceId(20L);
         var resources = mock(SsResourceService.class);
@@ -76,8 +75,12 @@ class ResourceSyncTransactionTest {
         when(resources.findById(20L)).thenReturn(employee);
         when(resources.findByIdForUpdate(20L)).thenReturn(employee);
         var sources = mock(ResourceBindingSourceService.class);
-        var source = new ResourceBindingSource(); source.setDigitalEmployeeId(20L);
-        when(sources.automaticSourcesForSynchronization(10L)).thenReturn(List.of(source));
+        // A content-only update must also refresh manually associated employees with no automatic source ledger.
+        job.setPackageChanged(true);
+        var relation = new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail();
+        relation.setResourceId(20L); relation.setRelResourceId(10L);
+        var relations = mock(SsResourceRelDetailService.class);
+        when(relations.list(any(Wrapper.class))).thenReturn(List.of(relation));
         var employees = mock(DigitalEmployeeApplicationService.class);
         doAnswer(call -> {
             jdbc.update("UPDATE employee SET skills='new' WHERE id=20");
@@ -104,7 +107,7 @@ class ResourceSyncTransactionTest {
         ReflectionTestUtils.setField(service, "jobs", jobs);
         ReflectionTestUtils.setField(service, "resources", resources);
         ReflectionTestUtils.setField(service, "sources", sources);
-        ReflectionTestUtils.setField(service, "relations", mock(SsResourceRelDetailService.class));
+        ReflectionTestUtils.setField(service, "relations", relations);
         ReflectionTestUtils.setField(service, "employees", employees);
         ReflectionTestUtils.setField(service, "runtime", runtime);
         ReflectionTestUtils.setField(service, "skills", mock(ByClawSkillResourceApplicationService.class));
@@ -148,5 +151,11 @@ class ResourceSyncTransactionTest {
             CurrentUserHolder.setLoginInfo(previous);
             jdbc.execute("SHUTDOWN");
         }
+    }
+
+    private static java.util.stream.Stream<Arguments> resourceSyncCases() {
+        return java.util.stream.Stream.of("SKILL", "TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM")
+            .flatMap(type -> java.util.stream.Stream.of("success", "association-failure", "refresh-failure")
+                .flatMap(mode -> java.util.stream.Stream.of(false, true).map(immediate -> Arguments.of(type, mode, immediate))));
     }
 }

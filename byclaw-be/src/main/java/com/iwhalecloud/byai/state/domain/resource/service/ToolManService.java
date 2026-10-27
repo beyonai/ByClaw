@@ -446,6 +446,9 @@ public class ToolManService {
                 byte[] content = root.toJSONString().getBytes(StandardCharsets.UTF_8);
                 MultipartFile file = new MultipartFileUtil("file", "tool.json", "application/json", content);
                 result = addToolFromThirdByBizType(file, root, resourceBizType, effectiveCatalogId);
+                // Non-skill imports replace the runtime JSON even when authorization flags are omitted.
+                // Refresh existing employee bindings without changing their authorization or association intent.
+                packageChanged = true;
             }
             enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
                 request, packageChanged, result);
