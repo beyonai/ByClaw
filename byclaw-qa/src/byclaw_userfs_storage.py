@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from by_qa.core import logger
@@ -262,8 +263,8 @@ class ByClawUserFsKnowledgeStorageProvider:
                     if data:
                         for key, value in data.items():
                             parts.append((key, (None, str(value))))
-                    for field_name, (filename, content_bytes, content_type) in files.items():
-                        parts.append((field_name, (filename, content_bytes, content_type)))
+                    for field_name, (filename, upload_content, content_type) in files.items():
+                        parts.append((field_name, (filename, upload_content, content_type)))
                     response = await client._upload_with_discovery(
                         service_name=service_name,
                         path=path,
@@ -307,7 +308,6 @@ class ByClawUserFsKnowledgeStorageProvider:
 
         from by_framework.common.redis_client import init_redis
         from by_framework.core.discovery import DiscoveryClient
-        from by_framework.util.http_client import RetryConfig
         from by_qa.config import get_settings
 
         import httpx
@@ -351,28 +351,35 @@ class ByClawUserFsKnowledgeStorageProvider:
     async def write(
         self,
         location: StorageLocation,
-        content: bytes,
+        content: bytes | Path,
         *,
         content_type: str,
     ) -> StoredObject:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = await build_byclaw_userfs_headers_async()
-        response = await self._request(
-            method="POST",
-            path=f"{_BASE_PATH}/files/put",
-            headers=headers,
-            data={
-                "spaceType": _SPACE_TYPE,
-                "path": file_path,
-                "contentType": content_type,
-            },
-            files={"file": ("file", content, content_type)},
-        )
+        size = content.stat().st_size if isinstance(content, Path) else len(content)
+        with ExitStack() as stack:
+            upload_content = (
+                stack.enter_context(content.open("rb"))
+                if isinstance(content, Path)
+                else content
+            )
+            response = await self._request(
+                method="POST",
+                path=f"{_BASE_PATH}/files/put",
+                headers=headers,
+                data={
+                    "spaceType": _SPACE_TYPE,
+                    "path": file_path,
+                    "contentType": content_type,
+                },
+                files={"file": ("file", upload_content, content_type)},
+            )
         data = _ensure_json_success(response, "write")
         return StoredObject(
             location=location,
-            size=data.get("fileSize", len(content)),
+            size=data.get("fileSize", size),
             checksum=data.get("checksum"),
             content_type=data.get("contentType", content_type),
         )
