@@ -97,6 +97,7 @@ RUN set -eux; \
     for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
         printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
     done; \
+    printf '%s\n' "/workspace/packages/deliverables/workspace-changes/package.json" >>/tmp/byclaw-package-manifests; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -125,6 +126,9 @@ RUN set -eux; \
         archive_count=$((archive_count + 1)); \
     done; \
     test "${archive_count}" -gt 0; \
+    test -s /opt/byclaw/plugins/byclaw--dsh-workspace/lib/index.js; \
+    test -s /opt/byclaw/plugins/byclaw--dsh-workspace/cordis.patch.yml; \
+    grep -Fx '@byclaw/dsh-workspace' /opt/byclaw/plugins/.bundle-names; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
@@ -408,6 +412,9 @@ COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-brid
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc
+
+ENV BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
+    BYCLAW_DSH_WORKSPACE_GIT_ENABLED=0
 
 EXPOSE 8081
 

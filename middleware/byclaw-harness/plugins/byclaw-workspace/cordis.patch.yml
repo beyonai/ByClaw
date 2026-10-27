@@ -1,0 +1,10 @@
+# The ByClaw adapter owns statistics policy; never run the eager stock recorder alongside it.
+- id: workspace-changes
+  disabled: true
+
+- insert:
+    - id: byclaw-workspace
+      name: '@byclaw/dsh-workspace'
+      config:
+        changesEnabled: !!js "process.env.BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED === '1'"
+        gitEnabled: !!js "process.env.BYCLAW_DSH_WORKSPACE_GIT_ENABLED === '1'"
