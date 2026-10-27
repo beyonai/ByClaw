@@ -120,7 +120,7 @@ public class GroupChatWebSocketService {
             new GroupMessagePayload(message.getChatContent(), message.getResourceList() == null ? java.util.List.of() : message.getResourceList(), message.getFiles(),
                 message.getReplyToMessageId() == null ? null : message.getReplyToMessageId().toString(),
                 message.getSenderName(), (String) coordinator.get("coordinatorAgentId"),
-                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized")), message.getClientRequestId());
+                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized"), message.getMentionAllUsers()), message.getClientRequestId());
         if (result == null || result.messageId() == null) {
             throw new IllegalStateException("tenant group message was not committed");
         }
@@ -135,6 +135,7 @@ public class GroupChatWebSocketService {
         event.put("creatorId", tenant.userId());
         event.put("creatorName", message.getSenderName());
         event.put("resourceList", message.getResourceList());
+        event.put("mentionAllUsers", Boolean.TRUE.equals(message.getMentionAllUsers()));
         event.put("files", message.getFiles());
         event.put("replyToMessageId", message.getReplyToMessageId());
         event.put("speaker", java.util.Map.of("type", "USER",

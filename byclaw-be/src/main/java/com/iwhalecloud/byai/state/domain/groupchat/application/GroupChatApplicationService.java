@@ -279,6 +279,7 @@ public class GroupChatApplicationService {
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("clientRequestId", command.getClientRequestId());
         metadata.put("resourceList", command.getResourceList());
+        metadata.put("mentionAllUsers", Boolean.TRUE.equals(command.getMentionAllUsers()));
         message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(new Date());
         message.setUpdateTime(new Date());
@@ -286,7 +287,8 @@ public class GroupChatApplicationService {
         topicService.persistMessage(message);
         if (mentionService != null) {
             mentionService.indexHumanMentions(session.getSessionId(), messageId,
-                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(), command.getResourceList());
+                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(),
+                mentionResources(session.getSessionId(), command));
         }
         JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
@@ -300,6 +302,7 @@ public class GroupChatApplicationService {
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
         event.put("creatorName", senderName);
         event.put("resourceList", command.getResourceList());
+        event.put("mentionAllUsers", Boolean.TRUE.equals(command.getMentionAllUsers()));
         // 与发送端请求关联，广播早于 ACK 时也能合并待发送消息。
         event.put("clientRequestId", command.getClientRequestId());
         Map<String, Object> speaker = new HashMap<>();
@@ -448,6 +451,20 @@ public class GroupChatApplicationService {
             || AgentMetaEnum.COMMON_FOLDER.equals(resourceType)
             || AgentMetaEnum.KG_DOC_FILE.equals(resourceType)
             || AgentMetaEnum.KG_DOC_FOLDER.equals(resourceType);
+    }
+
+    /** Resolve notification recipients from the authorized group snapshot, never agent resources. */
+    private List<ResourceVo> mentionResources(Long sessionId, ChatMessage command) {
+        if (!Boolean.TRUE.equals(command.getMentionAllUsers())) return command.getResourceList();
+        List<ResourceVo> resources = new ArrayList<>();
+        if (command.getResourceList() != null) resources.addAll(command.getResourceList());
+        for (ByaiSessionMember member : memberService.findSessionMembers(sessionId, "USER", null)) {
+            ResourceVo resource = new ResourceVo();
+            resource.setResourceType(AgentMetaEnum.HUMAN);
+            resource.setResourceId(String.valueOf(member.getMemObjId()));
+            resources.add(resource);
+        }
+        return resources;
     }
 
     private Long parseResourceId(String resourceId) {

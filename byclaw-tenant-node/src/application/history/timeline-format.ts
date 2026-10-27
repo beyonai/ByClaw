@@ -81,6 +81,7 @@ export async function displayMessages(
     return {
       messageId: row.messageId,
       clientRequestId: meta.clientRequestId,
+      mentionAllUsers: !recalled(source) && !isSnapshotOnly(meta) && meta.mentionAllUsers === true,
       topicId: row.topicId,
       taskId: passive ? undefined : meta.taskId,
       groupCoordination: passive ? undefined : meta.groupCoordination,

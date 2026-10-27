@@ -25,6 +25,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       (key) =>
         ![
           "chatContent",
+          "mentionAllUsers",
           "resourceList",
           "files",
           "replyToMessageId",
@@ -34,6 +35,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
           "coordinatorAuthorized",
         ].includes(key),
     ) ||
+    (payload.mentionAllUsers !== undefined && typeof payload.mentionAllUsers !== "boolean") ||
     !Array.isArray(payload.resourceList) ||
     payload.resourceList.length > 100 ||
     (payload.files !== undefined && (!Array.isArray(payload.files) || payload.files.length > 20))
@@ -89,6 +91,13 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       ),
     };
   }
+  if (payload.mentionAllUsers === true) {
+    const humans = await db.query(
+      "SELECT mem_obj_id FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND com_acct_id=$2",
+      [command.sessionId, command.enterpriseId],
+    );
+    for (const human of humans) mentionedUsers.push(String(human.memObjId ?? human.mem_obj_id));
+  }
   if (mentionedAgents.length && payload.coordinatorAgentId !== undefined) {
     const coordinatorAgentId = requireId(payload.coordinatorAgentId);
     const bound = await first(
@@ -139,6 +148,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       scene: "GROUP_CHAT",
       clientRequestId: command.requestId,
       resourceList: payload.resourceList,
+      mentionAllUsers: payload.mentionAllUsers === true,
     }),
     related_resources: payload.files?.length ? JSON.stringify({ files: payload.files }) : null,
     client_request_id: command.requestId,
@@ -165,6 +175,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
           scene: "GROUP_CHAT",
           clientRequestId: command.requestId,
           resourceList: payload.resourceList,
+          mentionAllUsers: payload.mentionAllUsers === true,
           groupCoordination: scope,
           taskId: scope.taskSessionId,
         }),

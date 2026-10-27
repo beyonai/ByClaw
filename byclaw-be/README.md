@@ -853,3 +853,7 @@ LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasonin
 `POST /new/model/healthCache` 按登录态读取 `PERSONAL` 或 `PUBLIC` 检查结果，只清理数据库已确认删除的记录，不调用模型。`healthNotice` 持久化提示状态；`healthRemoveDeleted` 只允许清理数据库已不存在的 ID；调试通过 `healthDebugBegin`/`healthDebugComplete` 复用原调试结果，后端按模型 ID 验证所有权并用版本号阻止旧结果覆盖。保存提交后失效在途旧结果，删除在事务提交后清理 Redis；短分布式锁只保护缓存的读取、合并和写入，不覆盖真实模型调用。
 
 直接进入模型页面会读取当前账号可见归属的 Redis 检查缓存。`/models` 顶部汇总个人和公共模型的历史异常总数，切换 tab 不改变统计范围；按归属分别列出异常数量，点击对应入口查看该范围的诊断（例如个人 1 项、公共 2 项，总计 3 项）。各 tab 的卡片仅显示自身模型的警告标记，公共 tab 保持只读；`/manager/systemParams/modal` 仅统计公共模型，并在汇总文案中明确标注归属。页面切换和点击警告只读取缓存，不调用模型、不刷新 24 小时有效期。关闭浮层不会移除页面上的异常标记，点击卡片标记可重新查看该模型的诊断。检查未完成使用未知状态文案，历史结果不当作实时可用性结论。公共模型仅管理员提供编辑和重新检查入口，其他用户显示联系管理员的建议。保存、删除和调试后即时刷新当前页面；切换页面、窗口重新获焦及可见页面每 60 秒只读取 Redis，用于同步其他标签页或设备的变化，不额外调用模型。资源中心入口和“模型”标签使用与审批中心一致的 Ant Design 小号数字徽章，统计个人与公共模型的失败总数（个人 1 + 公共 2 = 3），0 时隐藏；关闭诊断不清除徽章。
+
+### Group mention-all-users
+
+`GROUP_CHAT_SEND` accepts optional boolean `mentionAllUsers`. The caller must already be a group member. Both personal and tenant-owned groups resolve current `USER` members at message commit, exclude the sender, and deduplicate with explicit human mentions through the existing mention index. The marker never adds digital employees to task dispatch. No database migration is required. Message metadata and group timeline responses retain the flag; text stays readable as `@所有人` for older clients. Plain text and forwarded snapshots do not confer mention-all notification authority. Deploy the tenant Node and Java backend together before enabling the matching Hacu frontend.

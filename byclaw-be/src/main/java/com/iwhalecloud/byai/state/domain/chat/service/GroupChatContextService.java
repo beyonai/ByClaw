@@ -281,6 +281,7 @@ public class GroupChatContextService {
             message.setContent(StringUtils.defaultString(source.getMessageContent()));
             message.setResourceList(toMemberResources(source.getMetadata()));
             boolean passive = ForwardRuntimeProjection.isSnapshotOnly(source.getMetadata());
+            message.setMentionAllUsers(!source.isRecalled() && !passive && ForwardRuntimeProjection.metadata(source.getMetadata()).path("mentionAllUsers").asBoolean(false));
             message.setForward(source.isRecalled() ? null : ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(source.getMetadata())));
             List<ByaiGroupChatMessageAck> messageAcks = passive || source.isRecalled() ? List.of() : acknowledgements.getOrDefault(source.getMessageId(), List.of());
             message.setAcknowledgements(messageAcks.stream().map(this::toAcknowledgement).toList());

@@ -239,6 +239,24 @@ class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
     }
 
     @Test
+    void mentionAllResolvesOnlyHumanMembersForNotification() {
+        ByaiSessionMember first = new ByaiSessionMember();
+        first.setMemObjId(601L);
+        ByaiSessionMember second = new ByaiSessionMember();
+        second.setMemObjId(602L);
+        when(memberService.findSessionMembers(GROUP_ID, "USER", null)).thenReturn(List.of(first, second));
+        ChatMessage command = command(List.of());
+        command.setMentionAllUsers(true);
+        command.setChatContent("@所有人 通知");
+        service.acceptUserMessage(command);
+        ArgumentCaptor<List<ResourceVo>> recipients = ArgumentCaptor.forClass(List.class);
+        verify(mentionService).indexHumanMentions(eq(GROUP_ID), eq(MESSAGE_ID), eq(USER_ID), eq(USER_ID), recipients.capture());
+        assertThat(recipients.getValue()).extracting(ResourceVo::getResourceId).containsExactly("601", "602");
+        assertThat(recipients.getValue()).allMatch(resource -> resource.getResourceType() == AgentMetaEnum.HUMAN);
+        verify(executionCoordinator, never()).enqueue(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void humanResourcePersistsWithoutDispatchingAgent() {
         when(memberService.findSessionMember(GROUP_ID, MemObjType.USER.name(), 601L))
             .thenReturn(new ByaiSessionMember());
