@@ -47,6 +47,16 @@ try {
   assert.equal(chunks[0][2].metadata.event_kind, 'plan', 'ordinary plans use the existing backend execution-binding path')
   const payload = JSON.parse(chunks[1][2].content)
   assert.deepEqual(payload.steps[0].sub_steps.map(step => step.tool_metadata.status), ['completed', 'in_progress'])
+  const lifecycleEvents = []
+  const lifecycleRuntime = { async emitSessionEvent(...args) { lifecycleEvents.push(args) } }
+  for (const [type, data] of [
+    ['turn/start', { turn: 1 }],
+    ['user/message', { source: { kind: 'agent-message' } }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ]) await ByClawDshSessionRuntime.prototype.forwardChildLifecycle.call(lifecycleRuntime, turn, agent.session,
+    { type, seq: lifecycleEvents.length, data }, 1)
+  assert.deepEqual(lifecycleEvents.map(args => args[4]), ['running', 'completed'],
+    'template/parent activation must publish running on the actual turn start, without needing a human user/message')
   ctx.todoExecution.suspendForOrchestration(agent)
   new SuperAssistantPolicy().bind(agent.ctx, agent)
   const dispatches = []

@@ -4,10 +4,50 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-tool-todo'
 import type { TaskPlanTodo } from './protocol.ts'
 
+type ReadChild = (id: string) => Promise<{ events: readonly SessionEvent[]; label: string } | undefined>
+
+/** With no model-authored todo, show actual local delegations, not invented planning steps. */
+async function delegatedTaskPlan(sessionId: string, events: readonly SessionEvent[], readChild: ReadChild, triggerChildId?: string) {
+  const catalog = events.filter(event => event.type === 'subagent/catalog'
+    && ['one-shot', 'continuable'].includes(event.data.mode)
+    && !event.data.label?.startsWith('agent-teams:'))
+  if (!catalog.length || (triggerChildId !== undefined
+    && !catalog.some(event => event.type === 'subagent/catalog' && String(event.data.childId) === triggerChildId))) return undefined
+  const planId = `todo:${sessionId}:delegated:${catalog[0]!.seq}`
+  const todos: TaskPlanTodo[] = []
+  const seen = new Set<string>()
+  for (const entry of catalog) {
+    if (entry.type !== 'subagent/catalog') continue
+    const childId = String(entry.data.childId)
+    if (seen.has(childId)) continue
+    seen.add(childId)
+    const child = await readChild(childId)
+    const label = child?.label || '子代理'
+    const taskId = `${planId}:${childId}`
+    const runs: Array<{ externalSessionId: string; childTurn: number }> = []
+    let status = 'pending'
+    for (const event of child?.events ?? []) {
+      if (event.type === 'turn/start') {
+        runs.push({ externalSessionId: childId, childTurn: event.data.turn })
+        status = 'in_progress'
+      } else if (event.type === 'turn/end' && event.data.turn === runs.at(-1)?.childTurn) {
+        // Aborting a turn may mean waiting for async work; it is not proof of completion/cancellation.
+        status = event.data.reason.kind === 'completed' ? 'completed'
+          : event.data.reason.kind === 'aborted' ? 'pending' : 'failed'
+      }
+    }
+    todos.push({
+      taskId, content: `子代理任务 · ${label}`, assignee: label, status,
+      ...(runs.length ? { executions: [{ attempt: 1, attemptId: `${taskId}:1`, assignee: label, status, runs }] } : {}),
+    })
+  }
+  return { planId, todos }
+}
+
 export async function ordinaryTaskPlan(
   sessionId: string,
   events: readonly SessionEvent[],
-  readChild: (id: string) => Promise<{ events: readonly SessionEvent[]; label: string } | undefined>,
+  readChild: ReadChild,
   triggerChildId?: string,
 ): Promise<{ planId: string; todos: TaskPlanTodo[] } | undefined> {
   let planId = ''
@@ -48,7 +88,7 @@ export async function ordinaryTaskPlan(
       children.push({ childId: String(event.data.childId), taskId, attempt, attemptId: `${taskId}:${attempt}` })
     }
   }
-  if (!todos.length) return undefined
+  if (!todos.length) return delegatedTaskPlan(sessionId, events, readChild, triggerChildId)
   if (triggerChildId !== undefined && !children.some(child => child.childId === triggerChildId)) return undefined
   const runTimes = new Map<string, number>()
   for (const binding of children) {

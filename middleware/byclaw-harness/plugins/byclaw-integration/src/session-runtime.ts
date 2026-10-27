@@ -2801,6 +2801,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     event: SessionEvent,
     childTurn: number | undefined,
   ): Promise<void> {
+    if (event.type === 'turn/start') {
+      // Template activation and parent messages need not arrive as source.kind=user.
+      // The real turn start is the authoritative signal that this child is working.
+      await this.emitSessionEvent(turn, session, `${event.seq}:status`, 'session.status', 'running', '子 Agent 正在处理任务', {
+        childTurn,
+      })
+      return
+    }
     if (event.type === 'user/message') {
       if (event.data.source.kind === 'user') {
         await this.emitSessionEvent(turn, session, `${event.seq}:status`, 'session.status', 'running', '子 Agent 正在处理任务', {
