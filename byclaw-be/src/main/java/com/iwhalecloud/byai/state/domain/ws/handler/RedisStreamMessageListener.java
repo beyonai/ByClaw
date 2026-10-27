@@ -325,14 +325,17 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
     }
 
     private boolean acknowledge(MapRecord<String, String, String> message) {
+        long started = System.nanoTime();
         try {
             redisTemplate.opsForStream()
                 .acknowledge(message.getStream(), SessionStreamManager.CONSUMER_GROUP, message.getId());
             streamAckFailureRegistry.clear(message.getStream(), message.getId().getValue());
             sessionStreamMetrics.recordAckSuccess();
+            com.iwhalecloud.byai.state.domain.chat.service.ChatReplyLog.streamRecord("be.reply_ack", message, "ok", started);
             return true;
         }
         catch (Exception e) {
+            com.iwhalecloud.byai.state.domain.chat.service.ChatReplyLog.streamRecord("be.reply_ack", message, "failed", started);
             sessionStreamMetrics.recordAckFailure();
             logger.warn("ack Session Stream 消息失败, stream: {}, messageId: {}",
                 message.getStream(), message.getId(), e);

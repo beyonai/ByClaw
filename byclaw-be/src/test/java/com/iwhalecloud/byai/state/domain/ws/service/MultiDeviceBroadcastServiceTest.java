@@ -96,6 +96,32 @@ class MultiDeviceBroadcastServiceTest {
     }
 
     @Test
+    void replyFrameKeepsOriginAndOneFrameIdAcrossInstances() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        var manager = mock(ChannelManager.class);
+        when(manager.getChannels(7L)).thenReturn(Set.of(channel));
+        var redis = mock(StringRedisTemplate.class);
+        var source = service("instance-a", manager, redis);
+        JSONObject message = JSONObject.parseObject("{\"type\":\"CHAT_STREAM\",\"event\":\"finalAnswer\",\"sessionId\":\"50\","
+            + "\"chatChain\":{\"invocationId\":\"origin\",\"requestId\":\"root\",\"checkpoint\":true,\"replyEventId\":\"reply\"}}");
+        try {
+            source.broadcastRawToUser(7L, message, null);
+            TextWebSocketFrame local = channel.readOutbound();
+            JSONObject identity = JSONObject.parseObject(local.text()).getJSONObject("chatChain");
+            local.release();
+            ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+            verify(redis).convertAndSend(eq(MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC), envelope.capture());
+            service("instance-b", manager, mock(StringRedisTemplate.class)).handleRemoteBroadcast(envelope.getValue());
+            TextWebSocketFrame remote = channel.readOutbound();
+            try {
+                assertThat(JSONObject.parseObject(remote.text()).getJSONObject("chatChain"))
+                    .containsEntry("frameId", identity.getString("frameId"))
+                    .containsEntry("replyEventId", "reply").containsEntry("invocationId", "origin");
+            } finally { remote.release(); }
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test
     void broadcastRawToUser_sendsLocallyThenPublishesForOtherInstances() {
         EmbeddedChannel localChannel = new EmbeddedChannel();
         ChannelManager channelManager = mock(ChannelManager.class);

@@ -116,6 +116,8 @@ public class GatewayStreamEventProcessor {
         if (FinalAnswerContent.isFinalEvent(dataJson.getString("event_type"))) {
             JSONObject finalPayload = new JSONObject();
             finalPayload.put("final_content", FinalAnswerContent.extract(dataJson));
+            JSONObject diagnostics = ChatReplyLog.envelope(dataJson);
+            if (diagnostics != null) finalPayload.put("chatChain", diagnostics);
             return finalPayload.toJSONString();
         }
         String eventData = dataJson.getString("data");

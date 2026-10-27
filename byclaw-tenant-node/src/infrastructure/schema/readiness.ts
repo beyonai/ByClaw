@@ -101,6 +101,7 @@ export class SchemaReadiness {
     private readonly be: BeSchemaClient,
   ) {}
   async check(): Promise<void> {
+    const revision = this.connection.schemaRevision;
     this.state.verified = false;
     const auditedVersion = await this.be.currentVersion();
     this.state.auditedVersion = auditedVersion;
@@ -122,6 +123,7 @@ export class SchemaReadiness {
       });
       await this.checkColumns(db);
       await this.connection.guard(pool);
+      if (revision !== this.connection.schemaRevision) return;
       this.state.verified = true;
       this.connection.setSchemaReady(true);
     });

@@ -357,3 +357,7 @@ Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill
 模板 staging 保留原目录校验与文件命名规则，只复制用户模板、未知文件和子目录；本代际会重新生成的 ByClaw 模板不再先复制后删除。原代际锁、双目录发布回滚、撤权清理及 Skill 懒加载/版本检查不变。`session-metadata-ready` 日志将会话元数据恢复从内置 Skill 加载区间中单独标出。新增 `template-staging-verify.mjs` 覆盖撤权、用户文件保留、目录碰撞拒绝与失败时保留旧代际。
 
 Worker 消息分发不再设置任务并发上限，原 `maxConcurrency` 插件配置不再生效；会话内顺序和 DSH 工具并发仍独立控制。适配器显式关闭已发布 by-framework 版本的默认上限，因此不依赖 framework 升级即可生效。Redis 阻塞读取、消息 ACK、取消、健康检查和退出时等待在途任务均保留。`snapshotConcurrency`、`projectionConcurrency` 仍限制资源同步并发。实际容量取决于任务负载、保留状态、模型配额和 Redis 事件流量，取消分发上限不代表吞吐量没有上限。
+
+## 后端到沙箱的发起链路排查
+
+后端与 Harness 使用统一的 `chat_chain` 单行 JSON 日志，按服务端 `invocationId` 关联一次接收、按 `dispatchId` 区分派发重试，记录阶段耗时及租户与实例。初始化使用 `startupId`，回复使用 `replyEventId` 串联 Redis、后端、WebSocket 与前端实际应用对象。字段语义、三个场景的手工排查示例见 [链路日志规范](CHAT-CHAIN.zh.md)。本地验证：`pnpm verify:chat-chain`。

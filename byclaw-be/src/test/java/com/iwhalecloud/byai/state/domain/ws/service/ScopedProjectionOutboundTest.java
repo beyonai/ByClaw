@@ -70,6 +70,29 @@ class ScopedProjectionOutboundTest {
     }
 
     @Test
+    void deltaFramesRetainActualReplyAndFrameOwnership() {
+        healthy.attr(Constant.ATT_ENTERPRISE_ID).set("10");
+        healthy.attr(Constant.ATT_HEADER).set(Map.of("scoped-delta-version", "1"));
+        healthy.attr(Constant.ATT_SCOPED_SESSION_ID).set("200");
+        String log = "[\"" + "x".repeat(4000) + "\"]";
+        for (int revision = 1; revision <= 2; revision++) {
+            JSONObject message = projection("10" + revision + "-0", "hello" + revision, log);
+            message.put("chatChain", JSONObject.parseObject("{\"invocationId\":\"origin\",\"requestId\":\"root\",\"checkpoint\":true}"));
+            message.getJSONObject("chatChain").put("replyEventId", "reply-" + revision);
+            service.broadcastTenantScopedProjection(9L, 10L, "tenant:10:child", message, false);
+            healthy.runPendingTasks();
+            TextWebSocketFrame frame = healthy.readOutbound();
+            try {
+                JSONObject output = JSONObject.parseObject(frame.text());
+                if (revision == 2) assertThat(output.getString("type")).isEqualTo("SCOPED_MESSAGE_DELTA");
+                assertThat(output.getJSONObject("chatChain")).containsEntry("replyEventId", "reply-" + revision)
+                    .containsEntry("targetTenantId", "10").containsEntry("targetSessionId", "200");
+                assertThat(output.getJSONObject("chatChain").getString("frameId")).isNotBlank();
+            } finally { frame.release(); }
+        }
+    }
+
+    @Test
     void waitsForActualTransportCompletionAndKeepsLatestTerminalWithoutBlockingHealthyClient() {
         send("child", "first", false);
         for (int revision = 0; revision < 1000; revision++) {

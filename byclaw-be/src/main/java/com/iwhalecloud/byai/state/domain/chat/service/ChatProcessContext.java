@@ -31,6 +31,9 @@ import io.netty.channel.Channel;
 @Getter
 @Setter
 public class ChatProcessContext {
+    /** Bounded, process-local output ownership snapshots. Never used to make routing decisions. */
+    public final java.util.Map<String, com.alibaba.fastjson.JSONObject> replyDiagnosticsByTrace =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 停止会话哨兵事件类型。stopChat 同 pod + HTTP SSE 场景下，向 {@link #gatewayEventQueue}

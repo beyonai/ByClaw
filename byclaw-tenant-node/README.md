@@ -69,11 +69,15 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 默认 HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`。203 本地联调可显式设置 `INTERNAL_TRANSPORT=http`，此时 BE、KMS、Node 走 HTTP，并用 `INTERNAL_API_TOKEN` 认证：直连可使用 Bearer，经过 OpenSandbox HTTP 代理时使用 `X-Byclaw-Internal-Token`，因为代理不会转发 `Authorization`；`REDIS_TLS=false` 允许连接本地 Redis。除 live 外仍要求 `X-Enterprise-Id`、`X-Tenant-Generation`；业务请求还要求真实用户 `X-Actor-User-Id`。这些内部接口不得直接对浏览器开放。
 
+Node 调用 BE/KMS 时，HTTP 和 HTTPS 均发送 `Authorization: Bearer <INTERNAL_API_TOKEN>`；HTTPS 仍保留证书校验。`INTERNAL_API_TOKEN` 在两种模式下都必须非空，且须与 BE 的 `BYCLAW_TENANT_INTERNAL_TOKEN` 一致；缺失或全空白会在启动时失败。BE 创建 Node 时注入该值；更换 token 后须同步更新 BE 和现有 Node 的启动配置，重新创建容器或重启直接运行的 Node 进程以加载新值。
+
 - `/internal/v1/health/live`：进程存活，无需客户端证书。
 - `/internal/v1/health/db`：受保护；返回最近一次运行时身份/可写探测的状态。
 - `/internal/v1/health/ready`：受保护；`ready` 表示 Schema 已核验、Worker/HTTPS/流组件可供 BE 完成开通验收；`businessReady` 还要求 BE 已发布 `PROVISION_STATE.status=READY`。这样避免「BE 等 Node 就绪、Node 等 BE READY」的循环。
 
 成功连接后注册实际 `TENANT_DATA_<E>` Worker 和同名 ServiceRegistry 服务；metadata 含 enterpriseId、generation、实例 ID、HTTPS endpoint、Schema 版本与 READY/ADMIN_ONLY。失去连接权威后撤销注册，管理态拒绝业务命令。运行时每 5 秒串行对账。
+
+Schema 核验独立于五秒对账节奏：启动、连接池更换、Schema 任务开始或结束后，在下一次非升级中的对账立即核验；核验通过后每 60 秒重新查询 BE 审计版本并检查库内标记、结构指纹、必要字段和索引。首次初始化尚未就绪时保留五秒检查。核验异常立即关闭业务门禁，按 10、20、40、80、160、300 秒退避，之后最多每 300 秒重试；BE 返回 401/403 时直接等待 300 秒，并记录 `SCHEMA_AUTHENTICATION_FAILED`。重试等待期间不沿用成功状态开放业务，连接池或 Schema 任务变化会重置等待。此间隔仅用于运行态就绪检查，Schema 任务执行前仍直接核对 BE 审计版本。
 
 BE 以固定服务名 `TENANT_DATA_<E>` 从 Redis 发现并校验实例，直接使用注册的 host、port 和 pathPrefix，不再从数据库中的 sandbox ID 重建访问地址。Node 的 `ADVERTISE_HOST` 未设置、为空或沿用旧的 `host.containers.internal` 占位值时，默认发布自身容器 hostname；Docker 共享网络须能解析该 hostname，其他部署方式可显式设置可达的 `ADVERTISE_HOST`。容器重建后实例 hostname 可以变化，固定服务名和租户/代际校验保持不变。
 

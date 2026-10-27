@@ -5,6 +5,7 @@ import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { createMessage } from '@deepseek-ai/dsh-llm'
 import { ByClawDshSessionRuntime, ByClawAsyncTeamGate, TimedChunkBatcher } from '../lib/session-runtime.js'
 import { ByClawSessionActivityTracker } from '../lib/session-activity.js'
+import { ByClawChatChain } from '../lib/chat-chain-log.js'
 
 const listeners = new Map()
 const projections = []
@@ -47,6 +48,30 @@ function commit(type, data) {
   return event
 }
 try {
+  const info = console.info
+  const initiation = []
+  console.info = line => { if (line.startsWith('chat_chain ')) initiation.push(JSON.parse(line.slice(11))) }
+  try {
+    const command = requestId => ({ actionType: 'ASK_AGENT', header: {
+      sessionId: 'external', traceId: 'continued-trace', messageId: requestId, userCode: 'user', metadata: { requestId },
+    } })
+    turn.initiation = new ByClawChatChain(command('original'), 'worker')
+    turn.initiation.expectInput(String(session.id), 'old-input')
+    const foreground = { ...turn, initiation: new ByClawChatChain(command('foreground'), 'worker') }
+    foreground.initiation.expectInput(String(session.id), 'new-input')
+    runtime.pendingForeground.set(String(session.id), { inputMessageId: 'new-input', turn: foreground })
+    const claim = listeners.get('agent/inbox/claimed')
+    claim({ agent: { id: session.id, session }, message: { id: 'background-report' }, turn: 8 })
+    assert.equal(initiation.length, 0, 'background activity must not claim initiation success')
+    claim({ agent: { id: session.id, session }, message: { id: 'old-input' }, turn: 8 })
+    claim({ agent: { id: session.id, session }, message: { id: 'new-input' }, turn: 8 })
+    assert.deepEqual(initiation.map(event => event.requestId), ['original', 'foreground'],
+      'inbox claims must follow message ownership, even when ambient context is absent')
+  } finally {
+    console.info = info
+    runtime.pendingForeground.clear()
+    turn.initiation = undefined
+  }
   start('attempt-live')
   delta('attempt-live', 0, 'reasoning-delta', '思考')
   delta('attempt-live', 1, 'text-delta', '实时')
@@ -145,6 +170,7 @@ try {
   await runtime.close()
 }
 assert.equal(listeners.has('agent/assistant-stream'), false, 'disposal must release the live stream listener')
+assert.equal(listeners.has('agent/inbox/claimed'), false, 'disposal must release the initiation listener')
 console.log('current DSH live/durable assistant stream verification passed')
 
 const parent = { id: SessionId('parent') }

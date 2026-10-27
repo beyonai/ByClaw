@@ -17,6 +17,7 @@ export class ConnectionManager {
   private available = false;
   private schemaReady = false;
   private schemaBusy = false;
+  private verificationRevision = 0;
   constructor(
     readonly identity: TenantIdentity,
     private readonly ports: ConnectionPorts,
@@ -40,10 +41,15 @@ export class ConnectionManager {
   get upgrading() {
     return this.schemaBusy;
   }
+  get schemaRevision() {
+    return this.verificationRevision;
+  }
   setSchemaReady(value: boolean) {
     this.schemaReady = value;
   }
   setSchemaBusy(value: boolean) {
+    if (this.schemaBusy !== value) this.verificationRevision++;
+    if (value) this.schemaReady = false;
     this.schemaBusy = value;
   }
   /** 合并并发刷新，防止同时轮换连接池或覆盖权威版本下限。 */
@@ -98,6 +104,7 @@ export class ConnectionManager {
     }
     const previous = this.pool;
     this.pool = candidate;
+    this.verificationRevision++;
     this.schemaReady = false;
     await previous?.close();
   }
