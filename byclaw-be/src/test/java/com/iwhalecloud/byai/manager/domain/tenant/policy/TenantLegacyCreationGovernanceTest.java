@@ -28,7 +28,7 @@ class TenantLegacyCreationGovernanceTest {
         var provider = factory.getBeanProvider(TenantExecutionPolicyService.class);
         var ordinary = new EnterpriseInfoApplicationService();
         ordinary.setTenantExecutionPolicies(provider);
-        var administrator = new TenantAdminTenantService(null, null, null, null);
+        var administrator = new TenantAdminTenantService(null, null, null);
         administrator.setTenantExecutionPolicies(provider);
         assertThrows(TenantExecutionPolicyService.PolicyDeniedException.class, () -> ordinary.create(null));
         assertThrows(TenantExecutionPolicyService.PolicyDeniedException.class,
