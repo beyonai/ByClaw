@@ -12,6 +12,7 @@ describe('tool environment idle lifecycle', () => {
   let ssh: ToolEnvConnection
   let inner: { request: ReturnType<typeof vi.fn>; connectStream: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }
   let backend: ToolEnvBackend
+  let residual: () => Promise<ReadonlyArray<{ pid: number; comm: string }>>
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -22,10 +23,12 @@ describe('tool environment idle lifecycle', () => {
       dispose: vi.fn().mockResolvedValue(undefined),
     }
     const identity = { alias: 'test-b', writeClientConfig: vi.fn().mockResolvedValue(undefined) } as unknown as ToolEnvIdentity
+    residual = async () => []
     ssh = new ToolEnvConnection(ctx, {
       ssh: {} as never,
       ptcLaunch: { kind: 'node-script', executable: 'node', bootstrapPath: '/helper.mjs' },
       idleMs: 100,
+      busy: { residual: () => residual() },
     }, backend, identity)
     inner = {
       request: vi.fn().mockResolvedValue('done'),
@@ -93,5 +96,38 @@ describe('tool environment idle lifecycle', () => {
     expect(backend.pause).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(500)
     expect(backend.pause).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not pause a connection when a command starts while the idle process probe is pending', async () => {
+    await ssh.request('fs.readText', { path: '/by/result' }, z.string())
+    const probe = Promise.withResolvers<ReadonlyArray<{ pid: number; comm: string }>>()
+    residual = () => probe.promise
+    await vi.advanceTimersByTimeAsync(100)
+    const command = Promise.withResolvers<string>()
+    inner.request.mockReturnValueOnce(command.promise)
+    const running = ssh.request('spawn', { argv: ['bash'] }, z.string())
+    await vi.advanceTimersByTimeAsync(0)
+    probe.resolve([])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ssh.connected).toBe(true)
+    expect(backend.pause).not.toHaveBeenCalled()
+    command.resolve('finished')
+    expect(await running).toBe('finished')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts idle from newer activity even if that activity finished before an older probe', async () => {
+    await ssh.request('fs.readText', { path: '/by/result' }, z.string())
+    const probe = Promise.withResolvers<ReadonlyArray<{ pid: number; comm: string }>>()
+    residual = () => probe.promise
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await ssh.request('spawn', { argv: ['bash'] }, z.string())).toBe('done')
+    probe.resolve([])
+    await vi.advanceTimersByTimeAsync(99)
+    expect(ssh.connected).toBe(true)
+    expect(backend.pause).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
   })
 })

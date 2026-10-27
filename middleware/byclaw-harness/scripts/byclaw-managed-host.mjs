@@ -10,14 +10,82 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const same = (a, b) => a.instanceId === b.instanceId && a.mappingId === b.mappingId && a.generation === b.generation
 const fence = value => ({ managed: true, instanceId: value.instanceId, mappingId: value.mappingId, generation: value.generation })
 
+/** Bound cold context startup independently of resident capacity. Never release an active boot early. */
+export function limitContextStartup(boot, concurrency = 1, { queueCapacity = 128, now = Date.now, log = () => {} } = {}) {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('startup concurrency must be a positive integer')
+  if (!Number.isSafeInteger(queueCapacity) || queueCapacity < 0) throw new Error('startup queue capacity must be a nonnegative integer')
+  let active = 0
+  const queue = []
+  const drain = () => {
+    while (active < concurrency && queue.length) {
+      const item = queue.shift()
+      if (item.hooks.admission?.allowed() === false) { item.cancel(); continue }
+      item.waiting = false
+      active++
+      item.resolve()
+    }
+  }
+  return async (key, request, hooks) => {
+    const queuedAt = now()
+    const startup = hooks.startup = { phase: 'queued', queuedAt }
+    if (active >= concurrency && queue.length >= queueCapacity) {
+      Object.assign(startup, { phase: 'rejected', queueMs: 0 })
+      throw fail('context startup queue is full', 429)
+    }
+    let item
+    const admitted = new Promise((resolve, reject) => {
+      item = { hooks, resolve, waiting: true, cancel() {
+        if (!item.waiting) return
+        item.waiting = false
+        const index = queue.indexOf(item)
+        if (index !== -1) queue.splice(index, 1)
+        startup.phase = 'cancelled'; startup.queueMs = now() - queuedAt
+        reject(new Error('context startup cancelled before admission'))
+      } }
+      hooks.cancelStartup = item.cancel
+      queue.push(item)
+      drain()
+    })
+    log(`context ${key} startup queued; active=${active}; waiting=${queue.length}`)
+    await admitted
+    const startedAt = now()
+    Object.assign(startup, { phase: 'booting', startedAt, queueMs: startedAt - queuedAt })
+    log(`context ${key} startup admitted; queueMs=${startup.queueMs}; active=${active}`)
+    try {
+      // Removal can win between permit delivery and this continuation.
+      if (hooks.admission?.allowed() === false) throw new Error('context removed/released before boot')
+      const handle = await boot(key, request, hooks)
+      startup.phase = 'ready'
+      return handle
+    } catch (error) {
+      startup.phase = 'failed'
+      throw error
+    } finally {
+      startup.bootMs = now() - startedAt
+      log(`context ${key} startup ${startup.phase}; queueMs=${startup.queueMs}; bootMs=${startup.bootMs}`)
+      delete hooks.cancelStartup
+      active--
+      drain()
+    }
+  }
+}
+
+export function startupDiagnostics(hooks, now = Date.now) {
+  const value = hooks.startup
+  if (!value) return {}
+  return { startup: { ...value, queueMs: value.queueMs ?? now() - value.queuedAt,
+    ...(value.startedAt === undefined ? {} : { bootMs: value.bootMs ?? now() - value.startedAt }) } }
+}
+
 export class ManagedUserRegistry {
   managed = true
   entries = new Map()
   serial = Promise.resolve()
   scope = new AsyncLocalStorage()
   closing = false
-  constructor({ root, hostId, capacity, boot, claim = async () => {}, release = async () => {}, now = Date.now, log = () => {} }) {
-    Object.assign(this, { root, hostId, capacity, boot, claim, release, now, log })
+  constructor({ root, hostId, capacity, boot, startupConcurrency = 1, startupQueueCapacity = 128, claim = async () => {}, release = async () => {}, now = Date.now, log = () => {} }) {
+    Object.assign(this, { root, hostId, capacity, claim, release, now, log })
+    this.boot = limitContextStartup(boot, startupConcurrency, { queueCapacity: startupQueueCapacity, now, log })
   }
   locked(operation) {
     const result = this.serial.then(operation)
@@ -78,7 +146,7 @@ export class ManagedUserRegistry {
     await this.locked(() => this.check(key, value))
     const entry = this.get(key)
     return { ...fence(value), contextKey: key, status: entry?.status ?? 'absent', hostId: this.hostId,
-      ...(entry ? await this.activity(entry) : { activeRequests: 0, busy: false, lastActiveAt: this.now() }),
+      ...(entry ? { ...await this.activity(entry), ...startupDiagnostics(entry.hooks, this.now) } : { activeRequests: 0, busy: false, lastActiveAt: this.now() }),
       ...(this.admitting(key) ? { webPath: `/u/${key}/`, webToken: entry.webToken } : {}) }
   }
   async ensure(key, request) {
@@ -94,6 +162,9 @@ export class ManagedUserRegistry {
         if (current.draining || current.request.leaseExpiresAt <= this.now()) throw fail('context lease expired/released')
         if (current.request.userCode !== request.userCode || current.request.enterpriseId !== request.enterpriseId || current.request.userId !== request.userId) throw fail('tenant identity mismatch')
         current.request.leaseExpiresAt = Math.max(current.request.leaseExpiresAt, request.leaseExpiresAt)
+        // No context ran for a rejected admission. Keep the original fence,
+        // capacity reservation and owned/renewed claim; only retry its boot.
+        if (current.status === 'failed' && current.hooks.startup?.phase === 'rejected') this.start(current, false)
         return current
       }
       if (!request.env || typeof request.env !== 'object' || Array.isArray(request.env)) throw fail('fresh context requires env', 400)
@@ -103,26 +174,31 @@ export class ManagedUserRegistry {
       const e = { user: key, status: 'starting', request: { ...request, env: { ...request.env } }, hooks: {}, sockets: new Set(), webRequests: 0, lastActiveAt: this.now(), webToken: randomBytes(32).toString('base64url') }
       e.hooks.admission = { allowed: () => !e.draining && e.request.leaseExpiresAt > this.now() }
       this.entries.set(key, e)
-      e.booted = this.scope.run(e, async () => {
-        await this.claim(key, e.request)
-        e.handle = await this.boot(key, e.request, e.hooks)
-        return e.handle
-      })
-      e.ready = e.booted.then(() => this.locked(() => {
-        if (e.draining || e.request.leaseExpiresAt <= this.now()) throw fail('context removed/released while starting')
-        e.status = 'ready'; return e
-      })).catch(error => { e.status = 'failed'; e.error = String(error); throw error })
-      e.ready.catch(() => {})
+      this.start(e, true)
       return e
     })
     return entry.ready
+  }
+  start(entry, claim) {
+    entry.status = 'starting'
+    delete entry.error
+    entry.booted = this.scope.run(entry, async () => {
+      if (claim) await this.claim(entry.user, entry.request)
+      entry.handle = await this.boot(entry.user, entry.request, entry.hooks)
+      return entry.handle
+    })
+    entry.ready = entry.booted.then(() => this.locked(() => {
+      if (entry.draining || entry.request.leaseExpiresAt <= this.now()) throw fail('context removed/released while starting')
+      entry.status = 'ready'; return entry
+    })).catch(error => { entry.status = 'failed'; entry.error = String(error); throw error })
+    entry.ready.catch(() => {})
   }
   async remove(key, value) {
     const entry = await this.locked(async () => {
       const saved = await this.check(key, value)
       if (!saved?.deleted) await this.persist(key, { ...fence(value), deleted: true })
       const e = this.get(key)
-      if (e) e.draining = true
+      if (e) { e.draining = true; e.hooks.cancelStartup?.() }
       return e
     })
     if (!entry) return

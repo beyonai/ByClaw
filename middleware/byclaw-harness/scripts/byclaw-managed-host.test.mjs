@@ -152,3 +152,121 @@ test('lease drain closes browser admission while preserving running DSH executio
   assert.equal(closed, true); assert.equal(disposed, false)
   assert.equal((await r.describe('tenant-a', request())).activeRequests, 1)
 })
+
+test('startup budget queues distinct contexts while same-context followers and renewals keep working', async t => {
+  const first = deferred(); const started = deferred(); const secondStarted = deferred(); const boots = []
+  const r = await registry(t, { capacity: 3, boot: async key => {
+    boots.push(key)
+    if (key === 'alpha') { started.resolve(); await first.promise }
+    else secondStarted.resolve()
+    return { dispose: async () => {}, activity: () => ({ busy: false, activeRequests: 0 }) }
+  } })
+  const a = request('alpha', { capacity: 3 }); const b = request('beta', { capacity: 3 })
+  const one = r.ensure('alpha', a); await started.promise
+  const two = r.ensure('beta', b); const follower = r.ensure('beta', { ...b, leaseExpiresAt: b.leaseExpiresAt + 1000 })
+  await r.locked(() => {})
+  assert.deepEqual(boots, ['alpha'])
+  const queued = await r.describe('beta', b)
+  assert.equal(queued.status, 'starting'); assert.equal(queued.startup.phase, 'queued')
+  assert.equal(r.get('beta').request.leaseExpiresAt, b.leaseExpiresAt + 1000)
+  first.resolve(); await secondStarted.promise
+  assert.equal(await two, await follower); await one
+  assert.deepEqual(boots, ['alpha', 'beta'])
+  const done = (await r.describe('beta', b)).startup
+  assert.equal(done.phase, 'ready'); assert.ok(done.queueMs >= 0); assert.ok(done.bootMs >= 0)
+})
+
+test('queued deletion releases its claim without waiting for another context and never boots tombstoned generation', async t => {
+  const hold = deferred(); const started = deferred(); const boots = []; const released = []
+  const r = await registry(t, { capacity: 2, boot: async key => {
+    boots.push(key); started.resolve(); await hold.promise
+    return { dispose: async () => {}, activity: () => ({ busy: false, activeRequests: 0 }) }
+  }, release: async key => { released.push(key) } })
+  const a = request('alpha', { capacity: 2 }); const b = request('beta', { capacity: 2 })
+  const one = r.ensure('alpha', a); await started.promise
+  const two = r.ensure('beta', b); two.catch(() => {})
+  await r.locked(() => {})
+  try {
+    await r.remove('beta', b)
+    await assert.rejects(two, /cancel|removed|released/)
+    assert.deepEqual(released, ['beta']); assert.deepEqual(boots, ['alpha'])
+    await assert.rejects(r.ensure('beta', b), /tombston|released/)
+  } finally { hold.resolve(); await one }
+})
+
+test('transient startup overload retries the same managed fence without reclaiming or releasing its reservation', async t => {
+  const alphaGate = deferred(); const alphaStarted = deferred(); const betaGate = deferred(); const betaStarted = deferred()
+  const boots = []; const claims = []; const releases = []
+  const r = await registry(t, { capacity: 2, startupConcurrency: 1, startupQueueCapacity: 0,
+    claim: async key => { claims.push(key) }, release: async key => { releases.push(key) },
+    boot: async key => {
+      boots.push(key)
+      if (key === 'alpha') { alphaStarted.resolve(); await alphaGate.promise }
+      else { betaStarted.resolve(); await betaGate.promise }
+      return { dispose: async () => {}, activity: () => ({ busy: false, activeRequests: 0 }) }
+    } })
+  const alpha = request('alpha', { capacity: 2 }); const beta = request('beta', { capacity: 2 })
+  const one = r.ensure('alpha', alpha); await alphaStarted.promise
+  try {
+    await assert.rejects(r.ensure('beta', beta), error => error.status === 429)
+    assert.deepEqual(claims, ['alpha', 'beta']); assert.deepEqual(releases, [])
+    await Promise.all([r.ensure('beta', beta), r.ensure('beta', beta)].map(pending =>
+      assert.rejects(pending, error => error.status === 429)))
+    assert.deepEqual(claims, ['alpha', 'beta']); assert.deepEqual(releases, [])
+    await assert.rejects(r.ensure('beta', { ...beta, generation: 2 }), /fence/)
+    alphaGate.resolve(); await one
+    const retry = r.ensure('beta', beta); const follower = r.ensure('beta', { ...beta, env: undefined })
+    retry.catch(() => {}); follower.catch(() => {})
+    // A rejected entry must become a new starting attempt before either waiter completes.
+    await r.locked(() => {})
+    assert.equal(r.get('beta').status, 'starting')
+    await betaStarted.promise
+    assert.deepEqual(boots, ['alpha', 'beta']); assert.deepEqual(claims, ['alpha', 'beta']); assert.deepEqual(releases, [])
+    betaGate.resolve(); assert.equal(await retry, await follower)
+    assert.equal((await r.describe('beta', beta)).status, 'ready')
+    await r.remove('beta', beta)
+    assert.deepEqual(releases, ['beta'])
+    assert.equal((await r.describe('beta', beta)).status, 'absent')
+  } finally { alphaGate.resolve(); betaGate.resolve(); await one }
+})
+
+for (const boundary of ['delete', 'expiry']) {
+  test(`startup overload retry cannot resurrect a managed context across ${boundary}`, async t => {
+    const hold = deferred(); const started = deferred(); const boots = []; const releases = []
+    let now = Date.now()
+    const r = await registry(t, { capacity: 2, startupQueueCapacity: 0, now: () => now,
+      boot: async key => { boots.push(key); started.resolve(); await hold.promise; return { dispose: async () => {}, activity: () => ({ busy: false, activeRequests: 0 }) } },
+      release: async key => { releases.push(key) } })
+    const alpha = request('alpha', { capacity: 2 }); const beta = request('beta', { capacity: 2, leaseExpiresAt: now + 100 })
+    const active = r.ensure('alpha', alpha); await started.promise
+    try {
+      await assert.rejects(r.ensure('beta', beta), error => error.status === 429)
+      hold.resolve(); await active
+      if (boundary === 'delete') {
+        // The existing short registry lock establishes the durable tombstone before retry.
+        const removed = r.remove('beta', beta)
+        await assert.rejects(r.ensure('beta', beta), /released|tombston/)
+        await removed
+      } else {
+        now += 101
+        await assert.rejects(r.ensure('beta', { ...beta, leaseExpiresAt: now + 1000 }), /expired|released/)
+        await r.sweep()
+      }
+      assert.deepEqual(boots, ['alpha']); assert.deepEqual(releases, ['beta'])
+      assert.equal((await r.describe('beta', beta)).status, 'absent')
+      await assert.rejects(r.ensure('beta', { ...beta, leaseExpiresAt: now + 1000 }), /tombston|released/)
+    } finally { hold.resolve(); await active }
+  })
+}
+
+test('an actual managed boot failure remains sticky until fenced removal', async t => {
+  let boots = 0; let claims = 0; let releases = 0
+  const r = await registry(t, { boot: async () => { boots++; throw new Error('plugin boot failed') },
+    claim: async () => { claims++ }, release: async () => { releases++ } })
+  const value = request('failed-context')
+  await assert.rejects(r.ensure('failed-context', value), /plugin boot failed/)
+  await assert.rejects(r.ensure('failed-context', value), /plugin boot failed/)
+  assert.equal(boots, 1); assert.equal(claims, 1); assert.equal(releases, 0)
+  await r.remove('failed-context', value)
+  assert.equal(releases, 1)
+})

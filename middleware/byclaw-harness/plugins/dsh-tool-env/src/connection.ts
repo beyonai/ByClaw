@@ -59,6 +59,7 @@ export class ToolEnvConnection extends Service {
   private inflight = 0
   private readonly streams = new Set<Socket>()
   private idleTimer: NodeJS.Timeout | undefined
+  private idleVersion = 0
   private closed = false
   private pausing: Promise<void> | undefined
   /** When residual processes on B first postponed a pause; cleared by any operation or a release. */
@@ -236,6 +237,7 @@ export class ToolEnvConnection extends Service {
   }
 
   private touch(): void {
+    this.idleVersion++
     if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
     if (this.closed || this.options.idleMs <= 0 || this.inflight > 0 || this.streams.size > 0) return
     if (this.live === undefined && this.current === undefined) return
@@ -246,7 +248,11 @@ export class ToolEnvConnection extends Service {
   private async pauseIdle(): Promise<void> {
     if (this.closed || this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
     const logger = this.ctx.logger('byclaw-tool-env')
+    const version = this.idleVersion
     if (await this.stillBusy()) { this.touch(); return }
+    // A residual-process probe can yield to a new operation or stream. Only the
+    // idle interval it inspected may release B; newer activity owns its timer.
+    if (this.closed || this.idleVersion !== version || this.inflight > 0 || this.streams.size > 0 || this.pausing !== undefined) return
     this.pausing = (async () => {
       await this.drop()
       await this.backend.pause()

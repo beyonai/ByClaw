@@ -37,6 +37,8 @@
  *   BYCLAW_MULTI_HOST_ID           host id written into Redis claims (default: hostname).
  *   BYCLAW_MULTI_HOST_ROOT         state root; user homes are <root>/users/<userCode>/dsh-home (default /data/multi-host).
  *   BYCLAW_MULTI_HOST_USERS        optional comma list booted at startup (sandboxId `multi-host-<userCode>`).
+ *   BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY  simultaneous context boots per process (positive integer; default 1).
+ *   BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY  waiting boots per process (nonnegative integer; default 128; overflow 429).
  *   BYCLAW_MULTI_HOST_PUBLIC_URL   optional browser-facing root of this gateway (e.g. https://app.example/dsh/);
  *                                  sets each context's web-runtime `publicUrl` to <root>u/<userCode>/ and the
  *                                  cookie Path to that URL's path. Default: gateway at `/`, publicUrl http://127.0.0.1/.
@@ -64,7 +66,7 @@
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
-import { ManagedUserRegistry } from './byclaw-managed-host.mjs'
+import { ManagedUserRegistry, limitContextStartup, startupDiagnostics } from './byclaw-managed-host.mjs'
 export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -356,6 +358,10 @@ export function readHostConfig(env) {
   const port = Number(env.BYCLAW_MULTI_HOST_PORT || 7300)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`BYCLAW_MULTI_HOST_PORT ${env.BYCLAW_MULTI_HOST_PORT} is invalid`)
   const managed = env.BYCLAW_MULTI_HOST_MANAGED === '1'
+  const startupConcurrency = Number(env.BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY ?? 1)
+  if (!Number.isSafeInteger(startupConcurrency) || startupConcurrency < 1) throw new Error('BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY must be a positive integer')
+  const startupQueueCapacity = Number(env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY ?? 128)
+  if (!Number.isSafeInteger(startupQueueCapacity) || startupQueueCapacity < 0 || env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY?.trim() === '') throw new Error('BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY must be a nonnegative integer')
   const capacity = Number(env.BYCLAW_MULTI_HOST_CAPACITY)
   if (managed && !/^[0-9a-f-]{36}$/i.test(env.BYCLAW_MULTI_HOST_ID ?? '')) throw new Error('BYCLAW_MULTI_HOST_ID must be a shared instance UUID')
   if (managed && (!Number.isSafeInteger(capacity) || capacity < 1)) throw new Error('BYCLAW_MULTI_HOST_CAPACITY must be positive')
@@ -380,7 +386,7 @@ export function readHostConfig(env) {
     listenHost: env.BYCLAW_MULTI_HOST_LISTEN_HOST || '0.0.0.0',
     hostId: env.BYCLAW_MULTI_HOST_ID || hostname(),
     root: env.BYCLAW_MULTI_HOST_ROOT ?? '/data/multi-host',
-    managed, capacity,
+    managed, capacity, startupConcurrency, startupQueueCapacity,
     preloadUsers: managed ? [] : preloadUsers,
     publicBase,
     basePath: publicBase?.pathname ?? '/',
@@ -652,8 +658,8 @@ export class UserRegistry {
   #scope = new AsyncLocalStorage()
   #closing = false
 
-  constructor({ boot, claim = async () => {}, release = async () => {}, log = () => {}, createToken = () => randomBytes(32).toString('base64url'), disposeTimeoutMs = DISPOSE_TIMEOUT_MS }) {
-    this.boot = boot
+  constructor({ boot, startupConcurrency = 1, startupQueueCapacity = 128, claim = async () => {}, release = async () => {}, log = () => {}, createToken = () => randomBytes(32).toString('base64url'), disposeTimeoutMs = DISPOSE_TIMEOUT_MS }) {
+    this.boot = limitContextStartup(boot, startupConcurrency, { queueCapacity: startupQueueCapacity, log })
     this.claim = claim
     this.release = release
     this.log = log
@@ -667,7 +673,7 @@ export class UserRegistry {
   describe(user) {
     const entry = this.#entries.get(user)
     if (entry === undefined) return { userCode: user, status: 'absent' }
-    return { userCode: user, status: entry.status, ...entry.error === undefined ? {} : { error: entry.error } }
+    return { userCode: user, status: entry.status, ...startupDiagnostics(entry.hooks), ...entry.error === undefined ? {} : { error: entry.error } }
   }
 
   /** The web token of a running context, for callers that only read (GET) and never boot. */
@@ -711,6 +717,7 @@ export class UserRegistry {
       return current.ready
     }
     const entry = { user, status: 'starting', request, webToken: this.createToken(), hooks: {}, startedAt: Date.now() }
+    entry.hooks.admission = { allowed: () => entry.status !== 'failed' && entry.removal === undefined }
     entry.ready = this.#start(entry)
     // Callers observe failures through their own await; this keeps a dropped
     // ensure (e.g. a preload) from surfacing as an unhandled rejection.
@@ -779,6 +786,7 @@ export class UserRegistry {
   markFailed(entry, error) {
     if (this.#entries.get(entry.user) !== entry || entry.status === 'failed' || entry.removal !== undefined) return false
     entry.status = 'failed'
+    entry.hooks.cancelStartup?.()
     entry.error = errorMessage(error)
     this.log(`user ${entry.user} failed:`, inspect(error, { depth: 4 }))
     void this.#dispose(entry)
@@ -818,6 +826,7 @@ export class UserRegistry {
       return this.release(user).catch(error => this.log(`release ${user} failed:`, errorMessage(error)))
     }
     entry.removal ??= (async () => {
+      entry.hooks.cancelStartup?.()
       await entry.ready.catch(() => {})
       await this.#dispose(entry)
       await this.release(user).catch(error => this.log(`release ${user} failed:`, errorMessage(error)))
@@ -932,7 +941,7 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
       const entry = await registry.ensure(user, request)
       return sendJson(res, 200, { userCode: user, status: 'ready', hostId, webPath: webPrefix(user, basePath), webToken: entry.webToken })
     } catch (error) {
-      return sendJson(res, 503, { userCode: user, status: 'failed', hostId, error: errorMessage(error) })
+      return sendJson(res, error.status ?? 503, { userCode: user, status: 'failed', hostId, error: errorMessage(error) })
     }
   }
 
@@ -1243,7 +1252,7 @@ async function main() {
   const managedClaims = config.managed ? createManagedClaims(redis, config.hostId) : undefined
   const Registry = config.managed ? ManagedUserRegistry : UserRegistry
   const registry = new Registry({
-    root: config.root, hostId: config.hostId, capacity: config.capacity,
+    root: config.root, hostId: config.hostId, capacity: config.capacity, startupConcurrency: config.startupConcurrency, startupQueueCapacity: config.startupQueueCapacity,
     boot: (user, request, hooks) => bootUserContext(config, user, request, hooks, { current: () => currentUserToken(redis, user) }),
     claim: managedClaims?.claim ?? (user => redis.set(sharedHostKey(user), config.hostId, 'EX', SHARED_HOST_TTL_SECONDS)),
     release: managedClaims?.release ?? (user => redis.eval(RELEASE_SCRIPT, 1, sharedHostKey(user), config.hostId)),

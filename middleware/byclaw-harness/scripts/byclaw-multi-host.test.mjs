@@ -141,6 +141,16 @@ test('host config refuses to start without a token', () => {
   assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_PORT: 'x' }), /PORT/)
   assert.equal(config.toolEnvBackend, 'opensandbox')
   assert.equal(config.toolEnvBe, undefined)
+  assert.equal(config.startupConcurrency, 1)
+  assert.equal(config.startupQueueCapacity, 128)
+  assert.equal(readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY: '0' }).startupQueueCapacity, 0)
+  assert.equal(readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY: '3' }).startupConcurrency, 3)
+  for (const value of ['0', '-1', '1.5', 'NaN', '', '9007199254740992']) {
+    assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY: value }), /STARTUP_CONCURRENCY/)
+  }
+  for (const value of ['-1', '1.5', 'NaN', '', '9007199254740992']) {
+    assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY: value }), /STARTUP_QUEUE_CAPACITY/)
+  }
 })
 
 test('host config selects the byclaw-be tool-environment backend with the plugin\'s names and defaults', () => {
@@ -315,7 +325,9 @@ test('a failed boot marks the user failed and the next ensure retries', async ()
     boot: async () => { attempt++; if (attempt === 1) throw new Error('boom'); return fakeHandle('u1', []) },
   })
   await assert.rejects(registry.ensure('u1', { sandboxId: 's', env: {} }), /boom/)
-  assert.deepEqual(registry.describe('u1'), { userCode: 'u1', status: 'failed', error: 'boom' })
+  const { startup, ...description } = registry.describe('u1')
+  assert.deepEqual(description, { userCode: 'u1', status: 'failed', error: 'boom' })
+  assert.equal(startup.phase, 'failed')
   assert.deepEqual(registry.servedUsers(), [])
   const entry = await registry.ensure('u1', { sandboxId: 's', env: {} })
   assert.equal(entry.status, 'ready')
@@ -339,15 +351,62 @@ test('remove disposes one user, releases its claim and leaves others running', a
 
 test('remove during boot waits, then disposes the late handle', async () => {
   const gate = deferred()
+  const started = deferred()
   const disposed = []
-  const registry = new UserRegistry({ boot: async user => { await gate.promise; return fakeHandle(user, disposed) } })
+  const registry = new UserRegistry({ boot: async user => { started.resolve(); await gate.promise; return fakeHandle(user, disposed) } })
   const ensure = registry.ensure('u1', { sandboxId: 's', env: {} })
+  await started.promise
   const removal = registry.remove('u1')
   gate.resolve()
   await assert.rejects(ensure, /removed while starting/)
   await removal
   assert.deepEqual(disposed, ['u1'])
   assert.equal(registry.describe('u1').status, 'absent')
+})
+
+for (const concurrency of [1, 2, 3]) {
+  test(`startup budget ${concurrency} is independent of resident contexts and returns permits after failure`, async () => {
+    const started = []; const gates = new Map(); const count = concurrency + 2
+    for (let i = 0; i < count; i++) gates.set(`account-${i}`, deferred())
+    const registry = new UserRegistry({ startupConcurrency: concurrency, boot: async user => {
+      started.push(user)
+      await gates.get(user).promise
+      if (user === 'account-0') throw new Error('boot failed')
+      return fakeHandle(user, [])
+    } })
+    const pending = [...gates.keys()].map(user => registry.ensure(user, { sandboxId: `sandbox-${user}`, env: {} }))
+    for (const promise of pending) promise.catch(() => {})
+    try {
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(started.length, concurrency)
+      gates.get('account-0').resolve()
+      await assert.rejects(pending[0], /boot failed/)
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(started.length, concurrency + 1)
+      assert.equal(registry.describe(`account-${concurrency + 1}`).startup.phase, 'queued')
+      assert.ok(registry.servedUsers().includes(`account-${concurrency + 1}`), 'queued claims are renewed')
+    } finally {
+      for (const gate of gates.values()) gate.resolve()
+      await Promise.allSettled(pending)
+    }
+    assert.deepEqual(started, [...gates.keys()])
+    assert.equal(registry.describe(`account-${count - 1}`).status, 'ready')
+  })
+}
+
+test('removing a queued legacy user does not boot it or block another active context', async () => {
+  const gate = deferred(); const started = deferred(); const boots = []; const released = []
+  const registry = new UserRegistry({ boot: async user => {
+    boots.push(user); started.resolve(); await gate.promise; return fakeHandle(user, [])
+  }, release: async user => { released.push(user) } })
+  const first = registry.ensure('alpha', { sandboxId: 'a', env: {} }); await started.promise
+  const queued = registry.ensure('beta', { sandboxId: 'b', env: {} }); queued.catch(() => {})
+  await new Promise(resolve => setImmediate(resolve))
+  try {
+    await registry.remove('beta')
+    await assert.rejects(queued, /cancel/)
+    assert.deepEqual(boots, ['alpha']); assert.deepEqual(released, ['beta'])
+  } finally { gate.resolve(); await first }
 })
 
 test('a rejection raised from a context scope fails only that user', async () => {
@@ -541,4 +600,47 @@ test('upstream auth re-mints after the context rejects its cookie', async (t) =>
   assert.equal(launches, 2)
   const bad = createUpstreamAuth({ port: () => dshPort, launchUrl: origin => `${origin}?token=wrong` })
   await assert.rejects(bad.cookie(), /answered 401/)
+})
+
+for (const capacity of [0, 2]) {
+  test(`startup queue capacity ${capacity} rejects excess distinct contexts but permits running renewals`, async () => {
+    const gate = deferred(); const started = deferred(); let boots = 0
+    const registry = new UserRegistry({ startupQueueCapacity: capacity, boot: async user => {
+      boots++; started.resolve(); await gate.promise; return fakeHandle(user, [])
+    } })
+    const first = registry.ensure('first', { sandboxId: 'one', env: {} }); await started.promise
+    const pending = []
+    for (let i = 0; i < capacity; i++) pending.push(registry.ensure(`waiting-${i}`, { sandboxId: `s-${i}`, env: {} }))
+    let failure
+    const overflow = registry.ensure('overflow', { sandboxId: 'excess', env: {} }).catch(error => { failure = error })
+    try {
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(failure?.status, 429)
+      assert.match(failure.message, /startup queue/)
+      assert.equal(boots, 1)
+    } finally {
+      gate.resolve(); await Promise.allSettled([first, overflow, ...pending])
+    }
+    assert.equal((await registry.ensure('first', { sandboxId: 'one', env: {} })).status, 'ready')
+    assert.equal(boots, capacity + 1)
+  })
+}
+
+test('legacy admin API reports startup overload as retryable 429', async t => {
+  const gate = deferred(); const started = deferred()
+  const registry = new UserRegistry({ startupQueueCapacity: 0, boot: async user => {
+    started.resolve(); await gate.promise; return fakeHandle(user, [])
+  } })
+  const first = registry.ensure('first', { sandboxId: 's', env: {} }); await started.promise
+  const server = createHostServer({ registry, adminToken: 'private', hostId: 'local' })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => { server.close(); server.closeAllConnections() })
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/users/second`, {
+      method: 'PUT', headers: { authorization: 'Bearer private', 'content-type': 'application/json' },
+      body: JSON.stringify({ sandboxId: 'other', env: {} }),
+    })
+    assert.equal(response.status, 429)
+    assert.match((await response.json()).error, /startup queue/)
+  } finally { gate.resolve(); await first }
 })
