@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import {
   buildHubSkillAuthHeaders,
+  getHubSkillDownloadState,
+  hubSkillVersionSignature,
   resolveHubSkillApiUrl,
   syncHubSkillsForManagedAgents,
   validateHubSkillZipEntryName,
@@ -148,6 +150,11 @@ describe("hub-skill-sync", () => {
     ).resolves.toMatchObject({ changed: false, checked: 1, skipped: ["hub-skill"] });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getHubSkillDownloadState("hub-skill")).toMatchObject({ state: "DOWNLOADED", version: "v1" });
+    expect(hubSkillVersionSignature(managed[0].hubSkills)).toBe("hub-skill:v1");
+    fetchMock.mockResolvedValueOnce(versionResponse("v2")).mockResolvedValueOnce(zipResponse(zipPath));
+    await syncHubSkillsForManagedAgents({ managed, stateDir, baseUrl: "http://example.test/byaiService" });
+    expect(hubSkillVersionSignature(managed[0].hubSkills)).toBe("hub-skill:v2");
   });
 
   it.each(["version", "download", "extract"])(

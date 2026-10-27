@@ -40,11 +40,10 @@ public class DigitalEmployeeRuntimeRefreshService {
 
     /** Durable sync jobs must observe refresh failures rather than acknowledge them as complete. */
     public void refreshForResourceSync(Long employeeId) {
-        if (!postCommitRefreshExecutor.refresh(employeeId, null)) {
+        if (!refreshAndNotify(new RuntimeRefreshRequest(employeeId, null,
+            DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED, "enterprise-resource-sync"))) {
             throw new IllegalStateException("数字员工运行态刷新未完成");
         }
-        digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED,
-            employeeId, "enterprise-resource-sync");
     }
 
     public void scheduleSkillRuntimeRefreshAfterCommit(Collection<Long> digitalEmployeeIds) {
@@ -109,10 +108,7 @@ public class DigitalEmployeeRuntimeRefreshService {
         Exception failure = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                if (postCommitRefreshExecutor.refresh(digitalEmployeeId, request.inputDto())) {
-                    digEmployeeChangeEventPublisher.publishNowQuietly(request.eventType(), digitalEmployeeId, request.source());
-                    return;
-                }
+                if (refreshAndNotify(request)) return;
                 failure = new IllegalStateException("数字员工及关联资源运行态同步未完成");
             } catch (Exception e) {
                 failure = e;
@@ -121,6 +117,13 @@ public class DigitalEmployeeRuntimeRefreshService {
         }
         // The association transaction has already committed. Tell the caller to retry instead of announcing stale data.
         throw new BaseException("配置已保存，但运行配置同步失败，请重试保存；数字员工ID=" + digitalEmployeeId, failure);
+    }
+
+    /** Shared preparation trigger for manual binding and resource-sync binding, after their own source/permission checks. */
+    private boolean refreshAndNotify(RuntimeRefreshRequest request) {
+        if (!postCommitRefreshExecutor.refresh(request.digitalEmployeeId(), request.inputDto())) return false;
+        digEmployeeChangeEventPublisher.publishNowQuietly(request.eventType(), request.digitalEmployeeId(), request.source());
+        return true;
     }
 
     private static RuntimeRefreshRequest mergeRequest(RuntimeRefreshRequest existing, RuntimeRefreshRequest incoming) {

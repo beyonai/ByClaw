@@ -46,6 +46,28 @@ export type HubSkillSyncResult = {
   failed: string[];
 };
 
+export type HubSkillDownloadState = {
+  state: "PREPARING" | "DOWNLOADED" | "FAILED";
+  version?: string;
+  errorCode?: string;
+  checkedAt: number;
+};
+const downloadStates = new Map<string, HubSkillDownloadState>();
+export function getHubSkillDownloadState(skillCode: string): HubSkillDownloadState | undefined {
+  return downloadStates.get(skillCode);
+}
+export function hubSkillVersionSignature(refs: BaiyingHubSkillRef[] = []): string {
+  return refs.map(ref => `${ref.skillCode}:${downloadStates.get(ref.skillCode)?.version ?? ""}`).sort().join("|");
+}
+export function classifyHubSkillFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/HTTP (401|403)/.test(message)) return "DOWNLOAD_UNAUTHORIZED";
+  if (/HTTP 404/.test(message)) return "PACKAGE_NOT_FOUND";
+  if (/timeout|abort/i.test(message)) return "DOWNLOAD_TIMEOUT";
+  if (/zip|SKILL.md|package name/i.test(message)) return "INVALID_PACKAGE";
+  return "DOWNLOAD_FAILED";
+}
+
 function nonEmptyString(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 }
@@ -418,14 +440,20 @@ export async function syncHubSkillsForManagedAgents(params: {
   if (!hasAnyHubSkills) {
     return { changed: false, checked: 0, downloaded: [], skipped: [], failed: [] };
   }
-  const baseUrl =
-    params.baseUrl?.replace(/\/+$/g, "") ||
-    (await discoverBackendBaseUrl({ logger: params.logger })).replace(/\/+$/g, "");
-  if (!baseUrl) {
-    throw new Error("backend service discovery returned no usable instance");
+  let baseUrl: string;
+  let headers: Record<string, string>;
+  try {
+    baseUrl = params.baseUrl?.replace(/\/+$/g, "") ||
+      (await discoverBackendBaseUrl({ logger: params.logger })).replace(/\/+$/g, "");
+    if (!baseUrl) throw new Error("backend service discovery returned no usable instance");
+    headers = await buildHubSkillAuthHeaders({ redisJsonStore: params.redisJsonStore });
+  } catch (error) {
+    for (const agent of params.managed) for (const ref of agent.hubSkills ?? []) {
+      downloadStates.set(ref.skillCode, { state: "FAILED", errorCode: "BACKEND_UNAVAILABLE", checkedAt: Date.now() });
+    }
+    throw error;
   }
   const timeoutMs = Math.max(1000, params.timeoutMs ?? 30_000);
-  const headers = await buildHubSkillAuthHeaders({ redisJsonStore: params.redisJsonStore });
   const skillsRoot = path.join(params.stateDir ?? resolveStateDir(), "skills");
   const downloaded: string[] = [];
   const skipped: string[] = [];
@@ -439,6 +467,7 @@ export async function syncHubSkillsForManagedAgents(params: {
       }
       processed.add(ref.skillCode);
 
+      downloadStates.set(ref.skillCode, { state: "PREPARING", checkedAt: Date.now() });
       try {
         const versionUrl = resolveHubSkillApiUrl(baseUrl, ref.versionUrl);
         const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
@@ -447,6 +476,7 @@ export async function syncHubSkillsForManagedAgents(params: {
         const local = await readLocalMetadata(targetDir);
         const localSkillDocExists = await hasSkillDoc(targetDir);
         if (local?.skillUrl === downloadUrl && local?.version === version.version && localSkillDocExists) {
+          downloadStates.set(ref.skillCode, { state: "DOWNLOADED", version: version.version, checkedAt: Date.now() });
           skipped.push(ref.skillCode);
           continue;
         }
@@ -459,11 +489,13 @@ export async function syncHubSkillsForManagedAgents(params: {
           timeoutMs,
           targetDir,
         });
+        downloadStates.set(ref.skillCode, { state: "DOWNLOADED", version: version.version, checkedAt: Date.now() });
         downloaded.push(ref.skillCode);
         params.logger?.info?.(
           `baiying-enhance: hub skill synced skillCode=${ref.skillCode} version=${version.version}`,
         );
       } catch (err) {
+        downloadStates.set(ref.skillCode, { state: "FAILED", errorCode: classifyHubSkillFailure(err), checkedAt: Date.now() });
         failed.push(ref.skillCode);
         params.logger?.warn?.(
           `baiying-enhance: hub skill sync failed skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,

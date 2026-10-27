@@ -21,6 +21,18 @@
 
 > **配置格式**：OpenClaw 网关从 **`~/.openclaw/openclaw.json`** 读取配置（内容为 **JSON**，亦支持 **JSON5**：注释与尾随逗号）。接入本插件时，请在同一文件中配置 `plugins.entries`，见下文示例。插件同步托管 Agent 时也会通过 `writeConfigFile` 写回**当前生效的配置文件路径**（通常为上述 `openclaw.json`）。
 
+## 技能准备与运行端回执
+
+资源中心手工关联和资源同步自动关联保留各自的权限、来源及撤销规则，在事务提交后共同使用 `DigitalEmployeeRuntimeRefreshService` 发布员工配置并触发本插件的 Hub 技能下载。后端同步成功仅表示配置发布完成。自动关联目标仍是 `userCode_personal` 固定个人助理。
+
+本插件增加 `baiying_skills`（`status` / `prepare`）工具。它只处理当前用户有权使用且当前员工已关联的技能，不搜索或安装整个 `SKILL_*` 目录。首次消息在 `before_dispatch` 中最多等待约 5 秒进行准备，超时后后台继续；模型通过同一个工具查询实际进度，准备成功后继续原任务。`before_prompt_build` 只查询状态，不在运行中的会话内改写配置。显式关闭 `hubSkillAutoSync` 时不会自动下载。
+
+Hub 技能的 `READY` 必须同时满足：当前员工 Redis 快照已应用、运行中配置已热加载、技能包版本已确认、`SKILL.md` 位于 `${OPENCLAW_STATE_DIR}/skills/<resourceCode>/`，并且其 frontmatter `name` 已挂载到员工的技能列表。代码目录名可以是数字资源编码。就绪表示技能定义可读取并调用，不代表技能内的每个外部服务、依赖或业务操作已经执行成功。内置技能在页面单独标识，不使用 Hub 下载回执。
+
+运行端每 15 秒更新 `byai:skill_runtime:<userId>:<employeeId>` Hash，以进程 UUID 为字段。回执包含员工快照 SHA-256、观测时间、60 秒有效期和各技能的版本/状态/受控错误码；Hash TTL 为 120 秒，回执不含本地路径或凭据。后端接口 `/digitalEmployeeController/querySkillRuntimeStatus` 重新校验使用权限和数据库关联，并比对当前快照及技能版本。没有有效回执显示“等待运行端确认”；存在多个活跃实例时须全部就绪才显示“可调用”。
+
+`/digitalEmployeeController/prepareSkills` 仅写当前用户的重试请求，不改变关联或授权。运行端按 15/30/60 秒退避补偿未完成的准备，每分钟重新检查包版本，覆盖 Pub/Sub 丢失和同编码升级。页面重试请求在下一次 15 秒检查中生效，首次对话和工具调用会立即触发准备。失败时页面和模型显示准备失败及错误码，而不是把已关联技能解释为不存在。旧版运行端没有回执，升级并启动用户运行实例后才能确认可用。
+
 ## 依赖与安装
 
 - **正常使用（`npm install -g openclaw` / `pnpm add -g openclaw` 等官方包）**  

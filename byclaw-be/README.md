@@ -826,3 +826,7 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 包括手工关联且没有自动关联来源记录的员工。省略授权字段或仅传 `autoAuthorize=false` 不会跳过内容刷新，
 也不会因此新增授权或自动关联；原有授权开关语义不变。关联资源 Redis 写入失败或缺少运行 JSON 时，
 不能发布员工的新快照或把同步标为全部生效。`VIEW`、`OBJECT` 和 `DIG_EMPLOYEE` 不属于此接口支持的同步类型。
+
+### 技能运行状态
+
+手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。

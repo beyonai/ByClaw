@@ -53,7 +53,7 @@ function unquoteYamlScalar(value: string): string {
   return trimmed;
 }
 
-function parseSkillFrontmatterName(content: string): string | undefined {
+export function parseSkillFrontmatterName(content: string): string | undefined {
   const text = content.replace(/^\uFEFF/, "");
   if (!text.startsWith("---")) {
     return undefined;
