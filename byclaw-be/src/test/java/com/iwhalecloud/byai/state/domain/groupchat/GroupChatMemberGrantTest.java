@@ -119,6 +119,7 @@ class GroupChatMemberGrantTest extends I18nTestSupport {
         GroupChatApplicationService target = new GroupChatApplicationService(sessions, mock(SequenceService.class),
             authorization, members, mock(ProjectApplicationService.class), projectMembers,
             mock(ByaiMessageMapper.class), mock(GroupChatExecutionCoordinator.class), events, mock(SessionExtService.class));
+        ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
         ReflectionTestUtils.setField(target, "authApplicationService", authService);
         ReflectionTestUtils.setField(target, "invitationService", invitations);
         ReflectionTestUtils.setField(target, "tenantUserMembershipService", tenantUserMembershipService);

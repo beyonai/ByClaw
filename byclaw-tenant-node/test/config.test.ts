@@ -31,6 +31,22 @@ const env = {
   REDIS_TLS: "true",
 };
 describe("fixed tenant configuration", () => {
+  it("defaults the shared quota reader to an environment-independent key and ALLOW on Redis failure", () => {
+    expect(readConfig(env).quota).toEqual({
+      keyPrefix: "byclaw:shared:quota:v1:",
+      failurePolicy: "ALLOW",
+    });
+    expect(
+      readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "quota:", QUOTA_REDIS_FAILURE_POLICY: "REJECT" })
+        .quota,
+    ).toEqual({ keyPrefix: "quota:", failurePolicy: "REJECT" });
+    expect(() => readConfig({ ...env, QUOTA_REDIS_FAILURE_POLICY: "ignore" })).toThrow(
+      "Invalid QUOTA_REDIS_FAILURE_POLICY",
+    );
+    expect(() => readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "" })).toThrow(
+      "Invalid QUOTA_REDIS_KEY_PREFIX",
+    );
+  });
   it.each([undefined, "", "host.containers.internal"])(
     "advertises Kubernetes Pod IP instead of an unresolvable hostname when launch host is %s",
     (advertiseHost) => {

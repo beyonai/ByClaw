@@ -190,6 +190,7 @@ class WorkgroupCreationHookTest {
             var target = new TenantGroupCreationService(node, data, tenantMembers, projects, mock(WorkgroupTemplateService.class),
                 mock(AuthApplicationService.class));
             ReflectionTestUtils.setField(target, "groupWorkAssistant", assistant);
+            ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
             ReflectionTestUtils.setField(target, "workgroupHooks", hooks);
             when(data.read(any(), anyString())).thenAnswer(invocation -> {
                 if (failDetailRead) throw new IllegalStateException("detail unavailable");
@@ -203,6 +204,7 @@ class WorkgroupCreationHookTest {
             var sequence = mock(SequenceService.class); when(sequence.nextVal()).thenReturn(9007199254740993L);
             var target = new GroupChatApplicationService(mock(SessionService.class), sequence, mock(GroupChatAuthorizationService.class),
                 members, projects, mock(ProjectMemberService.class), null, null, null, mock(SessionExtService.class));
+            ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
             ReflectionTestUtils.setField(target, "workgroupHooks", hooks);
             var service = proxy(target);
             new GroupChatController(service, null, null, null).create(request);

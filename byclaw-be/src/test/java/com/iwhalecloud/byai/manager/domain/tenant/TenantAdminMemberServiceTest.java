@@ -10,6 +10,11 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.quota.QuotaSnapshot;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import com.iwhalecloud.byai.common.quota.SharedQuotaReader;
+import java.util.Optional;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -25,8 +30,19 @@ class TenantAdminMemberServiceTest {
 
     private final TenantAdminMemberMapper memberMapper = mock(TenantAdminMemberMapper.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
+    private final SharedQuotaReader quotaReader = mock(SharedQuotaReader.class);
+    private final JdbcTemplate quotaJdbc = mock(JdbcTemplate.class);
+    private final SharedQuotaAdmission quota = org.mockito.Mockito.spy(new SharedQuotaAdmission(quotaReader, quotaJdbc));
+
+    @org.junit.jupiter.api.BeforeEach
+    void quotaCountsUseMembershipState() {
+        when(memberMapper.countEnterprise(123L)).thenReturn(1);
+        when(quotaJdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(Long.class),
+            org.mockito.ArgumentMatchers.eq(123L))).thenAnswer(ignored -> (long) memberMapper.countActiveMembers(123L));
+    }
+
     private final TenantAdminMemberService service = new TenantAdminMemberService(memberMapper, new ObjectMapper(),
-        sequenceService);
+        sequenceService, quota);
 
     @AfterEach
     void clearLogin() {
@@ -38,7 +54,7 @@ class TenantAdminMemberServiceTest {
         assertThatThrownBy(() -> service.add("123", "0027024710"))
             .isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("403");
-        verify(memberMapper, never()).selectPackageSnapshotForUpdate(123L);
+        verify(quota, never()).beginEnterprise(123L);
     }
 
     @Test
@@ -144,8 +160,20 @@ class TenantAdminMemberServiceTest {
         assertThat(existing.getRole()).isEqualTo("OWNER");
     }
 
+    @Test
+    void missingPackageAllowsExistingEnterpriseButCannotCreateAnOrphanMembership() {
+        platformAdmin();
+        org.mockito.Mockito.doReturn(Optional.empty()).when(quota).beginEnterprise(123L);
+        when(memberMapper.selectActiveUserByCode("0027024710")).thenReturn(user());
+        when(sequenceService.nextVal()).thenReturn(88L);
+        service.add("123", "0027024710");
+        verify(memberMapper).insertMember(88L, 123L, 77L, 1L);
+        when(memberMapper.countEnterprise(123L)).thenReturn(0);
+        assertThatThrownBy(() -> service.add("123", "0027024710")).hasMessageContaining("tenant.notFound");
+    }
+
     private void readyBasicTenant() {
-        when(memberMapper.selectPackageSnapshotForUpdate(123L)).thenReturn("{\"memberLimit\":10}");
+        org.mockito.Mockito.doReturn(Optional.of(new QuotaSnapshot(123L, "1", 10, 5, 5, 5))).when(quota).beginEnterprise(123L);
         when(memberMapper.selectProvisionState(123L)).thenReturn("{\"status\":\"READY\"}");
     }
 

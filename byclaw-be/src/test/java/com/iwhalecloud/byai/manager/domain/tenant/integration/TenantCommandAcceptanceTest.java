@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.hook.*;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -32,6 +33,7 @@ class TenantCommandAcceptanceTest {
     private TenantCommandService service;
     private TenantCommandStore store;
     private HookProperties hooks;
+    private TenantSandboxProperties sandboxProperties;
     @BeforeEach void setup() throws Exception {
         var source = new DriverManagerDataSource("jdbc:h2:mem:acceptance" + System.nanoTime()
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000", "sa", "");
@@ -67,8 +69,10 @@ class TenantCommandAcceptanceTest {
         var durable = new DurableHookPublisher(source, hooks, List.of(new HookEventSchema("tenant.created", 1,
             Set.of("enterpriseId", "enterpriseName", "createdBy", "requestId", "provisionState"))));
         store = new TenantCommandStore(jdbc);
+        sandboxProperties = new TenantSandboxProperties();
         service = new TenantCommandService(store, jdbc, mapper, ids, json, new HookPublisher(null, durable),
-            new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source));
+            new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source),
+            sandboxProperties);
     }
     private ObjectNode body(String requestId) throws Exception {
         return (ObjectNode) json.readTree("""
@@ -142,5 +146,51 @@ class TenantCommandAcceptanceTest {
             assertEquals(first.get(15, TimeUnit.SECONDS).commandId(), second.get(15, TimeUnit.SECONDS).commandId());
         }
         assertReservations(1);
+    }
+
+    @Test void omittedProfileIsFrozenOnceAndConfigurationChangesApplyOnlyToNewReservations() throws Exception {
+        var original = body("request-default-profile");
+        original.remove("resourceSpec");
+        var first = service.provision(TenantCommandRequest.parse(original));
+        assertEquals("m", frozenProfile(first));
+        String storedRequest = jdbc.queryForObject("SELECT request_snapshot FROM byai.internal_command WHERE id=?",
+            String.class, Long.parseLong(first.commandId()));
+        assertFalse(json.readTree(storedRequest).has("resourceSpec"));
+
+        // Emulate a new startup setting while replaying the original unmodified business request.
+        sandboxProperties.setProfileKey("l");
+        jdbc.update("UPDATE byai.po_users SET is_locked='Y' WHERE user_id=1");
+        assertEquals(first, service.provision(TenantCommandRequest.parse(original)));
+        assertEquals("m", frozenProfile(first));
+        assertReservations(1);
+
+        jdbc.update("UPDATE byai.po_users SET is_locked='N' WHERE user_id=1");
+        var nextBody = body("request-new-default-profile");
+        nextBody.putObject("resourceSpec");
+        var next = service.provision(TenantCommandRequest.parse(nextBody));
+        assertEquals("l", frozenProfile(next));
+        assertReservations(2);
+    }
+
+    @Test void explicitTrustedProfilesOverrideDeploymentDefaultWithoutBindingVersion() throws Exception {
+        sandboxProperties.setProfileKey("l");
+        for (String profile : new String[]{"s", "m", "l"}) {
+            var value = body("request-explicit-profile-" + profile);
+            value.putObject("resourceSpec").put("profileKey", profile);
+            var accepted = service.provision(TenantCommandRequest.parse(value));
+            assertEquals(profile, frozenProfile(accepted));
+            var snapshot = json.readTree(jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+                + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+                Long.parseLong(accepted.enterpriseId())));
+            assertEquals(2, snapshot.path("memberLimit").asInt());
+        }
+        assertReservations(3);
+    }
+
+    private String frozenProfile(TenantCommandStore.Command command) throws Exception {
+        String snapshot = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+            + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+            Long.parseLong(command.enterpriseId()));
+        return json.readTree(snapshot).path("profileKey").asText();
     }
 }

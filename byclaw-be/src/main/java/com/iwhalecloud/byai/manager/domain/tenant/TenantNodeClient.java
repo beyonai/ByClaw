@@ -321,7 +321,11 @@ public class TenantNodeClient {
         NodeRejection(int nodeStatus, String code) {
             super(nodeStatus == 404 ? HttpStatus.NOT_FOUND
                 : nodeStatus == 403 ? HttpStatus.FORBIDDEN
-                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY,
+                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST
+                        : nodeStatus == 409 && java.util.Set.of("GROUP_MEMBER_LIMIT_EXCEEDED", "GROUP_AGENT_LIMIT_EXCEEDED").contains(code)
+                            ? HttpStatus.CONFLICT
+                            : nodeStatus == 503 && "QUOTA_UNAVAILABLE".equals(code)
+                                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY,
                 "tenant Node rejected request: " + code);
             this.nodeStatus = nodeStatus;
             this.code = code;

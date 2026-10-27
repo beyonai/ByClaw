@@ -4,6 +4,7 @@ import { requireId, text } from "../../domain/values.js";
 import { first, insert, nextId, camel } from "./sql-utils.js";
 
 import { membershipNotice } from "./member-notice.js";
+import { requireGroupMemberCapacity } from "./group-quota.js";
 /** 邀请用户须有 BE 的 ACTIVE 成员断言；邀请 AGENT 须有资源授权，普通成员还受群设置限制。 */
 export async function addMembers(context: CommandContext): Promise<Record<string, any>> {
   const { command, db } = context,
@@ -16,7 +17,7 @@ export async function addMembers(context: CommandContext): Promise<Record<string
   )
     throw new DomainError("INVALID_GROUP_MEMBERS");
   await authorizeInvitation(context, members);
-  const systemEvents: Record<string, any>[] = [];
+  // Validate and admit the whole batch before any membership or notice is persisted.
   for (const member of members) {
     requireId(member.memObjId);
     if (
@@ -25,6 +26,10 @@ export async function addMembers(context: CommandContext): Promise<Record<string
       (member.memObjType === "AGENT" && member.resourceAuthorized !== true)
     )
       throw new DomainError("INVALID_GROUP_MEMBERS");
+  }
+  await requireGroupMemberCapacity(context, members);
+  const systemEvents: Record<string, any>[] = [];
+  for (const member of members) {
     if (
       await first(
         db,

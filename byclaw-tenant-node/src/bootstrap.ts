@@ -11,6 +11,7 @@ import { MirrorService } from "./application/mirror-service.js";
 import { SchemaTaskService } from "./application/schema/task-service.js";
 import { TenantRuntime } from "./application/runtime.js";
 import { RedisLeases } from "./infrastructure/coordination/redis-leases.js";
+import { RedisSharedQuotaReader } from "./infrastructure/coordination/shared-quota-reader.js";
 import { Database } from "./infrastructure/persistence/database.js";
 import { SqlCommandTransactions } from "./infrastructure/persistence/command-repository.js";
 import { SqlMirrorTransactions } from "./infrastructure/persistence/mirror-repository.js";
@@ -57,7 +58,12 @@ export async function bootstrap(config: Config) {
     config.enterpriseId,
     new SqlHistoryRepository(read, config.enterpriseId),
   );
-  const commands = new CommandService(new SqlCommandTransactions(connection), () =>
+  const quotas = new RedisSharedQuotaReader(redis, {
+    ...config.quota,
+    warn: (code, enterpriseId) =>
+      app.log.warn({ code, enterpriseId }, "Shared quota Redis read failed"),
+  });
+  const commands = new CommandService(new SqlCommandTransactions(connection, quotas), () =>
     requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
   );
   const be = new BeSchemaClient(config, client),

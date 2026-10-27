@@ -1,4 +1,5 @@
 import type { TenantCommand } from "../../application/command.js";
+import type { SharedQuotaReader } from "../../application/shared-quota.js";
 import type { SqlRow, SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert, nextId } from "./sql-utils.js";
@@ -9,6 +10,7 @@ export class CommandContext {
   constructor(
     readonly db: SqlSession,
     readonly command: TenantCommand,
+    readonly quotas?: SharedQuotaReader,
   ) {}
   session(): Promise<SqlRow | null> {
     return first(

@@ -18,9 +18,8 @@
         ORDER BY m.joined_at, m.user_id
     </select>
 
-    <select id="selectPackageSnapshotForUpdate" resultType="string">
-        SELECT params_value FROM byai.tenant_config
-        WHERE enterprise_id = #{enterpriseId} AND params_code = 'PACKAGE_CONTENT_SNAPSHOT'
+    <select id="countEnterprise" resultType="int">
+        SELECT COUNT(*) FROM byai.po_enterprise_info WHERE enterprise_id = #{enterpriseId}
     </select>
 
     <select id="selectProvisionState" resultType="string">
