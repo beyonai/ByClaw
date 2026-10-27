@@ -56,7 +56,7 @@ public class TenantInternalEnterpriseService {
             throw error(HttpStatus.BAD_REQUEST, "MEMBER_ROLE_UNSUPPORTED");
         getEnterprise(enterpriseId);
         validUser(userId); validUser(auditUserId);
-        // Updating the shared snapshot row serializes quota admission with legacy trigger writers.
+        // Updating the shared snapshot row serializes this API's member admission with policy changes.
         // The latest snapshot must be read after this UPDATE has acquired its row write lock.
         if (jdbc.update("UPDATE byai.tenant_config SET params_version=params_version+1,updated_at=CURRENT_TIMESTAMP WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", enterpriseId) != 1)
             throw error(HttpStatus.CONFLICT, "MEMBER_QUOTA_UNAVAILABLE");

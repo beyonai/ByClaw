@@ -83,3 +83,116 @@ COMMENT ON COLUMN byai.byai_session_member.welcome_handled_at IS '本次成员�
 
 -- Group send/STOP exclusion is maintained by renewable Redis leases.
 DROP TABLE IF EXISTS byai.byai_group_chat_send_gate;
+
+-- BEGIN tenant service integration schema
+
+-- Generic service commands retain request identity independently from worker leases.
+CREATE TABLE byai.internal_command (
+    id bigint PRIMARY KEY,
+    source_system varchar(64) NOT NULL,
+    request_id varchar(128) NOT NULL,
+    request_hash varchar(64) NOT NULL,
+    type varchar(32) NOT NULL,
+    enterprise_id bigint NOT NULL,
+    owner_user_id bigint NOT NULL,
+    request_snapshot text NOT NULL,
+    status varchar(32) NOT NULL,
+    stage varchar(64) NOT NULL,
+    result text,
+    error_code varchar(64),
+    revision bigint NOT NULL DEFAULT 0,
+    lease_owner varchar(128),
+    lease_until TIMESTAMP WITH TIME ZONE,
+    fencing_token bigint NOT NULL DEFAULT 0,
+    attempt integer NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_internal_command_request UNIQUE (source_system, request_id),
+    CONSTRAINT ck_internal_command_status CHECK (status IN ('PENDING','RUNNING','RETRY_WAIT','RECONCILING','SUCCEEDED','FAILED','MANUAL_REQUIRED'))
+);
+CREATE INDEX idx_internal_command_due ON byai.internal_command(status,next_attempt_at);
+CREATE INDEX idx_internal_command_enterprise ON byai.internal_command(enterprise_id,created_at);
+
+-- An uncertain external result keeps this slot even after the worker's lease expires.
+CREATE TABLE byai.tenant_runtime_operation (
+    enterprise_id bigint PRIMARY KEY,
+    active_command_id bigint,
+    generation bigint NOT NULL DEFAULT 1,
+    state varchar(32) NOT NULL DEFAULT 'IDLE',
+    fencing_token bigint NOT NULL DEFAULT 0,
+    revision bigint NOT NULL DEFAULT 0
+);
+CREATE TABLE byai.internal_command_step (
+    command_id bigint NOT NULL REFERENCES byai.internal_command(id),
+    step_key varchar(64) NOT NULL,
+    status varchar(32) NOT NULL,
+    provider_request_key varchar(128) NOT NULL,
+    result text,
+    error_code varchar(64),
+    revision bigint NOT NULL DEFAULT 0,
+    PRIMARY KEY(command_id,step_key)
+);
+COMMENT ON COLUMN byai.internal_command.request_snapshot IS 'Canonical immutable JSON text including authenticated-service audit actor; never contains transport credentials';
+
+-- Policies remain immutable; the cursor is the sole CAS serialization point.
+CREATE TABLE byai.tenant_execution_policy (
+    enterprise_id BIGINT NOT NULL,
+    revision BIGINT NOT NULL CHECK (revision > 0),
+    payload TEXT NOT NULL,
+    PRIMARY KEY (enterprise_id, revision)
+);
+CREATE TABLE byai.tenant_policy_cursor (
+    enterprise_id BIGINT PRIMARY KEY,
+    desired_revision BIGINT NOT NULL CHECK (desired_revision > 0),
+    generation VARCHAR(64) NOT NULL DEFAULT '0'
+);
+CREATE TABLE byai.tenant_policy_consumer (
+    enterprise_id BIGINT NOT NULL,
+    policy_revision BIGINT NOT NULL,
+    consumer_key VARCHAR(64) NOT NULL,
+    generation VARCHAR(64) NOT NULL,
+    applied_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (enterprise_id, policy_revision, consumer_key, generation),
+    FOREIGN KEY (enterprise_id, policy_revision)
+        REFERENCES byai.tenant_execution_policy (enterprise_id, revision)
+);
+COMMENT ON TABLE byai.tenant_execution_policy IS 'Immutable tenant execution policy snapshots; unsupported quotas do not imply runtime activation';
+COMMENT ON TABLE byai.tenant_policy_cursor IS 'Authoritative desired policy revision and current runtime generation; conditional updates fence concurrent changes';
+COMMENT ON TABLE byai.tenant_policy_consumer IS 'Acknowledgments scoped to immutable policy revision and current runtime generation';
+
+-- Critical events and subscription attempts share the authoritative business transaction.
+CREATE TABLE byai.integration_outbox (
+    event_id varchar(36) PRIMARY KEY,
+    event_type varchar(128) NOT NULL,
+    event_version integer NOT NULL,
+    aggregate_id varchar(19) NOT NULL,
+    aggregate_revision varchar(19) NOT NULL,
+    generation varchar(19) NOT NULL,
+    correlation_id varchar(128) NOT NULL,
+    payload jsonb NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX integration_outbox_aggregate_idx
+    ON byai.integration_outbox (aggregate_id, created_at);
+CREATE TABLE byai.integration_delivery (
+    event_id varchar(36) NOT NULL REFERENCES byai.integration_outbox(event_id),
+    subscription_id varchar(64) NOT NULL,
+    status varchar(16) NOT NULL CHECK (status IN
+        ('PENDING','PROCESSING','RETRY','DELIVERED','FAILED','FILTERED')),
+    attempt integer NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    lease_until TIMESTAMP WITH TIME ZONE,
+    fencing_token bigint NOT NULL DEFAULT 0,
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    error_code varchar(64),
+    PRIMARY KEY (event_id, subscription_id)
+);
+CREATE INDEX integration_delivery_due_idx
+    ON byai.integration_delivery(status, next_attempt_at);
+CREATE INDEX integration_delivery_lease_idx
+    ON byai.integration_delivery(status, lease_until);
+COMMENT ON TABLE byai.integration_outbox IS 'Immutable critical business events persisted in the owning transaction';
+COMMENT ON TABLE byai.integration_delivery IS 'Independent subscription attempts with expiring leases and fencing tokens';
+
+-- END tenant service integration schema

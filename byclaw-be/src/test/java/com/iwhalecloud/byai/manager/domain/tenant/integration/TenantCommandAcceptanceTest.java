@@ -42,14 +42,15 @@ class TenantCommandAcceptanceTest {
         jdbc.execute("CREATE TABLE byai.tenant_config(id BIGINT PRIMARY KEY,enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),params_code VARCHAR(64),params_value TEXT NOT NULL,params_version BIGINT NOT NULL DEFAULT 1,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,UNIQUE(enterprise_id,params_code))");
         jdbc.execute("CREATE TABLE byai.tenant_user_membership(membership_id BIGINT PRIMARY KEY,enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),user_id BIGINT NOT NULL REFERENCES byai.po_users(user_id),role VARCHAR(16),status VARCHAR(16),created_by BIGINT NOT NULL,UNIQUE(enterprise_id,user_id))");
         Path root = Files.isDirectory(Path.of("deploy")) ? Path.of(".") : Path.of("..");
-        for (String fragment : List.of("internal-commands", "execution-policy", "integration-events")) {
-            String sql = Files.readString(root.resolve("deploy/migrations/versions/V0.6.0/V0.6.0-" + fragment + "__ddl.sql"));
-            // H2 exercises the actual portable table/index DDL; PostgreSQL trigger acceptance remains separate.
-            if (fragment.equals("internal-commands")) sql = sql.substring(0, sql.indexOf("CREATE OR REPLACE FUNCTION"));
-            sql = sql.replace("timestamptz", "TIMESTAMP WITH TIME ZONE");
-            try (var connection = source.getConnection()) {
-                ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
-            }
+        String migration = Files.readString(root.resolve("deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"));
+        String start = "-- BEGIN tenant service integration schema";
+        String end = "-- END tenant service integration schema";
+        int first = migration.indexOf(start), last = migration.indexOf(end);
+        assertTrue(first >= 0 && last > first, "tenant integration schema section must exist in the release DDL");
+        // H2 covers this feature's table/index DDL; PostgreSQL acceptance applies the entire release file.
+        String sql = migration.substring(first + start.length(), last).replace("timestamptz", "TIMESTAMP WITH TIME ZONE");
+        try (var connection = source.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
         }
         jdbc.update("INSERT INTO byai.po_users(user_id,state,is_locked) VALUES(1,'A','N')");
         var factory = new SqlSessionFactoryBean();

@@ -28,6 +28,7 @@ class TenantExecutionPolicyServiceTest {
         var initial = policy("{}");
         transaction.executeWithoutResult(status -> service.prepare(11, initial));
         assertEquals("1", service.projection(11).desiredRevision());
+        assertFalse(service.projection(11).capabilities().get("memberLimit"));
         var snapshot = mapper.readTree(jdbc.queryForObject("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=11 AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class));
         assertEquals("shared", snapshot.path("profileKey").asText());
         assertEquals(10, snapshot.path("memberLimit").asInt());

@@ -4,13 +4,11 @@
 Requires initdb, pg_ctl and psql; PG_BIN may name their directory. No Python packages,
 existing database, TCP listener, persistent credentials or production fixtures are used.
 """
-import concurrent.futures
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import threading
 
 
 def main():
@@ -59,47 +57,24 @@ def main():
                     params_value text NOT NULL, params_version bigint DEFAULT 0,
                     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(enterprise_id,params_code));
+                CREATE TABLE byai.byai_session_member (id bigint PRIMARY KEY);
                 CREATE TABLE byai.tenant_user_membership (
                     membership_id bigint PRIMARY KEY,enterprise_id bigint NOT NULL,
                     user_id bigint NOT NULL,role varchar(16) NOT NULL,status varchar(16) NOT NULL,
                     UNIQUE(enterprise_id,user_id));""")
-            for name in ("internal-commands", "integration-events", "execution-policy"):
-                path = root / "deploy/migrations/versions/V0.6.0" / f"V0.6.0-{name}__ddl.sql"
-                result = run([psql, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", str(path)])
-                assert result.returncode == 0, result.stderr
-                print(f"PASS migration {path.name}")
+            path = root / "deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"
+            result = run([psql, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", str(path)])
+            assert result.returncode == 0, result.stderr
+            print(f"PASS migration {path.name}")
 
+            # Member quotas belong to application admission; this migration installs no member trigger.
+            assert sql("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+                       "WHERE n.nspname='byai' AND p.proname='enforce_commercial_member_limit'") == "0"
+            assert sql("SELECT count(*) FROM pg_trigger WHERE tgname='trg_commercial_member_limit'") == "0"
+            print("PASS migration installs no commercial member quota function or trigger")
             sql("""INSERT INTO byai.tenant_config VALUES
                 (42,'COMMERCIAL_MANAGED','true',0,CURRENT_TIMESTAMP),
-                (42,'PACKAGE_CONTENT_SNAPSHOT','{"memberLimit":1}',0,CURRENT_TIMESTAMP);
-                INSERT INTO byai.tenant_user_membership VALUES (1,42,1,'OWNER','ACTIVE');""")
-            sql("INSERT INTO byai.tenant_user_membership VALUES (2,42,2,'MEMBER','ACTIVE')", "COMMERCIAL_MEMBER_LIMIT_EXCEEDED")
-            assert sql("SELECT count(*) FROM byai.tenant_user_membership WHERE enterprise_id=42 AND status='ACTIVE'") == "1"
-            print("PASS OWNER admission at limit one; second active member rejected")
-
-            sql("UPDATE byai.tenant_config SET params_value='{\"memberLimit\":2}' WHERE enterprise_id=42 AND params_code='PACKAGE_CONTENT_SNAPSHOT'")
-            barrier = threading.Barrier(2)
-
-            def final_seat(member):
-                barrier.wait(timeout=10)
-                return run([psql, "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-c",
-                            "BEGIN; INSERT INTO byai.tenant_user_membership VALUES "
-                            f"({member},42,{member},'MEMBER','ACTIVE'); SELECT pg_sleep(0.5); COMMIT;"])
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                results = list(executor.map(final_seat, (3, 4)))
-            assert sum(result.returncode == 0 for result in results) == 1, [r.stderr for r in results]
-            assert all(r.returncode == 0 or "COMMERCIAL_MEMBER_LIMIT_EXCEEDED" in r.stderr for r in results)
-            assert sql("SELECT count(*) FROM byai.tenant_user_membership WHERE enterprise_id=42 AND status='ACTIVE'") == "2"
-            print("PASS concurrent final-seat inserts: exactly one commits")
-
-            sql("INSERT INTO byai.tenant_user_membership VALUES (5,42,5,'MEMBER','INACTIVE')")
-            sql("UPDATE byai.tenant_user_membership SET status='ACTIVE' WHERE membership_id=5", "COMMERCIAL_MEMBER_LIMIT_EXCEEDED")
-            sql("UPDATE byai.tenant_user_membership SET status='INACTIVE' WHERE membership_id IN (3,4)")
-            sql("BEGIN; UPDATE byai.tenant_user_membership SET status='ACTIVE' WHERE membership_id=5; ROLLBACK")
-            assert sql("SELECT status FROM byai.tenant_user_membership WHERE membership_id=5") == "INACTIVE"
-            sql("UPDATE byai.tenant_user_membership SET status='ACTIVE' WHERE membership_id=5")
-            print("PASS activation respects capacity; rollback preserves inactive state and available seat")
+                (42,'PACKAGE_CONTENT_SNAPSHOT','{"memberLimit":1}',0,CURRENT_TIMESTAMP)""")
 
             outbox_insert = """INSERT INTO byai.integration_outbox VALUES
                 ('event-rollback','tenant.created',1,'42','1','1','command-1',CAST('{"data":{"enterpriseId":"42"}}' AS jsonb),CURRENT_TIMESTAMP)"""

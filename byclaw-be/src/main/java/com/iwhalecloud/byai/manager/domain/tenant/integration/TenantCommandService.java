@@ -58,7 +58,7 @@ public class TenantCommandService {
             config(enterprise,"INTEGRATION_SOURCE_SYSTEM",request.sourceSystem());
             config(enterprise,"PROVISION_STATE","{\"status\":\"RESERVED\",\"generation\":\"1\",\"fencingToken\":\"1\"}");
             policies.prepare(enterprise,body.get("initialPolicy"));
-            // Initial snapshot must exist before OWNER insertion so the same member guard applies from birth.
+            // Reserve the initial member snapshot before writing the OWNER relationship.
             tenants.insertOwner(ids.nextVal(),enterprise,request.ownerUserId());
             jdbc.update("INSERT INTO byai.tenant_runtime_operation(enterprise_id,active_command_id,state) VALUES (?,?,'ACTIVE')",enterprise,id);
             hooks.publishDurable("tenant.created",1,Long.toString(enterprise),"1","1",Long.toString(id),
