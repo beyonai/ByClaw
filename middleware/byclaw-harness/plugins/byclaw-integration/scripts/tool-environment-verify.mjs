@@ -13,6 +13,7 @@ import { resolvePluginMediaModel } from '../src/media-generation/plugin-model.ts
 import { persistFileChangesSummary } from '../src/file-changes.ts'
 import { memberSkillProjectionRoot, memberSkillRoot, resolveByClawDshHome } from '../src/group-skill-resources.ts'
 import { GroupStateBoundary } from '../src/group-state-boundary.ts'
+import { installGroupChatDisposition } from '../src/group-chat-disposition.ts'
 import { writeCachedByClawSkill } from '../src/skill-sync.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from '../src/skill-runtime.ts'
 import { applyByClawWorkerHistory, NO_WORKER_HISTORY } from '../src/worker-history.ts'
@@ -222,6 +223,65 @@ try {
     environment.connected = false
     check((await lazy.listDir(join(byRoot, '.sessions'))).some(entry => entry.name === 's1'), 'after B pauses, the last listing read from B is still served')
   }
+  // --- group-chat disposition -------------------------------------------------
+  {
+    const tail = await files.readTail(join(byRoot, 'a', 'b', 'note.txt'), 3)
+    check(tail.bytes.toString() === 'llo' && tail.truncated, 'readTail returns the last bytes from B and reports truncation')
+    const whole = await files.readTail(join(byRoot, 'a', 'b', 'note.txt'), 64)
+    check(whole.bytes.toString() === 'hello' && !whole.truncated, 'readTail returns a short file whole')
+    await assert.rejects(files.readTail(join(byRoot, 'missing.md'), 8), { code: 'ENOENT' }); checks += 1
+
+    let hook
+    const inputs = []
+    const dispositionCtx = {
+      logger: { warn: message => { throw new Error(`unexpected warning: ${message}`) } },
+      on(_event, listener) { hook = listener; return () => { hook = undefined } },
+      llm: { async *stream(request) {
+        inputs.push(request.messages[0].content[0].text)
+        yield { type: 'text-delta', text: JSON.stringify({ kind: 'TASK', taskName: '采集新闻' }) }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      } },
+    }
+    const disposition = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files, historyFiles: files })
+    await mkdir(b.toHost(join(byRoot, 'groups', 'g1')), { recursive: true })
+    await writeFile(b.toHost(join(byRoot, 'groups', 'g1', 'history.md')), 'older lines\nlatest: 新闻')
+    const opening = id => ({
+      command: { header: { sessionId: id }, content: '请采集新闻', extraPayload: { groupChat: { executionId: 'dispatch-b', groupHistoryPath: '/by/groups/g1/history.md' } } },
+      host: { byRoot, resolveSourcePath: source => join(byRoot, source.slice('/by/'.length)) },
+      firstSession: true, resolveModel: async () => ({ provider: 'p', model: 'm' }), signal: new AbortController().signal,
+    })
+    hook(opening('901'))
+    await disposition.whenIdle()
+    const state = join(byRoot, '.sessions', '901', '.byclaw')
+    check(JSON.parse(await readFile(b.toHost(join(state, 'group-chat-disposition.json')), 'utf8')).taskName === '采集新闻', 'the disposition is published on B')
+    check(JSON.parse(await readFile(b.toHost(join(state, 'session-opened.json')), 'utf8')).schemaVersion === '1', 'the opening marker is published on B')
+    const history = JSON.parse(inputs[0]).groupHistory
+    check(history.available && history.truncated && history.content === '闻' && history.path === '/by/groups/g1/history.md',
+      'the history tail is read from B, cut at a character boundary')
+    // A session opening while B is down (any first turn, group chat or not) must not start B:
+    // the opening marker waits for B like every other write of the context.
+    {
+      const deferred = new Map()
+      const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }
+      const queued = lazyToolEnvironmentFiles(environment, files)
+      const before = b.calls.fs.length + b.calls.subprocess.length
+      const quiet = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files: queued, historyFiles: files })
+      hook({ ...opening('902'), command: { header: { sessionId: '902' }, content: '你好', extraPayload: {} } })
+      await quiet.whenIdle()
+      check(b.calls.fs.length + b.calls.subprocess.length === before, 'an opening without group history does not reach B')
+      check([...deferred.keys()].some(key => key.endsWith(join('902', '.byclaw', 'session-opened.json'))), 'the opening marker is queued for B')
+      await quiet.close()
+    }
+
+    // A second worker opening the same session finds the published state instead of classifying again.
+    await disposition.close()
+    const again = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 12, environment: {}, files, historyFiles: files })
+    hook(opening('901'))
+    await again.whenIdle()
+    check(inputs.length === 1, 'a published opening on B is not classified again')
+    await again.close()
+  }
+
   check(b.calls.fs.every(([, path]) => typeof path !== 'string' || !path.startsWith(b.host)), 'the tool environment only ever saw its own paths')
   console.log(`tool-environment verification passed (${String(checks)} checks): user-tree I/O via ctx.fs/ctx.subprocess, configurable roots, dshHome, worker history`)
 } finally { await b.dispose() }

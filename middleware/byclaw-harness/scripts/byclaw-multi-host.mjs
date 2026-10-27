@@ -136,6 +136,7 @@ export const USER_ROW_OVERLAYS = {
   }),
   'agent-teams': (user, home) => ({ dshHome: home, workspaceOnToolEnvironment: true, workspace: '/by' }),
   'better-sidebar': () => ({ workspaceOnToolEnvironment: true }),
+  'iron-rules': () => ({ workspaceOnToolEnvironment: true }),
   'byclaw-browser-use': (user, home) => ({
     ownsRuntime: true,
     // Managed context IDs are long; keep sockets outside the context directory.

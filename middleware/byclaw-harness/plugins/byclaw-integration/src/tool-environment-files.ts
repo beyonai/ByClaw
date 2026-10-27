@@ -54,6 +54,8 @@ export interface ToolEnvironmentFiles {
   ensureDirectory(path: string): Promise<void>
   readText(path: string): Promise<string>
   readBytes(path: string, maxBytes: number): Promise<Buffer>
+  /** The last `maxBytes` bytes and whether the file is longer; rejects with `ENOENT` when absent. */
+  readTail(path: string, maxBytes: number): Promise<{ bytes: Buffer; truncated: boolean }>
   /** Direct children; rejects with `ENOENT`/`ENOTDIR` like `readdir`. */
   listDir(path: string): Promise<Array<{ name: string; type: 'file' | 'directory' | 'other' }>>
   /** Whole-file UTF-8 write through `ctx.fs` (creates parent directories). */
@@ -151,6 +153,13 @@ export function lazyToolEnvironmentFiles(environment: LazyToolEnvironment, files
       if (cached === undefined) throw absent(path)
       return Buffer.from(cached, 'utf8').subarray(0, maxBytes)
     },
+    async readTail(path, maxBytes) {
+      if (environment.connected) return files.readTail(path, maxBytes)
+      const cached = texts.get(path)
+      if (cached === undefined) throw absent(path)
+      const bytes = Buffer.from(cached, 'utf8')
+      return { bytes: bytes.subarray(Math.max(0, bytes.length - maxBytes)), truncated: bytes.length > maxBytes }
+    },
     async listDir(path) {
       if (environment.connected) {
         const listing = await files.listDir(path)
@@ -184,12 +193,12 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
     if (service === undefined) throw new Error('byclaw-dsh: no filesystem provider for the tool environment')
     return service
   }
-  const run = async (argv: readonly string[], input?: Uint8Array): Promise<string> => {
+  const run = async (argv: readonly string[], input?: Uint8Array, maxOutputBytes = 65_536): Promise<string> => {
     const subprocess = ctx.get('subprocess') as unknown as ToolEnvironmentSubprocess | undefined
     if (subprocess === undefined) throw new Error('byclaw-dsh: no subprocess provider for the tool environment')
     const handle = subprocess.spawn({
       argv, cwd: '/', graceMs: 1000,
-      stdio: { stdin: input === undefined ? 'ignore' : 'pipe', stdout: { maxBytes: 65_536 }, stderr: { maxBytes: 4096 } },
+      stdio: { stdin: input === undefined ? 'ignore' : 'pipe', stdout: { maxBytes: maxOutputBytes }, stderr: { maxBytes: 4096 } },
     })
     if (input !== undefined) {
       const stdin = handle.stdin
@@ -239,6 +248,15 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
       if (info.type === 'directory') throw coded(`EISDIR: illegal operation on a directory, ${path}`, 'EISDIR')
       try { return Buffer.from(await fs().readBytes(resolved, undefined, maxBytes)) } catch (error) { throw nodeCoded(error, path) }
     },
+    async readTail(path, maxBytes) {
+      const { info } = await present(path)
+      if (info.type === 'directory') throw coded(`EISDIR: illegal operation on a directory, ${path}`, 'EISDIR')
+      // Size, then the tail as base64: the collected output is text, the tail is bytes.
+      const output = await run(['/bin/sh', '-c', 'wc -c <"$1" && tail -c "$2" -- "$1" | base64 | tr -d "\\n"', 'sh', path, String(maxBytes)], undefined, Math.ceil(maxBytes / 3) * 4 + 64)
+      const newline = output.indexOf('\n')
+      const size = Number(output.slice(0, newline).trim())
+      return { bytes: Buffer.from(output.slice(newline + 1).trim(), 'base64'), truncated: size > maxBytes }
+    },
     async listDir(path) {
       const { resolved, info } = await present(path)
       if (info.type !== 'directory') throw coded(`ENOTDIR: not a directory, ${path}`, 'ENOTDIR')
@@ -265,17 +283,21 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
   }
 }
 
-/** Adapt tool-environment files to `@byclaw/media-runtime`'s `persistAssets` I/O. */
+/** Adapt tool-environment files to `@byclaw/media-runtime`'s session I/O (`persistAssets`, `host.artifactIo`). */
 export function mediaArtifactIo(files: ToolEnvironmentFiles): {
   realpath(path: string): Promise<string>
   mkdir(path: string): Promise<void>
   writeExclusive(path: string, bytes: Uint8Array): Promise<void>
+  writeReplace(path: string, bytes: Uint8Array): Promise<void>
+  readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   remove(path: string): Promise<void>
 } {
   return {
     realpath: path => files.realpath(path),
     mkdir: path => files.ensureDirectory(path),
     writeExclusive: (path, bytes) => files.writeBytes(path, bytes, { exclusive: true }),
+    writeReplace: (path, bytes) => files.writeBytes(path, bytes),
+    readBytes: (path, maxBytes) => files.readBytes(path, maxBytes),
     remove: path => files.remove(path),
   }
 }

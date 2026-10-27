@@ -11,6 +11,7 @@ import { extractByClawUserText } from './protocol.ts'
 import { byClawSessionCwd } from './session-cwd.ts'
 import { normalizeByClawSessionId, type ByClawSessionHost } from './session-extensions.ts'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
+import type { ToolEnvironmentFiles } from './tool-environment-files.ts'
 
 type Decision = { kind: 'CHAT' } | { kind: 'TASK'; taskName: string; ackText?: string }
 type Disposition = Decision & { schemaVersion: '1'; dispatchId: unknown }
@@ -25,6 +26,23 @@ export interface GroupChatDispositionOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>
   /** Register an explicit connection without replacing the conversation's model binding. */
   readonly resolveConfiguredModel?: (connection: GroupChatDispositionModelConfig) => ModelSelection | Promise<ModelSelection>
+  /**
+   * The user tree's files when it lives in the tool environment (`workspaceOnToolEnvironment`): the
+   * session state is read and published there instead of through this host's `node:fs`. Every first
+   * turn publishes state, so these are the context's queued files, which never start the tool
+   * environment by themselves; `historyFiles` reads the group history, which only the tool
+   * environment has (the platform writes it), and is used only for group requests that name one.
+   */
+  readonly files?: Pick<ToolEnvironmentFiles, 'readText' | 'writeText'>
+  readonly historyFiles?: Pick<ToolEnvironmentFiles, 'realpath' | 'lstat' | 'readTail'>
+}
+
+/** Where the session state and the group history are: this host's filesystem or the tool environment. */
+interface DispositionStore {
+  readText(path: string): Promise<string>
+  /** Publish once: false when the file already exists. */
+  publish(path: string, text: string, signal: AbortSignal): Promise<boolean>
+  historyTail(source: string, host: ByClawSessionHost, maxBytes: number, signal: AbortSignal): Promise<{ bytes: Buffer; truncated: boolean }>
 }
 
 const system = `你负责判定用户请求类型，只输出一个 JSON 对象，不输出 Markdown、思考过程或答案。
@@ -67,53 +85,88 @@ function modelDecision(text: string, userText: string): Decision {
 function missing(error: unknown): boolean { return object(error)?.code === 'ENOENT' }
 
 /** Inline recent history because the auxiliary LLM has no filesystem tools. */
-async function historyContext(source: unknown, host: ByClawSessionHost, maxBytes: number, signal: AbortSignal): Promise<{
+async function historyContext(source: unknown, host: ByClawSessionHost, maxBytes: number, signal: AbortSignal, store: DispositionStore): Promise<{
   path: string; available: true; content: string; truncated: boolean
 }> {
   if (typeof source !== 'string' || !source.trim()) throw new Error('groupChat.groupHistoryPath must be a nonblank file path')
   signal.throwIfAborted()
-  const root = await realpath(host.byRoot)
-  const path = await realpath(host.resolveSourcePath(source))
-  const suffix = relative(root, path)
-  if (!suffix || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) throw new Error('Group history is outside the ByClaw filesystem')
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-  try {
-    const info = await file.stat()
-    if (!info.isFile()) throw new Error('Group history must be a regular file')
-    // Parent directories may change after resolution; verify the opened file before exposing its contents.
-    const verifyIdentity = async () => {
-      const current = await realpath(path)
-      const location = relative(root, current)
-      if (!location || location === '..' || location.startsWith(`..${sep}`) || isAbsolute(location)) throw new Error('Group history moved outside the ByClaw filesystem')
-      const actual = await file.stat({ bigint: true })
-      const expected = await stat(current, { bigint: true })
-      if (actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('Group history changed while opening')
-    }
-    await verifyIdentity()
-    const start = Math.max(0, info.size - maxBytes)
-    const bytes = Buffer.alloc(Math.min(info.size, maxBytes))
-    let length = 0
-    while (length < bytes.length) {
-      signal.throwIfAborted()
-      const result = await file.read(bytes, length, bytes.length - length, start + length)
-      if (result.bytesRead === 0) break
-      length += result.bytesRead
-    }
-    await verifyIdentity()
-    signal.throwIfAborted()
-    // A bounded tail may start in the middle of a UTF-8 character.
-    let skip = 0
-    if (start > 0) for (const byte of bytes.subarray(0, length)) {
-      if ((byte & 0xc0) !== 0x80) break
-      skip++
-    }
-    return { path: source, available: true, content: bytes.subarray(skip, length).toString('utf8'), truncated: start > 0 }
-  } finally { await file.close() }
+  const { bytes, truncated } = await store.historyTail(source, host, maxBytes, signal)
+  signal.throwIfAborted()
+  // A bounded tail may start in the middle of a UTF-8 character.
+  let skip = 0
+  if (truncated) for (const byte of bytes) {
+    if ((byte & 0xc0) !== 0x80) break
+    skip++
+  }
+  return { path: source, available: true, content: bytes.subarray(skip).toString('utf8'), truncated }
 }
 
-async function existing(path: string): Promise<boolean> {
+function within(root: string, path: string): boolean {
+  const suffix = relative(root, path)
+  return !!suffix && suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)
+}
+
+const hostStore: DispositionStore = {
+  readText: path => readFile(path, 'utf8'),
+  publish: publishLocally,
+  async historyTail(source, host, maxBytes, signal) {
+    const root = await realpath(host.byRoot)
+    const path = await realpath(host.resolveSourcePath(source))
+    if (!within(root, path)) throw new Error('Group history is outside the ByClaw filesystem')
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    try {
+      const info = await file.stat()
+      if (!info.isFile()) throw new Error('Group history must be a regular file')
+      // Parent directories may change after resolution; verify the opened file before exposing its contents.
+      const verifyIdentity = async () => {
+        const current = await realpath(path)
+        if (!within(root, current)) throw new Error('Group history moved outside the ByClaw filesystem')
+        const actual = await file.stat({ bigint: true })
+        const expected = await stat(current, { bigint: true })
+        if (actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('Group history changed while opening')
+      }
+      await verifyIdentity()
+      const start = Math.max(0, info.size - maxBytes)
+      const bytes = Buffer.alloc(Math.min(info.size, maxBytes))
+      let length = 0
+      while (length < bytes.length) {
+        signal.throwIfAborted()
+        const result = await file.read(bytes, length, bytes.length - length, start + length)
+        if (result.bytesRead === 0) break
+        length += result.bytesRead
+      }
+      await verifyIdentity()
+      return { bytes: bytes.subarray(0, length), truncated: start > 0 }
+    } finally { await file.close() }
+  },
+}
+
+/** The tool environment's files; writes publish with create-if-absent, which reports an existing file. */
+function toolEnvironmentStore(files: NonNullable<GroupChatDispositionOptions['files']>,
+  historyFiles: GroupChatDispositionOptions['historyFiles']): DispositionStore {
+  return {
+    readText: path => files.readText(path),
+    async publish(path, text, signal) {
+      signal.throwIfAborted()
+      try { await files.writeText(path, text, { exclusive: true }); return true } catch (error: unknown) {
+        if (object(error)?.code === 'EEXIST') return false
+        throw error
+      }
+    },
+    async historyTail(source, host, maxBytes) {
+      if (historyFiles === undefined) throw new Error('Group history is not readable from this host')
+      const root = await historyFiles.realpath(host.byRoot)
+      const path = await historyFiles.realpath(host.resolveSourcePath(source))
+      if (!within(root, path)) throw new Error('Group history is outside the ByClaw filesystem')
+      if ((await historyFiles.lstat(path))?.type !== 'file') throw new Error('Group history must be a regular file')
+      return historyFiles.readTail(path, maxBytes)
+    },
+  }
+}
+
+async function existing(store: DispositionStore, path: string): Promise<boolean> {
   let text: string
-  try { text = await readFile(path, 'utf8') } catch (error: unknown) {
+  try { text = await store.readText(path) } catch (error: unknown) {
     if (missing(error)) return false
     throw new Error('群聊请求类型状态文件读取失败，请检查会话目录权限。', { cause: error })
   }
@@ -128,9 +181,9 @@ async function existing(path: string): Promise<boolean> {
   }
 }
 
-async function opened(path: string): Promise<boolean> {
+async function opened(store: DispositionStore, path: string): Promise<boolean> {
   try {
-    const data = object(JSON.parse(await readFile(path, 'utf8')))
+    const data = object(JSON.parse(await store.readText(path)))
     if (data?.schemaVersion !== '1' || Object.keys(data).length !== 1) throw new Error('Invalid session opening marker')
     return true
   } catch (error: unknown) {
@@ -139,18 +192,23 @@ async function opened(path: string): Promise<boolean> {
   }
 }
 
-async function publish(path: string, value: Disposition | { schemaVersion: '1' }, signal: AbortSignal, validate: (path: string) => Promise<boolean>): Promise<boolean> {
+async function publish(store: DispositionStore, path: string, value: Disposition | { schemaVersion: '1' }, signal: AbortSignal, validate: (store: DispositionStore, path: string) => Promise<boolean>): Promise<boolean> {
+  if (await store.publish(path, `${JSON.stringify(value, null, 2)}\n`, signal)) return true
+  if (!await validate(store, path)) throw new Error('Published session state disappeared')
+  return false
+}
+
+async function publishLocally(path: string, text: string, signal: AbortSignal): Promise<boolean> {
   const directory = dirname(path)
   await mkdir(directory, { recursive: true })
   const temporary = join(directory, `.group-chat-disposition-${randomUUID()}.tmp`)
   const file = await open(temporary, 'wx', 0o600)
   try {
-    try { await file.writeFile(`${JSON.stringify(value, null, 2)}\n`); await file.sync() } finally { await file.close() }
+    try { await file.writeFile(text); await file.sync() } finally { await file.close() }
     signal.throwIfAborted()
     // Linking a complete sibling file publishes once without replacing another worker's result.
     try { await link(temporary, path); return true } catch (error: unknown) {
       if (object(error)?.code !== 'EEXIST') throw error
-      if (!await validate(path)) throw new Error('Published session state disappeared')
       return false
     }
   } finally { await unlink(temporary) }
@@ -164,6 +222,7 @@ async function publish(path: string, value: Disposition | { schemaVersion: '1' }
 export function installGroupChatDisposition(ctx: Context, options: GroupChatDispositionOptions): { stop(): void; whenIdle(): Promise<void>; close(): Promise<void> } {
   const environment = { ...(options.environment ?? process.env) }
   const enabled = environment['BYCLAW_GROUP_CHAT_DISPOSITION_ENABLED']?.trim() !== '0'
+  const store = options.files === undefined ? hostStore : toolEnvironmentStore(options.files, options.historyFiles)
   const shutdown = new AbortController()
   const pending = new Map<string, Promise<void>>()
   const seen = new Set<string>()
@@ -189,13 +248,13 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
       const userText = extractByClawUserText(group?.originalContent !== undefined ? group.originalContent : payload.command.content)
       const historyPath = group?.groupHistoryPath
       const operation = (async () => {
-        if (await opened(marker)) return
-        if (dispatchId !== undefined && await existing(path)) {
-          await publish(marker, { schemaVersion: '1' }, shutdown.signal, opened)
+        if (await opened(store, marker)) return
+        if (dispatchId !== undefined && await existing(store, path)) {
+          await publish(store, marker, { schemaVersion: '1' }, shutdown.signal, opened)
           return
         }
         // Claim the first opening before the model call, including requests without group metadata.
-        if (!await publish(marker, { schemaVersion: '1' }, shutdown.signal, opened) || dispatchId === undefined || !enabled) return
+        if (!await publish(store, marker, { schemaVersion: '1' }, shutdown.signal, opened) || dispatchId === undefined || !enabled) return
         const signal = AbortSignal.any([shutdown.signal, AbortSignal.timeout(options.timeoutMs)])
         let text = ''
         try {
@@ -203,7 +262,7 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
           let input = userText
           if (historyPath !== undefined) {
             let history: Awaited<ReturnType<typeof historyContext>> | { path: string; available: false }
-            try { history = await historyContext(historyPath, payload.host, options.historyMaxBytes, signal) } catch (error: unknown) {
+            try { history = await historyContext(historyPath, payload.host, options.historyMaxBytes, signal, store) } catch (error: unknown) {
               if (shutdown.signal.aborted) throw error
               report(sessionId, 'group-history-unavailable', error)
               history = { path: typeof historyPath === 'string' ? historyPath : '', available: false }
@@ -235,7 +294,7 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
           report(sessionId, 'model-request-failed', error)
         }
         // Foreground completion or model timeout must not cancel result publication.
-        await publish(path, { schemaVersion: '1', dispatchId, ...modelDecision(text, userText) }, shutdown.signal, existing)
+        await publish(store, path, { schemaVersion: '1', dispatchId, ...modelDecision(text, userText) }, shutdown.signal, existing)
       })().catch((error: unknown) => {
         if (!shutdown.signal.aborted) report(sessionId, 'classification-or-write-failed', error)
       }).finally(() => { pending.delete(path) })

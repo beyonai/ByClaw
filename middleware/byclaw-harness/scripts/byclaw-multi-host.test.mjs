@@ -53,6 +53,16 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-dsh'], undefined)
 })
 
+test('every plugin that reads or writes the user tree does so in the tool environment', () => {
+  // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
+  const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
+    'devflow', 'devflow-tool', 'devflow-artifact-gate', 'devflow-agent-gate', 'devflow-worktree', 'devflow-command',
+    'devflow-spec', 'devflow-spec-sentinel', 'devflow-iron-rules', 'dsh-codegraph']
+  const entries = rows.map(id => ({ id, name: `x-${id}`, config: {} }))
+  const overlays = Object.fromEntries(composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', spec).map(row => [row.id, row.config]))
+  for (const id of rows) assert.equal(overlays[id]?.workspaceOnToolEnvironment, true, id)
+})
+
 test('byclaw-be tool environments get the host settings plus the user and the PUT token', () => {
   const entries = [{ id: 'byclaw-tool-env', name: '@byclaw/dsh-tool-env', config: { keep: 1 } }]
   const [row] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', beSpec)

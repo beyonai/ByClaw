@@ -42,7 +42,7 @@ import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
-import { lazyToolEnvironment, lazyToolEnvironmentFiles, toolEnvironmentFiles } from './tool-environment-files.ts'
+import { lazyToolEnvironment, lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from './tool-environment-files.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
 import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
@@ -1083,6 +1083,11 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       resolveSourcePath: source => resolveByClawInboundPath(source, byRoot),
       resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
       resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+      // Tools writing or checking a user's files (generated images and speech, task attachments) are
+      // tool calls: they use the tool environment itself, starting it like any other tool.
+      ...(config.workspaceOnToolEnvironment
+        ? { userFiles: toolEnvironmentFiles(ctx), artifactIo: mediaArtifactIo(toolEnvironmentFiles(ctx)) }
+        : {}),
     }
     const voiceRuntime = new ByClawVoiceRuntime({
       byRoot, userCode,
@@ -1117,6 +1122,10 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       maxTokens: config.groupChatDispositionMaxTokens ?? 1_024,
       historyMaxBytes: config.groupChatDispositionHistoryMaxBytes ?? 65_536,
       resolveConfiguredModel: connection => models.resolveGroupChatDispositionModel(connection),
+      // The session state and the group history are in the user tree. State goes through the queued
+      // view (every first turn writes it; a model-only turn must not start B); the history is written
+      // by the platform, so only the tool environment itself has it.
+      ...(userFiles === undefined ? {} : { files: userFiles, historyFiles: toolEnvironmentFiles(ctx) }),
     })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,

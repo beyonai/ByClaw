@@ -152,7 +152,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 
 分类流程还会检查 `BYCLAW_GROUP_CHAT_DISPOSITION_ENABLED`：仅去掉首尾空格后等于 `0` 时关闭模型判定，未设置、空值及其他值均开启。开关不能替代首次开启会话和 `groupChat.executionId` 条件。关闭判定时仍记录会话首次开启，之后开启开关不会对已开启的会话补判。可同时配置 `BYCLAW_GROUP_CHAT_DISPOSITION_BASE_URL`、`BYCLAW_GROUP_CHAT_DISPOSITION_API_KEY` 和 `BYCLAW_GROUP_CHAT_DISPOSITION_MODEL`，使用独立的 OpenAI 兼容 Chat Completions 接口。URL 是 API 基础地址，例如 `https://api.example.com/v1`，不包含凭据、查询参数或片段。三项均未设置或为空时沿用现有模型解析逻辑。独立连接不读取 Redis 模型记录，也不修改正常会话的模型。配置不完整或无效时记录日志并沿用已有的 `CHAT` 失败兜底，不借用正常模型的凭据。环境变量在分类器安装时读取，修改后需重启 Worker。
 
-模型错误和超时会记录日志，并对已收到的文本使用同样的容错规则；没有可用响应时兜底 `CHAT`。已有状态无效或文件操作失败只记录日志，不打断正常会话，也不覆盖已有文件。首次开启标记防止后续请求自动重复失败的后台尝试。后台工作自行管理插件生命周期内的取消，插件退出时会中止并收尾已接收的任务。路径遵循配置的 `/by` 本地存储映射。插件配置 `groupChatDispositionTimeoutMs` 默认 `30000`，`groupChatDispositionMaxTokens` 默认 `1024`，均为正整数。可运行 `pnpm run verify:group-chat-disposition` 执行无需 API Key 的容错与会话并行回归检查。
+模型错误和超时会记录日志，并对已收到的文本使用同样的容错规则；没有可用响应时兜底 `CHAT`。已有状态无效或文件操作失败只记录日志，不打断正常会话，也不覆盖已有文件。首次开启标记防止后续请求自动重复失败的后台尝试。后台工作自行管理插件生命周期内的取消，插件退出时会中止并收尾已接收的任务。路径遵循配置的 `/by` 本地存储映射。在用户树位于独立工具环境的共享 DSH 宿主上，首次开启标记和分流结果经工具环境的排队文件层写入（记录它们不会拉起工具环境），历史文件则在工具环境中读取。插件配置 `groupChatDispositionTimeoutMs` 默认 `30000`，`groupChatDispositionMaxTokens` 默认 `1024`，均为正整数。可运行 `pnpm run verify:group-chat-disposition` 执行无需 API Key 的容错与会话并行回归检查。
 
 `byclaw/session-setup` 是接收输入前等待完成的串行事件，覆盖新建、恢复、复用会话，以及后台工作期间的前台追问。事件提供显式的 Agent 实例及其作用域、可信 command，以及 BE 地址、当前用户登录请求头和 `/by/` 路径解析等宿主适配方法。类型从 `@byclaw/dsh-integration/session-extensions` 导出。监听器必须支持重复装配，不能启动 Agent；监听器失败会阻止本次输入进入会话。可选插件自行管理配置、启用条件和持久状态，Integration 不依赖这些插件。
 

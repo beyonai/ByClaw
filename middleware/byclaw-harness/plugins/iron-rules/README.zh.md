@@ -222,6 +222,7 @@ owner: admin
 | `checkOutputMaxChars` | `2000` | 每条违规详情引给模型的字符上限，防止脚本输出撑爆上下文 |
 | `maxRetries` | `2` | 连续强制续跑上限。设 `0` 表示只报告一次、从不强制重试 |
 | `requireApproval` | `false` | 预留：执行脚本前要求用户审批。当前不生效 |
+| `workspaceOnToolEnvironment` | `false` | 经上下文的工具环境（`ctx.fs` / `ctx.subprocess`）读写铁律，而不是本进程的文件系统；共享 DSH 宿主会打开它，因为用户的项目在各自的工具沙箱里 |
 
 ## 安装
 
