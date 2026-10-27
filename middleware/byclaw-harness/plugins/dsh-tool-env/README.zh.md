@@ -18,6 +18,7 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
 - **身份：** A 在自己的私有 DSH 目录里生成客户端密钥和 B 的主机密钥，所以 A 能锁定 B 的主机密钥。`opensandbox` 模式随创建请求交给 B；`byclaw-be` 模式把 A 的这个目录只读挂进 B（`BYCLAW_TOOL_ENV_SEED_DIR`，默认 `/etc/byclaw-tool-env`）。
   - B 的 sshd 只接受这把钥匙登录 `byclaw` 用户。
 - **密钥隔离：** 所有远程进程的环境变量都会去掉 `BYCLAW_TOOL_ENV_*`。A 的会话、凭据、profile 不会挂进 B。
+- **启动环境：** B 上的每个进程（Bash、终端、LSP、PTC）都会在自身环境之下叠加用户的启动环境，与拆分前从运行时继承的一致。来源是配置项 `launchEnv`：共享 DSH 宿主用 BE 为该用户渲染的环境填充，每次 PUT 更新，`USER_CODE` 始终是该上下文的用户；调用方自己的值优先，B 自己的路径、解释器与加载器设置、显示和浏览器（`PATH`、`HOME`、`NODE_*`、`LD_*`、`XDG_*`、`DISPLAY`、`PLAYWRIGHT_BROWSERS_PATH`、`BYCLAW_BROWSER_*` 等）保持不变。
 - **沙箱：** 拆分模式下默认 `DSH_PERMISSION_MODE=danger-full-access`。
   - B 本身就是隔离边界。
   - 宿主机禁止用户命名空间时，容器里用不了 bwrap/Landlock，`workspace-write` 会拒绝所有命令。

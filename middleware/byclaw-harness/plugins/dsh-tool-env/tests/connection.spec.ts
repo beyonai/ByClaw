@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { scrubEnvironment } from '../src/connection.ts'
+import { launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
@@ -19,6 +19,41 @@ describe('scrubEnvironment', () => {
     expect(scrubEnvironment(params)).toBe(params)
     expect(scrubEnvironment(undefined)).toBeUndefined()
     expect(scrubEnvironment({ env: undefined })).toEqual({ env: undefined })
+  })
+})
+
+describe('launchEnvironment', () => {
+  const launch = { USER_CODE: 'u1', REDIS_HOST: 'redis', MODEL_NAME: 'm', BYCLAW_DSH_TOOL_ENV: 'byclaw-be' }
+  it('gives every process on B the user\'s launch environment under the caller\'s own', () => {
+    const params = { argv: ['/bin/sh'], cwd: '/by', env: { PATH: '/usr/bin', MODEL_NAME: 'caller' }, graceMs: 1 }
+    expect(scrubEnvironment(launchEnvironment('process.prepare', params, launch))).toEqual({
+      argv: ['/bin/sh'], cwd: '/by', graceMs: 1, env: { USER_CODE: 'u1', REDIS_HOST: 'redis', MODEL_NAME: 'caller', PATH: '/usr/bin' },
+    })
+    expect(params.env).toEqual({ PATH: '/usr/bin', MODEL_NAME: 'caller' })
+  })
+  it('covers processes spawned without an environment, such as terminals', () => {
+    expect(launchEnvironment('process.prepare', { argv: ['bash'], cwd: '/by', graceMs: 1 }, launch))
+      .toEqual({ argv: ['bash'], cwd: '/by', graceMs: 1, env: launch })
+  })
+  it('keeps a caller\'s tombstone, which removes the variable on B', () => {
+    expect(launchEnvironment('process.prepare', { argv: ['sh'], env: { REDIS_HOST: null } }, launch))
+      .toEqual({ argv: ['sh'], env: { ...launch, REDIS_HOST: null } })
+  })
+  it('leaves the tool sandbox its own paths and browser settings', () => {
+    const own = {
+      PATH: '/usr/bin', HOME: '/home/a', DSH_HOME: '/home/a/.dsh', BYCLAW_BROWSER_SOCKET: '/a.sock', BYCLAW_BROWSER_VIEWER: 'none', REDIS_HOST: 'redis',
+      // The runtime's interpreter, loader, display and browser install are A's, not B's.
+      NODE_OPTIONS: '--max-old-space-size=4096', NODE_PATH: '/opt/a', LD_LIBRARY_PATH: '/opt/a/lib', LD_PRELOAD: '/a.so',
+      PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright-a', DISPLAY: ':1', XDG_RUNTIME_DIR: '/run/user/1000', XDG_CONFIG_HOME: '/home/a/.config', HOSTNAME: 'a',
+    }
+    expect(launchEnvironment('process.prepare', { argv: ['sh'] }, own)).toEqual({ argv: ['sh'], env: { REDIS_HOST: 'redis' } })
+  })
+
+  it('leaves other requests and an empty launch environment alone', () => {
+    const lookup = { command: 'bash', env: { PATH: '/bin' } }
+    expect(launchEnvironment('executable', lookup, launch)).toBe(lookup)
+    const spawn = { argv: ['sh'] }
+    expect(launchEnvironment('process.prepare', spawn, {})).toBe(spawn)
   })
 })
 

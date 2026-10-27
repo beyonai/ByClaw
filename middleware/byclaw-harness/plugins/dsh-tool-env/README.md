@@ -46,6 +46,14 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
 - **Secrets:** every remote spawn and lookup passes through this service, which
   strips `BYCLAW_TOOL_ENV_*` and `BYCLAW_DSH_TOOL_ENV` from the forwarded
   environment. A's sessions, credentials and profiles are never mounted in B.
+- **Launch environment:** a process on B (Bash, terminals, LSP, PTC) gets the
+  user's launch environment under its own, as it would have inherited it from
+  the runtime before the split: `launchEnv` in the config, which the shared DSH
+  host fills from the environment BE renders for the user and renews with
+  every PUT, with `USER_CODE` always the context's user. The caller's own
+  values still win, and B keeps its own paths, interpreter and loader settings,
+  display and browser (`PATH`, `HOME`, `NODE_*`, `LD_*`, `XDG_*`, `DISPLAY`,
+  `PLAYWRIGHT_BROWSERS_PATH`, `BYCLAW_BROWSER_*` and the like).
 - **Confinement:** in split mode the entrypoint defaults `DSH_PERMISSION_MODE`
   to `danger-full-access` (override with `DSH_PERMISSION_MODE` or
   `BYCLAW_TOOL_ENV_PERMISSION_MODE`). B itself is the isolation boundary, and

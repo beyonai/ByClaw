@@ -161,6 +161,8 @@ export const USER_ROW_OVERLAYS = {
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
+    // What the user's own sandbox would have started with (BE renders it from the harness spec for every PUT).
+    launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
       ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
@@ -196,6 +198,27 @@ export async function currentUserToken(redis, user) {
   if (userId === '') return undefined
   const token = String(await redis.hget(`user:${userId}:login:auth`, 'Beyond-Token') ?? '').trim()
   return token === '' ? undefined : token
+}
+
+/** The launch environment processes on B get: the PUT `env` with the user identity on top, as in {@link launchEnvironmentValues}. */
+function toolLaunchEnvironment(env, user) {
+  return { ...env, USER_CODE: user }
+}
+
+/**
+ * Give a running context the launch environment of a later PUT: processes it
+ * starts on B from then on get it under their own (see dsh-tool-env).
+ * @param ctx - the context's root (anything with `get(name)`).
+ * @param env - PUT `env`.
+ * @param user - the user the context runs as, which `env` cannot override.
+ * @returns whether an environment was handed over.
+ */
+export function renewLaunchEnvironment(ctx, env, user) {
+  if (env === undefined || env === null || Object.keys(env).length === 0) return false
+  const toolEnv = ctx.get('ssh')
+  if (typeof toolEnv?.setLaunchEnvironment !== 'function') return false
+  toolEnv.setLaunchEnvironment(toolLaunchEnvironment(env, user))
+  return true
 }
 
 export function renewUserToken(ctx, config, env) {
@@ -1193,7 +1216,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
     // using the one from boot otherwise, which expires long before a resident
     // context goes away (then every launch of B is a 401).
-    renew: request => { renewUserToken(ctx, config, request.env) },
+    renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
   }
   if (request.managed) {
     const deadline = Date.now() + 60_000
