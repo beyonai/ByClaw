@@ -64,6 +64,7 @@ public class ChatStreamRuntimeCoordinator {
             // modelAnswerMessageId. Its terminal write must update that message
             // instead of inserting a second assistant history record.
             ctx.recoveryOnly = true;
+            ctx.streamRecoveryToRequester = true;
             log.info("继续运行的 trace 缺少输出上下文，重新绑定本次请求, sessionId: {}, traceId: {}, clientRequestId: {}",
                 sessionId, ctx.traceId, ctx.clientRequestId);
         }

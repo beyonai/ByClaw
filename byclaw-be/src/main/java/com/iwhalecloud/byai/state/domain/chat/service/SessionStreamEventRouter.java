@@ -238,7 +238,7 @@ public class SessionStreamEventRouter {
         if (messageContext != null) {
             messageContext.setRecordedStreamEventData(null);
         }
-        if (ctx.recoveryOnly) {
+        if (ctx.recoveryOnly && !ctx.streamRecoveryToRequester) {
             boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
             if (!alreadyHydrated) {
                 pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);

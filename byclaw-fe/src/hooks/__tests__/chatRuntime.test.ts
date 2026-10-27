@@ -19,6 +19,7 @@ import {
   handleParsedChatStream,
   handleSessionRuntimeState,
   handleTaskPlanSnapshot,
+  refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -111,6 +112,89 @@ describe('hooks/useChat/chatRuntime', () => {
     expect(updateMessage).toHaveBeenCalledWith(answerMsg, { isAssign: undefined });
     expect(answerMsg.messageList).toHaveLength(1);
     jest.useRealTimers();
+  });
+
+  it('refreshes only the completed interaction while preserving newer stream state', () => {
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = {
+      msgId: 'a1',
+      messageId: 'm1',
+      queryMsgId: 'q1',
+      sessionId: 's1',
+      fromBeyond: true,
+      text: 'newer streamed text',
+      streamId: 'stream-2',
+      messageList: [
+        {
+          uuid: 'interaction-1',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 0, substance: { formStatus: 0 } },
+        },
+      ],
+    };
+    const freshAnswer: any = {
+      ...answerMsg,
+      text: 'older rendered text',
+      streamId: 'stream-1',
+      messageList: [
+        {
+          ...answerMsg.messageList[0],
+          content: { formStatus: 2, substance: { formStatus: 2 } },
+        },
+      ],
+    };
+    const updateMessage = jest.fn((msg) => msg);
+    const context = {
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler: jest.fn(),
+      updateMessage,
+    };
+    registerPendingChatContext(context);
+    registerSessionChatContext('s1', context);
+
+    expect(refreshChatStreamAnswerMessage({ sessionId: 's1' }, freshAnswer)).toBe(true);
+    expect(updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'newer streamed text',
+        streamId: 'stream-2',
+        messageList: [expect.objectContaining({ content: freshAnswer.messageList[0].content })],
+      }),
+      { isAssign: true }
+    );
+  });
+
+  it('does not refresh a stream context whose answer identity differs', () => {
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const answerMsg: any = {
+      msgId: 'a1',
+      messageId: 'm1',
+      queryMsgId: 'q1',
+      sessionId: 's1',
+      fromBeyond: true,
+      messageList: [],
+    };
+    const updateMessage = jest.fn((msg) => msg);
+    const context = {
+      clientRequestId: 'c1',
+      queryMsg,
+      answerMsg,
+      getMessageList: () => [queryMsg, answerMsg],
+      flowHandler: jest.fn(),
+      updateMessage,
+    };
+    registerPendingChatContext(context);
+    registerSessionChatContext('s1', context);
+
+    expect(
+      refreshChatStreamAnswerMessage(
+        { sessionId: 's1' },
+        { ...answerMsg, messageId: 'different-message', messageList: [] }
+      )
+    ).toBe(false);
+    expect(updateMessage).not.toHaveBeenCalled();
   });
 
   it('marks a running session when a stream message requires user input', () => {

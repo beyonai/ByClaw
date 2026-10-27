@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import {
   ByClawInteractionStore,
+  ColdRecoveryAskParking,
   buildRecoveredAskPayload,
   interactionAgentSessionId,
   interactionRecordKey,
@@ -12,6 +13,7 @@ import {
   shouldRetainInteractionAfterAskFailure,
   shouldReleaseWaitingInteractionAfterAsk,
   waitForAdmittedTurnCompletion,
+  repairColdAskUserQuestionSession,
 } from '../src/interaction-recovery.ts'
 
 assert.equal(
@@ -62,6 +64,55 @@ assert.equal(await releaseColdRecoveryBlockingTurn(undefined, async () => {
   throw new Error('missing blocking turn must not be cancelled')
 }, { setStreamFinished(value) { releaseEvents.push(['resume-without-blocker', value]) } }), false)
 assert.deepEqual(releaseEvents.at(-1), ['resume-without-blocker', false])
+
+const parking = new ColdRecoveryAskParking()
+const parkedContextEvents = []
+const parked = parking.park({
+  sessionId: 'session-1', userCode: 'user-1', messageId: 'message-1',
+  setStreamFinished(value) { parkedContextEvents.push(value) },
+})
+assert.equal(parking.has('session-1', 'user-1', 'message-1'), true)
+assert.equal(parking.release('session-1', 'user-1', 'message-1'), true)
+assert.deepEqual(await parked, { answer: '', dshSessionId: 'session-1' })
+assert.deepEqual(parkedContextEvents, [true], 'the reclaimed ASK stream must close without a terminal response')
+
+const originalCall = {
+  type: 'tool/call', seq: 5, time: 100,
+  data: { turn: 1, step: 1, callId: 'call-original', name: 'ask_user_question', arguments: JSON.stringify({
+    questions: [{ id: 'fruit', question: '喜欢哪些水果？' }],
+  }) },
+}
+const persistedEvents = [
+  { type: 'turn/start', seq: 1, time: 100, data: { turn: 1 } },
+  { type: 'step/start', seq: 2, time: 100, data: { turn: 1, step: 1 } },
+  { type: 'assistant/message', seq: 3, time: 100, data: { turn: 1, step: 1, message: {
+    id: 'assistant-1', role: 'assistant', content: [{ type: 'tool-call', id: 'call-original', name: 'ask_user_question', arguments: originalCall.data.arguments }],
+  }, stream: [] } },
+  originalCall,
+]
+const appended = []
+const repaired = await repairColdAskUserQuestionSession({
+  async open(_id, mode) {
+    assert.equal(mode, 'write')
+    return {
+      header: {}, inheritedEventCount: 0,
+      async read() { return { events: persistedEvents } },
+      async append(events) { appended.push(...events) },
+      async close() {},
+    }
+  },
+}, 'agent-1', {
+  questions: [{ id: 'fruit', question: '喜欢哪些水果？' }],
+  answer: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
+})
+assert.equal(repaired, true)
+assert.equal(appended[0].type, 'tool/result')
+assert.equal(appended[0].data.message.source.callId, 'call-original')
+assert.equal(appended[0].data.message.isError, false)
+assert.deepEqual(JSON.parse(appended[0].data.message.content[0].text), {
+  answers: [{ id: 'fruit', selected: ['苹果'] }],
+})
+assert.deepEqual(appended.slice(1).map(event => event.type), ['step/end', 'turn/end'])
 
 class FakeRedis {
   strings = new Map()
@@ -123,6 +174,8 @@ await firstProcess.create({
 })
 
 assert.ok(redis.strings.has(interactionRecordKey('test', 'interaction-1')))
+assert.equal((await firstProcess.findPending('session-1', 'user-1'))?.interactionId, 'interaction-1')
+assert.equal(await firstProcess.findPending('session-1', 'user-1', 'different-message'), undefined)
 
 // Simulate sandbox release: a different store instance receives Resume.
 const secondProcess = new ByClawInteractionStore(redis, { prefix: 'test', ttlSeconds: 60 })
