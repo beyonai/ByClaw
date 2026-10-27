@@ -14,7 +14,7 @@ export interface Config extends TenantIdentity {
   kmsUrl: string;
   beClientIdentity: string;
   transport?: "http" | "https";
-  internalToken?: string;
+  internalToken: string;
   tls?: { certFile: string; keyFile: string; caFile: string };
   redis: { host: string; port: number; db: number; username: string; password: string; tls?: {} };
 }
@@ -48,8 +48,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (requireId(required("TENANT_ID")) !== enterpriseId) throw new Error("Tenant IDs must match");
   if (env.REDIS_TLS !== "true" && env.REDIS_TLS !== "false")
     throw new Error("REDIS_TLS must be true or false");
-  if (transport === "http" && !env.INTERNAL_API_TOKEN)
-    throw new Error("Missing configuration: INTERNAL_API_TOKEN");
+  if (!env.INTERNAL_API_TOKEN?.trim()) throw new Error("Missing configuration: INTERNAL_API_TOKEN");
   const port = integer("PORT", 3100),
     redisPort = integer("REDIS_PORT", 6379);
   if (!port || !redisPort) throw new Error("Ports must be positive");
@@ -72,7 +71,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     kmsUrl: secureUrl("KMS_DECRYPT_URL"),
     beClientIdentity: transport === "https" ? required("BE_CLIENT_IDENTITY") : "",
     transport,
-    internalToken: transport === "http" ? required("INTERNAL_API_TOKEN") : undefined,
+    internalToken: required("INTERNAL_API_TOKEN"),
     tls:
       transport === "https"
         ? {

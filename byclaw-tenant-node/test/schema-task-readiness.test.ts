@@ -115,7 +115,7 @@ const indexes = [
   "uq_tenant_ask_answer_relation",
 ];
 
-function setup(missing?: string) {
+function setup(missing?: string, changeDuringVerification = false) {
   const rows = Object.entries(columns).flatMap(([table_name, names]) =>
     names.filter((name) => name !== missing).map((column_name) => ({ table_name, column_name })),
   );
@@ -128,10 +128,16 @@ function setup(missing?: string) {
     },
   };
   const ready = vi.fn();
+  let revision = 0;
   const connection = {
+    get schemaRevision() {
+      return revision;
+    },
     identity: { enterpriseId: "10" },
     database: () => ({ exclusive: async (work: (value: typeof db) => Promise<void>) => work(db) }),
-    guard: async () => {},
+    guard: async () => {
+      if (changeDuringVerification) revision++;
+    },
     setSchemaReady: ready,
   } as unknown as ConnectionManager;
   const be = { currentVersion: async () => "V0.5.0" } as unknown as BeSchemaClient;
@@ -153,6 +159,12 @@ describe("group task schema readiness", () => {
     await readiness.check();
     expect(readiness.state.verified).toBe(true);
     expect(ready).toHaveBeenCalledWith(true);
+  });
+  it("does not reopen business when a schema task changes during verification", async () => {
+    const { readiness, ready } = setup(undefined, true);
+    await readiness.check();
+    expect(readiness.state.verified).toBe(false);
+    expect(ready).not.toHaveBeenCalledWith(true);
   });
 });
 
