@@ -564,8 +564,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ...localE2eStorageRoot === undefined ? {} : { localE2eStorageRoot },
   })
   // With a tool environment the user tree exists only there; never touch it through this host's `node:fs`.
-  // ...and nothing a context does before its first tool call may start B: boot-time projections and
-  // session directories wait in the tool-environment facade until B connects for a tool.
+  // ...and nothing a context does while booting may start B: boot-time projections and session
+  // directories wait in the tool-environment facade until a turn connects B.
   const lazyEnvironment = config.workspaceOnToolEnvironment ? lazyToolEnvironment(ctx) : undefined
   const userFiles = config.workspaceOnToolEnvironment
     ? (lazyEnvironment === undefined ? toolEnvironmentFiles(ctx) : lazyToolEnvironmentFiles(lazyEnvironment, toolEnvironmentFiles(ctx)))

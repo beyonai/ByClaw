@@ -65,27 +65,25 @@ digests from its own installation, and the helper refuses a mismatch.
 
 ## When B starts
 
-Only a tool call starts B. A context's boot (resource projection, Skill views,
-media projections) and the start of a turn (the session directory) do not: the
-connection facade (`ctx.ssh`) exposes `connected` and `whenConnected(key, op)`,
-and the integration plugin hands B-bound writes and directory creation to it,
-so they run once B connects for a tool, before that tool runs. Reads of the
-user tree while B is down come from what this host last read or wrote there
-and are `ENOENT` otherwise, so a model-only answer never waits for a sandbox.
-Before the model runs, a turn also resolves its session directory and probes
-for files (git roots, session Skills). While B is down the facade answers
-those itself: path resolution only normalizes, queued directories are empty
-directories with nothing inside, `.git` and instruction-file probes
-(`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
-directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
-`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, directories this
-host already created on B still exist (B's volume outlives B), cleanup of a
-process or stream of a connection that is gone (`process.terminate`,
-`fs.streamClose`) is already done, and `executable` lookups resolve on this
-host (same image build). What tools do (stat, list, read, write of real
-paths; processes) still goes to B and starts it. The trade-off: until a
-session's first tool call, its prompt sees no session-local Skills and no
-instruction files from the user tree.
+Every turn starts B, a model-only turn included: before the model runs, a turn
+reads the session's instruction files (`AGENTS.md`, `CLAUDE.md` and their
+`.local` variants from the project root, the nearest `.git`, down to the
+session directory), session Skills and iron rules, and those live in the user
+tree, which only B serves as of now (the platform writes there too, for
+example uploads). So a turn sees what the user's own sandbox would have shown,
+never an older copy. A context's boot (resource projection, Skill views, media
+projections) does not start B: the connection facade (`ctx.ssh`) exposes
+`connected` and `whenConnected(key, op)`, and the integration plugin hands
+B-bound writes and directory creation to it, so they run once B connects,
+before anything else runs there. While B is down the facade still answers what
+needs no user tree: path resolution only normalizes; directories queued for
+creation on B, and the ones this host already created there, are directories
+(what is in them is B's to say); DSH's own homes (`DSH_HOME`,
+`DSH_AGENTS_HOME`) hold nothing; cleanup of a process or stream of a
+connection that is gone (`process.terminate`, `fs.streamClose`) is already
+done; `executable` lookups resolve on this host (same image build). B is
+released after `BYCLAW_TOOL_ENV_IDLE_MS` without operations, so it stays up
+while the user is active.
 A launch that BE refuses (for example while the platform is still releasing
 or creating the sandbox: "Sandbox is being created") is retried every 3 s for
 up to 60 s inside the operation that needs B, so one transient refusal does not

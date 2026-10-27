@@ -98,8 +98,8 @@ export function lazyToolEnvironment(ctx: Pick<Context, 'get'>): LazyToolEnvironm
 }
 
 /**
- * File access that never starts B. Only a tool call starts the tool environment,
- * so a context's boot and a turn's start must not touch B: writes and directory
+ * File access that never starts B. A turn starts the tool environment, a
+ * context's boot must not: writes and directory
  * creation are handed to the facade to run once B connects (latest write per
  * path wins); reads come from B when it is connected, otherwise from what this
  * host last read or wrote there, and are `ENOENT` when it has neither.

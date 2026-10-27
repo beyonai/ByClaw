@@ -197,7 +197,7 @@ try {
   check(shared.workerHistory === 'none' && shared.dshHome === '/data/u/dsh-home', 'shared-host values are accepted')
   assert.throws(() => Config({ workerHistory: 'redis' })); checks += 1
 
-  // Lazy access: nothing a context does before its first tool call may start B.
+  // Lazy access: nothing a context does while booting may start B.
   {
     const deferred = new Map()
     const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }

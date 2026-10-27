@@ -86,9 +86,10 @@ export class ToolEnvConnection extends Service {
   }
 
   /**
-   * Only a tool call is meant to start B. When an operation arrives while B is
-   * down and no start is in flight, name it: this is the line to read when B
-   * starts earlier than expected.
+   * A turn starts B (its instruction-file and Skill reads, then its tools); a
+   * context's boot does not. When an operation arrives while B is down and no
+   * start is in flight, name it: this is the line to read when B starts at an
+   * unexpected moment.
    */
   private noteStartReason(method: string, params: unknown): void {
     if (this.connected || this.current !== undefined || this.closed) return
@@ -150,8 +151,8 @@ export class ToolEnvConnection extends Service {
         if (local !== undefined) return result.parse(local)
       }
     }
-    // A turn resolves its session directory and probes for files (git roots, cwd) before the model
-    // runs; answer those without B: queued directories are empty directories, the rest is absent.
+    // What this host can say without B (queued directories, DSH's own homes, path resolution);
+    // everything else, a turn's instruction-file and Skill probes included, goes to B and starts it.
     if (!this.connected && this.current === undefined && !this.closed) {
       const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
