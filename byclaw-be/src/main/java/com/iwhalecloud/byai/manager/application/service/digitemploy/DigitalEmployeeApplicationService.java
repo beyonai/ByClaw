@@ -3850,28 +3850,23 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 把刚刚生成的标准 JSON 串镜像写入 ss_res_ext_dig_employee.target_content. 失败仅记日志,不阻断后续 MinIO 同步--target_content 是辅助快照,缺失不影响主流程.
+     * 保存本次运行快照。启动同步会优先读取 target_content，写入失败必须阻止发布并由调用方重试。
      */
     private void persistTargetContent(Long resourceId, String jsonContent) {
         if (resourceId == null || StringUtils.isBlank(jsonContent)) {
-            return;
+            throw new IllegalArgumentException("数字员工运行快照参数不能为空");
         }
-        try {
-            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
-            if (ssResExtDigEmployee == null) {
-                logger.warn("写入 target_content 失败:扩展表记录不存在, resourceId={}", resourceId);
-                return;
-            }
-            ssResExtDigEmployee.setTargetContent(jsonContent);
-            ssResExtDigEmployeeService.update(ssResExtDigEmployee);
-        } catch (Exception e) {
-            logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+        SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+        if (ssResExtDigEmployee == null) {
+            throw new IllegalStateException("数字员工扩展记录不存在, resourceId=" + resourceId);
         }
+        ssResExtDigEmployee.setTargetContent(jsonContent);
+        ssResExtDigEmployeeService.update(ssResExtDigEmployee);
     }
 
     /**
      * PR-1: 公开包级访问包装,供 {@code StartupTargetContentPreloader}(c-4 离线预生成)使用.
-     * 行为与私有 {@link #persistTargetContent} 一致;返回 boolean 便于预生成脚本统计.
+     * 预生成保留尽力写入语义，返回 boolean 便于预生成脚本统计；运行态同步使用严格写入。
      *
      * @param resourceId  数字员工资源 ID
      * @param jsonContent 标准 JSON 内容

@@ -166,6 +166,12 @@ public class TransactionAdviceConfig {
                     "com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationApplicationService")) {
                     return notSurpportedTx;
                 }
+                // 资源同步任务先提交领取状态和各员工关联，再刷新外部运行态。
+                // 外层 REQUIRED 会让 TransactionTemplate 加入同一事务，刷新时读到旧关联并等待自身写锁。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncReconcileService")) {
+                    return notSurpportedTx;
+                }
                 // 回滚补偿是尽力恢复外部运行态；它的失败不能污染用于记录 FAILED 的事务。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService")

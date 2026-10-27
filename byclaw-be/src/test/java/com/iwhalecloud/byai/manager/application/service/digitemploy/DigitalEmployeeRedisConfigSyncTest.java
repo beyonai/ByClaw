@@ -208,6 +208,28 @@ class DigitalEmployeeRedisConfigSyncTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"missing-extension", "write-failure"})
+    void snapshotPersistenceFailureStopsRuntimePublication(String mode) {
+        var syncing = spy(service);
+        var details = new DigitalEmployeeDetailsDTO(); details.setResourceId(9L);
+        doReturn(details).when(syncing).findDetailsById(any());
+        ReflectionTestUtils.setField(syncing, "ssResourceService", mock(SsResourceService.class));
+        var storage = mock(ResourceArtifactStorageService.class);
+        ReflectionTestUtils.setField(syncing, "resourceArtifactStorageService", storage);
+        var artifacts = mock(SsResourceArtifactService.class);
+        ReflectionTestUtils.setField(syncing, "ssResourceArtifactService", artifacts);
+        if ("write-failure".equals(mode)) {
+            var extension = new SsResExtDigEmployee(); extension.setResourceId(9L);
+            when(ssResExtDigEmployeeService.findById(9L)).thenReturn(extension);
+            org.mockito.Mockito.doThrow(new IllegalStateException("snapshot write failed"))
+                .when(ssResExtDigEmployeeService).update(extension);
+        }
+
+        assertThat(syncing.synOpenClawWorkSpace(9L)).isFalse();
+        org.mockito.Mockito.verifyNoInteractions(storage, artifacts, valueOperations);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void publicationSyncReadsUncommittedVersionAndRollsBackArtifactWithEmployee(boolean existing,
         @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {
