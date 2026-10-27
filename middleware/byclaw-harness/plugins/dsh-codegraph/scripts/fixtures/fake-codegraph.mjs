@@ -18,9 +18,19 @@ const tools = configured.split(',').filter(Boolean).map(name => ({
 }))
 
 const lines = createInterface({ input: process.stdin })
+let initialized = false
 lines.on('line', line => {
   const request = JSON.parse(line)
   if (request.id === undefined) return
+  // Like a real MCP server, a fresh process answers nothing before the handshake.
+  if (request.method === 'initialize') initialized = true
+  else if (request.method === 'server/discover') {
+    process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'method not found' } })}\n`)
+    return
+  } else if (!initialized) {
+    process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: 'not initialized' } })}\n`)
+    return
+  }
   const result = request.method === 'initialize'
     ? {
         protocolVersion: '2025-06-18',

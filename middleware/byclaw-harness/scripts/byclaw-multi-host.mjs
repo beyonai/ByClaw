@@ -251,11 +251,9 @@ export const DISABLED_BY_DESIGN = [
  * per-user config, and wire that config in USER_ROW_OVERLAYS.
  */
 export const DISABLED_UNTIL_MULTI_USER = [
-  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead.
+  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead
+  // (a server only while calls arrive, so B still pauses when idle).
   { id: 'codegraph-mcp', reason: 'replaced by dsh-codegraph on the tool environment' },
-  // Its MCP server stream stays open for the context's lifetime, which would keep
-  // B from ever idling into a pause. Enable once that stream is lease-aware.
-  { package: '@byclaw/dsh-codegraph', reason: 'would pin the tool environment awake' },
   // DSH's own terminal panel spawns a host PTY; better-sidebar's terminal runs on B.
   { package: '@deepseek-ai/dsh-client-ui-sidebar-terminal', reason: 'host PTY instead of the tool environment' },
 ]

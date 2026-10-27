@@ -26,6 +26,8 @@ The policy requires every CodeGraph call to pass the Agent's authoritative curre
 
 DSH's MCP stdio transport spawns its server with the MCP SDK on this host, not through `ctx.subprocess`, so the `codegraph-mcp` row always runs CodeGraph where DSH runs. When the workspace lives in a separate tool sandbox, disable that row and set `workspaceOnToolEnvironment: true` on `dsh-codegraph` together with a private `stateDir`. The plugin then starts `command args` (default `codegraph serve --mcp`, in `cwd`, default `/by`) through `ctx.subprocess` for every MCP connection, and mounts its own `codegraph` MCP client, which reaches that process through `bridge/stdio-socket.mjs` and a `0600` Unix socket in `stateDir`. The tool name is unchanged. The server's open streams keep the tool sandbox awake for as long as the context runs, and `codegraph` must be installed in the tool sandbox image.
 
+On a tool environment a CodeGraph server runs only while calls arrive: the plugin keeps the client's MCP session itself, ends the server after `idleMs` (default 120000) without a request so its streams stop keeping the tool sandbox from pausing, and starts the next one on demand, replaying the handshake to it. The server's answers to the handshake (`server/discover`, `initialize`, `tools/list`) are cached in `stateDir`, keyed by the server command and this host's copy of the executable, so a context registers the tool without starting the tool sandbox; a server that introduces itself differently refreshes the cache.
+
 ## Verification
 
 ```sh

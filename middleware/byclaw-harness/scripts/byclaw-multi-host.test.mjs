@@ -108,7 +108,8 @@ test('disabled lists match row ids and package prefixes', () => {
   ]
   // Multi-user plugins (browser-use, devflow, ...) load; only the pending ones stay off.
   const disabled = composeUserOverlays(entries, 'u1', '/h', spec).filter(row => row.disabled).map(row => row.id)
-  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'graph', 'hmr', 'lan'])
+  // CodeGraph itself runs on the tool environment (dsh-codegraph); only the row spawning it on this host stays off.
+  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'hmr', 'lan'])
   // Shrinking the pending list re-enables the plugin; by-design entries stay.
   const designOnly = composeUserOverlays(entries, 'u1', '/h', spec, { disabled: [DISABLED_BY_DESIGN] })
   assert.deepEqual(designOnly.filter(row => row.disabled).map(row => row.id).sort(), ['hmr', 'lan'])
