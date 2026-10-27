@@ -682,6 +682,7 @@ public class AssistantChatService {
             session.setCreateTime(new Date());
             session.setUpdateTime(new Date());
             assistantChatDto.setSessionId(sessionId);
+            ChatRequestCancellation.bindSession(sessionId);
             assistantChatDto.setSession(session);
             return session;
         }
@@ -726,6 +727,7 @@ public class AssistantChatService {
 
         // 6. 将新创建的sessionId设置回assistantChatDto
         assistantChatDto.setSessionId(newSessionId);
+        ChatRequestCancellation.bindSession(newSessionId);
 
         assistantChatDto.setSession(sessionMembersDto);
 

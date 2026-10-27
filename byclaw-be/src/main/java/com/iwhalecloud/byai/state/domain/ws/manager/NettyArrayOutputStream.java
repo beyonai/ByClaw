@@ -22,6 +22,7 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
 
     private final String wrapperType;
     private final String requestId;
+    private final String enterpriseId;
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx) {
         this(ctx, null, null);
@@ -32,6 +33,12 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
     }
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType, String requestId) {
+        this(ctx, clientRequestId, wrapperType, requestId, ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get());
+    }
+
+    public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType,
+        String requestId, String enterpriseId) {
+        this.enterpriseId = enterpriseId;
         this.requestId = requestId;
         this.ctx = ctx;
         this.clientRequestId = clientRequestId;
@@ -40,6 +47,7 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
 
     @Override
     public void write(byte[] b, int off, int len) {
+        if (com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.isCancelled()) return;
         super.write(b, off, len);
         // 获取新写入的数据
         byte[] newData = new byte[len];
@@ -72,7 +80,6 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         wrapper.put("type", wrapperType);
         wrapper.put("clientRequestId", clientRequestId);
         wrapper.put("requestId", requestId);
-        String enterpriseId = ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get();
         if (StringUtils.isNotBlank(enterpriseId)) {
             wrapper.put("enterpriseId", enterpriseId);
         }

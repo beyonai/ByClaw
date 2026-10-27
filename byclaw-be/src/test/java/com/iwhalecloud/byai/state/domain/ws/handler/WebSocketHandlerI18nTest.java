@@ -68,8 +68,9 @@ class WebSocketHandlerI18nTest extends I18nTestSupport {
     @Test
     void channelRead0PrefersMessageLanguageOverConnectionLanguage() {
         SandboxService sandboxService = mock(SandboxService.class);
+        java.util.concurrent.atomic.AtomicReference<Locale> observedLocale = new java.util.concurrent.atomic.AtomicReference<>();
         doAnswer(invocation -> {
-            assertThat(LocaleContextHolder.getLocale()).isEqualTo(Locale.US);
+            observedLocale.set(LocaleContextHolder.getLocale());
             return null;
         }).when(sandboxService).heartbeat("u1", -1L);
 
@@ -89,6 +90,8 @@ class WebSocketHandlerI18nTest extends I18nTestSupport {
 
         channel.writeInbound(new TextWebSocketFrame("{\"type\":\"HEARTBEAT\",\"language\":\"en-US\"}"));
 
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(2)).until(() -> observedLocale.get() != null);
+        assertThat(observedLocale.get()).isEqualTo(Locale.US);
         verify(sandboxService).heartbeat("u1", -1L);
         TextWebSocketFrame response = channel.readOutbound();
         assertThat(response.text()).contains("HEARTBEAT");
@@ -157,7 +160,7 @@ class WebSocketHandlerI18nTest extends I18nTestSupport {
 
             channel.writeInbound(new TextWebSocketFrame(
                 "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\"}"));
-            verify(chatService).llmChat(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+            org.mockito.Mockito.verify(chatService, org.mockito.Mockito.timeout(2000)).llmChat(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
             assertThat(TenantRequestContextHolder.get()).isNull();
         }
         finally {
@@ -218,6 +221,8 @@ class WebSocketHandlerI18nTest extends I18nTestSupport {
         try {
             channel.writeInbound(new TextWebSocketFrame(
                 "{\"type\":\"LLM_MESSAGE\",\"enterpriseId\":\"123\",\"clientRequestId\":\"chat-1\",\"language\":\"" + language + "\"}"));
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(2))
+                .until(() -> !channel.outboundMessages().isEmpty());
             TextWebSocketFrame error = channel.readOutbound();
             assertThat(error.text()).contains("ERROR", "chat-1", "123", expected).doesNotContain("sandbox starting");
             error.release();

@@ -81,7 +81,8 @@ public class ChatService {
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
         ChatChainLog.record("be.received", ChatChainLog.requestId(message), message.getSessionId(), "ok",
             "channelId", ctx.channel().id().asShortText());
-        LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+        LoginInfo currentUser = CurrentUserHolder.getLoginInfo();
+        if (currentUser == null) currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
 
         // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
         try {
@@ -112,13 +113,13 @@ public class ChatService {
         // 设置发送端 Channel，用于多端广播时排除发送端避免重复推送
         message.setSenderChannel(ctx.channel());
         try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getClientRequestId(),
-            "CHAT_STREAM", ChatChainLog.requestId(message))) {
+            "CHAT_STREAM", ChatChainLog.requestId(message), message.getEnterpriseId())) {
             assistantChatService.chat(message, outputStream, currentUser);
         }
         catch (IOException e) {
             log.error("Error processing LLM chat", e);
             // 发送错误消息给客户端
-            NettyResponse.sendErrorResponse(ctx, "Error processing LLM chat");
+            sendChatError(ctx, message, "Error processing LLM chat");
         }
     }
 
@@ -156,11 +157,15 @@ public class ChatService {
         catch (IOException e) {
             log.error("Error processing stream", e);
             // 发送错误消息给客户端
-            NettyResponse.sendErrorResponse(ctx, "Error processing processing stream");
+            sendChatError(ctx, message, "Error processing stream");
         }
     }
 
     public void stopChat(ChannelHandlerContext ctx, ChatMessage message) {
+        stopChat(ctx, message, () -> { });
+    }
+
+    public void stopChat(ChannelHandlerContext ctx, ChatMessage message, Runnable cancelPending) {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
         try {
             if (currentUser != null) {
@@ -176,6 +181,7 @@ public class ChatService {
             stopChatDto.setClientRequestId(message.getClientRequestId());
             fillStopChatFromRunningInfo(stopChatDto);
             assistantChatApplicationService.stopChat(stopChatDto);
+            cancelPending.run();
 
             JSONObject ack = new JSONObject();
             ack.put("type", "STOP_CHAT_ACK");
@@ -187,11 +193,17 @@ public class ChatService {
         }
         catch (Exception e) {
             log.error("Error stopping chat", e);
-            NettyResponse.sendErrorResponse(ctx, "Error stopping chat");
+            sendChatError(ctx, message, "Error stopping chat");
         }
         finally {
             CurrentUserHolder.clearLoginInfo();
         }
+    }
+
+    private void sendChatError(ChannelHandlerContext ctx, ChatMessage message, String detail) {
+        WebSocketErrorResponses.send(ctx, message,
+            com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null
+                ? detail : I18nUtil.get("tenant.ws.chatFailed"));
     }
 
     private void fillStopChatFromRunningInfo(StopChatDto stopChatDto) {

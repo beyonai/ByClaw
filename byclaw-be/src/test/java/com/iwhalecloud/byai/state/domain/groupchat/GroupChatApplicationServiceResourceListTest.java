@@ -331,6 +331,8 @@ class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
         channel.attr(Constant.ATT_USER_INFO).set(CurrentUserHolder.getLoginInfo());
         try {
             channel.writeInbound(new TextWebSocketFrame(payload));
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3))
+                .until(() -> !channel.outboundMessages().isEmpty());
             TextWebSocketFrame response = channel.readOutbound();
             assertThat(response).isNotNull();
             try {
@@ -573,6 +575,8 @@ class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
         channel.attr(Constant.ATT_USER_INFO).set(CurrentUserHolder.getLoginInfo());
         try {
             channel.writeInbound(new TextWebSocketFrame(JSON.toJSONString(request)));
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3))
+                .until(() -> !channel.outboundMessages().isEmpty());
             Object outbound = channel.readOutbound();
             try {
                 assertThat(outbound).isInstanceOf(TextWebSocketFrame.class);

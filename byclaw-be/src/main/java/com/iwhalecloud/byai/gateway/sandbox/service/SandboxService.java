@@ -770,34 +770,28 @@ public class SandboxService {
     }
 
     public boolean waitWorkerReadySync(String targetAgentType, long timeoutMs) {
-        LOGGER.debug("开始等待 Gateway worker 就绪，targetAgentType：{}，timeoutMs：{}", targetAgentType, timeoutMs);
-        long safeTimeoutMs = Math.max(1L, timeoutMs);
-        int maxAttempts = (int) Math.max(1L,
-            (safeTimeoutMs + WORKER_READY_POLL_INTERVAL_MS - 1) / WORKER_READY_POLL_INTERVAL_MS);
-        RetryConfig config = RetryConfig.custom()
-            .maxAttempts(maxAttempts)
-            .waitDuration(Duration.ofMillis(WORKER_READY_POLL_INTERVAL_MS))
-            .retryOnResult(result ->
-                !(result instanceof WorkerRegistry.OnlineAgentCheckResult readyResult) || !readyResult.exists)
-            .retryOnException(e -> true)
-            .build();
-        Retry retry = Retry.of("sandbox-worker-ready-" + targetAgentType, config);
-
-        try {
-            WorkerRegistry.OnlineAgentCheckResult result = Retry.decorateCheckedSupplier(retry,
-                () -> gatewayWorkerRegistry.hasOnlineAgentType(targetAgentType, true)).get();
-            if (result != null && result.exists) {
-                LOGGER.debug("Gateway worker 已就绪，targetAgentType：{}", targetAgentType);
-                return true;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(1L, timeoutMs));
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                WorkerRegistry.OnlineAgentCheckResult result = gatewayWorkerRegistry.hasOnlineAgentType(targetAgentType, true);
+                if (result != null && result.exists) return true;
+            }
+            catch (RuntimeException error) {
+                LOGGER.debug("Gateway worker readiness poll failed, targetAgentType：{}", targetAgentType, error);
+            }
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            try {
+                java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(remaining,
+                    java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(WORKER_READY_POLL_INTERVAL_MS)));
+            }
+            catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                return false;
             }
         }
-        catch (Throwable e) {
-            LOGGER.warn("等待 Gateway worker 就绪超时，targetAgentType：{}，timeoutMs：{}，原因：{}", targetAgentType,
-                timeoutMs, e.getMessage());
-            return false;
-        }
-
-        LOGGER.warn("等待 Gateway worker 就绪超时，targetAgentType：{}，timeoutMs：{}", targetAgentType, timeoutMs);
+        LOGGER.warn("Gateway worker not ready, targetAgentType：{}，timeoutMs：{}，interrupted：{}", targetAgentType,
+            timeoutMs, Thread.currentThread().isInterrupted());
         return false;
     }
 

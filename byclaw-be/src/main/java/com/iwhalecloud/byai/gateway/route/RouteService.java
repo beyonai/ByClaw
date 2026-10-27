@@ -169,6 +169,7 @@ public class RouteService {
      * storeMessage / afterProcess，最终由 cleanupResources 关闭流。
      */
     public void route(ChatProcessContext ctx) throws Exception {
+        com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.bindSession(ctx.getSessionId());
         if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null) {
             var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
             if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
@@ -241,6 +242,7 @@ public class RouteService {
         try (ChatGatewaySendGuard.Lease lease = sendGuard == null ? () -> { } : sendGuard.open(ctx)) {
             runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
             try {
+                com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.check();
                 ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
                 long readyMs = (System.nanoTime() - dispatchStarted) / 1_000_000;
                 ChatChainLog.record("be.worker_ready", ChatChainLog.requestId(ctx), sessionId, "ok",
@@ -771,6 +773,7 @@ public class RouteService {
         }
 
         while (true) {
+            com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.check();
             // 沙箱重启后的每次重试都重新读撤回屏障，不复用 decorator 的检查结果。
             ChatGatewaySendGuard sendGuard = sendGuardProvider == null ? null : sendGuardProvider.getIfAvailable();
             if (sendGuard != null) sendGuard.beforeSend(ctx);
