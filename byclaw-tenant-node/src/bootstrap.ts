@@ -1,4 +1,5 @@
 import { requireExecutionPolicy } from "./application/execution-policy.js";
+import MemberGroupRemoval from './application/MemberGroupRemoval.js';
 import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
 import { Redis } from "ioredis";
@@ -125,6 +126,7 @@ export async function bootstrap(config: Config) {
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),
       operations: new OperationsQueries(read, config.enterpriseId),
+      memberGroupRemoval: new MemberGroupRemoval(connection, config.enterpriseId),
       connected: () => connection.connected,
       ready: (): boolean => runtime.ready,
       provisioned: () => runtime.provisioned,
