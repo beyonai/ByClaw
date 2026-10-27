@@ -30,8 +30,7 @@ Thank you for contributing to Byclaw.
 
 ## Tests and docs
 
-- Repo-wide areas: `tests/unit/`, `tests/integration/`; reviewed machine-generated tests may live under `tests/auto-gen/` (see that folder’s README).
-- Modules may keep their own test trees (e.g. Jest under `byclaw-fe`). Explain boundaries in the PR if both apply.
+- Modules keep their own test trees (e.g. Jest under `byclaw-fe`). Explain boundaries in the PR when multiple modules are involved.
 
 ## Community
 
