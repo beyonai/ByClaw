@@ -274,7 +274,14 @@ public class ToolManController {
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
-            return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"), data);
+            String message = "tool.resource.import.success";
+            if (data.get("association") instanceof Map<?, ?> association
+                && !"NOT_REQUESTED".equals(association.get("status"))) {
+                message = Boolean.TRUE.equals(association.get("effective")) ? "tool.resource.sync.effective"
+                    : List.of("PENDING", "RUNNING").contains(association.get("status"))
+                        ? "tool.resource.sync.processing" : "tool.resource.sync.incomplete";
+            }
+            return ResponseUtil.successResponse(I18nUtil.get(message), data);
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -1898,7 +1905,8 @@ public class ToolManController {
             data.put("jobId", String.valueOf(id));
             data.put("resourceId", String.valueOf(job.getResourceId()));
             data.put("syncRevision", String.valueOf(job.getSyncRevision()));
-            data.put("status", job.getStatus());
+            data.put("status", job.publicStatus());
+            data.put("effective", job.associationResult().get("effective"));
             data.put("retryCount", job.getRetryCount());
             data.put("result", job.getResultSummary() == null ? Collections.emptyMap() : JSON.parseObject(job.getResultSummary()));
             return ResponseUtil.success(data);

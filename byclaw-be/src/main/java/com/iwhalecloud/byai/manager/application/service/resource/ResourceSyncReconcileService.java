@@ -62,37 +62,50 @@ public class ResourceSyncReconcileService {
     public void reconcilePending() {
         for (ResourceSyncJob job : jobs.pending()) {
             if (jobs.claim(job.getSyncJobId(), job.getRetryCount()) != 1) continue;
-            LoginInfo previous = CurrentUserHolder.getLoginInfo();
-            try {
-                LoginInfo operator = new LoginInfo();
-                var user = users.findById(job.getOperatorUserId());
-                if (user == null) throw new IllegalStateException("同步操作人不存在");
-                operator.setUserId(user.getUserId());
-                operator.setUserCode(user.getUserCode());
-                operator.setEnterpriseId(job.getComAcctId());
-                operator.setComAcctId(job.getComAcctId());
-                operator.setUsersOrganizations(userOrganizations.selectList(
-                    new LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UsersOrganization>()
-                        .eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserId, user.getUserId()))
-                    .stream().map(row -> {
-                        var organization = new com.iwhalecloud.byai.common.login.bean.UsersOrganization();
-                        organization.setOrgId(row.getOrgId());
-                        organization.setPositionId(row.getPositionId());
-                        organization.setUserType(row.getUserType());
-                        return organization;
-                    }).toList());
-                operator.setUserManageOrgs(List.of());
-                CurrentUserHolder.setLoginInfo(operator);
-                reconcile(job);
-            } catch (Exception exception) {
-                Map<String, Object> failure = job.getResultSummary() == null ? new LinkedHashMap<>()
-                    : new LinkedHashMap<>(JSON.parseObject(job.getResultSummary()));
-                failure.put("error", exception.getClass().getSimpleName());
-                finish(job, "FAILED", failure);
-                log.error("资源同步关联任务失败, jobId={}", job.getSyncJobId(), exception);
-            } finally {
-                CurrentUserHolder.setLoginInfo(previous);
-            }
+            executeClaimed(job);
+        }
+    }
+
+    /** Called after import commits; the scheduled path is only a durable retry/recovery fallback. */
+    public ResourceSyncJob reconcileNow(Long jobId) {
+        ResourceSyncJob job = jobs.selectById(jobId);
+        if (job == null) throw new IllegalArgumentException("同步任务不存在");
+        if (jobs.claim(jobId, job.getRetryCount()) == 1) executeClaimed(job);
+        return jobs.selectById(jobId);
+    }
+
+    private void executeClaimed(ResourceSyncJob job) {
+        job.setStatus(ResourceSyncJob.RUNNING);
+        LoginInfo previous = CurrentUserHolder.getLoginInfo();
+        try {
+            LoginInfo operator = new LoginInfo();
+            var user = users.findById(job.getOperatorUserId());
+            if (user == null) throw new IllegalStateException("同步操作人不存在");
+            operator.setUserId(user.getUserId());
+            operator.setUserCode(user.getUserCode());
+            operator.setEnterpriseId(job.getComAcctId());
+            operator.setComAcctId(job.getComAcctId());
+            operator.setUsersOrganizations(userOrganizations.selectList(
+                new LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UsersOrganization>()
+                    .eq(com.iwhalecloud.byai.manager.entity.users.UsersOrganization::getUserId, user.getUserId()))
+                .stream().map(row -> {
+                    var organization = new com.iwhalecloud.byai.common.login.bean.UsersOrganization();
+                    organization.setOrgId(row.getOrgId());
+                    organization.setPositionId(row.getPositionId());
+                    organization.setUserType(row.getUserType());
+                    return organization;
+                }).toList());
+            operator.setUserManageOrgs(List.of());
+            CurrentUserHolder.setLoginInfo(operator);
+            reconcile(job);
+        } catch (Exception exception) {
+            Map<String, Object> failure = job.getResultSummary() == null ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(JSON.parseObject(job.getResultSummary()));
+            failure.put("error", exception.getClass().getSimpleName());
+            finish(job, "FAILED", failure);
+            log.error("资源同步关联任务失败, jobId={}", job.getSyncJobId(), exception);
+        } finally {
+            CurrentUserHolder.setLoginInfo(previous);
         }
     }
 
@@ -126,20 +139,20 @@ public class ResourceSyncReconcileService {
             Set<Long> active = sync.activeUsers(expanded);
             skipped += expanded.size() - active.size();
             if (skipped > 0) skipReasons.put("INACTIVE_USER", skipped);
-            Map<Long, List<Long>> defaultsByUser = new LinkedHashMap<>();
+            Map<Long, List<Long>> assistantsByUser = new LinkedHashMap<>();
             List<Long> activeIds = new java.util.ArrayList<>(active);
             for (int offset = 0; offset < activeIds.size(); offset += 500) {
-                for (var row : scopeMapper.defaultEmployeesBatch(
+                for (var row : scopeMapper.personalAssistantsBatch(
                     activeIds.subList(offset, Math.min(offset + 500, activeIds.size())))) {
-                    defaultsByUser.computeIfAbsent(row.userId(), ignored -> new java.util.ArrayList<>()).add(row.employeeId());
+                    assistantsByUser.computeIfAbsent(row.userId(), ignored -> new java.util.ArrayList<>()).add(row.employeeId());
                 }
             }
             for (Long userId : active) {
-                List<Long> defaults = defaultsByUser.getOrDefault(userId, List.of());
-                String reason = defaults.size() > 1 ? "AMBIGUOUS_DEFAULT"
-                    : defaults.isEmpty() || defaults.get(0) == null ? "NO_DEFAULT" : null;
-                SsResource employee = reason == null ? resources.findById(defaults.get(0)) : null;
-                if (reason == null && !eligible(employee, resource, userId)) reason = "INELIGIBLE_DEFAULT_OR_RESOURCE";
+                List<Long> assistants = assistantsByUser.getOrDefault(userId, List.of());
+                String reason = assistants.size() > 1 ? "AMBIGUOUS_PERSONAL_ASSISTANT"
+                    : assistants.isEmpty() || assistants.get(0) == null ? "NO_PERSONAL_ASSISTANT" : null;
+                SsResource employee = reason == null ? resources.findById(assistants.get(0)) : null;
+                if (reason == null && !eligible(employee, resource, userId)) reason = "INELIGIBLE_PERSONAL_ASSISTANT_OR_RESOURCE";
                 if (reason != null) {
                     skipped++;
                     skipReasons.merge(reason, 1, Integer::sum);
@@ -221,8 +234,8 @@ public class ResourceSyncReconcileService {
                     ResourceBindingSourceService.SYNC.equals(source.getSourceType()) && "A".equals(source.getStatusCd())
                     && Objects.equals(user, source.getSourceUserId()))) continue;
                 if (!scopeMapper.activeUsers(List.of(user)).contains(user)) continue;
-                List<Long> defaults = scopeMapper.defaultEmployeesForUpdate(user);
-                if (defaults.size() == 1 && Objects.equals(defaults.get(0), employeeId)
+                List<Long> assistants = scopeMapper.personalAssistants(user);
+                if (assistants.size() == 1 && Objects.equals(assistants.get(0), employeeId)
                     && eligible(employee, resource, user)) validUsers.add(user);
             }
         }
@@ -296,7 +309,7 @@ public class ResourceSyncReconcileService {
             result.put("pendingEmployeeIds", targets.stream().map(String::valueOf).toList());
             String summary = result.toJSONString();
             int updated = jobs.update(null, new LambdaUpdateWrapper<ResourceSyncJob>()
-                .eq(ResourceSyncJob::getSyncJobId, job.getSyncJobId()).eq(ResourceSyncJob::getStatus, "RUNNING")
+                .eq(ResourceSyncJob::getSyncJobId, job.getSyncJobId()).eq(ResourceSyncJob::getStatus, ResourceSyncJob.RUNNING)
                 .eq(ResourceSyncJob::getRetryCount, job.getRetryCount() + 1)
                 .set(ResourceSyncJob::getResultSummary, summary).set(ResourceSyncJob::getUpdateTime, new Date()));
             if (updated == 1) job.setResultSummary(summary);
@@ -305,14 +318,14 @@ public class ResourceSyncReconcileService {
     }
 
     private void finish(ResourceSyncJob job, String status, Map<String, ?> result) {
-        job.setStatus(status);
+        job.setStatus(List.of("PARTIAL", "FAILED").contains(status) ? status + "_V2" : status);
         job.setResultSummary(JSON.toJSONString(result));
         job.setRetryCount(job.getRetryCount() + 1);
         job.setUpdateTime(new Date());
         job.setNextRetryTime(new Date(System.currentTimeMillis() + Math.min(300000L, 10000L << Math.min(job.getRetryCount(), 5))));
         // A worker whose lease was reclaimed must not overwrite the newer worker's result.
         jobs.update(null, new LambdaUpdateWrapper<ResourceSyncJob>()
-            .eq(ResourceSyncJob::getSyncJobId, job.getSyncJobId()).eq(ResourceSyncJob::getStatus, "RUNNING")
+            .eq(ResourceSyncJob::getSyncJobId, job.getSyncJobId()).eq(ResourceSyncJob::getStatus, ResourceSyncJob.RUNNING)
             .eq(ResourceSyncJob::getRetryCount, job.getRetryCount())
             .set(ResourceSyncJob::getStatus, job.getStatus()).set(ResourceSyncJob::getResultSummary, job.getResultSummary())
             .set(ResourceSyncJob::getUpdateTime, job.getUpdateTime()).set(ResourceSyncJob::getNextRetryTime, job.getNextRetryTime()));

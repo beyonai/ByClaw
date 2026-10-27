@@ -26,27 +26,28 @@ public interface ResourceSyncScopeMapper {
         """)
     List<Long> activeUsers(@Param("userIds") List<Long> userIds);
 
+    /** Resolve the stable personal assistant code independently of the user's selected default employee. */
     @Select("""
         <script>
-        SELECT create_user AS user_id, default_dig_employee_id AS employee_id FROM byai.suas_superassist
-        WHERE status = '00' AND create_user IN
+        SELECT u.user_id AS user_id, r.resource_id AS employee_id
+        FROM byai.po_users u
+        JOIN byai.ss_resource r ON r.resource_code = CONCAT(u.user_code, '_personal')
+        WHERE u.user_code IS NOT NULL AND u.user_code &lt;&gt; ''
+          AND r.resource_biz_type = 'DIG_EMPLOYEE' AND r.resource_status &lt;&gt; -1
+          AND u.user_id IN
           <foreach collection="userIds" item="id" open="(" separator="," close=")">#{id}</foreach>
         </script>
         """)
-    List<UserDefaultRow> defaultEmployeesBatch(@Param("userIds") List<Long> userIds);
+    List<UserAssistantRow> personalAssistantsBatch(@Param("userIds") List<Long> userIds);
 
-    record UserDefaultRow(Long userId, Long employeeId) { }
+    record UserAssistantRow(Long userId, Long employeeId) { }
 
+    /** Recheck the code mapping after the caller has locked the candidate employee resource. */
     @Select("""
-        SELECT default_dig_employee_id FROM byai.suas_superassist
-        WHERE create_user = #{userId} AND status = '00'
+        SELECT r.resource_id FROM byai.po_users u
+        JOIN byai.ss_resource r ON r.resource_code = CONCAT(u.user_code, '_personal')
+        WHERE u.user_id = #{userId} AND u.user_code IS NOT NULL AND u.user_code <> ''
+          AND r.resource_biz_type = 'DIG_EMPLOYEE' AND r.resource_status <> -1
         """)
-    List<Long> defaultEmployeesForUpdate(@Param("userId") Long userId);
-
-    /** Read by creator, never by superassist primary key; duplicate defaults are intentionally rejected. */
-    @Select("""
-        SELECT default_dig_employee_id FROM byai.suas_superassist
-        WHERE create_user = #{userId} AND status = '00'
-        """)
-    List<Long> defaultEmployees(@Param("userId") Long userId);
+    List<Long> personalAssistants(@Param("userId") Long userId);
 }

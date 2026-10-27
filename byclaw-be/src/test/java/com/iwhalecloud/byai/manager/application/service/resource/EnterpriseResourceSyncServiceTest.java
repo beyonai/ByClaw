@@ -66,7 +66,8 @@ class EnterpriseResourceSyncServiceTest {
         service.completeImport(10L, request, false, response);
         verifyNoInteractions(grants, writes);
         assertThat(resource.getThirdSyncRevision()).isEqualTo(3L);
-        assertThat(response.get("association")).isEqualTo(java.util.Map.of("status", "PENDING", "jobId", "100"));
+        assertThat((java.util.Map<String, Object>) response.get("association"))
+            .containsEntry("status", "PENDING").containsEntry("jobId", "100").containsEntry("effective", false);
         assertThat(resource.getUseAuthControlled()).isNull();
     }
 
@@ -182,6 +183,32 @@ class EnterpriseResourceSyncServiceTest {
         assertThat(saved.getValue().getResultSummary()).contains("20");
         assertThat(saved.getValue().getAuthRefreshUserIds()).contains("7");
         verifyNoInteractions(grants, writes);
+    }
+
+    @Test void dispatchesOnlyAfterCommitAndReturnsTheEffectiveResult() {
+        var dispatcher = mock(ResourceSyncDispatcher.class);
+        ReflectionTestUtils.setField(service, "dispatcher", dispatcher);
+        var completed = java.util.Map.<String, Object>of("status", "COMPLETED", "jobId", "100", "effective", true);
+        when(dispatcher.dispatch(100L)).thenReturn(completed);
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), false, response);
+        verifyNoInteractions(dispatcher);
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCommit());
+        verify(dispatcher).dispatch(100L);
+        assertThat(response.get("association")).isSameAs(completed);
+        verify((AuthApplicationService) ReflectionTestUtils.getField(service, "auth"), never()).syncUsersAuthToRedis(any());
+    }
+
+    @Test void rolledBackImportDoesNotDispatchExternalRuntimeWork() {
+        var dispatcher = mock(ResourceSyncDispatcher.class);
+        ReflectionTestUtils.setField(service, "dispatcher", dispatcher);
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), false, new HashMap<>());
+        TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCompletion(
+            org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
+        verifyNoInteractions(dispatcher);
     }
 
     private PrivilegeGrant grant(Long id) {

@@ -12,6 +12,25 @@ import org.springframework.mock.web.MockHttpSession;
 
 class ToolManControllerTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"COMPLETED,true,effective", "PENDING,false,processing",
+        "RUNNING,false,processing", "PARTIAL,false,incomplete", "COMPLETED,false,incomplete"})
+    void importMessageDistinguishesAcceptanceFromRuntimeReadiness(String state, boolean effective, String suffix) {
+        var controller = new ToolManController();
+        var imports = org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.resource.service.ToolManService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "toolManService", imports);
+        org.mockito.Mockito.when(imports.addToolFromThird("{}")).thenReturn(java.util.Map.of("association",
+            java.util.Map.of("status", state, "effective", effective)));
+        try (var messages = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            String key = "tool.resource.sync." + suffix;
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get(key)).thenReturn(key);
+            var response = controller.addToolFromThird("{}");
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getMsg()).isEqualTo(key);
+        }
+    }
+
+
     @Test
     void runtimeUseCheckUsesAuthoritativeGrantPolicyForSynchronizedAndOrdinaryResources() {
         var login = new LoginInfo(); login.setUserId(3L); login.setEnterpriseId(1L);
@@ -67,6 +86,9 @@ class ToolManControllerTest {
         job.setComAcctId(2L); job.setStatus("COMPLETED"); job.setRetryCount(0);
         org.mockito.Mockito.when(jobs.selectById(100L)).thenReturn(job);
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isZero();
+        job.setStatus("PARTIAL_V2");
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getData())
+            .containsEntry("status", "PARTIAL").containsEntry("effective", false);
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "101")).getCode()).isEqualTo(-1);
         org.mockito.Mockito.doThrow(new IllegalArgumentException("unauthorized")).when(sync).requireSyncPrincipal();
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isEqualTo(-1);

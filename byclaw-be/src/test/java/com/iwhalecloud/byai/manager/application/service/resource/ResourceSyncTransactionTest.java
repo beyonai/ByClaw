@@ -21,7 +21,7 @@ import java.util.UUID;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -37,8 +37,9 @@ import static org.mockito.Mockito.*;
 
 class ResourceSyncTransactionTest {
     @ParameterizedTest
-    @ValueSource(strings = {"success", "association-failure", "refresh-failure"})
-    void scheduledProxyCommitsBeforeRefreshAndKeepsFailuresRetryable(String mode) {
+    @CsvSource({"success,false", "association-failure,false", "refresh-failure,false",
+        "success,true", "association-failure,true", "refresh-failure,true"})
+    void immediateAndScheduledProxiesCommitBeforeRefreshAndKeepFailuresRetryable(String mode, boolean immediate) {
         var dataSource = new DriverManagerDataSource(
             "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=250", "sa", "");
         var jdbc = new JdbcTemplate(dataSource);
@@ -57,10 +58,11 @@ class ResourceSyncTransactionTest {
         var job = new ResourceSyncJob();
         job.setSyncJobId(100L); job.setResourceId(10L); job.setSyncRevision(1L);
         job.setOperatorUserId(9L); job.setComAcctId(1L); job.setRetryCount(0);
-        job.setStatus("RUNNING"); job.setAssociationMode("NONE");
+        job.setStatus(ResourceSyncJob.PENDING); job.setAssociationMode("NONE");
         var jobs = mock(ResourceSyncJobMapper.class);
         when(jobs.pending()).thenReturn(List.of(job));
-        when(jobs.claim(100L, 0)).thenAnswer(call -> jdbc.update("UPDATE sync_job SET status='RUNNING' WHERE id=100"));
+        when(jobs.selectById(100L)).thenReturn(job);
+        when(jobs.claim(100L, 0)).thenAnswer(call -> jdbc.update("UPDATE sync_job SET status='RUNNING_V2' WHERE id=100"));
         when(jobs.update(isNull(), any(Wrapper.class))).thenAnswer(call ->
             jdbc.update("UPDATE sync_job SET status=? WHERE id=100", job.getStatus()));
 
@@ -87,7 +89,7 @@ class ResourceSyncTransactionTest {
             // A separate transaction must see the committed claim and skills and can update the same row.
             independent.executeWithoutResult(status -> {
                 assertThat(jdbc.queryForObject("SELECT status FROM sync_job WHERE id=100", String.class))
-                    .isEqualTo("RUNNING");
+                    .isEqualTo("RUNNING_V2");
                 assertThat(jdbc.queryForObject("SELECT skills FROM employee WHERE id=20", String.class))
                     .isEqualTo("new");
                 jdbc.update("UPDATE employee SET snapshot=skills WHERE id=20");
@@ -114,14 +116,28 @@ class ResourceSyncTransactionTest {
         var proxy = (ResourceSyncReconcileService) factory.getProxy();
         var previous = CurrentUserHolder.getLoginInfo();
         try {
-            proxy.reconcilePending();
+            if (immediate) {
+                try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                    var dispatcher = new ResourceSyncDispatcher(proxy, executor, 5000);
+                    new TransactionTemplate(manager).executeWithoutResult(status -> {
+                        jdbc.update("UPDATE sync_job SET status='PENDING_V2' WHERE id=100");
+                        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                            new org.springframework.transaction.support.TransactionSynchronization() {
+                                @Override public void afterCommit() {
+                                    assertThat(dispatcher.dispatch(100L)).containsEntry("status",
+                                        "success".equals(mode) ? "COMPLETED" : "PARTIAL");
+                                }
+                            });
+                    });
+                }
+            } else proxy.reconcilePending();
             assertThat(CurrentUserHolder.getLoginInfo()).isSameAs(previous);
             assertThat(jdbc.queryForObject("SELECT skills FROM employee WHERE id=20", String.class))
                 .isEqualTo("association-failure".equals(mode) ? "old" : "new");
             assertThat(jdbc.queryForObject("SELECT snapshot FROM employee WHERE id=20", String.class))
                 .isEqualTo("success".equals(mode) ? "new" : "old");
             assertThat(jdbc.queryForObject("SELECT status FROM sync_job WHERE id=100", String.class))
-                .isEqualTo("success".equals(mode) ? "COMPLETED" : "PARTIAL");
+                .isEqualTo("success".equals(mode) ? "COMPLETED" : "PARTIAL_V2");
             if (!"success".equals(mode)) {
                 assertThat(com.alibaba.fastjson.JSON.parseObject(job.getResultSummary()).getJSONArray("failedEmployeeIds"))
                     .containsExactly("20");
