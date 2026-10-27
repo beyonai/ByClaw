@@ -331,12 +331,18 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey) {
-        if (StringUtils.isBlank(serviceKey)) {
-            return launchSandbox(userCode, null);
+        return launchSandboxWithServiceKey(userCode, serviceKey, null);
+    }
+
+    /** autoRelease 只覆盖新建独占沙箱；复用记录和共享上下文保持原策略。 */
+    public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey, Integer autoRelease) {
+        if (autoRelease != null && autoRelease != 0 && autoRelease != 1) {
+            throw new IllegalArgumentException("autoRelease must be 0 or 1");
         }
-        SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
-            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        return launchSandboxInternal(userCode, null, routing);
+        SandboxLaunchRouting routing = StringUtils.isBlank(serviceKey)
+            ? sandboxLaunchContextFactory.resolveRouting(null, userCode)
+            : new SandboxLaunchRouting(serviceKey, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        return launchSandboxInternal(userCode, null, routing, autoRelease);
     }
 
     /**
@@ -572,10 +578,20 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        return launchSandboxInternal(userCode, resourceId, routing, null);
+    }
+
+    private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        Integer autoRelease) {
         SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
         if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
-        if (platformRemote()) return platformGateway().convert(platformGateway().service("launch", platformGateway().params("userCode",userCode,"resourceId",resourceId,"routing",platformGateway().route(routing))),SandboxLaunchData.class);
+        if (platformRemote()) {
+            Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
+                "routing", platformGateway().route(routing));
+            if (autoRelease != null) params.put("autoRelease", autoRelease);
+            return platformGateway().convert(platformGateway().service("launch", params), SandboxLaunchData.class);
+        }
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -601,13 +617,13 @@ public class SandboxService {
             if (existingRecord != null) {
                 if (releaseStaleStartingRecordIfNecessary(existingRecord)) {
                     LOGGER.warn("已清理陈旧启动中沙箱记录，重新拉起默认沙箱：{}", sandboxRef(existingRecord));
-                    return doLaunchSandbox(userCode, resourceId, routing);
+                    return doLaunchSandbox(userCode, resourceId, routing, false, autoRelease);
                 }
                 LOGGER.warn("沙箱处于非可复用状态：{}", sandboxRef(existingRecord));
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
 
-            return doLaunchSandbox(userCode, resourceId, routing);
+            return doLaunchSandbox(userCode, resourceId, routing, false, autoRelease);
         }
         finally {
             if (locked) {
@@ -805,6 +821,11 @@ public class SandboxService {
 
     private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
         boolean skipReusableSandbox) {
+        return doLaunchSandbox(userCode, resourceId, routing, skipReusableSandbox, null);
+    }
+
+    private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        boolean skipReusableSandbox, Integer autoReleaseOverride) {
         String sharedHost = sharedDshHost(userCode, routing);
         if (sharedHost != null) {
             LOGGER.info("用户 {} 的 DSH 由共享宿主 {} 承载，跳过启动独立 byclaw-dsh 沙箱", userCode, sharedHost);
@@ -825,7 +846,8 @@ public class SandboxService {
         request.setProfileKey(routing.getProfileKey());
         SandboxServiceSpec effectiveSpec = resolveEffectiveSpec(launchContext.getSandboxType(), routing.getProfileKey());
         rejectTenantSpecFromUserLaunch(launchContext.getSandboxType(), effectiveSpec);
-        SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
+        SandboxLeasePolicy leasePolicy = autoReleaseOverride == null ? resolveDefaultLeasePolicy()
+            : autoReleaseOverride == 1 ? SandboxLeasePolicy.REMOTE_AUTO_EXPIRE : SandboxLeasePolicy.MANUAL;
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
         // Inject deterministic worker_id for by-framework worker registry alignment

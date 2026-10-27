@@ -105,6 +105,11 @@ credential, the spec and the sandbox record; A sends only the user's own
 not accept connections, A releases that record once (`/sandbox/removeSandbox`)
 and launches again.
 
+Every BE launch sends `autoRelease: 1` so newly created tool sandboxes use
+automatic idle release, even when BE/platform defaults to manual release.
+Reusing an existing sandbox preserves its release policy. The plugin's own
+idle/disposal release still applies.
+
 The B spec is a normal `sandbox_service_spec` row. It must use A's image, run
 the `tools` entrypoint, declare the sshd port as a `tcp` port named
 `sshInstance`, share `/by`, and mount A's tool-env state directory read-only at
@@ -257,7 +262,7 @@ out of the global spec: it would reach every A.
 
 ## Lifecycle of B with `byclaw-be`
 
-The plugin owns B's lifetime; BE only creates and removes records on request.
+The plugin releases B on idle/disposal; BE also applies automatic idle release to newly created tool sandboxes.
 
 - **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10
   minutes) without operations or open streams the connection calls `pause()`,

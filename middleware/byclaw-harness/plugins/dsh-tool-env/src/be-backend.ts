@@ -288,7 +288,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey }, 'POST', timeoutMs) as LaunchData | undefined
+    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey, autoRelease: 1 }, 'POST', timeoutMs) as LaunchData | undefined
     const sandboxType = serviceKey
     if (data?.sandboxId) this.ownsSandbox = true
     let sandboxId = data?.sandboxId

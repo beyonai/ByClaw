@@ -359,11 +359,11 @@ public class SandboxController {
     /**
      * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱规格
      *
-     * @param params 请求参数，userCode 必填，serviceKey 可选
+     * @param params 请求参数，userCode 必填，serviceKey、autoRelease 可选
      * @return ResponseUtil
      */
     @PostMapping("/launchByUserCode")
-    @Operation(summary = "按工号启动沙箱", description = "按工号为指定用户启动沙箱，可选传入 serviceKey 覆盖默认沙箱规格")
+    @Operation(summary = "按工号启动沙箱", description = "按工号启动沙箱；serviceKey 可选；autoRelease 为 0/1，仅对新建独占沙箱生效，不传沿用默认策略")
     @ApiResponses({
         @ApiResponse(responseCode = "0", description = "启动成功"),
         @ApiResponse(responseCode = "-1", description = "启动失败，参数缺失或规格不存在")
@@ -381,10 +381,21 @@ public class SandboxController {
             serviceKey = null;
         }
 
+        Object autoReleaseObj = params.get("autoRelease");
+        Integer autoRelease = null;
+        if (autoReleaseObj != null) {
+            String value = autoReleaseObj.toString();
+            if (!"0".equals(value) && !"1".equals(value)) {
+                return ResponseUtil.fail("autoRelease must be 0 or 1");
+            }
+            autoRelease = Integer.valueOf(value);
+        }
+
         try {
             String finalServiceKey = serviceKey;
+            Integer finalAutoRelease = autoRelease;
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
-                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
+                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease));
 
             // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
             // 未对登录开放的规格（enabled=0，例如工具沙箱）只是被按需启动，不是用户的选择，不写入首选。

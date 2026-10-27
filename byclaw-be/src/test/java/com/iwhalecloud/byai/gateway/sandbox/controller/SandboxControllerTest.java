@@ -43,6 +43,50 @@ import ch.qos.logback.core.read.ListAppender;
 
 class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
+    @Test
+    void launchByUserCode_passesAutoReleaseAndKeepsItOptional() {
+        for (Object value : java.util.Arrays.asList(0, 1, "0", "1", null)) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            Integer expected = value == null ? null : Integer.valueOf(value.toString());
+            com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData data =
+                new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("created-sandbox");
+            when(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected)).thenReturn(data);
+            Map<String, Object> params = new java.util.HashMap<>();
+            params.put("userCode", " user001 ");
+            params.put("serviceKey", "byclaw-dsh-tools");
+            if (value != null) params.put("autoRelease", value);
+
+            ResponseUtil response = controller.launchByUserCode(params);
+            assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+            assertThat(((Map<?, ?>) response.getData()).get("sandboxId")).isEqualTo("created-sandbox");
+            verify(service).launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected);
+
+            params.put("autoRelease", null);
+            when(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", null)).thenReturn(data);
+            assertThat(controller.launchByUserCode(params).getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        }
+    }
+
+    @Test
+    void launchByUserCode_rejectsInvalidAutoReleaseBeforeLaunching() {
+        SandboxService service = mock(SandboxService.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        for (Object invalid : List.of(-1, 2, true, 0.5, "", "false")) {
+            ResponseUtil response = controller.launchByUserCode(
+                Map.of("userCode", "user001", "autoRelease", invalid));
+            assertThat(response.getCode()).isEqualTo(ResponseUtil.FAIL);
+            assertThat(response.getMsg()).contains("autoRelease");
+        }
+        verifyNoInteractions(service);
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
