@@ -29,6 +29,8 @@
 
 部署插件时须同时更新 `dist/` 和 `openclaw.plugin.json`；`contracts.tools` 必须声明 `baiying_skills`，否则运行框架会拒绝向模型暴露该工具。
 
+工具发现与服务启动可能分别注册插件。对话工具和提示注入会按沙箱状态目录及用户定位进程内正在运行的准备服务，共用其授权、配置应用记录和回执 ID；未启动服务时返回 `RUNTIME_NOT_STARTED`，不会误报员工未授权。
+
 Hub 技能的 `READY` 必须同时满足：当前员工 Redis 快照已应用、运行中配置已热加载、技能包版本已确认、`SKILL.md` 位于 `${OPENCLAW_STATE_DIR}/skills/<resourceCode>/`，并且其 frontmatter `name` 已挂载到员工的技能列表。代码目录名可以是数字资源编码。就绪表示技能定义可读取并调用，不代表技能内的每个外部服务、依赖或业务操作已经执行成功。内置技能在页面单独标识，不使用 Hub 下载回执。
 
 运行端每 15 秒更新 `byai:skill_runtime:<userId>:<employeeId>` Hash，以进程 UUID 为字段。回执包含员工快照 SHA-256、观测时间、60 秒有效期和各技能的版本/状态/受控错误码；Hash TTL 为 120 秒，回执不含本地路径或凭据。后端接口 `/digitalEmployeeController/querySkillRuntimeStatus` 重新校验使用权限和数据库关联，并比对当前快照及技能版本。没有有效回执显示“等待运行端确认”；存在多个活跃实例时须全部就绪才显示“可调用”。

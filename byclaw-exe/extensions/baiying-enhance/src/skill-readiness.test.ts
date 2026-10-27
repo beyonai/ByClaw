@@ -116,6 +116,37 @@ describe("skill readiness", () => {
     expect(flush).not.toHaveBeenCalled();
     disabled.stop();
   });
+  it("tool discovery uses the running service after another plugin registration", async () => {
+    runtime.recordApplied([agent], "applied");
+    runtime.start();
+    const cold = createSkillReadiness({ api, registry: new AgentRegistryState(), store,
+      getAuthorizedIds: () => undefined, flush: vi.fn(), stateDir: dir,
+      resolveUserId: async () => "1125", now: () => clock });
+    registerSkillReadiness(api, cold);
+    const tool = api.registerTool.mock.calls[0][0]({ agentId });
+    const result = await tool.execute("call", { action: "status", query: "westock-data" });
+    expect(result.details).toMatchObject({ state: "READY", runtimeId: (await runtime.inspect(agentId)).runtimeId });
+    expect(result.details.skills[0].skillFile).toBe(path.join(dir, "skills", "8640", "SKILL.md"));
+    const prompt = api.on.mock.calls.find(([name]: any) => name === "before_prompt_build")[1];
+    expect((await prompt({}, { agentId })).appendSystemContext).toContain('"state":"READY"');
+    cold.stop();
+    expect((await tool.execute("call", { action: "prepare" })).details.state).toBe("READY");
+    runtime.stop();
+    expect((await tool.execute("call", { action: "status" })).details.errorCode).toBe("RUNTIME_NOT_STARTED");
+  });
+  it("does not reuse another sandbox's service or clear a replacement on old service stop", async () => {
+    runtime.start();
+    const other = createSkillReadiness({ api, registry, store, getAuthorizedIds: () => undefined,
+      flush: vi.fn(), stateDir: path.join(dir, "other"), now: () => clock });
+    expect((await other.resolveActive().inspect(agentId)).errorCode).toBe("RUNTIME_NOT_STARTED");
+    const replacement = createSkillReadiness({ api, registry, store, getAuthorizedIds: () => allowed,
+      flush: vi.fn(), stateDir: dir, resolveUserId: async () => "1125", now: () => clock });
+    replacement.recordApplied([agent], "applied");
+    replacement.start();
+    runtime.stop();
+    expect((await runtime.resolveActive().inspect(agentId)).state).toBe("READY");
+    replacement.stop(); other.stop();
+  });
   it("prompt hooks only inspect, and the tool returns associated matches rather than searching the market", async () => {
     registerSkillReadiness(api, runtime);
     const prompt = api.on.mock.calls.find(([name]: any) => name === "before_prompt_build")[1];
