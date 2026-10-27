@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,6 +122,8 @@ describe("skill readiness", () => {
     expect((await prompt({}, { agentId })).appendSystemContext).toContain("westock-data");
     expect(flush).not.toHaveBeenCalled();
     const factory = api.registerTool.mock.calls[0][0];
+    const manifest = JSON.parse(await readFile(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+    expect(manifest.contracts.tools).toContain(factory({ agentId }).name);
     expect(factory({ agentId: "main" })).toBeNull();
     const result = await factory({ agentId }).execute("call", { action: "status", query: "not-associated" });
     expect(result.details.skills).toEqual([]);

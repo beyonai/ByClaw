@@ -27,6 +27,8 @@
 
 本插件增加 `baiying_skills`（`status` / `prepare`）工具。它只处理当前用户有权使用且当前员工已关联的技能，不搜索或安装整个 `SKILL_*` 目录。首次消息在 `before_dispatch` 中最多等待约 5 秒进行准备，超时后后台继续；模型通过同一个工具查询实际进度，准备成功后继续原任务。`before_prompt_build` 只查询状态，不在运行中的会话内改写配置。显式关闭 `hubSkillAutoSync` 时不会自动下载。
 
+部署插件时须同时更新 `dist/` 和 `openclaw.plugin.json`；`contracts.tools` 必须声明 `baiying_skills`，否则运行框架会拒绝向模型暴露该工具。
+
 Hub 技能的 `READY` 必须同时满足：当前员工 Redis 快照已应用、运行中配置已热加载、技能包版本已确认、`SKILL.md` 位于 `${OPENCLAW_STATE_DIR}/skills/<resourceCode>/`，并且其 frontmatter `name` 已挂载到员工的技能列表。代码目录名可以是数字资源编码。就绪表示技能定义可读取并调用，不代表技能内的每个外部服务、依赖或业务操作已经执行成功。内置技能在页面单独标识，不使用 Hub 下载回执。
 
 运行端每 15 秒更新 `byai:skill_runtime:<userId>:<employeeId>` Hash，以进程 UUID 为字段。回执包含员工快照 SHA-256、观测时间、60 秒有效期和各技能的版本/状态/受控错误码；Hash TTL 为 120 秒，回执不含本地路径或凭据。后端接口 `/digitalEmployeeController/querySkillRuntimeStatus` 重新校验使用权限和数据库关联，并比对当前快照及技能版本。没有有效回执显示“等待运行端确认”；存在多个活跃实例时须全部就绪才显示“可调用”。

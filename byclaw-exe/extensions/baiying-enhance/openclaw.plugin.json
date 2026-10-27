@@ -6,7 +6,7 @@
   "enabledByDefault": true,
   "providers": ["baiying-aimodel"],
   "contracts": {
-    "tools": ["baiying_call", "updateTaskPlan"],
+    "tools": ["baiying_call", "baiying_skills", "updateTaskPlan"],
     "imageGenerationProviders": ["baiying-redis-image", "volcengine"]
   },
   "imageGenerationProviderMetadata": {
