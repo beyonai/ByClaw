@@ -110,6 +110,10 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
 - 心跳/续约/空闲回收对这类上下文不做任何事：宿主按自己的空闲规则回收。
 - 工具沙箱（B）由宿主上的运行时在第一次工具调用时经 `launchByUserCode` 按工具规格（`enabled=0`）启动；
   这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。新建 B 由插件显式开启自动空闲释放，复用已有实例保留原策略。
+- 指定用户的工具沙箱：系统参数 `BYCLAW_TOOL_SANDBOX_BY_USER` 为 `userCode=service_key` 列表（逗号、分号或空白分隔，
+  例如 `u1=byclaw-dsh-unity,u2=byclaw-dsh-unity`）。名单内用户 PUT 的环境里会带 `BYCLAW_TOOL_ENV_SERVICE_KEY`，宿主据此
+  为该用户的上下文选 B 的规格；不在名单内或参数读取失败时用宿主默认的 `BYCLAW_TOOL_ENV_SERVICE_KEY`。上下文启动时读取，
+  改参数后需该用户的上下文重建（“重启助理”或宿主回收后再次进入）才生效。
 
 决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。

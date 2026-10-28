@@ -52,7 +52,8 @@
  *                                  the PUT `env` carries; the other BYCLAW_TOOL_ENV_* settings of the byclaw-be
  *                                  backend (SERVICE_KEY, SSH_INSTANCE, HOST_TEMPLATE, SYSTEM_CODE,
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
- *                                  plugin's cordis.patch.yml.
+ *                                  plugin's cordis.patch.yml. A PUT `env` BYCLAW_TOOL_ENV_SERVICE_KEY overrides
+ *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
@@ -168,9 +169,14 @@ export const USER_ROW_OVERLAYS = {
     launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
-      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
+      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
+}
+
+/** The PUT `env` may pick this user's tool sandbox spec; otherwise the host's BYCLAW_TOOL_ENV_SERVICE_KEY applies. */
+export function toolEnvServiceKey(spec) {
+  return spec.env?.BYCLAW_TOOL_ENV_SERVICE_KEY?.trim() || spec.toolEnvBe.serviceKey
 }
 
 /** The user's BE token from the PUT `env`; the byclaw-be backend cannot create B without it. */
