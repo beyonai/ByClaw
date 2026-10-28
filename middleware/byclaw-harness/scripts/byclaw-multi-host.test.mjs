@@ -6,7 +6,7 @@ import {
   webStartupValues,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewLaunchEnvironment, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
@@ -49,6 +49,14 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-tool-env'].config.alias, 'byclaw-tool-env-u1')
   assert.equal(byId['byclaw-tool-env'].config.backend, 'opensandbox')
   assert.equal(byId['byclaw-tool-env'].config.byclawBe, undefined)
+  // Processes on B get the environment the user's own sandbox would have had (the PUT env).
+  // The identity is the context's user, whatever the PUT env says, as in the runtime's own launch layer.
+  assert.deepEqual(byId['byclaw-tool-env'].config.launchEnv, { ...spec.env, USER_CODE: 'u1' })
+  const spoofed = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, env: { USER_CODE: 'evil', A: 'b' } })
+  assert.deepEqual(spoofed.find(row => row.id === 'byclaw-tool-env').config.launchEnv, { USER_CODE: 'u1', A: 'b' })
+  // The launch environment goes to B; the host's own environment still reaches commands only through the allowlist.
+  const bash = composeUserOverlays([{ id: 'byclaw-bash-provider', name: '@byclaw/dsh-bash-provider' }], 'u1', '/r/users/u1/dsh-home', spec)[0]
+  assert.deepEqual(bash.config.forwardHostEnvironment, { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] })
   // Rows missing from the composition produce no overlay.
   assert.equal(byId['byclaw-dsh'], undefined)
 })
@@ -317,6 +325,18 @@ test('renewUserToken hands the PUT token to the byclaw-be backend only', () => {
   assert.equal(renewUserToken({ get: () => undefined }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.equal(renewUserToken({ get: () => ({}) }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.deepEqual(renewed, ['jwt-9'])
+})
+
+test('renewLaunchEnvironment hands the PUT environment to the tool environment', () => {
+  const seen = []
+  const ctx = { get: name => (name === 'ssh' ? { setLaunchEnvironment: env => seen.push(env) } : undefined) }
+  assert.equal(renewLaunchEnvironment(ctx, { BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'evil' }, 'u1'), true)
+  assert.deepEqual(seen, [{ BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'u1' }])
+  // A PUT without an environment keeps the last one.
+  assert.equal(renewLaunchEnvironment(ctx, undefined, 'u1'), false)
+  assert.equal(renewLaunchEnvironment(ctx, {}, 'u1'), false)
+  assert.equal(renewLaunchEnvironment({ get: () => ({}) }, { A: 'b' }, 'u1'), false)
+  assert.equal(seen.length, 1)
 })
 
 test('a failed boot marks the user failed and the next ensure retries', async () => {

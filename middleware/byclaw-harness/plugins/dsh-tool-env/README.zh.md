@@ -20,13 +20,15 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
 - **身份：** A 在自己的私有 DSH 目录里生成客户端密钥和 B 的主机密钥，所以 A 能锁定 B 的主机密钥。`opensandbox` 模式随创建请求交给 B；`byclaw-be` 模式把 A 的这个目录只读挂进 B（`BYCLAW_TOOL_ENV_SEED_DIR`，默认 `/etc/byclaw-tool-env`）。
   - B 的 sshd 只接受这把钥匙登录 `byclaw` 用户。
 - **密钥隔离：** 所有远程进程的环境变量都会去掉 `BYCLAW_TOOL_ENV_*`。A 的会话、凭据、profile 不会挂进 B。
+- **启动环境：** B 上的每个进程（Bash、终端、LSP、PTC）都会在自身环境之下叠加用户的启动环境，与拆分前从运行时继承的一致。来源是配置项 `launchEnv`：共享 DSH 宿主用 BE 为该用户渲染的环境填充，每次 PUT 更新，`USER_CODE` 始终是该上下文的用户；调用方自己的值优先，B 自己的路径、解释器与加载器设置、显示和浏览器（`PATH`、`HOME`、`NODE_*`、`LD_*`、`XDG_*`、`DISPLAY`、`PLAYWRIGHT_BROWSERS_PATH`、`BYCLAW_BROWSER_*` 等）保持不变。
 - **沙箱：** 拆分模式下默认 `DSH_PERMISSION_MODE=danger-full-access`。
   - B 本身就是隔离边界。
   - 宿主机禁止用户命名空间时，容器里用不了 bwrap/Landlock，`workspace-write` 会拒绝所有命令。
 
 ## B 什么时候启动
 
-只有工具调用才会启动 B。上下文启动（资源投影、Skill 视图、媒体投影）和一轮对话开始（会话目录）都不会：连接门面 `ctx.ssh` 提供 `connected` 和 `whenConnected(key, op)`，integration 插件把要写到 B 的内容和建目录交给它，等 B 为某次工具调用连上后、工具执行前再落下。B 没起时读用户目录，返回本机上次读到或写过的内容，没有就是 `ENOENT`，所以纯模型回答永远不等沙箱。模型运行前一轮对话还会解析会话目录、探测文件（git 根、会话 Skills）；B 没起时由门面自己回答：路径解析只做规范化，排队待建的目录视为空目录且里面什么都没有，`.git` 和指令文件探测（会话目录各级祖先下的 `AGENTS.md`、`CLAUDE.md` 及 `.local` 变体）视为不存在，DSH 自己的家目录（`DSH_HOME`、`DSH_AGENTS_HOME`）视为空，Skill 根目录列为空，`executable` 查找在本机解析（同一次镜像构建）。工具做的事（真实路径的 stat、列目录、读写、起进程）仍然去 B 并把它拉起来。代价是：会话第一次工具调用之前，提示词里看不到会话内的 Skills 和用户目录里的指令文件。`byclaw-be` 后端启动失败后会退避（1 秒起，翻倍到 30 秒），并说明原因，不再每次操作都去调 BE。
+每一轮对话都会启动 B，纯模型回答也一样：模型运行前，一轮对话要读会话的指令文件（从项目根即最近的 `.git` 到会话目录各级的 `AGENTS.md`、`CLAUDE.md` 及 `.local` 变体）、会话 Skills 和铁律，它们都在用户目录里，只有 B 能给出当下的内容（平台也会往里写，比如上传）。所以每轮看到的都和用户自己的沙箱一致，不会是旧副本。上下文启动（资源投影、Skill 视图、媒体投影）不会启动 B：连接门面 `ctx.ssh` 提供 `connected` 和 `whenConnected(key, op)`，integration 插件把要写到 B 的内容和建目录交给它，等 B 连上后、其他操作之前再落下。B 没起时门面只回答不需要用户目录的请求：路径解析只做规范化；排队待建和本机已在 B 上建过的目录视为目录（里面有什么由 B 回答）；DSH 自己的家目录（`DSH_HOME`、`DSH_AGENTS_HOME`）视为空；已断开连接上的进程或流的清理视为已完成；`executable` 查找在本机解析（同一次镜像构建）。B 在 `BYCLAW_TOOL_ENV_IDLE_MS` 内没有操作才释放，所以用户活跃期间它一直在。
+`byclaw-be` 后端启动失败后会退避（1 秒起，翻倍到 30 秒），并说明原因，不再每次操作都去调 BE。
 
 ## 三种后端
 
