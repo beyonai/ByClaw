@@ -206,6 +206,7 @@ export default {
   'tenant.addMember': '添加成员',
   'tenant.retryDelete': '重试删除',
   'tenant.delete': '删除租户',
+  'tenant.deleteFailed': '删除请求未成功，请重试；若仍失败，请联系管理员查看服务日志。',
   'tenant.confirmDelete': '确认删除',
   'tenant.deleteWarning': '删除后将释放该租户的数据库和数据服务沙箱，并删除其私有持久化数据。此操作不可撤销。',
   'tenant.confirmName': '输入租户名称确认删除',

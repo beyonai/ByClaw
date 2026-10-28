@@ -52,6 +52,25 @@ class TenantCommandWorkerDiagnosticsTest {
         verifyNoInteractions(store, provisioner, transactions, policies, hooks);
     }
 
+    @Test void deletionCommandsNeverReachProvisioningAndFailuresStayWithDeletionAuthority() {
+        var store=mock(TenantCommandStore.class);
+        var provisioner=mock(TenantDbProvisioningService.class);
+        var hooks=mock(HookPublisher.class);
+        var deletion=mock(TenantManagedDeletionService.class);
+        var lease=new TenantCommandStore.Lease(10,42,"worker",1);
+        when(store.candidates()).thenReturn(List.of(10L));
+        when(store.claim(eq(10L),anyString(),any())).thenReturn(lease);
+        when(store.find(10)).thenReturn(new TenantCommandStore.Command("10","HACU","request","hash","DELETE","42","RUNNING","RESERVED",null,1));
+        var worker=new TenantCommandWorker(store,null,mock(PlatformTransactionManager.class),new ObjectMapper(),
+            provisioner,mock(TenantExecutionPolicyService.class),hooks);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker,"managedDeletion",deletion);
+        worker.scan();
+        verify(deletion).execute(lease);verifyNoInteractions(provisioner,hooks);
+        var failure=new IllegalStateException("private-provider-credential");
+        doThrow(failure).when(deletion).execute(lease);
+        worker.scan();verify(deletion).failed(lease,failure);verifyNoInteractions(provisioner,hooks);
+    }
+
     @Test void nestedFileFailureRetainsCauseTypeAndLocationWithoutPathsOrMessages() throws Exception {
         var cause = new java.nio.file.AccessDeniedException("/private-provider-credential/data");
         cause.setStackTrace(new StackTraceElement[] {

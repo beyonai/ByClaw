@@ -34,6 +34,7 @@ class TenantCommandAcceptanceTest {
     private TenantCommandStore store;
     private HookProperties hooks;
     private TenantSandboxProperties sandboxProperties;
+    private TenantManagedDeletionService deletion;
     @BeforeEach void setup() throws Exception {
         var source = new DriverManagerDataSource("jdbc:h2:mem:acceptance" + System.nanoTime()
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000", "sa", "");
@@ -67,12 +68,18 @@ class TenantCommandAcceptanceTest {
         var subscription = new HookProperties.Subscription(); subscription.setEvent("tenant.created");
         hooks.getSubscriptions().put("hacu", subscription);
         var durable = new DurableHookPublisher(source, hooks, List.of(new HookEventSchema("tenant.created", 1,
-            Set.of("enterpriseId", "enterpriseName", "createdBy", "requestId", "provisionState"))));
+            Set.of("enterpriseId", "enterpriseName", "createdBy", "requestId", "provisionState")),
+            new com.iwhalecloud.byai.manager.domain.tenant.hook.TenantHookConfiguration().tenantDeletionRequestedSchema(),
+            new com.iwhalecloud.byai.manager.domain.tenant.hook.TenantHookConfiguration().tenantProvisioningFailedSchema()));
         store = new TenantCommandStore(jdbc);
         sandboxProperties = new TenantSandboxProperties();
         service = new TenantCommandService(store, jdbc, mapper, ids, json, new HookPublisher(null, durable),
             new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source),
             sandboxProperties);
+        deletion = new TenantManagedDeletionService(store,jdbc,new DataSourceTransactionManager(source),mapper,
+            org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.class),
+            new TenantExecutionPolicyService(jdbc,json,false,""),ids,json,new HookPublisher(null,durable),
+            org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class));
     }
     private ObjectNode body(String requestId) throws Exception {
         return (ObjectNode) json.readTree("""
@@ -185,6 +192,35 @@ class TenantCommandAcceptanceTest {
             assertEquals(2, snapshot.path("memberLimit").asInt());
         }
         assertReservations(3);
+    }
+
+    @Test void managedDeletionCommitsExternalCommandReceiptAndDurableEventsWithSuspendedPolicy() throws Exception {
+        var provision=service.provision(TenantCommandRequest.parse(body("request-delete-outbox")));
+        long tenant=Long.parseLong(provision.enterpriseId());
+        assertEquals("ACCEPTED",deletion.request(tenant,"Acceptance tenant",1));
+        assertEquals("FAILED",store.find(Long.parseLong(provision.commandId())).status());
+        assertEquals("TENANT_DELETION_REQUESTED",store.find(Long.parseLong(provision.commandId())).errorCode());
+        assertEquals("PENDING",store.latestDeletion(tenant).status());
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM byai.integration_outbox WHERE event_type='tenant.deletion.requested'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM byai.integration_outbox WHERE event_type='tenant.provisioning.failed'",Integer.class));
+        assertEquals("SUSPENDED",new TenantExecutionPolicyService(jdbc,json,false,"").projection(tenant).accessMode());
+        assertEquals("ACCEPTED",deletion.request(tenant,"Acceptance tenant",1));
+        assertEquals(3,count("integration_outbox"));
+    }
+
+    @Test void deletionStatesRejectNewExternalMutationsWithoutInvokingBusinessAction() throws Exception {
+        var provision=service.provision(TenantCommandRequest.parse(body("request-deletion-guard")));
+        long tenant=Long.parseLong(provision.enterpriseId());
+        var called=new java.util.concurrent.atomic.AtomicBoolean();
+        for(String state:List.of("DELETING","DELETE_FAILED","DELETED")) {
+            jdbc.update("UPDATE byai.tenant_config SET params_value=? WHERE enterprise_id=? AND params_code='PROVISION_STATE'",
+                "{\"status\":\""+state+"\"}",tenant);
+            var request=json.createObjectNode().put("requestId","request-after-"+state);
+            var error=assertThrows(TenantCommandException.class,()->service.mutation("HACU",tenant,"MEMBER_ADD",request,
+                ()->{called.set(true);return null;}));
+            assertEquals("TENANT_DELETION_IN_PROGRESS",error.getMessage());
+        }
+        assertFalse(called.get());assertEquals(1,count("internal_command"));
     }
 
     private String frozenProfile(TenantCommandStore.Command command) throws Exception {

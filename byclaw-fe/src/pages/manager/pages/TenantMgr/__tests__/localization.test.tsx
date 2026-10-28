@@ -109,3 +109,30 @@ test.each([360, 1280])('shows paused progress and reason without legacy retry at
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth });
   }
 });
+
+test('keeps the confirmation open and shows a rejected deletion instead of silently failing', async () => {
+  (deleteTenant as jest.Mock).mockRejectedValueOnce('租户仍有正在执行的任务，请稍后重试');
+  render(<TenantMgr />, { wrapper });
+  fireEvent.click(await screen.findByRole('button', { name: '删除租户' }));
+  const dialog = within(await screen.findByRole('dialog', { name: '删除租户：测试企业' }));
+  fireEvent.change(dialog.getByRole('textbox'), { target: { value: '测试企业' } });
+  fireEvent.click(dialog.getByRole('button', { name: '确认删除' }));
+  expect(await dialog.findByRole('alert')).toHaveTextContent('租户仍有正在执行的任务，请稍后重试');
+  expect(dialog.getByRole('button', { name: '确认删除' })).toBeEnabled();
+  expect(screen.getByText('已开通')).toBeInTheDocument();
+});
+
+test('uses an English fallback for a foreign error and permits retry after failure', async () => {
+  mockLocale = 'en-US';
+  (deleteTenant as jest.Mock).mockRejectedValueOnce(new Error('删除失败')).mockResolvedValueOnce(undefined);
+  render(<TenantMgr />, { wrapper });
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete tenant' }));
+  const dialog = within(await screen.findByRole('dialog', { name: 'Delete tenant: 测试企业' }));
+  fireEvent.change(dialog.getByRole('textbox'), { target: { value: '测试企业' } });
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm deletion' }));
+  expect(await dialog.findByRole('alert')).not.toHaveTextContent('删除失败');
+  expect(dialog.getByRole('alert')).toHaveTextContent('failed');
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm deletion' }));
+  await waitFor(() => expect(deleteTenant).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});

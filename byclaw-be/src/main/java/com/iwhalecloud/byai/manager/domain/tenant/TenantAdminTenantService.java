@@ -192,12 +192,15 @@ public class TenantAdminTenantService {
             // Invalid persisted state never grants tenant access.
         }
         // Commercial command truth supersedes the older provisioning snapshot after a paused worker.
-        if (row.getCommandStatus()!=null && !"DELETED".equals(status) && !"DELETING".equals(status)) {
+        if (row.getCommandStatus()!=null && !List.of("DELETED", "DELETING", "DELETE_FAILED").contains(status)) {
             status="SUCCEEDED".equals(row.getCommandStatus()) ? "READY" : row.getCommandStatus();
             stage=row.getCommandStage();
         }
+        boolean deleting = List.of("DELETING", "DELETE_FAILED", "DELETED").contains(status);
+        String reason = !deleting && row.getCommandStatus() != null
+            ? row.getCommandErrorCode() : row.getFailureReason();
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getCommandStatus()!=null ? row.getCommandErrorCode() : row.getFailureReason()));
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(reason));
     }
 
     /** 后台任务保存稳定错误键；读取时按查看者语言展示，历史诊断原文保持可读。 */
@@ -213,7 +216,7 @@ public class TenantAdminTenantService {
             }
         }
         if ("tenant provisioning failed".equals(reason)) return I18nUtil.get("tenant.failure.provisioning");
-        if (!reason.startsWith("tenant.")) return reason;
+        if (!reason.startsWith("tenant.") && !reason.startsWith("TENANT_DELETE_")) return reason;
         try {
             return I18nUtil.get(reason);
         } catch (org.springframework.context.NoSuchMessageException ignored) {

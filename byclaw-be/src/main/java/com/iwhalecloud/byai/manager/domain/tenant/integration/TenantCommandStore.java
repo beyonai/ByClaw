@@ -24,6 +24,10 @@ public class TenantCommandStore {
         return one("SELECT id,source_system,request_id,request_hash,type,enterprise_id,status,stage,error_code,revision "
             + "FROM byai.internal_command WHERE enterprise_id=? AND type='PROVISION' ORDER BY created_at DESC,id DESC LIMIT 1",enterpriseId);
     }
+    public Command latestDeletion(long enterpriseId) {
+        return one("SELECT id,source_system,request_id,request_hash,type,enterprise_id,status,stage,error_code,revision "
+            + "FROM byai.internal_command WHERE enterprise_id=? AND type='DELETE' ORDER BY created_at DESC,id DESC LIMIT 1",enterpriseId);
+    }
     public Command byRequest(String source,String request) {
         return one("SELECT * FROM byai.internal_command WHERE source_system=? AND request_id=?",source,request);
     }

@@ -95,6 +95,12 @@ public class TenantCommandService {
         if (existing!=null) return match(existing,hash);
         return accept(source,request,hash,() -> {
             requireSourceTenant(source,enterprise);
+            // Serialize member/policy writes with administrative deletion before reading lifecycle state.
+            if (jdbc.update("UPDATE byai.tenant_runtime_operation SET revision=revision+1 WHERE enterprise_id=?", enterprise) != 1)
+                throw new TenantCommandException(409,"TENANT_OPERATION_MISSING");
+            var state=read(tenants.selectConfig(enterprise,"PROVISION_STATE"));
+            if (Set.of("DELETING","DELETE_FAILED","DELETED").contains(state.path("status").asText()))
+                throw new TenantCommandException(409,"TENANT_DELETION_IN_PROGRESS");
             long id=ids.nextVal();
             store.insert(id,source,request,hash,type,enterprise,0,snapshot);
             String error=action.get();

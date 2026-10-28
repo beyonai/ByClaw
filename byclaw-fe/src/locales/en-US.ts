@@ -212,6 +212,7 @@ export default {
   'tenant.addMember': 'Add members',
   'tenant.retryDelete': 'Retry deletion',
   'tenant.delete': 'Delete tenant',
+  'tenant.deleteFailed': 'The deletion request failed. Retry, or contact an administrator to check the service logs.',
   'tenant.confirmDelete': 'Confirm deletion',
   'tenant.deleteWarning':
     "Deletion releases the tenant's database and data service sandboxes and removes its private persistent data. This action cannot be undone.",

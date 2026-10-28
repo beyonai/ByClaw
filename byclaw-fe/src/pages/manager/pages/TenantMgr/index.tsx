@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { useIntl, useSelector } from '@umijs/max';
 import { Alert, Button, DatePicker, Form, Input, Modal, Popover, Select, Space, Table, Tag, message } from 'antd';
 import {
@@ -36,6 +37,7 @@ export default function TenantMgr() {
   const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TenantItem | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [orgTenant, setOrgTenant] = useState<TenantItem | null>(null);
   const [progressTenant, setProgressTenant] = useState<TenantItem | null>(null);
@@ -128,6 +130,7 @@ export default function TenantMgr() {
   const submitDelete = async () => {
     if (!deleteTarget || deleteConfirmation !== deleteTarget.enterpriseName) return;
     setDeleting(true);
+    setDeleteError('');
     try {
       await deleteTenant(deleteTarget.enterpriseId, deleteTarget.enterpriseName);
       message.success(intl.formatMessage({ id: 'tenant.deleteSubmitted' }));
@@ -142,6 +145,9 @@ export default function TenantMgr() {
       setDeleteConfirmation('');
       setProgressTenant(null);
       await refresh();
+    } catch (error) {
+      const detail = typeof error === 'string' ? error : (error as Error)?.message;
+      setDeleteError(localizeErrorMessage(detail, intl.formatMessage({ id: 'tenant.deleteFailed' }), intl.locale));
     } finally {
       setDeleting(false);
     }
@@ -306,6 +312,7 @@ export default function TenantMgr() {
                   disabled={tenant.provisionState === 'DELETING'}
                   onClick={() => {
                     setDeleteConfirmation('');
+                    setDeleteError('');
                     setDeleteTarget(tenant);
                   }}
                 >
@@ -342,6 +349,7 @@ export default function TenantMgr() {
           }
         }}
       >
+        {deleteError && <Alert type="error" showIcon message={deleteError} style={{ marginBottom: 16 }} />}
         <p>{intl.formatMessage({ id: 'tenant.deleteWarning' })}</p>
         <p>{intl.formatMessage({ id: 'tenant.deleteConfirmation' }, { name: deleteTarget?.enterpriseName })}</p>
         <Input
