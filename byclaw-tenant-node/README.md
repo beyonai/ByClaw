@@ -375,6 +375,8 @@ Voice INPUT mirrors preserve `metadata: { messageType: "VOICE", voice: { fileId,
 
 租户数据库与 Node 的服务和资源档位始终读取 `sandbox_service_spec` / `sandbox_service_profile`，由表中 `enabled` 控制，不再依赖 `BYCLAW_SANDBOX_PROFILE_ENABLED`。显式指定的档位不存在或已禁用时，开通失败，不回退到内嵌资源限制。
 
+BE 创建数据库和 Node 时，将经开通流程校验的企业 ID 同时放入 `user_info.enterpriseId`（NAS 归属）与 `metadata.enterpriseId`（恢复对账）。
+
 ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态目录挂到各租户的 NAS 私有空间，由 Provider 的 init container 初始化目录权限；BE 不再为这类卷写旧 NFS 挂载目录。数据库租户镜像内置启动脚本。Node 镜像包含该初始化器需要的 Python 3，状态目录使用镜像自身的 UID/GID 1000。
 
 数据库端口必须返回 VPC 内网 TCP 地址，不能通过 HTTP 网关连接。Node 通过 Downward API 的 `POD_IP` 注册服务，BE 与 Node 需要能访问该 VPC。BE 的租户主密钥须持久保留，切换存储或更新环境时不能重新生成；内部鉴权配置、Redis 与 BE 内网地址同样需要保留。

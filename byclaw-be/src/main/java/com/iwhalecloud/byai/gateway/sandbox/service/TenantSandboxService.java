@@ -159,6 +159,8 @@ public class TenantSandboxService {
         request.setUserCode(record.getUserCode());
         request.setSandboxType(NODE_TYPE);
         request.setProfileKey(profileKey);
+        // Provider storage ownership uses user_info; metadata remains the recovery correlation.
+        request.setUserInfo(Map.of("enterpriseId", Long.toString(enterpriseId)));
         Map<String, String> envs = new LinkedHashMap<>();
         envs.put("TENANT_ID", Long.toString(enterpriseId));
         envs.put("COMMERCIAL_MANAGED", Boolean.toString(commercialManaged(enterpriseId)));
@@ -401,6 +403,8 @@ public class TenantSandboxService {
         request.setUserCode(record.getUserCode());
         request.setSandboxType(DB_TYPE);
         request.setProfileKey(profileKey);
+        // Provider storage ownership uses user_info; metadata remains the recovery correlation.
+        request.setUserInfo(Map.of("enterpriseId", Long.toString(enterpriseId)));
         Map<String, String> envs = new LinkedHashMap<>();
         envs.put("TENANT_ID", Long.toString(enterpriseId));
         envs.put("ENTERPRISE_ID", Long.toString(enterpriseId));
