@@ -1,6 +1,6 @@
 /** Shared-host opt-ins: user-tree I/O on the tool environment, configurable roots, worker history. */
 import assert from 'node:assert/strict'
-import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AskAgentCommand, HistoryProvider, MessageHeader } from '@byclaw/by-framework'
 import { createFakeToolEnvironment } from './tool-environment-fakes.mjs'
@@ -13,9 +13,11 @@ import { resolvePluginMediaModel } from '../src/media-generation/plugin-model.ts
 import { persistFileChangesSummary } from '../src/file-changes.ts'
 import { memberSkillProjectionRoot, memberSkillRoot, resolveByClawDshHome } from '../src/group-skill-resources.ts'
 import { GroupStateBoundary } from '../src/group-state-boundary.ts'
+import { installGroupChatDisposition } from '../src/group-chat-disposition.ts'
 import { writeCachedByClawSkill } from '../src/skill-sync.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from '../src/skill-runtime.ts'
 import { applyByClawWorkerHistory, NO_WORKER_HISTORY } from '../src/worker-history.ts'
+import { ToolEnvironmentSkills } from '../src/tool-environment-skills.ts'
 import { Config } from '../lib/index.js'
 
 const b = await createFakeToolEnvironment()
@@ -222,6 +224,127 @@ try {
     environment.connected = false
     check((await lazy.listDir(join(byRoot, '.sessions'))).some(entry => entry.name === 's1'), 'after B pauses, the last listing read from B is still served')
   }
+  // --- Skill directories on B -------------------------------------------------
+  // Hub Skills are unpacked on this host; their scripts and references run where commands run.
+  {
+    const hubCache = join(b.host, 'users', 'a', 'dsh-home', 'agent-templates', 'byclaw-skills')
+    const hubSkill = join(hubCache, 'file-path-format')
+    await mkdir(join(hubSkill, 'scripts'), { recursive: true })
+    await mkdir(join(hubSkill, 'references'), { recursive: true })
+    await writeFile(join(hubSkill, 'SKILL.md'), '---\nname: file-path-format\ndescription: d\n---\nRun scripts/check.sh\n')
+    await writeFile(join(hubSkill, 'scripts', 'check.sh'), '#!/bin/sh\necho ok\n')
+    await chmod(join(hubSkill, 'scripts', 'check.sh'), 0o755)
+    await writeFile(join(hubSkill, 'references', 'rules.md'), 'RULE-5521\n')
+    const visibleRoot = join(byRoot, '.byclaw', 'skills')
+    const memberHost = memberSkillProjectionRoot(homeA)
+    const memberVisible = join(byRoot, '.byclaw', 'member-skills')
+    const roots = [{ host: hubCache, visible: visibleRoot }, { host: memberHost, visible: memberVisible }]
+    const deferred = new Map()
+    const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }
+    const skills = new ToolEnvironmentSkills({ environment, files, roots })
+    const definition = { name: 'file-path-format', path: join(hubSkill, 'SKILL.md'), resourceBase: { kind: 'directory', path: hubSkill }, content: 'Run scripts/check.sh' }
+    const before = b.calls.subprocess.length
+    const presented = await skills.present(definition)
+    const visibleSkill = join(visibleRoot, 'file-path-format')
+    check(presented.resourceBase.path === visibleSkill && presented.path === join(visibleSkill, 'SKILL.md'), 'the model is told the Skill directory in the user tree on B')
+    check(presented.content === definition.content && definition.resourceBase.path === hubSkill, 'the Skill text is unchanged and the host definition is not mutated')
+    check(b.calls.subprocess.length === before && deferred.size === 1, 'while B is down the copy waits in the facade; presenting never starts B')
+    await skills.present(definition)
+    check(deferred.size === 1, 'presenting the same Skill again queues no second copy')
+    environment.connected = true
+    for (const operation of deferred.values()) await operation()
+    deferred.clear()
+    check(await readFile(b.toHost(join(visibleSkill, 'references', 'rules.md')), 'utf8') === 'RULE-5521\n', 'references land on B')
+    check(((await stat(b.toHost(join(visibleSkill, 'scripts', 'check.sh')))).mode & 0o100) !== 0, 'scripts stay executable on B')
+    check((await readdir(b.toHost(visibleRoot))).length === 1, 'the copy is swapped into place without leftovers')
+    // A restarted host (a fresh instance) finds the unchanged copy on B and does not copy again.
+    const copies = () => b.calls.subprocess.filter(argv => argv.some(value => typeof value === 'string' && value.includes('tar -x'))).length
+    const copied = copies()
+    await new ToolEnvironmentSkills({ environment, files, roots }).present(definition)
+    check(copies() === copied, 'an unchanged Skill is not copied again')
+    // A new version replaces the old copy; files the old version had are gone.
+    await rm(join(hubSkill, 'references'), { recursive: true })
+    await writeFile(join(hubSkill, 'scripts', 'check.sh'), '#!/bin/sh\necho v2\n')
+    await new ToolEnvironmentSkills({ environment, files, roots }).present(definition)
+    check(await readFile(b.toHost(join(visibleSkill, 'scripts', 'check.sh')), 'utf8') === '#!/bin/sh\necho v2\n', 'a changed Skill is copied again')
+    await assert.rejects(stat(b.toHost(join(visibleSkill, 'references'))), { code: 'ENOENT' }); checks += 1
+    // Skills elsewhere (deployment builtins, employee Skills already in the user tree) are left as they are.
+    const builtin = { name: 'b', path: '/opt/byclaw/builtin/skills/b/SKILL.md', resourceBase: { kind: 'directory', path: '/opt/byclaw/builtin/skills/b' } }
+    check((await skills.present(builtin)).resourceBase.path === builtin.resourceBase.path, 'Skills outside the mapped roots keep their paths')
+    check(skills.hostPath(join(visibleSkill, 'scripts', 'check.sh')) === join(hubSkill, 'scripts', 'check.sh'), 'a path on B maps back to the host copy')
+    check(skills.hostPath(join(byRoot, 'report.md')) === join(byRoot, 'report.md'), 'other paths map to themselves')
+    // Expert members: access control sees the paths the model uses on B.
+    const guarded = new GroupStateBoundary({ privateRoots: [hubCache], getScope: () => undefined, dshHome: homeA, hostPath: path => skills.hostPath(path) })
+    const own = memberSkillRoot('m1', homeA)
+    const ownVisible = join(memberVisible, own.slice(memberHost.length + 1))
+    const { setActiveMemberSkillRoots } = await import('../src/group-skill-resources.ts')
+    setActiveMemberSkillRoots('m1', [join(own, 'v1')], homeA)
+    guarded.actors.run(actor, () => guarded.assertPath(join(ownVisible, 'v1', 'SKILL.md')))
+    check(true, 'a member reads its own active Skill copy on B')
+    assert.throws(() => guarded.actors.run(actor, () => guarded.assertPath(join(ownVisible, 'v1', 'SKILL.md'), 'write')), /GROUP_MEMBER_PRIVATE_STATE_DENIED/); checks += 1
+    assert.throws(() => guarded.actors.run(actor, () => guarded.assertPath(join(memberVisible, 'someone-else', 'v1', 'SKILL.md'))), /GROUP_MEMBER_PRIVATE_STATE_DENIED/); checks += 1
+    assert.throws(() => guarded.actors.run(actor, () => guarded.assertPath(join(visibleSkill, 'SKILL.md'))), /GROUP_MEMBER_PRIVATE_STATE_DENIED/); checks += 1
+  }
+
+  // --- group-chat disposition -------------------------------------------------
+  {
+    const tail = await files.readTail(join(byRoot, 'a', 'b', 'note.txt'), 3)
+    check(tail.bytes.toString() === 'llo' && tail.truncated, 'readTail returns the last bytes from B and reports truncation')
+    const whole = await files.readTail(join(byRoot, 'a', 'b', 'note.txt'), 64)
+    check(whole.bytes.toString() === 'hello' && !whole.truncated, 'readTail returns a short file whole')
+    await assert.rejects(files.readTail(join(byRoot, 'missing.md'), 8), { code: 'ENOENT' }); checks += 1
+
+    let hook
+    const inputs = []
+    const dispositionCtx = {
+      logger: { warn: message => { throw new Error(`unexpected warning: ${message}`) } },
+      on(_event, listener) { hook = listener; return () => { hook = undefined } },
+      llm: { async *stream(request) {
+        inputs.push(request.messages[0].content[0].text)
+        yield { type: 'text-delta', text: JSON.stringify({ kind: 'TASK', taskName: '采集新闻' }) }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      } },
+    }
+    const disposition = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files, historyFiles: files })
+    await mkdir(b.toHost(join(byRoot, 'groups', 'g1')), { recursive: true })
+    await writeFile(b.toHost(join(byRoot, 'groups', 'g1', 'history.md')), 'older lines\nlatest: 新闻')
+    const opening = id => ({
+      command: { header: { sessionId: id }, content: '请采集新闻', extraPayload: { groupChat: { executionId: 'dispatch-b', groupHistoryPath: '/by/groups/g1/history.md' } } },
+      host: { byRoot, resolveSourcePath: source => join(byRoot, source.slice('/by/'.length)) },
+      firstSession: true, resolveModel: async () => ({ provider: 'p', model: 'm' }), signal: new AbortController().signal,
+    })
+    hook(opening('901'))
+    await disposition.whenIdle()
+    const state = join(byRoot, '.sessions', '901', '.byclaw')
+    check(JSON.parse(await readFile(b.toHost(join(state, 'group-chat-disposition.json')), 'utf8')).taskName === '采集新闻', 'the disposition is published on B')
+    check(JSON.parse(await readFile(b.toHost(join(state, 'session-opened.json')), 'utf8')).schemaVersion === '1', 'the opening marker is published on B')
+    const history = JSON.parse(inputs[0]).groupHistory
+    check(history.available && history.truncated && history.content === '闻' && history.path === '/by/groups/g1/history.md',
+      'the history tail is read from B, cut at a character boundary')
+    // A session opening while B is down (any first turn, group chat or not) must not start B:
+    // the opening marker waits for B like every other write of the context.
+    {
+      const deferred = new Map()
+      const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }
+      const queued = lazyToolEnvironmentFiles(environment, files)
+      const before = b.calls.fs.length + b.calls.subprocess.length
+      const quiet = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files: queued, historyFiles: files })
+      hook({ ...opening('902'), command: { header: { sessionId: '902' }, content: '你好', extraPayload: {} } })
+      await quiet.whenIdle()
+      check(b.calls.fs.length + b.calls.subprocess.length === before, 'an opening without group history does not reach B')
+      check([...deferred.keys()].some(key => key.endsWith(join('902', '.byclaw', 'session-opened.json'))), 'the opening marker is queued for B')
+      await quiet.close()
+    }
+
+    // A second worker opening the same session finds the published state instead of classifying again.
+    await disposition.close()
+    const again = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 12, environment: {}, files, historyFiles: files })
+    hook(opening('901'))
+    await again.whenIdle()
+    check(inputs.length === 1, 'a published opening on B is not classified again')
+    await again.close()
+  }
+
   check(b.calls.fs.every(([, path]) => typeof path !== 'string' || !path.startsWith(b.host)), 'the tool environment only ever saw its own paths')
   console.log(`tool-environment verification passed (${String(checks)} checks): user-tree I/O via ctx.fs/ctx.subprocess, configurable roots, dshHome, worker history`)
 } finally { await b.dispose() }
