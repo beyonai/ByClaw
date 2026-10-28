@@ -2,7 +2,7 @@ import type { QuotaMember } from "../../application/shared-quota.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
 import type { CommandContext } from "./command-context.js";
-import { lockSessions } from "./session-locks.js";
+import { lockBusiness, lockSessions } from "./session-locks.js";
 
 /** A database row write serializes count and insert even if a paused worker loses its Redis lease. */
 export async function requireGroupMemberCapacity(
@@ -11,6 +11,23 @@ export async function requireGroupMemberCapacity(
 ): Promise<void> {
   if (!context.quotas) return;
   const { db, command } = context;
+  if (command.operation === "CREATE_GROUP") {
+    // The session row is already part of this transaction. The enterprise
+    // advisory lock makes concurrent creators observe committed effective
+    // groups without introducing a row-lock query dependency.
+    await lockBusiness(db, `enterprise-workgroup:${command.enterpriseId}`);
+    let groupQuota = await context.quotas.read(command.enterpriseId);
+    if (groupQuota && groupQuota.mode !== "UNLIMITED") {
+      const count = await db.query(
+        "SELECT COUNT(*)::text AS current_count FROM byai.byai_session WHERE enterprise_id=$1 AND session_type='hs_as' AND (state IS NULL OR state NOT IN('CLOSED','GROUP_DISSOLVED'))",
+        [command.enterpriseId],
+      );
+      const current = String(count[0]?.currentCount ?? "");
+      if (!/^\d+$/.test(current)) throw new DomainError("QUOTA_UNAVAILABLE");
+      if (BigInt(current) > BigInt(groupQuota.limits.groupLimit))
+        throw new DomainError("GROUP_LIMIT_EXCEEDED");
+    }
+  }
   await lockSessions(db, [command.sessionId]);
   let quota = await context.quotas.read(command.enterpriseId);
   if (!quota || quota.mode === "UNLIMITED") return;

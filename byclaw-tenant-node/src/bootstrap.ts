@@ -61,6 +61,7 @@ export async function bootstrap(config: Config) {
   );
   const quotas = new RedisSharedQuotaReader(redis, {
     ...config.quota,
+    commercialManaged: config.commercialManaged,
     warn: (code, enterpriseId) =>
       app.log.warn({ code, enterpriseId }, "Shared quota Redis read failed"),
   });

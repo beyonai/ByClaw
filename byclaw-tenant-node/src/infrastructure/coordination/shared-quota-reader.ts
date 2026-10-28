@@ -9,6 +9,7 @@ interface QuotaReadOptions {
   keyPrefix?: string;
   failurePolicy?: "ALLOW" | "REJECT";
   warn?: (code: string, enterpriseId: string) => void;
+  commercialManaged?: boolean;
 }
 
 /** One atomic hash read avoids mixing revisions; policy corruption never uses the Redis outage fallback. */
@@ -33,7 +34,10 @@ export class RedisSharedQuotaReader implements SharedQuotaReader {
       if (this.options.failurePolicy === "REJECT") throw new DomainError("QUOTA_UNAVAILABLE");
       return null;
     }
-    if (Object.keys(hash).length === 0) return null;
+    if (Object.keys(hash).length === 0) {
+      if (this.options.commercialManaged) throw new DomainError("QUOTA_UNAVAILABLE");
+      return null;
+    }
     try {
       if (
         !hash.revision ||
@@ -68,8 +72,16 @@ export class RedisSharedQuotaReader implements SharedQuotaReader {
         !rfc3339(value.updatedAt)
       )
         throw new Error("Invalid quota payload");
+      if (this.options.commercialManaged) {
+        if (value.accessMode !== "ENABLED" || typeof value.effectiveFrom !== "string" || typeof value.effectiveTo !== "string")
+          throw new DomainError("QUOTA_POLICY_NOT_EFFECTIVE");
+        const now = Date.now();
+        if (now < Date.parse(value.effectiveFrom) || now >= Date.parse(value.effectiveTo))
+          throw new DomainError("QUOTA_POLICY_NOT_EFFECTIVE");
+      }
       return value as SharedQuota;
-    } catch {
+    } catch (error) {
+      if (error instanceof DomainError) throw error;
       throw new DomainError("QUOTA_UNAVAILABLE");
     }
   }

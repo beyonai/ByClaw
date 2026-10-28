@@ -167,6 +167,9 @@ public class GroupChatApplicationService {
         userIds.remove(operatorId);
         Long sessionId = sequenceService.nextVal();
         Long enterpriseId = businessEnterpriseId();
+        Optional<QuotaSnapshot> workgroupQuota = enterpriseId == null ? Optional.empty()
+            : quotaAdmission.beginWorkgroup(enterpriseId);
+        if (workgroupQuota.isPresent()) quotaAdmission.checkWorkgroupCapacity(workgroupQuota, enterpriseId, 1);
         Optional<QuotaSnapshot> initialQuota = enterpriseId == null ? Optional.empty()
             : quotaAdmission.beginGroup(enterpriseId, sessionId);
         // Validate the entire initial batch before project workspace or authorization side effects.

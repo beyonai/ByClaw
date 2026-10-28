@@ -13,7 +13,7 @@ const quota: SharedQuota = {
   enterpriseId: "10",
   revision: "1",
   mode: "LIMITED",
-  limits: { memberLimit: 100, groupLimit: 0, groupMemberLimit: 2, agentLimit: 1 },
+  limits: { memberLimit: 100, groupLimit: 1, groupMemberLimit: 2, agentLimit: 1 },
   updatedAt: "2026-10-27T01:00:00Z",
 };
 const user = (id: string) => ({ memObjType: "USER" as const, memObjId: id });
@@ -27,6 +27,10 @@ function fixture(value: SharedQuota | null = quota, existing = [user("20"), agen
     if (sql.startsWith("UPDATE byai.byai_session SET session_id=session_id")) {
       effects.push("database-guard");
       return [{ session_id: "30" }];
+    }
+    if (sql.includes("COUNT(*)::text AS current_count") && sql.includes("session_type='hs_as'")) {
+      effects.push("group-count");
+      return [{ current_count: "1" }];
     }
     if (sql.includes("GROUP BY mem_obj_type")) {
       effects.push("count");
@@ -232,6 +236,21 @@ describe("tenant group membership quota", () => {
     await expect(createSession(context)).rejects.toMatchObject({
       code: "GROUP_AGENT_LIMIT_EXCEEDED",
     });
+    expect(effects).not.toContain("insert-member");
+  });
+
+  it("rejects CREATE_GROUP when the enterprise workgroup limit is already full", async () => {
+    const { db, reader, effects } = fixture({ ...quota, limits: { ...quota.limits, groupLimit: 0 } }, []);
+    const context = new CommandContext(db, command({
+      operation: "CREATE_GROUP",
+      payload: {
+        projectId: "50",
+        sessionName: "Full",
+        members: [{ ...user("20"), userRole: "OWNER" }],
+      },
+    }), reader);
+    vi.spyOn(context, "session").mockResolvedValue(null);
+    await expect(createSession(context)).rejects.toMatchObject({ code: "GROUP_LIMIT_EXCEEDED" });
     expect(effects).not.toContain("insert-member");
   });
 

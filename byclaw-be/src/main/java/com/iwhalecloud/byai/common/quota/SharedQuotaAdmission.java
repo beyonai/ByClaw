@@ -36,6 +36,18 @@ public class SharedQuotaAdmission {
     }
 
     /**
+     * Serializes creation of enterprise-owned workgroups and re-reads the
+     * snapshot after waiting for another creator. Member writes keep using
+     * the per-group guard above, so unrelated groups do not contend here.
+     */
+    public Optional<QuotaSnapshot> beginWorkgroup(Long enterpriseId) {
+        var snapshot = read(enterpriseId);
+        if (snapshot.isEmpty()) return snapshot;
+        lock("ENTERPRISE_WORKGROUP", enterpriseId);
+        return read(enterpriseId);
+    }
+
+    /**
      * Final guard for generic session-member writers, using persisted session ownership instead of a request DTO.
      * Private H_AS sessions do not read commercial Redis state; a duplicate LIMITED group identity is a no-op.
      */
@@ -103,7 +115,7 @@ public class SharedQuotaAdmission {
 
     /** Initial group batches have no persisted members; count the deduplicated owner and assistant too. */
     public void checkInitialGroupForEnterprise(Long enterpriseId, int humans, int agents) {
-        checkInitialGroup(read(enterpriseId), humans, agents);
+        checkInitialWorkgroup(enterpriseId, humans, agents);
     }
 
     /** Initial group batches have no persisted members; count the deduplicated owner and assistant too. */
@@ -113,9 +125,38 @@ public class SharedQuotaAdmission {
         check(0L, agents, snapshot.orElseThrow().agentLimit(), "groupchat.agent.limit.reached");
     }
 
-    private Optional<QuotaSnapshot> read(Long enterpriseId) {
-        return enterpriseId == null || enterpriseId <= 0 ? Optional.empty() : reader.read(enterpriseId);
+    /** Checks the effective, non-closed hs_as groups for one enterprise. */
+    public void checkWorkgroupCapacity(Optional<QuotaSnapshot> snapshot, Long enterpriseId, int additions) {
+        if (snapshot.isEmpty() || additions == 0) return;
+        if (enterpriseId == null || enterpriseId <= 0) throw new IllegalArgumentException("Quota enterprise id must be positive");
+        Long current = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM byai.byai_session WHERE enterprise_id=? AND session_type='hs_as' "
+                + "AND (state IS NULL OR state NOT IN ('CLOSED','GROUP_DISSOLVED'))",
+            Long.class, enterpriseId);
+        check(current, additions, snapshot.orElseThrow().groupLimit(), "groupchat.group.limit.reached");
     }
+
+    /** Combined initial-group check used before any project, authorization or Node side effects. */
+    public void checkInitialWorkgroup(Long enterpriseId, int humans, int agents) {
+        var snapshot = beginWorkgroup(enterpriseId);
+        if (snapshot.isEmpty()) return;
+        checkWorkgroupCapacity(snapshot, enterpriseId, 1);
+        checkInitialGroup(snapshot, humans, agents);
+    }
+
+    private Optional<QuotaSnapshot> read(Long enterpriseId) {
+        if (enterpriseId == null || enterpriseId <= 0) return Optional.empty();
+        var value = reader.read(enterpriseId);
+        if (quotaProperties != null && quotaProperties.isCommercialManaged() && value.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "QUOTA_UNAVAILABLE");
+        }
+        if (quotaProperties != null && quotaProperties.isCommercialManaged() && value.isPresent() && !value.orElseThrow().commerciallyEffective()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "QUOTA_POLICY_NOT_EFFECTIVE");
+        }
+        return value;
+    }
+    @org.springframework.beans.factory.annotation.Autowired private SharedQuotaProperties quotaProperties;
+    private SharedQuotaProperties properties() { return quotaProperties; }
     private void lock(String scope, Long id) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Quota admission requires the membership mutation transaction");

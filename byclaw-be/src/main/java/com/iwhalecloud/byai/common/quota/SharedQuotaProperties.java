@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 public class SharedQuotaProperties {
     private String keyPrefix = "byclaw:shared:quota:v1:";
     private FailurePolicy failurePolicy = FailurePolicy.ALLOW;
+    private boolean commercialManaged;
     public String getKeyPrefix() { return keyPrefix; }
     public void setKeyPrefix(String keyPrefix) {
         if (keyPrefix == null || keyPrefix.isBlank()) throw new IllegalArgumentException("Quota key prefix is required");
@@ -20,4 +21,6 @@ public class SharedQuotaProperties {
         this.failurePolicy = failurePolicy;
     }
     public enum FailurePolicy { ALLOW, REJECT }
+    public boolean isCommercialManaged() { return commercialManaged; }
+    public void setCommercialManaged(boolean commercialManaged) { this.commercialManaged = commercialManaged; }
 }

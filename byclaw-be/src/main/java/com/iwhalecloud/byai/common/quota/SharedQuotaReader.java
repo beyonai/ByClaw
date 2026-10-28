@@ -64,6 +64,10 @@ public class SharedQuotaReader {
             JsonNode limits = root.path("limits");
             QuotaSnapshot snapshot = new QuotaSnapshot(enterpriseId, revision, limit(limits, "memberLimit"),
                 limit(limits, "groupLimit"), limit(limits, "groupMemberLimit"), limit(limits, "agentLimit"));
+            String accessMode = root.path("accessMode").isTextual() ? root.path("accessMode").textValue() : null;
+            java.time.OffsetDateTime from = root.path("effectiveFrom").isTextual() ? java.time.OffsetDateTime.parse(root.path("effectiveFrom").textValue()) : null;
+            java.time.OffsetDateTime to = root.path("effectiveTo").isTextual() ? java.time.OffsetDateTime.parse(root.path("effectiveTo").textValue()) : null;
+            snapshot = new QuotaSnapshot(enterpriseId, revision, snapshot.memberLimit(), snapshot.groupLimit(), snapshot.groupMemberLimit(), snapshot.agentLimit(), accessMode, from, to);
             if (!root.path("mode").isTextual()) throw new IllegalArgumentException();
             return switch (root.path("mode").textValue()) {
                 case "LIMITED" -> Optional.of(snapshot);

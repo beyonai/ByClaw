@@ -51,7 +51,7 @@ public class TenantGroupCreationService {
         Long coordinatorAgentId = groupWorkAssistant.resolveDefaultCoordinatorId();
         agentIds.add(coordinatorAgentId);
         // Initial cardinalities are known before platform project/cloud side effects; Node checks again in its write transaction.
-        quotaAdmission.checkInitialGroupForEnterprise(tenant.enterpriseId(), userIds.size() + 1, agentIds.size());
+        quotaAdmission.checkInitialWorkgroup(tenant.enterpriseId(), userIds.size() + 1, agentIds.size());
         grants.grantDigitalEmployeesToUser(List.of(coordinatorAgentId), tenant.userId());
         var users = members.prepareMembers(tenant, "USER", new ArrayList<>(userIds));
         var agents = new ArrayList<>(members.prepareMembers(tenant, "AGENT", agentIds.stream()

@@ -11,6 +11,9 @@ export interface SharedQuota {
     agentLimit: number;
   };
   updatedAt: string;
+  accessMode?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
 }
 
 export interface SharedQuotaReader {

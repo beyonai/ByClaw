@@ -30,6 +30,7 @@ class SharedQuotaAdmissionTest {
         jdbc.execute("CREATE TABLE byai.quota_write_guard(scope VARCHAR(32),subject_id BIGINT,version BIGINT NOT NULL,PRIMARY KEY(scope,subject_id))");
         jdbc.execute("CREATE TABLE byai.tenant_user_membership(membership_id BIGINT PRIMARY KEY,enterprise_id BIGINT,user_id BIGINT,status VARCHAR(16))");
         jdbc.execute("CREATE TABLE byai.byai_session_member(session_id BIGINT,mem_obj_type VARCHAR(16),mem_obj_id BIGINT)");
+        jdbc.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY,enterprise_id BIGINT,session_type VARCHAR(16),state VARCHAR(32))");
         jdbc.update("INSERT INTO byai.tenant_user_membership VALUES(1,42,1,'ACTIVE')");
         when(reader.read(42)).thenReturn(Optional.of(quota));
         admission = new SharedQuotaAdmission(reader, jdbc);
@@ -102,6 +103,24 @@ class SharedQuotaAdmissionTest {
         assertThrows(ResponseStatusException.class, () -> admission.checkInitialGroup(Optional.of(quota), 4, 0));
         assertThrows(ResponseStatusException.class, () -> admission.checkInitialGroup(Optional.of(quota), 1, 3));
         assertDoesNotThrow(() -> admission.checkInitialGroup(Optional.of(quota), 3, 2));
+    }
+
+    @Test void workgroupLimitCountsOnlyEffectiveEnterpriseGroups() {
+        jdbc.update("INSERT INTO byai.byai_session VALUES(10,42,'hs_as',NULL),(11,42,'hs_as','CLOSED'),(12,42,'h_as',NULL)");
+        tx.executeWithoutResult(status -> {
+            var snapshot = admission.beginWorkgroup(42L);
+            assertDoesNotThrow(() -> admission.checkWorkgroupCapacity(snapshot, 42L, 1));
+            var limited = Optional.of(new QuotaSnapshot(42, "7", 2, 2, 3, 2));
+            assertThrows(ResponseStatusException.class, () -> admission.checkWorkgroupCapacity(limited, 42L, 2));
+        });
+    }
+
+    @Test void closedAndDissolvedGroupsReleaseWorkgroupCapacity() {
+        jdbc.update("INSERT INTO byai.byai_session VALUES(20,42,'hs_as','CLOSED'),(21,42,'hs_as','GROUP_DISSOLVED')");
+        tx.executeWithoutResult(status -> {
+            var limited = Optional.of(new QuotaSnapshot(42, "7", 2, 1, 3, 2));
+            assertDoesNotThrow(() -> admission.checkWorkgroupCapacity(limited, 42L, 1));
+        });
     }
 
     @Test void guardRequiresTheMutationTransactionAndRollbackReleasesItsWrite() {

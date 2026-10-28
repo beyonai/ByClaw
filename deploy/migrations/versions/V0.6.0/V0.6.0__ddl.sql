@@ -200,7 +200,7 @@ COMMENT ON TABLE byai.integration_delivery IS 'Independent subscription attempts
 -- QUOTA GUARDS: transaction-local serialization for optional shared commercial quota admission.
 -- Created lazily per scope only when Redis publishes a LIMITED quota snapshot.
 CREATE TABLE byai.quota_write_guard (
-    scope VARCHAR(32) NOT NULL CHECK (scope IN ('ENTERPRISE_MEMBER', 'LEGACY_GROUP_MEMBER')),
+    scope VARCHAR(32) NOT NULL CHECK (scope IN ('ENTERPRISE_MEMBER', 'ENTERPRISE_WORKGROUP', 'LEGACY_GROUP_MEMBER')),
     subject_id BIGINT NOT NULL CHECK (subject_id > 0),
     version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0),
     PRIMARY KEY (scope, subject_id)

@@ -35,7 +35,7 @@ class TenantGroupCreationQuotaTest {
         var request = new GroupChatCreateRequest(); request.setName("group");
         request.setUserIds(List.of(1L, 2L, 2L, 3L)); request.setAgentIds(List.of(50L, 101L, 102L, 103L));
         doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "groupchat.agent.limit.reached"))
-                .when(quota).checkInitialGroupForEnterprise(42L, 3, 4);
+                .when(quota).checkInitialWorkgroup(42L, 3, 4);
         assertThrows(ResponseStatusException.class, () -> service.create(new TenantRequestContext(1L, 42L, "OWNER"), request));
         verifyNoInteractions(node, projects, members, grants);
     }
