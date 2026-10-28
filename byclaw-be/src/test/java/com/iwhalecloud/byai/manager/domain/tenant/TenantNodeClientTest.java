@@ -356,6 +356,31 @@ class TenantNodeClientTest {
         }
     }
 
+    @Test
+    void schemaDiscoveryAllowsAdminOnlyWithoutRelaxingBusinessReadiness() {
+        DiscoveryClient discovery = mock(DiscoveryClient.class);
+        TenantNodeClient client = new TenantNodeClient(mock(TenantAdminTenantMapper.class),
+            mock(SsSandboxRecordMapper.class), new ObjectMapper(), mock(RedisClient.class), "test-token");
+        ReflectionTestUtils.setField(client, "discovery", discovery);
+        try {
+            ServiceInstance node = instance("123", "1", "987", "ADMIN_ONLY");
+            when(discovery.getInstances("TENANT_DATA_123")).thenReturn(List.of(node));
+            java.net.URI endpoint = client.schemaEndpoint(123L, 1L, 987L);
+            assertThat(endpoint).isEqualTo(java.net.URI.create("http://tenant-node.example:3100"));
+            assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L, 1L,
+                "987", List.of(node))).isInstanceOf(ResponseStatusException.class);
+            for (ServiceInstance stale : List.of(instance("124", "1", "987", "ADMIN_ONLY"),
+                instance("123", "2", "987", "ADMIN_ONLY"), instance("123", "1", "988", "ADMIN_ONLY"),
+                instance("123", "1", "987", "UNKNOWN"))) {
+                when(discovery.getInstances("TENANT_DATA_123")).thenReturn(List.of(stale));
+                assertThatThrownBy(() -> client.schemaEndpoint(123L, 1L, 987L))
+                    .isInstanceOf(ResponseStatusException.class);
+            }
+        } finally {
+            client.close();
+        }
+    }
+
     private ServiceInstance instance(String enterpriseId, String generation, String dbRecordId, String mode) {
         ServiceInstance instance = new ServiceInstance();
         instance.setProtocol("http");

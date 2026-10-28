@@ -250,6 +250,18 @@ public class TenantNodeClient {
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
                                   List<ServiceInstance> instances) {
+        return registeredEndpoint(name, enterpriseId, generation, dbRecordId, instances, false);
+    }
+
+    /** Schema bootstrap precedes READY; only this internal operation accepts ADMIN_ONLY nodes. */
+    URI schemaEndpoint(long enterpriseId, long generation, long dbRecordId) {
+        String name = "TENANT_DATA_" + enterpriseId;
+        return registeredEndpoint(name, enterpriseId, generation, Long.toString(dbRecordId),
+            discovery.getInstances(name), true);
+    }
+
+    private static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
+                                           List<ServiceInstance> instances, boolean schemaBootstrap) {
         if (instances == null || instances.size() != 1) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.unavailable");
         }
@@ -260,7 +272,8 @@ public class TenantNodeClient {
             || !Long.toString(enterpriseId).equals(registration.enterpriseId())
             || !Long.toString(generation).equals(registration.generation())
             || !dbRecordId.equals(registration.dbSandboxRecordId())
-            || !"READY".equals(registration.mode())
+            || !("READY".equals(registration.mode())
+                || (schemaBootstrap && "ADMIN_ONLY".equals(registration.mode())))
             || !name.equals(registration.agentType())
             || !"http".equals(instance.getProtocol()) || instance.getHost() == null
             || instance.getPort() <= 0 || instance.getPort() > 65535) {
