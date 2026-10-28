@@ -284,7 +284,8 @@ RUN node /usr/local/lib/byclaw/verify-lean-harness.mjs \
     && node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-integration/package.json \
     && DSH_HOME=/opt/byclaw/dsh-managed node apps/cli/lib/bin.js --profile web --dump-config >/tmp/slim-profile.yml \
     && rm /tmp/slim-profile.yml
-ENV BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
+ENV BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=0 \
+    BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
     BYCLAW_DSH_WORKSPACE_GIT_ENABLED=0
 
 EXPOSE 3080

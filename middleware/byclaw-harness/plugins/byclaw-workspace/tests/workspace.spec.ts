@@ -40,6 +40,11 @@ it('default flags perform no discovery or recording on a model-only turn', async
   expect(ctx.workspaceChanges.summary(session.id, 0)).toBeUndefined()
 })
 
+it('publishes a default-off workspace discovery policy independently of Git statistics', async () => {
+  const { ctx } = await boot({ changesEnabled: true, gitEnabled: true })
+  expect(ctx.get('byclawWorkspacePolicy')?.automaticDiscoveryEnabled).toBe(false)
+})
+
 it('enabled Git statistics still defer discovery until a tool is admitted', async () => {
   const { session, resolve, spawn } = await boot({ changesEnabled: true, gitEnabled: true })
   session.append('turn/start', { turn: 1 })
