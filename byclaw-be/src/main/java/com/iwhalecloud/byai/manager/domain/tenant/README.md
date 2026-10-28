@@ -63,3 +63,5 @@ Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；�
 本次需发布 BE 和 FE；沿用 ACS/NAS 统一删除接口，不新增 SQL 迁移、租户镜像或 Harness 镜像。
 
 管理员托管租户删除与 `byclaw.integration.enabled` 解耦。该开关关闭或未配置时仍可受理删除；独立定时任务只领取 `DELETE` 命令，外部开通 worker 只领取 `PROVISION`，不会因清理失败租户而重新开启其他开通任务。`MANUAL_REQUIRED / SCHEMA_INIT` 且已绑定沙箱的租户沿用完整资源和 NAS 清理流程。
+
+删除协调器使用显式短事务领取任务和保存结果，须排除全局 Service 的 REQUIRED 事务包装；沙箱删除也不加入外层事务。ACS 已释放的资源状态会先提交，NAS 清理等待只将当前命令置为 `RETRY_WAIT`，不会回滚同批其他租户的删除结果。回归测试同时加载实际全局事务拦截器，覆盖 NAS 等待后恢复完成的路径。

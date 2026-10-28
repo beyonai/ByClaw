@@ -25,10 +25,11 @@ class TenantManagedDeletionServiceTest {
     TenantSandboxService sandboxes;
     TenantExecutionPolicyService policies;
     HookPublisher hooks;
+    org.springframework.transaction.PlatformTransactionManager transactions;
 
     @BeforeEach void setup() {
         var fixture = new TenantCommandStoreTest(); fixture.setup();
-        jdbc = fixture.jdbc; store = fixture.store;
+        jdbc = fixture.jdbc; store = fixture.store; transactions = fixture.tx.getTransactionManager();
         jdbc.execute("CREATE TABLE byai.tenant_config(id bigint,enterprise_id bigint,params_code varchar(100),params_value text,params_version bigint default 1)");
         jdbc.execute("CREATE TABLE byai.tenant_policy_cursor(enterprise_id bigint,desired_revision bigint,generation varchar(20) default '1')");
         jdbc.execute("CREATE TABLE byai.tenant_execution_policy(enterprise_id bigint,revision bigint,payload text)");
@@ -156,6 +157,36 @@ class TenantManagedDeletionServiceTest {
             service.request(2,"tenant",10001);service.scan();
             assertEquals("PENDING",store.latestDeletion(2).status());
             verifyNoInteractions(sandboxes);
+        } finally {
+            if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
+        }
+    }
+    @Test void realTransactionAdviceCommitsClaimsAndResourceReleaseBeforePendingNasCleanup() {
+        String old=System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV","production");
+            var config=new com.iwhalecloud.byai.common.config.TransactionAdviceConfig();
+            org.springframework.test.util.ReflectionTestUtils.setField(config,"transactionManager",transactions);
+            var advice=config.getAdvisor();
+            var sandboxProxy=new org.springframework.aop.framework.ProxyFactory(sandboxes);
+            sandboxProxy.setProxyTargetClass(true);sandboxProxy.addAdvice(advice);
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"sandboxes",sandboxProxy.getProxy());
+            var serviceProxy=new org.springframework.aop.framework.ProxyFactory(service);
+            serviceProxy.setProxyTargetClass(true);serviceProxy.addAdvice(advice);
+            var coordinator=(TenantManagedDeletionService)serviceProxy.getProxy();
+            jdbc.update("INSERT INTO byai.ss_sandbox_record VALUES(2,'TENANT','tenant-opengauss','RUNNING','db')");
+            doAnswer(call->{
+                jdbc.update("UPDATE byai.ss_sandbox_record SET status='RELEASED' WHERE enterprise_id=2");
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.volume.cleanup.pending");
+            }).doNothing().when(sandboxes).deleteTenantResources(2);
+            coordinator.request(2,"tenant",10001);
+            coordinator.scan();
+            assertEquals("RETRY_WAIT",store.latestDeletion(2).status());
+            assertEquals("RELEASED",jdbc.queryForObject("SELECT status FROM byai.ss_sandbox_record",String.class));
+            assertTrue(state().contains("DELETING"));verify(tenants,never()).deleteTenantMemberships(anyLong());
+            jdbc.update("UPDATE byai.internal_command SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=10");
+            coordinator.scan();
+            assertEquals("SUCCEEDED",store.latestDeletion(2).status());assertTrue(state().contains("DELETED"));
         } finally {
             if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
         }

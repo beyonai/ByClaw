@@ -139,6 +139,7 @@ public class TransactionAdviceConfig {
                 if (targetClass != null) {
                     String owner = ClassUtils.getUserClass(targetClass).getName();
                     if ("com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandService".equals(owner)
+                        || "com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService".equals(owner)
                         || ("com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService".equals(owner)
                             && "provisionDurably".equals(method.getName()))) {
                         return notSurpportedTx;
@@ -230,8 +231,10 @@ public class TransactionAdviceConfig {
                 if (targetClass != null
                     && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
                         .equals(ClassUtils.getUserClass(targetClass).getName())
-                    && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName()))) {
+                    && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName())
+                        || "deleteTenantResources".equals(method.getName()))) {
                     // Persist the retired record before inserting its replacement and calling OpenSandbox.
+                    // Deletion also commits each release before asynchronous NAS cleanup may request a retry.
                     return notSurpportedTx;
                 }
                 return super.getTransactionAttribute(method, targetClass);
