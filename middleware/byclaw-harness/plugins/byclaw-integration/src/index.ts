@@ -43,6 +43,8 @@ import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRunti
 import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
 import { lazyToolEnvironment, lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from './tool-environment-files.ts'
+import { ToolEnvironmentSkills } from './tool-environment-skills.ts'
+import { memberSkillProjectionRoot } from './group-skill-resources.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
 import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
@@ -602,10 +604,21 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     retryDelayMs: config.skillSyncRetryDelayMs ?? 250,
     onError: (ref, error) => ctx.logger.error(`[byclaw-dsh] Lazy Skill ${ref.code} sync failed: ${startupErrorDetail(error)}`),
   })
+  // Hub Skills and member copies are made on this host; their scripts and references must be where commands run.
+  const skillDirectories = userFiles === undefined ? undefined : new ToolEnvironmentSkills({
+    ...(lazyEnvironment === undefined ? {} : { environment: lazyEnvironment }),
+    files: toolEnvironmentFiles(ctx),
+    roots: [
+      { host: skillCacheDir, visible: join(byRoot, '.byclaw', 'skills') },
+      { host: memberSkillProjectionRoot(dshHome), visible: join(byRoot, '.byclaw', 'member-skills') },
+    ],
+    log: message => ctx.logger.warn(`[byclaw-dsh] ${message}`),
+  })
   const skillRuntime = await startup.measure('builtin-skills', () => ByClawSkillRuntime.install(ctx, {
     builtinSkillDir: config.builtinSkillDir,
     agentSkillRoot,
     ...(userFiles === undefined ? {} : { files: userFiles }),
+    ...(skillDirectories === undefined ? {} : { skillDirectories }),
     ...(dshHome === undefined ? {} : { dshHome }),
     resolveDeferredTemplate: template => lazySkills.resolve(template),
   }))
@@ -914,6 +927,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       getScope: id => groupCoordination.get(id),
       ...(dshHome === undefined ? {} : { dshHome }),
       stateRuntime: () => teamStateRuntime(ctx),
+      ...(skillDirectories === undefined ? {} : { hostPath: (path: string) => skillDirectories.hostPath(path) }),
     })
     ctx.effect(() => groupBoundary.install(ctx), 'byclaw-group-private-storage-boundary')
     ctx.effect(() => ctx.provide('byclawGroupCoordination', groupCoordination), 'byclaw-group-coordination')

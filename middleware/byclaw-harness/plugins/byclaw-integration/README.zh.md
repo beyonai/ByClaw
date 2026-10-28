@@ -86,6 +86,8 @@ Skill 同步先读取远端版本；本地 `code + version` 一致时直接复�
 
 数字员工 Skill 按 `baiying-enhance` 的下载语义同步到 `agentTemplateDir/byclaw-skills`。携带凭据的资源目录和 Skill 请求仅访问所配置 `baseUrl` 的同源地址，并禁止自动跟随重定向。插件对原有 Skill 注册表的 `snapshot/list/get` 增加 Agent 作用域视图；DSH 原生 `tool-skill` 仍通过 `skill-catalog` 向上下文注入元数据，并使用标准 `skill` 工具按需加载正文，无需修改 DSH 源码。
 
+开启 `workspaceOnToolEnvironment`（共享 DSH 宿主）时，模型的命令在独立的工具环境中执行，那里看不到本机的 DSH 家目录。因此展示给模型的每个 Hub Skill 目录、以及专家成员的 Skill 副本，会被复制到那里的用户目录（`<byRoot>/.byclaw/skills/<code>`、`<byRoot>/.byclaw/member-skills/...`），并以该路径告知模型；Skill 正文仍由本机提供。复制排在工具环境门面中，等工具环境连上后执行，加载上下文不会因此启动它；副本中的摘要文件使内容未变的目录不再重复复制。成员访问控制把这些路径换回其来源的本机副本再检查。
+
 运行中的数字员工（直达根 Agent、委派模板和 AgentTeams 成员）保留完整的 DSH 原生目录，包括全局、项目、用户、preset 以及插件注册的 bundled Skills，并在其上叠加 **部署内置 Skills + 当前 Redis 关联 Skills**。普通主 Agent 保留原有目录并加入部署内置 Skills。内置目录按 `builtinSkillDir` → `BYCLAW_SKILLS_DIR` → 仓库 `builtin/skills` 解析，只读取一级技能目录中的 `SKILL.md`；Dockerfile 已设置 `/opt/byclaw/builtin/skills`。支持多行 YAML 和标准 invocation 标记。同名时员工关联资源覆盖部署内置资源，部署内置资源覆盖 DSH 原生条目。
 
 Watch 收到员工或关联技能更新后，先准备完整内存覆盖层，再与文件代次一起发布。已有 Agent 绑定员工模板 ID，下一次目录查询或正文加载使用新代次，无需重建会话。明确的空 `relSkills`（包括字符串 `"[]"`）撤销全部关联；若此前覆盖了同名 DSH Skill，则重新显露底层原生条目，部署内置 Skill 与原生 Skill 都继续可用。准备或发布失败保留上一代；允许单 Skill 下载失败的降级规则仍如上文所述。正文变化但元数据未变时，额外的 `byclaw-skill-revision` 提示要求重新加载正文，它不承载技能目录。内置文件在插件启动时读取，部署更新后应重启插件。

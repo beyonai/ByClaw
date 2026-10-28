@@ -25,6 +25,12 @@ export class GroupStateBoundary {
     dshHome?: string
     /** This context's AgentTeams state runtime, resolved per use (default: the process-wide runtime). */
     stateRuntime?: () => TeamStateRuntime
+    /**
+     * The host path behind a path a member uses, where Skill directories are copied
+     * to a separate tool environment (`ToolEnvironmentSkills.hostPath`); checks are
+     * made against the host copies they come from.
+     */
+    hostPath?: (path: string) => string
   }) {
     const home = resolveByClawDshHome(options.dshHome)
     const legacyGenerationCopies = options.privateRoots.flatMap(root => {
@@ -53,7 +59,8 @@ export class GroupStateBoundary {
     const actor = this.actors.getStore()
     if (actor === undefined) return
     const runtime = this.stateRuntime()
-    const absolute = runtime.workspacePath(resolve(runtime.workspaceOf(actor.agent), path))
+    const used = runtime.workspacePath(resolve(runtime.workspaceOf(actor.agent), path))
+    const absolute = this.options.hostPath?.(used) ?? used
     const projection = memberSkillProjectionRoot(this.options.dshHome)
     const ownSkill = memberSkillRoot(String(actor.agent.id), this.options.dshHome)
     const allowedSkill = absolute === ownSkill || activeMemberSkillRoots(String(actor.agent.id)).some(root => isPathWithin(absolute, root))

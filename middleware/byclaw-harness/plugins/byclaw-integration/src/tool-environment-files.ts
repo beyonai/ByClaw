@@ -64,6 +64,8 @@ export interface ToolEnvironmentFiles {
   writeBytes(path: string, bytes: Uint8Array, options?: { exclusive?: boolean }): Promise<void>
   /** `rm -f`; absent paths are not an error. */
   remove(path: string): Promise<void>
+  /** Replace the directory at `path` with the contents of a tar archive, swapped into place whole. */
+  replaceDirectory(path: string, archive: Uint8Array): Promise<void>
 }
 
 function coded(message: string, code: string, cause?: unknown): Error {
@@ -83,6 +85,8 @@ function nodeCoded(error: unknown, path: string): unknown {
 const WRITE_EXCLUSIVE = 'umask 077 && mkdir -p -- "$(dirname -- "$1")" && set -C && cat > "$1"'
 const WRITE_REPLACE = 'umask 077 && mkdir -p -- "$(dirname -- "$1")" && t="$1.$2.tmp" && '
   + 'if cat > "$t"; then mv -f -- "$t" "$1"; else rm -f -- "$t"; exit 1; fi'
+const REPLACE_DIRECTORY = 'umask 077 && mkdir -p -- "$(dirname -- "$1")" && t="$1.$2.tmp" && rm -rf -- "$t" && mkdir -- "$t" && '
+  + 'if tar -x --no-same-owner -f - -C "$t"; then rm -rf -- "$1" && mv -- "$t" "$1"; else rm -rf -- "$t"; exit 1; fi'
 
 /**
  * The reconnecting tool-environment facade (`ctx.ssh` from dsh-tool-env), where present.
@@ -183,6 +187,10 @@ export function lazyToolEnvironmentFiles(environment: LazyToolEnvironment, files
       forget(path)
       await environment.whenConnected(`write:${path}`, () => files.remove(path))
     },
+    async replaceDirectory(path, archive) {
+      forget(path)
+      await environment.whenConnected(`write:${path}`, () => files.replaceDirectory(path, archive))
+    },
   }
 }
 
@@ -279,6 +287,9 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
     },
     async remove(path) {
       await run(['/bin/rm', '-f', '--', path])
+    },
+    async replaceDirectory(path, archive) {
+      await run(['/bin/sh', '-c', REPLACE_DIRECTORY, 'sh', path, randomUUID()], archive)
     },
   }
 }
