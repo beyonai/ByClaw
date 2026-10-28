@@ -253,6 +253,7 @@ ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} npm_config_registry=${NPM_REGISTRY} pnpm
 USER byclaw
 WORKDIR /workspace
 COPY --from=profile-builder --chown=byclaw:byclaw /opt/byclaw/dsh-managed/ /opt/byclaw/dsh-managed/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-managed-host.mjs /workspace/scripts/verify-shared-runtime.mjs /workspace/scripts/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/plugin-manager/src/ /workspace/packages/boot/plugin-manager/src/
@@ -279,6 +280,7 @@ COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/li
 COPY --chmod=0755 middleware/byclaw-harness/scripts/lean-harness-entrypoint.sh /usr/local/bin/byclaw-lean-entrypoint
 COPY middleware/byclaw-harness/scripts/verify-lean-harness.mjs /usr/local/lib/byclaw/verify-lean-harness.mjs
 RUN node /usr/local/lib/byclaw/verify-lean-harness.mjs \
+    && node /workspace/scripts/verify-shared-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web \
     && node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-integration/package.json \
     && DSH_HOME=/opt/byclaw/dsh-managed node apps/cli/lib/bin.js --profile web --dump-config >/tmp/slim-profile.yml \
     && rm /tmp/slim-profile.yml

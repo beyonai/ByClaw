@@ -248,6 +248,9 @@ All three business images run `scripts/verify-shared-runtime.mjs` against the
 installed profile: two users with 56 employees each, no eager resource loading,
 cross-user composition rejection and disposed-revision rejection. This check
 does not call models or register business workers.
+The slim image copies the shared launcher, lifecycle module and verifier from
+`profile-builder` into the final `runtime` stage and runs the verifier again
+there; passing the builder check alone does not verify the shipped image.
 
 ## Verification and startup
 
