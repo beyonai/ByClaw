@@ -38,8 +38,6 @@ export const getChatFileArtifactPath = (value?: string): string | undefined => {
   return candidate.replace(/^\/by(?=\/)/, '');
 };
 
-export const isManagedChatFileArtifactPath = (value?: string) => Boolean(getChatFileArtifactPath(value));
-
 /** A relative file link needs the message's session root, not the backend URL root. */
 export const isRelativeChatFileArtifactPath = (value?: string) => {
   if (!value) return false;
@@ -64,6 +62,8 @@ export const getRelativeChatFileArtifactPath = (value: string, sessionId?: strin
   if (!segments.length || segments.includes('..') || candidate.length > 2048) return undefined;
   return `/.sessions/${sessionId}/${segments.join('/')}`;
 };
+
+export const isManagedChatFileArtifactPath = (value?: string) => Boolean(getChatFileArtifactPath(value));
 
 const looksLikeFilePath = (value: string) => {
   const candidate = value.replace(/^file:\/\//i, '');

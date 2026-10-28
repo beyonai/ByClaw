@@ -296,7 +296,7 @@ class GroupChatContextServiceTest extends I18nTestSupport {
         request.setChildSessionId(501L);
         assertThatThrownBy(() -> service.load(request))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("Conversation not found");
+            .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode().value()).isEqualTo(404));
     }
 
     @Test

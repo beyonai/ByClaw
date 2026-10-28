@@ -69,10 +69,13 @@ public class EmployeePublicationApplicationService {
     private final DigEmployeeChangeEventPublisher events;
     private final DingtalkRobotConfigService robotConfigService;
     private final RobotChannelRegistryCoordinator robotChannels;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeePublicationScopeService scopeService;
 
     public Map<String, Boolean> capabilities() {
         boolean enabled = governance.publicationEnabled();
         return Map.of("enabled", enabled, "administrator", enabled && DigitalEmployeeGovernanceService.isAdministrator(),
+            "reviewer", enabled && (DigitalEmployeeGovernanceService.isAdministrator() || scopeService.hasOrganizationReviewRole()),
             "canCreateEnterprise", DigitalEmployeeGovernanceService.isAdministrator());
     }
 
@@ -86,33 +89,43 @@ public class EmployeePublicationApplicationService {
     public record Page(List<DigitalEmployeePublication> list, long total) { }
 
     public long pendingCount() {
-        if (!governance.publicationEnabled() || !DigitalEmployeeGovernanceService.isAdministrator()
+        if (!governance.publicationEnabled()
             || CurrentUserHolder.getEnterpriseId() == null) return 0;
+        boolean administrator = DigitalEmployeeGovernanceService.isAdministrator();
+        if (!administrator && !scopeService.hasOrganizationReviewRole()) return 0;
         var query = new LambdaQueryWrapper<DigitalEmployeePublication>()
             .eq(DigitalEmployeePublication::getTenantId, CurrentUserHolder.getEnterpriseId())
             .in(DigitalEmployeePublication::getStatus, "PENDING", "FAILED");
-        if (CurrentUserHolder.isAdminVip()) return publications.selectCount(query);
-        query.select(DigitalEmployeePublication::getTenantId, DigitalEmployeePublication::getSourceId,
-            DigitalEmployeePublication::getOfficialId, DigitalEmployeePublication::getAuthorId,
-            DigitalEmployeePublication::getStatus, DigitalEmployeePublication::getUpdatedAt,
-            DigitalEmployeePublication::getDependenciesJson);
+        if (!administrator) {
+            var visibleIds = scopeService.visibleRequestIds();
+            if (visibleIds.isEmpty()) return 0;
+            query.in(DigitalEmployeePublication::getRequestId, visibleIds);
+        }
         return publications.selectList(query).stream().filter(this::canReview).count();
     }
 
     public Page list(boolean review, int page, int size) {
         Long tenant = requireEnabled();
-        if (review && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.reviewAdminOnly");
+        if (review && !DigitalEmployeeGovernanceService.isAdministrator() && !scopeService.hasOrganizationReviewRole()) {
+            throw new BaseException("没有发布审核权限");
+        }
         var query = new LambdaQueryWrapper<DigitalEmployeePublication>().eq(DigitalEmployeePublication::getTenantId, tenant);
         if (!review) query.eq(DigitalEmployeePublication::getAuthorId, CurrentUserHolder.getCurrentUserId());
-        long total = publications.selectCount(query);
         int limit = Math.max(1, Math.min(size, 100));
-        query.orderByDesc(DigitalEmployeePublication::getUpdatedAt).last("limit " + limit + " offset " + (Math.max(0, page - 1) * (long) limit));
+        if (review && !DigitalEmployeeGovernanceService.isAdministrator()) {
+            var visibleIds = scopeService.visibleRequestIds();
+            if (visibleIds.isEmpty()) return new Page(List.of(), 0);
+            query.in(DigitalEmployeePublication::getRequestId, visibleIds).ne(DigitalEmployeePublication::getStatus, "DRAFT");
+        }
+        long total = publications.selectCount(query);
+        query.orderByDesc(DigitalEmployeePublication::getUpdatedAt)
+            .last("limit " + limit + " offset " + (Math.max(0, page - 1) * (long) limit));
         List<DigitalEmployeePublication> rows = publications.selectList(query);
         rows.forEach(publication -> {
             publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
             publication.setCanReview(canReview(publication));
         });
-        return new Page(rows, total);
+        return new Page(rows.stream().map(this::publicationForViewer).toList(), total);
     }
 
     public Detail detail(Long id) {
@@ -167,7 +180,7 @@ public class EmployeePublicationApplicationService {
         if (requested == null || !Objects.equals(tenant, requested.getComAcctId())) throw new BaseException("employee.publication.employeeMissing");
         requireEmployee(requested);
         boolean official = DigitalEmployeeGovernanceService.isOfficialCopy(requested);
-        if (official ? !governance.canMaintainOfficial(requested)
+        if (official ? !governance.canMaintainOfficial(requested) && !auth.hasResourceManagePermission(requested)
             : !Objects.equals(requested.getCreateBy(), CurrentUserHolder.getCurrentUserId())
                 && !DigitalEmployeeGovernanceService.isAdministrator()) {
             throw new BaseException("employee.publication.ownerRequired");
@@ -235,6 +248,7 @@ public class EmployeePublicationApplicationService {
             // Attribution follows the original resource creator, never the reviewing administrator.
             publication.setAuthorName(StringUtils.defaultIfBlank(publications.creatorName(requested.getCreateBy()), String.valueOf(requested.getCreateBy())));
             publication.setOfficialId(target == null ? null : target.getResourceId());
+            publication.setScopeUpdate(target != null);
             publication.setStatus("DRAFT");
             publication.setRevision(1L);
             publication.setCreatedAt(new Date());
@@ -242,6 +256,7 @@ public class EmployeePublicationApplicationService {
             if (target == null || fromPersonalUpdate) captureSourceResources(publication, resourceFingerprint(snapshot));
             if (target != null) captureUpdateTarget(publication, target, fromPersonalUpdate);
             publications.insert(publication);
+            scopeService.initialize(publication);
             return view(publication);
         });
     }
@@ -251,6 +266,7 @@ public class EmployeePublicationApplicationService {
         return transaction.execute(status -> {
             DigitalEmployeePublication previous = locked(request);
             requireState(previous, "REJECTED", "WITHDRAWN");
+            if (!canEdit(previous)) throw new BaseException("无权重新发起该发布申请");
             publications.lockResource(previous.getSourceId(), tenant);
             DigitalEmployeePublication active = publications.active(previous.getSourceId(), tenant);
             if (active != null) { requireView(active); return view(active); }
@@ -270,9 +286,12 @@ public class EmployeePublicationApplicationService {
                 requireUpdateTarget(official, previous.getSourceId(), tenant);
             }
             next.setOfficialId(official == null ? null : official.getResourceId());
+            next.setScopeUpdate(official != null && previous.isScopeUpdate());
             next.setStatus("DRAFT"); next.setRevision(1L); next.setCreatedAt(new Date());
-            DigitalEmployeeDTO snapshot = sanitize(JSON.parseObject(previous.getSnapshotJson(), DigitalEmployeeDTO.class), basis(next));
-            boolean fromPersonal = previous.getOfficialId() == null || isFromPersonal(previous);
+            boolean audienceOnly = official != null && !previous.isScopeUpdate();
+            DigitalEmployeeDTO snapshot = sanitize(audienceOnly ? readConfiguration(official.getResourceId())
+                : JSON.parseObject(previous.getSnapshotJson(), DigitalEmployeeDTO.class), basis(next));
+            boolean fromPersonal = !audienceOnly && (previous.getOfficialId() == null || isFromPersonal(previous));
             if (fromPersonal) {
                 DigitalEmployeeDTO latest = readPersonalSource(next);
                 copyResourceFields(latest, snapshot);
@@ -283,6 +302,7 @@ public class EmployeePublicationApplicationService {
             }
             if (official != null) captureUpdateTarget(next, official, fromPersonal);
             publications.insert(next);
+            scopeService.copy(previous, next);
             return view(next);
         });
     }
@@ -292,15 +312,35 @@ public class EmployeePublicationApplicationService {
         return transaction.execute(status -> {
             DigitalEmployeePublication publication = locked(request);
             requireEditable(publication);
+            if (request.getTargetOrgIds() != null) scopeService.configure(publication, request.getTargetOrgIds());
+            if ("PENDING".equals(publication.getStatus())) scopeService.resetDecisions(publication);
             SsResource basis = basis(publication);
-            DigitalEmployeeDTO snapshot = sanitize(request.getEmployee(), basis);
+            boolean audienceOnly = publication.getOfficialId() != null && !publication.isScopeUpdate();
+            DigitalEmployeeDTO snapshot = sanitize(audienceOnly ? readConfiguration(publication.getOfficialId()) : request.getEmployee(), basis);
             SourceResources sourceResources = sourceResources(publication);
             if (sourceResources != null && sourceResources.changed()) copyResourceFields(sourceResources.employee(), snapshot);
             setSnapshot(publication, snapshot);
+            if (audienceOnly) captureUpdateTarget(publication, basis, false);
             if (sourceResources != null) captureSourceResources(publication, sourceResources.fingerprint());
             advance(publication);
             return view(publication, sourceResources != null && sourceResources.changed());
         });
+    }
+
+    public Detail saveScope(EmployeePublicationRequest request) {
+        requireEnabled();
+        return transaction.execute(status -> {
+            DigitalEmployeePublication publication = locked(request);
+            requireEditable(publication);
+            scopeService.configure(publication, request.getTargetOrgIds());
+            advance(publication);
+            return view(publication);
+        });
+    }
+
+    public List<EmployeePublicationScopeService.OrganizationOption> scopeOptions() {
+        requireEnabled();
+        return scopeService.options();
     }
 
     /** 显式刷新对照版本，只保留候选配置；用户仍需重新确认提交或审核。 */
@@ -316,6 +356,8 @@ public class EmployeePublicationApplicationService {
             if (publication.getOfficialId() == null) throw new BaseException("employee.publication.notOfficialUpdate");
             SsResource target = publications.lockResource(publication.getOfficialId(), tenant);
             requireUpdateTarget(target, publication.getSourceId(), tenant);
+            if (!canEdit(publication)) throw new BaseException("无权修改更新对照配置");
+            scopeService.resetDecisions(publication);
             captureUpdateTarget(publication, target, isFromPersonal(publication));
             advance(publication);
             return view(publication);
@@ -352,8 +394,7 @@ public class EmployeePublicationApplicationService {
         return transaction.execute(status -> {
             DigitalEmployeePublication publication = locked(request);
             requireState(publication, "DRAFT", "PENDING", "FAILED");
-            if (!Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId())
-                && !DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.withdrawDenied");
+            if (!canEdit(publication)) throw new BaseException("employee.publication.withdrawDenied");
             publication.setStatus("WITHDRAWN");
             advance(publication);
             return view(publication);
@@ -367,8 +408,10 @@ public class EmployeePublicationApplicationService {
             requireReviewer(publication);
             requireState(publication, "PENDING", "FAILED");
             if (StringUtils.isBlank(request.getComment())) throw new BaseException("employee.publication.rejectionRequired");
+            scopeService.review(publication, request.getTargetOrgIds(), false, request.getComment());
             reviewStamp(publication, request.getComment());
-            publication.setStatus("REJECTED");
+            publication.setStatus(publication.isScopeUpdate() ? "REJECTED" : scopeService.hasPending(publication) ? "PENDING"
+                : "REJECTED");
             advance(publication);
             return view(publication);
         });
@@ -381,6 +424,34 @@ public class EmployeePublicationApplicationService {
         requireView(checked);
         requireReviewer(checked);
         if ("PUBLISHED".equals(checked.getStatus())) return view(checked);
+        Detail decision = transaction.execute(status -> {
+            DigitalEmployeePublication publication = locked(request);
+            requireReviewer(publication);
+            requireState(publication, "PENDING", "FAILED", "APPLYING");
+            if ("APPLYING".equals(publication.getStatus()) && (publication.getUpdatedAt() == null
+                || !publication.getUpdatedAt().before(new Date(System.currentTimeMillis() - 10 * 60_000L)))) {
+                throw new BaseException("发布正在执行，请稍后刷新");
+            }
+            if ("APPLYING".equals(publication.getStatus())) return null;
+            if ("PENDING".equals(publication.getStatus()) || scopeService.approvedOrgs(publication).isEmpty()) {
+                scopeService.review(publication, request.getTargetOrgIds(), true, request.getComment());
+            }
+            advance(publication);
+            request.setRevision(publication.getRevision());
+            if (publication.isScopeUpdate() && !scopeService.allApproved(publication)) return view(publication);
+            if (!publication.isScopeUpdate() && publication.getOfficialId() != null) {
+                SsResource official = resources.selectById(publication.getOfficialId());
+                requireUnchangedUpdateTarget(publication, official);
+                grantApprovedAudience(publication, official, true);
+                publication.setStatus(scopeService.hasPending(publication) ? "PENDING"
+                    : scopeService.hasRejected(publication) ? "REJECTED" : "PUBLISHED");
+                reviewStamp(publication, request.getComment());
+                advance(publication);
+                return view(publication);
+            }
+            return null;
+        });
+        if (decision != null) return decision;
         // Reserve the attempt durably before external I/O. A rolled-back attempt remains APPLYING
         // until compensation completes, so another reviewer cannot publish over that compensation.
         Long leaseRevision = transaction.execute(status -> {
@@ -415,7 +486,7 @@ public class EmployeePublicationApplicationService {
                     throw new BaseException("employee.publication.copyTenantMismatch");
                 }
                 if (!fresh && !Objects.equals(official.getResourceStatus(), 2)) throw new BaseException("employee.publication.copyInactive");
-                if (publication.getOfficialId() != null) {
+                if (publication.isScopeUpdate()) {
                     if (fresh || !Objects.equals(publication.getOfficialId(), official.getResourceId())) throw new BaseException("employee.publication.copyChanged");
                     requireUnchangedUpdateTarget(publication, official);
                 }
@@ -460,7 +531,10 @@ public class EmployeePublicationApplicationService {
                 }
                 if (fresh) resources.insert(official); else resources.updateById(official);
                 List<Dependency> publishedDependencies = dependencyList(publication);
-                Map<Long, Long> mapped = dependencies.materialize(publishedDependencies, tenant, official.getResourceId());
+                List<Long> audience = scopeService.approvedOrgs(publication);
+                Map<Long, Long> mapped = audience.equals(List.of(-1L))
+                    ? dependencies.materialize(publishedDependencies, tenant, official.getResourceId())
+                    : dependencies.materialize(publishedDependencies, tenant, official.getResourceId(), audience);
                 snapshot.setResourceId(official.getResourceId());
                 snapshot.setOwnerType("enterprise");
                 snapshot.setResourceCode(official.getResourceCode());
@@ -473,14 +547,16 @@ public class EmployeePublicationApplicationService {
                 extensions.save(extension);
                 if (fresh) {
                     auth.ensureCreatorDefaultPrivileges(official);
-                    dependencies.grantAudience(official, tenant);
                 }
+                grantApprovedAudience(publication, official, false);
                 // 只在审核通过的配置落地时补权限；草稿保存不会提前授权绑定资源。
                 auth.synchronizeDigitalEmployeeResourceUsers(official, snapshot.getRelTools());
                 runtimeAttempted[0] = true;
                 if (!employees.syncPublicationOpenClawWorkSpace(official.getResourceId(), snapshot)) throw new BaseException("employee.publication.runtimeSyncFailed");
                 publication.setOfficialId(official.getResourceId());
-                publication.setStatus("PUBLISHED");
+                if (!publication.isScopeUpdate()) captureUpdateTarget(publication, official, false);
+                publication.setStatus(scopeService.hasPending(publication) ? "PENDING"
+                    : scopeService.hasRejected(publication) ? "REJECTED" : "PUBLISHED");
                 publication.setPublishError(null);
                 reviewStamp(publication, request.getComment());
                 advance(publication);
@@ -512,6 +588,35 @@ public class EmployeePublicationApplicationService {
                 return view(publication);
             });
         }
+    }
+
+    private void grantApprovedAudience(DigitalEmployeePublication publication, SsResource official, boolean scopeOnly) {
+        if (official == null) throw new BaseException("企业员工不存在");
+        List<Long> audience = scopeService.approvedOrgs(publication);
+        if (audience.isEmpty()) throw new BaseException("尚无组织审核通过");
+        if (!publication.isScopeUpdate()) grantAudience(official, publication, audience);
+        for (Dependency dependency : dependencyList(publication)) {
+            if (dependency.getTargetId() == null) continue;
+            boolean copied = "COPY_SKILL".equals(dependency.getAction());
+            boolean publishedSkill = dependency.getResource() != null && "SKILL".equals(dependency.getResource().getResourceBizType())
+                && dependency.getResource().getPublicationRequestId() != null;
+            if (!copied && !publishedSkill) continue;
+            SsResource skill = resources.selectById(dependency.getTargetId());
+            if (skill == null || !Objects.equals(skill.getResourceStatus(), 2)
+                || !Objects.equals(skill.getComAcctId(), publication.getTenantId())) {
+                throw new BaseException("发布技能副本不存在或企业归属不一致");
+            }
+            grantAudience(skill, publication, audience);
+            auth.invalidateResourceAuthorizationCachesAfterCommit(skill.getResourceId(), "SKILL");
+        }
+        scopeService.activate(publication, official.getResourceId());
+        if (scopeOnly) auth.synchronizeDigitalEmployeeResourceUsers(official, null);
+        auth.invalidateResourceAuthorizationCachesAfterCommit(official.getResourceId(), "DIG_EMPLOYEE");
+    }
+
+    private void grantAudience(SsResource resource, DigitalEmployeePublication publication, List<Long> audience) {
+        if (audience.equals(List.of(-1L))) dependencies.grantAudience(resource, publication.getTenantId());
+        else dependencies.grantAudience(resource, publication.getTenantId(), audience);
     }
 
     private void replaceRelations(SsResource official, DigitalEmployeeDTO snapshot) {
@@ -672,6 +777,7 @@ public class EmployeePublicationApplicationService {
     }
 
     private Detail view(DigitalEmployeePublication publication, boolean sourceResourcesChanged) {
+        DigitalEmployeePublication visiblePublication = publicationForViewer(publication);
         DigitalEmployeeDetailsDTO employee = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDetailsDTO.class);
         List<Dependency> deps = dependencyList(publication);
         if (deps.stream().anyMatch(d -> d.getResource() == null && d.getTargetId() != null
@@ -692,7 +798,9 @@ public class EmployeePublicationApplicationService {
             return dto;
         }).filter(Objects::nonNull).toList());
         boolean active = List.of("DRAFT", "PENDING", "FAILED").contains(publication.getStatus());
-        boolean editable = "DRAFT".equals(publication.getStatus()) || canReview(publication) && "PENDING".equals(publication.getStatus());
+        boolean editable = canEdit(publication) && ("DRAFT".equals(publication.getStatus())
+            || "PENDING".equals(publication.getStatus()) && DigitalEmployeeGovernanceService.isAdministrator()
+                && (publication.isScopeUpdate() || publication.getOfficialId() == null));
         publication.setRequiresAdminVipReview(requiresAdminVipReview(publication));
         boolean canRevise = false;
         if (List.of("REJECTED", "WITHDRAWN").contains(publication.getStatus())) {
@@ -700,22 +808,39 @@ public class EmployeePublicationApplicationService {
             canRevise = current != null && Objects.equals(current.getRequestId(), publication.getRequestId());
         }
         ReviewResult previousReview = null;
-        if (List.of("DRAFT", "PENDING").contains(publication.getStatus()) && publication.getCreatedAt() != null) {
+        if (scopeService.canViewAllTargets(publication)
+            && List.of("DRAFT", "PENDING").contains(publication.getStatus()) && publication.getCreatedAt() != null) {
             DigitalEmployeePublication previous = publications.previousRejection(publication.getSourceId(), publication.getTenantId(),
                 publication.getCreatedAt(), publication.getRequestId());
             if (previous != null) previousReview = new ReviewResult(String.valueOf(previous.getRequestId()), previous.getReviewerName(),
                 previous.getReviewedAt(), previous.getComment());
         }
-        publication.setPublishError(EmployeePublicationMessages.localize(publication.getPublishError()));
-        return new Detail(publication, employee, deps.stream().map(d -> {
+        visiblePublication.setPublishError(EmployeePublicationMessages.localize(publication.getPublishError()));
+        return new Detail(visiblePublication, employee, deps.stream().map(d -> {
             EmployeePublicationResources.Availability availability = EmployeePublicationResources.describe(d);
             return new DependencyView(d.getResource() == null ? StringUtils.defaultIfBlank(d.getToolCode(), d.getTargetId() == null ? "" : String.valueOf(d.getTargetId())) : String.valueOf(d.getResource().getResourceId()),
                 d.getResource() == null ? StringUtils.defaultIfBlank(d.getLabel(), I18nUtil.get("employee.publication.resourceFallback", String.valueOf(d.getTargetId()))) : d.getResource().getResourceName(), d.getAction(), EmployeePublicationMessages.localize(d.getError()), EmployeePublicationMessages.localize(d.getWarning()),
-                availability.resourceType(), EmployeePublicationMessages.localize(availability.scope()),
+                availability.resourceType(), EmployeePublicationMessages.localize("COPY_SKILL".equals(d.getAction())
+                    && visiblePublication.getTargets().stream().anyMatch(t -> t.getOrgId() != -1L)
+                        ? "所选组织（审核通过后）" : availability.scope()),
                 EmployeePublicationMessages.localize(availability.reason()), EmployeePublicationMessages.localize(availability.impact()));
         }).toList(),
-            editable, "DRAFT".equals(publication.getStatus()), canReview(publication), active, canRevise, previousReview,
+            editable, editable && "DRAFT".equals(publication.getStatus()), canReview(publication), active && canEdit(publication), canRevise && canEdit(publication), previousReview,
             updateTarget(publication), sourceResourcesChanged);
+    }
+
+    private DigitalEmployeePublication publicationForViewer(DigitalEmployeePublication publication) {
+        DigitalEmployeePublication visible = new DigitalEmployeePublication();
+        BeanUtils.copyProperties(publication, visible);
+        visible.setTargets(scopeService.visibleTargets(publication));
+        if (!scopeService.canViewAllTargets(publication)) {
+            // 汇总字段可能属于其他组织；组织审核人从自己的目标行查看审核信息。
+            visible.setReviewerId(null);
+            visible.setReviewerName(null);
+            visible.setReviewedAt(null);
+            visible.setComment(null);
+        }
+        return visible;
     }
 
     private record SourceResources(DigitalEmployeeDTO employee, String fingerprint, boolean changed, boolean initialized) { }
@@ -849,7 +974,7 @@ public class EmployeePublicationApplicationService {
     }
 
     private UpdateTarget updateTarget(DigitalEmployeePublication publication) {
-        if (publication.getOfficialId() == null || !List.of("DRAFT", "PENDING", "FAILED", "APPLYING").contains(publication.getStatus())) return null;
+        if (!publication.isScopeUpdate() || publication.getOfficialId() == null || !List.of("DRAFT", "PENDING", "FAILED", "APPLYING").contains(publication.getStatus())) return null;
         SsResource target = basis(publication);
         JSONObject metadata = JSON.parseObject(publication.getSnapshotJson()).getJSONObject(UPDATE_TARGET);
         boolean changed = metadata == null || !Objects.equals(metadata.getString("fingerprint"), configurationFingerprint(target));
@@ -857,7 +982,7 @@ public class EmployeePublicationApplicationService {
     }
 
     private void requireUnchangedUpdateTarget(DigitalEmployeePublication publication) {
-        if (publication.getOfficialId() == null) return;
+        if (!publication.isScopeUpdate()) return;
         SsResource target = publications.lockResource(publication.getOfficialId(), publication.getTenantId());
         requireUpdateTarget(target, publication.getSourceId(), publication.getTenantId());
         requireUnchangedUpdateTarget(publication, target);
@@ -872,8 +997,8 @@ public class EmployeePublicationApplicationService {
     }
 
     private boolean canReview(DigitalEmployeePublication publication) {
-        if (!DigitalEmployeeGovernanceService.isAdministrator()
-            || !Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())) return false;
+        if (!Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())
+            || !scopeService.canReview(publication)) return false;
         boolean reviewable = List.of("PENDING", "FAILED").contains(publication.getStatus())
             || "APPLYING".equals(publication.getStatus()) && publication.getUpdatedAt() != null
                 && publication.getUpdatedAt().before(new Date(System.currentTimeMillis() - 10 * 60_000L));
@@ -929,7 +1054,8 @@ public class EmployeePublicationApplicationService {
     }
     private void requireView(DigitalEmployeePublication publication) {
         if (publication == null || !Objects.equals(publication.getTenantId(), CurrentUserHolder.getEnterpriseId())
-            || (!DigitalEmployeeGovernanceService.isAdministrator() && !Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId()))) throw new BaseException("employee.publication.requestUnavailable");
+            || (!DigitalEmployeeGovernanceService.isAdministrator() && !Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId())
+                && !scopeService.canView(publication) && !canEdit(publication))) throw new BaseException("employee.publication.requestUnavailable");
         basis(publication);
     }
     private DigitalEmployeePublication locked(EmployeePublicationRequest request) {
@@ -940,10 +1066,19 @@ public class EmployeePublicationApplicationService {
     }
     private void requireEditable(DigitalEmployeePublication publication) {
         requireState(publication, "DRAFT", "PENDING");
-        if ("PENDING".equals(publication.getStatus()) && !canReview(publication)) throw new BaseException("employee.publication.pendingEdit");
+        if ("PENDING".equals(publication.getStatus()) && (!DigitalEmployeeGovernanceService.isAdministrator()
+            || !publication.isScopeUpdate() && publication.getOfficialId() != null)) {
+            throw new BaseException("employee.publication.pendingEdit");
+        }
+        if (!canEdit(publication)) throw new BaseException("无权修改该发布申请");
+    }
+    private boolean canEdit(DigitalEmployeePublication publication) {
+        return DigitalEmployeeGovernanceService.isAdministrator()
+            || Objects.equals(publication.getAuthorId(), CurrentUserHolder.getCurrentUserId())
+            || publication.getOfficialId() != null && auth.hasResourceManagePermission(resources.selectById(publication.getOfficialId()));
     }
     private void requireReviewer(DigitalEmployeePublication publication) {
-        if (!DigitalEmployeeGovernanceService.isAdministrator()) throw new BaseException("employee.publication.platformReviewerOnly");
+        if (!scopeService.hasReviewAuthority(publication)) throw new BaseException("没有目标组织的审核权限");
         basis(publication);
         if (!CurrentUserHolder.isAdminVip() && requiresAdminVipReview(publication)) {
             // throw new BaseException("申请包含 adminvip 创建的员工或个人技能，仅允许 adminvip 审核");
@@ -960,14 +1095,17 @@ public class EmployeePublicationApplicationService {
         publication.setComment(StringUtils.left(comment, 2000));
     }
     private void advance(DigitalEmployeePublication publication) {
+        long expectedRevision = publication.getRevision();
         publication.setRevision(publication.getRevision() + 1);
         publication.setUpdatedAt(new Date());
         // Null fields must also be persisted (e.g. clearing the previous sync error on successful retry).
-        publications.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<DigitalEmployeePublication>()
-            .eq("request_id", publication.getRequestId()).set("snapshot_json", publication.getSnapshotJson())
+        int changed = publications.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<DigitalEmployeePublication>()
+            .eq("request_id", publication.getRequestId()).eq("tenant_id", publication.getTenantId())
+            .eq("revision", expectedRevision).set("snapshot_json", publication.getSnapshotJson())
             .set("dependencies_json", publication.getDependenciesJson()).set("employee_name", publication.getEmployeeName())
             .set("official_id", publication.getOfficialId()).set("status", publication.getStatus()).set("revision", publication.getRevision())
             .set("updated_at", publication.getUpdatedAt()).set("comment", publication.getComment()).set("publish_error", publication.getPublishError())
             .set("reviewer_id", publication.getReviewerId()).set("reviewer_name", publication.getReviewerName()).set("reviewed_at", publication.getReviewedAt()));
+        if (changed != 1) throw new BaseException("申请已被其他操作修改，请刷新后重试");
     }
 }

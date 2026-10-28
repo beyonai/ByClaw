@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Form, Input, message, Modal, ModalProps, Select, Spin, Upload } from 'antd';
 import { useIntl } from '@umijs/max';
 import { sendFeedback, uploadFeedbackFile } from '@/service/feedback';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 const normalizeUploadFileList = (event: any) => (Array.isArray(event) ? event : event?.fileList || []);
 
@@ -46,7 +47,13 @@ export default function FeedbackModal(props: FeedbackModalProps) {
       message.success(intl.formatMessage({ id: 'feedbackModal.success' }));
       onCancel?.();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : intl.formatMessage({ id: 'common.systemErrorRetry' }));
+      message.error(
+        localizeErrorMessage(
+          error instanceof Error ? error.message : '',
+          intl.formatMessage({ id: 'common.systemErrorRetry' }),
+          intl.locale
+        )
+      );
     } finally {
       setLoading(false);
     }

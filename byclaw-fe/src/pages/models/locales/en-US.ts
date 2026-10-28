@@ -37,6 +37,7 @@ export default {
   'personalModel.search': 'Search models',
   'personalModel.enableSuccess': 'Model {name} enabled successfully',
   'personalModel.detail.title': 'Model Details',
+  'personalModel.detail.loadFailed': 'Failed to load model details',
   'personalModel.detail.yes': 'Yes',
   'personalModel.detail.no': 'No',
   'personalModel.detail.separator': ', ',

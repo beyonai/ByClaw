@@ -16,6 +16,7 @@ export interface KnowledgeTargetItem {
 
 export interface KnowledgeTargetSelectorProps {
   open: boolean;
+  title?: React.ReactNode;
   onOk: () => void;
   onCancel: () => void;
   confirmLoading?: boolean;
@@ -37,13 +38,24 @@ export interface KnowledgeTargetSelectorProps {
   onLoadFolderChildren?: (directoryPath: string) => Promise<QueryDirAndFileByLevelItem[] | void>;
   emptyText?: React.ReactNode;
   folderEmptyText?: React.ReactNode;
+  footer?: React.ReactNode;
   footerExtra?: React.ReactNode;
   className?: string;
 }
 
 type KnowledgeTargetSelectorContentProps = Omit<
   KnowledgeTargetSelectorProps,
-  'open' | 'onOk' | 'onCancel' | 'confirmLoading' | 'okDisabled' | 'width' | 'zIndex' | 'destroyOnClose' | 'footerExtra'
+  | 'open'
+  | 'title'
+  | 'onOk'
+  | 'onCancel'
+  | 'confirmLoading'
+  | 'okDisabled'
+  | 'width'
+  | 'zIndex'
+  | 'destroyOnClose'
+  | 'footer'
+  | 'footerExtra'
 >;
 
 function normalizeDirectoryPath(path?: string) {
@@ -284,6 +296,7 @@ const KnowledgeTargetSelectorContent: React.FC<KnowledgeTargetSelectorContentPro
 const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) => {
   const {
     open,
+    title,
     onOk,
     onCancel,
     confirmLoading,
@@ -291,6 +304,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
     width = 900,
     zIndex,
     destroyOnClose = true,
+    footer,
     footerExtra,
     ...selectorProps
   } = props;
@@ -299,9 +313,10 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
   return (
     <Modal
       open={open}
-      title={intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
+      title={title ?? intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
       okText={intl.formatMessage({ id: 'common.confirm' })}
       cancelText={intl.formatMessage({ id: 'common.cancel' })}
+      footer={footer}
       confirmLoading={confirmLoading}
       okButtonProps={{ disabled: okDisabled }}
       onOk={onOk}
@@ -310,7 +325,10 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
       zIndex={zIndex}
       destroyOnClose={destroyOnClose}
     >
-      <KnowledgeTargetSelectorContent {...selectorProps} />
+      <KnowledgeTargetSelectorContent
+        key={String(getKnowledgeBaseId(selectorProps.selectedKnowledgeBase || {}))}
+        {...selectorProps}
+      />
       {footerExtra}
     </Modal>
   );

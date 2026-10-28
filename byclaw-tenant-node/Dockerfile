@@ -14,7 +14,11 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
-RUN mkdir -p /var/lib/byclaw-tenant && chown node:node /var/lib/byclaw-tenant
+# ACS runs the NAS directory initializer from the workload image.
+RUN sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/lib/byclaw-tenant && chown node:node /var/lib/byclaw-tenant
 USER node
 EXPOSE 3100
 CMD ["node", "dist/main.js"]

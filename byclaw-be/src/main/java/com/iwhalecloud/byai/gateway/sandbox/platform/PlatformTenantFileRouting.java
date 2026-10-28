@@ -27,6 +27,16 @@ public class PlatformTenantFileRouting {
     public void copy(Path root,Path target,byte[] content) {
         invoke("replace-file",gateway.params("path",relative(root,target),"content",Base64.getEncoder().encodeToString(content)));
     }
+    public void purgeTenant(long enterpriseId) {
+        if (enterpriseId <= 0) throw new IllegalArgumentException("Invalid tenant owner");
+        String id = Long.toString(enterpriseId);
+        Object completed = gateway.call("storage", "nas/purge-contents",
+            gateway.params("type", "TENANT", "tenant", id, "id", id));
+        if (!Boolean.TRUE.equals(completed)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "tenant.volume.cleanup.pending");
+        }
+    }
     public void delete(Path root,Path boundary,Path target) {
         invoke("delete-tree",gateway.params("boundary",relative(root,boundary),"path",relative(root,target)));
     }

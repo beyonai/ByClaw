@@ -2,6 +2,8 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ReplyFileArtifacts from './index';
+import ATag from '@/components/Markdown/aTag';
+import { replaceFilePrefixInMarkdown } from '@/components/Markdown/utils';
 import { downloadChatFileArtifact, resolveChatFileArtifacts } from '@/service/chatFileArtifact';
 import { transcribeVoice } from '@/service/voice';
 import { IMessageState } from '@/constants/message';
@@ -23,6 +25,7 @@ jest.mock('../ImageArtifactGallery', () => ({
 
 jest.mock('@/components/MessageList/components/FileRender', () => ({
   __esModule: true,
+  PREVIEWABLE: ['html'],
   default: ({ fileItem }: any) => (
     <button type="button" onClick={() => fileItem.downloadRequest?.()}>
       {fileItem.queryFile?.fileName}
@@ -44,6 +47,11 @@ jest.mock('../VoiceMessage', () => ({
     );
   },
 }));
+jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: { emit: jest.fn() } }));
+jest.mock('@/utils/file', () => ({ getFileUrl: (url: string) => url, downloadFile: jest.fn() }));
+jest.mock('@/components/MessageList/components/FileRender/components/IconRender', () => () => (
+  <span data-testid="inline-file-icon" />
+));
 
 const mockResolve = resolveChatFileArtifacts as jest.MockedFunction<typeof resolveChatFileArtifacts>;
 const mockDownload = downloadChatFileArtifact as jest.MockedFunction<typeof downloadChatFileArtifact>;
@@ -269,6 +277,29 @@ describe('ReplyFileArtifacts', () => {
     ]);
     render(<ReplyFileArtifacts message={message({ messageId: 'resolver-aliases' })} />);
     expect(await screen.findAllByRole('button', { name: 'report.pptx' })).toHaveLength(1);
+  });
+
+  it('renders one card for repeated Markdown links and the resolved file artifact', async () => {
+    const path = '/.sessions/101/report.html';
+    const link = `[report.html]({{file_preview_prefix}}/by${path})`;
+    const answer = `已完成转换。${link}\n已完成转换。${link}`;
+    const rewritten = replaceFilePrefixInMarkdown(
+      answer,
+      (url, regExp) => `/byaiService/commonFile/preview?filePath=${url.replace(regExp, '')}`
+    );
+    const href = rewritten.match(/\]\(([^)]*)\)/)?.[1];
+    const node = { name: 'a', attribs: { href }, children: [{ type: 'text', data: 'report.html' }] };
+    mockResolve.mockResolvedValueOnce([{ sourcePath: path, path, fileName: 'report.html', fileSize: 100 }]);
+    render(
+      <>
+        <ATag domNode={node} />
+        <ATag domNode={node} />
+        <ReplyFileArtifacts message={message({ messageId: 'markdown-and-artifact', text: answer })} />
+      </>
+    );
+    expect(await screen.findAllByRole('button', { name: 'report.html' })).toHaveLength(1);
+    expect(screen.queryByTestId('inline-file-icon')).not.toBeInTheDocument();
+    expect(mockResolve).toHaveBeenCalledWith(expect.objectContaining({ paths: [path] }));
   });
 });
 

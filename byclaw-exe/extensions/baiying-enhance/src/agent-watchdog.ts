@@ -46,7 +46,7 @@ import {
     skillSignature,
     watchWorkspaceSkillDirs,
 } from "./workspace-skills.js";
-import { syncHubSkillsForManagedAgents } from "./hub-skill-sync.js";
+import { syncHubSkillsForManagedAgents, hubSkillVersionSignature } from "./hub-skill-sync.js";
 
 export type LoadedManagedAgent = AdaptedManagedAgent & {
     /** SHA-256 hash of the source JSON content for change detection. */
@@ -107,13 +107,25 @@ function toolSignature(tools: unknown): string {
     return stableJson(tools ?? null);
 }
 
+function agentToolSignature(agent: AdaptedManagedAgent): string {
+    const resources = (agent.associatedResources ?? []).map((resource) => stableJson(resource)).sort();
+    const capabilities = stableJson({
+        resources,
+        integrationType: agent.integrationType ?? null,
+        agentSseUrl: agent.agentSseUrl ?? null,
+        agentHomeUrl: agent.agentHomeUrl ?? null,
+        coreCompetencies: agent.coreCompetencies ?? [],
+    });
+    // Dispatch metadata can contain credentials: only persist its digest in the reload marker.
+    const digest = createHash("sha256").update(capabilities).digest("hex");
+    return `${toolSignature(agent.listEntry.tools)};resources=${digest}`;
+}
+
 function managedSnapshotSignature(managed: LoadedManagedAgent[]): string {
     return managed
         .map(
             (m) =>
-                `${m.agentId}:skills=${skillSignature(m.listEntry.skills ?? [])};tools=${toolSignature(
-                    m.listEntry.tools,
-                )}`,
+                `${m.agentId}:skills=${skillSignature(m.listEntry.skills ?? [])};tools=${agentToolSignature(m)};hub=${hubSkillVersionSignature(m.hubSkills)}`,
         )
         .sort((a, b) => a.localeCompare(b))
         .join("|");
@@ -347,6 +359,7 @@ export async function loadManagedAgentsFromRedis(params: {
         let next: LoadedManagedAgent = {
             ...res,
             sourceJson: filteredRaw,
+            sourceSnapshotHash: result.hash,
             sourceRedisKey: result.key,
             contentHash: filteredRaw === result.raw ? result.hash
                 : createHash("sha256").update(JSON.stringify(filteredRaw)).digest("hex"),
@@ -450,6 +463,7 @@ export function createAgentWatchdog(params: {
     aimodelSecretResolverScriptPath?: string;
     debounceMs: number;
     workspaceArchiveApi?: WorkspaceArchiveApi;
+    onSkillsPrepared?: (agents: AdaptedManagedAgent[], configStamp: string) => void;
     authorizationFilter?: {
         getAuthorizedSourceKeys: () => Set<string> | undefined;
     };
@@ -653,7 +667,7 @@ export function createAgentWatchdog(params: {
             }
             prevToolSignatures.clear();
             for (const m of effectiveManaged) {
-                prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
+                prevToolSignatures.set(m.agentId, agentToolSignature(m));
             }
             closeSkillWatchers?.();
             closeSkillWatchers = watchWorkspaceSkillDirs({
@@ -931,6 +945,15 @@ export function createAgentWatchdog(params: {
                         .filter((entry) => entry.id)
                         .map((entry) => [entry.id!, toolSignature(entry.tools)]),
                 );
+                const savedSnapshotSignature = cfg?.skills?.entries?.[SNAPSHOT_INVALIDATION_ENTRY]
+                    ?.config?.managedSnapshotSignature;
+                if (
+                    (typeof savedSnapshotSignature === "string" &&
+                        savedSnapshotSignature !== managedSnapshotSignature(effectiveManaged)) ||
+                    (!savedSnapshotSignature && effectiveManaged.some((m) => m.associatedResources?.length))
+                ) {
+                    hasToolChanges = true;
+                }
                 for (const id of currentIds) {
                     if (!existingIds.has(id)) {
                         hasMissingManagedRegistrations = true;
@@ -947,14 +970,14 @@ export function createAgentWatchdog(params: {
                     if (existingSkillsById.get(m.agentId) !== nextSig) {
                         hasSkillChanges = true;
                     }
-                    const nextToolSig = toolSignature(m.listEntry.tools);
+                    const nextToolSig = agentToolSignature(m);
                     if (
                         prevToolSignatures.has(m.agentId) &&
                         prevToolSignatures.get(m.agentId) !== nextToolSig
                     ) {
                         hasToolChanges = true;
                     }
-                    if (existingToolsById.get(m.agentId) !== nextToolSig) {
+                    if (existingToolsById.get(m.agentId) !== toolSignature(m.listEntry.tools)) {
                         hasToolChanges = true;
                     }
                 }
@@ -1097,13 +1120,15 @@ export function createAgentWatchdog(params: {
             };
 
             if (!shouldSync) {
+                params.onSkillsPrepared?.(effectiveManaged, String(params.api.runtime.config.loadConfig()
+                    ?.skills?.entries?.[SNAPSHOT_INVALIDATION_ENTRY]?.config?.managedSnapshotSignature ?? ""));
                 await runMountedWorkspaceCheck("no-sync");
                 await trySeedMainSubagentRouting();
                 prevSkillSignatures.clear();
                 prevToolSignatures.clear();
                 for (const m of effectiveManaged) {
                     prevSkillSignatures.set(m.agentId, skillSignature(m.listEntry.skills ?? []));
-                    prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
+                    prevToolSignatures.set(m.agentId, agentToolSignature(m));
                 }
                 if (workspaceSkillAutoEnable) {
                     closeSkillWatchers?.();
@@ -1239,7 +1264,7 @@ export function createAgentWatchdog(params: {
             prevToolSignatures.clear();
             for (const m of effectiveManaged) {
                 prevSkillSignatures.set(m.agentId, skillSignature(m.listEntry.skills ?? []));
-                prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
+                prevToolSignatures.set(m.agentId, agentToolSignature(m));
             }
             if (workspaceSkillAutoEnable) {
                 closeSkillWatchers?.();
@@ -1255,6 +1280,8 @@ export function createAgentWatchdog(params: {
                 });
             }
 
+            params.onSkillsPrepared?.(effectiveManaged, String(params.api.runtime.config.loadConfig()
+                ?.skills?.entries?.[SNAPSHOT_INVALIDATION_ENTRY]?.config?.managedSnapshotSignature ?? ""));
             if (persistIndex) {
                 await saveAgentContentIndex(params.contentIndexPath, new Map(prevHashes), {
                     warn: (m) => params.api.logger.warn(m),

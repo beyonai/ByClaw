@@ -38,24 +38,21 @@ public class TenantNodeSchemaService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final Path bundlePath;
-    private final String sandboxBaseUrl;
-    private final String sandboxApiKey;
     private final String internalToken;
+    private final TenantNodeClient nodeClient;
     // OpenSandbox's HTTP proxy cannot stream multipart uploads during an h2c upgrade.
     private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(5)).build();
 
     public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                    @Value("${BYCLAW_TENANT_BASELINE_BUNDLE:}") String bundlePath,
-                                   @Value("${BYCLAW_SANDBOX_BASE_URL:}") String sandboxBaseUrl,
-                                   @Value("${BYCLAW_SANDBOX_API_KEY:}") String sandboxApiKey,
-                                   @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken) {
+                                   @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken,
+                                   TenantNodeClient nodeClient) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.bundlePath = bundlePath == null || bundlePath.isBlank() ? null : Path.of(bundlePath);
-        this.sandboxBaseUrl = sandboxBaseUrl;
-        this.sandboxApiKey = sandboxApiKey;
         this.internalToken = internalToken;
+        this.nodeClient = nodeClient;
     }
 
     public boolean initialized(long enterpriseId) {
@@ -89,7 +86,7 @@ public class TenantNodeSchemaService {
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId, long fencingToken) throws Exception {
         if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
-        if (internalToken == null || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
+        if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
         }
         byte[] bundle = readBundle();
@@ -129,18 +126,17 @@ public class TenantNodeSchemaService {
         script.put("sha256", metadata.sqlDigest());
 
         try {
-            URI base = nodeUri(node.endpoint());
-            waitForDatabase(base, enterpriseId, generation);
+            URI base = waitForDatabase(enterpriseId, generation, dbRecordId);
             String boundary = "byclaw-" + auditId;
             byte[] upload = multipart(boundary, objectMapper.writeValueAsBytes(task), bundle);
-            HttpResponse<byte[]> accepted = send(base.resolve(base.getPath() + "/internal/v1/schema-tasks"),
+            HttpResponse<byte[]> accepted = send(base.resolve(base.getRawPath() + "/internal/v1/schema-tasks"),
                 "POST", upload, "multipart/form-data; boundary=" + boundary, enterpriseId, generation,
                 Map.of("Idempotency-Key", auditId + ":" + attemptNo));
             if (accepted.statusCode() != 202) {
                 throw new IllegalStateException("tenant Node rejected schema initialization: HTTP " + accepted.statusCode());
             }
             Instant deadline = Instant.now().plus(Duration.ofMinutes(8));
-            URI taskUrl = base.resolve(base.getPath() + "/internal/v1/schema-tasks/" + auditId);
+            URI taskUrl = base.resolve(base.getRawPath() + "/internal/v1/schema-tasks/" + auditId);
             while (Instant.now().isBefore(deadline)) {
                 Thread.sleep(2000);
                 HttpResponse<byte[]> response = send(taskUrl, "GET", null, null, enterpriseId, generation, Map.of());
@@ -206,24 +202,38 @@ public class TenantNodeSchemaService {
 
     private URI nodeUri(String endpoint) {
         if (endpoint == null || endpoint.isBlank()) throw new IllegalStateException("tenant Node endpoint is missing");
-        String value = endpoint.startsWith("/")
-            ? sandboxBaseUrl.replaceAll("/+$", "") + endpoint : endpoint;
-        URI uri = URI.create(value);
-        if (!"http".equals(uri.getScheme()) || uri.getHost() == null) {
+        URI uri = URI.create(endpoint.replaceAll("/+$", ""));
+        if ((!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) || uri.getHost() == null) {
             throw new IllegalStateException("tenant Node HTTP endpoint is invalid");
         }
         return uri;
     }
 
-    private void waitForDatabase(URI base, long enterpriseId, long generation) throws Exception {
-        URI health = base.resolve(base.getPath() + "/internal/v1/health/db");
+    private URI waitForDatabase(long enterpriseId, long generation, long dbRecordId) throws Exception {
         Instant deadline = Instant.now().plus(Duration.ofSeconds(90));
         while (Instant.now().isBefore(deadline)) {
             try {
-                if (send(health, "GET", null, null, enterpriseId, generation, Map.of()).statusCode() == 200) return;
+                // The provider endpoint may be a public sandbox gateway. Internal tenant APIs use
+                // the registered address, just like normal tenant requests, including during bootstrap.
+                URI base = nodeUri(nodeClient.schemaEndpoint(enterpriseId, generation, dbRecordId).toString());
+                URI health = base.resolve(base.getRawPath() + "/internal/v1/health/db");
+                HttpResponse<byte[]> response = send(health, "GET", null, null, enterpriseId, generation, Map.of());
+                if (response.statusCode() == 200) {
+                    JsonNode result = objectMapper.readTree(response.body());
+                    if (result == null || !Long.toString(enterpriseId).equals(result.path("enterpriseId").asText())
+                        || !Long.toString(generation).equals(result.path("generation").asText())
+                        || !Long.toString(dbRecordId).equals(result.path("dbSandboxRecordId").asText())) {
+                        throw new IllegalStateException("tenant Node database health identity mismatch");
+                    }
+                    if (result.path("dbWritable").asBoolean(false)) return base;
+                }
+            }
+            catch (org.springframework.web.server.ResponseStatusException unavailable) {
+                if (!"tenant.node.registration.unavailable".equals(unavailable.getReason())) throw unavailable;
+                // Wait for the first live registration; never fall back to an unverified gateway.
             }
             catch (IOException ignored) {
-                // The sandbox can be reachable before Node starts listening.
+                // The sandbox can be registered before Node starts listening.
             }
             Thread.sleep(2000);
         }
@@ -237,9 +247,6 @@ public class TenantNodeSchemaService {
             .header("X-Byclaw-Internal-Token", internalToken)
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation));
-        if (sandboxApiKey != null && !sandboxApiKey.isBlank()) {
-            request.header("OPEN-SANDBOX-API-KEY", sandboxApiKey);
-        }
         if (contentType != null) request.header("Content-Type", contentType);
         extra.forEach(request::header);
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()

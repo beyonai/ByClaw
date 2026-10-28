@@ -503,7 +503,10 @@ const EmployeeDetail = ({ loading }) => {
   const readOnly =
     _readOnly === 'true' ||
     officialUpdate.busy ||
-    (!!publicationId && (!publicationDetail?.canEdit || publicationBusy));
+    (!!publicationId &&
+      (!publicationDetail?.canEdit ||
+        publicationBusy ||
+        (publicationDetail?.publication?.officialId && publicationDetail.publication.scopeUpdate === false)));
   const showManage = !publicationId && _manage === 'true';
   const showConfig = _config === 'true';
   const showOperation = !publicationId && _operation === 'true';
@@ -2326,6 +2329,7 @@ const EmployeeDetail = ({ loading }) => {
         agentType={effectiveAgentType}
         resourceId={agentId}
         modelCode={modelName}
+        modelId={prologueRef.current?.modelInfo?.modelId}
         onOk={(formValue, myQuestionList) => {
           if (publicationId) onValuesChange();
           setQuestionList(myQuestionList);

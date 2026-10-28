@@ -184,6 +184,7 @@ const RefineModal = ({
   agentType,
   resourceId,
   modelCode,
+  modelId,
 }) => {
   const intl = useIntl();
   const [myForm] = Form.useForm();
@@ -212,6 +213,7 @@ const RefineModal = ({
       resourceName: form.getFieldValue('resourceName') || '',
       agentType: agentType || form.getFieldValue('agentType') || '',
       modelCode: modelCode || form.getFieldValue('modelCode') || '',
+      modelId: modelId ?? form.getFieldValue('modelId') ?? '',
     });
 
   const stopStreaming = () => {
@@ -419,6 +421,7 @@ const RefineModal = ({
       agentType: agentType || outerFormValues.agentType || '',
       resourceId: resourceId || outerFormValues.resourceId || undefined,
       modelCode: modelCode || outerFormValues.modelCode || '',
+      modelId: modelId !== undefined && modelId !== null ? String(modelId) : outerFormValues.modelId,
       corePersonaDefinition: JSON.stringify(
         (initial ? parsePromptConfigList(corePersonaDefinition) : generatedPromptConfigs).map((item) =>
           toPersistPromptItem({

@@ -6,6 +6,19 @@ jest.mock('../common', () => ({
   isDevelopment: jest.fn(() => false),
 }));
 
+jest.mock('@umijs/max', () => ({
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({
+        'openClaw.websocket.invalidUrl': 'Invalid WebSocket URL',
+        'openClaw.websocket.credentialsRequired': 'A token or password is required to connect to WebSocket',
+        'openClaw.websocket.notOpen': 'WebSocket connection is not open',
+        'openClaw.websocket.chatTimeout': 'WebSocket chat timed out',
+        'openClaw.websocket.requestFailed': 'WebSocket request failed',
+      }[id] || id),
+  }),
+}));
+
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 
 import {
@@ -50,7 +63,7 @@ describe('utils/openClaw/openclawWebSocket', () => {
   it('rejects ensureConnected when token is missing', async () => {
     const client = new OpenClawWebSocketClient('https://agent.example.com:8080/', 'agent-1');
 
-    await expect(client.ensureConnected()).rejects.toThrow('Token or password is required for WebSocket connect');
+    await expect(client.ensureConnected()).rejects.toThrow('A token or password is required to connect to WebSocket');
   });
 
   it('normalizes session aliases in loadHistory and clamps limit', async () => {

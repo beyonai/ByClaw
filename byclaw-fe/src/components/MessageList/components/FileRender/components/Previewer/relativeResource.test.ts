@@ -4,6 +4,14 @@ import {
   getCommonFilePreviewUrl,
 } from './relativeResource';
 
+jest.mock('@umijs/max', () => ({
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({ 'fileBrowser.preview.empty': '文件内容为空，无法预览', 'common.requestFailed': '请求失败，请稍后重试' }[id] ||
+      id),
+  }),
+}));
+
 jest.mock('@/utils/file', () => ({
   getFileUrl: (fileUrl: string) => `/byaiService${fileUrl}`,
 }));
@@ -29,6 +37,20 @@ describe('relativeResource', () => {
     }
 
     delete (global as { fetch?: typeof fetch }).fetch;
+  });
+
+  it('shows localized errors for empty and failed relative resources', async () => {
+    const resolver = createRelativeResourceResolver(getCommonFilePreviewUrl(sessionHtmlPath));
+    const fetchMock = jest.spyOn(global, 'fetch');
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      blob: () => Promise.resolve(new Blob([])),
+    } as Response);
+    await expect(resolver?.('assets/empty.png')).rejects.toThrow('文件内容为空，无法预览');
+
+    fetchMock.mockResolvedValueOnce({ ok: false, statusText: 'Not Found' } as Response);
+    await expect(resolver?.('assets/missing.png')).rejects.toThrow('请求失败，请稍后重试');
+    fetchMock.mockRestore();
   });
 
   it('loads a commonFile HTML image from its session directory preview URL', async () => {

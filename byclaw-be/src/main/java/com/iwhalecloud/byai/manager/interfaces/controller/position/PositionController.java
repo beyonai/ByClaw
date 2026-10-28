@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.manager.qo.position.PositionQo;
 import com.iwhalecloud.byai.manager.qo.position.PositionUsersQo;
 import com.iwhalecloud.byai.manager.vo.position.PositionUsersVo;
 import com.iwhalecloud.byai.manager.dto.position.PositionDelDTO;
+import com.iwhalecloud.byai.manager.dto.position.PositionUserBindDTO;
 import com.iwhalecloud.byai.common.annotation.Add;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.annotation.Mod;
@@ -48,6 +49,20 @@ public class PositionController {
     public ResponseUtil searchPositionUsersByQo(@RequestBody PositionUsersQo positionUsersQo) {
         PageInfo<PositionUsersVo> pageVO = positionApplicationService.searchPositionUsersByQo(positionUsersQo);
         return ResponseUtil.successResponse(pageVO);
+    }
+
+    @ManageLogAnnotation(name = "岗位管理", description = "批量关联岗位用户")
+    @RequestMapping(value = "/addPositionUsers", method = RequestMethod.POST)
+    public ResponseUtil addPositionUsers(@Validated @RequestBody PositionUserBindDTO request) {
+        positionApplicationService.addPositionUsers(request);
+        return ResponseUtil.successResponse();
+    }
+
+    @ManageLogAnnotation(name = "岗位管理", description = "解除岗位用户关联")
+    @RequestMapping(value = "/removePositionUsers", method = RequestMethod.POST)
+    public ResponseUtil removePositionUsers(@Validated @RequestBody PositionUserBindDTO request) {
+        positionApplicationService.removePositionUsers(request);
+        return ResponseUtil.successResponse();
     }
 
     /**

@@ -38,10 +38,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 企业员工配置和人员授权共用的资源使用权限补齐；不撤销资源上的任何既有授权。 */
 @Service
 public class DigitalEmployeeResourceAuthorizationService {
+
+    private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeResourceAuthorizationService.class);
 
     private static final Set<String> RESOURCE_TYPES = Set.of("SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM",
         "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT", "OBJECT", "VIEW");
@@ -88,6 +92,7 @@ public class DigitalEmployeeResourceAuthorizationService {
     /** relToolCodes 非空时使用本次配置；为 null 时读取已生效的运行配置镜像。 */
     @Transactional(rollbackFor = Exception.class)
     public void synchronize(SsResource employee, List<String> relToolCodes) {
+        long started = System.nanoTime();
         if (!isEnterpriseEmployee(employee)) return;
         if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getEnterpriseId() == null
             || !Objects.equals(employee.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
@@ -100,7 +105,9 @@ public class DigitalEmployeeResourceAuthorizationService {
         }
         Map<Long, SsResource> boundResources = boundResources(employee, extension, relToolCodes);
         if (boundResources.isEmpty()) return;
+        long resourcesRead = System.nanoTime();
         Set<Long> userIds = effectiveUsers(employee);
+        long usersExpanded = System.nanoTime();
         Map<SsResource, List<Long>> missing = new LinkedHashMap<>();
         for (SsResource resource : boundResources.values()) {
             if (Boolean.TRUE.equals(resource.getUseAuthControlled()) || Boolean.TRUE.equals(resource.getViewAuthControlled())) continue;
@@ -112,7 +119,34 @@ public class DigitalEmployeeResourceAuthorizationService {
             }
         }
         // 整批先校验再追加，任一资源失败时由员工保存/人员授权的外层事务回滚。
+        long checked = System.nanoTime();
         missing.forEach(auth::appendDigitalEmployeeResourceUsePrivileges);
+        logger.info("员工关联资源授权 employeeId={}, resources={}, users={}, missing={}, resourceMs={}, usersMs={}, checkMs={}, appendMs={}",
+            employee.getResourceId(), boundResources.size(), userIds.size(),
+            missing.values().stream().mapToInt(List::size).sum(), (resourcesRead - started) / 1_000_000,
+            (usersExpanded - resourcesRead) / 1_000_000, (checked - usersExpanded) / 1_000_000,
+            (System.nanoTime() - checked) / 1_000_000);
+    }
+
+    /** 审核使用/管理申请只补齐本次申请人，不能借审核修复或扩大其他使用人的授权。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void synchronizeApprovedApplicant(SsResource employee, Long applicant) {
+        if (!isEnterpriseEmployee(employee)) return;
+        auth.requireApplicantAuditPermission(employee, applicant);
+        if (!auth.hasResourceUsePermission(employee, applicant)) {
+            throw new BaseException(I18nUtil.get("auth.employee.resources.employee.use.required", employee.getResourceName()));
+        }
+        SsResExtDigEmployee extension = employees.findById(employee.getResourceId());
+        if (extension != null && DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE.equals(extension.getAgentType())) return;
+        List<SsResource> missing = new ArrayList<>();
+        for (SsResource resource : boundResources(employee, extension, null).values()) {
+            // 外部同步维护的授权范围仍由原同步入口维护，不因员工审批扩展。
+            if (Boolean.TRUE.equals(resource.getUseAuthControlled()) || Boolean.TRUE.equals(resource.getViewAuthControlled())) continue;
+            if (auth.hasResourceUsePermission(resource, applicant)) continue;
+            auth.validateEmployeeResourceGrantTarget(resource, applicant);
+            missing.add(resource);
+        }
+        missing.forEach(resource -> auth.appendApprovedEmployeeResourceUsePrivilege(resource, applicant));
     }
 
     private boolean isEnterpriseEmployee(SsResource employee) {

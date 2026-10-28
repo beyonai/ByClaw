@@ -47,6 +47,7 @@ class TenantSandboxProviderCorrelationTest {
         assertEquals("command-41:DB_CREATE", request.getValue().getMetadata().get("providerRequestKey"));
         assertEquals("TENANT", request.getValue().getMetadata().get("ownerScope"));
         assertEquals("12", request.getValue().getMetadata().get("enterpriseId"));
+        assertEquals("12", request.getValue().getUserInfo().get("enterpriseId"));
         assertEquals("5432", request.getValue().getMetadata().get("byclawTcpPort"));
     }
 
@@ -60,6 +61,7 @@ class TenantSandboxProviderCorrelationTest {
         assertEquals("command-41:NODE_CREATE", request.getValue().getMetadata().get("providerRequestKey"));
         assertEquals("TENANT", request.getValue().getMetadata().get("ownerScope"));
         assertEquals("12", request.getValue().getMetadata().get("enterpriseId"));
+        assertEquals("12", request.getValue().getUserInfo().get("enterpriseId"));
     }
 
     @Test void malformedCorrelationIsRejectedBeforeAnyResourceMutation(@TempDir Path root) {

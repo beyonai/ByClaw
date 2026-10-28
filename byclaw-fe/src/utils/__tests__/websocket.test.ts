@@ -11,6 +11,12 @@ jest.mock('../auth', () => ({
 
 jest.mock('@umijs/max', () => ({
   getLocale: (...args: any[]) => mockGetLocale(...args),
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({ 'websocket.tokenUnavailable': 'WebSocket 凭证不可用', 'websocket.connectionTimeout': 'WebSocket 连接超时' }[
+        id
+      ] || id),
+  }),
 }));
 
 const createJwt = (payload: Record<string, unknown>) => {
@@ -105,7 +111,7 @@ describe('utils/websocket', () => {
     expect(WebSocketMock).not.toHaveBeenCalled();
     expect(mockClearToken).toHaveBeenCalled();
     expect(mockLoginRedirect).toHaveBeenCalledWith({ openLoginModal: '1' });
-    await expect(ws.waitUntilConnected()).rejects.toThrow('WebSocket token unavailable');
+    await expect(ws.waitUntilConnected()).rejects.toThrow('WebSocket 凭证不可用');
   });
 
   it('creates websocket with correct url in development and reports connecting state', () => {

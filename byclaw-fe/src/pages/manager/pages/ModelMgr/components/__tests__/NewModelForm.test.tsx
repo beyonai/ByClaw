@@ -2,6 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { ConfigProvider, message } from 'antd';
 import SharedModelFormModal from '../SharedModelFormModal';
 
+// 真实 Ant Design 表单含异步校验、弹层和长模板目录；为完整交互预留时间。
+jest.setTimeout(20000);
+
 const mockIntl = {
   locale: 'zh-CN',
   formatMessage: ({ id }: { id: string }, values: Record<string, string> = {}): string => {
@@ -72,6 +75,9 @@ async function renderForm(type: 'add' | 'edit' = 'add', detail: Record<string, a
     );
   });
   await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.apiToken')).toBeVisible());
+  if (type === 'edit') {
+    await waitFor(() => expect(screen.getByLabelText('modelMgr.modal.displayName')).toHaveValue(detail.displayName));
+  }
   return saveModelRequest;
 }
 
@@ -511,7 +517,7 @@ describe('new model quick setup', () => {
       max_tokens: 1024,
       temperature: 0.7,
     });
-  });
+  }, 60000);
 
   it.each([
     [undefined, undefined, 65536],

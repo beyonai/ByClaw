@@ -50,7 +50,7 @@ jest.mock('@/components/InfiniteScroll', () => ({
 }));
 jest.mock('@/components/Resources/components/ResourceCard', () => ({
   __esModule: true,
-  default: ({ resource, enableFavorites, actionConfig }: any) => (
+  default: ({ resource, enableFavorites, actionConfig, metaNode }: any) => (
     <div
       data-testid="card"
       data-id={resource.id}
@@ -63,6 +63,7 @@ jest.mock('@/components/Resources/components/ResourceCard', () => ({
       data-hidden-actions={actionConfig.hiddenMenuItemKeys.join(',')}
     >
       {resource.name}
+      {metaNode}
     </div>
   ),
 }));
@@ -82,6 +83,26 @@ describe('commercial employee favorite lists', () => {
     jest.mocked(getCompositeAppInfo).mockReset().mockResolvedValue(undefined);
     (getAllDigitalEmployeesV2 as jest.Mock).mockResolvedValue({ list: [row(1)], total: 1, pageNum: 1 });
     (queryMyCreatedAndSubscribedAgentsV2 as jest.Mock).mockResolvedValue({ list: [row(1)], total: 1, pageNum: 1 });
+  });
+
+  it.each(['employee', 'group'] as const)('shows organization metadata on recommended %s cards', async (mode) => {
+    (getAllDigitalEmployeesV2 as jest.Mock).mockResolvedValue({
+      list: [
+        { ...row(1), creatorName: 'Original creator', audienceOrganizations: [{ orgId: '10', orgName: '研发中心' }] },
+      ],
+      total: 1,
+      pageNum: 1,
+    });
+    render(<AllDigitalEmployees source="official" mode={mode} hideCategories />);
+    const card = await screen.findByTestId('card');
+    expect(card).toHaveTextContent('研发中心');
+    expect(card).not.toHaveTextContent('Original creator');
+  });
+
+  it.each(['available', 'favorites'] as const)('preserves the existing metadata for %s', async (source) => {
+    render(<AllDigitalEmployees source={source} hideCategories />);
+    const card = await screen.findByTestId('card');
+    expect(card).not.toHaveTextContent('digitalEmployees.audienceOrganizations');
   });
 
   it('keeps group-first sorting for available employee search and pagination', async () => {

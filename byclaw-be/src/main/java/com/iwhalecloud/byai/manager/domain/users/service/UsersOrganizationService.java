@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.users.service;
 import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper;
@@ -19,6 +20,9 @@ import java.util.HashMap;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -154,6 +158,59 @@ public class UsersOrganizationService {
         LambdaQueryWrapper<UsersOrganization> queryWrapper = new LambdaQueryWrapper<UsersOrganization>()
             .in(UsersOrganization::getUserId, userIds);
         return usersOrganizationMapper.selectList(queryWrapper);
+    }
+
+    /** 为用户现有的组织、角色关联增加岗位，保留其他岗位。 */
+    public void addPositionUsers(Long positionId, List<Long> userIds) {
+        List<UsersOrganization> memberships = findByUserIds(userIds).stream()
+            .filter(membership -> membership.getOrgId() != null).toList();
+        Set<Long> memberIds = memberships.stream().map(UsersOrganization::getUserId).collect(Collectors.toSet());
+        if (!memberIds.containsAll(userIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("position.members.organization.required"));
+        }
+
+        record Membership(Long userId, Long orgId, String userType) { }
+        Map<Membership, List<UsersOrganization>> groups = memberships.stream().collect(Collectors.groupingBy(
+            membership -> new Membership(membership.getUserId(), membership.getOrgId(), membership.getUserType())));
+        List<UsersOrganization> additions = new ArrayList<>();
+        Set<Long> changedUserIds = new LinkedHashSet<>();
+        groups.forEach((scope, relations) -> {
+            if (relations.stream().anyMatch(relation -> Objects.equals(positionId, relation.getPositionId()))) {
+                return;
+            }
+            UsersOrganization unassigned = relations.stream().filter(relation -> relation.getPositionId() == null)
+                .findFirst().orElse(null);
+            if (unassigned != null) {
+                usersOrganizationMapper.update(null, new LambdaUpdateWrapper<UsersOrganization>()
+                    .eq(UsersOrganization::getId, unassigned.getId())
+                    .set(UsersOrganization::getPositionId, positionId));
+            } else {
+                UsersOrganization relation = new UsersOrganization();
+                relation.setId(SequenceService.nextVal());
+                relation.setUserId(scope.userId());
+                relation.setOrgId(scope.orgId());
+                relation.setUserType(scope.userType());
+                relation.setPositionId(positionId);
+                additions.add(relation);
+            }
+            changedUserIds.add(scope.userId());
+        });
+        if (!additions.isEmpty()) {
+            usersOrganizationMapper.saveBatch(additions);
+        }
+        publishOrganizationChanged(new ArrayList<>(changedUserIds));
+    }
+
+    /** 仅清除目标岗位，不删除组织成员关系及角色。 */
+    public void removePositionUsers(Long positionId, List<Long> userIds) {
+        int changed = usersOrganizationMapper.update(null, new LambdaUpdateWrapper<UsersOrganization>()
+            .eq(UsersOrganization::getPositionId, positionId)
+            .in(UsersOrganization::getUserId, userIds)
+            .set(UsersOrganization::getPositionId, null));
+        if (changed > 0) {
+            publishOrganizationChanged(userIds);
+        }
     }
 
     /**

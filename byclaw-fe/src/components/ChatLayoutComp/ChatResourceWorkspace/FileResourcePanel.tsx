@@ -72,6 +72,8 @@ import { downloadFile as downloadUrlFile } from '@/utils/file';
 import { downloadResourceFile } from '@/service/file';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
+import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
+import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
 import { filterSessionRootItems } from './sessionResourceUtils';
@@ -81,6 +83,7 @@ import { useChatResourceProject } from './useChatResourceProject';
 import type { ChatRuntimeType } from '@/utils/chatRuntime';
 import { getProject } from '@/pages/projectSpace/service';
 import { normalizeProjectDetail } from '@/pages/projectSpace/utils';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -179,6 +182,16 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   });
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
+  const clearFileClickTimer = useCallback(() => {
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = null;
+  }, []);
+  const knowledgeSave = useSaveToKnowledge({
+    resourceId: resourceId || '',
+    personalOnly: true,
+    clearClickTimer: clearFileClickTimer,
+  });
+  const { openSaveToKnowledge } = knowledgeSave;
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(resolvedProject?.projectId);
   const projectCloudResourceId = projectCloudResourceIdProp || resolvedProject?.cloudResourceId;
@@ -517,8 +530,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const rows =
         destination === 'project'
           ? await queryProjectCloudDrive(projectCloudResourceId!, path, language)
-          : unwrapListResponse<FileBrowserItem>(await listFiles({ resourceId: resourceId!, path, language }));
-      return rows
+          : await listFiles({ resourceId: resourceId!, path, language }, { hideErrorTips: true });
+      return unwrapListResponse<FileBrowserItem>(rows)
         .filter(isDirectory)
         .map((item) => ({ title: item.name, key: ensureDirectoryPath(item.path), isLeaf: false }));
     },
@@ -540,7 +553,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setSaveTreeData([]);
       setSaveTreeLoading(true);
       try {
-        if (destination === 'shared') await ensureFolder({ resourceId, path: targetRootPath });
+        if (destination === 'shared') {
+          await ensureFolder({ resourceId, path: targetRootPath }, { hideErrorTips: true });
+        }
         const children = await loadSaveDirectories(targetRootPath, destination);
         setSaveTreeData([
           {
@@ -554,7 +569,13 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setSaveExpandedKeys([targetRootPath]);
       } catch (error: any) {
         setSaveTarget(null);
-        message.error(error?.message || intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }));
+        message.error(
+          localizeErrorMessage(
+            typeof error === 'string' ? error : error?.message,
+            intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }),
+            intl.locale
+          )
+        );
       } finally {
         setSaveTreeLoading(false);
       }
@@ -745,7 +766,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         // 项目云盘由后端按条目创建人、项目创建人及 adminvip 返回操作权限。
         ...(usesFileBrowser || (scope === 'project' && resourceId) ? ['rename', 'delete'] : []),
         ...(scope === 'session' && projectId && projectId !== -1 ? ['saveToProject'] : []),
-        ...(scope === 'session' && resourceId ? ['saveToShared'] : []),
+        ...(scope === 'session' && resourceId ? ['saveToShared', 'saveToPersonalKnowledge'] : []),
       ];
       const labels: Record<string, string> = {
         quote: intl.formatMessage({ id: 'common.quote' }),
@@ -759,6 +780,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         delete: intl.formatMessage({ id: 'fileBrowser.action.delete' }),
         saveToProject: intl.formatMessage({ id: 'chatResource.saveToProject' }),
         saveToShared: intl.formatMessage({ id: 'chatResource.saveToShared' }),
+        saveToPersonalKnowledge: intl.formatMessage({ id: 'chatResource.personalKnowledge.save' }),
       };
       return keys.map((key) => ({
         key,
@@ -880,6 +902,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'rename') setRenameTarget(item);
       if (key === 'saveToProject') void openSaveResource(item, 'project');
       if (key === 'saveToShared') void openSaveResource(item, 'shared');
+      if (key === 'saveToPersonalKnowledge') openSaveToKnowledge(item);
       if (key === 'delete') {
         Modal.confirm({
           title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
@@ -897,7 +920,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       intl,
       openPreview,
       quoteFile,
+      rootPath,
       openSaveResource,
+      openSaveToKnowledge,
       scope,
     ]
   );
@@ -1121,6 +1146,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   return (
     <>
+      {scope === 'session' && <PersonalKnowledgeSaveDialogs key={`${resourceId}-${sessionId}`} state={knowledgeSave} />}
       <FileSpaceBlock
         getDisplayName={scope === 'shared' ? getSharedDisplayName : undefined}
         title={null}

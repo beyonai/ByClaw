@@ -29,6 +29,12 @@ export const searchPositionList = (payload: any) =>
 export const searchPositionUsersByQo = (payload: any) =>
   POST('/byaiService/system/position/searchPositionUsersByQo', withPageNum(payload));
 
+export const addPositionUsers = (payload: { positionId: string | number; userIds: (string | number)[] }) =>
+  POST('/byaiService/system/position/addPositionUsers', payload, { responseCfg: { hideErrorTips: true } });
+
+export const removePositionUsers = (payload: { positionId: string | number; userIds: (string | number)[] }) =>
+  POST('/byaiService/system/position/removePositionUsers', payload, { responseCfg: { hideErrorTips: true } });
+
 export const getUsersByOrgId = (payload: any) =>
   POST('/byaiService/system/user/getUsersByOrgId', withPageNum(payload)).then((res) => {
     return res;

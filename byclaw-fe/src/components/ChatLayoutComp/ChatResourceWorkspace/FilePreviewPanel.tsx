@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Empty, Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import {
@@ -230,25 +231,25 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
 
       const loadFromFileUrl = async () => {
         const response = await fetch(getFilePreviewUrl(previewFileUrl!, imagePath, sourcePath), { cache: 'no-store' });
-        if (!response.ok) throw new Error(response.statusText);
+        if (!response.ok) throw new Error(intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         const file = await response.blob();
-        if (!file.size) throw new Error('Empty relative resource');
+        if (!file.size) throw new Error(intl.formatMessage({ id: 'fileBrowser.preview.empty' }));
         return { file };
       };
       const loadFromSourcePath = () =>
-        source === 'fileBrowser'
-          ? loadFileBrowserFile(resolvedPath)
-          : loadDatasetFile(resolvedPath);
+        source === 'fileBrowser' ? loadFileBrowserFile(resolvedPath) : loadDatasetFile(resolvedPath);
       const request = (
         previewFileUrl
           ? loadFromFileUrl().catch(() =>
-            resourceId && sourcePath ? loadFromSourcePath() : Promise.reject(new Error('File not found'))
+            resourceId && sourcePath
+              ? loadFromSourcePath()
+              : Promise.reject(new Error(intl.formatMessage({ id: 'fileBrowser.preview.notFound' })))
           )
           : loadFromSourcePath()
       )
         .then((response: any) => {
           const rawBlob = response?.file instanceof Blob ? response.file : new Blob([response?.file || response]);
-          if (!rawBlob.size) throw new Error('Empty relative resource');
+          if (!rawBlob.size) throw new Error(intl.formatMessage({ id: 'fileBrowser.preview.empty' }));
           const mimeType = getMimeType(resolvedPath);
           return mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
         })
@@ -260,7 +261,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       markdownImageCacheRef.current.set(cacheKey, request);
       return request;
     },
-    [loadDatasetFile, loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
+    [intl, loadDatasetFile, loadFileBrowserFile, previewFileUrl, resourceId, source, sourcePath]
   );
 
   useEffect(() => {
@@ -278,7 +279,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       }
       if (fileUrl) {
         const response = await fetch(getFileUrl(fileUrl), { cache: 'no-store' });
-        if (!response.ok) throw new Error(response.statusText);
+        if (!response.ok) throw new Error(intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         return response.blob();
       }
       if (resourceId && sourcePath) {
@@ -286,9 +287,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         let response: any;
         try {
           response =
-            source === 'fileBrowser'
-              ? await loadFileBrowserFile(sourcePath)
-              : await loadDatasetFile(sourcePath);
+            source === 'fileBrowser' ? await loadFileBrowserFile(sourcePath) : await loadDatasetFile(sourcePath);
         } catch (error) {
           if (!previewFileUrl) throw error;
           const previewResponse = await fetch(previewFileUrl, { cache: 'no-store' });
@@ -301,7 +300,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
       }
       if (previewFileUrl) {
         const response = await fetch(previewFileUrl, { cache: 'no-store' });
-        if (!response.ok) throw new Error(response.statusText);
+        if (!response.ok) throw new Error(intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
         return response.blob();
       }
       throw new Error(intl.formatMessage({ id: 'chatResource.missingFileSource' }));
@@ -315,7 +314,11 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
         if (active) setBlob(result);
       })
       .catch((error: any) => {
-        if (active) message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
+        if (active) {
+          message.error(
+            localizeErrorMessage(error?.message, intl.formatMessage({ id: 'fileBrowser.preview.failed' }), intl.locale)
+          );
+        }
       })
       .finally(() => {
         if (active) setLoading(false);

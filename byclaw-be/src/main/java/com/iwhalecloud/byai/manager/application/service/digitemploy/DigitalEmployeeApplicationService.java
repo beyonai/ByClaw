@@ -2730,6 +2730,8 @@ public class DigitalEmployeeApplicationService {
                 policy.put("resourceBizType", resource.getResourceBizType());
                 policy.put("createBy", resource.getCreateBy() == null ? "" : String.valueOf(resource.getCreateBy()));
                 policy.put("active", Objects.equals(resource.getResourceStatus(), 2));
+                policy.put("requiresExplicitUse", com.iwhalecloud.byai.manager.application.service.resource
+                    .EnterpriseResourceSyncContext.isSynchronizedCapability(resource));
                 controlled.add(policy);
             }
         }
@@ -2762,7 +2764,7 @@ public class DigitalEmployeeApplicationService {
         // 2) 前端编辑回显时(findDetailsById)可以从这里反序列化 relTools 等不入库的运行期字段.
         this.persistTargetContent(resourceId, jsonContent);
 
-        resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
+        resourceArtifactStorageService.publishResourceJson(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             resourceId);
         if (publication) {
             ssResourceArtifactService.upsertPublicationJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
@@ -2772,13 +2774,13 @@ public class DigitalEmployeeApplicationService {
                 "dig-employee-sync");
         }
 
-        boolean redisSyncSucceeded = this.syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
-
+        // 先补齐依赖快照，再发布员工快照，避免提前向运行端暴露不可调用的关联。
         // 数字员工自己的 JSON 同步完成后,再检查并补齐其关联资源的标准 JSON 产物.
         // 这样可以确保前端保存/更新数字员工后,关联的 toolkit / mcp / agent / kg_* / view / object
         // 也都能在开放资源目录中按标准命名被下游读取到.
         this.syncMissingRelatedResourceJsons(resourceId);
-        syncRelatedResourceConfigJsonsToRedisQuietly(resourceId);
+        this.syncRelatedResourceConfigJsonsToRedis(resourceId, true);
+        boolean redisSyncSucceeded = this.syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
 
         logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
             resourceId, resourceDir, fileName);
@@ -2842,7 +2844,16 @@ public class DigitalEmployeeApplicationService {
      * 将数字员工关联资源的标准 JSON 同步至 Redis(与 MinIO 产物同内容,键名为 {@code {BIZTYPE}_{resourceId}}). 每次数字员工开放目录同步后执行,不依赖 MinIO 是否缺失.
      */
     public void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
-        if (digEmployeeResourceId == null) {
+        try {
+            this.syncRelatedResourceConfigJsonsToRedis(digEmployeeResourceId, false);
+        } catch (Exception e) {
+            logger.error("同步数字员工关联资源配置到Redis失败, digEmployeeResourceId={}", digEmployeeResourceId, e);
+        }
+    }
+
+    private void syncRelatedResourceConfigJsonsToRedis(Long digEmployeeResourceId, boolean strict) {
+        if (digEmployeeRedisSyncProperties == null || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()
+            || digEmployeeResourceId == null) {
             return;
         }
         List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
@@ -2861,21 +2872,13 @@ public class DigitalEmployeeApplicationService {
         logger.debug("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
-            this.syncSingleRelatedResourceConfigJsonToRedisQuietly(digEmployeeResourceId, relResource);
-        }
-    }
-
-    /**
-     * syncSingleRelatedResourceConfigJsonToRedisQuietly。
-     */
-    private void syncSingleRelatedResourceConfigJsonToRedisQuietly(Long digEmployeeResourceId, SsResource relResource) {
-        try {
-            this.syncSingleRelatedResourceConfigJsonToRedis(digEmployeeResourceId, relResource);
-        } catch (Exception e) {
-            logger.error(
-                "同步数字员工关联资源配置到Redis失败,不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}, reason={}",
-                digEmployeeResourceId, relResource == null ? null : relResource.getResourceId(),
-                relResource == null ? null : relResource.getResourceBizType(), e.getMessage(), e);
+            try {
+                this.syncSingleRelatedResourceConfigJsonToRedis(digEmployeeResourceId, relResource);
+            } catch (RuntimeException e) {
+                if (strict) throw e;
+                logger.error("同步关联资源运行配置失败, digEmployeeResourceId={}, relResourceId={}",
+                    digEmployeeResourceId, relResource.getResourceId(), e);
+            }
         }
     }
 
@@ -2893,6 +2896,9 @@ public class DigitalEmployeeApplicationService {
         Long relResourceId = relResource.getResourceId();
         String targetContent = this.loadRelatedResourceTargetContent(resourceBizType, relResourceId);
         if (StringUtils.isBlank(targetContent)) {
+            if (!ResourceBizTypeEnum.SKILL.name().equals(resourceBizType)) {
+                throw new IllegalStateException("关联资源运行配置缺失, resourceId=" + relResourceId);
+            }
             logger.warn(
                 "数字员工关联资源targetContent为空,跳过Redis同步, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
@@ -2943,7 +2949,7 @@ public class DigitalEmployeeApplicationService {
             logger.debug(
                 "数字员工关联资源JSON缺失,开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
-            resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
+            resourceArtifactStorageService.publishResourceJson(targetContent, resourceBizType, relResourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
                 "dig-employee-related-sync");
             logger.debug(
@@ -3844,28 +3850,23 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 把刚刚生成的标准 JSON 串镜像写入 ss_res_ext_dig_employee.target_content. 失败仅记日志,不阻断后续 MinIO 同步--target_content 是辅助快照,缺失不影响主流程.
+     * 保存本次运行快照。启动同步会优先读取 target_content，写入失败必须阻止发布并由调用方重试。
      */
     private void persistTargetContent(Long resourceId, String jsonContent) {
         if (resourceId == null || StringUtils.isBlank(jsonContent)) {
-            return;
+            throw new IllegalArgumentException("数字员工运行快照参数不能为空");
         }
-        try {
-            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
-            if (ssResExtDigEmployee == null) {
-                logger.warn("写入 target_content 失败:扩展表记录不存在, resourceId={}", resourceId);
-                return;
-            }
-            ssResExtDigEmployee.setTargetContent(jsonContent);
-            ssResExtDigEmployeeService.update(ssResExtDigEmployee);
-        } catch (Exception e) {
-            logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+        SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+        if (ssResExtDigEmployee == null) {
+            throw new IllegalStateException("数字员工扩展记录不存在, resourceId=" + resourceId);
         }
+        ssResExtDigEmployee.setTargetContent(jsonContent);
+        ssResExtDigEmployeeService.update(ssResExtDigEmployee);
     }
 
     /**
      * PR-1: 公开包级访问包装,供 {@code StartupTargetContentPreloader}(c-4 离线预生成)使用.
-     * 行为与私有 {@link #persistTargetContent} 一致;返回 boolean 便于预生成脚本统计.
+     * 预生成保留尽力写入语义，返回 boolean 便于预生成脚本统计；运行态同步使用严格写入。
      *
      * @param resourceId  数字员工资源 ID
      * @param jsonContent 标准 JSON 内容

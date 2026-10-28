@@ -1,5 +1,20 @@
 // 员工发布、审批及关联资源说明共用文案，避免不同入口遗漏国际化。
 export default {
+  'employeePublication.audience.title': 'Publication audience',
+  'employeePublication.audience.all': 'Entire company',
+  'employeePublication.audience.organizations': 'Selected organizations',
+  'employeePublication.audience.status': 'Review status',
+  'employeePublication.audience.reviewer': 'Reviewer',
+  'employeePublication.audience.comment': 'Review comment',
+  'employeePublication.audience.approve': 'Approve this organization',
+  'employeePublication.audience.PENDING': 'Pending',
+  'employeePublication.audience.APPROVED': 'Approved',
+  'employeePublication.audience.REJECTED': 'Rejected',
+  'employeePublication.audience.required': 'Select at least one organization',
+  'employeePublication.audience.initialHint':
+    'Each organization reviews independently. Only approved organizations and their descendants receive access.',
+  'employeePublication.audience.updateHint':
+    'Shared updates take effect after every published organization approves. The current version remains available during review.',
   'employeePublication.toolbar.reviewNotesLabel': 'Review notes: ',
   'employeePublication.detailLoadFailed': 'Failed to load the publication configuration. Please try again later.',
   'employeePublication.audit.total': 'Total applications: {count}',
@@ -12,6 +27,12 @@ export default {
   'employeePublication.status.PENDING': 'Pending review',
   'employeePublication.status.APPLYING': 'Publishing',
   'employeePublication.status.PUBLISHED': 'Published',
+  'employeePublication.status.PARTIALLY_PUBLISHED': 'Partially published',
+  'employeePublication.status.APPROVED': 'Review approved',
+  'employeePublication.audience.organizationPublished': 'Published successfully within your organization [{orgNames}]',
+  'employeePublication.audience.partiallyPublished': 'Published successfully within organizations [{orgNames}]',
+  'employeePublication.audience.updateApproved':
+    'Approved by organizations [{orgNames}]. The shared version will update after all organizations approve.',
   'employeePublication.status.REJECTED': 'Rejected',
   'employeePublication.status.WITHDRAWN': 'Withdrawn',
   'employeePublication.status.FAILED': 'Publication failed',

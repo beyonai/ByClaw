@@ -12,6 +12,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
@@ -31,14 +37,49 @@ public class FileBrowserKnowledgeTransferApplicationService {
 
     private final DatasetApplicationService datasetApplicationService;
 
+    private final SsResourceService resourceService;
+
+    private final AuthApplicationService authService;
+
     public FileBrowserKnowledgeTransferApplicationService(FileBrowserApplicationService fileBrowserService,
-        DatasetApplicationService datasetApplicationService) {
+        DatasetApplicationService datasetApplicationService, SsResourceService resourceService,
+        AuthApplicationService authService) {
         this.fileBrowserService = fileBrowserService;
         this.datasetApplicationService = datasetApplicationService;
+        this.resourceService = resourceService;
+        this.authService = authService;
     }
 
     public FileBrowserSaveToKnowledgeVo saveToKnowledge(String userCode, FileBrowserSaveToKnowledgeRequest request)
         throws IOException {
+        return transfer(userCode, request, false, false);
+    }
+
+    /** 个人知识库入口：校验归属和管理权限，按需构建本次成功导入的文件。 */
+    public FileBrowserSaveToKnowledgeVo saveToPersonalKnowledge(String userCode,
+        FileBrowserSaveToKnowledgeRequest request) throws IOException {
+        validateRequest(request);
+        SsResource target = resourceService.findById(request.getTargetResourceId());
+        if (target == null || Integer.valueOf(-1).equals(target.getResourceStatus())
+            || !(OwnerType.PERSONAL.equals(target.getOwnerType()) || OwnerType.PERSONAL_DEFAULT.equals(target.getOwnerType()))
+            || !java.util.Arrays.asList("KG_DOC", "KG_QA", "KG_TERM").contains(target.getResourceBizType())) {
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.knowledge.invalid"));
+        }
+        if (!authService.hasResourceManagePermission(target)) {
+            throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+        }
+        String sourcePath = normalizeFileBrowserPath(request.getSourcePath());
+        String parent = ensureFileBrowserDirectoryPath(getParentKnowledgeDirectory(sourcePath));
+        FileBrowserItemVo source = fileBrowserService.listForTransfer(userCode, request.getResourceId(), parent).stream()
+            .filter(item -> sourcePath.equals(normalizeFileBrowserPath(item.getPath())))
+            .findFirst().orElseThrow(() -> new IllegalArgumentException(
+                I18nUtil.get("filebrowser.personal.source.unavailable")));
+        request.setSourceDir(source.isDir());
+        return transfer(userCode, request, true, !Boolean.FALSE.equals(request.getBuildAfterSave()));
+    }
+
+    private FileBrowserSaveToKnowledgeVo transfer(String userCode, FileBrowserSaveToKnowledgeRequest request,
+        boolean personalKnowledge, boolean buildAfterSave) throws IOException {
         validateRequest(request);
 
         FileBrowserSaveToKnowledgeVo result = new FileBrowserSaveToKnowledgeVo();
@@ -55,36 +96,46 @@ public class FileBrowserKnowledgeTransferApplicationService {
                 result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
             }
             copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(result.getSourcePath()),
-                targetDirectoryPath, result);
+                targetDirectoryPath, result, personalKnowledge, buildAfterSave);
         }
         else {
-            copyFile(userCode, request, result.getSourcePath(), targetDirectoryPath, result);
+            copyFile(userCode, request, result.getSourcePath(), targetDirectoryPath, result, buildAfterSave);
         }
         result.setTargetDirectoryPath(targetDirectoryPath);
         return result;
     }
 
     private void copyDirectory(String userCode, FileBrowserSaveToKnowledgeRequest request, String sourceDirectoryPath,
-        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result) throws IOException {
-        List<FileBrowserItemVo> children = fileBrowserService.list(userCode, request.getResourceId(),
-            sourceDirectoryPath);
+        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result, boolean personalKnowledge,
+        boolean buildAfterSave) throws IOException {
+        if (sourceDirectoryPath.split("/").length > 100) {
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.source.depth.exceeded"));
+        }
+        List<FileBrowserItemVo> children = personalKnowledge
+            ? fileBrowserService.listForTransfer(userCode, request.getResourceId(), sourceDirectoryPath)
+            : fileBrowserService.list(userCode, request.getResourceId(), sourceDirectoryPath);
         for (FileBrowserItemVo child : children) {
-            if (child.isDir()) {
-                String childTargetDirectoryPath = joinKnowledgePath(targetDirectoryPath, child.getName());
-                if (ensureKnowledgeFolder(request.getTargetResourceId(), targetDirectoryPath, child.getName())) {
-                    result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
+            try {
+                if (child.isDir()) {
+                    String childTargetDirectoryPath = joinKnowledgePath(targetDirectoryPath, child.getName());
+                    if (ensureKnowledgeFolder(request.getTargetResourceId(), targetDirectoryPath, child.getName())) {
+                        result.setCreatedFolderCount(result.getCreatedFolderCount() + 1);
+                    }
+                    copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(child.getPath()),
+                        childTargetDirectoryPath, result, personalKnowledge, buildAfterSave);
                 }
-                copyDirectory(userCode, request, ensureFileBrowserDirectoryPath(child.getPath()),
-                    childTargetDirectoryPath, result);
-            }
-            else {
-                copyFile(userCode, request, normalizeFileBrowserPath(child.getPath()), targetDirectoryPath, result);
+                else {
+                    copyFile(userCode, request, normalizeFileBrowserPath(child.getPath()), targetDirectoryPath, result, buildAfterSave);
+                }
+            } catch (IOException | RuntimeException ex) {
+                if (!personalKnowledge) throw ex;
+                result.getFailedItems().add(failedItem(child.getPath(), ex));
             }
         }
     }
 
     private void copyFile(String userCode, FileBrowserSaveToKnowledgeRequest request, String sourceFilePath,
-        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result) throws IOException {
+        String targetDirectoryPath, FileBrowserSaveToKnowledgeVo result, boolean buildAfterSave) throws IOException {
         String fileName = getLastPathName(sourceFilePath);
         try (InputStream inputStream = fileBrowserService.download(userCode, request.getResourceId(), sourceFilePath)) {
             MultipartFile multipartFile = new MultipartFileUtil("files", fileName, null, inputStream);
@@ -94,10 +145,33 @@ public class FileBrowserKnowledgeTransferApplicationService {
                 Boolean.TRUE.equals(request.getProcessFrontMatter()), Boolean.TRUE.equals(request.getOverwrite()),
                 false, Collections.emptyMap());
             result.setUploadedFileCount(result.getUploadedFileCount() + uploadResult.getUploadItems().size());
+            result.getFailedItems().addAll(uploadResult.getFailedItems());
+            result.getPostProcessErrors().addAll(uploadResult.getPostProcessErrors());
             for (UploadItem uploadItem : uploadResult.getUploadItems()) {
                 result.getUploadItems().add(uploadItem);
+                if (!buildAfterSave || Boolean.FALSE.equals(uploadItem.getSuccess())) continue;
+                try {
+                    if (StringUtils.isBlank(uploadItem.getFilePath())) {
+                        throw new IllegalArgumentException(I18nUtil.get("filebrowser.personal.build.path.missing"));
+                    }
+                    DatasetBuild build = new DatasetBuild();
+                    build.setResourceId(request.getTargetResourceId());
+                    build.setDirectoryPath(uploadItem.getFilePath());
+                    datasetApplicationService.build(build, Collections.emptyMap());
+                    result.setBuildSubmittedCount(result.getBuildSubmittedCount() + 1);
+                } catch (RuntimeException ex) {
+                    result.getBuildFailedItems().add(failedItem(uploadItem.getFilePath(), ex));
+                }
             }
         }
+    }
+
+    private UploadItem failedItem(String path, Exception exception) {
+        UploadItem item = new UploadItem();
+        item.setFilePath(path);
+        item.setSuccess(false);
+        item.setError(StringUtils.defaultIfBlank(exception.getMessage(), exception.getClass().getSimpleName()));
+        return item;
     }
 
     private boolean ensureKnowledgeFolder(Long resourceId, String parentDirectoryPath, String folderName) {

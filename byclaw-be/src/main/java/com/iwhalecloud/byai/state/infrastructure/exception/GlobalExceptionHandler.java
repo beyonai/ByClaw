@@ -29,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
@@ -103,7 +104,7 @@ public class GlobalExceptionHandler implements MessageSourceAware {
                 new String(wrapper.getContentAsByteArray(), Charset.forName(wrapper.getCharacterEncoding())));
         }
 
-        String msg = dealMessage(e.getMessage());
+        String msg = e instanceof BaseException ? dealMessage(e.getMessage()) : unexpectedMessage(e.getMessage());
         HttpStatus httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         return new ResponseEntity<>(ResponseUtil.fail(msg), httpStatus);
     }
@@ -113,8 +114,14 @@ public class GlobalExceptionHandler implements MessageSourceAware {
     public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
         logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
         String reason = StringUtils.defaultIfBlank(e.getReason(), e.getMessage());
-        String msg = dealMessage(messageSource == null ? reason
-            : messageSource.getMessage(reason, null, reason, LocaleContextHolder.getLocale()));
+        String translated = messageSource == null ? null
+            : messageSource.getMessage(reason, null, null, LocaleContextHolder.getLocale());
+        // Localized catalog messages may legitimately contain foreign names and technical identifiers.
+        // Only unrecognized raw exception reasons use the language fallback.
+        boolean rawEnglish = reason.matches("(?s).*[A-Za-z]{3,}.*") && !reason.matches("(?s).*\\p{IsHan}.*");
+        String msg = dealMessage(translated != null ? translated
+            : "zh".equals(LocaleContextHolder.getLocale().getLanguage()) && rawEnglish
+                ? unexpectedMessage(reason) : reason);
         ResponseUtil<Object> body = ResponseUtil.fail(msg);
         if (e.getStatusCode().value() == HttpStatus.FORBIDDEN.value()) {
             body.setData(Map.of("errorType", "PERMISSION_DENIED"));
@@ -179,11 +186,20 @@ public class GlobalExceptionHandler implements MessageSourceAware {
         }
         if (message.indexOf("MySQLSyntaxErrorException") > -1 || message.indexOf("SQLSyntaxErrorException") > -1
             || message.indexOf("PersistenceException") > -1 || message.indexOf("MysqlDataTruncation") > -1) {
-            message = "SQL exception, please check the log.";
+            message = I18nUtil.get("i18n.error.sql.generic");
         }
         else if (message.indexOf("UNKNOW") > -1 && message.indexOf("Observable onError") > -1) {
             message = message + ", " + I18nUtil.get("ZmessageExceptionAop_observableOnError");
         }
         return message;
+    }
+
+    private String unexpectedMessage(String detail) {
+        String key = detail != null && (detail.contains("MySQLSyntaxErrorException")
+            || detail.contains("SQLSyntaxErrorException") || detail.contains("PersistenceException")
+            || detail.contains("MysqlDataTruncation"))
+                ? "i18n.error.sql.generic" : "i18n.error.system.unexpected";
+        return messageSource == null ? ResponseUtil.failI18n(key).getMsg()
+            : messageSource.getMessage(key, null, LocaleContextHolder.getLocale());
     }
 }

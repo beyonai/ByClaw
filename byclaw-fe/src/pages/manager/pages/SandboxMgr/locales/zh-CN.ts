@@ -33,6 +33,28 @@ export default {
   'sandboxMgr.releaseReason.release.recovered.terminal-ownership': '已回收终止实例的归属',
 
   'sandboxMgr.endpoint.more': '更多',
+  // 操作失败提示
+  'sandboxMgr.error.list': '加载沙箱列表失败',
+  'sandboxMgr.error.remove': '释放沙箱失败',
+  'sandboxMgr.error.update': '更新沙箱失败',
+  'sandboxMgr.error.specList': '加载服务配置列表失败',
+  'sandboxMgr.error.spec': '加载服务配置失败',
+  'sandboxMgr.error.specSave': '保存服务配置失败',
+  'sandboxMgr.error.specDelete': '删除服务配置失败',
+  'sandboxMgr.error.launch': '启动沙箱失败',
+  'sandboxMgr.error.resize': '调整沙箱规格失败',
+  'sandboxMgr.error.resizeRecords': '加载规格调整记录失败',
+  'sandboxMgr.error.profiles': '加载服务规格失败',
+  'sandboxMgr.error.profileSave': '保存服务规格失败',
+  'sandboxMgr.error.profileDelete': '停用服务规格失败',
+  'sandboxMgr.error.healthSwitch': '加载健康检测开关失败',
+  'sandboxMgr.error.healthSwitchSave': '保存健康检测开关失败',
+  'sandboxMgr.error.watermarkModels': '加载水位模型失败',
+  'sandboxMgr.error.watermarkSave': '保存水位模型失败',
+  'sandboxMgr.error.watermarkDelete': '删除水位模型失败',
+  'sandboxMgr.error.watermarkUpdate': '更新水位模型失败',
+  'sandboxMgr.error.watermarkPreview': '预览水位模型失败',
+
   // 搜索
   'sandboxMgr.search.placeholder': '搜索用户编码、访问地址、会话ID',
 

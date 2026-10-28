@@ -45,6 +45,7 @@ public class EnterpriseResourceSyncService {
     @Autowired private UsersMapper users;
     @Autowired private ResourceSyncJobMapper jobs;
     @Autowired private SequenceService sequence;
+    @Autowired @Lazy private ResourceSyncDispatcher dispatcher;
 
     public void validate(EnterpriseResourceSyncRequest request) {
         // Legacy calls without new fields retain their existing import authentication behavior.
@@ -70,6 +71,12 @@ public class EnterpriseResourceSyncService {
             || !auth.isCurrentUserGlobalResourceManager()) {
             throw new IllegalArgumentException(I18nUtil.get("resource.sync.principal.required"));
         }
+    }
+
+    public boolean hasSyncPrincipal() {
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        return userId != null && userId > 0 && CurrentUserHolder.getEnterpriseId() != null
+            && CurrentUserHolder.getEnterpriseId() > 0 && auth.isCurrentUserGlobalResourceManager();
     }
 
     public void validateExisting(SsResource resource) {
@@ -134,12 +141,6 @@ public class EnterpriseResourceSyncService {
         resources.updateResourceEntity(resource);
         affected.addAll(scopeUsers);
         if (resource.getCreateBy() != null) affected.add(resource.getCreateBy());
-        if (!affected.isEmpty()) {
-            Set<Long> snapshot = Set.copyOf(affected);
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override public void afterCommit() { auth.syncUsersAuthToRedis(snapshot); }
-            });
-        }
         response.put("syncRevision", String.valueOf(revision));
         response.put("authorization", Map.of("viewReplaced", request.viewAuth() != null,
             "useReplaced", Boolean.TRUE.equals(request.autoAuthorize()), "scopeUserCount", scopeUsers.size()));
@@ -190,15 +191,26 @@ public class EnterpriseResourceSyncService {
             job.setResultSummary(inheritedResult);
             job.setAssociationMode(mode);
             job.setPackageChanged(refreshRequired);
-            job.setStatus("PENDING");
+            job.setStatus(ResourceSyncJob.PENDING);
             job.setRetryCount(0);
             job.setNextRetryTime(new Date());
             job.setCreateTime(new Date());
             job.setUpdateTime(new Date());
             jobs.insert(job);
-            response.put("association", Map.of("status", "PENDING", "jobId", String.valueOf(job.getSyncJobId())));
+            response.put("association", job.associationResult());
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    response.put("association", dispatcher.dispatch(job.getSyncJobId()));
+                }
+            });
         } else {
             response.put("association", Map.of("status", "NOT_REQUESTED"));
+            if (!affected.isEmpty()) {
+                Set<Long> snapshot = Set.copyOf(affected);
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCommit() { auth.syncUsersAuthToRedis(snapshot); }
+                });
+            }
         }
     }
 

@@ -97,7 +97,14 @@ public class TenantExecutionPolicyService {
         // This conditional update holds the cursor until ACK insert commits, fencing concurrent generations.
         if (jdbc.update("UPDATE byai.tenant_policy_cursor SET desired_revision=desired_revision WHERE enterprise_id=? AND desired_revision=? AND generation=?", enterpriseId, revision, generation) != 1)
             throw denied("POLICY_ACK_STALE");
-        jdbc.update("INSERT INTO byai.tenant_policy_consumer(enterprise_id,policy_revision,consumer_key,generation,applied_at) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", enterpriseId, revision, consumerKey, generation, Timestamp.from(clock.instant()));
+        // The cursor update above serializes ACK writers for this tenant until this transaction commits.
+        // Check the full identity under that fence; openGauss does not support PostgreSQL ON CONFLICT.
+        Integer existing = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_policy_consumer "
+            + "WHERE enterprise_id=? AND policy_revision=? AND consumer_key=? AND generation=?",
+            Integer.class, enterpriseId, revision, consumerKey, generation);
+        if (existing != null && existing > 0) return;
+        jdbc.update("INSERT INTO byai.tenant_policy_consumer(enterprise_id,policy_revision,consumer_key,generation,applied_at) VALUES (?,?,?,?,?)",
+            enterpriseId, revision, consumerKey, generation, Timestamp.from(clock.instant()));
     }
 
     public void requireExecution(long enterpriseId) {

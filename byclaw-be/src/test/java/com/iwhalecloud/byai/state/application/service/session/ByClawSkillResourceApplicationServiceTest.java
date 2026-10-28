@@ -1069,6 +1069,11 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(result.getSuccess()).isEqualTo(1);
         assertThat(result.getCreatedCount()).isEqualTo(1);
 
+        InOrder lockOrder = inOrder(ssResourceService);
+        lockOrder.verify(ssResourceService).lockSkillImport("enterprise-skill");
+        lockOrder.verify(ssResourceService).getResourceListByCode(List.of("enterprise-skill"));
+        lockOrder.verify(ssResourceService).saveResource(any(SsResource.class));
+
         ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
         verify(ssResourceService).saveResource(resourceCaptor.capture());
         assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("enterprise");
@@ -1085,6 +1090,22 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         verify(ssResourceArtifactService).upsertArtifact(eq(7101L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7101.json"),
             eq("chat-upload-skill-json"));
+    }
+
+    @Test
+    void importSkillZipLockFailureStopsBeforeReadingOrWritingResources() {
+        MockMultipartFile upload = new MockMultipartFile("file", "demo.zip", "application/zip", skillZipBytes("demo"));
+        doThrow(new org.springframework.dao.CannotAcquireLockException("lock unavailable"))
+            .when(ssResourceService).lockSkillImport("demo");
+
+        assertThatThrownBy(() -> service.importSkillZip(upload, 10L, "personal", "SKILL_MANAGE_IMPORT"))
+            .isInstanceOf(org.springframework.dao.CannotAcquireLockException.class);
+
+        verify(ssResourceService, never()).getResourceListByCode(any());
+        verify(ssResourceService, never()).saveResource(any());
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
     }
 
     @Test
@@ -1602,7 +1623,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
             eq("skill/org-hub/directory-sync/7301/" + DigestUtils.sha256Hex(bytes)),
             eq("skill.zip"), eq("application/zip"));
         verify(ssResourceRelDetailService, never()).save(any());
-        verify(resourceArtifactStorageService, never()).syncResourceJsonByBizType(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(resourceArtifactStorageService, never()).publishResourceJson(any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
     }
 

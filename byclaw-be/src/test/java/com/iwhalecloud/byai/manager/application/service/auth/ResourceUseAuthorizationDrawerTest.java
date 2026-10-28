@@ -360,8 +360,7 @@ class ResourceUseAuthorizationDrawerTest {
                 String.class)).isEqualTo("X");
             assertThat(jdbc.queryForObject("SELECT status_cd FROM au_privilege_grant WHERE grant_to_obj_id=5",
                 String.class)).isEqualTo("A");
-            verify(cache).asyncSyncAuthChangedUsers(java.util.Set.of(2L), GrantType.AVAILABLE_USE);
-            verify(cache).asyncSyncAuthChangedUsers(java.util.Set.of(5L), GrantType.FORCE_USE);
+            verify(cache).asyncSyncAuthChangedUsers(java.util.Set.of(2L, 5L), "AVAILABLE_USE,FORCE_USE");
             verify(redisSets).remove("DATASET:AUTHORITY:1_RED_READ_PERSON_2", "SKILL_13");
         }
     }

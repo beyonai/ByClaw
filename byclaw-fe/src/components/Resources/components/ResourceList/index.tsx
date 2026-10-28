@@ -622,7 +622,10 @@ const ResourceList: React.FC<ResourceListProps> = ({
         // 我可用的技能保留发布入口，由卡片判断版本和发布权限；浏览页仍隐藏其他生命周期操作。
         hiddenMenuItemKeys: [
           ...(resourceType === 'SKILL' && activeTab === 'personal' ? ['share'] : []),
-          ...(!myResourcesOnly ? ['shelfData', 'unShelfData', 'deleteData', 'delete'] : []),
+          // 知识库在浏览入口也允许按后端权限维护，包括下架后删除。
+          ...(!myResourcesOnly && !['KG_DOC', 'KG_QA', 'KG_TERM'].includes(resourceType)
+            ? ['shelfData', 'unShelfData', 'deleteData', 'delete']
+            : []),
           ...(!myResourcesOnly && !(resourceType === 'SKILL' && activeTab === 'personal')
             ? ['publishToEnterprise']
             : []),
