@@ -42,11 +42,15 @@ const MarkdownRender = React.memo(
     markdownClass,
     text,
     wrap,
+    sessionId,
+    messageId,
     myExtensions = emptyArr,
   }: {
     markdownClass?: string;
     text: string;
     wrap: React.RefObject<HTMLDivElement | null>;
+    sessionId?: string;
+    messageId?: string;
     myExtensions?: Array<{
       type: string;
       filter: (inputText: string) => string;
@@ -108,14 +112,14 @@ const MarkdownRender = React.memo(
             return <ImgComponent key={src} src={src} alt={alt} />;
           }
           if (domNode.name === 'a') {
-            return <ATag domNode={domNode} />;
+            return <ATag domNode={domNode} sessionId={sessionId} messageId={messageId} />;
           }
 
           return domNode;
         },
       };
       return parse(desc, options);
-    }, [desc]);
+    }, [desc, sessionId, messageId]);
 
     return (
       <div
@@ -147,7 +151,7 @@ function TextComp({
 }) {
   const { messageState, msgId, messageId, thinkDone, fromBeyond = true } = msg || {};
 
-  const { layoutMode } = useGlobal();
+  const { layoutMode, sessionId: activeSessionId } = useGlobal();
 
   const wrap = React.useRef<HTMLDivElement | null>(null);
 
@@ -200,7 +204,14 @@ function TextComp({
           <JsonRenderer data={jsonCheck.data} defaultExpanded={defaultExpandJson} />
         </div>
       ) : (
-        <MarkdownRender text={myText} wrap={wrap} markdownClass={markdownClass} myExtensions={myExtensions} />
+        <MarkdownRender
+          text={myText}
+          wrap={wrap}
+          markdownClass={markdownClass}
+          myExtensions={myExtensions}
+          sessionId={msg ? msg.sessionId || activeSessionId : undefined}
+          messageId={messageId || msgId}
+        />
       )}
     </div>
   );
