@@ -499,7 +499,9 @@ public class SandboxController {
         List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
                 // Display the live runtime state when the engine still has the instance.
                 // This projection never updates the persisted lifecycle record.
-                String liveStatus = inventory.get(record.getSandboxId());
+                // Map.of() rejects a null key. Persisted rows can have no sandbox id.
+                String sandboxId = record.getSandboxId();
+                String liveStatus = sandboxId == null ? null : inventory.get(sandboxId);
                 if (liveStatus != null) {
                     record.setStatus(liveStatus);
                 }
