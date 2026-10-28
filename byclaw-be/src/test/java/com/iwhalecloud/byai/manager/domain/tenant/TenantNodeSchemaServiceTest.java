@@ -14,6 +14,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class TenantNodeSchemaServiceTest {
+    @org.junit.jupiter.api.Test
+    void acsGatewayEndpointAcceptsHttpsAndNormalizesTrailingSlash() {
+        var service = new TenantNodeSchemaService(null, new com.fasterxml.jackson.databind.ObjectMapper(), "", "", "", "token");
+        var uri = (java.net.URI) org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,
+            "nodeUri", "https://tenant.example.test/kruise/node/3100/");
+        org.junit.jupiter.api.Assertions.assertEquals("https://tenant.example.test/kruise/node/3100", uri.toString());
+    }
+
 
     @Test
     void loadsBundledBaselineWhenNoExternalPathIsConfigured() throws Exception {

@@ -368,7 +368,12 @@ public class TenantSandboxService {
         if (spec.getResourceLimits() == null || spec.getResourceLimits().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.profile.unavailable");
         }
-        prepareEntrypoint(enterpriseId);
+        // Persistent volumes are initialized by the provider on the tenant NAS space.
+        // The tenant database image already contains its startup script.
+        boolean providerStorage = spec.getVolumes() != null && !spec.getVolumes().isEmpty()
+            && spec.getVolumes().stream().allMatch(volume -> volume != null
+                && "persistent".equals(volume.getType()) && volume.getHostPath() == null);
+        if (!providerStorage) prepareEntrypoint(enterpriseId);
 
         Date now = new Date();
         SsSandboxRecord record = new SsSandboxRecord();

@@ -369,3 +369,12 @@ BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 �
 Voice INPUT mirrors preserve `metadata: { messageType: "VOICE", voice: { fileId, fileName, mimeType: "audio/mpeg", durationMs? } }` in the message history JSON. The reference uses an owned positive decimal file ID, an MP3 filename of at most 512 UTF-8 bytes, and an optional integer duration from 1 to 300000 milliseconds. Contract validation and the persistence writer reject extra voice fields, audio base64, provider configuration, and signed URLs. The producer hash includes this metadata; consumers do not rewrite the envelope before checking it. Ordinary INPUT events can omit metadata. The backend mirror/outbox producer must use the same allowlist.
 
 群聊转发回归使用 `../byclaw-qa/fixtures/group-chat-forward/` 中的跨端共用夹具，覆盖 ID 规范化、资源名称冻结和同租户成员资格。快照资源引用仅投影公开展示字段，不恢复 `resourceCode`、`extData`；缺少转发来源标识的旧快照附件仅保留名称、类型和大小，已发布的目标文件副本保留预览信息。
+
+
+### ACS + NAS 租户开通
+
+租户数据库与 Node 的服务和资源档位始终读取 `sandbox_service_spec` / `sandbox_service_profile`，由表中 `enabled` 控制，不再依赖 `BYCLAW_SANDBOX_PROFILE_ENABLED`。显式指定的档位不存在或已禁用时，开通失败，不回退到内嵌资源限制。
+
+ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态目录挂到各租户的 NAS 私有空间，由 Provider 的 init container 初始化目录权限；BE 不再为这类卷写旧 NFS 挂载目录。数据库租户镜像内置启动脚本。Node 镜像包含该初始化器需要的 Python 3，状态目录使用镜像自身的 UID/GID 1000。
+
+数据库端口必须返回 VPC 内网 TCP 地址，不能通过 HTTP 网关连接。Node 通过 Downward API 的 `POD_IP` 注册服务，BE 与 Node 需要能访问该 VPC。BE 的租户主密钥须持久保留，切换存储或更新环境时不能重新生成；内部鉴权配置、Redis 与 BE 内网地址同样需要保留。

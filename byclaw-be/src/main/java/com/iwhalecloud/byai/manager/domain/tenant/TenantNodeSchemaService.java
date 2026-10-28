@@ -89,7 +89,7 @@ public class TenantNodeSchemaService {
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId, long fencingToken) throws Exception {
         if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
-        if (internalToken == null || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
+        if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
         }
         byte[] bundle = readBundle();
@@ -206,10 +206,13 @@ public class TenantNodeSchemaService {
 
     private URI nodeUri(String endpoint) {
         if (endpoint == null || endpoint.isBlank()) throw new IllegalStateException("tenant Node endpoint is missing");
+        if (endpoint.startsWith("/") && (sandboxBaseUrl == null || sandboxBaseUrl.isBlank())) {
+            throw new IllegalStateException("tenant Node relative endpoint requires a sandbox base URL");
+        }
         String value = endpoint.startsWith("/")
             ? sandboxBaseUrl.replaceAll("/+$", "") + endpoint : endpoint;
-        URI uri = URI.create(value);
-        if (!"http".equals(uri.getScheme()) || uri.getHost() == null) {
+        URI uri = URI.create(value.replaceAll("/+$", ""));
+        if ((!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) || uri.getHost() == null) {
             throw new IllegalStateException("tenant Node HTTP endpoint is invalid");
         }
         return uri;
