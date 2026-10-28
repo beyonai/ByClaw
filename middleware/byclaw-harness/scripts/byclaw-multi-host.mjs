@@ -35,7 +35,8 @@
  *   BYCLAW_MULTI_HOST_PORT         admin API + gateway port (default 7300).
  *   BYCLAW_MULTI_HOST_LISTEN_HOST  listen address (default 0.0.0.0).
  *   BYCLAW_MULTI_HOST_ID           host id written into Redis claims (default: hostname).
- *   BYCLAW_MULTI_HOST_ROOT         state root; user homes are <root>/users/<userCode>/dsh-home (default /data/multi-host).
+ *   BYCLAW_MULTI_HOST_ROOT         host runtime/profile/fence root (default /data/multi-host).
+ *   BYCLAW_MULTI_HOST_USER_ROOT    optional shared NAS context root (managed hosts only); homes are <userRoot>/<contextKey>/dsh-home.
  *   BYCLAW_MULTI_HOST_USERS        optional comma list booted at startup (sandboxId `multi-host-<userCode>`).
  *   BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY  simultaneous context boots per process (positive integer; default 1).
  *   BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY  waiting boots per process (nonnegative integer; default 128; overflow 429).
@@ -75,7 +76,7 @@ import { lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/pr
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { hostname } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, isAbsolute, relative } from 'node:path'
 import { Transform } from 'node:stream'
 import { inspect } from 'node:util'
 import { pathToFileURL } from 'node:url'
@@ -138,11 +139,11 @@ export const USER_ROW_OVERLAYS = {
   'agent-teams': (user, home) => ({ dshHome: home, workspaceOnToolEnvironment: true, workspace: '/by' }),
   'better-sidebar': () => ({ workspaceOnToolEnvironment: true }),
   'iron-rules': () => ({ workspaceOnToolEnvironment: true }),
-  'byclaw-browser-use': (user, home) => ({
+  'byclaw-browser-use': (user, home, spec) => ({
     ownsRuntime: true,
     // Managed context IDs are long; keep sockets outside the context directory.
-    // Hash the full home so the same user in different pools stays isolated.
-    runtimeDir: join(home, '..', '..', '..', 'run', createHash('sha256').update(home).digest('hex').slice(0, 24), 'browser'),
+    // Managed shared-storage boots supply a host-local runtime directory.
+    runtimeDir: spec.runtimeDir ?? join(home, '..', '..', '..', 'run', createHash('sha256').update(home).digest('hex').slice(0, 24), 'browser'),
     dshHome: home,
     browserdEnv: Object.fromEntries(['BYCLAW_BROWSER_EXECUTABLE_PATH', 'BYCLAW_BROWSER_NOVNC_DIR', 'PLAYWRIGHT_BROWSERS_PATH']
       .filter(key => process.env[key]).map(key => [key, process.env[key]])),
@@ -390,6 +391,17 @@ export function readHostConfig(env) {
   if (!Number.isSafeInteger(startupConcurrency) || startupConcurrency < 1) throw new Error('BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY must be a positive integer')
   const startupQueueCapacity = Number(env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY ?? 128)
   if (!Number.isSafeInteger(startupQueueCapacity) || startupQueueCapacity < 0 || env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY?.trim() === '') throw new Error('BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY must be a nonnegative integer')
+  const root = env.BYCLAW_MULTI_HOST_ROOT ?? '/data/multi-host'
+  const userRoot = env.BYCLAW_MULTI_HOST_USER_ROOT
+  if (userRoot !== undefined) {
+    const nested = (a, b) => {
+      const path = relative(resolve(a), resolve(b))
+      return path === '' || (!path.startsWith('../') && path !== '..' && !isAbsolute(path))
+    }
+    if (!managed || !isAbsolute(userRoot) || userRoot === '/' || nested(root, userRoot) || nested(userRoot, root)) {
+      throw new Error('BYCLAW_MULTI_HOST_USER_ROOT requires managed mode and an absolute root separate from the host root')
+    }
+  }
   const capacity = Number(env.BYCLAW_MULTI_HOST_CAPACITY)
   if (managed && !/^[0-9a-f-]{36}$/i.test(env.BYCLAW_MULTI_HOST_ID ?? '')) throw new Error('BYCLAW_MULTI_HOST_ID must be a shared instance UUID')
   if (managed && (!Number.isSafeInteger(capacity) || capacity < 1)) throw new Error('BYCLAW_MULTI_HOST_CAPACITY must be positive')
@@ -413,7 +425,7 @@ export function readHostConfig(env) {
     port,
     listenHost: env.BYCLAW_MULTI_HOST_LISTEN_HOST || '0.0.0.0',
     hostId: env.BYCLAW_MULTI_HOST_ID || hostname(),
-    root: env.BYCLAW_MULTI_HOST_ROOT ?? '/data/multi-host',
+    root, userRoot,
     managed, capacity, startupConcurrency, startupQueueCapacity,
     preloadUsers: managed ? [] : preloadUsers,
     publicBase,
@@ -1222,6 +1234,21 @@ export async function preloadHostRuntime(config) {
   return preloadConfiguredModules(entries, name => pathToFileURL(require.resolve(name)).href)
 }
 
+/** Durable homes follow stable context identity; profiles and sockets follow the executor. */
+export function userContextPaths(config, user) {
+  if (!isValidUserCode(user)) throw new Error('invalid user context path')
+  if (config.userRoot && !config.managed) throw new Error('shared user homes require managed mode')
+  const userDir = join(config.root, 'users', user)
+  const home = join(config.userRoot ? join(config.userRoot, user) : userDir, 'dsh-home')
+  return {
+    home,
+    profile: join(userDir, 'profile'),
+    runtimeDir: config.userRoot
+      ? join('/tmp/byclaw-multi-host', createHash('sha256').update(`${config.hostId ?? ''}\n${config.root}\n${user}`).digest('hex').slice(0, 24), 'browser')
+      : join(config.root, 'run', createHash('sha256').update(home).digest('hex').slice(0, 24), 'browser'),
+  }
+}
+
 /**
  * Boot one user's DSH context; resolves to a registry handle.
  * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
@@ -1239,9 +1266,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = appBoot
   const { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } = launchEnvironment
-  const userDir = join(config.root, 'users', user)
-  const home = join(userDir, 'dsh-home')
-  const dir = join(userDir, 'profile')
+  const { home, profile: dir, runtimeDir } = userContextPaths(config, user)
   await mkdir(home, { recursive: true, mode: 0o700 })
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await writeFile(join(dir, 'package.json'), await readFile(join(config.managedProfile, 'package.json'), 'utf8'))
@@ -1261,6 +1286,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   const spec = {
     ...request,
     contextKey: user,
+    runtimeDir,
     env: request.env,
     toolEnvBackend: config.toolEnvBackend,
     toolEnvTemplate: config.toolEnvTemplate,
@@ -1335,9 +1361,11 @@ export function createHostRedis(Redis, env) {
     db: Number(env.REDIS_DATABASE || 0), lazyConnect: false, maxRetriesPerRequest: 3 })
 }
 
-export function createManagedClaims(redis, instanceId) {
+export function createManagedClaims(redis, instanceId, { sharedStorage = false } = {}) {
   const nonce = randomBytes(16).toString('hex')
-  const key = (context, request) => `byclaw:dsh:managed-host:context:${context}:${request.generation}`
+  const key = (context, request) => sharedStorage
+    ? `byclaw:dsh:managed-host:storage:${context}`
+    : `byclaw:dsh:managed-host:context:${context}:${request.generation}`
   const owner = request => `${instanceId}:${request.mappingId}:${request.generation}:${nonce}`
   return {
     async claim(context, request) {
@@ -1362,7 +1390,7 @@ async function main() {
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
   const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))
-  const managedClaims = config.managed ? createManagedClaims(redis, config.hostId) : undefined
+  const managedClaims = config.managed ? createManagedClaims(redis, config.hostId, { sharedStorage: Boolean(config.userRoot) }) : undefined
   const Registry = config.managed ? ManagedUserRegistry : UserRegistry
   const registry = new Registry({
     root: config.root, hostId: config.hostId, capacity: config.capacity, startupConcurrency: config.startupConcurrency, startupQueueCapacity: config.startupQueueCapacity,

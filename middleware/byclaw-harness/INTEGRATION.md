@@ -147,3 +147,43 @@ python3 scripts/browser-supervisor-verify.py
 ```
 
 完整结果见[启动优化与验收边界](docs/startup-2026-10-22/startup-extreme-report.md)。
+
+
+## 共享宿主跨实例恢复会话
+
+受管共享宿主可配置 `BYCLAW_MULTI_HOST_USER_ROOT=/data/byclaw-contexts`，将用户的
+`<contextKey>/dsh-home` 放在所有共享宿主共用的 NAS 目录。`contextKey` 包含稳定的业务服务、
+租户、用户身份，与宿主 ID、容量档位、分配 generation 无关。未设置该参数时保留旧目录布局；
+非受管模式或与宿主根目录重叠的路径会拒绝启动。
+
+`BYCLAW_MULTI_HOST_ROOT=/data/multi-host` 继续保存当前宿主的 profile 和 managed-fences。
+共享模式下浏览器 socket 放在容器 `/tmp/byclaw-multi-host/<宿主及用户哈希>/browser`，不放 NAS。
+JSONL、版本化/压缩会话、storages、附件、team-state 等随用户 home 保留。释放上下文不删除 home。
+新宿主复用原 ByClaw session ID 和 `/by` 工作目录，调用现有 DSH resume；不保证恢复正在执行的
+外部工具调用或浏览器进程。不要将宿主的 managed-fences/profile/socket 复制到另一宿主。
+
+platform 的 `SHARED` 规格使用 `sharedStorageNamespace=byclaw-shared-dsh`，卷仍为 PRIVATE。
+服务拥有一个独立 SERVICE NAS 空间，里面分别挂载 `hosts/${user_code}/multi-host` 和 `contexts`。
+禁止使用 PUBLIC 卷绕过归属校验。当前空间配额沿用 NAS 默认配额，应按留存量监控和扩容。
+共享存储启用时 Redis 占用键按 contextKey 互斥，generation 保留在持有者值内；释放原子校验持有者。
+DSH 自身会话文件锁继续作为写入保护，NAS 跨 Pod 锁语义需要部署验收。
+
+升级需同时更新 platform 和 Harness 镜像，执行 platform V0.6.0 的 DDL/DML 增量后重建宿主。
+不能混用新旧宿主继续接单：先排空并停止旧上下文，更新完成后再重建宿主。
+本次不迁移旧宿主历史会话，旧 NAS 空间保留；新布局产生的会话支持后续跨共享宿主恢复。
+若实际部署使用静态 PVC，路径前还有 `shared/byclaw-shared-dsh/`；使用 NAS pool 时平台会将
+这一逻辑前缀替换为对应的 `spaces/<spaceKey>/`。
+
+本地验证：
+
+```bash
+DSH_SOURCE_ROOT=/path/to/built/deepseek-harness node --test \
+  middleware/byclaw-harness/scripts/byclaw-multi-host.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-managed-host.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-shared-storage-claims.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-shared-session-resume.test.mjs
+```
+
+其中 Redis 测试启动独立临时 Redis；恢复测试使用指定 DSH 构建的真实 JSONL 后端，不调用模型。
+云端需验证：A 宿主完成会话→排空释放→B 宿主恢复相同会话并正确回答历史信息；同时确认不同
+租户/用户不可串读、双写被拒绝、NAS 不可用时启动失败、释放宿主后数据仍存在。

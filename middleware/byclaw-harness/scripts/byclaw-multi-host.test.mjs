@@ -746,3 +746,33 @@ test('legacy admin API reports startup overload as retryable 429', async t => {
     assert.match((await response.json()).error, /startup queue/)
   } finally { gate.resolve(); await first }
 })
+
+
+test('managed homes survive host reassignment while profiles and sockets stay host-local', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'shared-context-home-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const user = `ctx_${'a'.repeat(64)}`
+  const config = { managed: true, root: join(root, 'host-a'), userRoot: join(root, 'contexts') }
+  const a = host.userContextPaths(config, user)
+  const b = host.userContextPaths({ ...config, root: join(root, 'host-b') }, user)
+  assert.equal(a.home, b.home)
+  assert.notEqual(a.profile, b.profile)
+  assert.notEqual(a.runtimeDir, b.runtimeDir)
+  assert.ok(a.runtimeDir.startsWith('/tmp/'), 'Unix sockets must not live on NAS')
+  assert.ok(Buffer.byteLength(`${a.runtimeDir}/browserd.sock`) <= 107)
+  assert.notEqual(a.home, host.userContextPaths(config, `ctx_${'b'.repeat(64)}`).home)
+  await mkdir(join(a.home, 'sessions'), { recursive: true })
+  await writeFile(join(a.home, 'sessions', 'session.v1.jsonl'), 'persisted history')
+  await rm(config.root, { recursive: true, force: true })
+  assert.equal(await readFile(join(b.home, 'sessions', 'session.v1.jsonl'), 'utf8'), 'persisted history')
+  const entries = [{ id: 'byclaw-browser-use', name: 'browser' }, { id: 'session-persistence-jsonl', name: 'sessions' }]
+  const first = composeUserOverlays(entries, user, a.home, { ...spec, runtimeDir: a.runtimeDir })
+  const second = composeUserOverlays(entries, user, b.home, { ...spec, runtimeDir: b.runtimeDir })
+  assert.notEqual(first.find(r => r.id === 'byclaw-browser-use').config.runtimeDir, second.find(r => r.id === 'byclaw-browser-use').config.runtimeDir)
+  assert.equal(first.find(r => r.id === 'session-persistence-jsonl').config.root, second.find(r => r.id === 'session-persistence-jsonl').config.root)
+})
+
+test('legacy homes stay unchanged and context path traversal is rejected', () => {
+  assert.equal(host.userContextPaths({ root: '/data/host' }, 'alice').home, '/data/host/users/alice/dsh-home')
+  assert.throws(() => host.userContextPaths({ root: '/data/host', userRoot: '/data/shared', managed: true }, '../alice'))
+})

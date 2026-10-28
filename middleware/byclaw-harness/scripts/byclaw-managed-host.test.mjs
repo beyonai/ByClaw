@@ -305,3 +305,15 @@ test('failed forced stop retains the context and claim for retry', async t => {
   await r.remove('tenant-a', { ...request(), force: true })
   assert.equal(released, true); assert.equal(r.get('tenant-a'), undefined)
 })
+
+
+test('shared user root is explicit, managed-only and separate from host-owned files', () => {
+  const env = { BYCLAW_MULTI_HOST_TOKEN: 'fixture', BYCLAW_MULTI_HOST_MANAGED: '1',
+    BYCLAW_MULTI_HOST_ID: instanceId, BYCLAW_MULTI_HOST_CAPACITY: '10',
+    BYCLAW_MULTI_HOST_ROOT: '/data/host', BYCLAW_MULTI_HOST_USER_ROOT: '/data/contexts' }
+  assert.equal(host.readHostConfig(env).userRoot, '/data/contexts')
+  for (const root of ['', '/', '/data/host', '/data/host/users', '/data', 'relative']) {
+    assert.throws(() => host.readHostConfig({ ...env, BYCLAW_MULTI_HOST_USER_ROOT: root }), /USER_ROOT/)
+  }
+  assert.throws(() => host.readHostConfig({ ...env, BYCLAW_MULTI_HOST_MANAGED: '0' }), /managed/)
+})
