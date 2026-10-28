@@ -24,6 +24,16 @@ test('both image builds link installation peers after plugin install and before 
   }
 })
 
+test('every business image verifies the actual shared launcher and packed employee scopes', async () => {
+  for (const name of ['Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim']) {
+    const source = await readFile(new URL(`../${name}`, import.meta.url), 'utf8')
+    const copy = source.indexOf('scripts/verify-shared-runtime.mjs /workspace/scripts/')
+    const install = source.indexOf('pnpm dsh plugin --profile web add')
+    const guard = source.indexOf('node scripts/verify-shared-runtime.mjs /workspace')
+    assert.ok(copy >= 0 && copy < install && guard > install, name)
+  }
+})
+
 // Run inside the pinned DSH builder workspace with:
 // DSH_ROOT=/workspace node --test scripts/dsh-profile-runtime.test.mjs
 // The test uses DSH's real runtime resolution and isolated business packages.

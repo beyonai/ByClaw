@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
 import test from 'node:test'
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as host from './byclaw-multi-host.mjs'
 import {
   webStartupValues, prepareUserProfile,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
@@ -9,6 +13,51 @@ import {
   parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewLaunchEnvironment, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
+
+test('shared host imports the installed runtime once from its CLI anchor, independent of cwd', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'shared-host-runtime-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const anchor = join(root, 'package.json')
+  await writeFile(anchor, '{}')
+  for (const name of ['dsh-app-boot', 'dsh-launch-environment']) {
+    const dir = join(root, 'node_modules/@deepseek-ai', name)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module', exports: './compiled.js' }))
+    await writeFile(join(dir, 'compiled.js'), 'export const identity = {}')
+  }
+  const [one, two] = await Promise.all([host.loadHostRuntime(anchor), host.loadHostRuntime(anchor)])
+  assert.equal(one, two, 'all user contexts reuse the runtime modules, not a user context')
+  assert.ok(one.appBoot.identity)
+  assert.ok(one.launchEnvironment.identity)
+  const missing = await mkdtemp(join(tmpdir(), 'missing-host-runtime-'))
+  t.after(() => rm(missing, { recursive: true, force: true }))
+  await assert.rejects(host.loadHostRuntime(join(missing, 'package.json')), /Cannot find module/)
+})
+
+test('shared host entrypoint uses compiled Node runtime without the source alias loader', async () => {
+  const source = await readFile(new URL('../docker-entrypoint.sh', import.meta.url), 'utf8')
+  const shared = source.slice(source.indexOf('if [[ "${1:-}" == multi-host ]]'), source.indexOf('if [[ "${BYCLAW_DSH_PREPARED'))
+  assert.match(shared, /exec node "\$\{launcher\}"/)
+  assert.doesNotMatch(shared, /tsx/)
+})
+
+test('module preloading deduplicates active rows without activating plugins or hiding import failures', async () => {
+  const loaded = []
+  const rows = [
+    { name: 'one' }, { name: 'one' }, { name: 'disabled', disabled: true },
+    { id: 'codegraph-mcp', name: 'host-only' },
+    { name: 'group', config: [{ name: 'two' }, { name: 'missing' }, { name: 'three' }] },
+    { name: 'group', disabled: true, config: [{ name: 'also-disabled' }] },
+  ]
+  const result = await host.preloadConfiguredModules(rows, name => name, async name => {
+    loaded.push(name)
+    if (name === 'missing') throw new Error('fixture import failure')
+    return { apply: () => assert.fail('preload must never activate a plugin') }
+  })
+  assert.deepEqual(loaded, ['one', 'two', 'missing', 'three'])
+  assert.deepEqual(result, { loaded: 3, failed: ['missing'] })
+  assert.equal(rows[0].name, 'one')
+})
 
 const spec = {
   sandboxId: 'sbx-1', env: { BEYOND_TOKEN: 'jwt-u1' }, toolEnvBackend: 'opensandbox',

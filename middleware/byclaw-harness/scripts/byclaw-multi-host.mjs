@@ -62,8 +62,8 @@
  * `byclaw:dsh:shared-host:user:<userCode>` = hostId (EX 90, renewed every 30 s).
  * A failed context is no longer renewed, so its claim lapses unless a PUT retries.
  *
- * Run from the DSH workspace through tsx (inside the ByClaw DSH image):
- *   BYCLAW_MULTI_HOST_TOKEN=... node --import tsx/esm scripts/byclaw-multi-host.mjs
+ * Run with the image's compiled DSH installation (never source aliases via tsx):
+ *   BYCLAW_MULTI_HOST_TOKEN=... node scripts/byclaw-multi-host.mjs
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
@@ -1170,6 +1170,58 @@ export function prepareUserProfile(runtime, base, profile, user, spec) {
   return { profileContext: { ...base, overlays }, patches: [...patches, ...overlays] }
 }
 
+const hostRuntimes = new Map()
+
+/** Share compiled modules only. User profiles, scopes and resource snapshots remain per-context. */
+export function loadHostRuntime(installAnchor) {
+  let runtime = hostRuntimes.get(installAnchor)
+  if (runtime === undefined) {
+    runtime = (async () => {
+      // Resolve from the installation, not this script or cwd. The workspace root
+      // has no runtime dependencies; tsx used to hide this with source aliases,
+      // splitting dsh-scope identity from packed plugins and recompiling on boot.
+      const require = createRequire(installAnchor)
+      const [appBoot, launchEnvironment] = await Promise.all([
+        import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href),
+        import(pathToFileURL(require.resolve('@deepseek-ai/dsh-launch-environment')).href),
+      ])
+      return { appBoot, launchEnvironment }
+    })()
+    hostRuntimes.set(installAnchor, runtime)
+  }
+  return runtime
+}
+
+/** Warm module code only; Loader still owns activation, injection and failure diagnostics. */
+export async function preloadConfiguredModules(entries, resolveModule, importModule = url => import(url)) {
+  const names = new Set()
+  const visit = rows => {
+    for (const row of rows) {
+      if (row.disabled || disabledRule(row)) continue
+      if (row.name === 'group') {
+        if (Array.isArray(row.config)) visit(row.config)
+      } else if (typeof row.name === 'string') names.add(row.name)
+    }
+  }
+  visit(entries)
+  const failed = []
+  // Bound startup CPU/memory rather than creating hundreds of concurrent imports.
+  for (const name of names) {
+    try { await importModule(resolveModule(name)) } catch { failed.push(name) }
+  }
+  return { loaded: names.size - failed.length, failed }
+}
+
+export async function preloadHostRuntime(config) {
+  const { appBoot } = await loadHostRuntime(config.installAnchor)
+  // Read only the immutable image profile. User patches and resource manifests
+  // must be read in that user's context, never cached in the shared host.
+  const profile = appBoot.loadProfileDirectory(BIN, config.managedProfile, config.installAnchor, { userLayer: false })
+  const entries = appBoot.composeEntries(profile.layers.map(layer => layer.patches))
+  const require = createRequire(join(config.managedProfile, 'package.json'))
+  return preloadConfiguredModules(entries, name => pathToFileURL(require.resolve(name)).href)
+}
+
 /**
  * Boot one user's DSH context; resolves to a registry handle.
  * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
@@ -1182,10 +1234,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     log(`context ${user} boot phase=${name}; phaseMs=${Math.round(now - previous)}; elapsedMs=${Math.round(now - started)}`)
     previous = now
   }
+  const { appBoot, launchEnvironment } = await loadHostRuntime(config.installAnchor)
   const {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
-  } = await import('@deepseek-ai/dsh-app-boot')
-  const { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } = await import('@deepseek-ai/dsh-launch-environment')
+  } = appBoot
+  const { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } = launchEnvironment
   const userDir = join(config.root, 'users', user)
   const home = join(userDir, 'dsh-home')
   const dir = join(userDir, 'profile')
@@ -1299,8 +1352,13 @@ export function createManagedClaims(redis, instanceId) {
 
 async function main() {
   const config = readHostConfig(process.env)
-  // Every context in this process runs its tools in a tool environment.
+  // Establish host defaults before evaluating any plugin modules.
   process.env.BYCLAW_DSH_TOOL_ENV ??= 'opensandbox'
+  const runtimeStarted = performance.now()
+  // Load the shared runtime before advertising readiness, without registering a
+  // user, loading employee resources or starting a tool environment.
+  const preloaded = await preloadHostRuntime(config)
+  log(`compiled runtime ready; elapsedMs=${Math.round(performance.now() - runtimeStarted)}; modules=${preloaded.loaded}; failed=${JSON.stringify(preloaded.failed)}`)
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
   const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))

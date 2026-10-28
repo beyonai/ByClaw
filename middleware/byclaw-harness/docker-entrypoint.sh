@@ -72,9 +72,9 @@ if [[ "${1:-}" == multi-host ]]; then
     launcher=/workspace/scripts/byclaw-multi-host.mjs
     if ((EUID == 0)); then
         exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
-            env HOME=/home/byclaw node --import tsx/esm "${launcher}" "$@"
+            env HOME=/home/byclaw node "${launcher}" "$@"
     fi
-    exec node --import tsx/esm "${launcher}" "$@"
+    exec node "${launcher}" "$@"
 fi
 
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then
