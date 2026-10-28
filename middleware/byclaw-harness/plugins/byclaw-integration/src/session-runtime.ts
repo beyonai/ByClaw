@@ -1884,12 +1884,15 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       )
     }
     if (record?.answer === undefined) return false
-    const originalCallRepair = parkedAskReleased && await repairColdAskUserQuestionSession(
-      this.ctx.sessionPersistence, record.agentSessionId, record,
-    ).catch(error => {
-      this.ctx.logger.warn(`byclaw-dsh failed to repair recovered ask_user_question call: ${sanitizeByClawOperationalLog(error)}`)
-      return false
-    })
+    let originalCallRepair: Awaited<ReturnType<typeof repairColdAskUserQuestionSession>> = false
+    if (parkedAskReleased) {
+      originalCallRepair = await repairColdAskUserQuestionSession(
+        this.ctx.sessionPersistence, record.agentSessionId, record,
+      ).catch(error => {
+        this.ctx.logger.warn(`byclaw-dsh failed to repair recovered ask_user_question call: ${sanitizeByClawOperationalLog(error)}`)
+        return false
+      })
+    }
     this.ctx.logger.info(
       `[ASK_USER_QUESTION_RECOVERY_TRACE] ORIGINAL_CALL_REPAIR interaction=${recoveredInteractionId} session=${command.header.sessionId} parked=${parkedAskReleased} repaired=${originalCallRepair !== false}`,
     )
