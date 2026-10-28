@@ -61,3 +61,5 @@ Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；�
 外部系统可继续通过租户 runtime 查询当前删除状态及删除命令编号，通过 commands 接口查询命令回执；历史开通成功不会覆盖删除状态。事件按既有 durable outbox 机制交付，消费方须订阅并处理上述删除事件，不能将仅发布事件等同于外部 UI 已完成同步。前端删除失败会在确认框展示本地化错误并允许重试。本地 development 实例不自动领取持久化命令或旧删除重试任务。
 
 本次需发布 BE 和 FE；沿用 ACS/NAS 统一删除接口，不新增 SQL 迁移、租户镜像或 Harness 镜像。
+
+管理员托管租户删除与 `byclaw.integration.enabled` 解耦。该开关关闭或未配置时仍可受理删除；独立定时任务只领取 `DELETE` 命令，外部开通 worker 只领取 `PROVISION`，不会因清理失败租户而重新开启其他开通任务。`MANUAL_REQUIRED / SCHEMA_INIT` 且已绑定沙箱的租户沿用完整资源和 NAS 清理流程。

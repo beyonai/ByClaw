@@ -30,8 +30,6 @@ public class TenantCommandWorker {
     private final TenantDbProvisioningService provisioner;
     private final TenantExecutionPolicyService policies;
     private final HookPublisher hooks;
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
-    private TenantManagedDeletionService managedDeletion;
     public TenantCommandWorker(TenantCommandStore store,JdbcTemplate jdbc,PlatformTransactionManager transactions,
         ObjectMapper json,TenantDbProvisioningService provisioner,TenantExecutionPolicyService policies,HookPublisher hooks) {
         this.store=store;this.jdbc=jdbc;this.tx=new TransactionTemplate(transactions);this.json=json;
@@ -44,24 +42,9 @@ public class TenantCommandWorker {
         if (RuntimeEnvironment.isDevelopment()) {
             return;
         }
-        for(long id:store.candidates()) {
+        for(long id:store.candidates("PROVISION")) {
             var lease=store.claim(id,worker,Duration.ofMinutes(30));
             if(lease==null) continue;
-            if ("DELETE".equals(store.find(id).type()) && managedDeletion != null) {
-                try { managedDeletion.execute(lease); }
-                catch (Exception error) {
-                    try {
-                        managedDeletion.failed(lease, error);
-                        LOG.warn("Tenant deletion deferred commandId={} enterpriseId={} exceptionType={} failurePath={}",
-                            id, lease.enterpriseId(), error.getClass().getName(), failurePath(error));
-                    }
-                    catch (Exception stale) {
-                        LOG.warn("Tenant deletion acknowledgement deferred commandId={} enterpriseId={} exceptionType={}",
-                            id, lease.enterpriseId(), stale.getClass().getName());
-                    }
-                }
-                continue;
-            }
             try {
                 if(!"PROVISION".equals(store.find(id).type())) throw new TenantCommandException(409,"COMMAND_TYPE_UNSUPPORTED");
                 var guard = new TenantProvisioningGuard(store,jdbc,tx,json,lease);

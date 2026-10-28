@@ -47,13 +47,13 @@ public class TenantCommandStore {
             rs.getString("status"),rs.getString("stage"),rs.getString("error_code"),rs.getLong("revision")),args);
         return rows.isEmpty() ? null : rows.getFirst();
     }
-    public List<Long> candidates() {
+    public List<Long> candidates(String type) {
         return jdbc.queryForList("""
-            SELECT id FROM byai.internal_command WHERE
+            SELECT id FROM byai.internal_command WHERE type=? AND (
             (status IN ('PENDING','RETRY_WAIT') AND next_attempt_at<=CURRENT_TIMESTAMP)
-            OR (status='RUNNING' AND lease_until<CURRENT_TIMESTAMP)
+            OR (status='RUNNING' AND lease_until<CURRENT_TIMESTAMP))
             ORDER BY created_at LIMIT 10
-            """,Long.class);
+            """,Long.class,type);
     }
     public Lease claim(long id,String worker,Duration duration) {
         // The winner advances the fencing token atomically; old callers cannot save results even after expiry.

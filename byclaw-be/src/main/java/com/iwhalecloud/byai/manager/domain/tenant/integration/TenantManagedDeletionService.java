@@ -8,7 +8,8 @@ import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicySe
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Map;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,8 +20,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Administrator deletion shares the durable command and operation-slot authority with provisioning. */
 @Service
-@ConditionalOnProperty(name = "byclaw.integration.enabled", havingValue = "true")
 public class TenantManagedDeletionService {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TenantManagedDeletionService.class);
+    private final String worker = "tenant-delete-" + java.util.UUID.randomUUID();
     private final TenantCommandStore store;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
@@ -39,6 +41,28 @@ public class TenantManagedDeletionService {
         this.store = store; this.jdbc = jdbc; this.tx = new TransactionTemplate(transactions);
         this.tenants = tenants; this.sandboxes = sandboxes; this.policies = policies;
         this.ids = ids; this.json = json; this.hooks = hooks; this.redis = redis;
+    }
+
+    /** Administrative cleanup remains available even when external provisioning is disabled. */
+    @Scheduled(fixedDelayString = "${tenant.delete.reconcile-delay-ms:30000}",
+        initialDelayString = "${tenant.delete.reconcile-initial-delay-ms:30000}")
+    public void scan() {
+        if (RuntimeEnvironment.isDevelopment()) return;
+        for (long id : store.candidates("DELETE")) {
+            var lease = store.claim(id, worker, java.time.Duration.ofMinutes(30));
+            if (lease == null) continue;
+            try { execute(lease); }
+            catch (Exception error) {
+                try {
+                    failed(lease, error);
+                    LOG.warn("Tenant deletion deferred commandId={} enterpriseId={} exceptionType={}",
+                        id, lease.enterpriseId(), error.getClass().getName());
+                } catch (Exception stale) {
+                    LOG.warn("Tenant deletion acknowledgement deferred commandId={} enterpriseId={} exceptionType={}",
+                        id, lease.enterpriseId(), stale.getClass().getName());
+                }
+            }
+        }
     }
 
     /** Called only after the administrator permission and exact tenant name have been checked. */

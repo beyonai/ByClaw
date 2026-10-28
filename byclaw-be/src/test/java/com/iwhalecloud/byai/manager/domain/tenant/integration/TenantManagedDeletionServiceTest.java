@@ -130,6 +130,36 @@ class TenantManagedDeletionServiceTest {
         assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.internal_command",Integer.class));
         assertEquals("2",policies.projection(2).desiredRevision());
     }
+    @Test void independentScannerDeletesPausedTenantWithoutClaimingOtherProvisionCommands() {
+        String old = System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV", "production");
+            jdbc.update("UPDATE byai.internal_command SET status='MANUAL_REQUIRED',stage='SCHEMA_INIT' WHERE id=1");
+            jdbc.update("UPDATE byai.tenant_runtime_operation SET active_command_id=1,state='ACTIVE' WHERE enterprise_id=2");
+            jdbc.update("INSERT INTO byai.ss_sandbox_record VALUES(2,'TENANT','tenant-opengauss','RUNNING','db-sandbox'),(2,'TENANT','tenant-data-node','RUNNING','node-sandbox')");
+            store.insert(100,"hacu","other-provision","hash","PROVISION",3,1,"{}");
+            service.request(2,"tenant",10001);
+            service.scan();
+            assertEquals("SUCCEEDED",store.latestDeletion(2).status());
+            assertTrue(state().contains("DELETED"));
+            assertEquals("FAILED",store.find(1).status());
+            assertEquals("PENDING",store.find(100).status());
+            verify(sandboxes).deleteTenantResources(2);
+        } finally {
+            if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
+        }
+    }
+    @Test void developmentScannerDoesNotConsumeDeletionCommands() {
+        String old=System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV","development");
+            service.request(2,"tenant",10001);service.scan();
+            assertEquals("PENDING",store.latestDeletion(2).status());
+            verifyNoInteractions(sandboxes);
+        } finally {
+            if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
+        }
+    }
     private TenantCommandStore.Lease makeProvisionRunning() {
         jdbc.update("UPDATE byai.internal_command SET status='PENDING' WHERE id=1");
         return store.claim(1,"provision-worker",Duration.ofMinutes(30));
