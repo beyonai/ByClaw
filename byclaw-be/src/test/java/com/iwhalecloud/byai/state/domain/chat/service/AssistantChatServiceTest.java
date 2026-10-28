@@ -134,6 +134,21 @@ class AssistantChatServiceTest {
         assertThat(title).isEqualTo("1234567890");
     }
 
+    @Test
+    void newSessionDoesNotWaitForTitleModel() {
+        var sequence = org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.sys.service.SequenceService.class);
+        when(sequence.nextVal()).thenReturn(42L);
+        ReflectionTestUtils.setField(assistantChatService, "sequenceService", sequence);
+        var request = new AssistantChatDto();
+        request.setChatContent("{{agent}}请帮我分析今天的销售数据");
+
+        var session = assistantChatService.createGroupChatSession(request);
+
+        assertThat(session.getSessionName()).isEqualTo("请帮我分析今天的销售");
+        assertThat(request.getSessionId()).isEqualTo(42L);
+        verifyNoInteractions(aiService, aiPromptService);
+    }
+
     private AiPrompt titlePrompt(String template, String modelCode) {
         AiPrompt prompt = new AiPrompt();
         prompt.setPromptZhTemplate(template);

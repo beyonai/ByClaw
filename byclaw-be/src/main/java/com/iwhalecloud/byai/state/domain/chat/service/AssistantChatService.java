@@ -639,6 +639,9 @@ public class AssistantChatService {
             SessionMembersDto membersDto = createGroupChatSession(assistantChatDto);
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
+            String titleContent = assistantChatDto.getChatContent();
+            sessionTitleService.summarizeAsync(membersDto.getSessionId(), membersDto.getSessionName(),
+                () -> summaryChatContent(titleContent));
         } else {
             GroupChatInternalSessionAccess.requirePublic(sessionService.findById(assistantChatDto.getSessionId()));
             // sessionId不为空时，检查当前用户是否在群成员列表中
@@ -712,7 +715,8 @@ public class AssistantChatService {
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto.setSessionName(this.summaryChatContent(chatContent));
+        sessionMembersDto.setSessionName(StringUtils.substring(
+            StringUtils.defaultString(chatContent).replaceAll("\\{\\{[^}]*+\\}\\}", "").trim(), 0, 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
@@ -736,6 +740,7 @@ public class AssistantChatService {
 
         // 5. 调用groupService.createGroupChat()创建群聊
         sessionService.createSessionMembers(sessionMembersDto);
+        sessionTitleService.markSummaryPending(newSessionId);
 
         // 6. 将新创建的sessionId设置回assistantChatDto
         assistantChatDto.setSessionId(newSessionId);

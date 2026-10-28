@@ -47,12 +47,35 @@ class AsyncConfigTest {
 
     @Test
     void namedExecutorsAlsoPropagateTaskContext() throws Exception {
+        assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().sessionTitleExecutor()));
         assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().projectInitExecutor()));
         assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().auditLogExecutor()));
         assertContextPropagation(
             register((ThreadPoolTaskExecutor) new AuthRedisSyncAsyncConfig().authRedisSyncExecutor()));
         assertContextPropagation(
             register((ThreadPoolTaskExecutor) new IntegrationRunAsyncConfig().integrationRunExecutor()));
+    }
+
+    @Test
+    void saturatedTitleExecutorRejectsInsteadOfBlockingChatThread() throws Exception {
+        ThreadPoolTaskExecutor executor = register((ThreadPoolTaskExecutor) new AsyncConfig().sessionTitleExecutor());
+        var started = new java.util.concurrent.CountDownLatch(2);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        Runnable blocked = () -> {
+            started.countDown();
+            try { release.await(); }
+            catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+        };
+        try {
+            executor.execute(blocked);
+            executor.execute(blocked);
+            assertThat(started.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            for (int i = 0; i < 32; i++) executor.execute(() -> { });
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> executor.execute(
+                () -> { throw new AssertionError("Caller must not run rejected title work"); }))
+                .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
+        }
+        finally { release.countDown(); }
     }
 
     private void assertContextPropagation(ThreadPoolTaskExecutor executor) throws Exception {

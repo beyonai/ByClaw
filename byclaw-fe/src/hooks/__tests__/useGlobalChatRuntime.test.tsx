@@ -68,6 +68,50 @@ describe('hooks/useGlobalChatRuntime', () => {
     expect(mockWebSocketManager.init).toHaveBeenCalledTimes(2);
   });
 
+  it('updates a session title after the chat turn has completed', () => {
+    const { unmount } = renderHook(() => useGlobalChatRuntime());
+    const handler = mockWebSocketManager.onMessage.mock.calls.find(([type]) => type === 'SESSION_EVENT')?.[1];
+    expect(handler).toEqual(expect.any(Function));
+    act(() => {
+      handler({
+        event: 'sessionTitleUpdated',
+        sessionId: '9007199254740993',
+        data: JSON.stringify({ sessionName: 'Generated title', updateTime: 123 }),
+      });
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'session/updateSession',
+      payload: { sessionId: '9007199254740993', sessionName: 'Generated title', updateTime: 123 },
+    });
+    unmount();
+    expect(mockWebSocketManager.offMessage).toHaveBeenCalledWith('SESSION_EVENT', handler);
+  });
+
+  it('keeps a manual rename when an older generated title arrives late', () => {
+    state.session.sessionList = [{ sessionId: 's1', sessionName: 'My manual title' }];
+    renderHook(() => useGlobalChatRuntime());
+    const handler = mockWebSocketManager.onMessage.mock.calls.find(([type]) => type === 'SESSION_EVENT')![1];
+    act(() => {
+      handler({
+        event: 'sessionTitleUpdated',
+        sessionId: 's1',
+        data: { sessionName: 'Generated title', previousSessionName: 'Local title' },
+      });
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('ignores malformed title events and unrelated session events', () => {
+    renderHook(() => useGlobalChatRuntime());
+    const handler = mockWebSocketManager.onMessage.mock.calls.find(([type]) => type === 'SESSION_EVENT')![1];
+    act(() => {
+      handler({ event: 'sessionTitleUpdated', sessionId: 's1', data: '{' });
+      handler({ event: 'sessionTitleUpdated', sessionId: 's1', data: { sessionName: ' ' } });
+      handler({ event: 'initialization', sessionId: 's1', data: { sessionName: 'Ignore me' } });
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('applies generic session runtime messages from websocket', () => {
     renderHook(() => useGlobalChatRuntime());
 
