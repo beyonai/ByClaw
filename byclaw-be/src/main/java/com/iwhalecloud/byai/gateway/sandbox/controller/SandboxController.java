@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,56 +221,61 @@ public class SandboxController {
     @PostMapping("/getSandboxInfo")
     @Operation(summary = "查询当前用户的沙箱信息", description = "查询当前用户的沙箱信息")
     public ResponseUtil getSandboxIdByUserCode(@RequestBody Map<String, Object> params) {
-        String userCode = CurrentUserHolder.getCurrentUserCode();
-        if (userCode == null) {
-            Object userCodeObj = params.get("userCode");
-            if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-                return ResponseUtil.fail("userCode is required");
-            }
-            userCode = userCodeObj.toString().trim();
-        }
-        List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
-
-        Object sandboxTypeObj = params.get("sandboxType");
-        String sandboxType = null;
-        if (sandboxTypeObj != null) {
-            sandboxType = sandboxTypeObj.toString().trim();
-        }
-
-        List<Map<String, Object>> data = new ArrayList<>();
-        if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
-            for (SandboxInfo sandbox : sandboxInfo) {
-                if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
-                    continue;
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (userCode == null) {
+                Object userCodeObj = params.get("userCode");
+                if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+                    return ResponseUtil.fail("userCode is required");
                 }
-
-                // 查询数据库记录获取完整状态
-                boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
-                SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
-                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
-
-                Map<String, Object> result = new HashMap<>();
-                result.put("userCode", userCode);
-                result.put("sandboxType", sandbox.getSandboxType());
-                result.put("sandboxId", sandbox.getSandboxId());
-                result.put("endpoints", sandbox.getEndpoints());
-                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
-                result.put("token", sandbox.getGatewayToken());
-                result.put("isShared", shared);
-                result.put("serviceKey", sandbox.getServiceKey());
-                result.put("mappingId", sandbox.getMappingId());
-                // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
-                result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
-                SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
-                result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
-                result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
-                result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
-                result.put("workerLeaseTtlSeconds",
-                    shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
-                data.add(result);
+                userCode = userCodeObj.toString().trim();
             }
+            List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
+
+            Object sandboxTypeObj = params.get("sandboxType");
+            String sandboxType = null;
+            if (sandboxTypeObj != null) {
+                sandboxType = sandboxTypeObj.toString().trim();
+            }
+
+            List<Map<String, Object>> data = new ArrayList<>();
+            if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
+                for (SandboxInfo sandbox : sandboxInfo) {
+                    if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
+                        continue;
+                    }
+
+                    // 查询数据库记录获取完整状态
+                    boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
+                    SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
+                        userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("userCode", userCode);
+                    result.put("sandboxType", sandbox.getSandboxType());
+                    result.put("sandboxId", sandbox.getSandboxId());
+                    result.put("endpoints", sandbox.getEndpoints());
+                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("token", sandbox.getGatewayToken());
+                    result.put("isShared", shared);
+                    result.put("serviceKey", sandbox.getServiceKey());
+                    result.put("mappingId", sandbox.getMappingId());
+                    // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
+                    result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
+                    SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
+                    result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
+                    result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
+                    result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
+                    result.put("workerLeaseTtlSeconds",
+                        shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
+                    data.add(result);
+                }
+            }
+            return ResponseUtil.successResponse(data);
+        } catch (Exception e) {
+            log.error("getSandboxIdByUserCode error", e);
+            return ResponseUtil.successResponse(Collections.emptyList());
         }
-        return ResponseUtil.successResponse(data);
     }
 
     /**

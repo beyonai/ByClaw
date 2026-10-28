@@ -33,9 +33,7 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
     private final SequenceService sequenceService = mock(SequenceService.class);
     private final TenantSandboxProperties sandboxProperties = new TenantSandboxProperties();
     private final TenantAdminTenantService service = new TenantAdminTenantService(mapper, sequenceService,
-        new ObjectMapper(), new com.iwhalecloud.byai.common.hook.HookPublisher(
-            new org.springframework.beans.factory.support.DefaultListableBeanFactory()
-                .getBeanProvider(com.iwhalecloud.byai.common.hook.HookDispatcher.class)), sandboxProperties);
+        new ObjectMapper(), sandboxProperties);
 
     @AfterEach
     void clearLogin() {

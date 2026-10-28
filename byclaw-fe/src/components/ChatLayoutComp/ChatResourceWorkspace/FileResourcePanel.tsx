@@ -24,6 +24,7 @@ import {
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
+import { isUploadFileCountExceeded, isUploadFileSizeExceeded } from '@/components/QueryInput/utils/fileUpload';
 import useGlobal from '@/hooks/useGlobal';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
@@ -116,7 +117,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const language = getLocale();
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, uploadFileConfig } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   // Tree 会缓存已触发过 loadData 的目录；刷新时必须同步清空，否则再次展开不会发起请求。
@@ -655,6 +656,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const handleUpload = useCallback(
     async (fileList: File[], targetPath = rootPath) => {
       if (!resourceId || !fileList.length || uploading) return;
+
+      // 项目云盘与知识库共用上传接口，数量校验保持一致，避免选择后才被后端拒绝。
+      if (scope === 'project' && isUploadFileCountExceeded(uploadFileConfig, fileList.length)) {
+        message.error(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig?.maxFileCount }));
+        return;
+      }
+
+      // 根目录和子目录上传共用单文件上限，整批校验通过后才开始写入。
+      if (fileList.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
+        message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
+        return;
+      }
       setUploading(true);
       try {
         if (scope === 'project') {
@@ -680,7 +693,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setUploading(false);
       }
     },
-    [intl, loadRoot, resourceId, rootPath, scope, uploading]
+    [intl, loadRoot, resourceId, rootPath, scope, uploadFileConfig, uploading]
   );
 
   const handleCreateFolder = useCallback(async () => {

@@ -16,6 +16,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -32,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
-/** Real tenant reservation and HTTP dispatch; external database operations remain mocked. */
+/** 旧管理入口不触发租户通知；通用 Hook 映射独立验证，数据库操作使用 mock。 */
 class TenantCreationHookTest {
     private final LinkedBlockingQueue<String> requests = new LinkedBlockingQueue<>();
     private final TenantAdminTenantMapper database = mock(TenantAdminTenantMapper.class);
@@ -73,37 +74,27 @@ class TenantCreationHookTest {
     }
 
     @Test
-    void newTenantSendsWhitelistedSnapshotAfterTransactionCommit() {
+    void legacyTenantCreationDoesNotSendHookAfterTransactionCommit() {
         runner.run(context -> {
             assertThat(context).hasNotFailed();
-            var service = service(context.getBean(HookPublisher.class));
+            var service = service();
             var provisioner = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService.class);
             var controller = new com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantAdminTenantController(
                 service, provisioner, mock(com.iwhalecloud.byai.manager.domain.tenant.TenantDeletionService.class));
             var view = controller.create(new com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantAdminTenantController
                 .CreateTenantRequest("测试企业", 12L, "tenant-request-01")).getData();
             verify(provisioner).request(9007199254740993L);
-            JsonNode body = new ObjectMapper().readTree(requests.poll(5, TimeUnit.SECONDS));
-            assertThat(body.path("event").path("type").asText()).isEqualTo("tenant.created");
-            assertThat(body.path("event").path("version").asInt()).isEqualTo(1);
-            assertThat(body.path("data").path("enterpriseId").asText()).isEqualTo(view.enterpriseId());
-            assertThat(body.path("data").path("enterpriseName").asText()).isEqualTo("测试企业");
-            assertThat(body.path("data").path("enterpriseId").isTextual()).isTrue();
-            assertThat(body.path("data").path("packageId").asText()).isEqualTo("12");
-            assertThat(body.path("data").path("packageId").isTextual()).isTrue();
-            assertThat(body.path("data").path("createdBy").asText()).isEqualTo("9007199254740995");
-            assertThat(body.path("data").path("provisionState").asText()).isEqualTo("RESERVED");
-            assertThat(body.path("data").fieldNames()).toIterable().containsExactlyInAnyOrder(
-                "enterpriseId", "enterpriseName", "packageId", "packageName", "createdBy", "requestId", "provisionState");
-            assertThat(requests).isEmpty();
+            assertThat(view.enterpriseId()).isEqualTo("9007199254740993");
+            verify(database).insertEnterprise(9007199254740993L, "测试企业");
+            assertThat(requests.poll(200, TimeUnit.MILLISECONDS)).isNull();
         });
     }
 
     @Test
     void outerTransactionRollbackNeverSends() {
         runner.run(context -> {
-            // The unproxied target joins this explicit outer transaction through HookPublisher synchronization.
-            var target = new TenantAdminTenantService(database, sequence, new ObjectMapper(), context.getBean(HookPublisher.class));
+            // 保留显式外层事务，确认旧入口即使回滚也不会登记通知。
+            var target = new TenantAdminTenantService(database, sequence, new ObjectMapper());
             new TransactionTemplate(new HookIntegrationTest.TestTransactions()).executeWithoutResult(status -> {
                 target.create("测试企业", 12L, "tenant-request-01");
                 assertThat(requests).isEmpty();
@@ -123,7 +114,7 @@ class TenantCreationHookTest {
         existing.setProvisionStateJson("{\"status\":\"RESERVED\"}");
         when(database.selectByRequestId("tenant-request-01")).thenReturn(existing);
         runner.run(context -> {
-            assertThat(service(context.getBean(HookPublisher.class)).create("测试企业", 12L, "tenant-request-01")
+            assertThat(service().create("测试企业", 12L, "tenant-request-01")
                 .enterpriseId()).isEqualTo("9007199254740993");
             verify(database, never()).insertEnterprise(anyLong(), org.mockito.ArgumentMatchers.anyString());
             assertThat(requests.poll(200, TimeUnit.MILLISECONDS)).isNull();
@@ -133,7 +124,7 @@ class TenantCreationHookTest {
     @Test
     void databaseFailureAndRejectedAccessNeverSend() {
         runner.run(context -> {
-            var service = service(context.getBean(HookPublisher.class));
+            var service = service();
             doThrow(new IllegalStateException("database unavailable")).when(database)
                 .insertOwner(anyLong(), anyLong(), anyLong());
             assertThatThrownBy(() -> service.create("测试企业", 12L, "tenant-request-01"))
@@ -148,7 +139,7 @@ class TenantCreationHookTest {
     @Test
     void globalSwitchOffStillCreatesTenantWithoutHttp() {
         runner.withPropertyValues("byclaw.hooks.enabled=false").run(context -> {
-            assertThat(service(context.getBean(HookPublisher.class)).create("测试企业", 12L, "tenant-request-01")
+            assertThat(service().create("测试企业", 12L, "tenant-request-01")
                 .enterpriseId()).isEqualTo("9007199254740993");
             assertThat(context).doesNotHaveBean(HookDispatcher.class);
             assertThat(requests.poll(200, TimeUnit.MILLISECONDS)).isNull();
@@ -156,7 +147,7 @@ class TenantCreationHookTest {
     }
 
     @Test
-    void externalTenantYamlMapsConfiguredBodyAndHeaders(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
+    void externalTenantYamlMapsExplicitlyPublishedEvent(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
         throws Exception {
         var yaml = directory.resolve("tenant-hooks.yaml");
         java.nio.file.Files.copy(java.nio.file.Path.of("config/examples/hooks.yaml"), yaml);
@@ -168,7 +159,12 @@ class TenantCreationHookTest {
                 "TENANT_CREATED_HOOK_URL=http://127.0.0.1:" + receiver.getAddress().getPort() + "/tenant",
                 "TENANT_CREATED_HOOK_TOKEN=test-token").run(context -> {
                 assertThat(context).hasNotFailed();
-                service(context.getBean(HookPublisher.class)).create("测试企业", 12L, "tenant-request-01");
+                // 此处显式发布只验证通用 YAML 映射，不再依赖旧管理创建入口触发事件。
+                new TransactionTemplate(new HookIntegrationTest.TestTransactions()).executeWithoutResult(status ->
+                    context.getBean(HookPublisher.class).publish("tenant.created", 1, Map.of(
+                        "enterpriseId", "9007199254740993", "enterpriseName", "测试企业",
+                        "packageId", "12", "packageName", "基础版", "createdBy", "9007199254740995",
+                        "requestId", "tenant-request-01", "provisionState", "RESERVED")));
                 JsonNode body = new ObjectMapper().readTree(requests.poll(5, TimeUnit.SECONDS));
                 assertThat(body.path("enterpriseId").asText()).isEqualTo("9007199254740993");
                 assertThat(body.path("enterpriseName").asText()).isEqualTo("测试企业");
@@ -176,8 +172,8 @@ class TenantCreationHookTest {
             });
     }
 
-    private TenantAdminTenantService service(HookPublisher publisher) {
-        var target = new TenantAdminTenantService(database, sequence, new ObjectMapper(), publisher);
+    private TenantAdminTenantService service() {
+        var target = new TenantAdminTenantService(database, sequence, new ObjectMapper());
         var proxy = new ProxyFactory(target);
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(new HookIntegrationTest.TestTransactions(),
