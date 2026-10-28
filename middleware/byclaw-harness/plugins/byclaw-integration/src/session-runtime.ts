@@ -2088,6 +2088,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
     const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
+    if (inboundTurn.project?.['project_id'] === undefined) {
+      this.ctx.logger.warn(
+        `DSH request has no project_id; falling back to session workspace (sessionId=${route.externalRootSessionId}, messageId=${command.header.messageId})`,
+      )
+    }
     const teamModelOverrides = this.ctx.get(AGENT_TEAMS_MODEL_OVERRIDES) as AgentTeamsModelOverrideService | undefined
     const sessionWorkspace = this.options.workspaceRegistry.registerRoot(
       rootAgent.session,

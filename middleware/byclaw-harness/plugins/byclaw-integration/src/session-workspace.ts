@@ -284,7 +284,7 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     ...(workspace.projectName === undefined ? [] : [`project_name: ${JSON.stringify(workspace.projectName)}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 命令和相对路径读写使用 cwd；报告等交付产物使用 default_output_root。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。',
+      'default_output_policy: 命令和相对路径读写使用 cwd；报告等交付产物使用 default_output_root。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; use default_output_root for reports and other deliverables. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
