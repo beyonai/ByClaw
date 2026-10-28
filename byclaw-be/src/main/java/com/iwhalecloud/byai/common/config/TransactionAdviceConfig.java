@@ -199,7 +199,7 @@ public class TransactionAdviceConfig {
                 if (targetClass != null
                     && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
                         .equals(ClassUtils.getUserClass(targetClass).getName())
-                    && "providerStatus".equals(method.getName())) {
+                    && ("providerStatus".equals(method.getName()) || "inspectRecovery".equals(method.getName()))) {
                     return notSurpportedTx;
                 }
                 if (targetClass != null

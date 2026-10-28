@@ -167,4 +167,16 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
         assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("provider diagnostic");
     }
 
+    @Test
+    void pausedCommercialCommandOverridesStaleCreatingSnapshot() {
+        platformAdmin();
+        var row=new TenantAdminTenantRow();row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"DB_CREATING\"}");
+        row.setCommandStatus("MANUAL_REQUIRED");row.setCommandStage("DB_CREATE");row.setCommandErrorCode("PROVIDER_RESULT_UNKNOWN");
+        when(mapper.selectTenants(any(),any(),any(),any(),any())).thenReturn(List.of(row));
+        var result=service.list(new TenantAdminTenantService.TenantListFilter(null,null,null,"createdAt","desc")).getFirst();
+        assertThat(result.provisionState()).isEqualTo("MANUAL_REQUIRED");assertThat(result.provisionStage()).isEqualTo("DB_CREATE");
+        assertThat(result.failureReason()).isEqualTo("PROVIDER_RESULT_UNKNOWN");
+    }
+
 }

@@ -102,4 +102,15 @@ class TenantProvisioningGuardTest {
         assertThat(guard.external("DB_CREATE", Boolean.class, () -> true)).isTrue();
         assertThat(guard.external("DB_CREATE", Boolean.class, () -> { throw new AssertionError("completed step replay"); })).isTrue();
     }
+    @Test
+    void auditedRetryReusesOriginalIntentAndCanOnlyCallOnce() throws Exception {
+        db.update("INSERT INTO byai.internal_command_step(command_id,step_key,status,provider_request_key) "
+            + "VALUES (7,'DB_CREATE','RETRY_READY','command-7:DB_CREATE')");
+        AtomicInteger calls=new AtomicInteger();
+        guard.external("DB_CREATE",Boolean.class,()->{calls.incrementAndGet();return true;});
+        guard.external("DB_CREATE",Boolean.class,()->{calls.incrementAndGet();return true;});
+        assertThat(calls).hasValue(1);
+        assertThat(db.queryForObject("SELECT provider_request_key FROM byai.internal_command_step",String.class)).isEqualTo("command-7:DB_CREATE");
+    }
+
 }

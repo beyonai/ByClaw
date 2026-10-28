@@ -15,6 +15,14 @@ class TenantInternalExceptionHandlerDiagnosticsTest {
         assertLogged(new TenantCommandException(404, "COMMAND_NOT_FOUND"), 404, "COMMAND_NOT_FOUND", Level.DEBUG);
     }
 
+    @Test void absentRecoveryReceiptRemains404AndOnlyLogsAtDebug() {
+        assertLogged(new TenantCommandException(404, "RECOVERY_NOT_FOUND"), 404, "RECOVERY_NOT_FOUND", Level.DEBUG);
+    }
+
+    @Test void serverFailureIsNotSilencedByRecoveryNotFoundCode() {
+        assertLogged(new TenantCommandException(503, "RECOVERY_NOT_FOUND"), 503, "RECOVERY_NOT_FOUND", Level.ERROR);
+    }
+
     @Test void serverFailureIsNotSilencedByCommandNotFoundCode() {
         assertLogged(new TenantCommandException(503, "COMMAND_NOT_FOUND"), 503, "COMMAND_NOT_FOUND", Level.ERROR);
     }

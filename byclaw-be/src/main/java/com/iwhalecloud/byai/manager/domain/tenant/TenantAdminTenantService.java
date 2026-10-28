@@ -191,8 +191,13 @@ public class TenantAdminTenantService {
         catch (Exception ignored) {
             // Invalid persisted state never grants tenant access.
         }
+        // Commercial command truth supersedes the older provisioning snapshot after a paused worker.
+        if (row.getCommandStatus()!=null && !"DELETED".equals(status) && !"DELETING".equals(status)) {
+            status="SUCCEEDED".equals(row.getCommandStatus()) ? "READY" : row.getCommandStatus();
+            stage=row.getCommandStage();
+        }
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getFailureReason()));
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getCommandStatus()!=null ? row.getCommandErrorCode() : row.getFailureReason()));
     }
 
     /** 后台任务保存稳定错误键；读取时按查看者语言展示，历史诊断原文保持可读。 */

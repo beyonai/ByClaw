@@ -206,3 +206,28 @@ CREATE TABLE byai.quota_write_guard (
     PRIMARY KEY (scope, subject_id)
 );
 COMMENT ON TABLE byai.quota_write_guard IS 'Transaction write guards for enterprise and legacy group quota admission';
+
+-- BEGIN BYCLAW TENANT COMMAND RECOVERY
+-- Existing V0.6.0 installations apply only this additional block; retain all historical command and step data.
+-- Recovery receipts and administrator evidence are committed with the original command CAS.
+BEGIN;
+CREATE TABLE byai.internal_command_recovery (
+    source_system varchar(64) NOT NULL,
+    request_id varchar(36) NOT NULL,
+    command_id bigint NOT NULL REFERENCES byai.internal_command(id),
+    enterprise_id bigint NOT NULL,
+    request_hash varchar(64) NOT NULL,
+    expected_revision bigint NOT NULL,
+    actor_type varchar(32) NOT NULL,
+    actor_id varchar(128) NOT NULL,
+    reason varchar(500) NOT NULL,
+    confirm_no_in_flight boolean NOT NULL,
+    decision varchar(40) NOT NULL,
+    step_key varchar(64) NOT NULL,
+    receipt text NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(source_system,request_id)
+);
+CREATE INDEX idx_internal_command_recovery_command ON byai.internal_command_recovery(command_id,created_at);
+COMMIT;
+-- END BYCLAW TENANT COMMAND RECOVERY

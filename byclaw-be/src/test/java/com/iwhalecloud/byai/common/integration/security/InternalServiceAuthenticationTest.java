@@ -143,4 +143,13 @@ class InternalServiceAuthenticationTest {
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/schema/current"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/runtime/extra"));
     }
+    @Test void recoveryRoutesHaveExactScopeAndUuidBoundaries() {
+        assertEquals("tenant:read",InternalServiceRoutes.scope("GET","/internal/v1/commands/7/recovery"));
+        assertEquals("tenant:provision",InternalServiceRoutes.scope("POST","/internal/v1/commands/7/recoveries"));
+        assertEquals("tenant:read",InternalServiceRoutes.scope("GET","/internal/v1/commands/7/recovery-requests/11111111-1111-4111-8111-111111111111"));
+        assertFalse(InternalServiceRoutes.matches("GET","/internal/v1/commands/7/recovery-requests/not-a-uuid"));
+        assertFalse(InternalServiceRoutes.matches("POST","/internal/v1/commands/7/recovery"));
+        assertFalse(InternalServiceRoutes.matches("GET","/internal/v1/commands/7/recovery/extra"));
+    }
+
 }

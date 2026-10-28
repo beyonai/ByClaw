@@ -34,8 +34,8 @@ public class TenantInternalExceptionHandler {
         if(status>=500) {
             LOG.error("Internal tenant request failed status={} errorCode={} exceptionType={} traceId={}",
                 status,code,error.getClass().getName(),traceId);
-        } else if(status==404 && "COMMAND_NOT_FOUND".equals(code)) {
-            // Absence is expected when reconciling an idempotency key before the first submission.
+        } else if(status==404 && ("COMMAND_NOT_FOUND".equals(code) || "RECOVERY_NOT_FOUND".equals(code))) {
+            // Command and recovery receipt absence is expected before the first idempotent submission.
             LOG.debug("Internal tenant command absent status={} errorCode={} exceptionType={} traceId={}",
                 status,code,error.getClass().getName(),traceId);
         } else {
