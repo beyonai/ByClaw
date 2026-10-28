@@ -413,7 +413,8 @@ COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-brid
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc
 
-ENV BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
+ENV BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=0 \
+    BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
     BYCLAW_DSH_WORKSPACE_GIT_ENABLED=0
 
 EXPOSE 8081

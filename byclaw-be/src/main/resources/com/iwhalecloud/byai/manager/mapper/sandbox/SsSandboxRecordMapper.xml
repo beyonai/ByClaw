@@ -710,16 +710,16 @@
     </update>
 
 
-    <!-- Management current inventory: filter before paging and use the same predicate for totals. -->
+    <!-- Live sandbox ids and persisted status are independent filters and may apply together. -->
     <sql id="CurrentInventoryFilter">
         <where>
-            <choose>
-                <when test="sandboxIds != null and sandboxIds.size() > 0">
-                    AND sandbox_id IN
-                    <foreach collection="sandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>
-                </when>
-                <otherwise>AND 1 = 0</otherwise>
-            </choose>
+            <if test="sandboxIds != null and sandboxIds.size() &gt; 0">
+                AND sandbox_id IN
+                <foreach collection="sandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status,jdbcType=VARCHAR}
+            </if>
             AND NOT EXISTS (SELECT 1 FROM ss_sandbox_record newer
                 WHERE newer.sandbox_id = ss_sandbox_record.sandbox_id AND newer.id > ss_sandbox_record.id)
             <if test="ownerScope != 'ALL'">

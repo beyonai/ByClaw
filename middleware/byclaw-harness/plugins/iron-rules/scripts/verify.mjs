@@ -14,7 +14,7 @@ import { join } from 'node:path'
 
 import { resolveConfig } from '../lib/index.js'
 import { renderFailures, renderGiveUp, renderZombies } from '../lib/check.js'
-import { buildAddition, buildBaseline, digestRules, renderRules } from '../lib/inject.js'
+import { applyInject, buildAddition, buildBaseline, digestRules, renderRules } from '../lib/inject.js'
 import { EMPTY_LIST_TEXT, recordRule, renderCaptureTask, renderListTask, triageDiagnostic } from '../lib/record.js'
 import { loadRules, parseRuleFile, resolveProjectRoot, rulesByteSize, validateRuleId, watchStatus } from '../lib/rules.js'
 import { toolEnvironmentRuleFiles } from '../lib/files.js'
@@ -24,6 +24,41 @@ import { readFile as readHostFile, readdir as readHostDir, stat as statHost, wri
 const checks = []
 /** Register one named assertion group. */
 function test(name, fn) { checks.push([name, fn]) }
+
+test('workspace policy skips automatic repository reads without skipping the remaining pre-step chain', async () => {
+  let preStep
+  const reads = []
+  const ctx = {
+    on: (event, listener) => { assert.equal(event, 'agent/pre-step'); preStep = listener },
+    get: name => name === 'byclawWorkspacePolicy' ? { automaticDiscoveryEnabled: false } : undefined,
+    logger: { warn() {}, info() {} },
+  }
+  applyInject(ctx, resolveConfig({}), {
+    exists: async path => { reads.push(path); return false },
+    subdirectories: async path => { reads.push(path); return [] },
+  })
+  const decision = { kind: 'enter', messages: [{ retained: true }] }
+  assert.equal(await preStep({ agent: { session: { header: { cwd: '/by/.sessions/chat' } } } }, async () => decision), decision)
+  assert.deepEqual(reads, [])
+})
+
+for (const policy of [undefined, { automaticDiscoveryEnabled: true }]) {
+  test(`workspace discovery retains standalone and opt-in behavior: ${JSON.stringify(policy)}`, async () => {
+    let preStep
+    const reads = []
+    applyInject({
+      on: (_event, listener) => { preStep = listener },
+      get: () => policy,
+      logger: { warn() {}, info() {} },
+    }, resolveConfig({}), {
+      exists: async path => { reads.push(path); return false },
+      subdirectories: async () => [],
+    })
+    const decision = { kind: 'enter', messages: [] }
+    assert.equal(await preStep({ agent: { session: { header: { cwd: '/by/.sessions/chat' } } } }, async () => decision), decision)
+    assert.ok(reads.some(path => path.endsWith('/.git')))
+  })
+}
 
 // --- config -----------------------------------------------------------------
 

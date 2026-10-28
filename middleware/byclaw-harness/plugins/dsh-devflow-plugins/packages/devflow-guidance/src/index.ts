@@ -142,6 +142,8 @@ export function apply(ctx: Context): void {
     // refreshes the cache the assembly after this waterfall reads — and
     // short-circuiting later pre-step listeners is never the price of that.
     const downstream = await next()
+    const workspacePolicy = ctx.get('byclawWorkspacePolicy') as { automaticDiscoveryEnabled: boolean } | undefined
+    if (workspacePolicy?.automaticDiscoveryEnabled === false) return downstream
     const cwd = agent.session.header.cwd
     if (cwd === undefined) return downstream
     const root = join(cwd, '.devflow')

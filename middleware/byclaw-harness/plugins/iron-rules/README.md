@@ -56,6 +56,8 @@ One malformed rule is skipped with a warning and leaves the rest armed — a sin
 
 ## Resident injection
 
+In ByClaw managed profiles, the optional `byclawWorkspacePolicy` service can disable automatic pre-step rule discovery. `BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=1` opts in; standalone use without that service retains the behavior below. Explicit rule tools and post-mutation enforcement are unaffected.
+
 Rule bodies are injected in full on `agent/pre-step`, with the `admin` group first and labelled non-negotiable.
 
 This deliberately avoids a catalog with on-demand loading. A catalog is right for a capability the model reaches for when relevant — that is what skills are — but a rule is an obligation, and one the model never opened is one it never followed.

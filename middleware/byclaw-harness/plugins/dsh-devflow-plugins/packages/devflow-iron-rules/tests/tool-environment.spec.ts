@@ -10,6 +10,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { workspaceIo } from '@zhchxiao123/dsh-devflow'
 import { resolveConfig } from '@zhchxiao123/dsh-devflow-iron-rules'
+import { applyInject } from '../src/inject.ts'
 import { recordRule } from '../src/record.ts'
 import { loadRules, watchStatus, workspaceOf } from '../src/rules.ts'
 import { mountToolEnvironment } from '../../../tests/tool-environment.ts'
@@ -25,6 +26,27 @@ afterEach(async () => {
 })
 
 describe('iron rules on a tool environment', () => {
+  it.each([false, true])('honors discovery policy without blocking explicit rule writes: %s', async (enabled) => {
+    root = await mkdtemp(join(tmpdir(), 'devflow-policy-'))
+    context = new Context()
+    const { fs } = await mountToolEnvironment(context)
+    context.provide('byclawWorkspacePolicy', { automaticDiscoveryEnabled: enabled })
+    const io = workspaceIo(context, true)
+    const config = resolveConfig({ workspaceOnToolEnvironment: true })
+    const agent = { session: { header: { cwd: root } }, inject: () => {} } as unknown as Agent
+    applyInject(context, config, io)
+    const decision = { kind: 'enter' as const, messages: [] }
+    expect(await context.waterfall('agent/pre-step', {
+      agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal,
+    }, () => Promise.resolve(decision))).toBe(decision)
+    expect(fs.calls.length > 0).toBe(enabled)
+    const result = await recordRule(context, agent, {
+      id: 'explicit', title: 'Explicit', body: 'Requested by user.', enforcement: 'judgement',
+    }, config, io)
+    expect(result.ok).toBe(true)
+    expect(await readFile(join(root, '.devflow', 'iron-rules', 'explicit', 'RULE.md'), 'utf8')).toContain('Requested by user.')
+  })
+
   it('records, replaces, discovers, and measures rules through the tool providers', async () => {
     root = await mkdtemp(join(tmpdir(), 'devflow-iron-toolenv-'))
     context = new Context()

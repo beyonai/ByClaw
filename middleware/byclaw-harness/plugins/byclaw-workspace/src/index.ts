@@ -6,6 +6,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import * as Upstream from '@deepseek-ai/dsh-workspace-changes'
+import { applyPresetPolicy } from './presets.js'
 
 /** Stable Loader identity for ByClaw's workspace policy. */
 export const name = 'byclawWorkspace'
@@ -14,6 +15,7 @@ export const inject = ['subprocess', 'fs']
 
 /** Statistics and Git discovery are independent opt-ins; recorder bounds use upstream defaults. */
 export interface Config {
+  automaticDiscoveryEnabled: boolean
   changesEnabled: boolean
   gitEnabled: boolean
   recorder: Upstream.Config
@@ -21,6 +23,7 @@ export interface Config {
 
 /** Loader defaults keep automatic statistics and Git discovery off. */
 export const Config: schema<Config> = schema.object({
+  automaticDiscoveryEnabled: schema.boolean().default(false),
   changesEnabled: schema.boolean().default(false),
   gitEnabled: schema.boolean().default(false),
   recorder: Upstream.Config.default({} as Upstream.Config),
@@ -31,6 +34,8 @@ export const Config: schema<Config> = schema.object({
  * root listener or real tool subprocess is replaced. Model-only turns never create a recorder.
  */
 export function apply(ctx: Context, config: Config): void {
+  ctx.provide('byclawWorkspacePolicy', Object.freeze({ automaticDiscoveryEnabled: config.automaticDiscoveryEnabled }))
+  applyPresetPolicy(ctx, config.automaticDiscoveryEnabled)
   if (!config.changesEnabled) {
     ctx.provide('workspaceChanges', {
       summary: () => undefined,

@@ -181,10 +181,11 @@ public class SessionTitleService {
                             if (sessionExtService.deleteBySessionIdAndParamCode(sessionId, SUMMARY_PENDING_CODE) <= 0) {
                                 return false;
                             }
+                            // Session state is nullable JSON/text, not an active/deleted flag.
+                            // Deleted sessions have no row; ownership still fences the update.
                             return byaiSessionMapper.update(update, new LambdaUpdateWrapper<ByaiSession>()
                                 .eq(ByaiSession::getSessionId, sessionId)
-                                .eq(ByaiSession::getCreatorId, userId)
-                                .eq(ByaiSession::getState, "A")) > 0;
+                                .eq(ByaiSession::getCreatorId, userId)) > 0;
                         });
                         if (Boolean.TRUE.equals(changed)) {
                             var event = (com.alibaba.fastjson.JSONObject) JSON.toJSON(update);

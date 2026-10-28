@@ -495,10 +495,14 @@ public class SandboxController {
         query.put("offset", (pageIndex - 1) * pageSize);
         query.put("pageSize", pageSize);
         query.put("sandboxIds", sandboxIds);
-        List<SandboxRecordView> list = sandboxIds.isEmpty() ? new java.util.ArrayList<>() :
-            sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
-                // Display the live runtime state; this projection never updates the persisted lifecycle record.
-                record.setStatus(inventory.get(record.getSandboxId()));
+        query.put("status", requestedStatus);
+        List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
+                // Display the live runtime state when the engine still has the instance.
+                // This projection never updates the persisted lifecycle record.
+                String liveStatus = inventory.get(record.getSandboxId());
+                if (liveStatus != null) {
+                    record.setStatus(liveStatus);
+                }
                 SandboxRecordView view = sandboxService.buildRecordView(record);
                 if (view != null) {
                     view.setStatus(record.getStatus());
@@ -528,7 +532,7 @@ public class SandboxController {
             }
             record.setEndpoint(SandboxEndpointRecordSupport.toStorageValue(endpoints, record.getEndpoint()));
         });
-        int total = sandboxIds.isEmpty() ? 0 : sandboxRecordMapper.countInventory(query);
+        int total = sandboxRecordMapper.countInventory(query);
         int totalPage = (total + pageSize - 1) / pageSize;
 
         Map<String, Object> result = new HashMap<>();
