@@ -1463,6 +1463,22 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void residentHost_browserLivesInTheToolSandboxWhetherOrNotTheContextRuns() {
+        SandboxService sandboxService = new SandboxService();
+        SharedDshHostContexts contexts = contexts("user001");
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Not running (released, host restarted): the answer does not depend on the context.
+        SharedDshHostClient.UserContext absent = new SharedDshHostClient.UserContext();
+        absent.setStatus(SharedDshHostClient.UserContext.STATUS_ABSENT);
+        when(((SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client")).getUser(any())).thenReturn(absent);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Everyone else keeps the browser in the sandbox the client already picks.
+        assertThat(sandboxService.browserServiceKey("user002")).isNull();
+        assertThat(new SandboxService().browserServiceKey("user001")).isNull();
+    }
+
+    @Test
     void residentHost_unlistedUsersAndOtherTypesKeepTheirRuntime() {
         SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();

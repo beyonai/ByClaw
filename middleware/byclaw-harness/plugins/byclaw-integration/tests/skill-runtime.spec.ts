@@ -50,7 +50,10 @@ function agent(id: string, header: Partial<Session['header']> = {}): Agent {
     send() {}, followup() {}, steer() {}, cancel() {}, whenIdle: () => Promise.resolve(),
   } as unknown as Agent
 }
-async function fixture(options: { resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate> } = {}) {
+async function fixture(options: {
+  resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>
+  skillDirectories?: { present<T extends { path?: string; resourceBase?: { kind: 'directory'; path: string } }>(definition: T): Promise<T> }
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'byclaw-skills-test-'))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const builtin = join(root, 'builtin')
@@ -127,6 +130,30 @@ it('publishes builtins plus exact associations and retains the ordinary agent ca
   expect(JSON.stringify(await f.propose(f.a, '/html-artifact'))).toContain('Bound HTML body')
   f.runtime.dispose()
   expect((await list(f.a)).map(s => s.name)).toEqual(['html-artifact', 'unrelated-global'])
+})
+
+it('tells the model where a Skill directory is for its commands, keeping the Skill text', async () => {
+  const presented: string[] = []
+  const f = await fixture({ skillDirectories: {
+    async present(definition) {
+      const base = definition.resourceBase?.path
+      if (base === undefined || !base.includes('/cache/')) return definition
+      presented.push(base)
+      const visible = `/by/.byclaw/skills/${base.slice(base.lastIndexOf('/') + 1)}`
+      return { ...definition, path: `${visible}/SKILL.md`, resourceBase: { kind: 'directory', path: visible } }
+    },
+  } })
+  const skill = await f.ctx.skills.get('html-artifact', { scope: f.a })
+  expect(skill?.resourceBase).toEqual({ kind: 'directory', path: '/by/.byclaw/skills/redis-code' })
+  expect(skill?.path).toBe('/by/.byclaw/skills/redis-code/SKILL.md')
+  expect(skill?.content).toContain('Bound HTML body')
+  const listed = (await f.ctx.skills.list({ scope: f.a })).find(s => s.name === 'html-artifact')
+  expect(listed?.resourceBase?.path).toBe('/by/.byclaw/skills/redis-code')
+  // Deployment builtins are on B at the same path already.
+  expect((await f.ctx.skills.get('builtin-help', { scope: f.a }))?.resourceBase?.path).toBe(join(f.builtin, 'builtin-help'))
+  expect(presented).toContain(f.html.path)
+  // The runtime's own record keeps the host path, which the log names.
+  expect(f.runtime.entries('byclaw-employee-1').find(e => e.name === 'html-artifact')?.path).toBe(f.html.path)
 })
 
 it('keeps the skill-creator workflow mandatory for Skill creation and modification', async () => {

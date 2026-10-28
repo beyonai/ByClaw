@@ -17,6 +17,8 @@ import { mirrorRoutes } from "./mirror-routes.js";
 import { schemaRoutes } from "./schema-routes.js";
 import type OperationsQueries from "../../application/OperationsQueries.js";
 import operationsRoutes from "./operationsRoutes.js";
+import type MemberGroupRemoval from '../../application/MemberGroupRemoval.js';
+import memberGroupRemovalRoutes from './memberGroupRemovalRoutes.js';
 
 import { forwardSourceRoutes } from "./group-forward-source-routes.js";
 import type { ForwardSourceAuthorityReader } from "../../application/group-forward-source-authority.js";
@@ -26,6 +28,7 @@ import { groupForwardRoutes } from "./group-forward-routes.js";
 
 // Some existing read APIs use POST for structured pagination/filter bodies.
 const readOnlyPosts = new Set([
+  '/internal/v1/member-group-removal/snapshot',
   "/internal/v1/sessions/query",
   "/internal/v1/sessions/:id/children/query",
   "/internal/v1/group-chats/invitations/validate",
@@ -42,6 +45,7 @@ const readOnlyPosts = new Set([
 ]);
 
 export interface HttpServices {
+  memberGroupRemoval?: MemberGroupRemoval;
   requireExecution?(): Promise<void>;
   operations?: OperationsQueries;
   forwards?: GroupForwardService;
@@ -100,8 +104,11 @@ export function createApp(
     )
       return;
     const management = req.url.startsWith("/internal/v1/schema");
+    // 企业离任交接属于权限管理，不因执行额度耗尽而阻止移除；仍要求租户 READY 和写租约。
+    const memberAdministration = req.routeOptions.url === '/internal/v1/member-group-removal/apply';
     if (
       !management &&
+      !memberAdministration &&
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
       !(req.method === "POST" && readOnlyPosts.has(req.routeOptions.url ?? ""))
     )
@@ -128,6 +135,9 @@ export function createApp(
   sessionRoutes(app, services.sessions, services.history);
   if (services.operations) {
     operationsRoutes(app, services.operations);
+  }
+  if (services.memberGroupRemoval) {
+    memberGroupRemovalRoutes(app, services.memberGroupRemoval);
   }
   if (services.mirror) mirrorRoutes(app, config, services.mirror);
   return app;

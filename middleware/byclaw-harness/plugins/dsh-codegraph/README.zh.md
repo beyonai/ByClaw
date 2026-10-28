@@ -26,6 +26,8 @@ dsh --profile web --dump-config
 
 DSH 的 MCP stdio 传输由 MCP SDK 在本机直接拉起服务进程，不经过 `ctx.subprocess`，因此 `codegraph-mcp` 行总是在 DSH 所在主机上运行 CodeGraph。工作区位于独立工具沙箱时，禁用该行，并在 `dsh-codegraph` 上设置 `workspaceOnToolEnvironment: true` 和私有的 `stateDir`。插件会为每个 MCP 连接通过 `ctx.subprocess` 启动 `command args`（默认 `codegraph serve --mcp`，工作目录 `cwd` 默认 `/by`），并挂载自己的 `codegraph` MCP 客户端；客户端经 `bridge/stdio-socket.mjs` 和 `stateDir` 中权限为 `0600` 的 Unix socket 连到该进程。工具名不变。服务进程的数据流会让工具沙箱在上下文存续期间保持唤醒，且工具沙箱镜像中必须安装 `codegraph`。
 
+在工具环境上，CodeGraph 服务只在有调用时运行：插件自己保持客户端的 MCP 会话，`idleMs`（默认 120000）内没有请求就结束服务进程，使其流不再阻止工具沙箱空闲暂停；下一次调用时再启动一个并重放握手。服务对握手（`server/discover`、`initialize`、`tools/list`）的应答缓存在 `stateDir`，按服务命令和本机可执行文件区分，因此上下文注册工具时无需启动工具沙箱；服务的自我介绍与缓存不同时会刷新缓存。
+
 ## 验证
 
 ```sh

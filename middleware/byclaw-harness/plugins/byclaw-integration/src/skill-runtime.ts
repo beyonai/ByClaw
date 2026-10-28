@@ -33,6 +33,10 @@ interface Registry {
   get(name: string, options?: Lookup): Promise<SkillDefinition | undefined>
 }
 interface View { definitions: Map<string, SkillDefinition>; digest: string }
+/** Where the model's commands reach a Skill's directory (see `ToolEnvironmentSkills`). */
+export interface SkillDirectories {
+  present<T extends { path?: string; resourceBase?: { kind: 'directory'; path: string } }>(definition: T): Promise<T>
+}
 interface Binding {
   templateId: string
   agentId: string
@@ -240,6 +244,7 @@ export class ByClawSkillRuntime {
     private readonly workspaceSkills: WorkspaceSkillReader = hostWorkspaceSkills,
     private readonly dshHome?: string,
     private readonly resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>,
+    private readonly skillDirectories?: SkillDirectories,
   ) {}
 
   /** Load deployment Skills once and install lifecycle-owned registry adapters. */
@@ -253,6 +258,8 @@ export class ByClawSkillRuntime {
     dshHome?: string
     /** Lazily resolve a template's associated Skills on first lookup (startup keeps only references). */
     resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>
+    /** With a separate tool environment: Skill directories copied where commands run, named as the model sees them. */
+    skillDirectories?: SkillDirectories
   } = {}): Promise<ByClawSkillRuntime> {
     const root = resolveBuiltinSkillDir(options.builtinSkillDir)
     const entries = (await readdir(root, { withFileTypes: true }))
@@ -273,6 +280,7 @@ export class ByClawSkillRuntime {
       options.files === undefined ? hostWorkspaceSkills : toolEnvironmentWorkspaceSkills(options.files),
       options.dshHome,
       options.resolveDeferredTemplate,
+      options.skillDirectories,
     )
     runtime.installAdapters(ctx)
     return runtime
@@ -498,13 +506,21 @@ export class ByClawSkillRuntime {
       text: 'Skill workflow invariant: before creating, editing, or updating any Skill, you must load the `skill-creator` Skill first and follow the instructions it provides. This applies to existing Skills, newly created Skills, root Agents, and delegated Agents alike.',
     }))
     const original = { list: skills.list, snapshot: skills.snapshot, get: skills.get }
+    // What the model is shown: member copies for expert members, then each directory where commands run.
     const present = async (view: View, scope?: object): Promise<View> => {
+      const own = await ownedBy(view, scope)
+      const directories = runtime.skillDirectories
+      if (directories === undefined) return own
+      const definitions = await Promise.all([...own.definitions.values()].map(definition => directories.present(definition)))
+      return { definitions: new Map(definitions.map(definition => [definition.name, definition])), digest: own.digest }
+    }
+    const ownedBy = async (view: View, scope?: object): Promise<View> => {
       const agent = scope as Agent | undefined
       if (agent === undefined || groupScope(ctx, String(agent.id))?.role !== 'member') return view
       const definitions = await Promise.all([...view.definitions.values()].map(definition => projectMemberSkill(String(agent.id), definition, view.digest, runtime.dshHome)))
       if (runtime.disposed) throw new Error('ByClaw Skill runtime is disposed')
       const current = await runtime.effectiveView(runtime.bindingForScope(scope), false)
-      if (current.digest !== view.digest) return present(current, scope)
+      if (current.digest !== view.digest) return ownedBy(current, scope)
       setActiveMemberSkillRoots(String(agent.id), definitions.flatMap(definition => definition.resourceBase === undefined ? [] : [definition.resourceBase.path]), runtime.dshHome)
       runtime.projectedMembers.set(String(agent.id), runtime.bindingForScope(scope)?.templateId)
       return { definitions: new Map(definitions.map(definition => [definition.name, definition])), digest: view.digest }
@@ -514,14 +530,14 @@ export class ByClawSkillRuntime {
       async list(options = {}) {
         options.signal?.throwIfAborted()
         const view = await runtime.effectiveView(runtime.bindingForScope(options.scope))
-        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? await visibleSummaries(view, options.scope) : mergeSummaries(await runtime.originalCalls.run(true, () => original.list.call(this, options)), view)
+        return groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member' ? await visibleSummaries(view, options.scope) : mergeSummaries(await runtime.originalCalls.run(true, () => original.list.call(this, options)), await present(view, options.scope))
       },
       async snapshot(options = {}) {
         options.signal?.throwIfAborted()
         const view = await runtime.effectiveView(runtime.bindingForScope(options.scope))
         if (groupScope(ctx, String((options.scope as Agent | undefined)?.id))?.role === 'member') return { skills: await visibleSummaries(view, options.scope), complete: true }
         const snapshot = await runtime.originalCalls.run(true, () => original.snapshot.call(this, options))
-        return { ...snapshot, skills: mergeSummaries(snapshot.skills, view) }
+        return { ...snapshot, skills: mergeSummaries(snapshot.skills, await present(view, options.scope)) }
       },
       async get(name, options = {}) {
         options.signal?.throwIfAborted()

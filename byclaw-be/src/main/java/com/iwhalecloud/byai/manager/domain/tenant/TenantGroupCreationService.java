@@ -18,6 +18,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantGroupCreationService {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.quota.SharedQuotaAdmission quotaAdmission;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks workgroupHooks;
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService projectMembers;
@@ -48,6 +50,8 @@ public class TenantGroupCreationService {
         if (request.getTemplateId() != null) agentIds.addAll(templates.resolveResourceIds(request.getTemplateId(), request.getExpectedTemplateVersion()));
         Long coordinatorAgentId = groupWorkAssistant.resolveDefaultCoordinatorId();
         agentIds.add(coordinatorAgentId);
+        // Initial cardinalities are known before platform project/cloud side effects; Node checks again in its write transaction.
+        quotaAdmission.checkInitialGroupForEnterprise(tenant.enterpriseId(), userIds.size() + 1, agentIds.size());
         grants.grantDigitalEmployeesToUser(List.of(coordinatorAgentId), tenant.userId());
         var users = members.prepareMembers(tenant, "USER", new ArrayList<>(userIds));
         var agents = new ArrayList<>(members.prepareMembers(tenant, "AGENT", agentIds.stream()

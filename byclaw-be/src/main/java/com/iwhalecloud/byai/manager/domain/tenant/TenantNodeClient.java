@@ -98,6 +98,15 @@ public class TenantNodeClient {
         return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
     }
 
+    /** 企业成员移除只开放快照与原子交接路径，不伪造普通群成员身份。 */
+    public <I, O> O memberGroupRemoval(long enterpriseId, String operation, I body, TypeReference<O> responseType) {
+        if (enterpriseId <= 0 || !("snapshot".equals(operation) || "apply".equals(operation))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.node.request.invalid");
+        }
+        return requestBound(new ServiceIdentity(enterpriseId, null), "POST",
+            "/internal/v1/member-group-removal/" + operation, body, responseType);
+    }
+
     private record ServiceIdentity(long enterpriseId, Long userId) { }
 
     private <I, O> O requestBound(ServiceIdentity context, String method, String path, I body, TypeReference<O> responseType) {
@@ -321,7 +330,11 @@ public class TenantNodeClient {
         NodeRejection(int nodeStatus, String code) {
             super(nodeStatus == 404 ? HttpStatus.NOT_FOUND
                 : nodeStatus == 403 ? HttpStatus.FORBIDDEN
-                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY,
+                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST
+                        : nodeStatus == 409 && java.util.Set.of("GROUP_MEMBER_LIMIT_EXCEEDED", "GROUP_AGENT_LIMIT_EXCEEDED").contains(code)
+                            ? HttpStatus.CONFLICT
+                            : nodeStatus == 503 && "QUOTA_UNAVAILABLE".equals(code)
+                                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY,
                 "tenant Node rejected request: " + code);
             this.nodeStatus = nodeStatus;
             this.code = code;

@@ -26,6 +26,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserKnowledgeTransferApplicationService;
+import com.iwhalecloud.byai.state.application.service.upload.GlobalFileUploadValidator;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserCopyRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserDeleteRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserListRequest;
@@ -54,6 +55,9 @@ public class FileBrowserController {
 
     @Autowired
     private FileBrowserKnowledgeTransferApplicationService knowledgeTransferApplicationService;
+
+    @Autowired
+    private GlobalFileUploadValidator globalFileUploadValidator;
 
     /**
      * 获取指定目录下的文件和文件夹列表
@@ -119,6 +123,8 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.upload.fileRequired"));
         }
         try {
+            // 所有文件先通过大小校验，避免后续超限时已写入部分文件。
+            globalFileUploadValidator.validateSize(files);
             fileBrowserService.upload(userCode, resourceId, path, files);
             return ResponseUtil.successResponse();
         } catch (Exception e) {

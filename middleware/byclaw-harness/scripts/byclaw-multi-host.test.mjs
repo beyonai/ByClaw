@@ -6,7 +6,7 @@ import {
   webStartupValues, prepareUserProfile,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewLaunchEnvironment, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
@@ -66,8 +66,26 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-tool-env'].config.alias, 'byclaw-tool-env-u1')
   assert.equal(byId['byclaw-tool-env'].config.backend, 'opensandbox')
   assert.equal(byId['byclaw-tool-env'].config.byclawBe, undefined)
+  // Processes on B get the environment the user's own sandbox would have had (the PUT env).
+  // The identity is the context's user, whatever the PUT env says, as in the runtime's own launch layer.
+  assert.deepEqual(byId['byclaw-tool-env'].config.launchEnv, { ...spec.env, USER_CODE: 'u1' })
+  const spoofed = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, env: { USER_CODE: 'evil', A: 'b' } })
+  assert.deepEqual(spoofed.find(row => row.id === 'byclaw-tool-env').config.launchEnv, { USER_CODE: 'u1', A: 'b' })
+  // The launch environment goes to B; the host's own environment still reaches commands only through the allowlist.
+  const bash = composeUserOverlays([{ id: 'byclaw-bash-provider', name: '@byclaw/dsh-bash-provider' }], 'u1', '/r/users/u1/dsh-home', spec)[0]
+  assert.deepEqual(bash.config.forwardHostEnvironment, { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] })
   // Rows missing from the composition produce no overlay.
   assert.equal(byId['byclaw-dsh'], undefined)
+})
+
+test('every plugin that reads or writes the user tree does so in the tool environment', () => {
+  // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
+  const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
+    'devflow', 'devflow-tool', 'devflow-artifact-gate', 'devflow-agent-gate', 'devflow-worktree', 'devflow-command',
+    'devflow-spec', 'devflow-spec-sentinel', 'devflow-iron-rules', 'dsh-codegraph']
+  const entries = rows.map(id => ({ id, name: `x-${id}`, config: {} }))
+  const overlays = Object.fromEntries(composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', spec).map(row => [row.id, row.config]))
+  for (const id of rows) assert.equal(overlays[id]?.workspaceOnToolEnvironment, true, id)
 })
 
 test('byclaw-be tool environments get the host settings plus the user and the PUT token', () => {
@@ -79,6 +97,11 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
+  // BE picks a user's tool sandbox spec through the PUT env; blank falls back to the host's.
+  const picked = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' byclaw-dsh-unity ' } })
+  assert.equal(picked[0].config.byclawBe.serviceKey, 'byclaw-dsh-unity')
+  const blank = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' ' } })
+  assert.equal(blank[0].config.byclawBe.serviceKey, 'byclaw-dsh-tools5')
   assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)
   assert.equal(toolEnvUserToken({ BEYOND_TOKEN: ' t ' }, 'u1'), 't')
 })
@@ -115,7 +138,8 @@ test('disabled lists match row ids and package prefixes', () => {
   ]
   // Multi-user plugins (browser-use, devflow, ...) load; only the pending ones stay off.
   const disabled = composeUserOverlays(entries, 'u1', '/h', spec).filter(row => row.disabled).map(row => row.id)
-  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'graph', 'hmr', 'lan'])
+  // CodeGraph itself runs on the tool environment (dsh-codegraph); only the row spawning it on this host stays off.
+  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'hmr', 'lan'])
   // Shrinking the pending list re-enables the plugin; by-design entries stay.
   const designOnly = composeUserOverlays(entries, 'u1', '/h', spec, { disabled: [DISABLED_BY_DESIGN] })
   assert.deepEqual(designOnly.filter(row => row.disabled).map(row => row.id).sort(), ['hmr', 'lan'])
@@ -334,6 +358,18 @@ test('renewUserToken hands the PUT token to the byclaw-be backend only', () => {
   assert.equal(renewUserToken({ get: () => undefined }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.equal(renewUserToken({ get: () => ({}) }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.deepEqual(renewed, ['jwt-9'])
+})
+
+test('renewLaunchEnvironment hands the PUT environment to the tool environment', () => {
+  const seen = []
+  const ctx = { get: name => (name === 'ssh' ? { setLaunchEnvironment: env => seen.push(env) } : undefined) }
+  assert.equal(renewLaunchEnvironment(ctx, { BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'evil' }, 'u1'), true)
+  assert.deepEqual(seen, [{ BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'u1' }])
+  // A PUT without an environment keeps the last one.
+  assert.equal(renewLaunchEnvironment(ctx, undefined, 'u1'), false)
+  assert.equal(renewLaunchEnvironment(ctx, {}, 'u1'), false)
+  assert.equal(renewLaunchEnvironment({ get: () => ({}) }, { A: 'b' }, 'u1'), false)
+  assert.equal(seen.length, 1)
 })
 
 test('a failed boot marks the user failed and the next ensure retries', async () => {

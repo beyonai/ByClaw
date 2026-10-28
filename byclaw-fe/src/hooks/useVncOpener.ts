@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { message } from 'antd';
+import { getIntl } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
 import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
 import { normalizeSessionId, type SessionIdInput } from '@/utils/sessionId';
@@ -15,8 +17,24 @@ type OpenRequest = VncOpenOptions & {
   timer?: ReturnType<typeof setTimeout>;
 };
 
-const MAX_REFRESHES = 5;
+// The desktop is served by the user's tool sandbox, which starts its browser on the
+// first browser tool call: allow about a minute for the endpoint and the viewer.
+const MAX_REFRESHES = 30;
 const RETRY_DELAY_MS = 2000;
+
+/**
+ * Whether the viewer behind `url` answers. The sandbox proxy returns 5xx while the
+ * desktop is not listening yet (or no longer); opening the iframe then would leave
+ * the user on the proxy's error page. Same-origin request, so the session cookie applies.
+ */
+export async function isViewerReady(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'GET', credentials: 'include', redirect: 'manual', cache: 'no-store' });
+    return response.type === 'opaqueredirect' || (response.status > 0 && response.status < 500);
+  } catch {
+    return false;
+  }
+}
 
 export default function useVncOpener(sessionId?: SessionIdInput) {
   const normalizedSessionId = normalizeSessionId(sessionId);
@@ -89,6 +107,11 @@ export default function useVncOpener(sessionId?: SessionIdInput) {
         } catch {
           // Invalid endpoints must never open an empty or malformed iframe.
         }
+        if (url && !(await isViewerReady(url))) url = '';
+        if (!isCurrent()) {
+          if (requestRef.current === request) cancelRequest();
+          return;
+        }
         if (url) {
           if (request.key) view.openedKeys.add(request.key);
           cancelRequest();
@@ -112,6 +135,9 @@ export default function useVncOpener(sessionId?: SessionIdInput) {
           }, RETRY_DELAY_MS);
         } else {
           cancelRequest();
+          // A click (no tool key) deserves an answer; the desktop only exists while the
+          // assistant's browser is open in its tool sandbox.
+          if (!request.key) message.info(getIntl().formatMessage({ id: 'common.remoteComputerUnavailable' }));
         }
       };
 

@@ -28,5 +28,5 @@ apply to both speech tools.
 Generators may return the existing `MediaAsset[]` or `{ assets, warnings }`.
 TTS outputs include `status` and `warnings`; an explicit limitation with no assets
 returns `unsupported` without persisting files or disguising it as a connector error.
-Image output remains unchanged. Keep speech controls in provider adapters rather
+Image output remains unchanged. Artifacts are read and written through the host's `artifactIo` when it supplies one (the shared DSH host does, so files land in the user's tool environment); otherwise through this process's filesystem. Keep speech controls in provider adapters rather
 than adding provider-specific request logic to this shared runtime.

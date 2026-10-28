@@ -23,6 +23,7 @@ import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-shell'
 import type { ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './index.ts'
+import { localRuleFiles, type RuleFiles } from './files.ts'
 import { loadRules, resolveProjectRoot, watchStatus, type IronRule } from './rules.ts'
 
 /**
@@ -192,8 +193,9 @@ function checkableRules(rules: readonly IronRule[]): CheckableRule[] {
  *
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param files - where the project lives: this host, or the tool environment.
  */
-export function applyCheck(ctx: Context, config: ResolvedConfig): void {
+export function applyCheck(ctx: Context, config: ResolvedConfig, files: RuleFiles = localRuleFiles): void {
   /** Agents whose current turn has landed a file change. */
   const dirty = new WeakSet<Agent>()
   /** Consecutive forced continuations per agent. */
@@ -210,8 +212,8 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
     const attempt = (retries.get(agent) ?? 0) + 1
     // A session header carries no cwd when the deployment never set one; the
     // launch directory is the only workspace such a session has.
-    const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd())
-    const { rules, warnings } = await loadRules(projectRoot, config)
+    const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd(), files)
+    const { rules, warnings } = await loadRules(projectRoot, config, files)
     for (const warning of warnings) ctx.logger.warn(`iron-rules: ${warning}`)
 
     const checkable = checkableRules(rules)
@@ -240,7 +242,7 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
     const watched = await Promise.all(
       outcomes
         .filter(({ outcome }) => outcome.passed)
-        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot) })),
+        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot, files) })),
     )
     const zombies = watched.filter(({ status }) => status?.stale === true).map(({ id }) => id)
     if (zombies.length > 0) {

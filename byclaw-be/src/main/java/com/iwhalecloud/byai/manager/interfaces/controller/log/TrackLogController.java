@@ -8,6 +8,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Map;
+import java.util.ArrayList;
 
 import com.iwhalecloud.byai.manager.application.service.log.TrackLogApplicationService;
 import com.iwhalecloud.byai.state.domain.log.dto.BatchTrackLogDto;
@@ -38,19 +40,25 @@ public class TrackLogController {
     public record DeliveryEvent(
         @NotBlank @Size(max = 160) String eventId,
         @Positive long time,
-        @NotNull @Pattern(regexp = "fe\\.(sent|final_received|final_applied|final_deferred|connection_closed|connection_opened)") String stage,
+        @NotNull @Pattern(regexp = "fe\\.(sent|reply_received|reply_applied|reply_deferred|final_received|final_applied|final_deferred|connection_closed|connection_opened)") String stage,
         @NotBlank @Size(max = 160) String requestId,
         @Size(max = 160) String sessionId,
         @Size(max = 160) String streamId,
-        @NotNull @Pattern(regexp = "ok|failed|restoring|missing_context") String result) { }
+        @NotNull @Pattern(regexp = "ok|failed|restoring|missing_context|ignored") String result,
+        @Size(max = 40) Map<@Pattern(regexp = "eventKind|targetTenantId|invocationId|dispatchId|deliveryId|startupId|tenantId|scope|traceId|messageId|replyEventId|frameId|eventSequence|eventType|eventSessionId|eventTraceId|eventMessageId|externalSessionId|sessionScope|targetSessionId|targetTraceId|targetMessageId|targetClientRequestId|targetInvocationId|frameClientRequestId|appliedClientRequestId|appliedSessionId|appliedTraceId|appliedMessageId|applyDelayMs") String,
+            @Size(max = 160) String> diagnostics) { }
 
     public record DeliveryBatch(@NotNull @Size(min = 1, max = 20) List<@NotNull @Valid DeliveryEvent> events) { }
 
     @PostMapping("/chatDelivery")
     public ResponseUtil<String> chatDelivery(@Valid @RequestBody DeliveryBatch batch) {
         for (DeliveryEvent event : batch.events()) {
+            List<Object> details = new ArrayList<>();
+            details.addAll(java.util.Arrays.asList("clientTime", event.time(), "eventId", event.eventId(),
+                "streamId", event.streamId(), "source", "browser_report"));
+            if (event.diagnostics() != null) event.diagnostics().forEach((key, value) -> { details.add(key); details.add(value); });
             ChatChainLog.record(event.stage(), event.requestId(), event.sessionId(), event.result(),
-                "clientTime", event.time(), "eventId", event.eventId(), "streamId", event.streamId(), "source", "browser_report");
+                details.toArray());
         }
         return ResponseUtil.successResponse();
     }

@@ -1,7 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,10 +16,10 @@ import java.util.Set;
 @Service
 public class TenantInternalEnterpriseService {
     private final JdbcTemplate jdbc;
-    private final ObjectMapper mapper;
     private final SequenceService sequence;
-    public TenantInternalEnterpriseService(JdbcTemplate jdbc, ObjectMapper mapper, SequenceService sequence) {
-        this.jdbc = jdbc; this.mapper = mapper; this.sequence = sequence;
+    private final SharedQuotaAdmission quotaAdmission;
+    public TenantInternalEnterpriseService(JdbcTemplate jdbc, SequenceService sequence, SharedQuotaAdmission quotaAdmission) {
+        this.jdbc = jdbc; this.sequence = sequence; this.quotaAdmission = quotaAdmission;
     }
     @Transactional(readOnly = true)
     public EnterpriseView getEnterprise(long enterpriseId) {
@@ -56,29 +56,20 @@ public class TenantInternalEnterpriseService {
             throw error(HttpStatus.BAD_REQUEST, "MEMBER_ROLE_UNSUPPORTED");
         getEnterprise(enterpriseId);
         validUser(userId); validUser(auditUserId);
-        // Updating the shared snapshot row serializes this API's member admission with policy changes.
-        // The latest snapshot must be read after this UPDATE has acquired its row write lock.
-        if (jdbc.update("UPDATE byai.tenant_config SET params_version=params_version+1,updated_at=CURRENT_TIMESTAMP WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", enterpriseId) != 1)
-            throw error(HttpStatus.CONFLICT, "MEMBER_QUOTA_UNAVAILABLE");
-        long limit = memberLimit(enterpriseId);
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status='ACTIVE'", Long.class, enterpriseId);
+        var quota = quotaAdmission.beginEnterprise(enterpriseId);
         Long owners = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status='ACTIVE' AND role='OWNER'", Long.class, enterpriseId);
         if (owners == null || owners != 1) throw error(HttpStatus.CONFLICT, "MEMBER_OWNER_INVARIANT");
-        Long existing = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND user_id=?", Long.class, enterpriseId, userId);
-        if (existing != null && existing > 0) throw error(HttpStatus.CONFLICT, "MEMBER_ALREADY_EXISTS");
-        if (count == null || count >= limit) throw error(HttpStatus.CONFLICT, "MEMBER_LIMIT_EXCEEDED");
+        var existing = jdbc.query("SELECT membership_id,user_id,role,status FROM byai.tenant_user_membership WHERE enterprise_id=? AND user_id=?",
+            (rs, index) -> new MemberView(Long.toString(rs.getLong(1)), Long.toString(rs.getLong(2)), rs.getString(3), rs.getString(4)), enterpriseId, userId);
+        if (!existing.isEmpty()) {
+            if (!"ACTIVE".equals(existing.getFirst().status())) throw error(HttpStatus.CONFLICT, "MEMBER_ALREADY_EXISTS");
+            return existing.getFirst();
+        }
+        quotaAdmission.checkMembers(quota, 1);
         long id = sequence.nextVal();
         // createdByUserId is a validated base-user audit reference, never a permission grant.
         jdbc.update("INSERT INTO byai.tenant_user_membership(membership_id,enterprise_id,user_id,role,status,created_by) VALUES (?,?,?,'MEMBER','ACTIVE',?)", id, enterpriseId, userId, auditUserId);
         return new MemberView(Long.toString(id), Long.toString(userId), "MEMBER", "ACTIVE");
-    }
-    private long memberLimit(long enterpriseId) {
-        try {
-            String value = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class, enterpriseId);
-            JsonNode limit = mapper.readTree(value).path("memberLimit");
-            if (!limit.isIntegralNumber() || !limit.canConvertToLong() || limit.longValue() <= 0) throw new IllegalArgumentException();
-            return limit.longValue();
-        } catch (Exception exception) { throw error(HttpStatus.CONFLICT, "MEMBER_QUOTA_UNAVAILABLE"); }
     }
     private void validUser(long id) {
         Long count = jdbc.queryForObject("SELECT COUNT(*) FROM byai.po_users WHERE user_id=? AND state='A' AND UPPER(COALESCE(is_locked,'N'))<>'Y' AND (user_eff_date IS NULL OR user_eff_date<=CURRENT_TIMESTAMP) AND (user_exp_date IS NULL OR user_exp_date>CURRENT_TIMESTAMP)", Long.class, id);

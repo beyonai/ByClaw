@@ -2,6 +2,18 @@
 
 固定企业、固定代际的租户数据服务。使用 TypeScript、Fastify、TypeORM 的参数化 SQL 适配器及 by-framework Worker；不直接引用 BE/FE 源码，不创建数据库或平台账号，不负责 AI 执行。
 
+## 共享 Redis 群成员额度
+
+Node 复用现有 Redis 连接，只读 `byclaw:shared:quota:v1:{enterpriseId}`，键名不包含环境名。花括号是 Redis hash tag 的实际字符，例如企业 10 使用 `byclaw:shared:quota:v1:{10}`。可通过 `QUOTA_REDIS_KEY_PREFIX` 调整前缀。HASH 的 `revision`、`payloadHash`、`payload` 一次读取，`payloadHash` 是原始 UTF-8 JSON 的 SHA-256 小写十六进制值。JSON 包含 `schemaVersion: 1`、字符串 `enterpriseId/revision`、`mode: LIMITED|UNLIMITED`、`limits: {memberLimit, groupLimit, groupMemberLimit, agentLimit}` 与 RFC3339 `updatedAt`；四项上限均为 0–2147483647 的整数，0 表示不能新增。revision 为规范的正十进制字符串，最大 9223372036854775807，与 Java long 范围保持一致；HASH 与 JSON 的 revision 必须完全一致，Node 通过 BigInt 校验，不转换成 JavaScript Number。
+
+`CREATE_GROUP` 初始成员、`ADD_MEMBERS`、`JOIN_GROUP`，以及群消息自动补入的默认协调员工，都在既有会话事务锁内检查额度后写入。LIMITED 策略在计数前通过 `UPDATE ... SET session_id=session_id ... RETURNING session_id` 取得群会话行的数据库写锁，覆盖计数、写入及提交，避免 Redis 租约过期后暂停进程继续写入造成并发超额；初建群使用同事务内刚插入的会话行，不使用 `SELECT ... FOR UPDATE`。实际用量查询当前租户数据库：USER 单独受 `groupMemberLimit` 限制，AGENT 单独受 `agentLimit` 限制，不将两类人数相加；OWNER 计入 USER，默认协调员工计入 AGENT。批次按类型和 ID 去重计算新增量，已有成员不占新增量；初建群继续沿用原协议的重复成员校验。额度降低不移除现有成员，只限制新增。任一类型超限会回滚整条命令，包括成员、系统消息及命令回执。超限错误为 `GROUP_MEMBER_LIMIT_EXCEEDED` 或 `GROUP_AGENT_LIMIT_EXCEEDED`，HTTP 409。
+
+键不存在或有效 `UNLIMITED` 策略允许新增。Redis 读取失败默认记录 `QUOTA_REDIS_UNAVAILABLE` 警告并按 ALLOW 处理；配置 `QUOTA_REDIS_FAILURE_POLICY=REJECT` 时返回 `QUOTA_UNAVAILABLE`（HTTP 503）。该配置只影响额度投影读取，既有数据库、会话与 Schema 租约仍必须有效。存在但结构错误、HASH 类型错误、摘要或租户不匹配、版本不支持的投影始终返回 503。每次新增重新读取，不缓存旧策略，不使用 Redis 用量计数器。
+
+`memberLimit` 与 `groupLimit` 保留在共享数据中，Node 本次仅执行每群 USER 和 AGENT 上限；租户成员总额由相应用例管理，群数量上限尚不在 Node 执行。已有商业租户执行策略门禁继续保持，新增额度读取能力不代表完整商业策略 ACK 或准入能力。
+
+回归源码位于 `test/shared-quota.test.ts`、`test/group-quota.test.ts`、`test/config.test.ts`。`test/group-quota-concurrency.test.ts` 复用严格限制地址的 `FORWARD_TEST_PG` 临时数据库与隔离 Redis，覆盖真实事务下 ADD_MEMBERS 与 JOIN_GROUP、自动协调员工插入的最后名额并发竞争，以及超限批次的整体回滚；本次未执行测试、类型检查、构建或迁移，数据库与 Redis 实际联调仍待验证。
+
 本次按「多租户三人并行开发计划」修正 C1–C4。协议细节集中在本文和 `openapi.json`；方案中未给出字节级定义的部分（hash、manifest、KMS HTTP 适配器、业务命令）在下面明确列出，A/B 联调须采用同一约定。
 
 ## 审查顺序
@@ -57,11 +69,15 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 默认 HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`。203 本地联调可显式设置 `INTERNAL_TRANSPORT=http`，此时 BE、KMS、Node 走 HTTP，并用 `INTERNAL_API_TOKEN` 认证：直连可使用 Bearer，经过 OpenSandbox HTTP 代理时使用 `X-Byclaw-Internal-Token`，因为代理不会转发 `Authorization`；`REDIS_TLS=false` 允许连接本地 Redis。除 live 外仍要求 `X-Enterprise-Id`、`X-Tenant-Generation`；业务请求还要求真实用户 `X-Actor-User-Id`。这些内部接口不得直接对浏览器开放。
 
+Node 调用 BE/KMS 时，HTTP 和 HTTPS 均发送 `Authorization: Bearer <INTERNAL_API_TOKEN>`；HTTPS 仍保留证书校验。`INTERNAL_API_TOKEN` 在两种模式下都必须非空，且须与 BE 的 `BYCLAW_TENANT_INTERNAL_TOKEN` 一致；缺失或全空白会在启动时失败。BE 创建 Node 时注入该值；更换 token 后须同步更新 BE 和现有 Node 的启动配置，重新创建容器或重启直接运行的 Node 进程以加载新值。
+
 - `/internal/v1/health/live`：进程存活，无需客户端证书。
 - `/internal/v1/health/db`：受保护；返回最近一次运行时身份/可写探测的状态。
 - `/internal/v1/health/ready`：受保护；`ready` 表示 Schema 已核验、Worker/HTTPS/流组件可供 BE 完成开通验收；`businessReady` 还要求 BE 已发布 `PROVISION_STATE.status=READY`。这样避免「BE 等 Node 就绪、Node 等 BE READY」的循环。
 
 成功连接后注册实际 `TENANT_DATA_<E>` Worker 和同名 ServiceRegistry 服务；metadata 含 enterpriseId、generation、实例 ID、HTTPS endpoint、Schema 版本与 READY/ADMIN_ONLY。失去连接权威后撤销注册，管理态拒绝业务命令。运行时每 5 秒串行对账。
+
+Schema 核验独立于五秒对账节奏：启动、连接池更换、Schema 任务开始或结束后，在下一次非升级中的对账立即核验；核验通过后每 60 秒重新查询 BE 审计版本并检查库内标记、结构指纹、必要字段和索引。首次初始化尚未就绪时保留五秒检查。核验异常立即关闭业务门禁，按 10、20、40、80、160、300 秒退避，之后最多每 300 秒重试；BE 返回 401/403 时直接等待 300 秒，并记录 `SCHEMA_AUTHENTICATION_FAILED`。重试等待期间不沿用成功状态开放业务，连接池或 Schema 任务变化会重置等待。此间隔仅用于运行态就绪检查，Schema 任务执行前仍直接核对 BE 审计版本。
 
 BE 以固定服务名 `TENANT_DATA_<E>` 从 Redis 发现并校验实例，直接使用注册的 host、port 和 pathPrefix，不再从数据库中的 sandbox ID 重建访问地址。Node 的 `ADVERTISE_HOST` 未设置、为空或沿用旧的 `host.containers.internal` 占位值时，默认发布自身容器 hostname；Docker 共享网络须能解析该 hostname，其他部署方式可显式设置可达的 `ADVERTISE_HOST`。容器重建后实例 hostname 可以变化，固定服务名和租户/代际校验保持不变。
 

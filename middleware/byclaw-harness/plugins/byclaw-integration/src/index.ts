@@ -1,3 +1,5 @@
+import { observeReplyRedis } from './reply-log.ts'
+import { ByClawStartupLog } from './startup-log.ts'
 import type { ManagedAdmissionLease } from './managed-admission.ts'
 import { createTtsDebugHttpHandler } from './tts-http.ts'
 import { ByClawVoiceRuntime } from './voice-runtime.ts'
@@ -41,7 +43,9 @@ import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
-import { lazyToolEnvironment, lazyToolEnvironmentFiles, toolEnvironmentFiles } from './tool-environment-files.ts'
+import { lazyToolEnvironment, lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from './tool-environment-files.ts'
+import { ToolEnvironmentSkills } from './tool-environment-skills.ts'
+import { memberSkillProjectionRoot } from './group-skill-resources.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
 import { applyByClawWorkerHistory, type ByClawWorkerHistory } from './worker-history.ts'
 import {
@@ -517,17 +521,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     () => installDefaultWebSearchPolicy(ctx.tools),
     'byclaw-dsh.disable-default-web-search',
   )
+  const startup = new ByClawStartupLog(config.userCode?.trim() || process.env['USER_CODE']?.trim() || '')
+  startup.point('plugin-apply')
   try {
-    await activate(ctx, config)
+    await activate(ctx, config, startup)
   } catch (error: unknown) {
+    startup.failed('plugin-apply', error)
     ctx.logger.error(`[byclaw-dsh] integration startup failed; plugin disabled while DSH continues: ${startupErrorDetail(error)}`)
   }
 }
 
 /** Activate resource synchronization and the by-framework Worker. */
-async function activate(ctx: Context, config: Config): Promise<void> {
+async function activate(ctx: Context, config: Config, startup: ByClawStartupLog): Promise<void> {
   const startupStarted = performance.now()
   const startupPhase = (phase: string): void => {
+    startup.point(phase)
     ctx.logger.info(`[byclaw-dsh] startup phase=${phase}; elapsedMs=${Math.round(performance.now() - startupStarted)}`)
   }
   startupPhase('activate')
@@ -565,8 +573,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ...localE2eStorageRoot === undefined ? {} : { localE2eStorageRoot },
   })
   // With a tool environment the user tree exists only there; never touch it through this host's `node:fs`.
-  // ...and nothing a context does before its first tool call may start B: boot-time projections and
-  // session directories wait in the tool-environment facade until B connects for a tool.
+  // ...and nothing a context does while booting may start B: boot-time projections and session
+  // directories wait in the tool-environment facade until a turn connects B.
   const lazyEnvironment = config.workspaceOnToolEnvironment ? lazyToolEnvironment(ctx) : undefined
   const userFiles = config.workspaceOnToolEnvironment
     ? (lazyEnvironment === undefined ? toolEnvironmentFiles(ctx) : lazyToolEnvironmentFiles(lazyEnvironment, toolEnvironmentFiles(ctx)))
@@ -583,7 +591,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   if (modelRouting.enabled) assertDshModelRoutingRuntime(ctx.get('agentLoop'))
   const projectionConcurrency = resolveByClawProjectionConcurrency(config.projectionConcurrency)
 
-  const sessionMetadata = await ByClawSessionMetadataStore.open(ctx)
+  const sessionMetadata = await startup.measure('session-metadata', () => ByClawSessionMetadataStore.open(ctx))
   startupPhase('session-metadata-ready')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
@@ -600,13 +608,24 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     retryDelayMs: config.skillSyncRetryDelayMs ?? 250,
     onError: (ref, error) => ctx.logger.error(`[byclaw-dsh] Lazy Skill ${ref.code} sync failed: ${startupErrorDetail(error)}`),
   })
-  const skillRuntime = await ByClawSkillRuntime.install(ctx, {
+  // Hub Skills and member copies are made on this host; their scripts and references must be where commands run.
+  const skillDirectories = userFiles === undefined ? undefined : new ToolEnvironmentSkills({
+    ...(lazyEnvironment === undefined ? {} : { environment: lazyEnvironment }),
+    files: toolEnvironmentFiles(ctx),
+    roots: [
+      { host: skillCacheDir, visible: join(byRoot, '.byclaw', 'skills') },
+      { host: memberSkillProjectionRoot(dshHome), visible: join(byRoot, '.byclaw', 'member-skills') },
+    ],
+    log: message => ctx.logger.warn(`[byclaw-dsh] ${message}`),
+  })
+  const skillRuntime = await startup.measure('builtin-skills', () => ByClawSkillRuntime.install(ctx, {
     builtinSkillDir: config.builtinSkillDir,
     agentSkillRoot,
     ...(userFiles === undefined ? {} : { files: userFiles }),
+    ...(skillDirectories === undefined ? {} : { skillDirectories }),
     ...(dshHome === undefined ? {} : { dshHome }),
     resolveDeferredTemplate: template => lazySkills.resolve(template),
-  })
+  }))
   startupPhase('builtin-skills-ready')
   const disposeAgentShellEnv = ctx.shellEnv.register({
     name: 'byclaw-agent-identity',
@@ -764,8 +783,8 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     return operation
   }
   try {
-    await redis.ping()
-    baseUrl = await resolveByClawBaseUrl(config.baseUrl, process.env, redis, ctx.logger)
+    await startup.measure('redis-connect', () => redis.ping())
+    baseUrl = await startup.measure('backend-discovery', () => resolveByClawBaseUrl(config.baseUrl, process.env, redis, ctx.logger))
     models = new ByClawDynamicModelRuntime(ctx, redis, {
       provider: config.provider,
       model: config.model,
@@ -774,7 +793,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     })
     installBrowserText(ctx)
     if (modelRouting.enabled) {
-      await installByClawModelCatalog(ctx, models, modelRouting.modelIds)
+      await startup.measure('model-catalog', () => installByClawModelCatalog(ctx, models!, modelRouting.modelIds))
       modelRoutingBinding = installByClawModelRouting(ctx, models, modelRouting.modelIds)
       ctx.effect(() => () => modelRoutingBinding?.dispose())
     }
@@ -793,9 +812,11 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     }
     // Startup discovers only Redis routing metadata. Templates, models and group
     // runtimes are prepared only after an employee/group is actually selected.
-    resources = await synchronizeByClawResourcesAtStartup({
+    const startupFallback = resources
+    resources = await startup.measure('resource-sync', () => synchronizeByClawResourcesAtStartup({
       synchronize: () => synchronize('cold-start-catalog'), fallback: resources, logger: ctx.logger,
-    })
+    }))
+    startup.point('resource-sync-result', { degraded: resources === startupFallback })
     startupPhase('resources-ready')
     if (lastResourceInventory === '') {
       lastResourceInventory = byClawResourceInventoryLines(resources, { reason: 'state' }).join('\n')
@@ -871,6 +892,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       getScope: id => groupCoordination.get(id),
       ...(dshHome === undefined ? {} : { dshHome }),
       stateRuntime: () => teamStateRuntime(ctx),
+      ...(skillDirectories === undefined ? {} : { hostPath: (path: string) => skillDirectories.hostPath(path) }),
     })
     ctx.effect(() => groupBoundary.install(ctx), 'byclaw-group-private-storage-boundary')
     ctx.effect(() => ctx.provide('byclawGroupCoordination', groupCoordination), 'byclaw-group-coordination')
@@ -1045,13 +1067,18 @@ async function activate(ctx: Context, config: Config): Promise<void> {
 
     const agentTypes = resolveWorkerAgentTypes(config.agentTypes, userCode)
     const sourceAgentType = agentTypes[0] as string
-    const emitter = new GatewayDataEmitter(redis)
+    const emitter = new GatewayDataEmitter(observeReplyRedis(redis))
     const sessionHost: ByClawSessionHost = {
       baseUrl, userCode, byRoot,
       resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders,
       resolveSourcePath: source => resolveByClawInboundPath(source, byRoot),
       resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
       resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+      // Tools writing or checking a user's files (generated images and speech, task attachments) are
+      // tool calls: they use the tool environment itself, starting it like any other tool.
+      ...(config.workspaceOnToolEnvironment
+        ? { userFiles: toolEnvironmentFiles(ctx), artifactIo: mediaArtifactIo(toolEnvironmentFiles(ctx)) }
+        : {}),
     }
     const voiceRuntime = new ByClawVoiceRuntime({
       byRoot, userCode,
@@ -1086,6 +1113,10 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       maxTokens: config.groupChatDispositionMaxTokens ?? 1_024,
       historyMaxBytes: config.groupChatDispositionHistoryMaxBytes ?? 65_536,
       resolveConfiguredModel: connection => models.resolveGroupChatDispositionModel(connection),
+      // The session state and the group history are in the user tree. State goes through the queued
+      // view (every first turn writes it; a model-only turn must not start B); the history is written
+      // by the platform, so only the tool environment itself has it.
+      ...(userFiles === undefined ? {} : { files: userFiles, historyFiles: toolEnvironmentFiles(ctx) }),
     })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
@@ -1146,13 +1177,15 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     worker = new ByClawDshWorkerRuntime({
       redis,
       workerId: id,
+      startupId: startup.startupId,
       admission: ctx.get('byclawManagedAdmission'),
       agentTypes,
       sessions,
     })
     startupPhase('worker-start')
-    await worker.start(id)
+    await startup.measure('worker-registration', () => worker!.start(id))
     startupPhase('worker-ready')
+    startup.point('worker-route', { workerId: id, agentTypes: agentTypes.join(',') })
     if (ctx.get('byclawManagedAdmission')) {
       const runtimeWorker = worker
       const runtimeSessions = sessions
@@ -1175,6 +1208,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ctx.logger.info(`byclaw-dsh Worker online: ${agentTypes.join(',')}; BE=${resourceLogValue(baseUrl)}; agentTemplates=${join(agentTemplateDir, 'templates')}; teams=${join(catalogDir, 'templates')}`)
 
   } catch (error: unknown) {
+    startup.failed('activation', error)
     const cleanupFailures: unknown[] = []
     try { await close() } catch (cleanupError: unknown) { cleanupFailures.push(cleanupError) }
     // apply() intentionally absorbs startup failure, so explicitly remove the

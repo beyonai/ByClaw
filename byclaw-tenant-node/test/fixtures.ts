@@ -19,6 +19,7 @@ export const config: Config = {
   beUrl: "https://be.test/byaiService",
   kmsUrl: "https://kms.test/decrypt",
   beClientIdentity: "byclaw-be",
+  internalToken: "test-internal-token",
   tls: { certFile: "cert", keyFile: "key", caFile: "ca" },
   redis: {
     host: "redis.test",

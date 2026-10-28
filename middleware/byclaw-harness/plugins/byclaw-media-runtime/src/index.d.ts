@@ -42,5 +42,16 @@ export interface MediaArtifactIo {
   /** Remove a file; absence is not an error. */
   remove(path: string): Promise<void>
 }
+/**
+ * What the media tools need from a session tree that is not on this machine: the
+ * shared DSH host keeps the user tree in the user's tool sandbox and hands this to
+ * the tools as `host.artifactIo`.
+ */
+export interface MediaSessionIo extends MediaArtifactIo {
+  /** Whole-file read, rejecting files larger than `maxBytes`. */
+  readBytes(path: string, maxBytes: number): Promise<Uint8Array>
+  /** Create or atomically replace a file. */
+  writeReplace(path: string, bytes: Uint8Array): Promise<void>
+}
 export function persistAssets(root: string, kind: 'image' | 'tts' | 'asr', assets: MediaAsset[], io?: MediaArtifactIo): Promise<Array<{ path: string; mimeType: string; bytes: number }>>
 export function mountMediaPlugin(ctx: any, options: { kind: 'image' | 'tts'; generate: (model: MediaModel, args: any, context: RequestContext) => Promise<MediaAsset[] | MediaGenerationResult>; describe?: (model: MediaModel) => SpeechOptions; modelId?: string; provider?: string; protocol?: string }): void

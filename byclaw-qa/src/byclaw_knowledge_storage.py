@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
 from dataclasses import dataclass
+from pathlib import Path
 
 from by_qa.core import logger
 from by_qa.knowledge_base.infrastructure.storage import (
@@ -80,7 +82,7 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
     async def write(
         self,
         location: StorageLocation,
-        content: bytes,
+        content: bytes | Path,
         *,
         content_type: str,
     ) -> StoredObject:
@@ -89,22 +91,29 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
             return await super().write(location, content, content_type=content_type)
         resource_id, file_path = target
         normalized_location = _normalize_location(location)
-        response = await self._request(
-            method="POST",
-            path=f"{_BASE_PATH}/files/put",
-            headers=await build_byclaw_userfs_headers_async(),
-            data={
-                "spaceType": _RESOURCE_SPACE_TYPE,
-                "resourceId": resource_id,
-                "path": file_path,
-                "contentType": content_type,
-            },
-            files={"file": ("file", content, content_type)},
-        )
+        size = content.stat().st_size if isinstance(content, Path) else len(content)
+        with ExitStack() as stack:
+            upload_content = (
+                stack.enter_context(content.open("rb"))
+                if isinstance(content, Path)
+                else content
+            )
+            response = await self._request(
+                method="POST",
+                path=f"{_BASE_PATH}/files/put",
+                headers=await build_byclaw_userfs_headers_async(),
+                data={
+                    "spaceType": _RESOURCE_SPACE_TYPE,
+                    "resourceId": resource_id,
+                    "path": file_path,
+                    "contentType": content_type,
+                },
+                files={"file": ("file", upload_content, content_type)},
+            )
         data = _ensure_json_success(response, "write")
         return StoredObject(
             location=normalized_location,
-            size=data.get("fileSize", len(content)),
+            size=data.get("fileSize", size),
             checksum=data.get("checksum"),
             content_type=data.get("contentType", content_type),
         )

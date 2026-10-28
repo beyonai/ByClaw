@@ -82,7 +82,7 @@ describe('ReplyFileArtifacts', () => {
     expect(mockResolve).toHaveBeenCalledWith({
       sessionId: '101',
       messageId: 'm1',
-      paths: ['/by/.sessions/101/output/report.pptx'],
+      paths: ['/.sessions/101/output/report.pptx'],
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'report.pptx' }));
@@ -116,7 +116,7 @@ describe('ReplyFileArtifacts', () => {
     expect(mockResolve).toHaveBeenCalledWith({
       sessionId: '101',
       messageId: 'm-speech',
-      paths: ['/by/.sessions/101/tts/summary.mp3'],
+      paths: ['/.sessions/101/tts/summary.mp3'],
     });
     expect(mockDownload).toHaveBeenCalledWith({ sessionId: '101', path: '/.sessions/101/tts/summary.mp3' });
   });
@@ -146,7 +146,7 @@ describe('ReplyFileArtifacts', () => {
     expect(mockResolve).toHaveBeenCalledWith({
       sessionId: '101',
       messageId: 'm-host-output',
-      paths: ['/by/.sessions/101/image/result.jpg', '/by/.sessions/101/tts/summary.mp3'],
+      paths: ['/.sessions/101/image/result.jpg', '/.sessions/101/tts/summary.mp3'],
     });
   });
 
@@ -218,6 +218,57 @@ describe('ReplyFileArtifacts', () => {
 
     await waitFor(() => expect(mockResolve).toHaveBeenCalled());
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    '/by/.sessions/101/output/report.pptx',
+    '/byaiService/commonFile/preview?filePath=%2F.sessions%2F101%2Foutput%2Freport.pptx',
+    '/byaiService/chat/file-artifacts/download?sessionId=101&path=%2Fby%2F.sessions%2F101%2Foutput%2Freport.pptx',
+  ])('deduplicates an existing attachment by its canonical path: %s', async (filePath) => {
+    render(
+      <ReplyFileArtifacts
+        message={message({
+          messageId: `path-${filePath}`,
+          fileList: [
+            { uid: 'existing', status: 'done', fileType: 'file', queryFile: { fileName: 'renamed.pptx', filePath } },
+          ],
+        })}
+      />
+    );
+    await waitFor(() => expect(mockResolve).toHaveBeenCalled());
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('keeps files with the same name at different paths', async () => {
+    render(
+      <ReplyFileArtifacts
+        message={message({
+          messageId: 'same-name-different-path',
+          fileList: [
+            {
+              uid: 'other',
+              status: 'done',
+              fileType: 'file',
+              queryFile: {
+                fileName: 'report.pptx',
+                filePath: '/.sessions/101/other/report.pptx',
+              },
+            },
+          ],
+        })}
+      />
+    );
+    expect(await screen.findByRole('button', { name: 'report.pptx' })).toBeInTheDocument();
+  });
+
+  it('deduplicates resolver results after canonicalizing paths', async () => {
+    const path = '/.sessions/101/output/report.pptx';
+    mockResolve.mockResolvedValueOnce([
+      { sourcePath: path, path, fileName: 'report.pptx' },
+      { sourcePath: `/by${path}`, path: `/by${path}`, fileName: 'report.pptx' },
+    ]);
+    render(<ReplyFileArtifacts message={message({ messageId: 'resolver-aliases' })} />);
+    expect(await screen.findAllByRole('button', { name: 'report.pptx' })).toHaveLength(1);
   });
 });
 

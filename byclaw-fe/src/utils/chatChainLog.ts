@@ -4,6 +4,9 @@ const MAX_EVENTS = 100;
 const MAX_AGE = 24 * 60 * 60 * 1000;
 type Stage =
   | 'fe.sent'
+  | 'fe.reply_received'
+  | 'fe.reply_applied'
+  | 'fe.reply_deferred'
   | 'fe.final_received'
   | 'fe.final_applied'
   | 'fe.final_deferred'
@@ -17,11 +20,13 @@ type Entry = {
   sessionId: string;
   streamId: string;
   result: string;
+  diagnostics: Record<string, string>;
 };
 let queue: Entry[] = [];
 const activeRequests = new Map<string, { fields: ReturnType<typeof chatChainFields>; remaining: Set<string> }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let flushing = false;
+const receivedAt = new Map<string, number>();
 const safe = (value: unknown) =>
   typeof value === 'string' || typeof value === 'number' ? `${value}`.slice(0, 160) : '';
 const object = (value: any): any => {
@@ -31,15 +36,64 @@ const object = (value: any): any => {
     return {};
   }
 };
+const DIAGNOSTIC_FIELDS = [
+  'eventKind',
+  'targetTenantId',
+  'invocationId',
+  'dispatchId',
+  'deliveryId',
+  'startupId',
+  'tenantId',
+  'scope',
+  'traceId',
+  'messageId',
+  'replyEventId',
+  'frameId',
+  'eventSequence',
+  'eventType',
+  'eventSessionId',
+  'eventTraceId',
+  'eventMessageId',
+  'externalSessionId',
+  'sessionScope',
+  'targetSessionId',
+  'targetTraceId',
+  'targetMessageId',
+  'targetClientRequestId',
+  'targetInvocationId',
+  'frameClientRequestId',
+  'appliedClientRequestId',
+  'appliedSessionId',
+  'appliedTraceId',
+  'appliedMessageId',
+  'applyDelayMs',
+] as const;
+const replyIdentity = (message: any): Record<string, any> => {
+  let cursor = object(message);
+  for (let depth = 0; cursor && depth < 4; depth += 1) {
+    const found = object(cursor.chatChain || object(cursor.metadata).chatChain);
+    if (found.invocationId) return found;
+    cursor = object(cursor.data);
+  }
+  return {};
+};
+
 export const chatChainFields = (message: any) => {
   const frame = object(message);
   const payload = object(frame.data);
   const data = object(payload.data);
   const metadata = object(payload.metadata);
   const frameMetadata = object(frame.metadata);
+  const identity = replyIdentity(frame);
+  const diagnostics: Record<string, string> = {};
+  DIAGNOSTIC_FIELDS.forEach((key) => {
+    const value = safe(frame[key] ?? frame.diagnostics?.[key] ?? identity[key]);
+    if (value) diagnostics[key] = value;
+  });
   return {
     requestId: safe(
-      frame.requestId ||
+      identity.requestId ||
+        frame.requestId ||
         payload.requestId ||
         data.requestId ||
         metadata.requestId ||
@@ -47,7 +101,8 @@ export const chatChainFields = (message: any) => {
         frame.clientRequestId
     ),
     sessionId: safe(frame.sessionId || payload.sessionId || payload.session_id || data.sessionId),
-    streamId: safe(frame.streamId || payload.stream_id || payload.streamId || data.streamId),
+    streamId: safe(frame.streamId || payload.stream_id || payload.streamId || data.streamId || identity.streamId),
+    diagnostics,
   };
 };
 export const isChatTerminal = (message: any) => {
@@ -55,6 +110,9 @@ export const isChatTerminal = (message: any) => {
   const payload = object(frame.data);
   return frame.type === 'ERROR' || ['appStreamResponse', 'error'].includes(frame.event || payload.event);
 };
+export const isChatCheckpoint = (message: any): boolean =>
+  isChatTerminal(message) || replyIdentity(message).checkpoint === true;
+
 function restore() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -66,12 +124,15 @@ function restore() {
       if (
         !safe(item.eventId) ||
         !safe(item.requestId) ||
-        !['ok', 'failed', 'restoring', 'missing_context'].includes(item.result)
+        !['ok', 'failed', 'restoring', 'missing_context', 'ignored'].includes(item.result)
       )
         return;
       if (
         ![
           'fe.sent',
+          'fe.reply_received',
+          'fe.reply_applied',
+          'fe.reply_deferred',
           'fe.final_received',
           'fe.final_applied',
           'fe.final_deferred',
@@ -135,6 +196,17 @@ export function recordChatChain(stage: Stage, message: any, result = 'ok') {
   try {
     const fields = chatChainFields(message);
     if (!fields.requestId) return;
+    const eventKey = fields.diagnostics.frameId || fields.diagnostics.replyEventId || fields.streamId;
+    if (eventKey && ['fe.reply_received', 'fe.final_received'].includes(stage)) {
+      receivedAt.set(eventKey, performance.now());
+      if (receivedAt.size > MAX_EVENTS) receivedAt.delete(receivedAt.keys().next().value!);
+    }
+    if (eventKey && ['fe.reply_applied', 'fe.final_applied'].includes(stage)) {
+      const received = receivedAt.get(eventKey);
+      if (received !== undefined)
+        fields.diagnostics.applyDelayMs = `${Math.max(0, Math.round(performance.now() - received))}`;
+      receivedAt.delete(eventKey);
+    }
     if (stage === 'fe.sent' && result === 'ok') {
       const ids = Array.isArray(message.laneIds) ? message.laneIds.map(safe).filter(Boolean).slice(0, 100) : [];
       activeRequests.set(fields.requestId, { fields, remaining: new Set(ids.length ? ids : [fields.requestId]) });

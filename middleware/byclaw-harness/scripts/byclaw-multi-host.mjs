@@ -52,7 +52,8 @@
  *                                  the PUT `env` carries; the other BYCLAW_TOOL_ENV_* settings of the byclaw-be
  *                                  backend (SERVICE_KEY, SSH_INSTANCE, HOST_TEMPLATE, SYSTEM_CODE,
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
- *                                  plugin's cordis.patch.yml.
+ *                                  plugin's cordis.patch.yml. A PUT `env` BYCLAW_TOOL_ENV_SERVICE_KEY overrides
+ *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
@@ -136,6 +137,7 @@ export const USER_ROW_OVERLAYS = {
   }),
   'agent-teams': (user, home) => ({ dshHome: home, workspaceOnToolEnvironment: true, workspace: '/by' }),
   'better-sidebar': () => ({ workspaceOnToolEnvironment: true }),
+  'iron-rules': () => ({ workspaceOnToolEnvironment: true }),
   'byclaw-browser-use': (user, home) => ({
     ownsRuntime: true,
     // Managed context IDs are long; keep sockets outside the context directory.
@@ -163,11 +165,18 @@ export const USER_ROW_OVERLAYS = {
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
+    // What the user's own sandbox would have started with (BE renders it from the harness spec for every PUT).
+    launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
-      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
+      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
+}
+
+/** The PUT `env` may pick this user's tool sandbox spec; otherwise the host's BYCLAW_TOOL_ENV_SERVICE_KEY applies. */
+export function toolEnvServiceKey(spec) {
+  return spec.env?.BYCLAW_TOOL_ENV_SERVICE_KEY?.trim() || spec.toolEnvBe.serviceKey
 }
 
 /** The user's BE token from the PUT `env`; the byclaw-be backend cannot create B without it. */
@@ -198,6 +207,27 @@ export async function currentUserToken(redis, user) {
   if (userId === '') return undefined
   const token = String(await redis.hget(`user:${userId}:login:auth`, 'Beyond-Token') ?? '').trim()
   return token === '' ? undefined : token
+}
+
+/** The launch environment processes on B get: the PUT `env` with the user identity on top, as in {@link launchEnvironmentValues}. */
+function toolLaunchEnvironment(env, user) {
+  return { ...env, USER_CODE: user }
+}
+
+/**
+ * Give a running context the launch environment of a later PUT: processes it
+ * starts on B from then on get it under their own (see dsh-tool-env).
+ * @param ctx - the context's root (anything with `get(name)`).
+ * @param env - PUT `env`.
+ * @param user - the user the context runs as, which `env` cannot override.
+ * @returns whether an environment was handed over.
+ */
+export function renewLaunchEnvironment(ctx, env, user) {
+  if (env === undefined || env === null || Object.keys(env).length === 0) return false
+  const toolEnv = ctx.get('ssh')
+  if (typeof toolEnv?.setLaunchEnvironment !== 'function') return false
+  toolEnv.setLaunchEnvironment(toolLaunchEnvironment(env, user))
+  return true
 }
 
 export function renewUserToken(ctx, config, env) {
@@ -250,11 +280,9 @@ export const DISABLED_BY_DESIGN = [
  * per-user config, and wire that config in USER_ROW_OVERLAYS.
  */
 export const DISABLED_UNTIL_MULTI_USER = [
-  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead.
+  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead
+  // (a server only while calls arrive, so B still pauses when idle).
   { id: 'codegraph-mcp', reason: 'replaced by dsh-codegraph on the tool environment' },
-  // Its MCP server stream stays open for the context's lifetime, which would keep
-  // B from ever idling into a pause. Enable once that stream is lease-aware.
-  { package: '@byclaw/dsh-codegraph', reason: 'would pin the tool environment awake' },
   // DSH's own terminal panel spawns a host PTY; better-sidebar's terminal runs on B.
   { package: '@deepseek-ai/dsh-client-ui-sidebar-terminal', reason: 'host PTY instead of the tool environment' },
 ]
@@ -1228,7 +1256,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
     // using the one from boot otherwise, which expires long before a resident
     // context goes away (then every launch of B is a 401).
-    renew: request => { renewUserToken(ctx, config, request.env) },
+    renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
   }
   if (request.managed) {
     const deadline = Date.now() + 60_000

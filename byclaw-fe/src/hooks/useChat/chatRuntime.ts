@@ -1,4 +1,4 @@
-import { isChatTerminal, recordChatChain } from '@/utils/chatChainLog';
+import { isChatCheckpoint, isChatTerminal, recordChatChain } from '@/utils/chatChainLog';
 import { applyAgentTeamsStreamSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import { get, isNil, set, unset } from 'lodash';
 
@@ -524,17 +524,31 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     scheduleAnswerFlush(context);
   }
   markParsedStreamApplied(context, parsed);
-  if (isChatTerminal(rawMessage))
-    recordChatChain('fe.final_applied', { ...rawMessage, appliedClientRequestId: context.clientRequestId });
+  if (isChatCheckpoint(rawMessage))
+    recordChatChain(isChatTerminal(rawMessage) ? 'fe.final_applied' : 'fe.reply_applied', {
+      ...rawMessage,
+      appliedClientRequestId: context.clientRequestId,
+      appliedSessionId: context.answerMsg.sessionId,
+      appliedTraceId: context.answerMsg.traceId,
+      appliedMessageId: context.answerMsg.messageId,
+    });
 };
 
 export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
-  if (!shouldApplyParsedStream(parsed)) return;
+  if (!shouldApplyParsedStream(parsed)) {
+    if (isChatCheckpoint(parsed.rawMessage)) recordChatChain('fe.reply_deferred', parsed.rawMessage, 'ignored');
+    return;
+  }
   applyAgentTeamsStreamSnapshot(parsed.rawMessage);
 
   const restoredKey = getRestoredKeyByParsed(parsed);
   if (restoringStreamKeys.has(restoredKey)) {
-    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'restoring');
+    if (isChatCheckpoint(parsed.rawMessage))
+      recordChatChain(
+        isChatTerminal(parsed.rawMessage) ? 'fe.final_deferred' : 'fe.reply_deferred',
+        parsed.rawMessage,
+        'restoring'
+      );
     bufferParsedStream(parsed);
     return;
   }
@@ -554,7 +568,12 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
     })
   );
   if (!context) {
-    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'missing_context');
+    if (isChatCheckpoint(parsed.rawMessage))
+      recordChatChain(
+        isChatTerminal(parsed.rawMessage) ? 'fe.final_deferred' : 'fe.reply_deferred',
+        parsed.rawMessage,
+        'missing_context'
+      );
     const messageSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);
     const runtimeInfo = chatSessionRuntimeManager.getBySession(messageSessionId);
     if (runtimeInfo?.restored) {

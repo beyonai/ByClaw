@@ -96,6 +96,14 @@ export interface GroupTaskPublicationClientOptions {
   byRoot: string
   timeoutMs: number
   fetchImpl?: typeof fetch
+  /**
+   * The user tree's files when they live in the tool environment rather than on
+   * this host (the shared DSH host): attachments are checked there.
+   */
+  userFiles?: {
+    realpath(path: string): Promise<string>
+    lstat(path: string): Promise<{ type: string } | undefined>
+  }
 }
 
 /** Verify a readable regular file in the user's mounted ByClaw filesystem without uploading it. */
@@ -106,18 +114,23 @@ async function validateFile(source: string, options: GroupTaskPublicationClientO
   }
   signal.throwIfAborted()
   try {
-    const root = await realpath(resolve(options.byRoot))
-    const file = await realpath(options.resolveSourcePath(source))
+    const files = options.userFiles
+    const root = await (files ?? { realpath }).realpath(resolve(options.byRoot))
+    const file = await (files ?? { realpath }).realpath(options.resolveSourcePath(source))
     const suffix = relative(root, file)
     if (suffix === '' || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
       throw new Error('outside-user-root')
     }
-    // Nonblocking open prevents a FIFO from stalling validation before the regular-file check.
-    const handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
-    try {
-      if (!(await handle.stat()).isFile()) throw new Error('not-a-file')
-    } finally {
-      await handle.close()
+    if (files !== undefined) {
+      if ((await files.lstat(file))?.type !== 'file') throw new Error('not-a-file')
+    } else {
+      // Nonblocking open prevents a FIFO from stalling validation before the regular-file check.
+      const handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
+      try {
+        if (!(await handle.stat()).isFile()) throw new Error('not-a-file')
+      } finally {
+        await handle.close()
+      }
     }
   } catch {
     throw new Error('附件不存在、不可读取，或不是当前用户 /by/ 工作区内的普通文件。')

@@ -79,7 +79,7 @@ public class ChatService {
      * @see AssistantChatService#chat(ChatMessage, NettyArrayOutputStream)
      */
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
-        ChatChainLog.record("be.received", ChatChainLog.requestId(message), message.getSessionId(), "ok",
+        ChatChainLog.accept(message,
             "channelId", ctx.channel().id().asShortText());
         LoginInfo currentUser = CurrentUserHolder.getLoginInfo();
         if (currentUser == null) currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
@@ -104,6 +104,8 @@ public class ChatService {
                 error.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
                 error.put("chatContent", I18nUtil.get("token.quota.monthly.exceeded"));
                 PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(error.toJSONString()));
+                ChatChainLog.stage(message, message.getTraceId(), "be.admission", "end", "failed",
+                    message.getChatChainContext().startedNanos(), "errorCode", "QUOTA_EXCEEDED");
                 return;
             }
         } catch (Exception e) {

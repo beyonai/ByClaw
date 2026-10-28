@@ -9,7 +9,10 @@ import java.util.HexFormat;
 import java.util.Set;
 import java.util.TreeSet;
 
-/** Validated immutable business snapshot; transport authentication is deliberately outside its digest. */
+/**
+ * Validated immutable business snapshot; transport authentication is deliberately outside its digest.
+ * An omitted profile remains unresolved until new-command acceptance freezes the startup default.
+ */
 public record TenantCommandRequest(String sourceSystem, String requestId, long ownerUserId,
                                   String enterpriseName, String profileKey, String snapshot, String hash) {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -25,14 +28,23 @@ public record TenantCommandRequest(String sourceSystem, String requestId, long o
         fields(body.get("actor"), Set.of("type", "id"));
         text(body.get("actor"),"type",64);
         text(body.get("actor"),"id",128);
-        JsonNode spec = body.get("resourceSpec");
-        fields(spec, Set.of("profileKey", "bindingVersion"));
-        String profile = text(spec,"profileKey",10);
-        if (!Set.of("s","m","l").contains(profile)) invalid();
-        if (decimal(spec.get("bindingVersion")) != 1) throw new TenantCommandException(409,"RESOURCE_BINDING_UNSUPPORTED");
+        String profile = null;
+        if (body.has("resourceSpec")) {
+            JsonNode spec = body.get("resourceSpec");
+            fields(spec, Set.of("profileKey", "bindingVersion"));
+            if (spec.has("profileKey")) {
+                profile = text(spec,"profileKey",10);
+                if (!Set.of("s","m","l").contains(profile)) invalid();
+            }
+            // Older immutable requests retain their version field; new callers need only a profile key.
+            if (spec.has("bindingVersion") && decimal(spec.get("bindingVersion")) != 1) {
+                throw new TenantCommandException(409,"RESOURCE_BINDING_UNSUPPORTED");
+            }
+        }
         JsonNode policy = body.get("initialPolicy");
         if (policy == null || !policy.isObject() || !"PREPARED".equals(policy.path("accessMode").asText())
             || !"1".equals(policy.path("revision").asText()) || !policy.path("revision").isTextual()) invalid();
+        // Keep omitted fields omitted so a later startup default cannot change a retry's business digest.
         String snapshot = canonical(body);
         return new TenantCommandRequest(source,request,owner,name,profile,snapshot,digest(snapshot));
     }

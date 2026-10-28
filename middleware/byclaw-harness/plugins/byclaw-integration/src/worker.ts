@@ -15,6 +15,8 @@ import {
 import type { ManagedAdmission } from './managed-admission.ts'
 import { byClawVoicePayload } from './voice-runtime.ts'
 import { extractByClawUserText } from './protocol.ts'
+import { runChatChain, chatChain } from './chat-chain-log.ts'
+import { instrumentContextReply, observeReplyRedis } from './reply-log.ts'
 
 /** Result of one ByClaw request after its DSH work and output have settled. */
 export interface ByClawDshAskResult {
@@ -45,6 +47,7 @@ export class ByClawDshCommandHandler {
       const resumed = await this.sessions.resume(command, context)
       if (!resumed) throw new Error('BYCLAW_DSH Resume has no matching ask_user interaction')
       const recovered = typeof resumed === 'boolean' ? undefined : resumed
+      chatChain()?.point('harness.resume_handoff', { mode: recovered === undefined ? 'handoff' : 'reconstructed' })
       console.info(
         `[ASK_USER_QUESTION_RECOVERY_TRACE] RESUME_DISPATCH_RESULT session=${command.header.sessionId} message=${command.header.messageId} mode=${recovered === undefined ? 'handoff' : 'reconstructed'} final_answer=${recovered?.finalAnswer === undefined ? 'absent' : 'present'}`,
       )
@@ -86,6 +89,8 @@ export class ByClawDshCommandHandler {
 /** Redis-consuming by-framework Worker that delegates every command to DSH. */
 export class ByClawDshGatewayWorker extends GatewayWorker {
   private readonly handler: ByClawDshCommandHandler
+  private readonly chainWorkerId: string
+  private readonly startupId: string
 
   constructor(options: {
     workerId: string
@@ -94,8 +99,11 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
     redis: ConstructorParameters<typeof WorkerRegistry>[0]
     registry?: WorkerRegistry
     admission?: ManagedAdmission
+    startupId?: string
   }) {
-    super(options.workerId, options.registry ?? new WorkerRegistry(options.redis), options.redis)
+    super(options.workerId, options.registry ?? new WorkerRegistry(options.redis), options.redis ? observeReplyRedis(options.redis) : undefined)
+    this.chainWorkerId = options.workerId
+    this.startupId = options.startupId ?? ''
     this.admission = options.admission
     this.agentTypes = [...new Set(options.agentTypes)]
     this.handler = new ByClawDshCommandHandler(options.sessions)
@@ -109,8 +117,18 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
   }
 
   processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
-    return this.admission === undefined ? this.handler.process(command, context)
-      : this.admission.run(() => this.handler.process(command, context))
+    return runChatChain(command, this.chainWorkerId, async () => {
+      instrumentContextReply(context, chatChain(), command.header.messageId)
+      const end = chatChain()?.start('harness.admission')
+      const process = () => { end?.(); return this.handler.process(command, context) }
+      try {
+        return await (this.admission === undefined ? process() : this.admission.run(process))
+      } catch (error: unknown) {
+        end?.('failed', { errorCode: 'WORKER_ADMISSION_FAILED', errorType: error instanceof Error ? error.name : 'UnknownError' })
+        chatChain()?.failInitiation(error)
+        throw error
+      }
+    }, this.startupId)
   }
 
   async onCancelTask(command: unknown): Promise<void> {

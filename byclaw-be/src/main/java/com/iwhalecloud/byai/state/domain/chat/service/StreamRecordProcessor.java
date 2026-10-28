@@ -95,11 +95,13 @@ public class StreamRecordProcessor {
             }
             List<JSONObject> events = new ArrayList<>();
             events.add(first);
+            ChatReplyLog.log("be.reply_received", first, null, "ok");
             int end = index + 1;
             while (end < records.size()) {
                 JSONObject next = childEvent(records.get(end));
                 if (next == null || !sameChildRun(first, next)) break;
                 events.add(next);
+                ChatReplyLog.log("be.reply_received", next, null, "ok");
                 end++;
             }
             String sessionId = first.getString("session_id");
@@ -169,6 +171,7 @@ public class StreamRecordProcessor {
 
         if (dataJson == null) return StreamDispatchResult.INTENTIONALLY_IGNORED;
         dataJson.put("stream_id", record.getId().getValue());
+        ChatReplyLog.log("be.reply_received", dataJson, null, "ok", "streamKey", record.getStream());
         String sessionId = dataJson.getString("session_id");
         if (sessionId == null || sessionId.isBlank()) {
             return sessionStreamEventRouter.dispatch(dataJson);
@@ -194,12 +197,18 @@ public class StreamRecordProcessor {
                 return result;
             }
 
+            long persistStarted = System.nanoTime();
+            ChatReplyLog.log("be.reply_persist", dataJson, ctx, "running", "phase", "start");
             if (!scriptService.persistAsyncGatewayContext(ctx)) {
+                ChatReplyLog.log("be.reply_persist", dataJson, ctx, "failed", "phase", "end",
+                    "durationMs", (System.nanoTime() - persistStarted) / 1_000_000);
                 outcome = "persist_failed";
                 log.warn("Redis Stream terminal 事件持久化失败，将保留 pending, stream: {}, messageId: {}",
                     record.getStream(), record.getId());
                 return StreamDispatchResult.ERROR;
             }
+            ChatReplyLog.log("be.reply_persist", dataJson, ctx, "ok", "phase", "end",
+                "durationMs", (System.nanoTime() - persistStarted) / 1_000_000);
             // 标记必须在落库成功之后、ACK 之前写入：进程若在落库前崩溃，
             // 不能留下「已完成」的痕迹，否则重投会被误判并 ACK 掉。
             outcome = "persist_marker_failed";
@@ -208,6 +217,8 @@ public class StreamRecordProcessor {
             return result;
         }
         finally {
+            ChatReplyLog.log("be.reply_processed", dataJson, null, outcome,
+                "lockWaitMs", lockWaitMs, "processingMs", (System.nanoTime() - processingStarted) / 1_000_000 - lockWaitMs);
             lock.processing.unlock();
             releaseSessionLock(sessionId, lock);
             if (terminal) ChatChainLog.record("be.final_processed", requestId, sessionId,

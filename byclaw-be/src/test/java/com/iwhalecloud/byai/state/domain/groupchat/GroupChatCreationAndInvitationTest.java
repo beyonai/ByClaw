@@ -71,6 +71,7 @@ import org.springframework.transaction.annotation.AnnotationTransactionAttribute
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/** 建群与邀请业务测试；配额、缓存相关服务及 JDBC 连接均使用 mock，无需启动 Redis 或数据库。 */
 class GroupChatCreationAndInvitationTest extends I18nTestSupport {
     @org.junit.jupiter.api.BeforeEach
     void useEnglishMessages() {
@@ -101,6 +102,7 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         service = new GroupChatApplicationService(sessions, sequence, authorization, members,
             projects, projectMembers, messages, mock(GroupChatExecutionCoordinator.class),
             events, sessionExt);
+        ReflectionTestUtils.setField(service, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
         ReflectionTestUtils.setField(service, "workgroupHooks",
             mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks.class));
         ReflectionTestUtils.setField(service, "workgroupTemplateService", templates);
@@ -168,6 +170,112 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         verify(messages, never()).insert(any(ByaiMessage.class));
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
         verifyNoInteractions(events);
+    }
+
+    @Test
+    void initialGroupQuotaCountsDeduplicatedOwnerAndDefaultAssistantBeforeProjectSideEffects() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        var snapshot = java.util.Optional.of(new com.iwhalecloud.byai.common.quota.QuotaSnapshot(42L, "1", 10, 5, 1, 1));
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(42L);
+        when(quota.beginGroup(org.mockito.ArgumentMatchers.eq(42L), any())).thenReturn(snapshot);
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(30L);
+        var request = request(); request.setUserIds(List.of(10L, 20L, 20L)); request.setAgentIds(List.of(30L, 30L));
+        org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT, "groupchat.member.limit.reached"))
+            .when(quota).checkInitialGroup(snapshot, 2, 1);
+        assertThatThrownBy(() -> service.create(request)).hasMessageContaining("groupchat.member.limit.reached");
+        verify(projects, never()).createGroupChatProject(any());
+        verify(members, never()).batchSave(any());
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void batchAdmissionChecksAllDistinctUsersBeforeProjectMembershipOrGrants() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        var snapshot = java.util.Optional.of(new com.iwhalecloud.byai.common.quota.QuotaSnapshot(42L, "1", 10, 5, 1, 1));
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        var group = authorization.requireGroup(200L); group.setEnterpriseId(42L);
+        when(quota.beginGroup(42L, 200L)).thenReturn(snapshot);
+        var ownership = new ByaiSessionExt(); ownership.setExtParamValue("42");
+        when(sessionExt.findOneByExtParamCode(200L, GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT)).thenReturn(ownership);
+        org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT, "groupchat.member.limit.reached"))
+            .when(quota).checkGroupMembers(snapshot, 200L, "USER", 2);
+        assertThatThrownBy(() -> service.inviteBatch(200L, "USER", List.of(20L, 20L, 21L)))
+            .hasMessageContaining("groupchat.member.limit.reached");
+        verify(projectMembers, never()).addMember(any(), any(), any());
+        verify(members, never()).save(any());
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void personalGroupPersistsTrustedOwnershipMarkerWithoutChargingStorageFallback() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        CurrentUserHolder.getLoginInfo().setComAcctId(1L);
+        var result = service.create(request());
+        ArgumentCaptor<ByaiSessionExt> captured = ArgumentCaptor.forClass(ByaiSessionExt.class);
+        verify(sessionExt, times(3)).save(captured.capture());
+        assertThat(captured.getAllValues()).anySatisfy(ext -> {
+            assertThat(ext.getExtParamCode()).isEqualTo(GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT);
+            assertThat(ext.getExtParamValue()).isEqualTo("NONE");
+        });
+        var personal = new ByaiSessionExt(); personal.setExtParamValue("NONE");
+        when(sessionExt.findOneByExtParamCode(200L, GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT)).thenReturn(personal);
+        authorization.requireGroup(200L).setEnterpriseId(1L);
+        service.invite(200L, "AGENT", 30L);
+        verifyNoInteractions(quota);
+        assertThat(result.getSession().getEnterpriseId()).isEqualTo(1L);
+    }
+
+    @Test
+    void unmarkedLegacyGroupWithAPublishedPackageRequiresOwnershipConfirmation() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        authorization.requireGroup(200L).setEnterpriseId(1L);
+        var snapshot = java.util.Optional.of(new com.iwhalecloud.byai.common.quota.QuotaSnapshot(1L, "1", 10, 5, 3, 1));
+        when(quota.beginGroup(1L, 200L)).thenReturn(snapshot);
+        assertThatThrownBy(() -> service.invite(200L, "AGENT", 30L))
+            .hasMessageContaining("groupchat.quota.enterprise.unconfirmed");
+        verify(members, never()).save(any());
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void existingDefaultAssistantIsNotANewQuotaAdmission() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        authorization.requireGroup(200L).setEnterpriseId(42L);
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(30L);
+        when(members.findSessionMember(200L, "AGENT", 30L)).thenReturn(new ByaiSessionMember());
+        assertThat(service.ensureDefaultCoordinator(200L)).isEqualTo(30L);
+        verifyNoInteractions(quota);
+        verify(members, never()).batchSave(any());
+    }
+
+    @Test
+    void defaultAssistantUpgradeCannotBypassAgentQuotaOrGrantAccess() {
+        var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+        var snapshot = java.util.Optional.of(new com.iwhalecloud.byai.common.quota.QuotaSnapshot(42L, "1", 10, 5, 1, 0));
+        ReflectionTestUtils.setField(service, "quotaAdmission", quota);
+        authorization.requireGroup(200L).setEnterpriseId(42L);
+        when(quota.beginGroup(42L, 200L)).thenReturn(snapshot);
+        var ownership = new ByaiSessionExt(); ownership.setExtParamValue("42");
+        when(sessionExt.findOneByExtParamCode(200L, GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT)).thenReturn(ownership);
+        var assistants = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupWorkAssistantService.class);
+        ReflectionTestUtils.setField(service, "workAssistantService", assistants);
+        when(assistants.resolveDefaultCoordinatorId()).thenReturn(30L);
+        org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT, "groupchat.agent.limit.reached"))
+            .when(quota).checkGroupMembers(snapshot, 200L, "AGENT", 1);
+        assertThatThrownBy(() -> service.ensureDefaultCoordinator(200L)).hasMessageContaining("groupchat.agent.limit.reached");
+        verify(members, never()).batchSave(any());
+        verifyNoInteractions(authService);
     }
 
     @Test
@@ -298,11 +406,11 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
 
     private void assertDefaultMemberPermissions(Long sessionId) {
         ArgumentCaptor<ByaiSessionExt> captured = ArgumentCaptor.forClass(ByaiSessionExt.class);
-        verify(sessionExt, times(2)).save(captured.capture());
+        verify(sessionExt, times(3)).save(captured.capture());
         assertThat(captured.getAllValues()).extracting(ByaiSessionExt::getExtParamCode)
             .containsExactlyInAnyOrder(GroupChatAuthorizationService.MEMBER_INVITE_USER,
-                GroupChatAuthorizationService.MEMBER_ADD_AGENT);
-        assertThat(captured.getAllValues()).allSatisfy(ext -> {
+                GroupChatAuthorizationService.MEMBER_ADD_AGENT, GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT);
+        assertThat(captured.getAllValues().stream().filter(ext -> !GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT.equals(ext.getExtParamCode())).toList()).allSatisfy(ext -> {
             assertThat(ext.getSessionId()).isEqualTo(sessionId);
             assertThat(ext.getExtParamValue()).isEqualTo("true");
             assertThat(ext.getExtParamName()).isEqualTo(ext.getExtParamCode());
@@ -563,7 +671,14 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         verify(members).batchSave(anyList());
         verify(connection).rollback();
         verify(connection, never()).commit();
-        verifyNoInteractions(sessionExt);
+        // 归属标记在成员写入前保存，授权失败时随外层事务回滚，后续成员权限不应初始化。
+        ArgumentCaptor<ByaiSessionExt> ownership = ArgumentCaptor.forClass(ByaiSessionExt.class);
+        verify(sessionExt).save(ownership.capture());
+        assertThat(ownership.getValue().getSessionId()).isEqualTo(200L);
+        assertThat(ownership.getValue().getExtParamCode())
+            .isEqualTo(GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT);
+        assertThat(ownership.getValue().getExtParamValue()).isEqualTo("NONE");
+        verifyNoMoreInteractions(sessionExt);
     }
 
     @Test
