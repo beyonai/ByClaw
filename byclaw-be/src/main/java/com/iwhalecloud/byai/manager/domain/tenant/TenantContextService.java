@@ -12,6 +12,7 @@ import java.util.List;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,9 +24,12 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipRow;
+import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
 
 @Service
 public class TenantContextService {
+
+    public static final long PUBLIC_TRIAL_ENTERPRISE_ID = 999L;
 
     private static final Logger log = LoggerFactory.getLogger(TenantContextService.class);
 
@@ -34,14 +38,23 @@ public class TenantContextService {
     private static final int CONTEXT_VERSION = 1;
 
     private final TenantMembershipMapper membershipMapper;
+    private final TenantUserMembershipService membershipWriter;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
 
-    public TenantContextService(TenantMembershipMapper membershipMapper, ObjectMapper objectMapper,
-                                StringRedisTemplate redisTemplate) {
+    @Autowired
+    public TenantContextService(TenantMembershipMapper membershipMapper, TenantUserMembershipService membershipWriter,
+                                ObjectMapper objectMapper, StringRedisTemplate redisTemplate) {
         this.membershipMapper = membershipMapper;
+        this.membershipWriter = membershipWriter;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+    }
+
+    /** Compatibility constructor for focused tests and legacy embedders. */
+    public TenantContextService(TenantMembershipMapper membershipMapper, ObjectMapper objectMapper,
+                                StringRedisTemplate redisTemplate) {
+        this(membershipMapper, null, objectMapper, redisTemplate);
     }
 
     public TenantSwitchView switchTo(String enterpriseIdText) {
@@ -172,6 +185,13 @@ public class TenantContextService {
             .map(row -> new TenantAvailableView(row.getEnterpriseId(), row.getEnterpriseName(),
                 row.getRole(), provisionState(row)))
             .toList();
+    }
+
+    /** 将当前登录用户加入已由运维初始化的公共免费试用企业，并返回可切换上下文。 */
+    public TenantSwitchView activatePublicTrial() {
+        LoginInfo login = requireLogin();
+        membershipWriter.add(login.getUserId(), PUBLIC_TRIAL_ENTERPRISE_ID, "MEMBER", login.getUserId());
+        return switchTo(Long.toString(PUBLIC_TRIAL_ENTERPRISE_ID));
     }
 
     private String provisionState(TenantMembershipRow row) {

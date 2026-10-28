@@ -33,6 +33,11 @@ public class TenantContextController {
         return ResponseUtil.success(tenantContextService.switchTo(request.enterpriseId()));
     }
 
+    @PostMapping("/public-trial")
+    public ResponseUtil<TenantSwitchView> activatePublicTrial() {
+        return ResponseUtil.success(tenantContextService.activatePublicTrial());
+    }
+
     public record SwitchRequest(String enterpriseId) {
     }
 }
