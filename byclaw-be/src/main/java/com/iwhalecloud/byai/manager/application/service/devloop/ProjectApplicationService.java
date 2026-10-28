@@ -59,6 +59,8 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.common.util.MultipartFileUtil;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -92,6 +94,12 @@ public class ProjectApplicationService {
 
     @Autowired
     private WorkgroupNameService workgroupNames;
+
+    @Autowired
+    private FileBrowserApplicationService fileBrowserApplicationService;
+
+    @Autowired
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
     private static final Logger logger = LoggerFactory.getLogger(ProjectApplicationService.class);
 
@@ -265,6 +273,8 @@ public class ProjectApplicationService {
         projectInitService.initProjectWorkspace(project.getProjectId());
         projectWorkspaceManifestService.syncProjectGitmodules(project.getProjectId());
 
+        ensureDshProjectSharedFolder(project);
+
         return project;
     }
 
@@ -425,7 +435,16 @@ public class ProjectApplicationService {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
 
+        ensureDshProjectSharedFolder(project);
 
+    }
+
+    private void ensureDshProjectSharedFolder(Project project) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if ("1".equals(systemParamTargetAgentResolver.resolveEffectiveEnableDsh(userCode))) {
+            fileBrowserApplicationService.ensureFolder(userCode, project.getResourceId(),
+                "/by/.shared/project_" + project.getProjectId() + "/");
+        }
     }
 
     /**

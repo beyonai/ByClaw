@@ -40,6 +40,8 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,12 +74,19 @@ class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i1
     @Mock
     private DatasetApplicationService datasetApplicationService;
 
+    @Mock
+    private FileBrowserApplicationService fileBrowserApplicationService;
+
+    @Mock
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
     private Object originalMessageSource;
 
     @BeforeEach
     void setCurrentUser() {
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(88L);
+        loginInfo.setUserCode("test-user");
         CurrentUserHolder.setLoginInfo(loginInfo);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
@@ -114,6 +123,45 @@ class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i1
         verify(projectInitService).initProjectWorkspace(1001L);
         verify(projectWorkspaceManifestService).syncProjectGitmodules(1001L);
         verify(datasetApplicationService).createDataset(any());
+        verify(fileBrowserApplicationService, never()).ensureFolder(any(), any(), any());
+    }
+
+    @Test
+    void ensuresSharedFolderWhenCreatingDshProjectAndGroupProject() {
+        when(systemParamTargetAgentResolver.resolveEffectiveEnableDsh("test-user")).thenReturn("1");
+        when(sequenceService.nextVal()).thenReturn(1001L, 1002L);
+        Project firstProject = new Project();
+        firstProject.setProjectId(1001L);
+        Project secondProject = new Project();
+        secondProject.setProjectId(1002L);
+        when(projectService.findById(1001L)).thenReturn(firstProject);
+        when(projectService.findById(1002L)).thenReturn(secondProject);
+        stubCreateCloudResource();
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectName("DSH project");
+        dto.setResourceId(42L);
+
+        service().createProject(dto);
+        service().createGroupChatProject(dto);
+
+        verify(fileBrowserApplicationService).ensureFolder("test-user", 42L, "/by/.shared/project_1001/");
+        verify(fileBrowserApplicationService).ensureFolder("test-user", 42L, "/by/.shared/project_1002/");
+    }
+
+    @Test
+    void ensuresSharedFolderWhenUpdatingDshProject() {
+        when(systemParamTargetAgentResolver.resolveEffectiveEnableDsh("test-user")).thenReturn("1");
+        Project project = new Project();
+        project.setProjectId(1001L);
+        project.setCloudResourceId(9001L);
+        when(projectService.findById(1001L)).thenReturn(project);
+        ProjectDTO dto = new ProjectDTO();
+        dto.setProjectId(1001L);
+        dto.setResourceId(43L);
+
+        service().updateProject(dto);
+
+        verify(fileBrowserApplicationService).ensureFolder("test-user", 43L, "/by/.shared/project_1001/");
     }
 
     @Test
@@ -144,6 +192,7 @@ class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i1
         verify(projectService).existsProjectName("renamed workspace", 99L, 10L, 1001L);
         verify(projectService).update(project);
         assertThat(project.getProjectName()).isEqualTo("renamed workspace");
+        verify(fileBrowserApplicationService, never()).ensureFolder(any(), any(), any());
     }
 
     @Test
@@ -327,6 +376,8 @@ class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i1
         ReflectionTestUtils.setField(service, "projectInitService", projectInitService);
         ReflectionTestUtils.setField(service, "projectWorkspaceManifestService", projectWorkspaceManifestService);
         ReflectionTestUtils.setField(service, "datasetApplicationService", datasetApplicationService);
+        ReflectionTestUtils.setField(service, "fileBrowserApplicationService", fileBrowserApplicationService);
+        ReflectionTestUtils.setField(service, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
         return service;
     }
 }

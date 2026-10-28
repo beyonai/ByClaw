@@ -5,9 +5,20 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { teamStateRuntime, type TeamStateRuntime } from '@byclaw/dsh-agent-teams'
 import { resolveByClawInboundPath } from './inbound-context.ts'
-import { byClawSessionCwd, isLegacyProjectCwd } from './session-cwd.ts'
+import { byClawSessionCwd, isLegacyProjectCwd, isLegacyProjectWorkspaceTransition, isProjectSharedCwd } from './session-cwd.ts'
 import type { ByClawSessionMetadataStore } from './session-metadata.ts'
 import { byClawBoundRootSessionId, foldByClawSessionWorkspace } from './session-workspace.ts'
+
+const requestedWorkspaces = new WeakMap<object, Map<string, string>>()
+
+/** Bind the current authenticated inbound project before persistence restores immutable headers. */
+export function requestByClawProjectWorkspace(metadata: object, externalId: string, cwd: string): void {
+  let workspaces = requestedWorkspaces.get(metadata)
+  if (workspaces === undefined) requestedWorkspaces.set(metadata, workspaces = new Map())
+  const previous = workspaces.get(externalId)
+  if (previous !== undefined && previous !== cwd) throw new Error('ByClaw project workspace cannot change')
+  workspaces.set(externalId, cwd)
+}
 
 /**
  * DSH headers are immutable. Translate at the storage boundary BEFORE Agent restore,
@@ -28,7 +39,7 @@ export function installByClawSessionCwdCompatibility(
   const originalList = persistence.list
   const stateAliases = new Map<string, () => void>()
 
-  async function externalId(header: SessionHeader, visited = new Set<string>()): Promise<string | undefined> {
+  async function externalId(header: SessionHeader, visited = new Set<string>()): Promise<{ id: string; cwd?: string } | undefined> {
     const id = String(header.id)
     if (visited.has(id)) throw new Error('Cyclic ByClaw workspace lineage')
     visited.add(id)
@@ -40,10 +51,11 @@ export function installByClawSessionCwdCompatibility(
         throw new Error('ByClaw workspace root identity mismatch')
       }
       if (header.cwd === undefined || record.identity.cwd === undefined || (resolve(record.identity.cwd) !== resolve(header.cwd)
-        && resolve(record.identity.cwd) !== byClawSessionCwd(record.externalSessionId, byRoot))) {
+        && resolve(record.identity.cwd) !== byClawSessionCwd(record.externalSessionId, byRoot)
+        && !isLegacyProjectWorkspaceTransition(header.cwd, record.identity.cwd, record.externalSessionId, byRoot))) {
         throw new Error('ByClaw workspace metadata conflicts with the stored header')
       }
-      return record.externalSessionId
+      return { id: record.externalSessionId, cwd: record.identity.cwd }
     }
     if (header.parentSession !== undefined) {
       const parent = await originalStat.call(persistence, header.parentSession)
@@ -58,16 +70,22 @@ export function installByClawSessionCwdCompatibility(
       if (legacy !== undefined && (header.cwd === undefined || legacy.cwd !== resolve(header.cwd))) {
         throw new Error('ByClaw legacy workspace conflicts with the stored header')
       }
-      return legacy?.externalSessionId === id ? id : undefined
+      return legacy?.externalSessionId === id ? { id } : undefined
     } finally {
       await handle.close()
     }
   }
 
   async function projectHeader(header: SessionHeader): Promise<SessionHeader> {
-    if (!isLegacyProjectCwd(header.cwd, byRoot)) return header
-    const id = await externalId(header)
-    return id === undefined ? header : { ...header, cwd: byClawSessionCwd(id, byRoot) }
+    if (!isLegacyProjectCwd(header.cwd, byRoot)
+      && !(header.cwd !== undefined && resolve(header.cwd).startsWith(resolve(byRoot, '.sessions') + '/'))) return header
+    const root = await externalId(header)
+    if (root === undefined) return header
+    const { id, cwd: persisted } = root
+    const cwd = requestedWorkspaces.get(metadata)?.get(id)
+      ?? (isProjectSharedCwd(persisted, byRoot) ? persisted! : byClawSessionCwd(id, byRoot))
+    if (header.cwd === cwd) return header
+    return isLegacyProjectWorkspaceTransition(header.cwd, cwd, id, byRoot) ? { ...header, cwd } : header
   }
 
   const wrappedOpen: typeof persistence.open = async function (this: typeof persistence, id, access, options) {
@@ -77,10 +95,13 @@ export function installByClawSessionCwdCompatibility(
       if (header === handle.header) return handle
       if (access === 'write') {
         await ensureDirectory(header.cwd!)
-        const key = JSON.stringify([header.cwd, handle.header.cwd])
+        const root = await externalId(handle.header)
+        const stateWorkspace = isProjectSharedCwd(header.cwd, byRoot) && root !== undefined
+          ? byClawSessionCwd(root.id, byRoot) : header.cwd!
+        const key = JSON.stringify([stateWorkspace, handle.header.cwd])
         if (!stateAliases.has(key)) {
           stateAliases.set(key, stateRuntime().registerWorkspaceAlias(
-            header.cwd!, resolveByClawInboundPath(handle.header.cwd!, byRoot),
+            stateWorkspace, resolveByClawInboundPath(handle.header.cwd!, byRoot),
           ))
         }
       }

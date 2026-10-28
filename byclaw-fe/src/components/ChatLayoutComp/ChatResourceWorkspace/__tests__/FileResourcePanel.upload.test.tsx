@@ -3,9 +3,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { message } from 'antd';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
-import { listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
+import { getProject } from '@/pages/projectSpace/service';
 import FileResourcePanel from '../FileResourcePanel';
 
 const MB = 1024 * 1024;
@@ -29,7 +30,7 @@ jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
   default: () => ({ uploadFileConfig: mockConfig }),
 }));
-jest.mock('@/service/fileBrowser', () => ({ listFiles: jest.fn(), uploadFiles: jest.fn() }));
+jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
@@ -37,6 +38,7 @@ jest.mock('@/utils/file', () => ({ downloadFile: jest.fn() }));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
 jest.mock('@/components/QueryInput/withDrag', () => ({ DragType: {} }));
 jest.mock('../useChatResourceProject', () => ({ useChatResourceProject: () => ({}) }));
+jest.mock('@/pages/projectSpace/service', () => ({ getProject: jest.fn() }));
 jest.mock('../FilePreviewPanel', () => ({ __esModule: true, default: () => null }));
 jest.mock('@/layout/sider/components/FileSiderPanel/components/CreateFolderModal', () => ({
   __esModule: true,
@@ -56,15 +58,24 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     items,
     loading,
     onAction,
+    onNodeClick,
+    getDisplayName,
   }: {
     contentBefore: ReactNode;
     items: FileBrowserItem[];
     loading: boolean;
     onAction: (action: string, item: FileBrowserItem) => void;
+    onNodeClick: (event: React.MouseEvent, item: FileBrowserItem) => void;
+    getDisplayName?: (item: FileBrowserItem) => string;
   }) {
     return (
       <section aria-label="File space" aria-busy={loading}>
         {contentBefore}
+        {items.map((item) => (
+          <button key={`open-${item.path}`} type="button" onClick={(event) => onNodeClick(event, item)}>
+            Open {getDisplayName?.(item) || item.name}
+          </button>
+        ))}
         {items.map((item) => (
           <button key={item.path} type="button" onClick={() => onAction('upload', item)}>
             Upload to {item.name}
@@ -82,6 +93,99 @@ function createFile(name: string, size: number) {
   return file;
 }
 
+it('navigates from the DSH project directory to shared root and uploads into the selected directory', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="7"
+        projectId={12}
+        project={{ projectId: 12, projectName: '测试项目' } as any}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_12/' }));
+  expect(ensureFolder).toHaveBeenCalledWith({ resourceId: '42', path: '/by/.shared/project_12/' });
+  expect(jest.mocked(ensureFolder).mock.invocationCallOrder[0]).toBeLessThan(
+    jest.mocked(listFiles).mock.invocationCallOrder[0]
+  );
+  expect(screen.getByText('测试项目')).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '本地共享' }));
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/' }));
+  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  const input = screen
+    .getByRole('region', { name: 'File space' })
+    .querySelector<HTMLInputElement>('input[type="file"]');
+  await chooseFiles(input!, [createFile('root.pdf', 1)]);
+  expect(uploadFiles).toHaveBeenCalledWith('42', '/by/.shared/', expect.any(Array));
+});
+
+it('resolves project folder labels after returning to shared root and preserves physical paths when entering', async () => {
+  jest.mocked(getProject).mockResolvedValue({ data: { projectId: 42, projectName: '其他项目' } } as any);
+  jest.mocked(listFiles).mockImplementation(async (request) =>
+    request.path === '/by/.shared/'
+      ? [
+          { name: 'project_-1', path: '/by/.shared/project_-1/', isDir: true },
+          { name: 'project_42', path: '/by/.shared/project_42/', isDir: true },
+        ]
+      : []
+  );
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="7"
+        projectId={-1}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_-1/' }));
+  expect(screen.getByText('默认项目')).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '本地共享' }));
+  });
+  expect(screen.getByRole('button', { name: 'Open 默认项目' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open 其他项目' })).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open 其他项目' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_42/' }));
+  expect(screen.getByText('其他项目')).toBeInTheDocument();
+});
+
+it('retries failed project names and refreshes renamed projects on list refresh', async () => {
+  jest.mocked(listFiles).mockResolvedValue([{ name: 'project_42', path: '/by/.shared/project_42/', isDir: true }]);
+  jest.mocked(getProject).mockRejectedValueOnce(new Error('offline'));
+  const panel = (refreshKey: number) => (
+    <FileResourcePanel scope="shared" sessionId="7" resourceId="42" refreshKey={refreshKey} onOpenDetail={jest.fn()} />
+  );
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(panel(0));
+  });
+  expect(screen.getByRole('button', { name: 'Open project_42' })).toBeInTheDocument();
+  jest.mocked(getProject).mockResolvedValue({ data: { projectId: 42, projectName: '恢复项目' } } as any);
+  await act(async () => {
+    view.rerender(panel(1));
+  });
+  expect(screen.getByRole('button', { name: 'Open 恢复项目' })).toBeInTheDocument();
+  jest.mocked(getProject).mockResolvedValue({ data: { projectId: 42, projectName: '改名项目' } } as any);
+  await act(async () => {
+    view.rerender(panel(2));
+  });
+  expect(screen.getByRole('button', { name: 'Open 改名项目' })).toBeInTheDocument();
+});
+
 async function renderPanel(scope: 'shared' | 'project') {
   // 列表请求已 mock 为立即完成，显式等待 React 提交状态，避免轮询与渲染竞争。
   await act(async () => {
@@ -89,6 +193,7 @@ async function renderPanel(scope: 'shared' | 'project') {
   });
   const region = screen.getByRole('region', { name: 'File space' });
   expect(region).toHaveAttribute('aria-busy', 'false');
+  expect(ensureFolder).not.toHaveBeenCalled();
   const input = region.querySelector<HTMLInputElement>('input[type="file"]');
   if (!input) throw new Error('Upload file input is missing');
   return { input };

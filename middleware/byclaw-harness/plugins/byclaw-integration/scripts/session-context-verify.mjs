@@ -20,6 +20,7 @@ import {
   byClawTurnFailurePresentation,
   emitByClawTurnFailure,
   resolveByClawTurnModelSelection,
+  byClawCommandSessionRoute,
 } from '../lib/session-runtime.js'
 import {
   byClawModelErrorFromRequestFailure,
@@ -28,6 +29,18 @@ import {
 } from '../lib/model-error.js'
 import * as dshSession from '@deepseek-ai/dsh-session'
 import * as integration from '../lib/index.js'
+
+for (const projectId of [-1, 42]) {
+  const route = byClawCommandSessionRoute({
+    header: { sessionId: 'project-conversation', messageId: 'request', metadata: { project_info: { project_id: projectId } } },
+    content: [], extraPayload: { cwd: '/untrusted/override' },
+  })
+  assert.equal(route.cwd, `/by/.shared/project_${projectId}`)
+}
+assert.equal(byClawCommandSessionRoute({
+  header: { sessionId: 'project-conversation', messageId: 'request', metadata: {} },
+  content: [], extraPayload: { cwd: '/untrusted/override' },
+}).cwd, '/by/.sessions/project-conversation')
 
 const workspace = {
   externalSessionId: '350860623218590448',
@@ -443,7 +456,7 @@ assert.deepEqual(first[1].source, { kind: 'plugin:byclaw-context' })
 assert.match(first[1].content[0].text, /session_id: 350860623218590448/u)
 assert.match(first[1].content[0].text, /cwd: \/workspace\/byclaw/u)
 assert.match(first[1].content[0].text, /default_output_root: \/srv\/byclaw\/by\/\.sessions\/350860623218590448/u)
-assert.match(first[1].content[0].text, /默认使用当前会话的过程文件目录/u)
+assert.match(first[1].content[0].text, /交付产物使用 default_output_root/u)
 assert.match(first[2].content[0].text, /需求说明\.pdf/u)
 assert.match(first[2].content[0].text, /研发知识库/u)
 assert.match(first[2].content[0].text, /测试研发项目/u)

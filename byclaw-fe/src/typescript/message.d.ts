@@ -69,6 +69,7 @@ export type IMessageListItem = {
     parentOrderId?: string;
     orderId?: string;
     sourceAgentType?: string;
+    runtimeType?: 'dsh' | 'openclaw' | 'unknown' | string;
     formStatus?: IFormStatus;
    };
   contentType: SSEMessageType;

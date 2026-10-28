@@ -751,9 +751,13 @@ public class RouteService {
 
         // 构建项目信息
         Long projectId = chatDto.getProjectId();
-        String workspace = resolveSandboxWorkspace(sessionId);
+        boolean dshRuntime = targetAgentType != null
+            && (targetAgentType.startsWith("BYCLAW_DSH_") || targetAgentType.startsWith("HARNESS_"));
+        String workspace = dshRuntime && projectId != null
+            ? "/by/.shared/project_" + projectId : resolveSandboxWorkspace(sessionId);
+        metadata.put("runtimeType", dshRuntime ? "dsh" : "openclaw");
         if (projectId != null) {
-            // 项目空间仍作为资源地址提供；会话执行和过程文件不再共享项目 cwd。
+            // 项目源码目录继续作为资源地址提供，与 DSH 项目共享工作目录区分。
             JSONObject projectInfo = this.buildProjectInfo(projectId, resolveSandboxProjectWorkspace(projectId));
             metadata.put("project_info", projectInfo);
         }
@@ -795,6 +799,11 @@ public class RouteService {
             for (ChatGatewayRequestDecorator decorator : requestDecorators.orderedStream().toList()) {
                 messageContent = decorator.decorate(ctx, messageContent, gatewayParams);
             }
+        }
+
+        // Group decorators retain their own metadata, but must not replace the resolved DSH project cwd.
+        if (dshRuntime && projectId != null) {
+            gatewayParams.put("cwd", workspace);
         }
 
         while (true) {

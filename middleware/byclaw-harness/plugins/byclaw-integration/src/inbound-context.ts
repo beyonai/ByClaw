@@ -4,6 +4,7 @@ import { groupPublicContextDeclaration, parseGroupPublicContext, type GroupPubli
 import { groupCoordinationFromExtra, type GroupCoordinationSpec } from './group-coordination.ts'
 import type { AskAgentCommand } from '@byclaw/by-framework'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { byClawProjectCwd } from './session-cwd.ts'
 
 const VIRTUAL_BY_ROOT = resolve('/by')
 export const BYCLAW_DSH_LOCAL_E2E_STORAGE_ENABLED_ENV = 'BYCLAW_DSH_LOCAL_E2E_STORAGE_ENABLED' as const
@@ -125,6 +126,7 @@ export function resolveByClawByRoot(input: {
 export function resolveByClawStorageLayout(input: {
   externalSessionId: string
   workspace: string
+  projectId?: unknown
 }): ByClawStorageLayout {
   const byRoot = resolveByClawByRoot(input)
   const sessionRoot = join(byRoot, '.sessions', input.externalSessionId.trim())
@@ -132,7 +134,7 @@ export function resolveByClawStorageLayout(input: {
     byRoot,
     sessionRoot,
     sharedRoot: join(byRoot, '.shared'),
-    defaultOutputRoot: sessionRoot,
+    defaultOutputRoot: byClawProjectCwd(input.projectId, byRoot) ?? sessionRoot,
   }
 }
 
