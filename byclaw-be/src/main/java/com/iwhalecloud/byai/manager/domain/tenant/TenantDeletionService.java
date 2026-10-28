@@ -26,6 +26,9 @@ public class TenantDeletionService {
     private static final Logger LOG = LoggerFactory.getLogger(TenantDeletionService.class);
     private static final String DELETE_MARKER = "TENANT_DELETE_REQUESTED";
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService managedDeletion;
+
     private final TenantAdminTenantMapper tenants;
     private final TenantSandboxService sandboxes;
     private final SequenceService sequence;
@@ -58,15 +61,19 @@ public class TenantDeletionService {
         catch (NumberFormatException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid", e);
         }
-        if ("true".equals(tenants.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.operation.requiresDurableCommand");
-        }
         String actualName = tenants.selectManagedEnterpriseName(enterpriseId);
         if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
         if (!actualName.equals(confirmedName)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.delete.nameMismatch");
         }
         if ("DELETED".equals(status(enterpriseId))) return "COMPLETED";
+        if ("true".equals(tenants.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) {
+            if (managedDeletion == null) throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "tenant.operation.requiresDurableCommand");
+            Long actor = CurrentUserHolder.getCurrentUserId();
+            if (actor == null || actor <= 0) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
+            return managedDeletion.request(enterpriseId, actualName, actor);
+        }
         upsert(enterpriseId, DELETE_MARKER, "true");
         writeState(enterpriseId, "DELETING");
         tenants.deleteConfig(enterpriseId, "PROVISION_FAILURE_REASON");
@@ -77,6 +84,7 @@ public class TenantDeletionService {
     @Scheduled(initialDelayString = "${tenant.delete.reconcile-initial-delay-ms:30000}",
         fixedDelayString = "${tenant.delete.reconcile-delay-ms:30000}")
     public void retryPending() {
+        if (com.iwhalecloud.byai.common.util.RuntimeEnvironment.isDevelopment()) return;
         for (Long enterpriseId : tenants.selectPendingDeletions()) {
             executor.execute(() -> deleteNow(enterpriseId));
         }

@@ -86,7 +86,7 @@ class TenantCommandWorkerDiagnosticsTest {
         var transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         var lease = new TenantCommandStore.Lease(10, 42, "worker", 1);
-        when(store.candidates()).thenReturn(List.of(10L));
+        when(store.candidates("PROVISION")).thenReturn(List.of(10L));
         when(store.claim(eq(10L), anyString(), any())).thenReturn(lease);
         when(store.find(10)).thenReturn(new TenantCommandStore.Command("10", "HACU", "request", "hash",
             "PROVISION", "42", "RUNNING", "DB_CREATE", null, 1));

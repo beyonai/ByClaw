@@ -18,10 +18,15 @@ class TenantInternalControllerTest {
     private MockMvc mvc;
     private TenantCommandStore.Command command;
     private int reads;
+    private String runtimeState = "READY";
+    private TenantCommandStore.Command deletion;
+
     private final InternalServicePrincipal principal = new InternalServicePrincipal("client", "HACU", Set.of("tenant:read"), Set.of("42"), false);
     @BeforeEach void setup() {
         command = new TenantCommandStore.Command("10", "HACU", "request-123", "hash", "PROVISION", "42", "PENDING", "RESERVED", null, 1);
         var store = new TenantCommandStore(null) {
+            @Override public Command latestProvision(long id) { return command; }
+            @Override public Command latestDeletion(long id) { return deletion; }
             @Override public Command find(long id) { return id == 10 ? command : null; }
             @Override public Command byRequest(String source, String request) { return command; }
         };
@@ -46,7 +51,13 @@ class TenantInternalControllerTest {
         converters.add(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(
             configuration.jacksonObjectMapper(new org.springframework.http.converter.json.Jackson2ObjectMapperBuilder())));
         configuration.extendMessageConverters(converters);
-        var controller=new TenantInternalController(commands, store, null, enterprises, null, null, new ObjectMapper());
+        var tenants = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper.class);
+        org.mockito.Mockito.when(tenants.selectConfig(42, "COMMERCIAL_MANAGED")).thenReturn("true");
+        org.mockito.Mockito.when(tenants.selectConfig(42, "PROVISION_STATE"))
+            .thenAnswer(call -> "{\"status\":\"" + runtimeState + "\"}");
+        var policies = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService.class);
+        var sandboxes = org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.class);
+        var controller=new TenantInternalController(commands, store, policies, enterprises, tenants, sandboxes, new ObjectMapper());
         var recovery=org.mockito.Mockito.mock(TenantCommandRecovery.class);
         org.mockito.Mockito.when(recovery.inspect(10)).thenReturn(java.util.Map.of("decision","MANUAL_REQUIRED"));
         org.springframework.test.util.ReflectionTestUtils.setField(controller,"recoveries",recovery);
@@ -61,6 +72,19 @@ class TenantInternalControllerTest {
             return com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil.success(java.util.Map.of("count", 1));
         }
     }
+    @Test void deletionLifecycleCannotBeOverwrittenByHistoricalProvisionSuccess() throws Exception {
+        command = new TenantCommandStore.Command("10", "HACU", "request-123", "hash", "PROVISION", "42", "SUCCEEDED", "READY", null, 3);
+        for (String state : new String[]{"DELETING", "DELETE_FAILED", "DELETED"}) {
+            runtimeState = state;
+            deletion = new TenantCommandStore.Command("11", "HACU", "admin-delete-42", "hash", "DELETE", "42",
+                "DELETED".equals(state) ? "SUCCEEDED" : "MANUAL_REQUIRED", "DELETE_RESOURCES", "test-error", 7);
+            mvc.perform(get("/internal/v1/tenants/42/runtime").requestAttr(InternalServicePrincipal.ATTRIBUTE, principal))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.stage").value(state))
+                .andExpect(jsonPath("$.data.status").value(state)).andExpect(jsonPath("$.data.commandId").value("11"))
+                .andExpect(jsonPath("$.data.commandRevision").value("7"));
+        }
+    }
+
     @Test void legacyConverterRepresentationIsPreserved() throws Exception {
         mvc.perform(get("/legacy-converter-contract")).andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value("0")).andExpect(jsonPath("$.data.count").value("1"));

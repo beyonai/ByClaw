@@ -81,9 +81,11 @@ public class TenantInternalController {
         var result=new java.util.LinkedHashMap<String,Object>();
         result.put("enterpriseId",id);result.put("stage",stage);result.put("status",stage);result.put("generation","1");
         if ("true".equals(tenants.selectConfig(tenant,"COMMERCIAL_MANAGED"))) {
-            var command=store.latestProvision(tenant);
+            boolean deleting=Set.of("DELETING","DELETE_FAILED","DELETED").contains(stage);
+            var command=deleting ? store.latestDeletion(tenant) : store.latestProvision(tenant);
             if(command!=null) {
-                result.put("stage",command.stage());result.put("status",command.status());
+                if (!deleting) { result.put("stage",command.stage());result.put("status",command.status()); }
+                result.put("commandStatus",command.status());
                 result.put("errorCode",command.errorCode());result.put("commandId",command.commandId());
                 result.put("commandRevision",Long.toString(command.revision()));
             }

@@ -42,7 +42,7 @@ public class TenantCommandWorker {
         if (RuntimeEnvironment.isDevelopment()) {
             return;
         }
-        for(long id:store.candidates()) {
+        for(long id:store.candidates("PROVISION")) {
             var lease=store.claim(id,worker,Duration.ofMinutes(30));
             if(lease==null) continue;
             try {

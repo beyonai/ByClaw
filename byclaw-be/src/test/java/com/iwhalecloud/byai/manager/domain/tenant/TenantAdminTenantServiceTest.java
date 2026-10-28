@@ -168,6 +168,20 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void deletionFailureKeepsLifecycleAndLocalizedReasonOverHistoricalProvisionSuccess() {
+        platformAdmin();
+        var row=new TenantAdminTenantRow();row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"DELETE_FAILED\"}");
+        row.setCommandStatus("SUCCEEDED");row.setCommandStage("READY");
+        row.setFailureReason("TENANT_DELETE_RESOURCE_UNCERTAIN");
+        when(mapper.selectTenants(any(),any(),any(),any(),any())).thenReturn(List.of(row));
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        var result=service.list(null).getFirst();
+        assertThat(result.provisionState()).isEqualTo("DELETE_FAILED");
+        assertThat(result.failureReason()).isNotEqualTo("TENANT_DELETE_RESOURCE_UNCERTAIN").isNotBlank();
+    }
+
+    @Test
     void pausedCommercialCommandOverridesStaleCreatingSnapshot() {
         platformAdmin();
         var row=new TenantAdminTenantRow();row.setEnterpriseId(123L);
