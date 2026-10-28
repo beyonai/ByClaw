@@ -38,12 +38,14 @@ public final class SharedDshHostContexts {
     public static final String WEB_INSTANCE = "openclaw";
     private static final Pattern USER_LIST_SEPARATOR = Pattern.compile("[,;\\s]+");
     private static final String SANDBOX_TYPE = SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
+    private static final String DEFAULT_TOOL_SERVICE_KEY = "byclaw-dsh-tools";
 
     private final SharedDshHostClient client;
     private final String webBaseUrl;
     private final Predicate<String> sharedUsers;
     private final Function<String, Map<String, String>> launchEnv;
     private final Executor prewarmExecutor;
+    private final String toolServiceKey;
 
     /**
      * @param client      the host's admin API
@@ -54,11 +56,24 @@ public final class SharedDshHostContexts {
      */
     public SharedDshHostContexts(SharedDshHostClient client, String webBaseUrl, Predicate<String> sharedUsers,
                                  Function<String, Map<String, String>> launchEnv, Executor prewarmExecutor) {
+        this(client, webBaseUrl, sharedUsers, launchEnv, prewarmExecutor, DEFAULT_TOOL_SERVICE_KEY);
+    }
+
+    /** @param toolServiceKey service key of the users' tool sandbox, which carries their browser */
+    public SharedDshHostContexts(SharedDshHostClient client, String webBaseUrl, Predicate<String> sharedUsers,
+                                 Function<String, Map<String, String>> launchEnv, Executor prewarmExecutor,
+                                 String toolServiceKey) {
+        this.toolServiceKey = StringUtils.defaultIfBlank(toolServiceKey, DEFAULT_TOOL_SERVICE_KEY);
         this.client = client;
         this.webBaseUrl = StringUtils.removeEnd(StringUtils.trimToEmpty(webBaseUrl), "/");
         this.sharedUsers = sharedUsers;
         this.launchEnv = launchEnv;
         this.prewarmExecutor = prewarmExecutor;
+    }
+
+    /** Service key of the users' tool sandbox, which carries their browser (desktop {@code vnc}, byCLI {@code bycli}). */
+    public String toolServiceKey() {
+        return toolServiceKey;
     }
 
     /** This user's {@code byclaw-dsh} is a context on the host. */

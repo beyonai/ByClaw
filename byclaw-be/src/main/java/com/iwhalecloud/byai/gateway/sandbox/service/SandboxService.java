@@ -105,6 +105,15 @@ public class SandboxService {
      * 该用户的这类沙箱是常驻宿主上的进程内上下文：不建记录、不启动沙箱，直接向宿主要上下文（幂等 PUT）。
      * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
      */
+    /**
+     * Service key of the sandbox carrying the user's browser when it is not the one clients pick by default: a user
+     * on the resident DSH host keeps the browser (desktop, byCLI) in the tool sandbox, whether or not the host
+     * context runs right now. {@code null} for everyone else.
+     */
+    public String browserServiceKey(String userCode) {
+        return sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE) ? sharedDshHostContexts.toolServiceKey() : null;
+    }
+
     private boolean sharedHostRoutes(String userCode, String sandboxType) {
         return sharedDshHostContexts != null && sharedDshHostContexts.routes(userCode, sandboxType)
             && (sharedSandboxGateway == null || !sharedSandboxGateway.enabled());

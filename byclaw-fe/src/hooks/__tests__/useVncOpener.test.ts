@@ -1,4 +1,9 @@
 const mockEventEmitter = { emit: jest.fn() };
+const mockMessageInfo = jest.fn();
+const mockFetch = jest.fn();
+
+jest.mock('antd', () => ({ message: { info: (...args: unknown[]) => mockMessageInfo(...args) } }));
+jest.mock('@umijs/max', () => ({ getIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }) }));
 const mockRefreshSandboxes = jest.fn();
 const mockSetSiderCollapsed = jest.fn();
 let mockAppState: any;
@@ -31,6 +36,8 @@ describe('useVncOpener', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    mockFetch.mockResolvedValue({ type: 'basic', status: 200 });
+    (globalThis as any).fetch = mockFetch;
     mockRefreshSandboxes.mockResolvedValue([]);
     mockAppState = {
       sandboxesInfo: readySandboxes,
@@ -100,8 +107,51 @@ describe('useVncOpener', () => {
 
     expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     expect(mockRefreshSandboxes.mock.calls.length).toBeGreaterThan(0);
-    expect(mockRefreshSandboxes.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(mockRefreshSandboxes.mock.calls.length).toBeLessThanOrEqual(30);
     expect(jest.getTimerCount()).toBe(0);
+    // A click that finds no desktop is told so.
+    expect(mockMessageInfo).toHaveBeenCalledWith('common.remoteComputerUnavailable');
+  });
+
+  it('waits for the desktop to answer before opening it', async () => {
+    // The sandbox proxy answers 502 until the browser's desktop listens in the tool sandbox.
+    mockFetch.mockResolvedValueOnce({ type: 'basic', status: 502 }).mockResolvedValueOnce({ type: 'basic', status: 502 })
+      .mockResolvedValue({ type: 'opaqueredirect', status: 0 });
+    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
+    const { result } = renderHook(() => useVncOpener('session-a'));
+    act(() => result.current({ key: 'answer-a:tool-a' }));
+    await flush();
+    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2000);
+    });
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch.mock.calls[0][1]).toMatchObject({ credentials: 'include', redirect: 'manual' });
+  });
+
+  it('gives up quietly when a tool call never brings up the desktop', async () => {
+    mockFetch.mockResolvedValue({ type: 'basic', status: 502 });
+    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
+    const { result } = renderHook(() => useVncOpener('session-a'));
+    act(() => result.current({ key: 'answer-a:tool-a' }));
+    await flush();
+    await act(async () => {
+      await jest.runAllTimersAsync();
+    });
+    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    expect(mockMessageInfo).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('treats a failed probe as not ready', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('network')).mockResolvedValue({ type: 'basic', status: 200 });
+    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
+    const { result } = renderHook(() => useVncOpener('session-a'));
+    act(() => result.current());
+    await flush();
+    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it('handles a rejected cache and refresh without an unhandled rejection', async () => {

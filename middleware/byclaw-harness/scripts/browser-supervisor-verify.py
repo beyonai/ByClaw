@@ -191,6 +191,17 @@ calls = 0
 if os.path.exists(path): calls = json.loads(open(path).read()).get("calls", 0)
 with open(os.environ["FAKE_BYCLI_RECORD"], "w") as output:
     json.dump({"uid": os.getuid(), "gid": os.getgid(), "home": os.environ.get("HOME"), "calls": calls + 1}, output)
+# Like the real daemon, serve HTTP on the byCLI port in the background (binding fails
+# while anything else still holds the port).
+port = os.environ.get("FAKE_BYCLI_PORT")
+if port:
+    import socket, subprocess, sys
+    server = socket.create_server(("0.0.0.0", int(port)))
+    serve = "import os,socket,sys\ns=socket.socket(fileno=3)\nwhile True:\n c,_=s.accept(); c.recv(65536); c.sendall(b'HTTP/1.0 200 OK\\r\\n\\r\\nbycli-daemon'); c.close()"
+    daemon = subprocess.Popen([sys.executable, "-c", serve], pass_fds=(server.fileno(),), start_new_session=True,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              preexec_fn=lambda: os.dup2(server.fileno(), 3))
+    open(os.environ["FAKE_BYCLI_DAEMON_PID"], "w").write(str(daemon.pid))
 # Keep restart in progress after publishing the invocation count.
 if calls > 0:
     time.sleep(float(os.environ["FAKE_BYCLI_RECOVERY_DELAY"]))
@@ -338,6 +349,7 @@ def fixture(
         "FAKE_PREPARE_SIGNAL": str(directory / "prepare.signal"),
         "FAKE_PREPARE_MODE": prepare_mode,
         "FAKE_BYCLI_RECORD": str(directory / "bycli.json"),
+        "FAKE_BYCLI_DAEMON_PID": str(directory / "bycli-daemon.pid"),
         "FAKE_BYCLI_STATUS_RECORD": str(directory / "bycli-status-count"),
         "FAKE_BYCLI_STATUS_SEQUENCE": bycli_status_sequence,
         "FAKE_BYCLI_RECOVERY_DELAY": str(bycli_recovery_delay),
@@ -845,6 +857,78 @@ def run_lazy_activation(root: Path) -> None:
     assert not Path(str(path) + ".activated").exists()
 
 
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def http_get(port: int) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        client.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        answer = b""
+        while chunk := client.recv(65536):
+            answer += chunk
+        return answer
+
+
+def stop_fake_bycli_daemon(root: Path) -> None:
+    pid_file = root / "bycli-daemon.pid"
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def lazy_port_fixture(root: Path, port: int):
+    command, env, path, browser_record, dsh_record = fixture(root, bycli=True, viewer="shared-novnc")
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    env["FAKE_BYCLI_PORT"] = str(port)
+    command[command.index("--"):command.index("--")] = ["--activation-port", str(port)]
+    return command, env, path, browser_record, dsh_record
+
+
+def run_lazy_port_activation(root: Path) -> None:
+    # BE reaches byCLI over HTTP (account login, recorder): its first request starts
+    # the browser, and is answered by the daemon once that is up.
+    port = free_port()
+    command, env, path, browser_record, dsh_record = lazy_port_fixture(root, port)
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not browser_record.exists(), "browser started before the first browser request"
+        assert http_get(port).endswith(b"bycli-daemon"), "the first request was not answered by byCLI"
+        wait_for(Path(str(path) + ".activated"), process)
+        assert browser_record.exists()
+        assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+        # Later requests go to the daemon itself.
+        assert http_get(port).endswith(b"bycli-daemon")
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+        stop_fake_bycli_daemon(root)
+
+
+def run_lazy_socket_activation_frees_port(root: Path) -> None:
+    # Activated through the browser socket instead, the port is handed to byCLI as well.
+    port = free_port()
+    command, env, path, _browser_record, dsh_record = lazy_port_fixture(root, port)
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+        wait_for(Path(str(path) + ".activated"), process)
+        assert http_get(port).endswith(b"bycli-daemon")
+    finally:
+        process.terminate()
+        _, stderr = process.communicate(timeout=5)
+        stop_fake_bycli_daemon(root)
+    assert "bycli-exited" not in stderr, stderr
+
+
 def run_lazy_extension_verification_failure(root: Path) -> None:
     command, env, path, _browser_record, dsh_record = fixture(
         root, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
@@ -912,6 +996,37 @@ def run_lazy_profile_conflict(root: Path) -> None:
                 process.communicate(timeout=5)
 
 
+def run_secret_file(root: Path) -> None:
+    # A tool sandbox serves the browser over SSH sessions, which cannot inherit
+    # the anonymous descriptor: the supervisor also leaves the secret in a file
+    # only the browser user can read.
+    import hashlib
+    secret_file = root / "broker.secret"
+    command, env, _socket, browser_record, _dsh = fixture(root, dsh_mode="exit7")
+    at = command.index("--readiness-timeout")
+    command[at:at] = ["--secret-file", str(secret_file)]
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    browser = json.loads(browser_record.read_text())
+    assert hashlib.sha256(secret_file.read_bytes()).hexdigest() == browser["digest"]
+    assert secret_file.stat().st_mode & 0o777 == 0o400
+    assert secret_file.stat().st_uid == os.getuid()
+    assert secret_file.read_text() not in result.stdout + result.stderr
+
+
+def run_lazy_secret_file(root: Path) -> None:
+    # On demand, the file exists before the first client triggers the browser.
+    secret_file = root / "broker.secret"
+    command, env, path, browser_record, _ = fixture(root, dsh_mode="exit7")
+    at = command.index("--readiness-timeout")
+    command[at:at] = ["--secret-file", str(secret_file)]
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert not browser_record.exists()
+    assert len(secret_file.read_text()) >= 32
+
+
 def run_lazy_unused_exit(root: Path) -> None:
     profile = root / "unused-profile"
     command, env, path, browser_record, _ = fixture(
@@ -940,6 +1055,10 @@ def main() -> None:
             ("lazy-activation", run_lazy_activation),
             ("lazy-extension-verification-failure", run_lazy_extension_verification_failure),
             ("lazy-unused-exit", run_lazy_unused_exit),
+            ("lazy-port-activation", run_lazy_port_activation),
+            ("lazy-socket-activation-frees-port", run_lazy_socket_activation_frees_port),
+            ("secret-file", run_secret_file),
+            ("lazy-secret-file", run_lazy_secret_file),
             ("lazy-profile-conflict", run_lazy_profile_conflict),
             ("exit", run_exit_propagation),
             ("signal", run_signal_forwarding),

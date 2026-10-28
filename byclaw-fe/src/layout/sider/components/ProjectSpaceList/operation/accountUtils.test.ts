@@ -3,7 +3,7 @@ jest.mock('@umijs/max', () => ({
   getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
 }));
 
-import { buildGlobalOperationAccountPayload, normalizeOperationAccounts } from './accountUtils';
+import { browserSandboxServiceKey, buildGlobalOperationAccountPayload, normalizeOperationAccounts } from './accountUtils';
 
 describe('operation account utilities', () => {
   it('normalizes custom account links returned by the backend', () => {
@@ -58,4 +58,13 @@ it('translates only missing custom-link labels and preserves account IDs and nam
   expect(normalized.id).toBe(account.accountId);
   expect(normalizeOperationAccounts([{ ...account, accountName: '业务账号' }])[0].accountName).toBe('业务账号');
   mockLocale = 'zh-CN';
+});
+
+it('launches the sandbox that carries the user\'s browser', () => {
+  // A user on the shared DSH host: BE names the tool sandbox.
+  expect(browserSandboxServiceKey('byclaw-dsh-tools')).toBe('byclaw-dsh-tools');
+  // Everyone else keeps the default remote-desktop sandbox.
+  expect(browserSandboxServiceKey(null)).toBe('openclaw');
+  expect(browserSandboxServiceKey(undefined)).toBe('openclaw');
+  expect(browserSandboxServiceKey('')).toBe('openclaw');
 });

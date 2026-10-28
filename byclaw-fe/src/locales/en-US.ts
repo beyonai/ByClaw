@@ -646,6 +646,7 @@ export default {
   'common.import': 'Import',
   'common.localFile': 'Local File',
   'common.remoteComputer': 'Remote Computer',
+  'common.remoteComputerUnavailable': "The remote desktop is not available: the assistant's browser is not open",
   'common.curlImport': 'Curl Import',
   'common.pasteCurlCommand': 'Please paste Curl command',
   'common.curlImportHint':

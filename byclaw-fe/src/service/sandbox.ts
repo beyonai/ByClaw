@@ -1,4 +1,4 @@
-import { POST } from './common/request';
+import { GET, POST } from './common/request';
 import { ISandboxesInfo } from '@/models/common/useAppStore';
 
 export interface LaunchSandboxResult {
@@ -34,6 +34,13 @@ export async function getSandboxInfo(params: {
   sandboxType?: string;
 }): Promise<Array<ISandboxesInfo>> {
   return POST('/byaiService/sandbox/getSandboxInfo', params);
+}
+
+/**
+ * 查询承载当前用户浏览器的沙箱规格：常驻 DSH 宿主上的用户是其工具沙箱，其他用户为空（沿用默认沙箱）。
+ */
+export async function getBrowserServiceKey(): Promise<string | null> {
+  return GET('/byaiService/sandbox/browserServiceKey', {}, silentErrorConfig);
 }
 
 /**

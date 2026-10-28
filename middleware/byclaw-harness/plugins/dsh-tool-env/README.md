@@ -33,8 +33,12 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
   or open streams, B is paused. Running commands and background jobs hold
   streams open, so they are never paused underneath.
 - **Gone:** a deleted or expired B is recreated on the next lease. The workspace
-  is a host volume shared with A, so pausing or recreating B loses no files; only
-  B's own root filesystem (e.g. ad-hoc installs) is lost on recreation.
+  is a host volume shared with A, so pausing or recreating B loses no files.
+  With a `home` volume in B's spec (example below), `/home/byclaw` survives as
+  well (CLI logins, `~/.openclaw`, `~/.bycli`, user-level installs): the
+  entrypoint fills it from the image's home and later only adds new defaults.
+  The rest of B's root filesystem (system installs, `/tmp`) is lost on
+  recreation, as it was when the pre-split sandbox was recreated.
 - **Expiry:** A renews B's OpenSandbox expiry while it uses B. A B whose A
   disappeared without a graceful shutdown lives at most `timeoutSeconds`.
 - **Identity:** A owns both SSH key pairs (client and B's host key) in its
@@ -114,20 +118,35 @@ The B spec is a normal `sandbox_service_spec` row. It must use A's image, run
 the `tools` entrypoint, declare the sshd port as a `tcp` port named
 `sshInstance`, share `/by`, and mount A's tool-env state directory read-only at
 `BYCLAW_TOOL_ENV_SEED_DIR` (default `/etc/byclaw-tool-env`) so B's sshd finds
-`client_ed25519.pub` and `host_ed25519`. Host paths below follow the `byclaw-dsh`
-layout and are deployment-specific:
+`client_ed25519.pub` and `host_ed25519`. B also runs the browser the user's own
+sandbox ran: declare its desktop (8081) as instance `vnc`, which the frontend
+opens, and the byCLI daemon (19825) as instance `bycli`, which BE's account
+login and recorder call. The browser starts on demand: the native `browser`
+tool, a `bycli` command on B, or BE's first request to 19825 starts it; until
+then the supervisor holds 19825 for byCLI, and that first request is answered
+once the browser is up. The browser profile defaults to the path the user's
+own sandbox used on the user volume (`/by/byclaw/.dsh/browser/user-data`), so
+earlier logins carry over; `BYCLAW_TOOL_BROWSER_USER_DATA_DIR` overrides it and
+`BYCLAW_TOOL_BROWSER=0` turns the browser off. Host paths below follow the
+`byclaw-dsh` layout and are deployment-specific:
 
 ```json
 {
   "image": "byclaw/dsh:local",
   "startup": { "entrypoint": ["/usr/local/bin/byclaw-dsh-entrypoint", "tools"] },
-  "ports": [{ "port": 22, "instance": "ssh", "protocol": "tcp" }],
+  "ports": [
+    { "port": 22, "instance": "ssh", "protocol": "tcp" },
+    { "port": 8081, "instance": "vnc", "protocol": "http" },
+    { "port": 19825, "instance": "bycli", "protocol": "http" }
+  ],
   "timeout": 3600,
   "resourceLimits": { "cpu": "2", "memory": "4Gi" },
   "env": { "BYCLAW_TOOL_ENV_PORT": "22", "TZ": "Asia/Shanghai" },
   "volumes": [
     { "key": "by", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/by",
       "mountPath": "/by", "uid": 1001, "gid": 1001, "mode": "0770" },
+    { "key": "home", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/tool-home",
+      "mountPath": "/home/byclaw", "uid": 1001, "gid": 1001, "mode": "0700" },
     { "key": "templates", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file",
       "subPath": "byclaw-dsh/byclaw-${user_code}/dsh-home/agent-templates",
       "mountPath": "/home/byclaw/.dsh/agent-templates", "readOnly": true },
