@@ -30,7 +30,7 @@ export const BYCLAW_ROOT_BINDING_EVENT = 'byclaw/root-binding'
 export interface ByClawSessionWorkspace {
   /** External ByAI session id shared by the root and every descendant. */
   readonly externalSessionId: string
-  /** Absolute conversation process-file workspace inherited by every descendant. */
+  /** Absolute execution workspace inherited by every descendant. */
   readonly cwd: string
   /** Current ByClaw user identity; credentials are never stored here. */
   readonly userCode?: string
@@ -38,6 +38,9 @@ export interface ByClawSessionWorkspace {
   /** Canonical host-visible roots for per-session delivery and shared files. */
   readonly sessionRoot?: string
   readonly sharedRoot?: string
+  readonly sharedDir?: string
+  readonly projectId?: string
+  readonly projectName?: string
   readonly defaultOutputRoot?: string
 }
 
@@ -156,8 +159,7 @@ export class ByClawSessionWorkspaceRegistry {
     }
     if (legacy !== undefined && session.header.cwd !== undefined
       && resolve(session.header.cwd) !== legacy.cwd
-      && !(context.sessionRoot !== undefined && resolve(session.header.cwd) === resolve(context.sessionRoot)
-        && isLegacyProjectWorkspaceTransition(
+      && !(context.sessionRoot !== undefined && isLegacyProjectWorkspaceTransition(
           legacy.cwd, session.header.cwd, externalSessionId, dirname(dirname(context.sessionRoot)),
         ))) {
       throw new Error(
@@ -236,16 +238,20 @@ export class ByClawSessionWorkspaceRegistry {
   private register(sessionId: string, requested: ByClawSessionWorkspace): ByClawSessionWorkspace {
     const workspace = { ...requested, cwd: resolve(requested.cwd) }
     const current = this.workspaces.get(sessionId)
+    const upgrade = current !== undefined && current.externalSessionId === workspace.externalSessionId
+      && workspace.sessionRoot !== undefined && isLegacyProjectWorkspaceTransition(
+        current.cwd, workspace.cwd, workspace.externalSessionId, dirname(dirname(workspace.sessionRoot)),
+      )
     if (current !== undefined
-      && (current.externalSessionId !== workspace.externalSessionId || current.cwd !== workspace.cwd)) {
+      && (current.externalSessionId !== workspace.externalSessionId || (current.cwd !== workspace.cwd && !upgrade))) {
       throw new Error(
         `ByClaw live session ${sessionId} workspace cannot change from session "${current.externalSessionId}" at "${current.cwd}"`
         + ` to session "${workspace.externalSessionId}" at "${workspace.cwd}"`,
       )
     }
-    if (current !== undefined) return current
-    this.workspaces.set(sessionId, workspace)
-    return workspace
+    const updated = { ...current, ...workspace }
+    this.workspaces.set(sessionId, updated)
+    return updated
   }
 }
 
@@ -273,9 +279,12 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     `cwd: ${workspace.cwd}`,
     ...(workspace.sessionRoot === undefined ? [] : [`session_root: ${workspace.sessionRoot}`]),
     ...(workspace.sharedRoot === undefined ? [] : [`shared_root: ${workspace.sharedRoot}`]),
+    ...(workspace.sharedDir === undefined ? [] : [`shared_dir: ${workspace.sharedDir}`]),
+    ...(workspace.projectId === undefined ? [] : [`project_id: ${workspace.projectId}`]),
+    ...(workspace.projectName === undefined ? [] : [`project_name: ${JSON.stringify(workspace.projectName)}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 命令执行、相对路径读写及报告等交付产物默认使用当前会话的过程文件目录；访问项目源码时使用明确的项目路径。',
+      'default_output_policy: 命令和相对路径读写使用 cwd；报告等交付产物使用 default_output_root。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
@@ -354,7 +363,7 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     '## ByClaw session workspace',
     byClawSessionWorkspaceDeclaration(workspace),
     'Treat plugin:byclaw-context messages as authoritative runtime context, not as user-authored business requests.',
-    'The cwd above is the authoritative default process-file workspace for this ByClaw conversation and its descendants.',
+    'The cwd above is the authoritative execution workspace for this ByClaw conversation and its descendants. When a project is bound, it is the project shared directory, not the global shared root.',
     'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,

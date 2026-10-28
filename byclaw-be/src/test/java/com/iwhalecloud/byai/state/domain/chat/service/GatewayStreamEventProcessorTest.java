@@ -8,12 +8,19 @@ import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GatewayStreamEventProcessorTest extends I18nTestSupport {
 
     private final GatewayStreamEventProcessor processor = new GatewayStreamEventProcessor();
+
+    @BeforeEach
+    void setUpRuntimeResolver() {
+        ReflectionTestUtils.setField(processor, "targetAgentResolver", new TargetAgentResolver());
+    }
 
     @Test
     void normalizeEventType_preservesExplicitParentAssistantOutput() {

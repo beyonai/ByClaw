@@ -369,3 +369,8 @@ Worker 消息分发不再设置任务并发上限，原 `maxConcurrency` 插件�
 ## 后端到沙箱的发起链路排查
 
 后端与 Harness 使用统一的 `chat_chain` 单行 JSON 日志，按服务端 `invocationId` 关联一次接收、按 `dispatchId` 区分派发重试，记录阶段耗时及租户与实例。初始化使用 `startupId`，回复使用 `replyEventId` 串联 Redis、后端、WebSocket 与前端实际应用对象。字段语义、三个场景的手工排查示例见 [链路日志规范](CHAT-CHAIN.zh.md)。本地验证：`pnpm verify:chat-chain`。
+### DSH 项目共享工作目录
+
+网关 `header.metadata.project_info.project_id` 绑定项目时，DSH 根会话和子会话的执行 cwd、相对路径文件操作及默认交付目录统一使用 `/by/.shared/project_{projectId}`，默认项目为 `project_-1`。运行端在工具环境中幂等创建目录；未绑定项目时保留原会话 cwd。`.sessions/<sessionId>` 仍作为内部会话路径存在，不再作为项目会话的默认交付目录。
+
+`plugin:system-prompt` 和 `plugin:byclaw-context` 同时声明执行 cwd、项目共享目录、共享根目录及项目身份。旧会话恢复时在持久化读取边界映射会话头，保留原始日志、历史产物和 AgentTeams 状态；不移动旧文件，不允许从一个项目目录切换到另一个项目目录。运行中的旧根会话在下一次普通请求时关闭旧句柄并恢复到新 cwd，正在执行的任务沿用原路径直到结束。本规则仅作用于 DSH。

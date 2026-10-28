@@ -63,6 +63,7 @@ interface FileSpaceBlockProps {
   /** 项目代码可通过接口 URL 覆盖文件悬浮提示路径。 */
   getTooltipPath?: (item: FileBrowserItem) => string | undefined;
   getNodeExtra?: (item: FileTreeItem) => React.ReactNode;
+  getDisplayName?: (item: FileBrowserItem) => string;
 }
 
 export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
@@ -106,6 +107,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   onAction,
   getTooltipPath,
   getNodeExtra,
+  getDisplayName,
   style,
 }) => {
   // 分组文件数量使用语言包处理英文单复数。
@@ -178,6 +180,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         onAction={onAction || noopAction}
         getTooltipPath={getTooltipPath}
         getNodeExtra={getNodeExtra}
+        getDisplayName={getDisplayName}
       />
     </div>
   );

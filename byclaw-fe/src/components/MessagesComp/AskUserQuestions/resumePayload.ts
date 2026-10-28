@@ -1,3 +1,5 @@
+import { isDshRuntime } from '@/utils/chatRuntime';
+
 type Question = {
   id?: string;
 };
@@ -13,7 +15,7 @@ export function isDshInteractionResume(
   interactionId: string | undefined,
   parentRunId: string | undefined
 ): boolean {
-  return sourceAgentType?.startsWith('BYCLAW_DSH') === true || Boolean(interactionId && !parentRunId);
+  return isDshRuntime({ sourceAgentType }) || Boolean(interactionId && !parentRunId);
 }
 
 /** Build the fields consumed directly by BYCLAW_DSH ResumeCommand. */

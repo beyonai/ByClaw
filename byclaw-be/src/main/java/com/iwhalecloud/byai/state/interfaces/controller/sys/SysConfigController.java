@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.state.interfaces.controller.sys;
 import com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfig;
 import com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfigList;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import java.util.List;
@@ -21,6 +23,15 @@ public class SysConfigController {
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Autowired
+    private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
+    @RequestMapping(value = "/getEffectiveEnableDsh", method = RequestMethod.POST)
+    public ResponseUtil<String> getEffectiveEnableDsh() {
+        return ResponseUtil.successResponse(systemParamTargetAgentResolver.resolveEffectiveEnableDsh(
+            CurrentUserHolder.getCurrentUserCode()));
+    }
 
     /**
      * 获取静态参数

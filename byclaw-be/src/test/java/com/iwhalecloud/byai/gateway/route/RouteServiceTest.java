@@ -511,6 +511,27 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     }
 
     @Test
+    void route_usesProjectSharedCwdForDshIncludingDefaultProject() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
+        ctx.getAssistantChatDto().setProjectId(-1L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq("BYCLAW_DSH_u1"), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
+        assertThat(paramsCaptor.getValue()).containsEntry("cwd", "/by/.shared/project_-1");
+        assertThat(metadataCaptor.getValue()).containsEntry("runtimeType", "dsh");
+    }
+
+    @Test
     void route_sendsGroupChatReferenceToRegularAgent() throws Exception {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),

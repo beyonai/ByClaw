@@ -253,6 +253,12 @@ export function getSessionFilePath(sessionId?: string) {
   return normalizedSessionId ? `${SESSION_FILE_PATH}${normalizedSessionId}/` : SESSION_FILE_PATH;
 }
 
+export function getProjectSharedFilePath(projectId?: string | number) {
+  const normalizedProjectId = `${projectId ?? ''}`.trim();
+  if (!normalizedProjectId || !/^[A-Za-z0-9_-]+$/.test(normalizedProjectId)) return SHARED_FILE_PATH;
+  return `${SHARED_FILE_PATH}project_${normalizedProjectId}/`;
+}
+
 export function getDefaultFileCategoryKey(sessionId?: string): FileCategoryKey {
   return getNormalizedSessionId(sessionId) ? 'session' : 'root';
 }

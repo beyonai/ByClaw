@@ -4,7 +4,8 @@ import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, by
 import { instrumentChatEmitter } from './reply-log.ts'
 import { chatChain, measureChatStage, prepareChatTurn, type ByClawChatChain } from './chat-chain-log.ts'
 import { normalizeByClawSessionId } from './session-extensions.ts'
-import { byClawSessionCwd } from './session-cwd.ts'
+import { byClawProjectCwd, byClawSessionCwd, isLegacyProjectWorkspaceTransition, isProjectSharedCwd } from './session-cwd.ts'
+import { requestByClawProjectWorkspace } from './session-cwd-compat.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -535,8 +536,8 @@ export function byClawCommandSessionRoute(
     ...optionalSessionId(command.extraPayload['dsh_parent_session_id']) === undefined ? {} : {
       parentDshSessionId: optionalSessionId(command.extraPayload['dsh_parent_session_id']),
     },
-    // Old gateways may still send a project cwd; the business conversation owns execution now.
-    cwd: byClawSessionCwd(externalRootSessionId, byRoot),
+    cwd: byClawProjectCwd(buildByClawInboundTurnContext(command, byRoot).project?.['project_id'], byRoot)
+      ?? byClawSessionCwd(externalRootSessionId, byRoot),
   }
 }
 
@@ -1349,6 +1350,16 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     settled: Set<string>
   }>()
 
+  private commandSessionRoute(command: AskAgentCommand): ByClawCommandSessionRoute {
+    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const persistedCwd = this.options.sessionMetadata.get(route.externalRootSessionId)?.identity.cwd
+    if (isProjectSharedCwd(persistedCwd, this.options.byRoot)
+      && buildByClawInboundTurnContext(command, this.options.byRoot).project?.['project_id'] === undefined) {
+      return { ...route, cwd: persistedCwd }
+    }
+    return route
+  }
+
   constructor(private readonly ctx: Context, private readonly options: ByClawDshSessionRuntimeOptions) {
     this.questions = new ByClawQuestionBroker(options.interactionStore)
     this.disposeInboxEvents = ctx.root.on('agent/inbox/claimed', ({ agent, message, turn: turnNumber }) => {
@@ -1471,11 +1482,18 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   async ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     this.assertAccepting()
+    const route = this.commandSessionRoute(command)
+    const stateWorkspace = byClawSessionCwd(route.externalRootSessionId, this.options.byRoot)
+    return teamStateRuntime(this.ctx).runWithWorkspaceAlias(route.cwd ?? stateWorkspace, stateWorkspace,
+      () => this.askInWorkspace(command, context))
+  }
+
+  private async askInWorkspace(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
     const payload = byClawVoicePayload(command)
     if (!payload) return this.askPrepared(command, context)
     const voice = this.options.voiceRuntime
     if (!voice) throw new Error('ASR_RUNTIME_UNAVAILABLE')
-    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const route = this.commandSessionRoute(command)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}\0${command.header.messageId}`
     const fingerprint = voiceRequestFingerprint(payload)
     const previous = this.voiceRequests.get(key)
@@ -1517,7 +1535,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   private async askPrepared(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
-    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const route = this.commandSessionRoute(command)
     const key = `${command.header.userCode}\0${route.externalRootSessionId}`
     const endPreflight = chatChain()?.start('harness.preflight')
     try {
@@ -1644,7 +1662,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     owner.teamGate.assertHealthy()
     const agent = this.ctx.agents.get(SessionId(owner.responseSessionId))
     if (agent === undefined) throw new Error('ByClaw background captain is no longer available')
-    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const route = this.commandSessionRoute(command)
     const override = byClawTurnModelOverride(command.extraPayload)
     const hasConversationModelOverride = override.modelId !== undefined
       || override.thinkingLevel !== undefined
@@ -2020,7 +2038,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   ): Promise<ByClawDshAskResult> {
     this.assertAccepting()
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
-    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const route = this.commandSessionRoute(command)
     const text = extractByClawUserText(command.content)
     const directTarget = route.targetDshSessionId === undefined
       ? this.options.resolveInboundTarget?.(command, text)
@@ -2063,12 +2081,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
-    await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(sessionRoot)
+    await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(route.cwd ?? sessionRoot)
     this.assertAccepting()
     const entry = await measureChatStage('harness.agent_open', () => this.handleFor(command, selection, preparedRoot))
     this.assertAccepting()
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
+    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     const teamModelOverrides = this.ctx.get(AGENT_TEAMS_MODEL_OVERRIDES) as AgentTeamsModelOverrideService | undefined
     const sessionWorkspace = this.options.workspaceRegistry.registerRoot(
       rootAgent.session,
@@ -2078,11 +2097,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         userName: nonEmptyString(command.header.userName),
         sessionRoot,
         sharedRoot: join(byRoot, '.shared'),
-        defaultOutputRoot: sessionRoot,
+        sharedDir: isProjectSharedCwd(route.cwd, byRoot) ? route.cwd : join(byRoot, '.shared'),
+        ...(inboundTurn.project?.['project_id'] === undefined ? {} : { projectId: String(inboundTurn.project['project_id']) }),
+        ...(inboundTurn.project?.['project_name'] === undefined ? {} : { projectName: String(inboundTurn.project['project_name']) }),
+        defaultOutputRoot: route.cwd ?? sessionRoot,
       },
       this.options.sessionMetadata.get(String(rootAgent.id))?.binding,
     )
-    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     this.options.workspaceRegistry.registerTurn(route.externalRootSessionId, inboundTurn)
     const policy = groupPolicy(this.ctx)
     policy?.recordContext?.(String(rootAgent.id), command.extraPayload['groupContextSnapshot'])
@@ -2294,7 +2315,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     preparedRoot?: Awaited<ReturnType<ByClawTemplateInstanceRuntime['prepareRoot']>>,
   ): Promise<RootHandle> {
     this.assertAccepting()
-    const route = byClawCommandSessionRoute(command, this.options.byRoot)
+    const route = this.commandSessionRoute(command)
     const externalRootSessionId = route.externalRootSessionId
     const coordination = groupCoordinationFromExtra(command.extraPayload)
       ?? this.options.sessionMetadata.get(externalRootSessionId)?.groupCoordination
@@ -2303,7 +2324,16 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       : { kind: 'template', templateId: preparedRoot.templateId }
     const sessionId = SessionId(this.options.sessionMetadata.resolveRootSessionId(externalRootSessionId, requestedBinding))
     const key = `${command.header.userCode}\0${sessionId}`
-    const existing = this.handles.get(key)
+    if (route.cwd !== undefined && isProjectSharedCwd(route.cwd, this.options.byRoot)) requestByClawProjectWorkspace(this.options.sessionMetadata, externalRootSessionId, route.cwd)
+    let existing = this.handles.get(key)
+    if (existing !== undefined && isLegacyProjectWorkspaceTransition(
+      existing.handle.agent.session.header.cwd, route.cwd, externalRootSessionId, this.options.byRoot,
+    )) {
+      await existing.handle.dispose()
+      this.handles.delete(key)
+      this.options.workspaceRegistry.delete(String(sessionId))
+      existing = undefined
+    }
     if (existing !== undefined && this.ctx.agents.get(existing.handle.agent.id) === existing.handle.agent) {
       if (normalizeByClawSessionId(command.header.sessionId) === externalRootSessionId) this.observeSessionOpening(command, () => false)
       assertStableSessionCwd(externalRootSessionId, existing.handle.agent.session.header.cwd, route.cwd)

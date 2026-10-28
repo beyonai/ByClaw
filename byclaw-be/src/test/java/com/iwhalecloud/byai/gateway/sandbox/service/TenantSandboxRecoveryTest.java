@@ -27,7 +27,7 @@ class TenantSandboxRecoveryTest {
         assertEquals("RESOURCE_CONNECTION_DATA_UNAVAILABLE",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         var row=new SsSandboxRecord();row.setId(8L);row.setEnterpriseId(7L);row.setResourceId(7L);row.setSandboxType("tenant-opengauss");row.setOwnerScope("TENANT");row.setServiceType("tenant-opengauss");
         row.setLockVersion(0);row.setSandboxId("original");row.setEndpoint("tcp://db:5432");row.setStatus("RUNNING");
-        when(records.selectActiveTenantByResourceAndType(7,"tenant-opengauss")).thenReturn(row);
+        when(records.selectActiveTenantByResourceAndType(7L,"tenant-opengauss")).thenReturn(row);
         assertEquals("MATCHED",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRecovery(7,"DB_CREATE","command-99:DB_CREATE").reasonCode());
         when(client.recoveryInventory(anyMap())).thenReturn(List.of(remote,remote));
