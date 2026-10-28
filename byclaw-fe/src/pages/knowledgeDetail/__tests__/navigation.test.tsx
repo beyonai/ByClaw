@@ -35,7 +35,8 @@ jest.mock('@/models/useKnowledgeStore', () => ({
   default: () => ({ queryResourceDetail: mockQueryResourceDetail }),
 }));
 jest.mock('@/service/knowledgeCenter', () => ({
-  queryKnowledgeCapability: jest.fn().mockResolvedValue({ allowKnowledgeBaseDelete: true }),
+  // Legacy deployment capability must not override per-resource permissions.
+  queryKnowledgeCapability: jest.fn().mockResolvedValue({ allowKnowledgeBaseDelete: false }),
 }));
 jest.mock('@/pages/manager/service/resources', () => ({
   deleteKnowledge: (...args: unknown[]) => mockDeleteKnowledge(...args),
@@ -65,7 +66,7 @@ describe('KnowledgeDetail return navigation', () => {
     mockQueryResourceDetail.mockResolvedValue({
       resourceId: 'knowledge-1',
       resourceName: 'Knowledge',
-      operationPermissions: { hasManagePermission: true },
+      operationPermissions: { hasManagePermission: true, canDelete: true },
     });
     mockDeleteKnowledge.mockResolvedValue({});
   });
@@ -106,6 +107,25 @@ describe('KnowledgeDetail return navigation', () => {
 
     expect(mockDeleteKnowledge).toHaveBeenCalledWith({ resourceId: 'knowledge-1' });
     expect(mockNavigate).toHaveBeenCalledWith(returnPath, { replace: true, state: returnState });
+  });
+
+  it.each([
+    { ownerType: 'personal', hasManagePermission: false, canDelete: false },
+    { ownerType: 'enterprise', hasManagePermission: true, canDelete: false },
+    { ownerType: 'personal_default', hasManagePermission: true, canDelete: true },
+    { ownerType: 'personal', hasManagePermission: true, canDelete: undefined },
+  ])('blocks deletion when the resource is protected or deletion permission is absent: %j', async (permissions) => {
+    mockQueryResourceDetail.mockResolvedValue({
+      resourceId: 'knowledge-1',
+      resourceName: 'Knowledge',
+      ownerType: permissions.ownerType,
+      operationPermissions: permissions,
+    });
+    render(<KnowledgeDetail />);
+    await screen.findByText('Knowledge');
+    fireEvent.click(screen.getByTestId('icon-a-Deleteshanchu'));
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockDeleteKnowledge).not.toHaveBeenCalled();
   });
 
   it('preserves the independent knowledge center entry', async () => {

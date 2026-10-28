@@ -9,6 +9,7 @@ import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectS
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
 import ProjectDataSources from '@/components/ProjectDataSources';
+import { useProjectDataSourcesEnabled } from '@/components/ProjectDataSources/useProjectDataSourcesEnabled';
 import { useSessionDataSourcesVisible } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourcesVisible';
 import { getSessionResourceTabKeys } from '@/components/ChatLayoutComp/ChatResourceWorkspace/resourceTabUtils';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
@@ -19,6 +20,7 @@ import { HIDDEN_RESOURCE_MENU_KEYS } from '@/constants/system';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from '../../index.module.less';
 import FilePicker from './FilePicker';
+import useCommercialEdition from '@/hooks/useCommercialEdition';
 
 interface Props {
   keyword?: string;
@@ -56,6 +58,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   onSelect,
 }) => {
   const intl = useIntl();
+  const commercial = useCommercialEdition();
   const navigationContentRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const content = navigationContentRef.current;
@@ -76,6 +79,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   const resolvedProjectId = Number(projectId ?? project?.projectId);
   const resolvedCloudResourceId = projectCloudResourceId ?? project?.cloudResourceId;
   const showDataSources = useSessionDataSourcesVisible(sessionId, resolvedProjectId);
+  const dataSourcesEnabled = useProjectDataSourcesEnabled();
   const visibleFileKeys = useMemo(() => {
     const menuKeyMap = { file: 'processFile', sharedFile: 'file', projectFile: 'projectCloud', code: 'projectCode' };
     // 过程文件属于已创建的会话，新建任务不提供该入口。
@@ -84,13 +88,13 @@ const ResourceToolMenu: React.FC<Props> = ({
       .map((key) => menuKeyMap[key]);
     // 新建任务只对 -1 默认项目隐藏项目分类；项目尚未返回时仍保留入口。
     if (!sessionId && resolvedProjectId !== -1) {
-      for (const key of ['projectCloud', 'dataSources', 'projectCode']) {
+      for (const key of ['projectCloud', ...(dataSourcesEnabled ? ['dataSources'] : []), 'projectCode']) {
         if (!keys.includes(key)) keys.push(key);
       }
     }
-    if (sessionId && showDataSources) keys.push('dataSources');
+    if (sessionId && dataSourcesEnabled && showDataSources) keys.push('dataSources');
     return keys;
-  }, [resolvedProjectId, sessionId, showDataSources]);
+  }, [resolvedProjectId, sessionId, showDataSources, dataSourcesEnabled]);
   const currentUserInfo = useSelector((state: any) => state.user?.userInfo);
   const defaultDigEmployeeId = useSelector(
     (state: any) => state.employees?.defaultDigEmployeeId || state.user?.userInfo?.defaultDigEmployeeId
@@ -99,10 +103,11 @@ const ResourceToolMenu: React.FC<Props> = ({
   const [visitedKeys, setVisitedKeys] = useState<string[]>(['expert']);
   useEffect(() => {
     if (!activeKeyProp || HIDDEN_RESOURCE_MENU_KEYS.has(activeKeyProp)) return;
+    if (!commercial && ['tool', 'knowledge'].includes(activeKeyProp)) return;
     if (hideEmployeeResources && ['skill', 'tool', 'knowledge'].includes(activeKeyProp)) return;
     setActiveKey(activeKeyProp);
     setVisitedKeys((current) => (current.includes(activeKeyProp) ? current : [...current, activeKeyProp]));
-  }, [activeKeyProp, hideEmployeeResources]);
+  }, [activeKeyProp, hideEmployeeResources, commercial]);
   const tabs = [
     {
       key: 'expert',
@@ -149,6 +154,7 @@ const ResourceToolMenu: React.FC<Props> = ({
   ];
   const visibleTabs = tabs.filter(
     (tab) =>
+      (commercial || !['tool', 'knowledge'].includes(tab.key)) &&
       (!hideEmployeeResources || !['skill', 'tool', 'knowledge'].includes(tab.key)) &&
       (!['processFile', 'projectCloud', 'file', 'dataSources', 'projectCode'].includes(tab.key) ||
         visibleFileKeys.includes(tab.key))
@@ -157,6 +163,7 @@ const ResourceToolMenu: React.FC<Props> = ({
     // 对象或项目切换后，隐藏分类及已访问面板一起清理，避免继续展示或请求不适用的资源。
     const fileKeys = ['processFile', 'projectCloud', 'file', 'dataSources', 'projectCode'];
     const isVisible = (key: string) =>
+      (commercial || !['tool', 'knowledge'].includes(key)) &&
       (!hideEmployeeResources || !['skill', 'tool', 'knowledge'].includes(key)) &&
       (!fileKeys.includes(key) || visibleFileKeys.includes(key));
     if (!isVisible(activeKey)) setActiveKey('expert');
@@ -164,7 +171,7 @@ const ResourceToolMenu: React.FC<Props> = ({
       const next = current.filter(isVisible);
       return next.length === current.length ? current : next;
     });
-  }, [activeKey, visibleFileKeys, hideEmployeeResources]);
+  }, [activeKey, visibleFileKeys, hideEmployeeResources, commercial]);
   const visibleActiveKey = visibleTabs.some((tab) => tab.key === activeKey) ? activeKey : 'expert';
   const visibleVisitedKeys = visitedKeys.filter((key) => visibleTabs.some((tab) => tab.key === key));
   const selectTab = (key: string) => {

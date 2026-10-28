@@ -353,6 +353,8 @@ export default {
   'fileBrowser.move.success': 'Moved successfully',
   'fileBrowser.move.failed': 'Move failed',
   'fileBrowser.preview.failed': 'Preview failed',
+  'fileBrowser.preview.empty': 'The file is empty and cannot be previewed',
+  'fileBrowser.preview.notFound': 'File not found',
   'fileBrowser.preview.unavailable': 'This file cannot be previewed online. Please download it to view.',
   'fileBrowser.createFolder.prompt': 'Enter folder name',
   'fileBrowser.createFolder.duplicateName': 'A folder with this name already exists in the current folder',

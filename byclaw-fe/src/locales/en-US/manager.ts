@@ -73,6 +73,15 @@ export default {
     'The latest debug call failed. Check the debug request, endpoint, credentials and model protocol. See the debug output for the specific error.',
   'modelMgr.error.invalidDebugResponse':
     'The model did not return a valid streaming response. Check the model protocol and API endpoint.',
+  'orgMgr.modal.administrators': 'Organization administrators',
+  'orgMgr.administrators.select': 'Select organization administrators',
+  'orgMgr.administrators.search': 'Search users in this organization',
+  'orgMgr.administrators.directMembers': 'Only direct members of the selected organization are shown',
+  'orgMgr.administrators.membershipHint':
+    'Select one or more administrators; selected users will join this organization when saved',
+  'orgMgr.administrators.selected': '{count} selected',
+  'orgMgr.administrators.loadFailed': 'Failed to load organization administrators. Please retry.',
+  'orgMgr.administrators.retry': 'Retry',
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
@@ -208,6 +217,7 @@ export default {
   'orgMgr.members.assignTokenQuota.label': 'Monthly Token Quota',
   'orgMgr.members.assignTokenQuota.placeholder': 'Enter quota, 0 to disable',
   'orgMgr.members.assignTokenQuota.success': 'Quota assigned successfully',
+  'orgMgr.members.assignTokenQuota.failed': 'Failed to assign quota',
   'orgMgr.members.assignTokenQuota.hint': 'Uses system default if not set',
   'orgMgr.batchExitOrganization': 'Batch Exit Organization',
   'orgMgr.batchExitOrganizationTitle': 'Batch Exit Organization',
@@ -328,6 +338,8 @@ export default {
   'orgTree.addSameLevelDept': 'Same Level',
   'orgTree.addSubDept': 'Sub Level',
   'orgTree.deleteOrg': 'Delete Organization',
+  'orgTree.editOrg': 'Edit Organization',
+  'orgTree.actions': 'Organization actions',
   'orgTree.deleteConfirm': 'Are you sure you want to delete?',
   'orgTree.dataPermission': 'Data Permission Settings',
 
@@ -358,6 +370,20 @@ export default {
 
   // Position Member List
   'postList.searchPlaceholder': 'Search by name, employee ID',
+  'postList.batchActions': 'Batch Actions',
+  'postList.operation': 'Actions',
+  'postList.batchAdd': 'Add Users in Bulk',
+  'postList.batchRemove': 'Remove Users in Bulk',
+  'postList.addSearchPlaceholder': 'Search by user code or name',
+  'postList.userCode': 'User Code',
+  'postList.selectedCount': '{count} users selected',
+  'postList.removeTitle': 'Delete Position Membership',
+  'postList.removeConfirm':
+    'Remove the selected {count} users from this position? Their organization memberships and roles will be retained.',
+  'postList.addSuccess': 'Users added to the position',
+  'postList.removeSuccess': 'Users removed from the position',
+  'postList.updateFailed': 'Failed to update position memberships. Please try again.',
+  'postList.loadUsersFailed': 'Failed to load users. Please try again.',
   'postList.userName': 'Username',
   'postList.phone': 'Phone Number',
   'postList.userNumber': 'ID',

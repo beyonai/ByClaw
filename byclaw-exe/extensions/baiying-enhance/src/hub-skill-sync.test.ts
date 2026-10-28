@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -8,12 +8,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import {
   buildHubSkillAuthHeaders,
+  getHubSkillDownloadState,
+  hubSkillVersionSignature,
   resolveHubSkillApiUrl,
   syncHubSkillsForManagedAgents,
   validateHubSkillZipEntryName,
 } from "./hub-skill-sync.js";
 
 const execFileAsync = promisify(execFile);
+
+vi.mock("./backend-service-discovery.js", () => ({ discoverBackendBaseUrl: vi.fn() }));
+vi.mock("./redis-json-store.js", () => ({ getSharedRedisJsonStore: vi.fn() }));
 
 async function createSkillZip(params: {
   skillCode: string;
@@ -145,7 +150,85 @@ describe("hub-skill-sync", () => {
     ).resolves.toMatchObject({ changed: false, checked: 1, skipped: ["hub-skill"] });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getHubSkillDownloadState("hub-skill")).toMatchObject({ state: "DOWNLOADED", version: "v1" });
+    expect(hubSkillVersionSignature(managed[0].hubSkills)).toBe("hub-skill:v1");
+    fetchMock.mockResolvedValueOnce(versionResponse("v2")).mockResolvedValueOnce(zipResponse(zipPath));
+    await syncHubSkillsForManagedAgents({ managed, stateDir, baseUrl: "http://example.test/byaiService" });
+    expect(hubSkillVersionSignature(managed[0].hubSkills)).toBe("hub-skill:v2");
   });
+
+  it.each(["version", "download", "extract"])(
+    "continues installing later skills when the first skill fails during %s",
+    async (failureStage) => {
+      const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-hub-partial-state-"));
+      const zipPath = await createSkillZip({ skillCode: "second-skill" });
+      const logger = { warn: vi.fn() };
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = new URL(String(input));
+        const skillId = url.searchParams.get("skillId");
+        if (url.pathname.endsWith("/getSkillVersion")) {
+          if (skillId === "1" && failureStage === "version") {
+            return new Response(JSON.stringify({ code: -1, data: null, msg: "Skill version not found", success: false }), { status: 200 });
+          }
+          return versionResponse("v1", `/byaiService/tool/downloadSkillZip?skillId=${skillId}`);
+        }
+        if (url.pathname.endsWith("/downloadSkillZip")) {
+          if (skillId === "1") {
+            return failureStage === "download"
+              ? new Response("download unavailable", { status: 503 })
+              : new Response("invalid zip contents", { status: 200 });
+          }
+          return zipResponse(zipPath);
+        }
+        throw new Error(`Unexpected URL: ${url.pathname}`);
+      });
+
+      try {
+        const result = await syncHubSkillsForManagedAgents({
+          managed: [
+            {
+              hubSkills: ["first-skill", "second-skill"].map((skillCode, index) => ({
+                skillCode,
+                skillUrl: `/byaiService/tool/downloadSkillZip?skillId=${index + 1}`,
+                versionUrl: `/byaiService/tool/getSkillVersion?skillId=${index + 1}`,
+              })),
+            },
+          ],
+          stateDir,
+          baseUrl: "http://example.test/byaiService",
+          timeoutMs: 5000,
+          logger,
+        });
+
+        expect(result).toEqual({
+          changed: true,
+          checked: 2,
+          downloaded: ["second-skill"],
+          skipped: [],
+          failed: ["first-skill"],
+        });
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining("hub skill sync failed skillCode=first-skill"),
+        );
+        if (failureStage === "version") {
+          expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("version request rejected code=-1: Skill version not found"));
+        }
+        expect(fetchMock).toHaveBeenCalledWith(
+          "http://example.test/byaiService/tool/downloadSkillZip?skillId=2",
+          expect.any(Object),
+        );
+        await expect(
+          readFile(path.join(stateDir, "skills", "second-skill", "SKILL.md"), "utf8"),
+        ).resolves.toContain("# second-skill");
+        await expect(
+          readFile(path.join(stateDir, "skills", "first-skill", "SKILL.md"), "utf8"),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(stateDir, { recursive: true, force: true });
+        await rm(path.dirname(zipPath), { recursive: true, force: true });
+      }
+    },
+  );
 
   it("accepts zip files with SKILL.md at archive root", async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-hub-root-state-"));

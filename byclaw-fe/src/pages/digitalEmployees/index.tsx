@@ -410,6 +410,19 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const hasUsePermission = permissions?.hasUsePermission === true;
   const canApplyUse = permissions?.canApplyUse === true;
   const isApplyPending = permissions?.useApplyPending === true;
+  const handleApplyManage = async () => {
+    if (!employeeResourceId || !permissions?.canApplyManage || applyLoading) return;
+    setApplyLoading(true);
+    try {
+      await applyResourceUse({ resourceId: String(employeeResourceId), permissionType: 'MANAGE' });
+      setPermissions((current: any) => ({ ...current, canApplyManage: false, manageApplyPending: true }));
+      message.success(intl.formatMessage({ id: 'digitalEmployees.manageApplySubmitted' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.saveFailed' }));
+    } finally {
+      setApplyLoading(false);
+    }
+  };
   const handleApplyUse = async () => {
     if (!employeeResourceId || !canApplyUse || applyLoading || isApplyPending) return;
     setApplyLoading(true);
@@ -584,6 +597,15 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </Typography.Title>
                   <EmployeeTypeTag ownerType={detail.ownerType} agentType={detail.agentType} />
                 </div>
+                {(permissions?.canApplyManage || permissions?.manageApplyPending) && (
+                  <Button loading={applyLoading} disabled={permissions.manageApplyPending} onClick={handleApplyManage}>
+                    {intl.formatMessage({
+                      id: permissions.manageApplyPending
+                        ? 'digitalEmployees.manageApplyPending'
+                        : 'digitalEmployees.applyManage',
+                    })}
+                  </Button>
+                )}
                 {hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     {intl.formatMessage({ id: 'digitalEmployees.newTask' })}

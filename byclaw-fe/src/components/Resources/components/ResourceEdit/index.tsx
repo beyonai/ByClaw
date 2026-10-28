@@ -37,7 +37,7 @@ interface ResourceEditProps {
   resourceType: string;
   catalogList: Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>;
   onCancel: () => void;
-  onSave: (values: any) => void;
+  onSave: (values: any) => void | Promise<void>;
 }
 
 const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType, catalogList, onCancel, onSave }) => {
@@ -46,13 +46,15 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
   const avatarValue = Form.useWatch('avatar', form);
   const [avatarUploadLoading, setAvatarUploadLoading] = React.useState(false);
   const [avatarGenerateLoading, setAvatarGenerateLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const savingRef = React.useRef(false);
 
   // 当item变化时，设置表单字段的值
   React.useEffect(() => {
     if (item) {
       form.setFieldsValue({
         resourceName: item.resourceName,
-        resourceDesc: item.resourceDesc,
+        resourceDesc: item.resourceDesc ?? item.description,
         avatar: item.resourceLogoUrl || item.avatar,
         catalogId: item.catalogId === '-1' ? undefined : item.catalogId,
       });
@@ -73,7 +75,26 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
   const typeName = getTypeName(resourceType);
 
   const handleCancel = () => {
-    onCancel();
+    if (!savingRef.current) onCancel();
+  };
+
+  const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const values = await form.validateFields();
+      await onSave({ ...values, resourceId: item?.resourceId });
+    } catch (error: any) {
+      // 字段校验由表单展示；请求失败保留当前草稿，让用户修改或重试。
+      if (!error?.errorFields) {
+        const detail = error?.msg || error?.message || (typeof error === 'string' ? error : '');
+        message.error(detail || intl.formatMessage({ id: 'common.saveFailed' }));
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const uploadAvatarFile = async (file: File) => {
@@ -127,28 +148,24 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
       onCancel={handleCancel}
       width={800}
       destroyOnHidden
+      maskClosable={!saving}
+      closable={!saving}
       footer={[
-        <Button key="cancel" onClick={handleCancel}>
+        <Button key="cancel" onClick={handleCancel} disabled={saving}>
           {intl.formatMessage({ id: 'common.cancel' })}
         </Button>,
         <Button
           key="save"
           type="primary"
-          onClick={() => {
-            form.validateFields().then((values) => {
-              const params = {
-                ...values,
-                resourceId: item?.resourceId,
-              };
-              onSave(params);
-            });
-          }}
+          loading={saving}
+          disabled={avatarUploadLoading || avatarGenerateLoading}
+          onClick={() => void handleSave()}
         >
           {intl.formatMessage({ id: 'common.save' })}
         </Button>,
       ]}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={saving}>
         {resourceType === 'SKILL' && (
           <>
             <Form.Item name="avatar" hidden>
@@ -165,11 +182,15 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
                 </div>
                 <Space>
                   <Upload accept="image/*" showUploadList={false} beforeUpload={handleUploadBefore}>
-                    <Button loading={avatarUploadLoading} disabled={avatarGenerateLoading}>
+                    <Button loading={avatarUploadLoading} disabled={saving || avatarGenerateLoading}>
                       {intl.formatMessage({ id: 'common.upload' })}
                     </Button>
                   </Upload>
-                  <Button loading={avatarGenerateLoading} disabled={avatarUploadLoading} onClick={handleGenerateAvatar}>
+                  <Button
+                    loading={avatarGenerateLoading}
+                    disabled={saving || avatarUploadLoading}
+                    onClick={handleGenerateAvatar}
+                  >
                     {intl.formatMessage({ id: 'resource.imageGenerate' })}
                   </Button>
                 </Space>

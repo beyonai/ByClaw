@@ -1,3 +1,4 @@
+import type { KnowledgeUploadItem } from '@/service/knowledgeCenter';
 import { GET, POST } from '@/service/common/request';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
@@ -84,10 +85,13 @@ export interface FileBrowserSaveToKnowledgeParams {
   targetDirectoryPath: string;
   processFrontMatter?: boolean;
   overwrite?: boolean;
+
+  /** Personal knowledge saves build by default; false imports without building. */
+  buildAfterSave?: boolean;
 }
 
-export function listFiles(params: FileBrowserListParams) {
-  return POST<FileBrowserItem[]>('/byaiService/fileBrowser/list', params);
+export function listFiles(params: FileBrowserListParams, responseCfg?: Record<string, any>) {
+  return POST<FileBrowserItem[]>('/byaiService/fileBrowser/list', params, { responseCfg });
 }
 
 export function getDefaultPath(resourceId: string | number) {
@@ -161,8 +165,8 @@ export function createFolder(params: FileBrowserCreateFolderParams) {
   return POST('/byaiService/fileBrowser/createFolder', params);
 }
 
-export function ensureFolder(params: FileBrowserCreateFolderParams) {
-  return POST('/byaiService/fileBrowser/ensureFolder', params);
+export function ensureFolder(params: FileBrowserCreateFolderParams, responseCfg?: Record<string, any>) {
+  return POST('/byaiService/fileBrowser/ensureFolder', params, { responseCfg });
 }
 
 export interface FileBrowserSearchParams {
@@ -185,4 +189,21 @@ export function downloadFolder(resourceId: string | number, path: string) {
 
 export function saveToKnowledge(params: FileBrowserSaveToKnowledgeParams) {
   return POST('/byaiService/fileBrowser/saveToKnowledge', params);
+}
+
+export interface FileBrowserKnowledgeSaveResult {
+  targetResourceId: string | number;
+  targetDirectoryPath: string;
+  createdFolderCount: number;
+  uploadedFileCount: number;
+  buildSubmittedCount: number;
+  failedItems: KnowledgeUploadItem[];
+  buildFailedItems: KnowledgeUploadItem[];
+  postProcessErrors: string[];
+}
+
+export function saveToPersonalKnowledge(params: FileBrowserSaveToKnowledgeParams) {
+  return POST<FileBrowserKnowledgeSaveResult>('/byaiService/fileBrowser/saveToPersonalKnowledge', params, {
+    responseCfg: { hideErrorTips: true },
+  });
 }

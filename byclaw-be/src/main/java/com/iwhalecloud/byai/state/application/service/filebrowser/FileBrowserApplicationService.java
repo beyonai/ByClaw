@@ -68,6 +68,14 @@ public class FileBrowserApplicationService {
         return items;
     }
 
+    public List<FileBrowserItemVo> listForTransfer(String userCode, Long resourceId, String relativePath) {
+        FileBrowserPathPolicy.assertBrowsable(relativePath);
+        return providerFactory.getProvider().listForTransfer(userCode, resourceId, toProviderPath(relativePath)).stream()
+            .filter(item -> !FileBrowserPathPolicy.isProtected(item.getPath()))
+            .map(this::toExternalItem)
+            .collect(java.util.stream.Collectors.toList());
+    }
+
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
         FileBrowserPathPolicy.assertBrowsable(relativePath);
         String providerPath = toProviderPath(relativePath);
@@ -200,8 +208,7 @@ public class FileBrowserApplicationService {
 
     private boolean folderExists(FileBrowserProvider provider, String userCode, Long resourceId, String parentPath,
         String folderName) {
-        return provider.list(userCode, resourceId, parentPath).stream()
-            .anyMatch(item -> item.isDir() && folderName.equals(item.getName()));
+        return provider.folderExists(userCode, resourceId, parentPath, folderName);
     }
 
     private List<String> splitPath(String path) {

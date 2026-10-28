@@ -368,6 +368,54 @@ public class RedisUtil {
     }
 
     /**
+     * 同 key 多成员 SADD，按最多 500 条命令组成 pipeline。
+     * pipeline 部分成功或不支持时同步重放该批；SADD 幂等，重复执行不会重复授权。
+     * 重放仍失败时向调用方抛出异常，不将缓存写入失败视为成功。
+     */
+    public static void addSets(Map<String, Set<String>> additions) {
+        if (additions.isEmpty()) return;
+        List<SetAddition> commands = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : additions.entrySet()) {
+            List<String> members = new ArrayList<>(entry.getValue());
+            for (int offset = 0; offset < members.size(); offset += 500) {
+                commands.add(new SetAddition(entry.getKey(),
+                    members.subList(offset, Math.min(offset + 500, members.size())).toArray(String[]::new)));
+            }
+        }
+        for (int offset = 0; offset < commands.size(); offset += 500) {
+            List<SetAddition> batch = commands.subList(offset, Math.min(offset + 500, commands.size()));
+            try {
+                List<Object> results = instance.stringRedisTemplate.executePipelined(new SessionCallback<Object>() {
+                    @Override
+                    @SuppressWarnings({"rawtypes", "unchecked"})
+                    public Object execute(RedisOperations operations) {
+                        for (SetAddition command : batch) {
+                            operations.opsForSet().add(command.key(), (Object[]) command.members());
+                        }
+                        return null;
+                    }
+                });
+                if (results == null || results.size() != batch.size()) {
+                    throw new IllegalStateException("Incomplete authorization Redis pipeline response");
+                }
+            } catch (RuntimeException pipelineFailure) {
+                logger.warn("授权 Redis pipeline 失败，幂等重放本批 commands={}", batch.size(), pipelineFailure);
+                try {
+                    for (SetAddition command : batch) {
+                        instance.stringRedisTemplate.opsForSet().add(command.key(), command.members());
+                    }
+                } catch (RuntimeException retryFailure) {
+                    retryFailure.addSuppressed(pipelineFailure);
+                    throw new RedisSystemException("Authorization Redis batch replay failed", retryFailure);
+                }
+            }
+        }
+    }
+
+    private record SetAddition(String key, String[] members) {
+    }
+
+    /**
      * 是事存在这个key
      *
      * @param key key

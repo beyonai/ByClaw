@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Segmented } from 'antd';
+import { Alert, Segmented } from 'antd';
 import { CodeOutlined, ReadOutlined } from '@ant-design/icons';
 import cn from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
@@ -9,6 +9,7 @@ import { getIntl } from '@umijs/max';
 import TextHighlight from './TextHighlight';
 import type { MarkdownImageResolver } from './Md';
 import styles from './Html.module.less';
+import { resolveHtmlResources } from './htmlResources';
 
 // loader.config({
 //   paths: {
@@ -33,64 +34,6 @@ export interface HtmlPreviewProps {
 const isRelativeResourcePath = (path: string) =>
   !path.startsWith('/') && !path.startsWith('#') && !path.startsWith('//') && !/^[a-z][a-z\d+.-]*:/i.test(path);
 
-const resolveHtmlResources = async (
-  content: string,
-  resolver: MarkdownImageResolver,
-  onLinkClick?: (href: string) => void
-) => {
-  const document = new DOMParser().parseFromString(content, 'text/html');
-  const resourceNodes = [
-    ...Array.from(document.querySelectorAll<HTMLElement>('img[src], source[src]')).map((element) => ({
-      element,
-      attribute: 'src',
-    })),
-    ...Array.from(document.querySelectorAll<HTMLElement>('video[poster]')).map((element) => ({
-      element,
-      attribute: 'poster',
-    })),
-    ...Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((element) => ({
-      element,
-      attribute: 'href',
-    })),
-  ];
-  const objectUrls: string[] = [];
-
-  await Promise.all(
-    resourceNodes.map(async ({ element, attribute }) => {
-      const resourcePath = element.getAttribute(attribute);
-      if (!resourcePath || !isRelativeResourcePath(resourcePath)) return;
-
-      try {
-        const resolvedResource = await resolver(resourcePath);
-        if (resolvedResource instanceof Blob) {
-          const objectUrl = URL.createObjectURL(resolvedResource);
-          objectUrls.push(objectUrl);
-          element.setAttribute(attribute, objectUrl);
-        } else if (resolvedResource) {
-          element.setAttribute(attribute, resolvedResource);
-        }
-        if (element.tagName === 'A') {
-          element.setAttribute('data-preview-resource-path', resourcePath);
-          (element as HTMLAnchorElement).target =
-            onLinkClick && isRelativeResourcePath(resourcePath) ? '_self' : '_blank';
-          (element as HTMLAnchorElement).rel = 'noopener noreferrer';
-          if (onLinkClick && isRelativeResourcePath(resourcePath)) {
-            element.addEventListener('click', (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onLinkClick(resourcePath);
-            });
-          }
-        }
-      } catch {
-        // 单个资源解析失败时保留原始地址，不影响 HTML 其它内容预览。
-      }
-    })
-  );
-
-  return { content: document.documentElement.outerHTML, objectUrls };
-};
-
 export const HtmlRender = React.memo(
   (props: {
     content?: string;
@@ -102,6 +45,7 @@ export const HtmlRender = React.memo(
   }) => {
     const { content, data, href, safe = true, resolveResource, onLinkClick } = props;
     const [loading, setLoading] = useState<boolean>(false);
+    const [failedResources, setFailedResources] = useState<string[]>([]);
     const [blobContent, setBlobContent] = useState<string>();
     const ref = useRef<HTMLIFrameElement>(null);
     const htmlContent = content !== undefined ? content : blobContent;
@@ -142,6 +86,7 @@ export const HtmlRender = React.memo(
     };
 
     useEffect(() => {
+      setFailedResources([]);
       let objectUrl: string | undefined;
       let resourceObjectUrls: string[] = [];
       let active = true;
@@ -182,8 +127,11 @@ export const HtmlRender = React.memo(
       if (htmlContent !== undefined && !href) {
         setLoading(true);
         if (resolveResource) {
-          void resolveHtmlResources(htmlContent, resolveResource, onLinkClick)
-            .then(({ content: resolvedContent, objectUrls }) => renderContent(resolvedContent, objectUrls))
+          void resolveHtmlResources(htmlContent, resolveResource)
+            .then(({ content: resolvedContent, objectUrls, failed }) => {
+              if (active) setFailedResources(failed);
+              renderContent(resolvedContent, objectUrls);
+            })
             .catch(() => renderContent(htmlContent));
         } else {
           renderContent(htmlContent);
@@ -215,6 +163,16 @@ export const HtmlRender = React.memo(
 
     return (
       <section className={styles.html}>
+        {!!failedResources.length && (
+          <Alert
+            type="warning"
+            showIcon
+            message={getIntl().formatMessage(
+              { id: 'preview.resourceFailed' },
+              { resources: failedResources.join(', ') }
+            )}
+          />
+        )}
         {loading && (
           <div className={styles.loader}>
             <span />

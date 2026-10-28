@@ -88,6 +88,183 @@ import org.mockito.InOrder;
 class AuthApplicationServiceTest {
 
     @Test
+    void synchronizedToolsUseExplicitGrantsConsistentlyAndKeepRevocationAndTenantIsolation() {
+        for (String bizType : List.of("AGENT", "TOOLKIT", "MCP")) {
+            for (Long tenant : java.util.Arrays.asList(null, 1L, 2L)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setResourceBizType(bizType); resource.setComAcctId(tenant); resource.setCreateBy(3L);
+                var grants = new ArrayList<PrivilegeGrant>();
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType(bizType); grant.setGrantType(GrantType.FORCE_USE); grants.add(grant);
+                var service = newExplicitUserPermissionService(grants);
+                prepareOperationPermissionQueries(service, resource);
+                if (!java.util.Objects.equals(tenant, 1L)) {
+                    assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                    assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                    continue;
+                }
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isTrue();
+                grant.setGrantType(GrantType.ALLOW_VIEW);
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantType(GrantType.FORCE_USE); grant.setExpDate(new java.util.Date(0));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setExpDate(null); grant.setStatusCd("P");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setEffDate(null); grant.setGrantToType(Color.BLACK);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantToType(Color.RED); resource.setResourceStatus(3);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                resource.setResourceStatus(2); grants.clear(); login.setUserCode("adminvip");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isFalse();
+                grants.add(grant); login.setUserCode("user3");
+                resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+                assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+            }
+        }
+    }
+
+    @Test
+    void synchronizedSkillUsesEffectiveExplicitGrantsInBothRuntimeAndListWithinCurrentTenant() {
+        for (Long tenant : java.util.Arrays.asList(null, 0L, 1L, 2L)) {
+            for (String type : List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_MANAGE)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setComAcctId(tenant);
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType("SKILL"); grant.setGrantType(type);
+                var service = newExplicitUserPermissionService(List.of(grant));
+                prepareOperationPermissionQueries(service, resource);
+                if (!java.util.Objects.equals(tenant, 1L)) {
+                    assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                    assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                    continue;
+                }
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                var row = service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L);
+                assertThat(row.isHasUsePermission()).isTrue();
+                assertThat(row.isHasViewPermission()).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void synchronizedSkillViewOnlyGrantNeverAllowsContentAccess() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grant.setGrantType(GrantType.ALLOW_VIEW);
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceViewPermission(resource)).isTrue();
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        for (var permission : List.of(service.queryResourceOperationPermissions(607L),
+            service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L))) {
+            assertThat(permission.isHasViewPermission()).isTrue();
+            assertThat(permission.isHasUsePermission()).isFalse();
+            assertThat(permission.isCanViewDetail()).isFalse();
+        }
+    }
+
+    @Test
+    void synchronizedSkillRevocationExpiryAndOffShelfCannotBeBypassedByCreatorOrAdmin() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setCreateBy(3L); resource.setComAcctId(1L);
+        var grants = new ArrayList<PrivilegeGrant>();
+        var service = newExplicitUserPermissionService(grants);
+        prepareOperationPermissionQueries(service, resource);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grants.add(grant);
+        assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+        grant.setExpDate(new java.util.Date(0));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setExpDate(null); grant.setStatusCd("P");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setEffDate(null); resource.setResourceStatus(3);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        resource.setResourceStatus(2);
+        grants.clear();
+        login.setUserCode("adminvip");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void synchronizedSkillUseBlacklistStillOverridesUseGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var allow = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        var deny = useGrant(607L, 3L, GrantToObjType.USER, Color.BLACK, "A");
+        allow.setGrantObjType("SKILL"); deny.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(allow, deny));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void ordinaryControlledSkillStillRequiresMatchingEnterpriseEvenWithExplicitGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.hasResourceViewPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    private SsResource synchronizedSkillResource() {
+        var resource = enterpriseResource(607L, 1L);
+        resource.setResourceBizType("SKILL"); resource.setResourceCode("external-skill");
+        resource.setSystemCode("BYAI"); resource.setThirdSyncRevision(1L);
+        resource.setComAcctId(1L); resource.setUseAuthControlled(true); resource.setViewAuthControlled(true);
+        return resource;
+    }
+
+    @Test
+    void synchronizationUseCheckKeepsGrantRequirementsAndRestoresOrdinaryEnterpriseIsolation() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = enterpriseResource(607L, 1L);
+        resource.setComAcctId(2L); resource.setUseAuthControlled(true);
+        var granted = newExplicitUserPermissionService(List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        var ungranted = newExplicitUserPermissionService(List.of());
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isFalse();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> ungranted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(3);
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(2);
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+    }
+
+    @Test
     void pendingEnterpriseSkillCannotBeManagedToBypassPublicationReview() {
         var service = new AuthApplicationService();
         SsResource skill = new SsResource();
@@ -764,11 +941,54 @@ class AuthApplicationServiceTest {
         }
     }
 
+    /** 部署模式不改变知识库的管理权：单条详情和批量列表必须一致。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void knowledgeMaintenanceUsesResourcePermissionAcrossDeploymentModes(String mode) {
+        for (String bizType : List.of("KG_DOC", "KG_QA", "KG_TERM")) {
+            for (String identity : List.of("creator", "manager", "useOnly", "none", "blocked", "inactive")) {
+                List<PrivilegeGrant> grants = new ArrayList<>();
+                if (List.of("manager", "blocked", "inactive").contains(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.RED,
+                        "inactive".equals(identity) ? "P" : "A"));
+                }
+                if ("blocked".equals(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+                }
+                if ("useOnly".equals(identity)) {
+                    grants.add(useGrant(620L, 2L, GrantToObjType.USER, Color.RED, "A"));
+                }
+                grants.forEach(grant -> grant.setGrantObjType(bizType));
+                AuthApplicationService service = newExplicitUserPermissionService(grants);
+                ReflectionTestUtils.setField(service, "datasetSystem", mode);
+                CurrentUserHolder.setLoginInfo(loginInfo(2L));
+                SsResource resource = enterpriseResource(620L, "creator".equals(identity) ? 2L : 1L);
+                resource.setResourceBizType(bizType);
+                prepareOperationPermissionQueries(service, resource);
+                boolean manageable = List.of("creator", "manager").contains(identity);
+                for (String owner : List.of(OwnerType.PERSONAL, OwnerType.ENTERPRISE, OwnerType.PERSONAL_DEFAULT)) {
+                    resource.setOwnerType(owner);
+                    for (int status : List.of(0, 2, 3, -1)) {
+                        resource.setResourceStatus(status);
+                        var detail = service.queryResourceOperationPermissions(620L);
+                        var row = service.queryResourceOperationPermissionsBatch(List.of(620L)).get(620L);
+                        assertThat(row).as("%s/%s/%s/%s/%s", mode, bizType, identity, owner, status)
+                            .usingRecursiveComparison().isEqualTo(detail);
+                        boolean editable = manageable && status != -1 && !OwnerType.PERSONAL_DEFAULT.equals(owner);
+                        assertThat(detail.isCanEdit()).isEqualTo(editable);
+                        assertThat(detail.isCanDelete()).isEqualTo(editable
+                            && (OwnerType.PERSONAL.equals(owner) || status == 0 || status == 3));
+                    }
+                }
+            }
+        }
+    }
+
     /**
-     * WHALE_AGENT 模式下知识/工具由外部智能体发布，本系统不允许编辑基础信息或注销。
+     * WHALE_AGENT 模式下工具仍由外部智能体发布，知识库权限调整不能放开工具维护。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsWhaleAgentKnowledgeAndToolEditDeleteActions() {
+    void queryResourceOperationPermissions_rejectsWhaleAgentToolEditDeleteActions() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
@@ -1593,10 +1813,11 @@ class AuthApplicationServiceTest {
         qo.setResourceId(300L);
         qo.setApplyUserId(1001L);
 
+        when(privilegeGrantMapper.update(any(), any())).thenReturn(1);
         service.approveUseApply(qo);
 
         verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
-        verify(privilegeGrantService).update(eq(pendingApply));
+        verify(privilegeGrantMapper).update(any(), any());
     }
 
     @Test
@@ -1899,7 +2120,7 @@ class AuthApplicationServiceTest {
     }
 
     @Test
-    void applyUseIfNeeded_locksBeforePendingCheck() {
+    void applyUseIfNeeded_readsResourceWithoutQueryLockBeforePendingCheck() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
@@ -2074,6 +2295,7 @@ class AuthApplicationServiceTest {
         when(resources.selectById(607L)).thenReturn(employee);
         PrivilegeGrant pending = useGrant(607L, 3L, "USER", Color.RED, "P");
         when(mapper.selectOne(any())).thenReturn(pending);
+        when(mapper.update(any(), any())).thenReturn(1);
         doNothing().when(service).syncUserAuthToRedis(3L);
         if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronize(employee, null);
         ResourceUseApplyApproveQo request = new ResourceUseApplyApproveQo(); request.setResourceId(607L); request.setApplyUserId(3L);
@@ -2146,12 +2368,15 @@ class AuthApplicationServiceTest {
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             service.appendDigitalEmployeeResourceUsePrivileges(bound, List.of(2L, 3L, 3L));
-            ArgumentCaptor<PrivilegeGrant> captured = ArgumentCaptor.forClass(PrivilegeGrant.class);
-            verify(grants, times(1)).save(captured.capture());
-            assertThat(captured.getValue().getGrantToObjId()).isEqualTo(3L);
-            assertThat(captured.getValue().getGrantType()).isEqualTo(GrantType.FORCE_USE);
-            assertThat(captured.getValue().getGrantToType()).isEqualTo(Color.RED);
-            assertThat(captured.getValue().getStatusCd()).isEqualTo("A");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<PrivilegeGrant>> captured = ArgumentCaptor.forClass(List.class);
+            verify(grants, times(1)).saveBatch(captured.capture());
+            assertThat(captured.getValue()).singleElement().satisfies(grant -> {
+                assertThat(grant.getGrantToObjId()).isEqualTo(3L);
+                assertThat(grant.getGrantType()).isEqualTo(GrantType.FORCE_USE);
+                assertThat(grant.getGrantToType()).isEqualTo(Color.RED);
+                assertThat(grant.getStatusCd()).isEqualTo("A");
+            });
             verify(grants, never()).findPrivilegeGrant(any(), any(), any(), any());
             verify(grants, never()).remove(any());
             verify(grants, never()).update(any());
@@ -2168,6 +2393,30 @@ class AuthApplicationServiceTest {
         } finally {
             org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    @Test
+    void retryOfCommittedBoundResourceGrantDoesNotInsertAgain() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
+        SsResource resource = enterpriseResource(607L, 1L);
+        Set<Long> persisted = new java.util.HashSet<>(Set.of(2L));
+        org.mockito.Mockito.doAnswer(call -> persisted.contains(call.getArgument(1)))
+            .when(service).hasResourceUsePermission(eq(resource), any(Long.class));
+        doNothing().when(service).validateDigitalEmployeeResourceUseGrant(eq(resource), any(Long.class));
+        org.mockito.Mockito.doAnswer(call -> {
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            batch.forEach(grant -> persisted.add(grant.getGrantToObjId()));
+            return null;
+        }).when(grants).saveBatch(any());
+        mockRedisSetWrite();
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        verify(grants).saveBatch(argThat(batch -> batch.size() == 1 && batch.getFirst().getGrantToObjId().equals(3L)));
+        assertThat(persisted).containsExactlyInAnyOrder(2L, 3L);
     }
 
     @Test
@@ -2248,11 +2497,13 @@ class AuthApplicationServiceTest {
             return null;
         }).when(service).handleAuth(any());
         org.mockito.Mockito.doAnswer(call -> {
-            PrivilegeGrant grant = call.getArgument(0);
-            if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
-            jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            for (PrivilegeGrant grant : batch) {
+                if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
+                jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            }
             return null;
-        }).when(grants).save(any());
+        }).when(grants).saveBatch(any());
         mockRedisSetWrite();
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.setProxyTargetClass(true);
@@ -2271,7 +2522,7 @@ class AuthApplicationServiceTest {
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(6);
             assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3 ORDER BY resource_id", Long.class))
                 .containsExactly(100L, 200L, 201L);
-            verify(cache, times(2)).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
+            verify(cache).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
         }
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants WHERE user_id=999", Integer.class)).isEqualTo(1);
     }

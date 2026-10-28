@@ -131,7 +131,7 @@ class ResourceLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         ext.setTargetContent("{}");
         when(toolkits.findById(10L)).thenReturn(ext);
         service.shelfResource(10L);
-        verify(artifacts).syncResourceJsonByBizType(contains("resourceId"), eq("TOOLKIT"), eq(10L));
+        verify(artifacts).publishResourceJson(contains("resourceId"), eq("TOOLKIT"), eq(10L));
         verify(toolkits).update(ext);
     }
 
@@ -172,12 +172,31 @@ class ResourceLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         verify(refresh).scheduleDigitalEmployeeUpdateRefreshAfterCommit(20L, null);
     }
 
-    @Test
-    void externalKnowledgeRemainsReadOnly() {
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void knowledgeCanBeEditedUnpublishedAndDeletedByManagersAcrossModes(String mode) {
         resource.setResourceBizType("KG_DOC");
-        ReflectionTestUtils.setField(service, "datasetSystem", "external");
-        assertThatThrownBy(() -> service.unShelfResource(10L))
-            .hasMessage("commercial.not.support.knowledge.operation");
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        service.updateResourceBasicInfo(10L, "Renamed knowledge", "Updated description", null, null);
+        assertThat(resource.getResourceName()).isEqualTo("Renamed knowledge");
+        service.unShelfResource(10L);
+        assertThat(resource.getResourceStatus()).isEqualTo(3);
+        service.deregisterResource(10L);
+        assertThat(resource.getResourceStatus()).isEqualTo(-1);
+        verify(datasets).deleteDataset(10L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void knowledgeWriteEndpointsStillRejectUsersWithoutManagement(String mode) {
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType("personal");
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        when(auth.hasResourceManagePermission(resource)).thenReturn(false);
+        assertThatThrownBy(() -> service.updateResourceBasicInfo(10L, "Rejected", "", null, null))
+            .hasMessage("user.permission.nopermission");
+        assertThatThrownBy(() -> service.deregisterResource(10L)).hasMessage("user.permission.nopermission");
         verify(resources, never()).updateResourceEntity(any());
+        verifyNoInteractions(datasets);
     }
 }

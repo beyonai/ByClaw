@@ -285,7 +285,7 @@ public class TenantSandboxService {
                 openSandboxClient.deleteSandbox(record.getSandboxId());
                 if (openSandboxClient.getSandboxIfExists(record.getSandboxId()) != null) {
                     throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "tenant sandbox still exists after delete request");
+                        "i18n.status.tenant.sandbox.still.exists.after.delete.request");
                 }
             }
             if (!"RELEASED".equals(record.getStatus()) && recordMapper.markReleased(record.getId(),

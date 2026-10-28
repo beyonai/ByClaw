@@ -184,7 +184,9 @@ const ResourceInstallDialog: React.FC<ResourceInstallDialogProps> = ({
       if (failureCount > 0) {
         message.warning(intl.formatMessage({ id: 'resource.installBatchResult' }, { successCount, failureCount }));
       } else {
-        message.success(intl.formatMessage({ id: 'resource.installSuccess' }));
+        message.success(
+          intl.formatMessage({ id: resourceType === 'SKILL' ? 'skillRuntime.associated' : 'resource.installSuccess' })
+        );
       }
       if (succeededIds.length > 0) {
         notifyInstalled(succeededIds);

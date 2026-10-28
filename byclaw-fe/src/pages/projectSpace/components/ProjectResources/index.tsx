@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ProjectDataSources from '@/components/ProjectDataSources';
+import { useProjectDataSourcesEnabled } from '@/components/ProjectDataSources/useProjectDataSourcesEnabled';
 import { useIntl, useSelector } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
@@ -116,6 +117,7 @@ const ProjectResources: React.FC<Props> = ({
     (id) => id !== undefined && `${id}` === `${project.createBy}`
   );
   const [dataSourceRefreshKey, setDataSourceRefreshKey] = useState(0);
+  const dataSourcesEnabled = useProjectDataSourcesEnabled();
   const siderContentContext = useContext(SiderContentContext);
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
@@ -162,7 +164,7 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project.projectType);
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 5 类，默认和普通项目仅展示共享文件。
-  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + 1;
+  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + Number(dataSourcesEnabled);
 
   const loadFiles = useCallback(async () => {
     const cloudResourceId = project.cloudResourceId;
@@ -939,21 +941,23 @@ const ProjectResources: React.FC<Props> = ({
           </div>
         </section>
 
-        <section
-          className={`${styles.resourceCategoryCard} ${
-            expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
-          }`}
-        >
-          <ProjectDataSources
-            key={project.projectId}
-            projectId={Number(project.projectId)}
-            canManage={canManageDataSources}
-            renderHeader={(actions) =>
-              renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
-            }
-            refreshKey={dataSourceRefreshKey}
-          />
-        </section>
+        {dataSourcesEnabled && (
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
+            <ProjectDataSources
+              key={project.projectId}
+              projectId={Number(project.projectId)}
+              canManage={canManageDataSources}
+              renderHeader={(actions) =>
+                renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
+              }
+              refreshKey={dataSourceRefreshKey}
+            />
+          </section>
+        )}
 
         {repositoryProject && (
           <section

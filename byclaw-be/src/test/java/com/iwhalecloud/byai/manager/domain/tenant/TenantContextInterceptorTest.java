@@ -26,6 +26,32 @@ class TenantContextInterceptorTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"/tool/addToolFromThird", "/tool/queryResourceSyncJob"})
+    void synchronizationRoutesValidateTenantSelectors(String path) {
+        for (int headers = 1; headers <= 3; headers++) {
+            var request = new MockHttpServletRequest("POST", "/byaiService" + path);
+            request.setContextPath("/byaiService");
+            if ((headers & 1) != 0) request.addHeader("X-Enterprise-Id", "not-a-tenant-id");
+            if ((headers & 2) != 0) request.addHeader("X-Tenant-Context", "unused-context");
+            assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+                .isInstanceOf(ResponseStatusException.class);
+            assertThat(TenantRequestContextHolder.get()).isNull();
+        }
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/tool/addToolFromThird/other", "/tool/queryResourceDetail"})
+    void synchronizationExceptionDoesNotExtendToOtherResourceRoutes(String path) {
+        var request = request("/byaiService" + path, "123");
+        request.setMethod("POST");
+        request.addHeader("X-Tenant-Context", "context-token");
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"/chat/superAgentChat", "/chat/runningStatus", "/chat/runningSnapshot",
         "/api/v1/sessionResources/query", "/chat/stopChat", "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus",
         "/showcase/messages/count"})

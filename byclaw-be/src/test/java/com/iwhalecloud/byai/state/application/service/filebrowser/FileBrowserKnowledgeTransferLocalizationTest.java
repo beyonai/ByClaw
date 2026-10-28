@@ -16,7 +16,7 @@ class FileBrowserKnowledgeTransferLocalizationTest extends I18nTestSupport {
     void localizesMissingFieldsBeforeAnyFileOperation() {
         var files = mock(FileBrowserApplicationService.class);
         var datasets = mock(DatasetApplicationService.class);
-        var service = new FileBrowserKnowledgeTransferApplicationService(files, datasets);
+        var service = new FileBrowserKnowledgeTransferApplicationService(files, datasets, mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class), mock(com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService.class));
         var request = new FileBrowserSaveToKnowledgeRequest();
         assertThatThrownBy(() -> service.saveToKnowledge("alice", request)).hasMessage("resourceId 不能为空");
         LocaleContextHolder.setLocale(Locale.US);

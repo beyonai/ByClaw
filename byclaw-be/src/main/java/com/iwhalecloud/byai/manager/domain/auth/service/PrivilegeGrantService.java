@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
 import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeAuthVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.database.ByaiDruidProperties;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
 import com.iwhalecloud.byai.manager.dto.auth.ManOrgDTO;
@@ -51,6 +52,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * @author he.duming
@@ -59,6 +61,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class PrivilegeGrantService {
+
+    private static final int INSERT_BATCH_SIZE = 500;
 
     public static final Logger logger = LoggerFactory.getLogger(PrivilegeGrantService.class);
 
@@ -71,6 +75,9 @@ public class PrivilegeGrantService {
     @Autowired
     private SsResourceMapper ssResourceMapper;
 
+    @Autowired
+    private ByaiDruidProperties byaiDruidProperties;
+
     /**
      * 保存权限
      *
@@ -82,6 +89,37 @@ public class PrivilegeGrantService {
         privilegeGrant.setEffDate(new Date());
         privilegeGrant.setCreateStaff(CurrentUserHolder.getCurrentUserId());
         privilegeGrantMapper.insert(privilegeGrant);
+    }
+
+    /** 分批执行 SQL，所有批次参与同一事务；任何批次失败均向外抛出并回滚。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveBatch(List<PrivilegeGrant> grants) {
+        if (grants == null || grants.isEmpty()) return;
+        long started = System.nanoTime();
+        long sequenceNanos = 0;
+        Long operator = CurrentUserHolder.getCurrentUserId();
+        for (int offset = 0; offset < grants.size(); offset += INSERT_BATCH_SIZE) {
+            List<PrivilegeGrant> batch = grants.subList(offset, Math.min(offset + INSERT_BATCH_SIZE, grants.size()));
+            long sequenceStarted = System.nanoTime();
+            List<Long> ids = SequenceService.nextValues(batch.size());
+            sequenceNanos += System.nanoTime() - sequenceStarted;
+            Date now = new Date();
+            for (int i = 0; i < batch.size(); i++) {
+                PrivilegeGrant grant = batch.get(i);
+                grant.setPrivilegeGrantId(ids.get(i));
+                grant.setCreateDate(now);
+                grant.setEffDate(now);
+                grant.setCreateStaff(operator);
+            }
+            int inserted = privilegeGrantMapper.insertBatch(batch, byaiDruidProperties.getDbType());
+            if (inserted != batch.size()) {
+                throw new IllegalStateException("Incomplete authorization batch: expected=" + batch.size()
+                    + ", inserted=" + inserted);
+            }
+        }
+        logger.info("授权批量保存完成 rows={}, batches={}, sequenceMs={}, totalMs={}", grants.size(),
+            (grants.size() + INSERT_BATCH_SIZE - 1) / INSERT_BATCH_SIZE,
+            sequenceNanos / 1_000_000, (System.nanoTime() - started) / 1_000_000);
     }
 
     /**

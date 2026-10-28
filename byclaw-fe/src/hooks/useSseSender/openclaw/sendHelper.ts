@@ -1,6 +1,6 @@
 /* eslint-disable indent */
 import { get } from 'lodash';
-import { SSEMessageType } from '@/constants/message';
+import { getIntl } from '@umijs/max';
 import { IAgentCache } from '@/typescript/agent';
 import { getOpenClawWebSocket, OpenClawWebSocketClient } from '@/utils/openClaw/openclawWebSocket';
 import { generateFilePrompt } from '@/utils/openClaw/utils';
@@ -68,7 +68,7 @@ export default class OpenclawSendHelper {
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const client = getOpenClawWebSocket();
       if (!client) {
-        reject(new Error('OpenClaw WebSocket not connected'));
+        reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.notOpen' })));
         return;
       }
 
@@ -117,7 +117,7 @@ export default class OpenclawSendHelper {
                 if (!finished) {
                   finished = true;
                   clearTimer();
-                  reject(new Error(SSEMessageType[SSEMessageType.error] || 'openclaw ws error'));
+                  reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.requestFailed' })));
                 }
               }
             },

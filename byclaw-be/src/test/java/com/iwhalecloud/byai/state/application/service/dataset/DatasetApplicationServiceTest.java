@@ -59,6 +59,13 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceDiscoveryRegistrationService;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
+import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
+
 import java.util.*;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -167,6 +174,69 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         verify(feignPythonBuildService).createDirectory(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/2026/reports");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void capabilitiesEnableMaintenanceAcrossModesWithoutChangingCreation(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        var capabilities = service.queryKnowledgeCapability();
+        assertThat(capabilities.getAllowKnowledgeBaseEdit()).isTrue();
+        assertThat(capabilities.getAllowKnowledgeBaseDelete()).isTrue();
+        assertThat(capabilities.getAllowKnowledgeBaseCreate()).isEqualTo(mode.isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void datasetManagersCanUpdateAndDeleteAcrossModes(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceStatus(3);
+        SsResExtDocService documents = org.mockito.Mockito.mock(SsResExtDocService.class);
+        ResourceDiscoveryRegistrationService discovery = org.mockito.Mockito.mock(ResourceDiscoveryRegistrationService.class);
+        ReflectionTestUtils.setField(service, "ssResExtDocService", documents);
+        ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", discovery);
+        ReflectionTestUtils.setField(service, "resourceRuntimeInfoResolver", org.mockito.Mockito.mock(ResourceRuntimeInfoResolver.class));
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResourceService.updateResource(100L, "Updated", "Description")).thenReturn(resource);
+        SsResExtDoc document = new SsResExtDoc();
+        when(documents.updateSsResExtDocTargetContent(100L, "dataset", "Updated", "Description"))
+            .thenReturn(document);
+        DatasetDto request = new DatasetDto();
+        request.setResourceId(100L);
+        request.setResourceName("Updated");
+        request.setResourceDesc("Description");
+        request.setType("dataset");
+        service.updateDataset(request);
+        verify(feignPythonBuildService).updateKnowledgeBase(org.mockito.ArgumentMatchers.argThat(update ->
+            "Updated".equals(update.getKnName()) && "personal-kb".equals(update.getKnCode())));
+
+        ResourceOperationPermissionsVo permissions = new ResourceOperationPermissionsVo();
+        permissions.setCanDelete(true);
+        when(authApplicationService.queryResourceOperationPermissions(100L)).thenReturn(permissions);
+        assertThat(service.deleteDataset(100L)).isTrue();
+        assertThat(resource.getResourceStatus()).isEqualTo(-1);
+        verify(feignPythonBuildService).deleteKnowledgeBase(any(), eq(100L));
+        verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(100L, "KG_DOC");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void datasetWriteEndpointsRejectNonManagersAcrossModes(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(OwnerType.PERSONAL);
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
+        DatasetDto request = new DatasetDto();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.updateDataset(request)).hasMessage("No permission to manage this resource");
+        assertThatThrownBy(() -> service.deleteDataset(100L)).hasMessage("No permission to manage this resource");
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        verifyNoInteractions(feignPythonBuildService);
     }
 
     @Test

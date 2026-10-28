@@ -415,8 +415,8 @@ class ToolManServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSuppor
             verify(resources).updateResourceEntity(resource);
             verify(skillApplication).refreshSkillBasicInfo(resource);
             if (status == 2) {
-                verify(storage).syncResourceJsonByBizType(targetContent, "SKILL", 802L);
-                verify(artifacts).upsertStandardJsonArtifact(802L, "SKILL", "resource-basic-info-sync");
+                verify(storage).publishResourceJson(targetContent, "SKILL", 802L);
+                verify(artifacts).upsertBasicInfoJsonArtifact(802L, "SKILL", "resource-basic-info-sync");
             } else {
                 org.mockito.Mockito.verifyNoInteractions(storage, artifacts);
             }
@@ -510,6 +510,40 @@ class ToolManServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSuppor
         assertThatThrownBy(() -> service.deleteManagedResource("dup_tool", "enterprise"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("tool.resource.code.duplicate.too.many");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {2, 3})
+    void localCurlToolMetadataRefreshesTheStandardJsonOnlyWhileActive(int status) {
+        var service = new ToolManService();
+        var resources = mock(SsResourceService.class);
+        var auth = mock(AuthApplicationService.class);
+        var tools = mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService.class);
+        var storage = mock(ResourceArtifactStorageService.class);
+        var artifacts = mock(SsResourceArtifactService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", resources);
+        ReflectionTestUtils.setField(service, "authApplicationService", auth);
+        ReflectionTestUtils.setField(service, "ssResExtToolService", tools);
+        ReflectionTestUtils.setField(service, "resourceArtifactStorageService", storage);
+        ReflectionTestUtils.setField(service, "ssResourceArtifactService", artifacts);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        LoginInfo login = new LoginInfo(); login.setUserId(100L); login.setUserCode("author");
+        CurrentUserHolder.setLoginInfo(login);
+        var resource = new SsResource(); resource.setResourceId(42L); resource.setResourceBizType("TOOL");
+        resource.setOwnerType("personal"); resource.setResourceStatus(status);
+        when(resources.findByIdForUpdate(42L)).thenReturn(resource);
+        when(auth.hasResourceManagePermission(resource)).thenReturn(true);
+        var extension = new com.iwhalecloud.byai.manager.entity.resource.SsResExtTool();
+        extension.setResourceId(42L);
+        extension.setTargetContent("{\"resourceId\":42,\"resourceName\":\"Old name\",\"resourceService\":[]}");
+        when(tools.findById(42L)).thenReturn(extension);
+        service.updateResourceBasicInfo(42L, "New name", "New description", null, null);
+        var updated = com.alibaba.fastjson.JSON.parseObject(extension.getTargetContent());
+        assertThat(updated.getString("resourceName")).isEqualTo("New name");
+        assertThat(updated.getJSONArray("resourceService")).isEmpty();
+        verify(tools).update(extension);
+        if (status == 2) verify(storage).publishResourceJson(extension.getTargetContent(), "TOOL", 42L);
+        else verify(storage, never()).publishResourceJson(any(), any(), anyLong());
     }
 
     private void prepareRedisUtil() {

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DeleteOutlined } from '@ant-design/icons';
 import { Button, Input, message, Modal, Popconfirm, Table, Tag, Tooltip, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { queryEmployeeGroupMemberCandidates } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getAvatarUrl, getDefaultAgentAvatar } from '@/pages/manager/utils/agent';
 import styles from './EmployeeGroupMembers.module.less';
@@ -140,7 +141,13 @@ export default function EmployeeGroupMembers({
           setCandidates([]);
           setHasMore(false);
         }
-        message.error(error?.message || intl.formatMessage({ id: 'employeeDetail.groupMember.loadFailed' }));
+        message.error(
+          localizeErrorMessage(
+            error?.message,
+            intl.formatMessage({ id: 'employeeDetail.groupMember.loadFailed' }),
+            intl.locale
+          )
+        );
       })
       .finally(() => {
         if (requestRef.current === requestController) {

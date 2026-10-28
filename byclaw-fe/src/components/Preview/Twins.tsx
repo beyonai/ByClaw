@@ -26,6 +26,7 @@ import {
   TEXT_PREVIEW_TYPES,
   VIDEO_PREVIEW_TYPES,
   resolvePreviewType,
+  MAX_TEXT_PREVIEW_SIZE,
 } from './formats';
 import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
@@ -159,6 +160,7 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
   /** 内容 - 用于展示源代码 */
   const [content, setContent] = useState<[ext: string, data: string]>();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
   const canDownload = !!uri || (data instanceof Blob && officeTypes.includes(type));
 
   const onDownload = () => {
@@ -192,35 +194,52 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
     setUri(undefined);
     setContent(undefined);
     setLoading(false);
+    setError(undefined);
 
     if (data instanceof Blob && !officeTypes.includes(type)) {
       if (canReadSource(type)) {
-        setLoading(true);
-        data
-          .text()
-          .then((source) => {
-            if (disposed) return;
-            let text = source;
-            if (type === 'json') {
-              try {
-                text = JSON.stringify(JSON.parse(source), null, 2);
-              } catch {
-                // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
+        if (data.size > MAX_TEXT_PREVIEW_SIZE) {
+          setError('preview.tooLarge');
+        } else {
+          setLoading(true);
+          data
+            .text()
+            .then((source) => {
+              if (disposed) return;
+              if (
+                /[\u0000-\u0008\u000b\u000e-\u001f]/.test(source) ||
+                source.startsWith('PK\u0003\u0004') ||
+                source.startsWith('%PDF-')
+              ) {
+                setError('preview.binaryText');
+                return;
               }
-            }
-            setContent([langMap[type], text]);
-          })
-          .catch(() => {
-            if (!disposed) setContent(undefined);
-          })
-          .finally(() => {
-            if (!disposed) setLoading(false);
-          });
+              let text = source;
+              if (type === 'json') {
+                try {
+                  text = JSON.stringify(JSON.parse(source), null, 2);
+                } catch {
+                  // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
+                }
+              }
+              setContent([langMap[type], text]);
+            })
+            .catch(() => {
+              if (!disposed) setError('fileRender.previewUnavailable');
+            })
+            .finally(() => {
+              if (!disposed) setLoading(false);
+            });
+        }
       }
+      if (!data.size) setError('preview.empty');
       objectUrl = URL.createObjectURL(createPreviewBlob(data, type, title));
       setUri(objectUrl);
     } else if (typeof data === 'string') {
-      if (canReadSource(type)) setContent([langMap[type], data]);
+      if (canReadSource(type)) {
+        if (new Blob([data]).size > MAX_TEXT_PREVIEW_SIZE) setError('preview.tooLarge');
+        else setContent([langMap[type], data]);
+      }
       if (type === 'svg' || HTML_PREVIEW_TYPES.includes(type)) {
         objectUrl = URL.createObjectURL(createPreviewBlob(new Blob([data]), type, title));
         setUri(objectUrl);
@@ -236,12 +255,19 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
     };
   }, [data, type, title]);
 
+  const previewLabel = intl.formatMessage({ id: 'common.preview' });
+  const sourceLabel = intl.formatMessage({ id: 'preview.source' });
   const tabs = useMemo(() => {
     const options = [];
-    if (visualTypes.includes(type)) options.push({ value: 'preview', icon: <EyeOutlined /> });
-    if (content) options.push({ value: 'source', icon: <FileDoneOutlined /> });
+    if (visualTypes.includes(type)) options.push({ value: 'preview', label: previewLabel, icon: <EyeOutlined /> });
+    if (content)
+      options.push({
+        value: 'source',
+        label: sourceLabel,
+        icon: <FileDoneOutlined />,
+      });
     return options;
-  }, [type, content]);
+  }, [type, content, previewLabel, sourceLabel]);
 
   useEffect(() => {
     setTab(tabs[0]?.value as 'source' | 'preview' | undefined);
@@ -270,7 +296,9 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
         </span>
         {extra}
       </nav>
-      <div className={ss.twins}>
+      {error && <Alert type="warning" showIcon message={intl.formatMessage({ id: error })} />}
+      {isTextLike(type) && !visualTypes.includes(type) && <span>{intl.formatMessage({ id: 'preview.textMode' })}</span>}
+      <div className={ss.twins} style={{ display: error ? 'none' : undefined }}>
         {!loading && !visualTypes.includes(type) && !isTextLike(type) && (
           <Alert type="info" showIcon message={intl.formatMessage({ id: 'fileRender.formatUnsupported' })} />
         )}
@@ -294,8 +322,11 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            {/* 非微信、钉钉环境继续使用浏览器内置 PDF 预览。 */}
-            {(HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas)) &&
+            {/* PDF 必须保留二进制 URL 交给浏览器预览，避免被 HTML 资源解析分支读取为文本而显示乱码。 */}
+            {!error &&
+              !!uri &&
+              tab === 'preview' &&
+              (HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas)) &&
               (type !== 'pdf' && resolveHtmlResource ? (
                 <HtmlRenderComponent
                   content={content?.[1]}
@@ -322,7 +353,9 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            {IMAGE_PREVIEW_TYPES.includes(type) && <ImagePreviewComponent url={uri} title={title} />}
+            {!error && !!uri && tab === 'preview' && IMAGE_PREVIEW_TYPES.includes(type) && (
+              <ImagePreviewComponent url={uri} title={title} />
+            )}
           </Suspense>
         </div>
         <div
@@ -350,7 +383,9 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            <MdPreviewComponent content={content?.[1]} resolveImage={resolveMarkdownImage} />
+            {content && tab === 'preview' && type === 'md' && (
+              <MdPreviewComponent content={content[1]} resolveImage={resolveMarkdownImage} />
+            )}
           </Suspense>
         </div>
         <div
@@ -373,63 +408,63 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
             {officeTypes.includes(type) && <OfficeComponent data={data} type={type} fileName={title} />}
           </Suspense>
         </div>
-        {DECODED_IMAGE_PREVIEW_TYPES.includes(type) && (
+        {!error && DECODED_IMAGE_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <DecodedImageComponent data={data} type={type} title={title} />
             </Suspense>
           </div>
         )}
-        {DOCUMENT_DATA_PREVIEW_TYPES.includes(type) && (
+        {!error && DOCUMENT_DATA_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               {type === 'rtf' ? <RtfComponent data={data} title={title} /> : <OdsComponent data={data} />}
             </Suspense>
           </div>
         )}
-        {OFFICE_VARIANT_PREVIEW_TYPES.includes(type) && (
+        {!error && OFFICE_VARIANT_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <OfficeVariantComponent data={data} type={type as OfficeVariantType} />
             </Suspense>
           </div>
         )}
-        {EMAIL_PREVIEW_TYPES.includes(type) && (
+        {!error && EMAIL_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <EmlComponent data={data} type={type as 'eml' | 'msg'} />
             </Suspense>
           </div>
         )}
-        {OPEN_DOCUMENT_PREVIEW_TYPES.includes(type) && (
+        {!error && OPEN_DOCUMENT_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <OpenDocumentComponent data={data} type={type as 'odt' | 'odp'} title={title} />
             </Suspense>
           </div>
         )}
-        {NOTEBOOK_PREVIEW_TYPES.includes(type) && (
+        {!error && NOTEBOOK_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <NotebookComponent data={data} />
             </Suspense>
           </div>
         )}
-        {EBOOK_PREVIEW_TYPES.includes(type) && (
+        {!error && EBOOK_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <EpubComponent data={data} title={title} />
             </Suspense>
           </div>
         )}
-        {DATABASE_PREVIEW_TYPES.includes(type) && (
+        {!error && DATABASE_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <SqliteComponent data={data} />
             </Suspense>
           </div>
         )}
-        {ARCHIVE_PREVIEW_TYPES.includes(type) && (
+        {!error && ARCHIVE_PREVIEW_TYPES.includes(type) && (
           <div className="full-width full-height">
             <Suspense fallback={<Spin />}>
               <ArchiveComponent

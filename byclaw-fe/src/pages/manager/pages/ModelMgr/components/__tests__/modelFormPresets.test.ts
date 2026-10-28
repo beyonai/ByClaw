@@ -390,6 +390,7 @@ describe('deterministic model form presets', () => {
     expect(values.contextTokens).toBe(202745);
     // 文本控件清空为 ''；保存时也不能残留上一模板的 effort 映射。
     expect(values.reasoningEffortMapText).toBe('');
+    expect(buildModelUpsertPayload({ values }).reasoningConfig).not.toHaveProperty('effortMap');
     expect(values.reasoningConfig).toMatchObject({ enabled: false, compatFormat: 'bailian' });
     expect(buildModelUpsertPayload({ values }).reasoningConfig).not.toHaveProperty('effortMap');
   });

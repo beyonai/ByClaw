@@ -11,6 +11,8 @@ import java.io.Serializable;
 @Getter
 @Setter
 public class OrganizationVo implements Serializable {
+    private java.util.List<String> administratorIds;
+    private java.util.List<String> administratorNames;
 
     /**
      * 组织ID

@@ -79,6 +79,22 @@ public class DigitalEmployeeController {
         return ResponseUtil.fail(I18nUtil.get(exception.getMessageKey(), exception.getMessageArguments()));
     }
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.SkillRuntimeStatusService skillRuntimeStatusService;
+
+    @PostMapping("/querySkillRuntimeStatus")
+    public ResponseUtil<com.iwhalecloud.byai.manager.application.service.digitemploy.SkillRuntimeStatusService.Status>
+        querySkillRuntimeStatus(@RequestBody EmployeeIdDTO request) {
+        return ResponseUtil.successResponse(skillRuntimeStatusService.query(request.getResourceId()));
+    }
+
+    @PostMapping("/prepareSkills")
+    public ResponseUtil<com.iwhalecloud.byai.manager.application.service.digitemploy.SkillRuntimeStatusService.Status>
+        prepareSkills(@RequestBody EmployeeIdDTO request) {
+        return ResponseUtil.successResponse(skillRuntimeStatusService.prepare(request.getResourceId()));
+    }
+
+
     /**
      * 查询列表
      *

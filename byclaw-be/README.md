@@ -857,3 +857,114 @@ LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasonin
 ### Group mention-all-users
 
 `GROUP_CHAT_SEND` accepts optional boolean `mentionAllUsers`. The caller must already be a group member. Both personal and tenant-owned groups resolve current `USER` members at message commit, exclude the sender, and deduplicate with explicit human mentions through the existing mention index. The marker never adds digital employees to task dispatch. No database migration is required. Message metadata and group timeline responses retain the flag; text stays readable as `@所有人` for older clients. Plain text and forwarded snapshots do not confer mention-all notification authority. Deploy the tenant Node and Java backend together before enabling the matching Hacu frontend.
+## 查询 SQL 的并发约定
+
+查询 SQL 不附加 `FOR UPDATE`。历史 `ForUpdate` / `lockResource` 方法名保留兼容，不表示查询持有行锁。业务并发控制应依赖显式事务互斥、条件更新或唯一约束；已有事务注解本身不保证先读后写串行化。子会话发送门禁通过独立连接上的显式 UPDATE 持有互斥，释放租约时回滚；普通资源查询不再提供悲观锁保证。
+
+## 资源编辑与数字员工配置生成
+
+数字员工配置生成接口接受可选 `modelId`，按模型缓存中的实例 ID 精确读取服务配置，并使用该实例的供应商模型编码。初次生成、重新生成及 JSON 修复均使用同一实例；指定实例不存在时不回退到同编码的其他实例。未传 `modelId` 的旧客户端沿用 `modelCode` 选择方式。
+
+资源基础信息保存中的标准 JSON 产物登记加入当前事务。普通技能刷新已在该事务内更新同一产物记录，后续登记不能挂起事务后再次写入该记录，否则会等待自身持有的写锁。
+
+## 组织管理员与组织范围发布（V0.5.1）
+
+新增和编辑组织均支持从当前企业的有效成员中设置多名管理员；选中用户自动加入目标组织，
+撤销管理员只移除该角色，保留成员关系和其他角色。新增组织、企业组织归属及管理员角色在同一事务中保存。
+管理员选择通过 `POST /system/organization/administratorOrganizations` 获取当前企业组织树，
+通过 `POST /system/organization/administratorCandidates` 按 `memberOrgId` 精确查询直属用户，不展开子组织；
+两个接口均携带目标 `orgId`（编辑）或 `parentOrgId`（新增），并校验操作权限及企业范围。
+组织管理员接口使用项目实际 FastJson 消息转换器回归验证请求解析和字段输出；前后端须同时部署，
+旧后端若缺少管理员接口会抛出 `NoResourceFoundException`，不能仅更新前端。
+组织管理员的发布及申请审核范围为本组织和下级组织，审核时读取当前角色，撤权后旧登录态不能继续审核。
+
+个人数字员工可选择全公司或多个组织发布（选择上级组织已包含其下级，不重复创建目标）。全公司由平台管理员或超管审核；
+具体组织由目标组织及上级组织管理员、平台管理员或超管审核。首次发布逐组织生效，获批范围成员可直接查看和使用，管理权限仍需申请。
+部分组织拒绝后可以重新申请；已生效范围保留，重新申请只增加范围，使用现有企业配置。
+企业配置保持一个共享版本，更新必须经所有已发布组织审核通过后一起切换，期间继续使用旧版本。
+审核权限不包含修改候选配置；管理员修改待审配置会重置全部组织审核结果。
+发布审核列表和详情只向组织管理员返回本组织及下级组织的目标行，不返回其他组织的审核人、意见或历史汇总审核信息；
+发布人、平台管理员和超管保留完整范围。展示过滤使用独立响应副本，不改变共享版本的全组织审批判断。
+员工发布执行中的关联技能复制沿用目标组织审核权限，并校验执行状态、企业、员工来源与申请关联；
+组织管理员不再因旧的平台管理员专用检查导致技能复制失败，原有快照校验、事务回滚和重试幂等保持不变。
+
+企业推荐的 `POST /api/v2/digitEmploy/discover` 返回 `audienceOrganizations`（字符串 `orgId` 和 `orgName`）。
+发布副本从生效发布范围读取；直接创建的企业员工和员工组从有效组织使用授权读取，排除过期、未生效及黑名单授权，
+不以创建者组织或 `manOrgId` 代替。仅返回查看者所属或管理范围匹配的组织，创建者、平台管理员和超管可看完整范围。
+`orgId=-1` 表示全公司，空数组表示未设置可展示的组织；待审或驳回范围不作为生效范围返回。
+
+员工使用与管理申请任一合法审核人通过即生效。除既有创建者/资源管理者、平台管理员、超管外，
+申请人所在组织的管理员可审核本组织管理范围内已发布的企业员工；不允许借此审批跨范围或个人员工。
+管理申请使用独立的 `MANAGE_APPLY` 待审记录，批准后才授予 `ALLOW_MANAGE`；条件更新避免重复处理。
+
+部署前请人工检查 `deploy/migrations/versions/V0.5.1/V0.5.1__ddl.sql` 和 `V0.5.1__dml.sql`，先 DDL 后 DML。
+迁移只登记已有企业发布副本的全公司历史范围，不扩大手工创建资源的授权。
+创建待审申请唯一索引前，先检查以下查询是否返回重复记录；迁移不会自动删除历史申请：
+
+```sql
+SELECT grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type, COUNT(*)
+FROM byai.au_privilege_grant
+WHERE status_cd = 'P' AND grant_obj_type = 'DIG_EMPLOYEE' AND grant_to_obj_type = 'USER'
+  AND grant_to_type = 'RED' AND grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')
+GROUP BY grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type
+HAVING COUNT(*) > 1;
+```
+
+本次查询没有增加行锁子句，并发依赖条件更新、事务及唯一约束。版本迁移不自动合并初始化 SQL。
+
+## 标准资源 JSON 的 Redis 副本
+
+商业资源同步和本地配置管理复用标准产物 JSON，按 `<resourceBizType>_<resourceId>` 存储 Redis String，
+例如 `SKILL_42`、`KG_DOC_43`、`TOOLKIT_44`（工具使用自身实际业务类型，不统一改成 TOOL）。
+创建、导入、基础信息或技能包更新时覆盖，下架、注销和删除时清除；不缓存 ZIP 内容、技能包内同名 JSON 或数字员工已有的专用缓存。
+文件写入可挂起数据库事务，Redis 回调仍保留在调用方事务内，仅提交后执行，回滚不改变原缓存。
+Redis 故障记录日志，不能把已成功提交的保存操作误报为回滚。
+
+启动时按资源 ID 分页读取现有扩展表的 `target_content`，回填已上架资源并清除未上架资源的旧 key；
+不重新发布文件，不修改数据库。可用 `init.Redis.resource.json.runner.enabled=false` 关闭回填。
+知识正文或文件仍在原存储中，Redis 存放资源配置 JSON。该副本不代替现有查看、使用或管理授权校验。
+
+第三方同步技能的运行权限以有效显式使用或管理授权为准。服务端持久化的正数同步版本、
+企业技能类型及完整外部资源身份用于识别同步技能；企业记账字段为空或与用户企业不一致，
+不会使已有授权失效。查看授权仅允许读取基础信息，不能下载或执行技能。授权未生效、
+过期、撤销、使用黑名单及资源下架仍会阻止使用；创建人和管理员身份不替代同步技能的显式授权。
+普通资源的企业隔离和资源维护权限保持原规则。自动关联支持用户唯一且有权使用的个人或企业
+普通默认数字员工，继续排除超级助手、未上架员工和默认员工不唯一的情况。
+
+### 同步工具关联后的运行配置
+
+第三方同步的 `AGENT`、`TOOLKIT`、`MCP` 与 `SKILL` 使用相同的显式授权策略：必须具备有效的使用或管理授权；
+仅有查看授权、创建人或管理员身份不能代替调用授权。同步来源由服务端持久化的同步版本及完整资源身份确认，
+企业记账字段为空或不一致不再单独阻止已授权调用；普通资源仍保留原有企业隔离。
+
+保存数字员工后，先同步关联资源的运行配置，再发布员工 Redis 快照；缺失工具运行配置或依赖 Redis 写入失败会使刷新失败。
+提交后的刷新最多尝试三次，仅成功后发布变更事件。连续失败时接口明确提示“配置已保存，但运行配置同步失败，请重试保存”，
+关联关系已经提交，需要修复存储或资源配置后重新保存。第三方资源同步任务沿用现有持久化任务重试机制。
+
+资源同步调度不加入全局服务事务：任务领取立即提交，每名员工的关联及 `skills` 在独立事务中提交后，
+才刷新 `target_content`、资源文件和 Redis。快照写入失败或员工扩展记录缺失会中止发布，任务保留为
+可重试的 `PARTIAL`，不再把旧运行配置标为同步完成。离线快照预生成仍返回失败计数。
+升级无需数据库迁移；历史已标为 `COMPLETED` 的旧快照需通过员工保存或原资源同步接口重新触发刷新。
+
+资源同步接口在导入事务提交后立即启动关联和运行配置同步，默认最多等待 5 秒返回结果
+（`byai.resource-sync.response-wait-ms`，范围 0–10000 毫秒）。返回的 `association.effective=true`
+才表示本次关联和运行配置全部完成且没有跳过用户；`association.status` 为 `PENDING` / `RUNNING`
+表示仍在处理，`PARTIAL` / `FAILED` 表示等待后台重试，跳过原因和失败员工见 `association.result`。
+超过等待时间不取消任务，可用 `association.jobId` 调用 `/tool/queryResourceSyncJob` 查询最终结果。
+该状态表示运行配置已发布，不代表已完成模型调用或沙箱内的技能下载验证。
+
+新版待执行、执行中和待重试任务在库内使用 `_V2` 后缀，接口仍返回原有状态名称。
+旧版调度器无法领取这些任务，新版也能接管旧版遗留的可重试任务；已被旧版领取的事务仍需结束后才能恢复。
+即时执行使用独立的有界线程池，进程退出或队列满时由持久化任务轮询恢复，无需表结构或数据迁移。
+回滚前应先用新版处理完 `_V2` 任务；旧版本不会恢复这些任务。自动关联仍以 `${userCode}_personal`
+对应的唯一有效个人助理为目标，不随用户选择的默认数字员工变化。
+
+同一资源同步接口支持 `TOOLKIT`、`MCP`、`AGENT`、`SKILL` 以及 `KG_DOC` / `KG_DB` / `KG_QA` /
+`KG_TERM`。非技能资源每次导入都会更新运行 JSON，因此也必须触发已关联员工的运行配置刷新，
+包括手工关联且没有自动关联来源记录的员工。省略授权字段或仅传 `autoAuthorize=false` 不会跳过内容刷新，
+也不会因此新增授权或自动关联；原有授权开关语义不变。关联资源 Redis 写入失败或缺少运行 JSON 时，
+不能发布员工的新快照或把同步标为全部生效。`VIEW`、`OBJECT` 和 `DIG_EMPLOYEE` 不属于此接口支持的同步类型。
+
+### 技能运行状态
+
+手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。

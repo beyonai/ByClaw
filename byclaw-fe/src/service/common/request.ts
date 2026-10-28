@@ -12,6 +12,7 @@ import {
   loginRedirect,
 } from '@/utils/auth';
 import { generateSignature } from '@/utils/signature';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { getLocale, history, getIntl } from '@umijs/max';
 import { message } from 'antd';
 import { showRequestErrorModal } from '@/utils/antdAppModal';
@@ -127,7 +128,7 @@ function checkFactoryRes(
 
   // 请求没报错，但接口code返回不为0，提示接口url和接口返回的错误信息
   if (code !== 0) {
-    const errText = !isNil(msg) && String(msg).trim() !== '' ? String(msg) : '请求失败';
+    const errText = localizeErrorMessage(msg, getIntl().formatMessage({ id: 'common.requestFailed' }), getLocale());
     if (!hideErrorTips) {
       showRequestErrorModal(errText);
     }
@@ -288,7 +289,11 @@ instance.interceptors.response.use(
     }
 
     // 请求报错，返回错误码信息通过useRequest的onError中去提示
-    const errMsg = String(get(response, 'data.msg') || ERROR_CODE[status] || response?.statusText || '网络异常');
+    const errMsg = localizeErrorMessage(
+      get(response, 'data.msg') || ERROR_CODE[status] || response?.statusText,
+      getIntl().formatMessage({ id: 'common.requestFailed' }),
+      getLocale()
+    );
     return Promise.reject(errMsg);
   }
 );

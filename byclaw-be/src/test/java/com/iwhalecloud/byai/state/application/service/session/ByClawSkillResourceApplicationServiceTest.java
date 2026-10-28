@@ -1602,7 +1602,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
             eq("skill/org-hub/directory-sync/7301/" + DigestUtils.sha256Hex(bytes)),
             eq("skill.zip"), eq("application/zip"));
         verify(ssResourceRelDetailService, never()).save(any());
-        verify(resourceArtifactStorageService, never()).syncResourceJsonByBizType(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(resourceArtifactStorageService, never()).publishResourceJson(any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
     }
 

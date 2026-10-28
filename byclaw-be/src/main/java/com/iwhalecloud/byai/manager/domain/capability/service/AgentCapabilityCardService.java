@@ -637,7 +637,7 @@ public class AgentCapabilityCardService {
             }
             return hex.toString();
         } catch (Exception e) {
-            throw new BaseException("Failed to compute capability card fingerprint", e);
+            throw new BaseException("i18n.error.capability.fingerprint.failed", e);
         }
     }
 
@@ -662,7 +662,7 @@ public class AgentCapabilityCardService {
                 .replace("<", "&lt;").replace(">", "&gt;");
             return "<agent_source locale=\"" + escapedLocale + "\">\n" + body + "\n</agent_source>";
         } catch (Exception e) {
-            throw new BaseException("Failed to serialize agent source for prompt", e);
+            throw new BaseException("i18n.error.capability.sourceSerialize.failed", e);
         }
     }
 }

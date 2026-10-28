@@ -75,7 +75,7 @@ public class TenantGroupTaskRoutingAspect {
                 yield ResponseUtil.successResponse(delivery.currentAuthorized(taskId));
             }
             default -> throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "tenant group task operation is not ready");
+                "i18n.status.tenant.group.task.operation.is.not.ready");
         };
     }
 }

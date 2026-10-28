@@ -521,7 +521,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
 
         assertThat(controller.removeSandboxById(Map.of()).getMsg()).isEqualTo("id or sandboxId is required");
         assertThat(controller.removeSandboxById(Map.of("id", "abc", "sandboxId", "sandbox-9")).getMsg())
-            .isEqualTo("id must be a valid number");
+            .isEqualTo("id 必须是有效数字");
         when(service.findRecordIdBySandboxIdAndStatus("missing", "RUNNING")).thenReturn(null);
         assertThat(controller.removeSandboxById(Map.of("sandboxId", "missing")).getMsg())
             .isEqualTo("running sandbox record not found");
