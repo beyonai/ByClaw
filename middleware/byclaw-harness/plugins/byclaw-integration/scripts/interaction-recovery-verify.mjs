@@ -105,7 +105,10 @@ const repaired = await repairColdAskUserQuestionSession({
   questions: [{ id: 'fruit', question: '喜欢哪些水果？' }],
   answer: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
 })
-assert.equal(repaired, true)
+assert.deepEqual(repaired, {
+  toolCallId: 'call-original',
+  output: { answers: [{ id: 'fruit', selected: ['苹果'] }] },
+})
 assert.equal(appended[0].type, 'tool/result')
 assert.equal(appended[0].data.message.source.callId, 'call-original')
 assert.equal(appended[0].data.message.isError, false)
