@@ -62,6 +62,11 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
+  // BE picks a user's tool sandbox spec through the PUT env; blank falls back to the host's.
+  const picked = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' byclaw-dsh-unity ' } })
+  assert.equal(picked[0].config.byclawBe.serviceKey, 'byclaw-dsh-unity')
+  const blank = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' ' } })
+  assert.equal(blank[0].config.byclawBe.serviceKey, 'byclaw-dsh-tools5')
   assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)
   assert.equal(toolEnvUserToken({ BEYOND_TOKEN: ' t ' }, 'u1'), 't')
 })
