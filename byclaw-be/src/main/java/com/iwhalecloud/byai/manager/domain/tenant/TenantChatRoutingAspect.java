@@ -60,7 +60,7 @@ public class TenantChatRoutingAspect {
         + " || execution(* com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.getMessageCountAndPosition(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null) return call.proceed();
+        if (context == null || TenantContextService.isSharedPublicEnterprise(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         if (mentionMapper != null && args.length > 0 && args[0] instanceof ByaiSessionQo sessionQuery

@@ -68,7 +68,7 @@ public class TenantGroupChatRoutingAspect {
             if (context == null) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
         }
-        if (context == null) return call.proceed();
+        if (context == null || TenantContextService.isSharedPublicEnterprise(context.enterpriseId())) return call.proceed();
         if ("defaultAssistant".equals(method)) return call.proceed();
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();

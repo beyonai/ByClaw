@@ -30,6 +30,9 @@ import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembersh
 public class TenantContextService {
 
     public static final long PUBLIC_TRIAL_ENTERPRISE_ID = 999L;
+    public static boolean isSharedPublicEnterprise(long enterpriseId) {
+        return enterpriseId == PUBLIC_TRIAL_ENTERPRISE_ID;
+    }
 
     private static final Logger log = LoggerFactory.getLogger(TenantContextService.class);
 
@@ -132,7 +135,7 @@ public class TenantContextService {
         if (RuntimeEnvironment.isDevelopment()) {
             return membership;
         }
-        if (!"READY".equals(provisionState(membership))) {
+        if (!isSharedPublicEnterprise(enterpriseId) && !"READY".equals(provisionState(membership))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.notReady");
         }
         return membership;
