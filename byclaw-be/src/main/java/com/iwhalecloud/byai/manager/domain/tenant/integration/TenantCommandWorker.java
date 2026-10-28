@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.hook.HookPublisher;
+import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import java.time.Duration;
@@ -36,6 +37,11 @@ public class TenantCommandWorker {
     }
     @Scheduled(fixedDelayString="${byclaw.integration.command-delay-ms:5000}",initialDelayString="${byclaw.integration.command-initial-delay-ms:10000}")
     public void scan() {
+        // Local development may share the database, but must never claim provisioning work from it.
+        // Check before scanning so restored commands and expired leases remain for deployment workers.
+        if (RuntimeEnvironment.isDevelopment()) {
+            return;
+        }
         for(long id:store.candidates()) {
             var lease=store.claim(id,worker,Duration.ofMinutes(30));
             if(lease==null) continue;

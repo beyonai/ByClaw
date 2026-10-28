@@ -9,6 +9,8 @@ import com.iwhalecloud.byai.common.hook.HookPublisher;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -20,6 +22,36 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class TenantCommandWorkerDiagnosticsTest {
+    private String previousEnvironment;
+
+    @BeforeEach void isolateEnvironment() {
+        previousEnvironment = System.getProperty("BE_ENV");
+        System.setProperty("BE_ENV", "production");
+    }
+
+    @AfterEach void restoreEnvironment() {
+        if (previousEnvironment == null) {
+            System.clearProperty("BE_ENV");
+        } else {
+            System.setProperty("BE_ENV", previousEnvironment);
+        }
+    }
+
+    @Test void developmentDoesNotScanClaimOrExecuteSharedCommands() {
+        System.setProperty("BE_ENV", "development");
+        var store = mock(TenantCommandStore.class);
+        var provisioner = mock(TenantDbProvisioningService.class);
+        var transactions = mock(PlatformTransactionManager.class);
+        var policies = mock(TenantExecutionPolicyService.class);
+        var hooks = mock(HookPublisher.class);
+        var worker = new TenantCommandWorker(store, null, transactions, new ObjectMapper(), provisioner, policies, hooks);
+
+        worker.scan();
+
+        // Development must not touch the shared queue, including expired leases and restored commands.
+        verifyNoInteractions(store, provisioner, transactions, policies, hooks);
+    }
+
     @Test void nestedFileFailureRetainsCauseTypeAndLocationWithoutPathsOrMessages() throws Exception {
         var cause = new java.nio.file.AccessDeniedException("/private-provider-credential/data");
         cause.setStackTrace(new StackTraceElement[] {
