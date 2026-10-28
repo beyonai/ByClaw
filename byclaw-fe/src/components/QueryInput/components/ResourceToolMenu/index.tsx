@@ -22,7 +22,6 @@ import { chatModeMap } from '@/constants/query';
 import { HIDDEN_RESOURCE_MENU_KEYS } from '@/constants/system';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from '../../index.module.less';
-import FilePicker from './FilePicker';
 import useCommercialEdition from '@/hooks/useCommercialEdition';
 
 interface Props {
