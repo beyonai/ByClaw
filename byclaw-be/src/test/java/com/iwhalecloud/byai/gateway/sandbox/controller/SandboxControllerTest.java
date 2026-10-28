@@ -332,6 +332,43 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void listRecords_keepsPersistedStatusWhenSandboxIdIsMissing() {
+        setPlatformManager();
+        SandboxController controller = new SandboxController();
+        var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
+        when(inventory.current()).thenReturn(Map.of());
+        var mapper = mock(SsSandboxRecordMapper.class);
+        var service = mock(SandboxService.class);
+        var config = mock(ByaiSystemConfigService.class);
+        ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", config);
+
+        SsSandboxRecord released = new SsSandboxRecord();
+        released.setId(11L);
+        released.setStatus("RELEASED");
+        released.setSandboxType("openclaw");
+        released.setOwnerScope("USER");
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(released));
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
+        SandboxRecordView view = new SandboxRecordView();
+        view.setId(11L);
+        view.setSandboxType("openclaw");
+        view.setStatus("RELEASED");
+        when(service.buildRecordView(released)).thenReturn(view);
+        when(config.getDcSystemConfigValueByCode(org.mockito.ArgumentMatchers.anyString())).thenReturn("");
+
+        ResponseUtil response = controller.listRecords(Map.of("status", "RELEASED"));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        @SuppressWarnings("unchecked")
+        List<SandboxRecordView> list = (List<SandboxRecordView>) ((Map<?, ?>) response.getData()).get("list");
+        assertThat(list).hasSize(1);
+        assertThat(list.get(0).getStatus()).isEqualTo("RELEASED");
+    }
+
+    @Test
     void listRecords_appliesSandboxIdsAndStatusTogether() {
         setPlatformManager();
         SandboxController controller = controllerWithInventory();

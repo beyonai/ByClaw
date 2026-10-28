@@ -550,6 +550,51 @@ describe('hooks/useChat/index', () => {
     expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
 
+  it('reuses the restored answer when refresh dropped the client query id', async () => {
+    const completedAnswer = {
+      msgId: 'answer-client-after-refresh',
+      messageId: '201',
+      fromBeyond: true,
+      agentId: 'employee-42',
+      agentName: '原数字员工',
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+      messageList: [],
+    };
+    mockMessageList = [completedAnswer];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          resumeAnswerMsg: completedAnswer,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        } as any,
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[1]).toMatchObject({
+      agentCode: 'employee-42',
+      clientRequestId: expect.stringContaining('answer-client-after-refresh'),
+    });
+  });
+
   it('waits for session messages before restoring running messages', async () => {
     let resolveSessionMessages!: () => void;
     const sessionMessagesPromise = new Promise<void>((resolve) => {

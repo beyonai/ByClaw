@@ -230,6 +230,7 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
 # The build decisions the plugin-builder folded together. This stage starts from
 # the pristine base again, whose own workspace never saw the plugins, and the
 # packed plugins carry no pnpm-workspace.yaml of their own — so the merged file
@@ -277,6 +278,7 @@ RUN set -eux; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
+    node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     rm -f /tmp/prune-dsh-profile.mjs /tmp/link-dsh-installation-peers.mjs /tmp/byclaw-prepared-workspace.yaml
 
 RUN set -eux; \
@@ -303,9 +305,6 @@ COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
-# Shared DSH host launcher (many users, one process); run it instead of the
-# entrypoint: `node scripts/byclaw-multi-host.mjs`. Inert for ordinary sandboxes.
-COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs /workspace/scripts/
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor

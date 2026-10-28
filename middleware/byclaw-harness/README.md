@@ -236,6 +236,19 @@ The launcher's header comment lists its environment variables. Running the
 image's default `web` entrypoint as a non-root user fails with "root entrypoint
 required for private browser runtime"; that mode is for per-user sandboxes.
 
+Shared hosts run the compiled DSH packages resolved from `BYCLAW_DSH_INSTALL_ANCHOR`,
+without `tsx` source aliases. Mixing workspace sources with installed plugins
+creates separate scope identities and breaks employee preset mounting. Common
+boot and active image-profile modules load before the host advertises readiness
+(`compiled runtime ready` logs that cost); each user still receives independent profiles, scopes,
+credentials and lazy employee resources. Preloading imports code without invoking
+plugin activation; activation remains per user. Import failures are logged by
+module name and remain subject to Loader's normal per-user error handling.
+All three business images run `scripts/verify-shared-runtime.mjs` against the
+installed profile: two users with 56 employees each, no eager resource loading,
+cross-user composition rejection and disposed-revision rejection. This check
+does not call models or register business workers.
+
 ## Verification and startup
 
 The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.slim`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. The new `prepare-dsh-startup-021.mjs` patch indexes immutable resolver path prefixes in the disposable build workspace; it rejects other DSH versions/source shapes. All three business images rebuild app-boot and copy its source and compiled output together. Model-routing compatibility is likewise applied only in that build workspace. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.

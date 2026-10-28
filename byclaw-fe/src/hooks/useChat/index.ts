@@ -157,15 +157,21 @@ const isMatchingResumeAnswer = (
   answer: IMessage | undefined,
   expected: { sessionId?: string; messageId?: unknown; queryMsgId?: IMessage['msgId'] }
 ) => {
-  const actualIds = [answer?.sessionId, answer?.messageId, answer?.queryMsgId].map((value) => `${value ?? ''}`.trim());
-  const expectedIds = [expected.sessionId, expected.messageId, expected.queryMsgId].map((value) =>
-    `${value ?? ''}`.trim()
-  );
+  const actualSessionId = `${answer?.sessionId ?? ''}`.trim();
+  const actualMessageId = `${answer?.messageId ?? ''}`.trim();
+  const actualQueryMsgId = `${answer?.queryMsgId ?? ''}`.trim();
+  const expectedSessionId = `${expected.sessionId ?? ''}`.trim();
+  const expectedMessageId = `${expected.messageId ?? ''}`.trim();
+  const expectedQueryMsgId = `${expected.queryMsgId ?? ''}`.trim();
   return Boolean(
     answer?.fromBeyond &&
-      actualIds.every(Boolean) &&
-      expectedIds.every(Boolean) &&
-      actualIds.every((value, index) => value === expectedIds[index])
+      actualSessionId &&
+      actualMessageId &&
+      expectedSessionId &&
+      expectedMessageId &&
+      actualSessionId === expectedSessionId &&
+      actualMessageId === expectedMessageId &&
+      (!actualQueryMsgId || !expectedQueryMsgId || actualQueryMsgId === expectedQueryMsgId)
   );
 };
 
@@ -1133,6 +1139,16 @@ function useChat(props: IProps) {
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
     let resumeTargetAnswer: IMessage | undefined;
     let hasFreshResumeTarget = false;
+    const llmMessageId = get(restPayload, 'llmMessageId');
+
+    hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
+      sessionId,
+      messageId: llmMessageId,
+      queryMsgId: inheritQryMsgId,
+    });
+    if (isColdResume && hasFreshResumeTarget) {
+      resumeTargetAnswer = sendProps.resumeAnswerMsg;
+    }
 
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
@@ -1164,12 +1180,6 @@ function useChat(props: IProps) {
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
       }
-      const llmMessageId = get(restPayload, 'llmMessageId');
-      hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
-        sessionId,
-        messageId: llmMessageId,
-        queryMsgId: inheritQryMsgId,
-      });
       if (isContinuingRunningTrace && hasFreshResumeTarget && sendProps.resumeAnswerMsg) {
         const refreshed = refreshChatStreamAnswerMessage(
           { sessionId, traceId: payload.traceId },
@@ -1203,6 +1213,10 @@ function useChat(props: IProps) {
           })
         );
       }
+    }
+
+    if (isResumeChat && resumeTargetAnswer?.agentId) {
+      _agentId = `${resumeTargetAnswer.agentId}`;
     }
 
     resourceList = limitToLatestDigitalEmployee(resourceList);

@@ -1884,15 +1884,48 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       )
     }
     if (record?.answer === undefined) return false
-    const originalCallRepaired = parkedAskReleased && await repairColdAskUserQuestionSession(
-      this.ctx.sessionPersistence, record.agentSessionId, record,
-    ).catch(error => {
-      this.ctx.logger.warn(`byclaw-dsh failed to repair recovered ask_user_question call: ${sanitizeByClawOperationalLog(error)}`)
-      return false
-    })
+    let originalCallRepair: Awaited<ReturnType<typeof repairColdAskUserQuestionSession>> = false
+    if (parkedAskReleased) {
+      originalCallRepair = await repairColdAskUserQuestionSession(
+        this.ctx.sessionPersistence, record.agentSessionId, record,
+      ).catch(error => {
+        this.ctx.logger.warn(`byclaw-dsh failed to repair recovered ask_user_question call: ${sanitizeByClawOperationalLog(error)}`)
+        return false
+      })
+    }
     this.ctx.logger.info(
-      `[ASK_USER_QUESTION_RECOVERY_TRACE] ORIGINAL_CALL_REPAIR interaction=${recoveredInteractionId} session=${command.header.sessionId} parked=${parkedAskReleased} repaired=${originalCallRepaired}`,
+      `[ASK_USER_QUESTION_RECOVERY_TRACE] ORIGINAL_CALL_REPAIR interaction=${recoveredInteractionId} session=${command.header.sessionId} parked=${parkedAskReleased} repaired=${originalCallRepair !== false}`,
     )
+    if (originalCallRepair !== false) {
+      const repairedProjection = toolCallProjection({
+        phase: 'success',
+        toolCallId: originalCallRepair.toolCallId,
+        toolName: 'ask_user_question',
+        output: originalCallRepair.output,
+        description: 'Tool result · 调用完成',
+      }, {
+        sessionId: record.agentSessionId,
+        ...(record.parentAgentSessionId === undefined ? {} : { parentSessionId: record.parentAgentSessionId }),
+        rootSessionId: record.parentAgentSessionId ?? record.agentSessionId,
+        externalParentSessionId: recoverySessionId,
+        scope: record.parentAgentSessionId === undefined ? 'parent' : 'child',
+        depth: record.parentAgentSessionId === undefined ? 0 : 1,
+        sequence: `recovery:${recoveredInteractionId}`,
+        eventKind: 'tool.result',
+        status: 'completed',
+        parentMessageId: command.header.messageId,
+        messageIdPrefix: command.header.messageId,
+      })
+      await emitByClawProjection(
+        this.options.emitter,
+        recoverySessionId,
+        command.header.traceId,
+        repairedProjection,
+        this.options.sourceAgentType,
+      ).catch(error => {
+        this.ctx.logger.warn(`byclaw-dsh failed to project recovered ask_user_question result: ${sanitizeByClawOperationalLog(error)}`)
+      })
+    }
     const recovered = buildRecoveredAskPayload(record)
     this.ctx.logger.info(
       `[byclaw-dsh] recovering ask_user_question after sandbox restart (interaction=${recoveredInteractionId}, session=${command.header.sessionId}, dsh_session=${record.agentSessionId})`,
