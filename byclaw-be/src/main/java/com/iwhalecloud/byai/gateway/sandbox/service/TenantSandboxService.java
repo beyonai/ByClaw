@@ -212,7 +212,7 @@ public class TenantSandboxService {
                 || active.getLockVersion() == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.replacement.inProgress");
             }
-            openSandboxClient.deleteSandbox(active.getSandboxId());
+            removeProvider(active);
             if (recordMapper.updateStatusToReleased(active.getId(), "tenant Node image replacement",
                 new Date(), active.getLockVersion()) != 1) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.changedDuringReplacement");
@@ -265,7 +265,7 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.anotherActive");
         }
         if (latest.getSandboxId() != null && !latest.getSandboxId().isBlank()) {
-            openSandboxClient.deleteSandbox(latest.getSandboxId());
+            removeProvider(latest);
         }
         if (recordMapper.markReleased(latest.getId(), "tenant sandbox restart", new Date(),
             latest.getLockVersion()) != 1) {
@@ -281,8 +281,8 @@ public class TenantSandboxService {
         List<SsSandboxRecord> records = recordMapper.selectTenantRecords(enterpriseId);
         for (SsSandboxRecord record : records) {
             if (record.getSandboxId() != null && !record.getSandboxId().isBlank()) {
-                openSandboxClient.deleteSandbox(record.getSandboxId());
-                if (openSandboxClient.getSandboxIfExists(record.getSandboxId()) != null) {
+                removeProvider(record);
+                if (observeProvider(record) != null) {
                     throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                         "i18n.status.tenant.sandbox.still.exists.after.delete.request");
                 }
@@ -291,6 +291,13 @@ public class TenantSandboxService {
                 "tenant deleted", new Date(), record.getLockVersion()) != 1) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringDeletion");
             }
+        }
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()
+            && java.util.stream.Stream.of(DB_TYPE, NODE_TYPE).map(specRepository::findByServiceKey)
+                .flatMap(java.util.Optional::stream).anyMatch(spec -> spec.getVolumes() != null
+                    && spec.getVolumes().stream().anyMatch(v -> v != null && "persistent".equals(v.getType())))) {
+            platformTenantFiles.purgeTenant(enterpriseId);
+            return;
         }
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenants = root.resolve("tenants");
@@ -563,11 +570,21 @@ public class TenantSandboxService {
         return record.getEndpoint() != null && record.getEndpoint().startsWith("tcp://") && isRunning(record);
     }
 
-    private SandboxRuntimeInstance observeProvider(SsSandboxRecord record) {
-        SandboxInfo info = SandboxInfo.builder().sandboxId(record.getSandboxId())
+    private SandboxInfo providerInfo(SsSandboxRecord record) {
+        return SandboxInfo.builder().sandboxId(record.getSandboxId())
             .sandboxType(record.getSandboxType()).serviceKey(record.getServiceType())
             .userCode(record.getUserCode()).build();
-        SandboxResponse<SandboxRuntimeInstance> response = lifecycleFacade.getSandbox(info);
+    }
+
+    private void removeProvider(SsSandboxRecord record) {
+        SandboxResponse<Void> response = lifecycleFacade.removeSandbox(providerInfo(record));
+        if (response == null || !response.isSuccess()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.unavailable");
+        }
+    }
+
+    private SandboxRuntimeInstance observeProvider(SsSandboxRecord record) {
+        SandboxResponse<SandboxRuntimeInstance> response = lifecycleFacade.getSandbox(providerInfo(record));
         if (response == null || !response.isSuccess()) {
             // A failed query is not evidence that the existing database can be retired or replaced.
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.unavailable");

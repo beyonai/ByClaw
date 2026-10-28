@@ -36,4 +36,35 @@ class TenantSandboxPersistentVolumeTest {
         verify(files, never()).prepare(any(), any(), any());
         verify(files, never()).copy(any(), any(), any());
     }
+    @Test void deletionPurgesNasOnlyAfterProviderAbsenceAndPropagatesPendingCleanup() throws Exception {
+        var spec = new ObjectMapper().readValue("{\"volumes\":[{\"type\":\"persistent\"}]}", SandboxServiceSpec.class);
+        var specs = mock(SandboxServiceSpecRepository.class);
+        when(specs.findByServiceKey("tenant-opengauss")).thenReturn(Optional.of(spec));
+        var lifecycle = mock(SandboxLifecycleFacade.class);
+        var files = mock(PlatformTenantFileRouting.class);
+        when(files.isRemote()).thenReturn(true);
+        var records = mock(SsSandboxRecordMapper.class);
+        var record = new com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord();
+        record.setId(31L); record.setSandboxId("namespace--db"); record.setSandboxType("tenant-opengauss");
+        record.setServiceType("tenant-opengauss"); record.setUserCode("tenant-42");
+        record.setStatus("RELEASED"); record.setLockVersion(2);
+        when(records.selectTenantRecords(42L)).thenReturn(List.of(record));
+        var service = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class), specs,
+            records, new ObjectMapper(), "db", "/not-mounted", "node", "redis", "6379", "0",
+            "default", "password", "http://be", "token", "host");
+        ReflectionTestUtils.setField(service, "platformTenantFiles", files);
+        when(lifecycle.removeSandbox(any())).thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(null));
+        var running = com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance.builder().state("Running").build();
+        when(lifecycle.getSandbox(any())).thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(running));
+        assertThrows(ResponseStatusException.class, () -> service.deleteTenantResources(42L));
+        verify(files, never()).purgeTenant(anyLong());
+        when(lifecycle.getSandbox(any())).thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(null));
+        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "cleanup pending"))
+            .doNothing().when(files).purgeTenant(42L);
+        assertThrows(ResponseStatusException.class, () -> service.deleteTenantResources(42L));
+        assertDoesNotThrow(() -> service.deleteTenantResources(42L));
+        verify(files, times(2)).purgeTenant(42L);
+        verify(files, never()).delete(any(), any(), any());
+    }
+
 }
