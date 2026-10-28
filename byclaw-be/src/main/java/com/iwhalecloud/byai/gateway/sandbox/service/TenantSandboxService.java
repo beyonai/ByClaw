@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -118,10 +120,7 @@ public class TenantSandboxService {
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, NODE_TYPE);
         if (active != null) {
-            SandboxDetail detail = active.getSandboxId() == null ? null
-                : openSandboxClient.getSandboxIfExists(active.getSandboxId());
-            if ("RUNNING".equals(active.getStatus()) && detail != null && detail.getStatus() != null
-                && "Running".equalsIgnoreCase(detail.getStatus().getState())) {
+            if (isRunning(active)) {
                 return new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint());
             }
             if (!"RUNNING".equals(active.getStatus()) || recordMapper.updateStatusToFailed(active.getId(),
@@ -231,21 +230,19 @@ public class TenantSandboxService {
         if (record == null || !"RUNNING".equals(record.getStatus()) || record.getSandboxId() == null) {
             return false;
         }
-        SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-        return detail != null && detail.getStatus() != null
-            && "Running".equalsIgnoreCase(detail.getStatus().getState());
+        SandboxRuntimeInstance instance = observeProvider(record);
+        return instance != null && "Running".equalsIgnoreCase(instance.getState());
     }
 
-    /** Live provider observation. UNKNOWN means OpenSandbox could not be queried, not that the sandbox stopped. */
+    /** Live provider observation. UNKNOWN means the configured provider could not be queried, not that the sandbox stopped. */
     public String providerStatus(SsSandboxRecord record) {
         if (record == null || record.getSandboxId() == null || record.getSandboxId().isBlank()) {
             return "MISSING";
         }
         try {
-            SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-            if (detail == null) return "MISSING";
-            if (detail.getStatus() == null || detail.getStatus().getState() == null) return "UNKNOWN";
-            return "Running".equalsIgnoreCase(detail.getStatus().getState()) ? "RUNNING" : "STOPPED";
+            SandboxRuntimeInstance instance = observeProvider(record);
+            if (instance == null) return "MISSING";
+            return "Running".equalsIgnoreCase(instance.getState()) ? "RUNNING" : "STOPPED";
         }
         catch (RuntimeException e) {
             LOG.warn("Could not verify tenant sandbox provider status for record {}: {}",
@@ -563,11 +560,24 @@ public class TenantSandboxService {
     }
 
     private boolean isReusable(SsSandboxRecord record) {
-        if (!"RUNNING".equals(record.getStatus()) || record.getSandboxId() == null
-            || record.getEndpoint() == null || !record.getEndpoint().startsWith("tcp://")) return false;
-        SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-        return detail != null && detail.getStatus() != null
-            && "Running".equalsIgnoreCase(detail.getStatus().getState());
+        return record.getEndpoint() != null && record.getEndpoint().startsWith("tcp://") && isRunning(record);
+    }
+
+    private SandboxRuntimeInstance observeProvider(SsSandboxRecord record) {
+        SandboxInfo info = SandboxInfo.builder().sandboxId(record.getSandboxId())
+            .sandboxType(record.getSandboxType()).serviceKey(record.getServiceType())
+            .userCode(record.getUserCode()).build();
+        SandboxResponse<SandboxRuntimeInstance> response = lifecycleFacade.getSandbox(info);
+        if (response == null || !response.isSuccess()) {
+            // A failed query is not evidence that the existing database can be retired or replaced.
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.unavailable");
+        }
+        SandboxRuntimeInstance instance = response.getData();
+        if (instance != null && (!record.getSandboxId().equals(instance.getSandboxId())
+            || instance.getState() == null || instance.getState().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.invalid");
+        }
+        return instance;
     }
 
     public record TenantSandboxView(long recordId, String sandboxId, String endpoint) {

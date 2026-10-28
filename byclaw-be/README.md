@@ -764,7 +764,7 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 
 建表初始化与普通租户请求使用相同的 Redis 服务发现地址（`TENANT_DATA_<企业ID>`），不使用 ACS 公网网关 endpoint。初始化最多等待 90 秒，允许节点处于 `ADMIN_ONLY` 或 `READY`，但注册记录必须唯一且匹配企业 ID、generation 和数据库沙箱记录 ID；数据库健康响应还必须返回相同身份及 `dbWritable=true` 才上传 baseline。普通业务请求仍只接受 `READY`。BE 到注册节点仅携带租户内部令牌，不转发沙箱平台 API Key。
 
-数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
+数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。 数据库与 Node 的复用和运行状态检查通过 provider-neutral 生命周期接口查询当前执行引擎，兼容 ACS，不再调用 OpenSandbox 专属详情接口。查询失败或返回身份/状态不完整时停止开通并保留现有资源，避免把“状态未核实”当作沙箱丢失。
 
 本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口；两者也兼容沙箱记录中的 `openclaw` JSON endpoint。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 通过已核验沙箱 ID 对应的容器名和注册端口直连 Node，使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
 

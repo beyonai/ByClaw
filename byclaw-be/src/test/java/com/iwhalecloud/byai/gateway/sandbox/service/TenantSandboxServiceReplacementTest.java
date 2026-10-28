@@ -15,8 +15,6 @@ import static org.mockito.Mockito.never;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
-import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
-import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxStatus;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
@@ -135,6 +133,60 @@ class TenantSandboxServiceReplacementTest {
         verify(records, never()).markReleased(eq(10L), any(), any(Date.class), eq(1));
     }
 
+    @Test
+    void retriesReuseAcsDatabaseAndNodeThroughProviderNeutralLifecycle() {
+        var lifecycle = mock(SandboxLifecycleFacade.class);
+        var legacy = mock(OpenSandboxClient.class);
+        var records = mock(SsSandboxRecordMapper.class);
+        var service = new TenantSandboxService(lifecycle, legacy,
+            mock(SandboxServiceSpecRepository.class), records, new ObjectMapper(), "db-image", "/tmp",
+            "node-image", "redis", "6379", "0", "default", "password", "http://be", "token", "host");
+        for (String type : List.of("tenant-opengauss", "tenant-data-node")) {
+            SsSandboxRecord record = tenantRecord(44L, "namespace--acs-" + type);
+            record.setSandboxType(type);
+            record.setServiceType(type);
+            record.setUserCode("tenant-12");
+            record.setEndpoint("tenant-opengauss".equals(type) ? "tcp://192.0.2.4:5432" : "http://gateway/node");
+            when(records.selectActiveTenantByResourceAndType(12L, type)).thenReturn(record);
+            var observed = com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance.builder()
+                .sandboxId(record.getSandboxId()).state("Running").build();
+            when(lifecycle.getSandbox(any())).thenReturn(
+                com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(observed));
+            var result = "tenant-opengauss".equals(type)
+                ? service.launchOpenGauss(12L, "m", "byclaw_t_12", "bc_t_12_admin", "password")
+                : service.launchDataNode(12L, "m", 20L, 1L);
+            assertThat(result.recordId()).isEqualTo(44L);
+            assertThat(result.sandboxId()).isEqualTo(record.getSandboxId());
+            verify(lifecycle).getSandbox(org.mockito.ArgumentMatchers.argThat(info ->
+                record.getSandboxId().equals(info.getSandboxId()) && type.equals(info.getSandboxType())
+                    && type.equals(info.getServiceKey()) && "tenant-12".equals(info.getUserCode())));
+        }
+        verify(lifecycle, never()).launchSandbox(any());
+        verify(records, never()).insert(any(SsSandboxRecord.class));
+        org.mockito.Mockito.verifyNoInteractions(legacy);
+    }
+
+    @Test
+    void providerQueryFailureCannotRetireOrReplaceExistingDatabase() {
+        var lifecycle = mock(SandboxLifecycleFacade.class);
+        var legacy = mock(OpenSandboxClient.class);
+        var records = mock(SsSandboxRecordMapper.class);
+        var service = new TenantSandboxService(lifecycle, legacy,
+            mock(SandboxServiceSpecRepository.class), records, new ObjectMapper(), "db-image", "/tmp",
+            "node-image", "redis", "6379", "0", "default", "password", "http://be", "token", "host");
+        var record = tenantRecord(44L, "namespace--existing-db");
+        record.setSandboxType("tenant-opengauss");
+        record.setEndpoint("tcp://192.0.2.4:5432");
+        when(records.selectActiveTenantByResourceAndType(12L, "tenant-opengauss")).thenReturn(record);
+        when(lifecycle.getSandbox(any())).thenReturn(
+            com.iwhalecloud.byai.common.feign.response.SandboxResponse.error("provider unavailable"));
+        assertThatThrownBy(() -> service.launchOpenGauss(12L, "m", "byclaw_t_12", "bc_t_12_admin", "password"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.sandbox.provider.unavailable");
+        verify(records, never()).updateStatusToFailed(any(), any(), any(), any());
+        verify(lifecycle, never()).launchSandbox(any());
+        org.mockito.Mockito.verifyNoInteractions(legacy);
+    }
+
     private SsSandboxRecord tenantRecord(long id, String sandboxId) {
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(id);
@@ -201,25 +253,23 @@ class TenantSandboxServiceReplacementTest {
 
     @Test
     void reportsProviderStateWithoutTreatingAnUnreachableProviderAsStopped() {
+        var lifecycle = mock(SandboxLifecycleFacade.class);
         OpenSandboxClient client = mock(OpenSandboxClient.class);
-        TenantSandboxService service = new TenantSandboxService(mock(SandboxLifecycleFacade.class), client,
+        TenantSandboxService service = new TenantSandboxService(lifecycle, client,
             mock(SandboxServiceSpecRepository.class), mock(SsSandboxRecordMapper.class), new ObjectMapper(),
             "db-image", "/tmp", "node-image", "redis", "6379", "0", "default", "password",
             "http://be", "token", "host.containers.internal");
-        SsSandboxRecord record = new SsSandboxRecord();
-        record.setId(45L);
-        record.setSandboxId("tenant-sandbox");
-        SandboxDetail detail = new SandboxDetail();
-        SandboxStatus status = new SandboxStatus();
-        status.setState("Running");
-        detail.setStatus(status);
-        when(client.getSandboxIfExists("tenant-sandbox"))
-            .thenReturn(detail)
-            .thenReturn(null)
-            .thenThrow(new IllegalStateException("provider unavailable"));
+        SsSandboxRecord record = tenantRecord(45L, "tenant-sandbox");
+        var running = com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance.builder()
+            .sandboxId("tenant-sandbox").state("Running").build();
+        when(lifecycle.getSandbox(any()))
+            .thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(running))
+            .thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(null))
+            .thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.error("provider unavailable"));
 
         assertThat(service.providerStatus(record)).isEqualTo("RUNNING");
         assertThat(service.providerStatus(record)).isEqualTo("MISSING");
         assertThat(service.providerStatus(record)).isEqualTo("UNKNOWN");
+        org.mockito.Mockito.verifyNoInteractions(client);
     }
 }
