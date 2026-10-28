@@ -2,12 +2,13 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.listener;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.annotation.PreDestroy;
 
@@ -19,7 +20,7 @@ import com.iwhalecloud.byai.gateway.channels.enums.AssistantAccessChannel;
 import com.iwhalecloud.byai.gateway.channels.enums.ChannelType;
 import com.iwhalecloud.byai.gateway.channels.enums.ChatChannelExtensionKeys;
 import com.iwhalecloud.byai.gateway.channels.service.ChannelService;
-import com.iwhalecloud.byai.gateway.channels.service.ChannelServiceFactory;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.DingtalkChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkFileDownloadService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkReplyDispatcher;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkSessionService;
@@ -43,10 +44,14 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import com.dingtalk.open.app.api.callback.OpenDingTalkCallbackListener;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.context.i18n.LocaleContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -68,15 +73,9 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
     private final DingtalkCallbackMessageParser dingtalkCallbackMessageParser;
     private final DingtalkSessionService dingtalkSessionService;
     private final DingtalkStreamProperties streamProperties;
-    private final ExecutorService messageExecutor = new ThreadPoolExecutor(
-            8,
-            32,
-            60L,
-            TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(512),
-            new MessageThreadFactory(),
-            new ThreadPoolExecutor.CallerRunsPolicy()
-    );
+    private final ChannelService channelService;
+    private final ThreadPoolExecutor preparationExecutor;
+    private final ThreadPoolExecutor chatExecutor;
 
     @Autowired
     private IndexService indexService;
@@ -89,7 +88,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             DingtalkCardService dingtalkCardService,
             DingtalkCallbackMessageParser dingtalkCallbackMessageParser,
             DingtalkSessionService dingtalkSessionService,
-            DingtalkStreamProperties streamProperties
+            DingtalkStreamProperties streamProperties,
+            @Lazy DingtalkChannelService channelService
     ) {
         this.objectMapper = objectMapper;
         this.dingtalkUserService = dingtalkUserService;
@@ -99,10 +99,16 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         this.dingtalkCallbackMessageParser = dingtalkCallbackMessageParser;
         this.dingtalkSessionService = dingtalkSessionService;
         this.streamProperties = streamProperties;
+        this.channelService = channelService;
+        DingtalkStreamProperties.Dispatch dispatch = streamProperties.getDispatch();
+        this.preparationExecutor = createExecutor(dispatch.getPreparationWorkers(),
+            dispatch.getPreparationQueueCapacity(), "dingtalk-bot-prepare-");
+        this.chatExecutor = createExecutor(dispatch.getChatWorkers(), dispatch.getChatQueueCapacity(), "dingtalk-bot-chat-");
     }
 
     @Override
     public Map<String, Object> execute(Map<String, Object> callbackData) {
+        long receivedAt = System.nanoTime();
         DingtalkCallbackMessage DDMessage = dingtalkCallbackMessageParser.parse(callbackData);
         String msgId = DDMessage.getMsgId();
         String sessionWebhook = DDMessage.getSessionWebhook();
@@ -110,13 +116,13 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         String conversationId = DDMessage.getConversationId();
         String senderStaffId = DDMessage.getSenderStaffId();
         String msgtype = DDMessage.getMsgtype();
-        String textContent = DDMessage.getTextContent();
+        MessageTiming timing = new MessageTiming(msgId, UUID.randomUUID().toString(), receivedAt,
+            LocaleContextHolder.getLocaleContext());
 
-        logger.info("Received DingTalk bot message. msgId={}, msgtype={}, conversationType={}, content={}",
-                msgId, msgtype, conversationType, textContent);
+        logStage(timing, "received", receivedAt, "ok");
 
         if (sessionWebhook == null || sessionWebhook.isBlank()) {
-            logger.warn("Skip replying because sessionWebhook is empty. payload={}", callbackData);
+            logger.warn("Skip replying because sessionWebhook is empty. msgId={}", msgId);
             return new HashMap<>();
         }
 
@@ -149,72 +155,132 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             return new HashMap<>();
         }
 
-        messageExecutor.execute(() -> handleMessageAsync(DDMessage));
+        try {
+            preparationExecutor.execute(() -> prepareMessage(DDMessage, timing));
+        } catch (RejectedExecutionException e) {
+            logStage(timing, "preparation_rejected", receivedAt, "busy");
+            notifyFailure(DDMessage, null, "channel.error.busy");
+        }
 
         return new HashMap<>();
     }
 
-    private void handleMessageAsync(DingtalkCallbackMessage DDMessage) {
+    private void prepareMessage(DingtalkCallbackMessage DDMessage, MessageTiming timing) {
         String msgId = DDMessage.getMsgId();
         String sessionWebhook = DDMessage.getSessionWebhook();
         String robotCode = DDMessage.getRobotCode();
         String senderStaffId = DDMessage.getSenderStaffId();
 
+        DingtalkCardStreamSession cardSession = null;
+        setThreadContext(timing, null);
         try {
+            logStage(timing, "preparation_dequeued", timing.receivedAt(), "ok");
+            long started = System.nanoTime();
             LoginInfo userInfo = dingtalkUserService.resolveLoginInfo(DDMessage);
+            logStage(timing, "user_resolved", started, "ok");
             if (userInfo == null) {
                 dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.notFound"));
                 return;
             }
 
+            started = System.nanoTime();
             AuthDigitEmployVo digitEmployVo = findAuthorizedDigitEmploy(userInfo.getUserId(), robotCode);
+            logStage(timing, "authorized", started, "ok");
             if (digitEmployVo == null) {
                 dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "对不起，您可能没有数字员工的权限");
                 return;
             }
 
             String sessionExtValue = buildSessionExtValue(DDMessage);
+            started = System.nanoTime();
             AssistantChatDto assistantChatDto = buildAssistantChatDto(
                 digitEmployVo, sessionExtValue, DDMessage
             );
-
-            List<MessageFileDto> messageFiles = dingtalkFileDownloadService.downloadMessageFiles(DDMessage, assistantChatDto);
-            if (CollectionUtils.isNotEmpty(messageFiles)) {
-                assistantChatDto.setFiles(messageFiles);
-                assistantChatDto.getExtParams().put("files", buildExtParamFiles(messageFiles, userInfo));
-                if (assistantChatDto.getChatContent() == null || assistantChatDto.getChatContent().isBlank()) {
-                    assistantChatDto.setChatContent(" ");
-                }
+            assistantChatDto.setClientRequestId(timing.requestId());
+            logStage(timing, "session_resolved", started, "ok");
+            if (!channelService.validateRequest(assistantChatDto)) {
+                throw new BdpRuntimeException(I18nUtil.get("assistant.chat.request.invalid"));
             }
-
-            replyAssistantMessage(
-                digitEmployVo,
-                sessionExtValue,
-                assistantChatDto,
-                DDMessage
-            );
+            started = System.nanoTime();
+            cardSession = dingtalkCardService.createAssistantReplyCardSession(senderStaffId, robotCode,
+                DDMessage.getConversationType(), DDMessage.getConversationId(), digitEmployVo.getName());
+            logStage(timing, "first_card", started, "ok");
+            DingtalkCardStreamSession preparedCard = cardSession;
+            long queuedAt = System.nanoTime();
+            try {
+                chatExecutor.execute(() -> processMessage(DDMessage, assistantChatDto, userInfo,
+                    preparedCard, timing, queuedAt));
+            } catch (RejectedExecutionException e) {
+                logStage(timing, "chat_rejected", queuedAt, "busy");
+                notifyFailure(DDMessage, cardSession, "channel.error.busy");
+            }
         } catch (Exception e) {
             logger.error("Failed to reply DingTalk bot message. msgId={}, senderStaffId={}, robotCode={}",
                     msgId, senderStaffId, robotCode, e);
-            try {
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.message.failed", e.getMessage()));
-            } catch (IOException ex) {
-                logger.error("Failed to send error message to DingTalk. msgId={}", msgId, ex);
-            }
+            logStage(timing, "preparation_failed", timing.receivedAt(), "failed");
+            notifyFailure(DDMessage, cardSession, DEFAULT_FALLBACK_REPLY_KEY);
         } finally {
-            CurrentUserHolder.clearLoginInfo();
+            clearThreadContext();
+        }
+    }
+
+    private void processMessage(DingtalkCallbackMessage message, AssistantChatDto chatDto, LoginInfo userInfo,
+        DingtalkCardStreamSession cardSession, MessageTiming timing, long queuedAt) {
+        setThreadContext(timing, userInfo);
+        try {
+            logStage(timing, "chat_dequeued", queuedAt, "ok");
+            long started = System.nanoTime();
+            List<MessageFileDto> files = dingtalkFileDownloadService.downloadMessageFiles(message, chatDto);
+            if (CollectionUtils.isNotEmpty(files)) {
+                chatDto.setFiles(files);
+                chatDto.getExtParams().put("files", buildExtParamFiles(files, userInfo));
+                if (!StringUtils.hasText(chatDto.getChatContent())) {
+                    chatDto.setChatContent(" ");
+                }
+            }
+            logStage(timing, "files_ready", started, "ok");
+            replyAssistantCardStreamingMessage(message.getSessionWebhook(), chatDto, cardSession);
+            logStage(timing, "completed", timing.receivedAt(), "ok");
+        } catch (Exception e) {
+            logger.error("DingTalk chat failed. msgId={}, requestId={}", timing.msgId(), timing.requestId(), e);
+            logStage(timing, "chat_failed", timing.receivedAt(), "failed");
+            notifyFailure(message, cardSession, DEFAULT_FALLBACK_REPLY_KEY);
+        } finally {
+            clearThreadContext();
+        }
+    }
+
+    private void notifyFailure(DingtalkCallbackMessage message, DingtalkCardStreamSession cardSession, String key) {
+        String content = I18nUtil.get(key);
+        if (cardSession != null && !cardSession.isFinalized()) {
+            try {
+                dingtalkCardService.streamingUpdateAssistantReply(cardSession, content, true);
+                return;
+            } catch (Exception e) {
+                logger.warn("DingTalk failure card update failed. msgId={}", message.getMsgId(), e);
+            }
+        }
+        try {
+            dingtalkReplyDispatcher.sendTextMessage(message.getSessionWebhook(), content);
+        } catch (Exception e) {
+            logger.error("DingTalk failure text delivery failed. msgId={}", message.getMsgId(), e);
         }
     }
 
     @PreDestroy
     public void shutdown() {
-        messageExecutor.shutdown();
+        shutdownExecutor(preparationExecutor);
+        shutdownExecutor(chatExecutor);
+    }
+
+    private void shutdownExecutor(ThreadPoolExecutor executor) {
+        executor.shutdown();
         try {
-            if (!messageExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                messageExecutor.shutdownNow();
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
             }
         } catch (InterruptedException e) {
-            messageExecutor.shutdownNow();
+            executor.shutdownNow();
             Thread.currentThread().interrupt();
         }
     }
@@ -254,85 +320,35 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         return Boolean.FALSE.equals(firstConsume);
     }
 
-    private void replyAssistantMessage(
-        AuthDigitEmployVo digitEmployVo,
-        String sessionExtValue,
-        AssistantChatDto assistantChatDto,
-        DingtalkCallbackMessage DDMessage
-    ) throws IOException {
-        String conversationType = DDMessage.getConversationType();
-        String conversationId = DDMessage.getConversationId();
-        String senderStaffId = DDMessage.getSenderStaffId();
-        String robotCode = DDMessage.getRobotCode();
-        String sessionWebhook = DDMessage.getSessionWebhook();
-
-        ChannelService channelService = ChannelServiceFactory.getService(ChannelType.DINGTALK.getCode());
-
-        if (!channelService.validateRequest(assistantChatDto)) {
-            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.request.invalid"));
-        }
-
-        if (!StringUtils.hasText(robotCode)) {
-            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "钉钉机器人编码未配置，暂无法回复。");
-            return;
-        }
-
-        replyAssistantCardStreamingMessage(
-            sessionWebhook,
-            channelService,
-            assistantChatDto,
-            senderStaffId,
-            robotCode,
-            conversationType,
-            conversationId,
-            digitEmployVo
-        );
-    }
-
-    private boolean replyAssistantCardStreamingMessage(
+    private void replyAssistantCardStreamingMessage(
             String sessionWebhook,
-            ChannelService channelService,
             AssistantChatDto assistantChatDto,
-            String senderStaffId,
-            String robotCode,
-            String conversationType,
-            String conversationId,
-            AuthDigitEmployVo digitEmployVo
+            DingtalkCardStreamSession cardSession
     ) throws IOException {
-        DingtalkCardStreamSession cardSession;
-        try {
-            cardSession = dingtalkCardService.createAssistantReplyCardSession(
-                    senderStaffId,
-                    robotCode,
-                    conversationType,
-                    conversationId,
-                    digitEmployVo == null ? "" : digitEmployVo.getName()
-            );
-        } catch (Exception e) {
-            logger.warn("Create DingTalk card failed, fallback to text. robotCode={}, senderStaffId={}",
-                    robotCode, senderStaffId, e);
-            return false;
-        }
-
+        long chatStarted = System.nanoTime();
+        AtomicBoolean firstContent = new AtomicBoolean();
         DingtalkCardStreamingOutputStream outputStream =
                 new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession,
-                        null, CurrentUserHolder.getCurrentUserCode(), streamProperties.isShowReasoning());
+                        content -> {
+                            if (StringUtils.hasText(content) && firstContent.compareAndSet(false, true)) {
+                                logger.info("dingtalk_chain requestId={} stage=first_content durationMs={}",
+                                    assistantChatDto.getClientRequestId(),
+                                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - chatStarted));
+                            }
+                        }, CurrentUserHolder.getCurrentUserCode(), streamProperties.isShowReasoning());
         try {
             channelService.chat(assistantChatDto, outputStream);
-            // Gateway mode returns after dispatching the request. The actual
-            // answer deltas and appStreamResponse arrive asynchronously, so
-            // appStreamResponse (or an idle timeout) owns finalization.
+            // Some transports complete asynchronously; appStreamResponse or idle timeout owns finalization.
             boolean finalOk = awaitStreamCompletion(outputStream);
             if (!finalOk || outputStream.hasStreamingFailed()) {
                 dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY));
             }
-            return true;
         } catch (Exception e) {
             try {
                 outputStream.finish();
             } catch (Exception finishEx) {
-                logger.warn("Finalize DingTalk card failed after chat exception. robotCode={}, senderStaffId={}",
-                        robotCode, senderStaffId, finishEx);
+                logger.warn("Finalize DingTalk card failed after chat exception. outTrackId={}",
+                        cardSession.getOutTrackId(), finishEx);
             }
 
             throw new RuntimeException(e);
@@ -443,12 +459,53 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
                 || DingtalkMsgType.INTERACTIVE_CARD.matches(msgtype);
     }
 
+    private void logStage(MessageTiming timing, String stage, long started, String status) {
+        long now = System.nanoTime();
+        logger.info("dingtalk_chain msgId={} requestId={} stage={} status={} durationMs={} elapsedMs={} "
+                + "preparationActive={} preparationQueued={} chatActive={} chatQueued={}",
+            timing.msgId(), timing.requestId(), stage, status,
+            TimeUnit.NANOSECONDS.toMillis(now - started), TimeUnit.NANOSECONDS.toMillis(now - timing.receivedAt()),
+            preparationExecutor.getActiveCount(), preparationExecutor.getQueue().size(),
+            chatExecutor.getActiveCount(), chatExecutor.getQueue().size());
+    }
+
+    private void setThreadContext(MessageTiming timing, LoginInfo loginInfo) {
+        CurrentUserHolder.clearLoginInfo();
+        if (loginInfo != null) {
+            CurrentUserHolder.setLoginInfo(loginInfo);
+        }
+        LocaleContextHolder.setLocaleContext(timing.localeContext());
+        MDC.put("dingtalkRequestId", timing.requestId());
+    }
+
+    private void clearThreadContext() {
+        CurrentUserHolder.clearLoginInfo();
+        LocaleContextHolder.resetLocaleContext();
+        MDC.remove("dingtalkRequestId");
+    }
+
+    private static ThreadPoolExecutor createExecutor(int workers, int queueCapacity, String threadName) {
+        if (workers <= 0 || queueCapacity <= 0) {
+            throw new IllegalArgumentException("DingTalk worker counts and queue capacities must be positive");
+        }
+        return new ThreadPoolExecutor(workers, workers, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(queueCapacity), new MessageThreadFactory(threadName),
+            new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    private record MessageTiming(String msgId, String requestId, long receivedAt, LocaleContext localeContext) { }
+
     private static class MessageThreadFactory implements ThreadFactory {
         private final AtomicInteger counter = new AtomicInteger(1);
+        private final String prefix;
+
+        private MessageThreadFactory(String prefix) {
+            this.prefix = prefix;
+        }
 
         @Override
         public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "dingtalk-bot-msg-" + counter.getAndIncrement());
+            Thread thread = new Thread(runnable, prefix + counter.getAndIncrement());
             thread.setDaemon(true);
             return thread;
         }

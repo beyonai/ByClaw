@@ -321,6 +321,12 @@ The CodeGraph runtime check requires the version declared by `plugins/dsh-codegr
 The business `Dockerfile` installs the pinned `searxng-cli` search runtime for
 `knowledge-collection` in an isolated Python environment. Its launcher supplies
 the bundled engine settings by default; `SEARXNG_CLI_SETTINGS` can override them.
+Online installation uses only the Tsinghua PyPI mirror, with pip configuration
+files and inherited extra indexes disabled. There is no official-PyPI fallback.
+It logs progress every 30 seconds and fails after a total 180-second deadline
+(`SEARXNG_INSTALL_TIMEOUT_SECONDS` can change that bound), including downloads
+that keep transferring slowly without hitting pip's socket timeout.
+`SEARXNG_WHEELHOUSE` retains the offline installation path.
 No search API key or separately hosted SearXNG server is required for this CLI
 provider. The build checks Python dependencies and runs `--list-engines` as
 `byclaw`; installation or initialization failures fail the image build. This

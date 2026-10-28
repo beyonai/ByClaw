@@ -902,6 +902,7 @@ public class ByClawSkillResourceApplicationService {
         SkillPackageMetadata metadata = inspectSkillPackage(file);
         String resolvedOwnerType = resolveOwnerType(ownerType);
         Long resolvedCatalogId = catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId;
+        ssResourceService.lockSkillImport(metadata.skillCode());
         List<SsResource> existingSkills = findExistingSkillsByNaturalKey(metadata.skillCode());
         if (CollectionUtils.isEmpty(existingSkills)) {
             return importNewSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId, sourceType);

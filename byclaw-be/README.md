@@ -18,6 +18,43 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 🛠️ **工具集成** - 灵活的插件和工具编排
 - 📊 **数据分析** - 对话分析和性能监控
 
+## 钉钉机器人首次反馈与耗时排查
+
+钉钉消息先完成用户绑定、员工权限和会话校验，再投递“正在思考...”卡片。
+附件下载、会话文件保存以及模型执行在首卡投递后进行。首卡准备与长问答使用独立的有界线程池；
+长问答不再占用首卡准备线程，聊天池可直接使用配置的并发数。队列满时提示“当前咨询人数较多，请稍后再试”，
+不会将模型执行转移到 Stream 回调线程。卡片创建失败发送文字提示；已创建卡片后附件处理失败或聊天容量耗尽，
+会结束等待卡片，更新失败时再发送文字提示。拒绝的消息不会自动重放，用户需重新发送。
+
+以下环境变量均可选，需设置为正整数：
+
+| 环境变量 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `DINGTALK_PREPARATION_WORKERS` | 8 | 每个 BE 实例的用户校验及首卡准备并发 |
+| `DINGTALK_PREPARATION_QUEUE_CAPACITY` | 32 | 首卡准备排队容量 |
+| `DINGTALK_CHAT_WORKERS` | 32 | 附件处理及整轮问答并发 |
+| `DINGTALK_CHAT_QUEUE_CAPACITY` | 64 | 首卡已投递后的问答排队容量 |
+| `DINGTALK_CONNECT_TIMEOUT_MILLIS` | 3000 | 钉钉 HTTP 连接超时 |
+| `DINGTALK_READ_TIMEOUT_MILLIS` | 10000 | 钉钉 SDK、Webhook 和附件请求的读取超时 |
+| `DINGTALK_REQUEST_TIMEOUT_MILLIS` | 15000 | 每次文字 Webhook 请求的总超时 |
+| `DINGTALK_FILE_TIMEOUT_MILLIS` | 120000 | 每次附件地址获取/文件下载请求的总超时 |
+
+连接/读取超时也应用于 Token、用户查询及卡片 SDK；卡片 SDK 不开启应用层自动重试，
+这两个 SDK 的连接/读取超时不是整轮问答总超时。附件总超时按单次 HTTP 请求计算，
+多附件仍按原有顺序保存。容量用尽时的文字提示使用有超时的 Webhook 请求，不运行模型。
+Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例的并发缓存未命中共用一次获取；
+机器人配置变更仍按原有机器人前缀失效缓存，无需数据迁移。
+
+检索 `dingtalk_chain`，按 `msgId` / `requestId` 关联以下阶段：
+`preparation_dequeued`（首卡排队）、`user_resolved`、`authorized`、`session_resolved`、
+`token`（缓存命中及获取耗时）、`first_card`（Token 获取及卡片投递）、`chat_dequeued`（问答排队）、
+`files_ready`、`first_content`（进入聊天处理后首段可展示内容就绪，含沙箱就绪和派发等待）、
+`first_card_update`（首次内容更新的 HTTP 耗时）、`completed`。
+`durationMs` 为该阶段耗时，`elapsedMs` 为收到回调后的累计时间；线程池活跃数及队列长度一并记录。
+`first_card.elapsedMs` 反映服务端首卡投递完成时间，不包含钉钉客户端展示延迟。
+后续使用同一 `requestId` 对照 Gateway 日志的 `readyMs`、`dispatchMs`，区分沙箱就绪与消息派发。
+完整事件内容不再逐包记录到 INFO。生产效果需部署后用实际钉钉消息验证，单元测试不代表外网或模型可用。
+
 ## Super 运行时兼容
 
 `byclaw.super-enabled` 默认 `false`，可通过环境变量 `BYCLAW_SUPER_ENABLED` 配置。
@@ -42,7 +79,9 @@ Standalone 和 K3s 默认部署已移除 Super 服务及专用镜像、运行参
 
 ## 技能导入并发与外部子会话恢复
 
-技能导入、审核与审核后的运行文件刷新按技能编码共享 Spring Integration `RedisLockRegistry`。
+资源中心 ZIP 导入在查询同编码技能前，按技能编码取得 Spring Integration `RedisLockRegistry` 分布式锁；
+第三方资源同步也通过 `SsResourceService.lockSkillImport` 串行化同一外部资源身份。
+审核、生命周期维护和同步产物更新沿用各自的资源 ID 事务锁，不改动审核和授权规则。
 锁使用已有 Redis 连接，在数据库事务提交或回滚后释放；持锁期间自动续租，提交前再次验证锁所有权。
 若提交前已失去租约或 Redis 无法验证锁，事务回滚。
 同事务重复取得同编码锁不会重复持有，不同编码可以并发执行；等待超过 30 秒或 Redis 获取锁失败时终止操作，
