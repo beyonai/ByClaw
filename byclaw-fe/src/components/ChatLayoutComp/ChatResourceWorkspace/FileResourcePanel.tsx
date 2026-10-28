@@ -13,7 +13,7 @@ import {
   message,
   type MenuProps,
 } from 'antd';
-import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
+import { EllipsisOutlined, FolderAddOutlined, HomeOutlined, UploadOutlined } from '@ant-design/icons';
 import { getLocale, useIntl } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
@@ -190,7 +190,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const browsePath = browseLocation.context === browseContext ? browseLocation.path : rootPath;
   const setBrowsePath = (path: string) => setBrowseLocation({ context: browseContext, path });
   const currentDirectoryPath = scope === 'shared' ? browsePath : rootPath;
-  const sharedGlobalRootPath = `${DISPLAY_FILE_PATH_PREFIX}${SHARED_FILE_PATH}`;
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const projectDirectoryIds = useMemo(() => {
     if (scope !== 'shared') return [];
@@ -243,7 +242,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     if (scope !== 'shared') return [];
     const currentSegments = browsePath.split('/').filter(Boolean);
     const getSegmentTitle = (segment: string, index: number) => {
-      if (segment === '.shared') return intl.formatMessage({ id: 'chatResource.localSharedFile' });
+      if (segment === '.shared') return <HomeOutlined aria-label={intl.formatMessage({ id: 'chatResource.localSharedFile' })} />;
       if (index === 2 && /^project_-?\d+$/.test(segment)) return projectNames[segment.slice(8)] || segment;
       return segment;
     };
@@ -1149,11 +1148,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
                     ),
                   }))}
                 />
-                {browsePath !== sharedGlobalRootPath && (
-                  <Button size="small" onClick={() => setBrowsePath(sharedGlobalRootPath)}>
-                    {intl.formatMessage({ id: 'chatResource.rootDirectory' })}
-                  </Button>
-                )}
               </div>
               {resourceId && !hideProjectToolbar && (
                 <div className={styles.localSharedToolbar}>
