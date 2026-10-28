@@ -27,14 +27,14 @@ export interface SchemaObject {
   kind: "table" | "index" | "sequence";
   name: string;
 }
-/** 发布制品约定：对象清单限制 SQL 操作，catalogDigest 核验本版完成后的整个 byai 结构。 */
+/** 发布制品约定：对象清单限制 SQL 操作；catalogDigest 仅保留为旧制品的兼容元数据。 */
 export interface SchemaManifest {
   version: string;
   parentVersion: string | null;
   engine: "openGauss";
   nodeProtocol: { min: number; max: number };
   sqlSha256: string;
-  catalogDigest: string;
+  catalogDigest?: string;
   objects: SchemaObject[];
 }
 export interface VerifiedScript {
@@ -47,7 +47,7 @@ export interface SchemaMarker {
   protocolVersion: 1;
   enterpriseId: string;
   version: string;
-  catalogDigest: string;
+  catalogDigest?: string;
   scriptDigest: string;
 }
 export type SchemaStatus =

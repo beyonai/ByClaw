@@ -46,7 +46,7 @@ describe("DDL boundary", () => {
 describe("ZIP integrity", () => {
   it("checks the bundle, SQL, manifest and allowed object list", async () => {
     const sql = Buffer.from("CREATE TABLE byai.t(id bigint);"),
-      m = { ...manifest(), sqlSha256: sha256(sql) },
+      m = { ...manifest(), sqlSha256: sha256(sql), catalogDigest: undefined },
       bytes = zip([
         ["baseline/S1/__ddl.sql", sql],
         ["baseline/S1/manifest.json", Buffer.from(JSON.stringify(m))],
