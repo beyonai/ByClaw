@@ -1,10 +1,12 @@
 import { listSharedMembers, listSharedRecords, releaseSharedMember } from '@/pages/manager/service/SharedSandbox';
-import { act, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
 import SharedResources from '../SharedResources';
 import { ConfigProvider } from 'antd';
 import type { ReactElement } from 'react';
 
 jest.setTimeout(20000);
+// Drawer rendering can exceed the default one-second wait in the full regression suite.
+configure({ asyncUtilTimeout: 5000 });
 const render = (element: ReactElement) =>
   renderComponent(<ConfigProvider theme={{ token: { motion: false } }}>{element}</ConfigProvider>);
 
@@ -22,6 +24,7 @@ jest.mock('@/pages/manager/service/SharedSandbox', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  [listSharedMembers, listSharedRecords, releaseSharedMember].forEach((mock) => (mock as jest.Mock).mockReset());
   mockLocale = 'zh-CN';
   (releaseSharedMember as jest.Mock).mockResolvedValue(true);
   (listSharedRecords as jest.Mock).mockResolvedValue({

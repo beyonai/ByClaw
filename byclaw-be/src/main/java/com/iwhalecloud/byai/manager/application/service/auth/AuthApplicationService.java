@@ -793,15 +793,21 @@ public class AuthApplicationService {
 
     /** 只在目标用户缺少使用权限时校验补授权准入，不扩大资源管理权限。 */
     public void validateDigitalEmployeeResourceUseGrant(SsResource resource, Long userId) {
-        if (resource == null || !OwnerType.ENTERPRISE.equals(resource.getOwnerType())
+        validateEmployeeResourceGrantTarget(resource, userId);
+        validateEmployeeAuthorizationPermission(resource);
+        if (!hasResourceUseSettingPermission(resource)) {
+            throw new BaseException(I18nUtil.get("auth.employee.resources.no.grant.permission", resource.getResourceName()));
+        }
+    }
+
+    /** 审核内补授权只豁免关联资源的独立管理权，不豁免租户、资源状态和使用黑名单。 */
+    void validateEmployeeResourceGrantTarget(SsResource resource, Long userId) {
+        if (resource == null || userId == null || CurrentUserHolder.getEnterpriseId() == null
+            || !OwnerType.ENTERPRISE.equals(resource.getOwnerType())
             || !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
             || !ResourceLifecyclePolicy.isRuntimeAvailable(resource)) {
             throw new BaseException(I18nUtil.get("auth.employee.resources.invalid",
                 resource == null ? "-" : resource.getResourceName()));
-        }
-        validateEmployeeAuthorizationPermission(resource);
-        if (!hasResourceUseSettingPermission(resource)) {
-            throw new BaseException(I18nUtil.get("auth.employee.resources.no.grant.permission", resource.getResourceName()));
         }
         Date now = new Date();
         boolean blacklisted = listAuthPrivilegeGrant(null, List.of(resource.getResourceBizType()),
@@ -818,12 +824,22 @@ public class AuthApplicationService {
     /** 追加缺失的 USER/FORCE_USE，不调用全量名单对账，保留其他人员、黑名单及原授权有效期。 */
     @Transactional(rollbackFor = Exception.class)
     public void appendDigitalEmployeeResourceUsePrivileges(SsResource resource, Collection<Long> userIds) {
+        appendResourceUsePrivileges(resource, userIds, this::validateDigitalEmployeeResourceUseGrant);
+    }
+
+    /** 仅由已校验员工、审批人、申请人和真实绑定关系的审批补授权流程调用。 */
+    void appendApprovedEmployeeResourceUsePrivilege(SsResource resource, Long applicant) {
+        appendResourceUsePrivileges(resource, List.of(applicant), this::validateEmployeeResourceGrantTarget);
+    }
+
+    private void appendResourceUsePrivileges(SsResource resource, Collection<Long> userIds,
+        java.util.function.BiConsumer<SsResource, Long> validate) {
         long started = System.nanoTime();
         Set<Long> addedUserIds = new LinkedHashSet<>();
         List<PrivilegeGrant> additions = new ArrayList<>();
         for (Long userId : new LinkedHashSet<>(userIds)) {
             if (hasResourceUsePermission(resource, userId)) continue;
-            validateDigitalEmployeeResourceUseGrant(resource, userId);
+            validate.accept(resource, userId);
             AuthDTO target = new AuthDTO();
             target.setGrantToObjType(GrantToObjType.USER);
             target.setGrantToObjId(userId);
@@ -1077,17 +1093,6 @@ public class AuthApplicationService {
             .filter(Objects::nonNull).distinct().collect(Collectors.toList());
         Map<Long, SsResource> resourceMap = ssResourceMapper.selectBatchIds(resourceIds).stream()
             .collect(Collectors.toMap(SsResource::getResourceId, item -> item, (left, right) -> left));
-        Set<Long> auditableResourceIds = new HashSet<>();
-        // 每个有申请的资源只校验一次权限，不再为同一资源的多条申请重复校验。
-        for (SsResource resource : resourceMap.values()) {
-            try {
-                validateResourceUseApplyAuditAllowed(resource);
-                validateResourceUseSettingPermission(resource);
-                auditableResourceIds.add(resource.getResourceId());
-            } catch (RuntimeException ignored) {
-                // 无审核权限的资源跳过，继续处理其他可审核资源。
-            }
-        }
         // 同一审核列表按申请类型校验权限，不能让资源管理人借使用审核权限审核上架。
         return candidates.stream().filter(item -> {
             if (GrantType.SKILL_PUBLICATION.equals(item.getAuditType())) {
@@ -1099,8 +1104,7 @@ public class AuthApplicationService {
                     && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
             }
             SsResource resource = resourceMap.get(item.getResourceId());
-            return resource != null && (auditableResourceIds.contains(item.getResourceId())
-                || canAuditApplicant(resource, item.getUserId()));
+            return canAuditApplication(resource, item.getUserId(), item.getAuditType());
         }).collect(Collectors.toList());
     }
 
@@ -1188,7 +1192,9 @@ public class AuthApplicationService {
         }
 
         // 审批通过也是新增员工使用人，不能绕过绑定资源校验；失败时连同申请状态一起回滚。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        if (isEnterpriseDigitalEmployee(ssResource)) {
+            employeeResourceAuthorizationService.synchronizeApprovedApplicant(ssResource, qo.getApplyUserId());
+        }
         afterAuthorizationCommit(() -> syncUserAuthToRedis(qo.getApplyUserId()));
     }
 
@@ -1222,20 +1228,35 @@ public class AuthApplicationService {
         claimPermissionApplication(pendingApply, "R");
     }
 
-    /**
-     * 根据资源和授权类型查询授权明细。 这里只负责从数据库拿“原始授权记录”，不在这一层做业务裁剪， 这样后续无论是统计、排查还是页面展示，都能复用同一份原始结果。
-     */
-    private boolean canAuditApplicant(SsResource resource, Long applicant) {
-        if (resource == null || applicant == null) return false;
-        if (!"DIG_EMPLOYEE".equals(resource.getResourceBizType())) return hasResourceUseSettingPermission(resource);
-        if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
-            || !isResourceUseApplyStatusAllowed(resource) || isPersonalResourceUseApplyUnsupported(resource)) return false;
-        return hasResourceUseSettingPermission(resource) || CurrentUserHolder.isAdminVip()
-            || CurrentUserHolder.isPlatformManager() || employeeScopes.canReviewApplicant(resource, applicant);
+    /** 管理申请还需符合员工类型限制，避免列表展示动作接口不支持的申请。 */
+    private boolean canAuditApplication(SsResource resource, Long applicant, String auditType) {
+        if ("MANAGE".equals(auditType) && (resource == null
+            || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
+            || OwnerType.PERSONAL_DEFAULT.equals(resource.getOwnerType()) || isPersonalAssistantResource(resource))) {
+            return false;
+        }
+        return canAuditApplicant(resource, applicant);
     }
 
-    private void requireApplicantAuditPermission(SsResource resource, Long applicant) {
-        if (!canAuditApplicant(resource, applicant)) throw new BaseException("没有该申请的审核权限");
+    /** 列表、单资源申请列表和审核动作共用四类审核人规则；平台角色本身不授予审核权。 */
+    boolean canAuditApplicant(SsResource resource, Long applicant) {
+        Long reviewer = CurrentUserHolder.getCurrentUserId();
+        Long tenant = CurrentUserHolder.getEnterpriseId();
+        if (resource == null || applicant == null || reviewer == null || tenant == null
+            || !Objects.equals(resource.getComAcctId(), tenant)
+            || !isResourceUseApplyStatusAllowed(resource) || isPersonalResourceUseApplyUnsupported(resource)
+            || com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isPublicationSkill(resource)) {
+            return false;
+        }
+        return CurrentUserHolder.isAdminVip() || Objects.equals(resource.getCreateBy(), reviewer)
+            || hasCurrentUserAllowManagePrivilege(resource)
+            || "DIG_EMPLOYEE".equals(resource.getResourceBizType()) && employeeScopes.canReviewApplicant(resource, applicant);
+    }
+
+    void requireApplicantAuditPermission(SsResource resource, Long applicant) {
+        if (!canAuditApplicant(resource, applicant)) {
+            throw new BaseException(I18nUtil.get("auth.application.review.denied"));
+        }
     }
 
     private void claimPermissionApplication(PrivilegeGrant application, String result) {
@@ -1273,6 +1294,9 @@ public class AuthApplicationService {
 
     private void reviewEmployeeManage(ResourceUseApplyApproveQo qo, boolean approved) {
         SsResource resource = getRequiredResource(qo.getResourceId());
+        if (approved && isEnterpriseDigitalEmployee(resource)) {
+            resource = employeeResourceAuthorizationService.lockForAuthorization(resource);
+        }
         validateResourceManageAuthAllowed(resource);
         validateResourceUseApplyAuditAllowed(resource);
         if (!"DIG_EMPLOYEE".equals(resource.getResourceBizType())) throw new BaseException("该资源不支持管理权限申请");
@@ -1289,7 +1313,9 @@ public class AuthApplicationService {
             grant.setGrantToObjType(GrantToObjType.USER); grant.setGrantToObjId(qo.getApplyUserId());
             grant.setGrantToType(Color.RED); grant.setStatusCd("A"); privilegeGrantService.save(grant);
         }
-        synchronizeDigitalEmployeeResourceUsers(resource, null);
+        if (isEnterpriseDigitalEmployee(resource)) {
+            employeeResourceAuthorizationService.synchronizeApprovedApplicant(resource, qo.getApplyUserId());
+        }
         afterAuthorizationCommit(() -> syncUserAuthToRedis(qo.getApplyUserId()));
     }
 

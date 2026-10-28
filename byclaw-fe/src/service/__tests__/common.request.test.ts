@@ -1,3 +1,9 @@
+import {
+  approveUseApply,
+  rejectUseApply,
+  queryResourceUseApplyAudit,
+  queryUseApplyList,
+} from '@/pages/manager/service/resources';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@/utils/auth', () => ({
   clearToken: jest.fn(),
@@ -128,6 +134,20 @@ describe('Service Common Request', () => {
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
   });
+
+  it.each([approveUseApply, rejectUseApply, queryResourceUseApplyAudit, queryUseApplyList])(
+    'rejects approval business failures even when HTTP succeeds',
+    async (api) => {
+      const reason = '当前用户没有资源【dingtalk-sender-report-hub】的授权维护权限';
+      mockRequest.mockResolvedValueOnce({
+        data: { code: 50500, msg: reason },
+        status: 200,
+        config: { url: '/byaiService/auth/privilegeGrant/approveUseApply' },
+      });
+      await expect(api({ resourceId: '900', applyUserId: '42' })).rejects.toBe(reason);
+      expect(showRequestErrorModal).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     '/byaiService/assiman/qryConversations',

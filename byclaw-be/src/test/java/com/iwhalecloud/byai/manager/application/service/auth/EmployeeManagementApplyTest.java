@@ -25,6 +25,7 @@ class EmployeeManagementApplyTest {
     SsResourceMapper resources = mock(SsResourceMapper.class);
     EmployeePublicationScopeService scopes = mock(EmployeePublicationScopeService.class);
     SsResource employee = new SsResource();
+    DigitalEmployeeResourceAuthorizationService synchronization = mock(DigitalEmployeeResourceAuthorizationService.class);
 
     @BeforeEach void setup() {
         LoginInfo login = new LoginInfo(); login.setUserId(7L); login.setUserCode("reviewer");
@@ -37,7 +38,13 @@ class EmployeeManagementApplyTest {
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
         ReflectionTestUtils.setField(service, "employeeScopes", scopes);
         when(resources.selectById(900L)).thenReturn(employee);
-        doReturn(false).when(service).hasResourceUseSettingPermission(employee);
+        ReflectionTestUtils.setField(service, "employeeResourceAuthorizationService", synchronization);
+        when(synchronization.lockForAuthorization(employee)).thenReturn(employee);
+        doReturn(false).when(service).hasCurrentUserAllowManagePrivilege(employee);
+        var messages = mock(org.springframework.context.MessageSource.class);
+        when(messages.getMessage(anyString(), any(), any(java.util.Locale.class))).thenAnswer(call ->
+            "auth.application.review.denied".equals(call.getArgument(0)) ? "没有该申请的审核权限" : call.getArgument(0));
+        ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class, "messageSource", messages);
         doNothing().when(service).synchronizeDigitalEmployeeResourceUsers(any(), any());
         doNothing().when(service).syncUserAuthToRedis(anyLong());
     }
@@ -67,7 +74,7 @@ class EmployeeManagementApplyTest {
         var request = pending(); when(grants.update(any(), any())).thenReturn(1);
         service.approveUseApply(request);
         verify(writes).save(argThat(p -> "ALLOW_MANAGE".equals(p.getGrantType()) && "A".equals(p.getStatusCd()) && p.getGrantToObjId() == 42L));
-        verify(service).synchronizeDigitalEmployeeResourceUsers(employee, null);
+        verify(synchronization).synchronizeApprovedApplicant(employee, 42L);
         verify(service).syncUserAuthToRedis(42L);
     }
 
@@ -75,7 +82,7 @@ class EmployeeManagementApplyTest {
         var request = pending(); when(grants.update(any(), any())).thenReturn(0);
         assertThatThrownBy(() -> service.approveUseApply(request)).hasMessageContaining("已被处理");
         verifyNoInteractions(writes);
-        verify(service, never()).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        verify(synchronization, never()).synchronizeApprovedApplicant(any(), any());
     }
 
     @Test void anOrganizationAdministratorCannotApproveAcrossThePublishedAudience() {

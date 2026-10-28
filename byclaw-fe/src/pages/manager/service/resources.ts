@@ -433,7 +433,7 @@ export function applyResourceUse(params: ResourceUseApplyParams) {
 export function queryUseApplyList(params: ResourceUseApplyParams) {
   return POST<ResourceUseApplyAuditItem[]>('/byaiService/auth/privilegeGrant/queryUseApplyList', params, {
     responseCfg: {
-      customHandle: true,
+      hideErrorTips: true,
     },
   });
 }
@@ -454,7 +454,7 @@ export function queryResourceUseApplyAudit(params: ResourceUseApplyAuditQueryPar
     '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
     params,
     {
-      responseCfg: { customHandle: true },
+      responseCfg: { hideErrorTips: true },
     }
   );
 }
@@ -473,7 +473,7 @@ export function queryDigitalEmployeeUseApplyAudit(params: ResourceUseApplyAuditQ
 export function approveUseApply(params: ApproveResourceUseApplyParams) {
   return POST('/byaiService/auth/privilegeGrant/approveUseApply', params, {
     responseCfg: {
-      customHandle: true,
+      hideErrorTips: true,
     },
   });
 }
@@ -487,7 +487,7 @@ export function approveUseApply(params: ApproveResourceUseApplyParams) {
 export function rejectUseApply(params: ApproveResourceUseApplyParams) {
   return POST('/byaiService/auth/privilegeGrant/rejectUseApply', params, {
     responseCfg: {
-      customHandle: true,
+      hideErrorTips: true,
     },
   });
 }

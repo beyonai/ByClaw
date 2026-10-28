@@ -340,17 +340,19 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         SsResource target = enterpriseResource(601L, 1L);
         target.setResourceBizType(bizType);
+        target.setComAcctId(1L);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(1L);
         var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
         row.setResourceId(601L);
-        row.setAuditType("USE");
+        row.setAuditType("USE"); row.setUserId(3L);
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
         for (boolean history : List.of(false, true)) {
             when(grants.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
                 .thenReturn(List.of(row));
             // 命中名称的记录也必须通过使用审核权限校验，待审核和历史使用相同口径。
-            doReturn(false).when(service).hasResourceUseSettingPermission(target);
+            doReturn(false).when(service).canAuditApplicant(target, 3L);
             assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务")).isEmpty();
-            doReturn(true).when(service).hasResourceUseSettingPermission(target);
+            doReturn(true).when(service).canAuditApplicant(target, 3L);
             assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
                 .containsExactly(row);
         }
@@ -1784,12 +1786,12 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
 
         LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserId(2L);
+        loginInfo.setUserId(2L); loginInfo.setEnterpriseId(1L);
         // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
         loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
-        SsResource resource = new SsResource();
+        SsResource resource = new SsResource(); resource.setComAcctId(1L);
         resource.setResourceId(300L);
         resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
         resource.setCreateBy(1L);
@@ -2290,20 +2292,20 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
-        CurrentUserHolder.setLoginInfo(loginInfo(1L));
-        SsResource employee = enterpriseResource(607L, 1L); employee.setResourceBizType("DIG_EMPLOYEE");
+        CurrentUserHolder.setLoginInfo(loginInfo(1L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(1L);
+        SsResource employee = enterpriseResource(607L, 1L); employee.setResourceBizType("DIG_EMPLOYEE"); employee.setComAcctId(1L);
         when(resources.selectById(607L)).thenReturn(employee);
         PrivilegeGrant pending = useGrant(607L, 3L, "USER", Color.RED, "P");
         when(mapper.selectOne(any())).thenReturn(pending);
         when(mapper.update(any(), any())).thenReturn(1);
         doNothing().when(service).syncUserAuthToRedis(3L);
-        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronize(employee, null);
+        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronizeApprovedApplicant(employee, 3L);
         ResourceUseApplyApproveQo request = new ResourceUseApplyApproveQo(); request.setResourceId(607L); request.setApplyUserId(3L);
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             if (fail) assertThatThrownBy(() -> service.approveUseApply(request)).hasMessage("resource denied");
             else service.approveUseApply(request);
-            verify(synchronization).synchronize(employee, null);
+            verify(synchronization).synchronizeApprovedApplicant(employee, 3L);
             verify(service, never()).syncUserAuthToRedis(3L);
             if (!fail) {
                 org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
@@ -2324,6 +2326,9 @@ class AuthApplicationServiceTest {
         doReturn(false).when(service).hasResourceUseSettingPermission(bound);
         assertThatThrownBy(() -> service.validateDigitalEmployeeResourceUseGrant(bound, 3L))
             .hasMessage("auth.employee.resources.no.grant.permission");
+        // 已审核员工的内部补授权不要求关联资源管理权，仍复用目标与黑名单校验。
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.validateEmployeeResourceGrantTarget(bound, 3L))
+            .doesNotThrowAnyException();
     }
 
     @ParameterizedTest
@@ -2338,6 +2343,25 @@ class AuthApplicationServiceTest {
         doReturn(true).when(service).hasResourceUseSettingPermission(bound);
         assertThatThrownBy(() -> service.validateDigitalEmployeeResourceUseGrant(bound, 3L))
             .hasMessage("auth.employee.resources.user.blacklisted");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"tenant", "personal", "off-shelf", "deleted", "blacklisted"})
+    void approvedResourceGrantStillRejectsInvalidScopeAndBlacklists(String invalid) {
+        mockI18n();
+        PrivilegeGrant blacklist = useGrant(607L, 3L, "USER", Color.BLACK, "A");
+        AuthApplicationService service = newExplicitUserPermissionService("blacklisted".equals(invalid) ? List.of(blacklist) : List.of());
+        CurrentUserHolder.setLoginInfo(loginInfo(1L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(10L);
+        SsResource bound = enterpriseResource(607L, 2L); bound.setComAcctId(10L);
+        switch (invalid) {
+            case "tenant" -> bound.setComAcctId(20L);
+            case "personal" -> bound.setOwnerType(OwnerType.PERSONAL);
+            case "off-shelf" -> bound.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+            case "deleted" -> bound.setResourceStatus(ResourceStatus.DELETE.getNum());
+            default -> { }
+        }
+        assertThatThrownBy(() -> service.validateEmployeeResourceGrantTarget(bound, 3L))
+            .hasMessage("blacklisted".equals(invalid) ? "auth.employee.resources.user.blacklisted" : "auth.employee.resources.invalid");
     }
 
     @Test

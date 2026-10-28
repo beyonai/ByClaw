@@ -1,3 +1,4 @@
+import { getRequestErrorMessage } from '@/utils/requestError';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Popconfirm, Segmented, Space, Spin, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -137,7 +138,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         }
       } catch (error: any) {
         if (sequence === requestSequence.current[scope]) {
-          message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+          message.error(getRequestErrorMessage(error, intl.formatMessage({ id: 'common.operationFailed' })));
         }
       } finally {
         if (sequence === requestSequence.current[scope]) setLoadingState(false);
@@ -197,7 +198,7 @@ const ResourceAuditCenter: React.FC<ResourceAuditCenterProps> = ({
         }
         onAuditComplete?.();
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        message.error(getRequestErrorMessage(error, intl.formatMessage({ id: 'common.operationFailed' })));
       } finally {
         setActionKey('');
       }

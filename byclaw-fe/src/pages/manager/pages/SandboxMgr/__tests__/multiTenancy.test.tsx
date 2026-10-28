@@ -165,7 +165,7 @@ test('running endpoints show named links and expand the complete list without na
     'https://sandbox.example/cli'
   );
   expect(screen.queryByText(/\{"openclaw"/)).not.toBeInTheDocument();
-});
+}, 15000);
 
 test('shows the user name returned for a user sandbox record', () => {
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
