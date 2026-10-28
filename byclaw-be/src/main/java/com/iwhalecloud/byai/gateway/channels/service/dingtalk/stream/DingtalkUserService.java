@@ -8,7 +8,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.dingtalk.api.DefaultDingTalkClient;
 import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiV2UserGetRequest;
 import com.dingtalk.api.response.OapiV2UserGetResponse;
@@ -56,6 +55,8 @@ public class DingtalkUserService {
     private DingtalkTokenService dingtalkTokenService;
     @Autowired
     private DingtalkReplyDispatcher dingtalkReplyDispatcher;
+    @Autowired
+    private DingtalkHttpClientFactory httpClientFactory;
 
     public OapiV2UserGetResponse.UserGetResponse getUserDetail(String accessToken, String userId) {
         if (!StringUtils.hasText(accessToken)) {
@@ -66,7 +67,7 @@ public class DingtalkUserService {
         }
 
         try {
-            DingTalkClient client = new DefaultDingTalkClient(USER_GET_URL);
+            DingTalkClient client = httpClientFactory.legacyClient(USER_GET_URL);
             OapiV2UserGetRequest request = new OapiV2UserGetRequest();
             request.setUserid(userId);
             request.setLanguage(DEFAULT_LANGUAGE);
