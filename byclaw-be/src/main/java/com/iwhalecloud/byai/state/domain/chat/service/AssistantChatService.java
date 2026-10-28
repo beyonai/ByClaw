@@ -183,6 +183,11 @@ public class AssistantChatService {
     @WithSpan(value = "chat", inheritContext = false)
     public void chat(AssistantChatDto assistantChatDto, OutputStream outputStream, LoginInfo userInfo)
         throws IOException {
+        if (userInfo != null) CurrentUserHolder.setLoginInfo(userInfo);
+        ChatChainLog.accept(assistantChatDto);
+        long preparationStarted = System.nanoTime();
+        boolean preparationFinished = false;
+        ChatChainLog.stage(assistantChatDto, assistantChatDto.getTraceId(), "be.prepare", "start", "running", 0);
         boolean groupTaskStarted = false;
         if (assistantChatDto != null) assistantChatDto.setGroupTaskTurnId(null);
         Span span = Span.current();
@@ -194,11 +199,6 @@ public class AssistantChatService {
         try {
             long firstTextStartTime = System.currentTimeMillis();
             long time01 = System.currentTimeMillis();
-            // 给Netty使用
-            if (userInfo != null) {
-                CurrentUserHolder.setLoginInfo(userInfo);
-            }
-
             if (assistantChatDto != null) {
                 AssistantAccessChannel.fromAccessTerminal(assistantChatDto.getAccessTerminal())
                     .ifPresent(ch -> ch.ensureChannelTypeInExtension(assistantChatDto));
@@ -208,6 +208,9 @@ public class AssistantChatService {
             Map<String, Object> extParams = assistantChatDto.getExtParams();
             String taskType = MapUtils.getString(extParams, "taskType");
             if (TaskTypeEnum.FIXMEMORY.getCode().equalsIgnoreCase(taskType)) {
+                preparationFinished = true;
+                ChatChainLog.stage(assistantChatDto, assistantChatDto.getTraceId(), "be.prepare", "end", "ok",
+                    preparationStarted, "route", "fix_memory");
                 this.handleFixMemory(assistantChatDto, outputStream);
                 return;
             }
@@ -248,11 +251,20 @@ public class AssistantChatService {
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
+            preparationFinished = true;
+            ChatChainLog.stage(assistantChatDto, assistantChatDto.getTraceId(), "be.prepare", "end", "ok",
+                preparationStarted, "agentId", assistantChatDto.getAgentId());
             executeChat(assistantChatDto, outputStream, firstTextStartTime);
             groupTaskStarted = true;
         } catch (BdpRuntimeException e) {
+            if (!preparationFinished) ChatChainLog.stage(assistantChatDto, assistantChatDto.getTraceId(),
+                "be.prepare", "end", "failed", preparationStarted, "errorCode", "CHAT_PREPARATION_FAILED",
+                "errorType", e.getClass().getSimpleName());
             handleBdpRuntimeException(e, assistantChatDto, outputStream);
         } catch (Exception e) {
+            if (!preparationFinished) ChatChainLog.stage(assistantChatDto, assistantChatDto.getTraceId(),
+                "be.prepare", "end", "failed", preparationStarted, "errorCode", "CHAT_PREPARATION_FAILED",
+                "errorType", e.getClass().getSimpleName());
             handleGeneralException(e, outputStream);
         } finally {
             // Asynchronous request return is not turn completion; only release a failed startup here.
@@ -627,6 +639,9 @@ public class AssistantChatService {
             SessionMembersDto membersDto = createGroupChatSession(assistantChatDto);
             CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
                 JSON.toJSONString(membersDto));
+            String titleContent = assistantChatDto.getChatContent();
+            sessionTitleService.summarizeAsync(membersDto.getSessionId(), membersDto.getSessionName(),
+                () -> summaryChatContent(titleContent));
         } else {
             GroupChatInternalSessionAccess.requirePublic(sessionService.findById(assistantChatDto.getSessionId()));
             // sessionId不为空时，检查当前用户是否在群成员列表中
@@ -682,6 +697,7 @@ public class AssistantChatService {
             session.setCreateTime(new Date());
             session.setUpdateTime(new Date());
             assistantChatDto.setSessionId(sessionId);
+            ChatRequestCancellation.bindSession(sessionId);
             assistantChatDto.setSession(session);
             return session;
         }
@@ -699,7 +715,8 @@ public class AssistantChatService {
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto.setSessionName(this.summaryChatContent(chatContent));
+        sessionMembersDto.setSessionName(StringUtils.substring(
+            StringUtils.defaultString(chatContent).replaceAll("\\{\\{[^}]*+\\}\\}", "").trim(), 0, 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
@@ -723,9 +740,11 @@ public class AssistantChatService {
 
         // 5. 调用groupService.createGroupChat()创建群聊
         sessionService.createSessionMembers(sessionMembersDto);
+        sessionTitleService.markSummaryPending(newSessionId);
 
         // 6. 将新创建的sessionId设置回assistantChatDto
         assistantChatDto.setSessionId(newSessionId);
+        ChatRequestCancellation.bindSession(newSessionId);
 
         assistantChatDto.setSession(sessionMembersDto);
 

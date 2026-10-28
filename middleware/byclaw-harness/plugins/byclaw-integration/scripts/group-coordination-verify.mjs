@@ -55,6 +55,17 @@ try {
   runtime.bind('captain2','leader',undefined,next)
   assert.notEqual(runtime.get('captain').templateId,runtime.get('captain2').templateId)
   assert.deepEqual((await runtime.template('captain2')).members.map(m => m.name), ['a','c'])
+  const directPreparations = []
+  const coldDirect = new ByClawGroupCoordinationRuntime({ resources: () => resources, catalogDir,
+    supportedWorkerTypes: ['BYCLAW_EXE'], resolveModel: async () => ({ provider: 'fake', model: 'fake' }),
+    prepareEmployee: async id => { directPreparations.push(id) }, executeExternal: async () => ({ output: 'external' }) })
+  const directScope = { ...parsed, mode: 'DIRECT' }
+  await coldDirect.validate(directScope)
+  assert.deepEqual(directPreparations, ['leader'], 'ordinary DIRECT conversation must not eagerly prepare members')
+  coldDirect.bind('cold-direct', 'leader', undefined, directScope)
+  await coldDirect.prepareTeam('cold-direct')
+  assert.deepEqual(directPreparations, ['leader', 'a', 'b'], 'team use prepares its allowed dependencies before catalog admission')
+  await assert.rejects(coldDirect.prepareSelected(directScope, 'byclaw-employee-c'), /outside/)
   const privateLoads=[]
   const emptyResources={...resources,employees:[],directEmployeeIds:[]}
   const privateRuntime=new ByClawGroupCoordinationRuntime({resources:()=>emptyResources,catalogDir,supportedWorkerTypes:['BYCLAW_EXE'],resolveModel:async()=>({provider:'fake',model:'fake'}),executeExternal:async()=>({output:'external'}),loadScopedEmployee:async (_scope,id)=>{

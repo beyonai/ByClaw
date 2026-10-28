@@ -1,6 +1,6 @@
 import { useIntl } from '@umijs/max';
-import { CheckOutlined, CloseOutlined, LoadingOutlined } from '@ant-design/icons';
-import { Button, Modal } from 'antd';
+import { CheckOutlined, CloseOutlined, LoadingOutlined, PauseCircleOutlined } from '@ant-design/icons';
+import { Alert, Button, Modal } from 'antd';
 import type { TenantItem } from '../../service/TenantMgr';
 import { tenantProvisionSteps } from './provisionStatus';
 import styles from './TenantProvisionProgress.module.less';
@@ -41,6 +41,7 @@ export default function TenantProvisionProgress({
     active: intl.formatMessage({ id: 'tenant.progress.active' }),
     pending: intl.formatMessage({ id: 'tenant.progress.pending' }),
     failed: intl.formatMessage({ id: 'tenant.progress.failed' }),
+    paused: intl.formatMessage({ id: 'tenant.progress.paused' }),
   };
 
   const steps = tenantProvisionSteps(tenant?.provisionState || '', tenant?.provisionStage);
@@ -67,6 +68,14 @@ export default function TenantProvisionProgress({
         <span>{intl.formatMessage({ id: 'tenant.enterpriseSummary' }, { id: tenant?.enterpriseId })}</span>
         <span>{intl.formatMessage({ id: 'tenant.packageSummary' }, { name: tenant?.packageName })}</span>
       </div>
+      {tenant?.provisionState === 'MANUAL_REQUIRED' && (
+        <Alert
+          type="warning"
+          showIcon
+          className={styles.notice}
+          message={intl.formatMessage({ id: 'tenant.progress.manualRequired' })}
+        />
+      )}
       <ol className={styles.timeline}>
         {stages.map((stage, index) => {
           const status = steps[index];
@@ -74,7 +83,15 @@ export default function TenantProvisionProgress({
             <li className={`${styles.step} ${styles[status]}`} key={stage.title}>
               <div className={styles.rail}>
                 <span className={styles.circle} aria-hidden="true">
-                  {status === 'done' ? <CheckOutlined /> : status === 'failed' ? <CloseOutlined /> : index + 1}
+                  {status === 'done' ? (
+                    <CheckOutlined />
+                  ) : status === 'failed' ? (
+                    <CloseOutlined />
+                  ) : status === 'paused' ? (
+                    <PauseCircleOutlined />
+                  ) : (
+                    index + 1
+                  )}
                 </span>
               </div>
               <div className={styles.content}>
@@ -86,7 +103,7 @@ export default function TenantProvisionProgress({
                   </span>
                 </div>
                 <p>{stage.description}</p>
-                {status === 'failed' && tenant?.failureReason && (
+                {(status === 'failed' || status === 'paused') && tenant?.failureReason && (
                   <p className={styles.failure}>{tenant.failureReason}</p>
                 )}
               </div>

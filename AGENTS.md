@@ -26,7 +26,6 @@ This is the canonical contract for automated agents working in this repository:
 | `middleware/byclaw-harness/` | Harness image definitions, plugins, and runtime-specific integration |
 | `docs/` | Top-level docs: `architecture/`, `api/`, `quick-start/` |
 | `examples/` | Standalone examples, decoupled from production config |
-| `tests/` | Repo-wide test layout: `unit/`, `integration/`, `auto-gen/` (reviewed only) |
 | `scripts/` | Repo automation; optional LLM-assisted checks (secrets via env/CI only) |
 | `.github/` | CI, templates, Dependabot |
 

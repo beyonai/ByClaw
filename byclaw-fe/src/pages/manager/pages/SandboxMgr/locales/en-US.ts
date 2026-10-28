@@ -1,4 +1,38 @@
 export default {
+  'sandboxMgr.releaseReason.release.switch-to-shared': 'Switched to shared sandbox',
+  'sandboxMgr.status.pending': 'Pending',
+  'sandboxMgr.releaseReason.release.cancelled-launch': 'Launch cancelled',
+  'sandboxMgr.releaseReason.release.remote.exit': 'Remote sandbox exited',
+  'sandboxMgr.releaseReason.release.auto.idle-timeout': 'Automatically released after idle timeout',
+  'sandboxMgr.releaseReason.release.retry': 'Release retried',
+  'sandboxMgr.releaseReason.release.manual': 'Manual release',
+  'sandboxMgr.releaseReason.manualDetail': 'Manual release: {detail}',
+  'sandboxMgr.releaseReason.orphan': 'Orphaned sandbox: {status}; {reason}',
+  'sandboxMgr.releaseReason.timeoutMinutes': 'Timed out after {minutes} minutes',
+
+  'sandboxMgr.releaseReason.manual.force': 'Forced release by administrator',
+  'sandboxMgr.shared.member.search': 'Search by user code or name',
+  'sandboxMgr.shared.member.status': 'User status',
+  'sandboxMgr.shared.member.allocating': 'Allocating',
+  'sandboxMgr.shared.member.release': 'Release user',
+  'sandboxMgr.shared.member.releaseConfirm': 'Release user {user}?',
+  'sandboxMgr.shared.member.releaseDescription':
+    'Only this user’s context in this shared instance will be released and running tasks interrupted. Other users are unaffected.',
+  'sandboxMgr.shared.member.releaseSuccess': 'User context released',
+  'sandboxMgr.shared.member.releaseFailed':
+    'The user state has changed. No context was released. Refresh and try again.',
+  'sandboxMgr.releaseReason.idle': 'Idle timeout',
+  'sandboxMgr.releaseReason.allocation.idle': 'Allocation timeout',
+  'sandboxMgr.releaseReason.manual': 'Manual release',
+  'sandboxMgr.releaseReason.manual.frontend': 'Released by administrator',
+  'sandboxMgr.releaseReason.instance.manual': 'Instance manually released',
+  'sandboxMgr.releaseReason.instance.empty': 'Instance empty and idle',
+  'sandboxMgr.releaseReason.eligibility.revoked': 'Shared eligibility revoked',
+  'sandboxMgr.releaseReason.eligibility.granted': 'Shared eligibility granted',
+  'sandboxMgr.releaseReason.host.admission.closed': 'Host admission closed',
+  'sandboxMgr.releaseReason.release.remote.missing': 'Remote sandbox no longer exists',
+  'sandboxMgr.releaseReason.release.recovered.terminal-ownership': 'Terminal instance ownership recovered',
+
   'sandboxMgr.endpoint.more': 'More',
   // Search
   'sandboxMgr.search.placeholder': 'Search by user code, endpoint, chat ID',

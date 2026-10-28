@@ -29,8 +29,25 @@ const env = {
   REDIS_USERNAME: "tenant",
   REDIS_PASSWORD: "test",
   REDIS_TLS: "true",
+  INTERNAL_API_TOKEN: "test-internal-token",
 };
 describe("fixed tenant configuration", () => {
+  it("defaults the shared quota reader to an environment-independent key and ALLOW on Redis failure", () => {
+    expect(readConfig(env).quota).toEqual({
+      keyPrefix: "byclaw:shared:quota:v1:",
+      failurePolicy: "ALLOW",
+    });
+    expect(
+      readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "quota:", QUOTA_REDIS_FAILURE_POLICY: "REJECT" })
+        .quota,
+    ).toEqual({ keyPrefix: "quota:", failurePolicy: "REJECT" });
+    expect(() => readConfig({ ...env, QUOTA_REDIS_FAILURE_POLICY: "ignore" })).toThrow(
+      "Invalid QUOTA_REDIS_FAILURE_POLICY",
+    );
+    expect(() => readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "" })).toThrow(
+      "Invalid QUOTA_REDIS_KEY_PREFIX",
+    );
+  });
   it.each([undefined, "", "host.containers.internal"])(
     "advertises Kubernetes Pod IP instead of an unresolvable hostname when launch host is %s",
     (advertiseHost) => {
@@ -59,11 +76,21 @@ describe("fixed tenant configuration", () => {
     "DB_SANDBOX_RECORD_ID",
     "REDIS_USERNAME",
     "TLS_KEY_FILE",
+    "INTERNAL_API_TOKEN",
   ])("requires %s", (key) => {
     expect(() => readConfig({ ...env, [key]: "" })).toThrow();
   });
   it("rejects plain HTTP unless explicitly selected", () => {
     expect(() => readConfig({ ...env, KMS_DECRYPT_URL: "http://kms" })).toThrow();
+  });
+  it("preserves the BE callback token with HTTPS and still requires client certificates", () => {
+    const config = readConfig(env);
+    expect(config.internalToken).toBe("test-internal-token");
+    expect(config.transport).toBe("https");
+    expect(config.tls?.certFile).toBe("/cert");
+    expect(() => readConfig({ ...env, INTERNAL_API_TOKEN: "   " })).toThrow(
+      "Missing configuration: INTERNAL_API_TOKEN",
+    );
   });
   it("allows explicitly selected HTTP with an internal token and plain Redis", () => {
     const { TLS_CERT_FILE, TLS_KEY_FILE, TLS_CA_FILE, BE_CLIENT_IDENTITY, ...withoutTls } = env;
@@ -76,6 +103,7 @@ describe("fixed tenant configuration", () => {
       REDIS_TLS: "false",
     });
     expect(local.transport).toBe("http");
+    expect(local.internalToken).toBe("test-internal-token");
     expect(local.tls).toBeUndefined();
     expect(local.redis.tls).toBeUndefined();
   });

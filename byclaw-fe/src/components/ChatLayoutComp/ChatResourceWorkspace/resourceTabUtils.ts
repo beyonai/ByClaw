@@ -1,3 +1,5 @@
+import type { ChatRuntimeType } from '@/utils/chatRuntime';
+
 export type SessionFileTabKey = 'file' | 'sharedFile' | 'projectFile';
 
 /** 本地共享文件始终展示，仅非默认项目额外展示项目云盘。 */
@@ -14,3 +16,9 @@ export const getSessionResourceTabKeys = (projectId?: number, sessionId?: string
   ...getSessionFileTabKeys(projectId),
   ...(sessionId && Number(projectId) > 0 ? (['code'] as SessionResourceTabKey[]) : []),
 ];
+
+export const getVisibleSessionFileTabKeys = (
+  tabs: SessionResourceTabKey[],
+  runtimeType?: ChatRuntimeType
+): SessionFileTabKey[] =>
+  tabs.filter((key): key is SessionFileTabKey => key !== 'code' && !(runtimeType !== 'openclaw' && key === 'file'));

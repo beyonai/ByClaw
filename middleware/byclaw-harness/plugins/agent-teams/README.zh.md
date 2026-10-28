@@ -139,3 +139,5 @@ pnpm verify
 ## 许可证
 
 [MIT](./LICENSE)
+
+DSH 项目内的会话可以共用执行 cwd，同时保持各自的任务状态隔离：`TeamStateRuntime.runWithWorkspaceAlias` 在异步调用范围内，将状态解析到所属会话；不改变文件执行路径，兼容已有状态目录别名。

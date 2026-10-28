@@ -137,7 +137,7 @@ describe('ByClawBeBackend', () => {
     const backend = new ByClawBeBackend(config, identity, message => logs.push(message))
     expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
     expect(fake.calls).toEqual([{
-      path: '/byaiService/sandbox/launchByUserCode', body: { userCode: 'u1', serviceKey: 'byclaw-dsh-tools' }, token: 'jwt-u1', systemCode: undefined,
+      path: '/byaiService/sandbox/launchByUserCode', body: { userCode: 'u1', serviceKey: 'byclaw-dsh-tools', autoRelease: 1 }, token: 'jwt-u1', systemCode: undefined,
     }])
     // The keys B's sshd will read from the mounted state directory exist before the launch.
     await access(join(dir, 'state', 'client_ed25519.pub'))

@@ -27,10 +27,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify": "pnpm build && pnpm run verify:contract && pnpm run verify:runtime-fixtures && pnpm run verify:tool-environment",
+    "verify": "pnpm build && pnpm run verify:contract && pnpm run verify:runtime-fixtures && pnpm run verify:mcp-relay && pnpm run verify:tool-environment",
     "verify:contract": "node scripts/verify.mjs",
     "verify:runtime": "node scripts/verify.mjs --runtime",
     "verify:runtime-fixtures": "node scripts/verify-runtime-fixtures.mjs",
+    "verify:mcp-relay": "node scripts/verify-mcp-relay.mjs",
     "verify:tool-environment": "node scripts/verify-tool-environment.mjs"
   },
   "peerDependencies": {

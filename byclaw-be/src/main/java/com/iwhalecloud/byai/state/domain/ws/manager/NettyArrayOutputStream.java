@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.manager;
 
 import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatReplyLog;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 
 import java.io.ByteArrayOutputStream;
@@ -22,6 +23,13 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
 
     private final String wrapperType;
     private final String requestId;
+    private final String enterpriseId;
+    private final java.util.Map<String, JSONObject> replyIdentities = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void registerReply(String traceId, String messageId, JSONObject envelope) {
+        if (traceId != null && !traceId.isBlank() && (replyIdentities.size() < 256 || replyIdentities.containsKey("trace:" + traceId))) replyIdentities.put("trace:" + traceId, new JSONObject(envelope));
+        if (messageId != null && !messageId.isBlank() && (replyIdentities.size() < 256 || replyIdentities.containsKey("message:" + messageId))) replyIdentities.put("message:" + messageId, new JSONObject(envelope));
+    }
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx) {
         this(ctx, null, null);
@@ -32,6 +40,12 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
     }
 
     public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType, String requestId) {
+        this(ctx, clientRequestId, wrapperType, requestId, ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get());
+    }
+
+    public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType,
+        String requestId, String enterpriseId) {
+        this.enterpriseId = enterpriseId;
         this.requestId = requestId;
         this.ctx = ctx;
         this.clientRequestId = clientRequestId;
@@ -40,6 +54,7 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
 
     @Override
     public void write(byte[] b, int off, int len) {
+        if (com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.isCancelled()) return;
         super.write(b, off, len);
         // 获取新写入的数据
         byte[] newData = new byte[len];
@@ -52,6 +67,7 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         JSONObject terminal = ChatChainLog.terminalFrame(frameText);
         long started = System.nanoTime();
         if (ctx.channel().isActive()) {
+            if (terminal != null && ChatReplyLog.envelope(terminal) != null) ChatReplyLog.log("be.ws_write", terminal, null, "running", "channelId", ctx.channel().id().asShortText());
             ChatChainLog.wsWritten(ctx.writeAndFlush(new TextWebSocketFrame(frameText)), terminal, started);
         } else {
             ChatChainLog.wsUnavailable(ctx.channel(), terminal);
@@ -72,7 +88,6 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         wrapper.put("type", wrapperType);
         wrapper.put("clientRequestId", clientRequestId);
         wrapper.put("requestId", requestId);
-        String enterpriseId = ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get();
         if (StringUtils.isNotBlank(enterpriseId)) {
             wrapper.put("enterpriseId", enterpriseId);
         }
@@ -88,6 +103,30 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
                 wrapper.put("sessionId", String.valueOf(sessionId));
             }
             wrapper.put("data", payload);
+            JSONObject details = ChatReplyLog.object(payload.get("data"));
+            String trace = payload.getString("traceId");
+            if (trace == null && details != null) trace = details.getString("traceId");
+            String messageId = payload.getString("messageId");
+            if (messageId == null && details != null) messageId = details.getString("messageId");
+            JSONObject chain = ChatReplyLog.envelope(payload);
+            if (chain == null && messageId != null) chain = replyIdentities.get("message:" + messageId);
+            if (chain == null && trace != null) chain = replyIdentities.get("trace:" + trace);
+            if (chain == null && trace == null && messageId == null && !replyIdentities.isEmpty()) {
+                JSONObject candidate = replyIdentities.values().iterator().next();
+                boolean oneOwner = replyIdentities.values().stream().allMatch(value ->
+                    java.util.Objects.equals(value.getString("targetTraceId"), candidate.getString("targetTraceId")));
+                if (oneOwner) chain = candidate;
+            }
+            if (chain != null) {
+                chain = new JSONObject(chain);
+                chain.put("frameId", java.util.UUID.randomUUID().toString());
+                chain.put("frameClientRequestId", clientRequestId);
+                chain.put("targetTenantId", enterpriseId == null ? "" : enterpriseId);
+                if (sessionId != null) chain.put("targetSessionId", String.valueOf(sessionId));
+                if (messageId != null) chain.put("targetMessageId", messageId);
+                if (trace != null) chain.put("targetTraceId", trace);
+                wrapper.put("chatChain", chain);
+            }
         }
         catch (Exception e) {
             wrapper.put("data", content);

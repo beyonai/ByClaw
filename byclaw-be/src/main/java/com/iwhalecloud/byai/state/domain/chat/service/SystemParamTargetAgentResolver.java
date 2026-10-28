@@ -46,10 +46,7 @@ public class SystemParamTargetAgentResolver {
             return currentTargetAgentType;
         }
         String normalizedUserCode = StringUtils.trim(userCode);
-        String enabled = privateParamCacheReader.getValue(normalizedUserCode, ENABLE_HARNESS_PARAM_CODE);
-        if (StringUtils.isBlank(enabled)) {
-            enabled = systemConfigService.getDcSystemConfigValueByCode(ENABLE_HARNESS_PARAM_CODE);
-        }
+        String enabled = resolveEffectiveEnableDsh(normalizedUserCode);
         if (!"1".equals(StringUtils.trim(enabled))) {
             if (!isHarnessAgent(agentId)) {
                 return currentTargetAgentType;
@@ -70,5 +67,14 @@ public class SystemParamTargetAgentResolver {
         catch (Exception ignored) {
             return false;
         }
+    }
+
+    public String resolveEffectiveEnableDsh(String userCode) {
+        String enabled = StringUtils.isBlank(userCode) ? null
+            : privateParamCacheReader.getValue(StringUtils.trim(userCode), ENABLE_HARNESS_PARAM_CODE);
+        if (StringUtils.isBlank(enabled)) {
+            enabled = systemConfigService.getDcSystemConfigValueByCode(ENABLE_HARNESS_PARAM_CODE);
+        }
+        return "1".equals(StringUtils.trim(enabled)) ? "1" : "0";
     }
 }

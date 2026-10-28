@@ -129,11 +129,15 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         }
         const root = current.host.resolveSessionRoot(String(current.agent.id))
         if (typeof root !== 'string' || !isAbsolute(root)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED')
-        const canonical = await realpath(root)
+        // A host whose session tree is not on this machine (the shared DSH host keeps it in the
+        // user's tool sandbox) supplies the file operations; otherwise they are local.
+        const io = current.host.artifactIo
+        const canonical = await (io ?? { realpath }).realpath(root)
         const directory = join(canonical, kind)
-        await mkdir(directory, { recursive: true, mode: 0o700 })
-        if (await realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
-        await access(directory, constants.W_OK)
+        if (io) await io.mkdir(directory)
+        else await mkdir(directory, { recursive: true, mode: 0o700 })
+        if (await (io ?? { realpath }).realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
+        if (!io) await access(directory, constants.W_OK)
         exec.signal?.throwIfAborted()
         // Deployment-only compatibility overrides; never accepted from tool arguments.
         const model = await resolveModel()
@@ -142,7 +146,7 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         let assets
         try {
           const referenceImage = kind === 'image' && normalizedArgs.referenceImage !== undefined
-            ? await loadImageReference(root, normalizedArgs.referenceImage) : undefined
+            ? await loadImageReference(root, normalizedArgs.referenceImage, io) : undefined
           assets = await generate(model, normalizedArgs, { signal, ...(referenceImage ? { referenceImage } : {}) })
         } catch (error) {
           if (signal.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError'
@@ -154,8 +158,10 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         const media = kind === 'tts' && !Array.isArray(assets) ? assets.assets : assets
         // Only an explicit recoverable control outcome can omit generated files.
         const unsupported = kind === 'tts' && media.length === 0 && warnings.length > 0
-        const artifacts = unsupported ? [] : await persistAssets(root, kind, media)
-        const imageArtifacts = kind === 'image' ? await describeImageArtifacts(root, artifacts, normalizedArgs, current.command.header.sessionId) : undefined
+        const artifacts = unsupported ? [] : await persistAssets(root, kind, media, ...(io ? [io] : []))
+        const imageArtifacts = kind === 'image'
+          ? await describeImageArtifacts(root, artifacts, normalizedArgs, current.command.header.sessionId, io && { io, sources: media })
+          : undefined
         const publicArtifacts = imageArtifacts ? artifacts.map((artifact, index) => ({ ...artifact, path: imageArtifacts[index].path })) : artifacts
         return { ...(imageArtifacts ? { imageArtifacts } : {}), provider: model.provider, model: model.model, artifacts: publicArtifacts,
           ...(kind === 'tts' ? { status: unsupported ? 'unsupported' : 'generated', warnings } : {}) }

@@ -222,6 +222,7 @@ owner: admin
 | `checkOutputMaxChars` | `2000` | 每条违规详情引给模型的字符上限，防止脚本输出撑爆上下文 |
 | `maxRetries` | `2` | 连续强制续跑上限。设 `0` 表示只报告一次、从不强制重试 |
 | `requireApproval` | `false` | 预留：执行脚本前要求用户审批。当前不生效 |
+| `workspaceOnToolEnvironment` | `false` | 经上下文的工具环境（`ctx.fs` / `ctx.subprocess`）读写铁律，而不是本进程的文件系统；共享 DSH 宿主会打开它，因为用户的项目在各自的工具沙箱里 |
 
 ## 安装
 
@@ -314,3 +315,7 @@ npm run verify         # = link:dsh + build + 离线冒烟
 - **`check.sh` 通过 `bash` 执行**，要求运行环境有 bash。Windows 下需 WSL 或 Git Bash
 - **没有 `shell` 服务时校验静默不跑**：插件不硬依赖任何服务（硬依赖会让整个插件停在 `PENDING`、连注入和沉淀一起失效），所以缺 shell 时它照常加载，只是校验那一半不激活。同理，缺 `commands` 或 `tools` 时对应入口不出现
 - **尚未做真实 agent 端到端验证**：改动门控、循环上限、注入时机均只有离线覆盖
+
+## ByClaw 工作区探测策略
+
+在 ByClaw 托管配置中，`byclawWorkspacePolicy` 默认关闭每次问答前的规则目录自动发现。设置 `BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=1` 可启用；未安装该策略服务时保持独立插件原有行为。显式规则工具及发生文件修改后的检查保持可用。

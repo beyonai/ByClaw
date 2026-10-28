@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,56 +221,61 @@ public class SandboxController {
     @PostMapping("/getSandboxInfo")
     @Operation(summary = "查询当前用户的沙箱信息", description = "查询当前用户的沙箱信息")
     public ResponseUtil getSandboxIdByUserCode(@RequestBody Map<String, Object> params) {
-        String userCode = CurrentUserHolder.getCurrentUserCode();
-        if (userCode == null) {
-            Object userCodeObj = params.get("userCode");
-            if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-                return ResponseUtil.fail("userCode is required");
-            }
-            userCode = userCodeObj.toString().trim();
-        }
-        List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
-
-        Object sandboxTypeObj = params.get("sandboxType");
-        String sandboxType = null;
-        if (sandboxTypeObj != null) {
-            sandboxType = sandboxTypeObj.toString().trim();
-        }
-
-        List<Map<String, Object>> data = new ArrayList<>();
-        if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
-            for (SandboxInfo sandbox : sandboxInfo) {
-                if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
-                    continue;
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (userCode == null) {
+                Object userCodeObj = params.get("userCode");
+                if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+                    return ResponseUtil.fail("userCode is required");
                 }
-
-                // 查询数据库记录获取完整状态
-                boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
-                SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
-                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
-
-                Map<String, Object> result = new HashMap<>();
-                result.put("userCode", userCode);
-                result.put("sandboxType", sandbox.getSandboxType());
-                result.put("sandboxId", sandbox.getSandboxId());
-                result.put("endpoints", sandbox.getEndpoints());
-                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
-                result.put("token", sandbox.getGatewayToken());
-                result.put("isShared", shared);
-                result.put("serviceKey", sandbox.getServiceKey());
-                result.put("mappingId", sandbox.getMappingId());
-                // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
-                result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
-                SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
-                result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
-                result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
-                result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
-                result.put("workerLeaseTtlSeconds",
-                    shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
-                data.add(result);
+                userCode = userCodeObj.toString().trim();
             }
+            List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
+
+            Object sandboxTypeObj = params.get("sandboxType");
+            String sandboxType = null;
+            if (sandboxTypeObj != null) {
+                sandboxType = sandboxTypeObj.toString().trim();
+            }
+
+            List<Map<String, Object>> data = new ArrayList<>();
+            if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
+                for (SandboxInfo sandbox : sandboxInfo) {
+                    if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
+                        continue;
+                    }
+
+                    // 查询数据库记录获取完整状态
+                    boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
+                    SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
+                        userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("userCode", userCode);
+                    result.put("sandboxType", sandbox.getSandboxType());
+                    result.put("sandboxId", sandbox.getSandboxId());
+                    result.put("endpoints", sandbox.getEndpoints());
+                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("token", sandbox.getGatewayToken());
+                    result.put("isShared", shared);
+                    result.put("serviceKey", sandbox.getServiceKey());
+                    result.put("mappingId", sandbox.getMappingId());
+                    // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
+                    result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
+                    SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
+                    result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
+                    result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
+                    result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
+                    result.put("workerLeaseTtlSeconds",
+                        shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
+                    data.add(result);
+                }
+            }
+            return ResponseUtil.successResponse(data);
+        } catch (Exception e) {
+            log.error("getSandboxIdByUserCode error", e);
+            return ResponseUtil.successResponse(Collections.emptyList());
         }
-        return ResponseUtil.successResponse(data);
     }
 
     /**
@@ -359,11 +365,11 @@ public class SandboxController {
     /**
      * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱规格
      *
-     * @param params 请求参数，userCode 必填，serviceKey 可选
+     * @param params 请求参数，userCode 必填，serviceKey、autoRelease 可选
      * @return ResponseUtil
      */
     @PostMapping("/launchByUserCode")
-    @Operation(summary = "按工号启动沙箱", description = "按工号为指定用户启动沙箱，可选传入 serviceKey 覆盖默认沙箱规格")
+    @Operation(summary = "按工号启动沙箱", description = "按工号启动沙箱；serviceKey 可选；autoRelease 为 0/1，仅对新建独占沙箱生效，不传沿用默认策略")
     @ApiResponses({
         @ApiResponse(responseCode = "0", description = "启动成功"),
         @ApiResponse(responseCode = "-1", description = "启动失败，参数缺失或规格不存在")
@@ -381,10 +387,21 @@ public class SandboxController {
             serviceKey = null;
         }
 
+        Object autoReleaseObj = params.get("autoRelease");
+        Integer autoRelease = null;
+        if (autoReleaseObj != null) {
+            String value = autoReleaseObj.toString();
+            if (!"0".equals(value) && !"1".equals(value)) {
+                return ResponseUtil.fail("autoRelease must be 0 or 1");
+            }
+            autoRelease = Integer.valueOf(value);
+        }
+
         try {
             String finalServiceKey = serviceKey;
+            Integer finalAutoRelease = autoRelease;
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
-                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
+                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease));
 
             // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
             // 未对登录开放的规格（enabled=0，例如工具沙箱）只是被按需启动，不是用户的选择，不写入首选。
@@ -478,10 +495,16 @@ public class SandboxController {
         query.put("offset", (pageIndex - 1) * pageSize);
         query.put("pageSize", pageSize);
         query.put("sandboxIds", sandboxIds);
-        List<SandboxRecordView> list = sandboxIds.isEmpty() ? new java.util.ArrayList<>() :
-            sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
-                // Display the live runtime state; this projection never updates the persisted lifecycle record.
-                record.setStatus(inventory.get(record.getSandboxId()));
+        query.put("status", requestedStatus);
+        List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
+                // Display the live runtime state when the engine still has the instance.
+                // This projection never updates the persisted lifecycle record.
+                // Map.of() rejects a null key. Persisted rows can have no sandbox id.
+                String sandboxId = record.getSandboxId();
+                String liveStatus = sandboxId == null ? null : inventory.get(sandboxId);
+                if (liveStatus != null) {
+                    record.setStatus(liveStatus);
+                }
                 SandboxRecordView view = sandboxService.buildRecordView(record);
                 if (view != null) {
                     view.setStatus(record.getStatus());
@@ -511,7 +534,7 @@ public class SandboxController {
             }
             record.setEndpoint(SandboxEndpointRecordSupport.toStorageValue(endpoints, record.getEndpoint()));
         });
-        int total = sandboxIds.isEmpty() ? 0 : sandboxRecordMapper.countInventory(query);
+        int total = sandboxRecordMapper.countInventory(query);
         int totalPage = (total + pageSize - 1) / pageSize;
 
         Map<String, Object> result = new HashMap<>();
@@ -1010,6 +1033,17 @@ public class SandboxController {
      * @param userCode 用户工号
      * @return 首选 serviceKey，未配置时 data 为 null
      */
+    @GetMapping("/browserServiceKey")
+    @Operation(summary = "查询承载当前用户浏览器的沙箱 serviceKey",
+        description = "常驻 DSH 宿主上的用户，浏览器（远程桌面、byCLI）在其工具沙箱里；其他用户返回空，由调用方沿用默认沙箱")
+    public ResponseUtil getBrowserServiceKey() {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
+        }
+        return ResponseUtil.successResponse(sandboxService.browserServiceKey(userCode.trim()));
+    }
+
     @GetMapping("/preferredServiceKey")
     @Operation(summary = "查询用户首选沙箱 serviceKey", description = "查询 Redis 中缓存的用户首选沙箱 serviceKey")
     public ResponseUtil getPreferredServiceKey(@RequestParam("userCode") String userCode) {

@@ -48,6 +48,9 @@ public class GatewayStreamEventProcessor {
     @Autowired
     private RunningChatSnapshotService runningChatSnapshotService;
 
+    @Autowired
+    private TargetAgentResolver targetAgentResolver;
+
     @Autowired(required = false)
     private ModelErrorPresentationService modelErrorPresentationService = new ModelErrorPresentationService();
 
@@ -116,6 +119,8 @@ public class GatewayStreamEventProcessor {
         if (FinalAnswerContent.isFinalEvent(dataJson.getString("event_type"))) {
             JSONObject finalPayload = new JSONObject();
             finalPayload.put("final_content", FinalAnswerContent.extract(dataJson));
+            JSONObject diagnostics = ChatReplyLog.envelope(dataJson);
+            if (diagnostics != null) finalPayload.put("chatChain", diagnostics);
             return finalPayload.toJSONString();
         }
         String eventData = dataJson.getString("data");
@@ -131,6 +136,7 @@ public class GatewayStreamEventProcessor {
             eventPayload.remove("stream_id");
             eventPayload.put("sessionId", sessionId);
             eventPayload.put("streamId", streamId);
+            eventPayload.put("runtimeType", targetAgentResolver.resolveRuntimeType(sourceAgentType));
             if (clientMetadata != null && !clientMetadata.isEmpty()) {
                 eventPayload.put("metadata", clientMetadata.toJSONString());
             }
@@ -142,6 +148,7 @@ public class GatewayStreamEventProcessor {
             if (dataObj != null) {
                 applyModelErrorPresentation(dataObj, metadata);
                 dataObj.put("sourceAgentType", sourceAgentType);
+                dataObj.put("runtimeType", targetAgentResolver.resolveRuntimeType(sourceAgentType));
                 dataObj.put("sessionId", sessionId);
                 dataObj.put("traceId", traceId);
                 dataObj.put("streamId", streamId);

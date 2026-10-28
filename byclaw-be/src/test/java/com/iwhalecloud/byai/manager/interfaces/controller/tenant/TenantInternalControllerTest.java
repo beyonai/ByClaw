@@ -46,7 +46,11 @@ class TenantInternalControllerTest {
         converters.add(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(
             configuration.jacksonObjectMapper(new org.springframework.http.converter.json.Jackson2ObjectMapperBuilder())));
         configuration.extendMessageConverters(converters);
-        mvc = MockMvcBuilders.standaloneSetup(new TenantInternalController(commands, store, null, enterprises, null, null, new ObjectMapper()), new LegacyConverterProbe())
+        var controller=new TenantInternalController(commands, store, null, enterprises, null, null, new ObjectMapper());
+        var recovery=org.mockito.Mockito.mock(TenantCommandRecovery.class);
+        org.mockito.Mockito.when(recovery.inspect(10)).thenReturn(java.util.Map.of("decision","MANUAL_REQUIRED"));
+        org.springframework.test.util.ReflectionTestUtils.setField(controller,"recoveries",recovery);
+        mvc = MockMvcBuilders.standaloneSetup(controller, new LegacyConverterProbe())
             .setControllerAdvice(new TenantInternalExceptionHandler())
             .setMessageConverters(converters.toArray(new org.springframework.http.converter.HttpMessageConverter<?>[0])).build();
     }
@@ -116,4 +120,16 @@ class TenantInternalControllerTest {
             .andExpect(status().isForbidden()).andExpect(jsonPath("$.errorCode").value("SERVICE_SCOPE_DENIED"));
         org.junit.jupiter.api.Assertions.assertEquals(1, reads);
     }
+    @Test void recoveryRequiresServiceSourceTenantAndWriteScope() throws Exception {
+        mvc.perform(get("/internal/v1/commands/10/recovery")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/internal/v1/commands/10/recovery").requestAttr(InternalServicePrincipal.ATTRIBUTE,principal))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.decision").value("MANUAL_REQUIRED"));
+        var wrongSource=new InternalServicePrincipal("client","OTHER",Set.of("tenant:read"),Set.of("42"),false);
+        mvc.perform(get("/internal/v1/commands/10/recovery").requestAttr(InternalServicePrincipal.ATTRIBUTE,wrongSource)).andExpect(status().isForbidden());
+        var wrongTenant=new InternalServicePrincipal("client","HACU",Set.of("tenant:read"),Set.of("99"),false);
+        mvc.perform(get("/internal/v1/commands/10/recovery").requestAttr(InternalServicePrincipal.ATTRIBUTE,wrongTenant)).andExpect(status().isForbidden());
+        mvc.perform(post("/internal/v1/commands/10/recoveries").contentType("application/json").content("{}")
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE,principal)).andExpect(status().isForbidden());
+    }
+
 }

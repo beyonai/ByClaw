@@ -1,0 +1,21 @@
+# The ByClaw adapter owns statistics policy; never run the eager stock recorder alongside it.
+- id: workspace-changes
+  disabled: true
+
+# Presets eagerly mount their own plugins. Wait for the registry policy first.
+- id: preset-standard
+  inject: [byclawWorkspacePresets]
+- id: preset-ptc
+  inject: [byclawWorkspacePresets]
+- id: preset-cordis
+  inject: [byclawWorkspacePresets]
+- id: preset-minimal
+  inject: [byclawWorkspacePresets]
+
+- insert:
+    - id: byclaw-workspace
+      name: '@byclaw/dsh-workspace'
+      config:
+        automaticDiscoveryEnabled: !!js "process.env.BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED === '1'"
+        changesEnabled: !!js "process.env.BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED === '1'"
+        gitEnabled: !!js "process.env.BYCLAW_DSH_WORKSPACE_GIT_ENABLED === '1'"

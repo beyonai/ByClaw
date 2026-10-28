@@ -68,6 +68,19 @@ public class TenantNodeSchemaService {
         return count != null && count > 0;
     }
 
+    /** Recovery only acknowledges the original request's verified target; it never creates a replacement audit. */
+    public boolean verifiedRecoveryAudit(long enterpriseId, String requestId, long dbRecordId) {
+        String version;
+        try { version=metadata(readBundle()).version(); }
+        catch (IOException failure) { throw new IllegalStateException("cannot read tenant baseline bundle",failure); }
+        Integer count=jdbc.queryForObject("SELECT count(*) FROM byai.tenant_schema_audit "
+            + "WHERE enterprise_id=? AND request_id=? AND db_sandbox_record_id=? AND generation=1 "
+            + "AND operation_type='INIT' AND trigger_type='AUTO_PROVISION' AND is_current=TRUE "
+            + "AND status='VERIFIED' AND observed_version=? AND target_version=?",
+            Integer.class,enterpriseId,requestId,dbRecordId,version,version);
+        return count!=null && count==1;
+    }
+
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId) throws Exception {
         initialize(enterpriseId, generation, dbRecordId, node, requestId, 1L);

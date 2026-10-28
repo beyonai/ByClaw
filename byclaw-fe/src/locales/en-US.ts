@@ -163,6 +163,10 @@ export default {
   'connector.connectKnowledge': 'Connect {name} as an AI knowledge base',
   'connector.getCredentials': 'Get credentials from {name}',
   'sandbox.userResources': 'User resources',
+  'tenant.status.MANUAL_REQUIRED': 'Manual action required',
+  'tenant.progress.paused': 'Paused',
+  'tenant.progress.manualRequired':
+    'Provisioning is paused. A platform administrator must verify the original request and resources before recovery.',
   'tenant.status.RESERVED': 'Not provisioned',
   'tenant.status.PROVISIONING': 'Provisioning',
   'tenant.status.READY': 'Ready',
@@ -646,6 +650,7 @@ export default {
   'common.import': 'Import',
   'common.localFile': 'Local File',
   'common.remoteComputer': 'Remote Computer',
+  'common.remoteComputerUnavailable': "The remote desktop is not available: the assistant's browser is not open",
   'common.curlImport': 'Curl Import',
   'common.pasteCurlCommand': 'Please paste Curl command',
   'common.curlImportHint':

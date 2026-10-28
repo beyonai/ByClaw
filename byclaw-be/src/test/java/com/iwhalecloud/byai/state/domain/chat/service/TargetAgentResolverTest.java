@@ -197,10 +197,17 @@ class TargetAgentResolverTest {
         org.mockito.Mockito.lenient().when(client.call(org.mockito.ArgumentMatchers.eq("lookup"),
             org.mockito.ArgumentMatchers.anyMap())).thenReturn(java.util.Map.of("code", 0, "data",
                 java.util.Map.of("workerAgentType", "BYCLAW_DSH_SHARED_old_1")));
+        when(client.call(org.mockito.ArgumentMatchers.eq("releaseAll"), org.mockito.ArgumentMatchers.anyMap()))
+            .thenReturn(java.util.Map.of("code", 0, "data", 1));
 
         assertThat(targetAgentResolver.resolveAgentType("HARNESS", 1L, "BYCLAW_DSH_SHARED_old_1", "user001"))
             .isEqualTo("BYCLAW_DSH_user001");
-        org.mockito.Mockito.verifyNoInteractions(client, users);
+        org.mockito.Mockito.verify(client).call(org.mockito.ArgumentMatchers.eq("releaseAll"),
+            org.mockito.ArgumentMatchers.argThat(p -> "eligibility.revoked".equals(p.get("reason"))));
+        when(client.call(org.mockito.ArgumentMatchers.eq("releaseAll"), org.mockito.ArgumentMatchers.anyMap()))
+            .thenReturn(java.util.Map.of("code", -1, "msg", "stop unconfirmed"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> targetAgentResolver.resolveAgentType(
+            "HARNESS", 1L, "BYCLAW_DSH_SHARED_old_1", "user001")).hasMessageContaining("stop unconfirmed");
     }
 
 }

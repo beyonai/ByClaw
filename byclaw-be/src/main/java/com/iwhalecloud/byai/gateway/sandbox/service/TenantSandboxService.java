@@ -42,6 +42,9 @@ public class TenantSandboxService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper tenantPolicyConfigs;
 
+    @Value("${file.storage.type:minio}")
+    private String recoveryStorageType = "minio";
+
     private static final Logger LOG = LoggerFactory.getLogger(TenantSandboxService.class);
 
     private static final String DB_TYPE = "tenant-opengauss";
@@ -423,6 +426,65 @@ public class TenantSandboxService {
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
     }
 
+    /** Only a complete provider inventory and exact ownership can authorize command recovery. */
+    public RecoveryResource inspectRecovery(long enterpriseId, String step, String providerRequestKey) {
+        if ("whale-agent".equalsIgnoreCase(recoveryStorageType)) return new RecoveryResource("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", null, null);
+        String type = "DB_CREATE".equals(step) ? DB_TYPE : NODE_TYPE;
+        List<SandboxDetail> resources;
+        try {
+            // Query by enterprise alone so wrong type/owner/key resources cannot disappear behind an over-specific filter.
+            resources = openSandboxClient.recoveryInventory(Map.of("enterpriseId", Long.toString(enterpriseId)));
+        } catch (RuntimeException failure) {
+            String code = failure.getMessage();
+            return new RecoveryResource(code != null && Set.of("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", "PROVIDER_QUERY_DISABLED",
+                "PROVIDER_QUERY_INVALID", "PROVIDER_QUERY_FAILED", "PROVIDER_QUERY_INCOMPLETE", "PROVIDER_QUERY_UNSTABLE").contains(code)
+                ? code : "PROVIDER_QUERY_FAILED", null, null);
+        }
+        List<SandboxDetail> candidates = new java.util.ArrayList<>();
+        for (SandboxDetail resource : resources) {
+            var metadata = resource.getMetadata();
+            if (metadata == null || !Long.toString(enterpriseId).equals(metadata.get("enterpriseId"))
+                || !"TENANT".equals(metadata.get("ownerScope")) || !Set.of(DB_TYPE, NODE_TYPE).contains(metadata.get("serviceKey"))) {
+                return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+            }
+            if (type.equals(metadata.get("serviceKey"))) candidates.add(resource);
+        }
+        SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, type);
+        if (candidates.isEmpty()) {
+            // A durable provider identifier with a now-missing resource needs investigation, not replacement.
+            if (active != null && active.getSandboxId() != null) return new RecoveryResource("RECORDED_RESOURCE_MISSING", null, null);
+            return new RecoveryResource("ABSENT", null, active);
+        }
+        if (candidates.size() != 1) return new RecoveryResource("MULTIPLE_PROVIDER_RESOURCES", null, null);
+        SandboxDetail candidate = candidates.getFirst();
+        if (!providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))) {
+            return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+        }
+        if (active == null || !"TENANT".equals(active.getOwnerScope()) || !Long.valueOf(enterpriseId).equals(active.getEnterpriseId())
+            || !Long.valueOf(enterpriseId).equals(active.getResourceId()) || !type.equals(active.getSandboxType())
+            || !type.equals(active.getServiceType()) || !candidate.getId().equals(active.getSandboxId())
+            || !Long.toString(active.getId()).equals(candidate.getMetadata().get("recordId"))
+            || active.getLockVersion() == null || !"RUNNING".equals(active.getStatus()) || active.getEndpoint() == null || active.getEndpoint().isBlank()
+            || (DB_TYPE.equals(type) && !active.getEndpoint().startsWith("tcp://"))) {
+            return new RecoveryResource("RESOURCE_CONNECTION_DATA_UNAVAILABLE", null, null);
+        }
+        if (candidate.getStatus() == null || !"Running".equalsIgnoreCase(candidate.getStatus().getState())) {
+            return new RecoveryResource("RESOURCE_NOT_RUNNING", null, null);
+        }
+        return new RecoveryResource("MATCHED", new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint()), active);
+    }
+
+    /** Retire only the exact unbound local intent inspected before the command CAS. */
+    public void retireUnboundRecoveryRecord(RecoveryResource resource) {
+        SsSandboxRecord record = resource.observedRecord();
+        if (record != null && recordMapper.updateStatusToFailed(record.getId(), "command recovery confirmed provider absence",
+            new Date(), record.getLockVersion()) != 1) {
+            throw new com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException(409, "RECOVERY_RESOURCE_CHANGED");
+        }
+    }
+
+    public record RecoveryResource(String reasonCode, TenantSandboxView adopted, SsSandboxRecord observedRecord) { }
+
     private static void validateProviderRequestKey(String providerRequestKey) {
         if (providerRequestKey != null && !providerRequestKey.matches("[A-Za-z0-9_.:-]{1,128}")) {
             throw new IllegalArgumentException("invalid provider request key");
@@ -447,6 +509,18 @@ public class TenantSandboxService {
     }
 
     private void prepareEntrypoint(long enterpriseId) {
+        try {
+            prepareEntrypointFiles(enterpriseId);
+        } catch (RuntimeException failure) {
+            // This boundary finishes before any provider call, so the durable code is positive non-creation evidence.
+            var classified = new com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException(
+                409, "PROVIDER_NOT_CALLED_FILE_PREPARATION");
+            classified.initCause(failure);
+            throw classified;
+        }
+    }
+
+    private void prepareEntrypointFiles(long enterpriseId) {
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenantDirectory = root.resolve("tenants").resolve(Long.toString(enterpriseId)).resolve("opengauss");
         Path target = tenantDirectory.resolve("byclaw-tenant-entrypoint.py");
@@ -474,7 +548,7 @@ public class TenantSandboxService {
                 Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        catch (IOException e) {
+        catch (IOException | RuntimeException e) {
             throw new IllegalStateException("tenant OpenGauss startup script could not be prepared", e);
         }
     }

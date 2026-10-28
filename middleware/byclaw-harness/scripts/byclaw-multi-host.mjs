@@ -37,6 +37,8 @@
  *   BYCLAW_MULTI_HOST_ID           host id written into Redis claims (default: hostname).
  *   BYCLAW_MULTI_HOST_ROOT         state root; user homes are <root>/users/<userCode>/dsh-home (default /data/multi-host).
  *   BYCLAW_MULTI_HOST_USERS        optional comma list booted at startup (sandboxId `multi-host-<userCode>`).
+ *   BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY  simultaneous context boots per process (positive integer; default 1).
+ *   BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY  waiting boots per process (nonnegative integer; default 128; overflow 429).
  *   BYCLAW_MULTI_HOST_PUBLIC_URL   optional browser-facing root of this gateway (e.g. https://app.example/dsh/);
  *                                  sets each context's web-runtime `publicUrl` to <root>u/<userCode>/ and the
  *                                  cookie Path to that URL's path. Default: gateway at `/`, publicUrl http://127.0.0.1/.
@@ -50,7 +52,8 @@
  *                                  the PUT `env` carries; the other BYCLAW_TOOL_ENV_* settings of the byclaw-be
  *                                  backend (SERVICE_KEY, SSH_INSTANCE, HOST_TEMPLATE, SYSTEM_CODE,
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
- *                                  plugin's cordis.patch.yml.
+ *                                  plugin's cordis.patch.yml. A PUT `env` BYCLAW_TOOL_ENV_SERVICE_KEY overrides
+ *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
@@ -64,7 +67,7 @@
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
-import { ManagedUserRegistry } from './byclaw-managed-host.mjs'
+import { ManagedUserRegistry, limitContextStartup, startupDiagnostics } from './byclaw-managed-host.mjs'
 export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -134,6 +137,7 @@ export const USER_ROW_OVERLAYS = {
   }),
   'agent-teams': (user, home) => ({ dshHome: home, workspaceOnToolEnvironment: true, workspace: '/by' }),
   'better-sidebar': () => ({ workspaceOnToolEnvironment: true }),
+  'iron-rules': () => ({ workspaceOnToolEnvironment: true }),
   'byclaw-browser-use': (user, home) => ({
     ownsRuntime: true,
     // Managed context IDs are long; keep sockets outside the context directory.
@@ -161,11 +165,18 @@ export const USER_ROW_OVERLAYS = {
     workspace: '/by',
     idleMs: spec.toolEnvIdleMs,
     port: 22,
+    // What the user's own sandbox would have started with (BE renders it from the harness spec for every PUT).
+    launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
-      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user) } }
+      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
+}
+
+/** The PUT `env` may pick this user's tool sandbox spec; otherwise the host's BYCLAW_TOOL_ENV_SERVICE_KEY applies. */
+export function toolEnvServiceKey(spec) {
+  return spec.env?.BYCLAW_TOOL_ENV_SERVICE_KEY?.trim() || spec.toolEnvBe.serviceKey
 }
 
 /** The user's BE token from the PUT `env`; the byclaw-be backend cannot create B without it. */
@@ -196,6 +207,27 @@ export async function currentUserToken(redis, user) {
   if (userId === '') return undefined
   const token = String(await redis.hget(`user:${userId}:login:auth`, 'Beyond-Token') ?? '').trim()
   return token === '' ? undefined : token
+}
+
+/** The launch environment processes on B get: the PUT `env` with the user identity on top, as in {@link launchEnvironmentValues}. */
+function toolLaunchEnvironment(env, user) {
+  return { ...env, USER_CODE: user }
+}
+
+/**
+ * Give a running context the launch environment of a later PUT: processes it
+ * starts on B from then on get it under their own (see dsh-tool-env).
+ * @param ctx - the context's root (anything with `get(name)`).
+ * @param env - PUT `env`.
+ * @param user - the user the context runs as, which `env` cannot override.
+ * @returns whether an environment was handed over.
+ */
+export function renewLaunchEnvironment(ctx, env, user) {
+  if (env === undefined || env === null || Object.keys(env).length === 0) return false
+  const toolEnv = ctx.get('ssh')
+  if (typeof toolEnv?.setLaunchEnvironment !== 'function') return false
+  toolEnv.setLaunchEnvironment(toolLaunchEnvironment(env, user))
+  return true
 }
 
 export function renewUserToken(ctx, config, env) {
@@ -248,11 +280,9 @@ export const DISABLED_BY_DESIGN = [
  * per-user config, and wire that config in USER_ROW_OVERLAYS.
  */
 export const DISABLED_UNTIL_MULTI_USER = [
-  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead.
+  // The bundle's MCP row spawns codegraph on this host; dsh-codegraph runs it on B instead
+  // (a server only while calls arrive, so B still pauses when idle).
   { id: 'codegraph-mcp', reason: 'replaced by dsh-codegraph on the tool environment' },
-  // Its MCP server stream stays open for the context's lifetime, which would keep
-  // B from ever idling into a pause. Enable once that stream is lease-aware.
-  { package: '@byclaw/dsh-codegraph', reason: 'would pin the tool environment awake' },
   // DSH's own terminal panel spawns a host PTY; better-sidebar's terminal runs on B.
   { package: '@deepseek-ai/dsh-client-ui-sidebar-terminal', reason: 'host PTY instead of the tool environment' },
 ]
@@ -356,6 +386,10 @@ export function readHostConfig(env) {
   const port = Number(env.BYCLAW_MULTI_HOST_PORT || 7300)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`BYCLAW_MULTI_HOST_PORT ${env.BYCLAW_MULTI_HOST_PORT} is invalid`)
   const managed = env.BYCLAW_MULTI_HOST_MANAGED === '1'
+  const startupConcurrency = Number(env.BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY ?? 1)
+  if (!Number.isSafeInteger(startupConcurrency) || startupConcurrency < 1) throw new Error('BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY must be a positive integer')
+  const startupQueueCapacity = Number(env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY ?? 128)
+  if (!Number.isSafeInteger(startupQueueCapacity) || startupQueueCapacity < 0 || env.BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY?.trim() === '') throw new Error('BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY must be a nonnegative integer')
   const capacity = Number(env.BYCLAW_MULTI_HOST_CAPACITY)
   if (managed && !/^[0-9a-f-]{36}$/i.test(env.BYCLAW_MULTI_HOST_ID ?? '')) throw new Error('BYCLAW_MULTI_HOST_ID must be a shared instance UUID')
   if (managed && (!Number.isSafeInteger(capacity) || capacity < 1)) throw new Error('BYCLAW_MULTI_HOST_CAPACITY must be positive')
@@ -380,7 +414,7 @@ export function readHostConfig(env) {
     listenHost: env.BYCLAW_MULTI_HOST_LISTEN_HOST || '0.0.0.0',
     hostId: env.BYCLAW_MULTI_HOST_ID || hostname(),
     root: env.BYCLAW_MULTI_HOST_ROOT ?? '/data/multi-host',
-    managed, capacity,
+    managed, capacity, startupConcurrency, startupQueueCapacity,
     preloadUsers: managed ? [] : preloadUsers,
     publicBase,
     basePath: publicBase?.pathname ?? '/',
@@ -652,8 +686,8 @@ export class UserRegistry {
   #scope = new AsyncLocalStorage()
   #closing = false
 
-  constructor({ boot, claim = async () => {}, release = async () => {}, log = () => {}, createToken = () => randomBytes(32).toString('base64url'), disposeTimeoutMs = DISPOSE_TIMEOUT_MS }) {
-    this.boot = boot
+  constructor({ boot, startupConcurrency = 1, startupQueueCapacity = 128, claim = async () => {}, release = async () => {}, log = () => {}, createToken = () => randomBytes(32).toString('base64url'), disposeTimeoutMs = DISPOSE_TIMEOUT_MS }) {
+    this.boot = limitContextStartup(boot, startupConcurrency, { queueCapacity: startupQueueCapacity, log })
     this.claim = claim
     this.release = release
     this.log = log
@@ -667,7 +701,7 @@ export class UserRegistry {
   describe(user) {
     const entry = this.#entries.get(user)
     if (entry === undefined) return { userCode: user, status: 'absent' }
-    return { userCode: user, status: entry.status, ...entry.error === undefined ? {} : { error: entry.error } }
+    return { userCode: user, status: entry.status, ...startupDiagnostics(entry.hooks), ...entry.error === undefined ? {} : { error: entry.error } }
   }
 
   /** The web token of a running context, for callers that only read (GET) and never boot. */
@@ -711,6 +745,7 @@ export class UserRegistry {
       return current.ready
     }
     const entry = { user, status: 'starting', request, webToken: this.createToken(), hooks: {}, startedAt: Date.now() }
+    entry.hooks.admission = { allowed: () => entry.status !== 'failed' && entry.removal === undefined }
     entry.ready = this.#start(entry)
     // Callers observe failures through their own await; this keeps a dropped
     // ensure (e.g. a preload) from surfacing as an unhandled rejection.
@@ -779,6 +814,7 @@ export class UserRegistry {
   markFailed(entry, error) {
     if (this.#entries.get(entry.user) !== entry || entry.status === 'failed' || entry.removal !== undefined) return false
     entry.status = 'failed'
+    entry.hooks.cancelStartup?.()
     entry.error = errorMessage(error)
     this.log(`user ${entry.user} failed:`, inspect(error, { depth: 4 }))
     void this.#dispose(entry)
@@ -818,6 +854,7 @@ export class UserRegistry {
       return this.release(user).catch(error => this.log(`release ${user} failed:`, errorMessage(error)))
     }
     entry.removal ??= (async () => {
+      entry.hooks.cancelStartup?.()
       await entry.ready.catch(() => {})
       await this.#dispose(entry)
       await this.release(user).catch(error => this.log(`release ${user} failed:`, errorMessage(error)))
@@ -932,7 +969,7 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
       const entry = await registry.ensure(user, request)
       return sendJson(res, 200, { userCode: user, status: 'ready', hostId, webPath: webPrefix(user, basePath), webToken: entry.webToken })
     } catch (error) {
-      return sendJson(res, 503, { userCode: user, status: 'failed', hostId, error: errorMessage(error) })
+      return sendJson(res, error.status ?? 503, { userCode: user, status: 'failed', hostId, error: errorMessage(error) })
     }
   }
 
@@ -1122,10 +1159,29 @@ export function managedRuntimeActivity(ctx) {
 }
 
 /**
+ * Read one user-owned configuration snapshot, then append the host's identity
+ * overlays. Re-reading every bundle/home patch for boot both repeats work and
+ * lets the overlay calculation and the actual boot see different revisions.
+ */
+export function prepareUserProfile(runtime, base, profile, user, spec) {
+  const patches = runtime.readProfilePatches(BIN, base, profile)
+  const entries = runtime.composeEntries([patches])
+  const overlays = composeUserOverlays(entries, user, base.home, spec)
+  return { profileContext: { ...base, overlays }, patches: [...patches, ...overlays] }
+}
+
+/**
  * Boot one user's DSH context; resolves to a registry handle.
  * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
  */
 async function bootUserContext(config, user, request, hooks, tokenSource) {
+  const started = performance.now()
+  let previous = started
+  const phase = name => {
+    const now = performance.now()
+    log(`context ${user} boot phase=${name}; phaseMs=${Math.round(now - previous)}; elapsedMs=${Math.round(now - started)}`)
+    previous = now
+  }
   const {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = await import('@deepseek-ai/dsh-app-boot')
@@ -1139,9 +1195,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   await ensureLink(join(config.managedProfile, 'node_modules'), join(dir, 'node_modules'))
   await writeFile(join(dir, 'cordis.yml'), '[]\n')
   await writeFile(join(dir, 'cordis.patch.yml'), '[]\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error })
+  phase('directories-ready')
 
   const profile = loadProfileDirectory(BIN, dir, config.installAnchor)
   const resolution = await createRuntimeResolution({ installAnchor: config.installAnchor, profile })
+  phase('resolution-ready')
   const base = {
     name: 'web', dir, patchPath: profile.patchPath ?? join(dir, 'cordis.patch.yml'), installAnchor: config.installAnchor,
     startedBundles: profile.layers.map(layer => layer.packageName),
@@ -1157,13 +1215,12 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     toolEnvIdleMs: config.toolEnvIdleMs,
     publicUrl: userPublicUrl(config.publicBase, user),
   }
-  const entries = composeEntries([readProfilePatches(BIN, base, profile)])
-  const profileContext = { ...base, overlays: composeUserOverlays(entries, user, home, spec) }
+  const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
   const environment = createLaunchEnvironmentSnapshot([
     { source: 'process', values: launchEnvironmentValues(process.env, request.env, request.managed ? request.userCode : user, request.managed) },
   ])
-  const started = Date.now()
-  const ctx = await boot(BIN, join(dir, 'cordis.yml'), readProfilePatches(BIN, profileContext, profile), async (hostCtx) => {
+  phase('overlays-ready')
+  const ctx = await boot(BIN, join(dir, 'cordis.yml'), patches, async (hostCtx) => {
     if (request.managed) hostCtx.provide('byclawManagedAdmission', hooks.admission)
     hooks.isPluginFailure = reason => isLoaderFailure(hostCtx, reason)
     hostCtx.dshHomePath = (...parts) => join(home, ...parts)
@@ -1177,6 +1234,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
     await hostCtx.plugin(PluginPackages, { resolution })
   })
+  phase('plugins-ready')
   const handle = {
     get port() { return ctx.get('webServer')?.port },
     auth: createUpstreamAuth({
@@ -1189,11 +1247,16 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     }),
     activity: () => managedRuntimeActivity(ctx),
     stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
+    forceStop: async () => {
+      const runtime = ctx.get('byclawManagedRuntime')
+      if (typeof runtime?.stopExecution !== 'function') throw new Error('forced context stop is not supported')
+      await runtime.stopExecution()
+    },
     dispose: () => ctx.fiber.dispose(),
     // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
     // using the one from boot otherwise, which expires long before a resident
     // context goes away (then every launch of B is a 401).
-    renew: request => { renewUserToken(ctx, config, request.env) },
+    renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
   }
   if (request.managed) {
     const deadline = Date.now() + 60_000
@@ -1204,7 +1267,8 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     await ctx.fiber.dispose()
     throw new Error('context booted without a web listener')
   }
-  log(`user ${user} ready in ${String(Date.now() - started)} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
+  phase('worker-ready')
+  log(`user ${user} ready in ${String(Math.round(performance.now() - started))} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
   return handle
 }
 
@@ -1243,7 +1307,7 @@ async function main() {
   const managedClaims = config.managed ? createManagedClaims(redis, config.hostId) : undefined
   const Registry = config.managed ? ManagedUserRegistry : UserRegistry
   const registry = new Registry({
-    root: config.root, hostId: config.hostId, capacity: config.capacity,
+    root: config.root, hostId: config.hostId, capacity: config.capacity, startupConcurrency: config.startupConcurrency, startupQueueCapacity: config.startupQueueCapacity,
     boot: (user, request, hooks) => bootUserContext(config, user, request, hooks, { current: () => currentUserToken(redis, user) }),
     claim: managedClaims?.claim ?? (user => redis.set(sharedHostKey(user), config.hostId, 'EX', SHARED_HOST_TTL_SECONDS)),
     release: managedClaims?.release ?? (user => redis.eval(RELEASE_SCRIPT, 1, sharedHostKey(user), config.hostId)),

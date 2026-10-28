@@ -3,10 +3,10 @@ import http from 'node:http'
 import net from 'node:net'
 import test from 'node:test'
 import {
-  webStartupValues,
+  webStartupValues, prepareUserProfile,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewLaunchEnvironment, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
@@ -18,6 +18,23 @@ const beSpec = {
   ...spec, toolEnvBackend: 'byclaw-be',
   toolEnvBe: { baseUrl: 'http://be:8086/byaiService', systemCode: '', serviceKey: 'byclaw-dsh-tools5', sshInstance: 'ssh', hostTemplate: '', publishKeys: true, readyTimeoutMs: 180000, requestTimeoutMs: 180000 },
 }
+
+test('user boot uses one patch snapshot and isolates identity overlays between contexts', () => {
+  let reads = 0
+  const source = [{ insert: [{ id: 'storage-json', name: 'storage', config: { root: '/old', keep: true } }] }]
+  const runtime = {
+    readProfilePatches: () => { reads++; return structuredClone(source) },
+    composeEntries: ([patches]) => patches[0].insert,
+  }
+  const first = prepareUserProfile(runtime, { home: '/alice' }, {}, 'alice', spec)
+  const second = prepareUserProfile(runtime, { home: '/bob' }, {}, 'bob', spec)
+  assert.equal(reads, 2, 'each boot reads its user patches exactly once')
+  assert.deepEqual(first.patches.at(-1).config, { root: '/alice/storages', keep: true })
+  assert.deepEqual(second.patches.at(-1).config, { root: '/bob/storages', keep: true })
+  first.patches[0].insert[0].config.keep = false
+  assert.equal(second.patches[0].insert[0].config.keep, true)
+  assert.equal(source[0].insert[0].config.root, '/old')
+})
 
 // --- overlays ---------------------------------------------------------------
 
@@ -49,8 +66,26 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-tool-env'].config.alias, 'byclaw-tool-env-u1')
   assert.equal(byId['byclaw-tool-env'].config.backend, 'opensandbox')
   assert.equal(byId['byclaw-tool-env'].config.byclawBe, undefined)
+  // Processes on B get the environment the user's own sandbox would have had (the PUT env).
+  // The identity is the context's user, whatever the PUT env says, as in the runtime's own launch layer.
+  assert.deepEqual(byId['byclaw-tool-env'].config.launchEnv, { ...spec.env, USER_CODE: 'u1' })
+  const spoofed = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, env: { USER_CODE: 'evil', A: 'b' } })
+  assert.deepEqual(spoofed.find(row => row.id === 'byclaw-tool-env').config.launchEnv, { USER_CODE: 'u1', A: 'b' })
+  // The launch environment goes to B; the host's own environment still reaches commands only through the allowlist.
+  const bash = composeUserOverlays([{ id: 'byclaw-bash-provider', name: '@byclaw/dsh-bash-provider' }], 'u1', '/r/users/u1/dsh-home', spec)[0]
+  assert.deepEqual(bash.config.forwardHostEnvironment, { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] })
   // Rows missing from the composition produce no overlay.
   assert.equal(byId['byclaw-dsh'], undefined)
+})
+
+test('every plugin that reads or writes the user tree does so in the tool environment', () => {
+  // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
+  const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
+    'devflow', 'devflow-tool', 'devflow-artifact-gate', 'devflow-agent-gate', 'devflow-worktree', 'devflow-command',
+    'devflow-spec', 'devflow-spec-sentinel', 'devflow-iron-rules', 'dsh-codegraph']
+  const entries = rows.map(id => ({ id, name: `x-${id}`, config: {} }))
+  const overlays = Object.fromEntries(composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', spec).map(row => [row.id, row.config]))
+  for (const id of rows) assert.equal(overlays[id]?.workspaceOnToolEnvironment, true, id)
 })
 
 test('byclaw-be tool environments get the host settings plus the user and the PUT token', () => {
@@ -62,6 +97,11 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
+  // BE picks a user's tool sandbox spec through the PUT env; blank falls back to the host's.
+  const picked = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' byclaw-dsh-unity ' } })
+  assert.equal(picked[0].config.byclawBe.serviceKey, 'byclaw-dsh-unity')
+  const blank = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' ' } })
+  assert.equal(blank[0].config.byclawBe.serviceKey, 'byclaw-dsh-tools5')
   assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)
   assert.equal(toolEnvUserToken({ BEYOND_TOKEN: ' t ' }, 'u1'), 't')
 })
@@ -98,7 +138,8 @@ test('disabled lists match row ids and package prefixes', () => {
   ]
   // Multi-user plugins (browser-use, devflow, ...) load; only the pending ones stay off.
   const disabled = composeUserOverlays(entries, 'u1', '/h', spec).filter(row => row.disabled).map(row => row.id)
-  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'graph', 'hmr', 'lan'])
+  // CodeGraph itself runs on the tool environment (dsh-codegraph); only the row spawning it on this host stays off.
+  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'hmr', 'lan'])
   // Shrinking the pending list re-enables the plugin; by-design entries stay.
   const designOnly = composeUserOverlays(entries, 'u1', '/h', spec, { disabled: [DISABLED_BY_DESIGN] })
   assert.deepEqual(designOnly.filter(row => row.disabled).map(row => row.id).sort(), ['hmr', 'lan'])
@@ -141,6 +182,16 @@ test('host config refuses to start without a token', () => {
   assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_PORT: 'x' }), /PORT/)
   assert.equal(config.toolEnvBackend, 'opensandbox')
   assert.equal(config.toolEnvBe, undefined)
+  assert.equal(config.startupConcurrency, 1)
+  assert.equal(config.startupQueueCapacity, 128)
+  assert.equal(readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY: '0' }).startupQueueCapacity, 0)
+  assert.equal(readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY: '3' }).startupConcurrency, 3)
+  for (const value of ['0', '-1', '1.5', 'NaN', '', '9007199254740992']) {
+    assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_CONCURRENCY: value }), /STARTUP_CONCURRENCY/)
+  }
+  for (const value of ['-1', '1.5', 'NaN', '', '9007199254740992']) {
+    assert.throws(() => readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_STARTUP_QUEUE_CAPACITY: value }), /STARTUP_QUEUE_CAPACITY/)
+  }
 })
 
 test('host config selects the byclaw-be tool-environment backend with the plugin\'s names and defaults', () => {
@@ -309,13 +360,27 @@ test('renewUserToken hands the PUT token to the byclaw-be backend only', () => {
   assert.deepEqual(renewed, ['jwt-9'])
 })
 
+test('renewLaunchEnvironment hands the PUT environment to the tool environment', () => {
+  const seen = []
+  const ctx = { get: name => (name === 'ssh' ? { setLaunchEnvironment: env => seen.push(env) } : undefined) }
+  assert.equal(renewLaunchEnvironment(ctx, { BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'evil' }, 'u1'), true)
+  assert.deepEqual(seen, [{ BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'u1' }])
+  // A PUT without an environment keeps the last one.
+  assert.equal(renewLaunchEnvironment(ctx, undefined, 'u1'), false)
+  assert.equal(renewLaunchEnvironment(ctx, {}, 'u1'), false)
+  assert.equal(renewLaunchEnvironment({ get: () => ({}) }, { A: 'b' }, 'u1'), false)
+  assert.equal(seen.length, 1)
+})
+
 test('a failed boot marks the user failed and the next ensure retries', async () => {
   let attempt = 0
   const registry = new UserRegistry({
     boot: async () => { attempt++; if (attempt === 1) throw new Error('boom'); return fakeHandle('u1', []) },
   })
   await assert.rejects(registry.ensure('u1', { sandboxId: 's', env: {} }), /boom/)
-  assert.deepEqual(registry.describe('u1'), { userCode: 'u1', status: 'failed', error: 'boom' })
+  const { startup, ...description } = registry.describe('u1')
+  assert.deepEqual(description, { userCode: 'u1', status: 'failed', error: 'boom' })
+  assert.equal(startup.phase, 'failed')
   assert.deepEqual(registry.servedUsers(), [])
   const entry = await registry.ensure('u1', { sandboxId: 's', env: {} })
   assert.equal(entry.status, 'ready')
@@ -339,15 +404,62 @@ test('remove disposes one user, releases its claim and leaves others running', a
 
 test('remove during boot waits, then disposes the late handle', async () => {
   const gate = deferred()
+  const started = deferred()
   const disposed = []
-  const registry = new UserRegistry({ boot: async user => { await gate.promise; return fakeHandle(user, disposed) } })
+  const registry = new UserRegistry({ boot: async user => { started.resolve(); await gate.promise; return fakeHandle(user, disposed) } })
   const ensure = registry.ensure('u1', { sandboxId: 's', env: {} })
+  await started.promise
   const removal = registry.remove('u1')
   gate.resolve()
   await assert.rejects(ensure, /removed while starting/)
   await removal
   assert.deepEqual(disposed, ['u1'])
   assert.equal(registry.describe('u1').status, 'absent')
+})
+
+for (const concurrency of [1, 2, 3]) {
+  test(`startup budget ${concurrency} is independent of resident contexts and returns permits after failure`, async () => {
+    const started = []; const gates = new Map(); const count = concurrency + 2
+    for (let i = 0; i < count; i++) gates.set(`account-${i}`, deferred())
+    const registry = new UserRegistry({ startupConcurrency: concurrency, boot: async user => {
+      started.push(user)
+      await gates.get(user).promise
+      if (user === 'account-0') throw new Error('boot failed')
+      return fakeHandle(user, [])
+    } })
+    const pending = [...gates.keys()].map(user => registry.ensure(user, { sandboxId: `sandbox-${user}`, env: {} }))
+    for (const promise of pending) promise.catch(() => {})
+    try {
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(started.length, concurrency)
+      gates.get('account-0').resolve()
+      await assert.rejects(pending[0], /boot failed/)
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(started.length, concurrency + 1)
+      assert.equal(registry.describe(`account-${concurrency + 1}`).startup.phase, 'queued')
+      assert.ok(registry.servedUsers().includes(`account-${concurrency + 1}`), 'queued claims are renewed')
+    } finally {
+      for (const gate of gates.values()) gate.resolve()
+      await Promise.allSettled(pending)
+    }
+    assert.deepEqual(started, [...gates.keys()])
+    assert.equal(registry.describe(`account-${count - 1}`).status, 'ready')
+  })
+}
+
+test('removing a queued legacy user does not boot it or block another active context', async () => {
+  const gate = deferred(); const started = deferred(); const boots = []; const released = []
+  const registry = new UserRegistry({ boot: async user => {
+    boots.push(user); started.resolve(); await gate.promise; return fakeHandle(user, [])
+  }, release: async user => { released.push(user) } })
+  const first = registry.ensure('alpha', { sandboxId: 'a', env: {} }); await started.promise
+  const queued = registry.ensure('beta', { sandboxId: 'b', env: {} }); queued.catch(() => {})
+  await new Promise(resolve => setImmediate(resolve))
+  try {
+    await registry.remove('beta')
+    await assert.rejects(queued, /cancel/)
+    assert.deepEqual(boots, ['alpha']); assert.deepEqual(released, ['beta'])
+  } finally { gate.resolve(); await first }
 })
 
 test('a rejection raised from a context scope fails only that user', async () => {
@@ -541,4 +653,47 @@ test('upstream auth re-mints after the context rejects its cookie', async (t) =>
   assert.equal(launches, 2)
   const bad = createUpstreamAuth({ port: () => dshPort, launchUrl: origin => `${origin}?token=wrong` })
   await assert.rejects(bad.cookie(), /answered 401/)
+})
+
+for (const capacity of [0, 2]) {
+  test(`startup queue capacity ${capacity} rejects excess distinct contexts but permits running renewals`, async () => {
+    const gate = deferred(); const started = deferred(); let boots = 0
+    const registry = new UserRegistry({ startupQueueCapacity: capacity, boot: async user => {
+      boots++; started.resolve(); await gate.promise; return fakeHandle(user, [])
+    } })
+    const first = registry.ensure('first', { sandboxId: 'one', env: {} }); await started.promise
+    const pending = []
+    for (let i = 0; i < capacity; i++) pending.push(registry.ensure(`waiting-${i}`, { sandboxId: `s-${i}`, env: {} }))
+    let failure
+    const overflow = registry.ensure('overflow', { sandboxId: 'excess', env: {} }).catch(error => { failure = error })
+    try {
+      await new Promise(resolve => setImmediate(resolve))
+      assert.equal(failure?.status, 429)
+      assert.match(failure.message, /startup queue/)
+      assert.equal(boots, 1)
+    } finally {
+      gate.resolve(); await Promise.allSettled([first, overflow, ...pending])
+    }
+    assert.equal((await registry.ensure('first', { sandboxId: 'one', env: {} })).status, 'ready')
+    assert.equal(boots, capacity + 1)
+  })
+}
+
+test('legacy admin API reports startup overload as retryable 429', async t => {
+  const gate = deferred(); const started = deferred()
+  const registry = new UserRegistry({ startupQueueCapacity: 0, boot: async user => {
+    started.resolve(); await gate.promise; return fakeHandle(user, [])
+  } })
+  const first = registry.ensure('first', { sandboxId: 's', env: {} }); await started.promise
+  const server = createHostServer({ registry, adminToken: 'private', hostId: 'local' })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => { server.close(); server.closeAllConnections() })
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/users/second`, {
+      method: 'PUT', headers: { authorization: 'Bearer private', 'content-type': 'application/json' },
+      body: JSON.stringify({ sandboxId: 'other', env: {} }),
+    })
+    assert.equal(response.status, 429)
+    assert.match((await response.json()).error, /startup queue/)
+  } finally { gate.resolve(); await first }
 })

@@ -110,6 +110,27 @@ try {
     })
     assert.deepEqual(await endpointClient.prepare(binding, { text: 'x' }, signal), data)
   }
+  // A host whose user tree lives in the tool sandbox (the shared DSH host) checks attachments there.
+  {
+    const remote = { '/remote/by': 'directory', '/remote/by/REPORT.md': 'file', '/remote/by/directory': 'directory', '/remote/outside.txt': 'file' }
+    const links = { '/remote/by/escape.txt': '/remote/outside.txt' }
+    const userFiles = {
+      realpath: async path => {
+        const target = links[path] ?? path
+        if (remote[target] === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+        return target
+      },
+      lstat: async path => (remote[path] === undefined ? undefined : { type: remote[path] }),
+    }
+    const remoteClient = new GroupTaskPublicationClient({ baseUrl: 'https://be.test', userCode: binding.userCode, resolveAuthHeaders, timeoutMs: 10000,
+      byRoot: '/remote/by', resolveSourcePath: source => `/remote/by/${source.slice('/by/'.length)}`, userFiles,
+      fetchImpl: async (_url, options) => Response.json({ code: 0, data: { ...data, sourcePaths: JSON.parse(options.body).sourcePaths } }),
+    })
+    assert.deepEqual((await remoteClient.prepare(binding, { text: 'x', sourcePaths: ['/by/REPORT.md'] }, signal)).sourcePaths ?? ['/by/REPORT.md'], ['/by/REPORT.md'])
+    for (const path of ['/by/missing.md', '/by/directory', '/by/escape.txt']) {
+      await assert.rejects(remoteClient.prepare(binding, { text: 'x', sourcePaths: [path] }, signal), /附件/u, path)
+    }
+  }
   for (const code of [0, '0']) {
     for (const msg of [undefined, null, 'Operation successful']) {
       respond = () => Response.json({ code, msg, data })

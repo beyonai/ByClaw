@@ -74,3 +74,38 @@ test('localizes organization membership while retaining names and query argument
   expect(screen.getByText('张三')).toBeInTheDocument();
   expect(listTenantOrganizationMembers).toHaveBeenCalledWith('9007199254740993', '1', true);
 });
+
+test('shows manual action in the list instead of provisioning', async () => {
+  (listTenants as jest.Mock).mockResolvedValue([{ ...tenant, provisionState: 'MANUAL_REQUIRED' }]);
+  const { rerender } = render(<TenantMgr />, { wrapper });
+  expect(await screen.findByText('待人工处理')).toHaveClass('ant-tag-orange');
+  mockLocale = 'en-US';
+  rerender(<TenantMgr />);
+  expect(screen.getByText('Manual action required')).toHaveClass('ant-tag-orange');
+});
+
+test.each([360, 1280])('shows paused progress and reason without legacy retry at viewport %s', (width) => {
+  const previousWidth = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  try {
+    const paused = {
+      ...tenant,
+      provisionState: 'MANUAL_REQUIRED',
+      provisionStage: 'DB_CREATE',
+      failureReason: 'PROVIDER_RESULT_UNKNOWN',
+    };
+    const props = { tenant: paused, onClose: jest.fn(), onRetry: jest.fn(), retrying: false };
+    const { rerender } = render(<TenantProvisionProgress {...props} />, { wrapper });
+    expect(screen.getByText('已暂停')).toBeInTheDocument();
+    expect(screen.getByText('PROVIDER_RESULT_UNKNOWN')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试开通' })).not.toBeInTheDocument();
+    mockLocale = 'en-US';
+    rerender(<TenantProvisionProgress {...props} />);
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+    expect(screen.getByText('PROVIDER_RESULT_UNKNOWN')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry provisioning' })).not.toBeInTheDocument();
+    expect(props.onRetry).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth });
+  }
+});

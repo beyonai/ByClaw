@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { scrubEnvironment } from '../src/connection.ts'
+import { launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
@@ -19,6 +19,41 @@ describe('scrubEnvironment', () => {
     expect(scrubEnvironment(params)).toBe(params)
     expect(scrubEnvironment(undefined)).toBeUndefined()
     expect(scrubEnvironment({ env: undefined })).toEqual({ env: undefined })
+  })
+})
+
+describe('launchEnvironment', () => {
+  const launch = { USER_CODE: 'u1', REDIS_HOST: 'redis', MODEL_NAME: 'm', BYCLAW_DSH_TOOL_ENV: 'byclaw-be' }
+  it('gives every process on B the user\'s launch environment under the caller\'s own', () => {
+    const params = { argv: ['/bin/sh'], cwd: '/by', env: { PATH: '/usr/bin', MODEL_NAME: 'caller' }, graceMs: 1 }
+    expect(scrubEnvironment(launchEnvironment('process.prepare', params, launch))).toEqual({
+      argv: ['/bin/sh'], cwd: '/by', graceMs: 1, env: { USER_CODE: 'u1', REDIS_HOST: 'redis', MODEL_NAME: 'caller', PATH: '/usr/bin' },
+    })
+    expect(params.env).toEqual({ PATH: '/usr/bin', MODEL_NAME: 'caller' })
+  })
+  it('covers processes spawned without an environment, such as terminals', () => {
+    expect(launchEnvironment('process.prepare', { argv: ['bash'], cwd: '/by', graceMs: 1 }, launch))
+      .toEqual({ argv: ['bash'], cwd: '/by', graceMs: 1, env: launch })
+  })
+  it('keeps a caller\'s tombstone, which removes the variable on B', () => {
+    expect(launchEnvironment('process.prepare', { argv: ['sh'], env: { REDIS_HOST: null } }, launch))
+      .toEqual({ argv: ['sh'], env: { ...launch, REDIS_HOST: null } })
+  })
+  it('leaves the tool sandbox its own paths and browser settings', () => {
+    const own = {
+      PATH: '/usr/bin', HOME: '/home/a', DSH_HOME: '/home/a/.dsh', BYCLAW_BROWSER_SOCKET: '/a.sock', BYCLAW_BROWSER_VIEWER: 'none', REDIS_HOST: 'redis',
+      // The runtime's interpreter, loader, display and browser install are A's, not B's.
+      NODE_OPTIONS: '--max-old-space-size=4096', NODE_PATH: '/opt/a', LD_LIBRARY_PATH: '/opt/a/lib', LD_PRELOAD: '/a.so',
+      PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright-a', DISPLAY: ':1', XDG_RUNTIME_DIR: '/run/user/1000', XDG_CONFIG_HOME: '/home/a/.config', HOSTNAME: 'a',
+    }
+    expect(launchEnvironment('process.prepare', { argv: ['sh'] }, own)).toEqual({ argv: ['sh'], env: { REDIS_HOST: 'redis' } })
+  })
+
+  it('leaves other requests and an empty launch environment alone', () => {
+    const lookup = { command: 'bash', env: { PATH: '/bin' } }
+    expect(launchEnvironment('executable', lookup, launch)).toBe(lookup)
+    const spawn = { argv: ['sh'] }
+    expect(launchEnvironment('process.prepare', spawn, {})).toBe(spawn)
   })
 })
 
@@ -68,30 +103,30 @@ describe('resolveLocalExecutable', () => {
 
 describe('answerWhileDown', () => {
   const pending = ['/by/.sessions/42']
-  it('describes a queued session directory as an existing empty directory', () => {
+  it('describes a queued session directory as an existing directory; what is in it is B\'s to say', () => {
     expect(answerWhileDown('fs.resolve', { path: '/by/.sessions/42' }, pending)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
     expect(answerWhileDown('fs.resolve', { path: 'notes.md', cwd: '/by/.sessions/42' }, pending)).toEqual({ targetKey: '/by/.sessions/42/notes.md', displayPath: '/by/.sessions/42/notes.md' })
     expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/42/' }, pending)).toEqual({ version: 'pending', type: 'directory' })
     expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, pending)).toEqual({ version: 'pending', type: 'directory' })
-    expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/42/notes.md' }, pending)).toBeNull()
-    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, pending)).toEqual([])
-    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/42/.dsh/skills', displayPath: 'x' } }, pending)).toEqual([])
+    // The platform may already have put files there (an upload): only B knows.
+    expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/42/notes.md' }, pending)).toBeUndefined()
+    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, pending)).toBeUndefined()
+    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/.sessions/42/.dsh/skills', displayPath: 'x' } }, pending)).toBeUndefined()
   })
-  it('answers the turn-start probes: git roots are absent, Skill roots are empty', () => {
+  it('leaves the turn-start probes to B, which they start: instruction files, git roots, Skill roots, iron rules', () => {
     expect(answerWhileDown('fs.resolve', { path: '../.git', cwd: '/by/.sessions/42' }, [])).toEqual({ targetKey: '/by/.sessions/.git', displayPath: '/by/.sessions/.git' })
-    expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/.git' }, [])).toBeNull()
-    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/.git', displayPath: 'x' } }, [])).toBeNull()
-    expect(answerWhileDown('fs.list', { target: { targetKey: '/home/byclaw/.dsh/skills', displayPath: 'x' } }, [])).toEqual([])
-    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/projects/7/.agents/skills', displayPath: 'x' } }, [])).toEqual([])
-    // DSH's own home: instruction files and Skills read at turn start, absent on B.
+    expect(answerWhileDown('fs.lstat', { path: '/by/.sessions/.git' }, [])).toBeUndefined()
+    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/.git', displayPath: 'x' } }, [])).toBeUndefined()
+    expect(answerWhileDown('fs.list', { target: { targetKey: '/by/projects/7/.agents/skills', displayPath: 'x' } }, [])).toBeUndefined()
+    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/projects/7/.iron-rules', displayPath: 'x' } }, [])).toBeUndefined()
+    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/projects/7/AGENTS.md', displayPath: 'x' } }, [], [])).toBeUndefined()
+    expect(answerWhileDown('fs.lstat', { path: 'CLAUDE.local.md', cwd: '/by/.sessions' }, [], [])).toBeUndefined()
+    // DSH's own home is this host's, not the user tree: absent on B, so it never starts B.
+    expect(answerWhileDown('fs.list', { target: { targetKey: '/home/byclaw/.dsh/skills', displayPath: 'x' } }, [], ['/home/byclaw/.dsh'])).toEqual([])
     expect(answerWhileDown('fs.stat', { target: { targetKey: '/home/byclaw/.dsh/AGENTS.md', displayPath: 'x' } }, [], ['/home/byclaw/.dsh'])).toBeNull()
     expect(answerWhileDown('fs.lstat', { path: '/opt/dsh-home/CLAUDE.md' }, [], ['/opt/dsh-home/'])).toBeNull()
     expect(answerWhileDown('fs.list', { target: { targetKey: '/home/byclaw/.dsh/agent-templates', displayPath: 'x' } }, [], ['/home/byclaw/.dsh'])).toEqual([])
     expect(answerWhileDown('fs.lstat', { path: '/home/byclaw/.agents/skills' }, [], ['/home/byclaw/.dsh', '/home/byclaw/.agents'])).toBeNull()
-    // Instruction files looked up along the session directory's ancestors.
-    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/AGENTS.md', displayPath: 'x' } }, [], [])).toBeNull()
-    expect(answerWhileDown('fs.lstat', { path: 'CLAUDE.local.md', cwd: '/by/.sessions' }, [], [])).toBeNull()
-    expect(answerWhileDown('fs.stat', { target: { targetKey: '/by/notes/AGENTS.txt', displayPath: 'x' } }, [], [])).toBeUndefined()
   })
   it('keeps directories it created on B as existing while B is down; their contents still need B', () => {
     const created = ['/by/.sessions/41/']

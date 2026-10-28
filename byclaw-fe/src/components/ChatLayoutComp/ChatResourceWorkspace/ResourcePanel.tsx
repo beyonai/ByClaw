@@ -1,5 +1,5 @@
 import ProjectDataSources from '@/components/ProjectDataSources';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Spin, Tabs } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
@@ -14,7 +14,9 @@ import FileResourcePanel from './FileResourcePanel';
 // import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import { useSessionDataSourcesVisible } from './useSessionDataSourcesVisible';
 import { useChatResourceProject } from './useChatResourceProject';
-import { getSessionResourceTabKeys, type SessionFileTabKey } from './resourceTabUtils';
+import { getSessionResourceTabKeys, getVisibleSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
+import type { ChatRuntimeType } from '@/utils/chatRuntime';
+import { useChatRuntime } from '@/hooks/useChatRuntime';
 import styles from './index.module.less';
 
 type UpperScopeKey = 'session' | 'employee';
@@ -34,7 +36,7 @@ interface ResourcePanelProps {
 }
 
 const EMPTY_SECONDARY_STATE: SecondaryState = {
-  session: 'file',
+  session: 'sharedFile',
   employee: 'knowledge',
 };
 
@@ -42,6 +44,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const intl = useIntl();
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
+  const previousRuntimeTypeRef = useRef<ChatRuntimeType>();
+  const { runtimeType, runtimeReady, runtimeError, retry: retryRuntime } = useChatRuntime(sessionId);
   const { project, loading: projectLoading } = useChatResourceProject(projectId);
   const [upperScopeKey, setUpperScopeKey] = useState<UpperScopeKey>('session');
   const [secondaryState, setSecondaryState] = useState<SecondaryState>(EMPTY_SECONDARY_STATE);
@@ -53,8 +57,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     [resolvedProjectId, sessionId]
   );
   const sessionFileTabKeys = useMemo(
-    () => sessionResourceTabKeys.filter((key): key is SessionFileTabKey => key !== 'code'),
-    [sessionResourceTabKeys]
+    () => getVisibleSessionFileTabKeys(sessionResourceTabKeys, runtimeType),
+    [runtimeType, sessionResourceTabKeys]
   );
   const showDataSources = useSessionDataSourcesVisible(sessionId, resolvedProjectId, sessionResourceRefreshKey);
   const showProjectCloudDrive = sessionFileTabKeys.includes('projectFile');
@@ -67,19 +71,28 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   const showCode = false;
 
   useEffect(() => {
-    if (!showCode && secondaryState.session === 'code') {
+    const previousRuntimeType = previousRuntimeTypeRef.current;
+    if (runtimeType === 'openclaw' && previousRuntimeType !== 'openclaw' && secondaryState.session === 'sharedFile') {
       setSecondaryState((current) => ({ ...current, session: 'file' }));
     }
-  }, [secondaryState.session, showCode]);
+    previousRuntimeTypeRef.current = runtimeType;
+  }, [runtimeType, secondaryState.session]);
+
+  useEffect(() => {
+    if (!showCode && secondaryState.session === 'code') {
+      setSecondaryState((current) => ({ ...current, session: runtimeType === 'openclaw' ? 'file' : 'sharedFile' }));
+    }
+  }, [runtimeType, secondaryState.session, showCode]);
 
   useEffect(() => {
     if (
+      (runtimeType !== 'openclaw' && secondaryState.session === 'file') ||
       (!showProjectCloudDrive && secondaryState.session === 'projectFile') ||
       (!showDataSources && secondaryState.session === 'dataSources')
     ) {
       setSecondaryState((current) => ({ ...current, session: 'sharedFile' }));
     }
-  }, [secondaryState.session, showProjectCloudDrive, showDataSources]);
+  }, [runtimeType, secondaryState.session, showProjectCloudDrive, showDataSources]);
 
   const upperSecondaryItems = useMemo(() => {
     const label = (id: string) => intl.formatMessage({ id });
@@ -107,6 +120,16 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
 
   const upperContent = useMemo(() => {
     if (upperScopeKey === 'session') {
+      if (!runtimeReady) {
+        return runtimeError ? (
+          <Button icon={<ReloadOutlined />} onClick={retryRuntime}>
+            {intl.formatMessage({ id: 'chatResource.loadFailed.shared' })}
+          </Button>
+        ) : (
+          <Spin />
+        );
+      }
+      if (runtimeType === 'dsh' && projectLoading) return <Spin />;
       if (upperSecondaryKey === 'dataSources' && showDataSources) {
         return <ProjectDataSources key={sessionId} sessionId={sessionId} refreshKey={sessionResourceRefreshKey} />;
       }
@@ -130,6 +153,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
             scope="project"
             sessionId={sessionId}
             projectId={resolvedProjectId}
+            runtimeType={runtimeType}
+            runtimeReady={runtimeReady}
             project={project}
             resourceId={projectCloudResourceId}
             refreshKey={sessionResourceRefreshKey}
@@ -143,6 +168,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
             scope="shared"
             sessionId={sessionId}
             projectId={resolvedProjectId}
+            runtimeType={runtimeType}
+            runtimeReady={runtimeReady}
             project={project}
             projectCloudResourceId={projectCloudResourceId}
             resourceId={resourceId}
@@ -184,10 +211,15 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     empty,
     onOpenDetail,
     project,
+    projectLoading,
     projectCloudResourceId,
     projectId,
     resolvedProjectId,
     resourceId,
+    runtimeType,
+    runtimeReady,
+    runtimeError,
+    retryRuntime,
     sessionResourceRefreshKey,
     sessionId,
     showDataSources,

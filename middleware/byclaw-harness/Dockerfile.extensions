@@ -97,6 +97,7 @@ RUN set -eux; \
     for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
         printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
     done; \
+    printf '%s\n' "/workspace/packages/deliverables/workspace-changes/package.json" >>/tmp/byclaw-package-manifests; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -125,6 +126,9 @@ RUN set -eux; \
         archive_count=$((archive_count + 1)); \
     done; \
     test "${archive_count}" -gt 0; \
+    test -s /opt/byclaw/plugins/byclaw--dsh-workspace/lib/index.js; \
+    test -s /opt/byclaw/plugins/byclaw--dsh-workspace/cordis.patch.yml; \
+    grep -Fx '@byclaw/dsh-workspace' /opt/byclaw/plugins/.bundle-names; \
     rm -rf /tmp/byclaw-plugin-packs
 
 
@@ -172,7 +176,7 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.74
+ARG BYCLI_VERSION=2.1.76
 ARG BYCLI_EXTENSION_VERSION=2.1.28
 
 ENV DSH_HOME=/home/byclaw/.dsh \
@@ -402,6 +406,10 @@ COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-en
 
 ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
     BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc
+
+ENV BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=0 \
+    BYCLAW_DSH_WORKSPACE_CHANGES_ENABLED=0 \
+    BYCLAW_DSH_WORKSPACE_GIT_ENABLED=0
 
 EXPOSE 8081
 

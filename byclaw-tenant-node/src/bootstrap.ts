@@ -1,4 +1,5 @@
 import { requireExecutionPolicy } from "./application/execution-policy.js";
+import MemberGroupRemoval from './application/MemberGroupRemoval.js';
 import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
 import { Redis } from "ioredis";
@@ -11,6 +12,7 @@ import { MirrorService } from "./application/mirror-service.js";
 import { SchemaTaskService } from "./application/schema/task-service.js";
 import { TenantRuntime } from "./application/runtime.js";
 import { RedisLeases } from "./infrastructure/coordination/redis-leases.js";
+import { RedisSharedQuotaReader } from "./infrastructure/coordination/shared-quota-reader.js";
 import { Database } from "./infrastructure/persistence/database.js";
 import { SqlCommandTransactions } from "./infrastructure/persistence/command-repository.js";
 import { SqlMirrorTransactions } from "./infrastructure/persistence/mirror-repository.js";
@@ -57,7 +59,12 @@ export async function bootstrap(config: Config) {
     config.enterpriseId,
     new SqlHistoryRepository(read, config.enterpriseId),
   );
-  const commands = new CommandService(new SqlCommandTransactions(connection), () =>
+  const quotas = new RedisSharedQuotaReader(redis, {
+    ...config.quota,
+    warn: (code, enterpriseId) =>
+      app.log.warn({ code, enterpriseId }, "Shared quota Redis read failed"),
+  });
+  const commands = new CommandService(new SqlCommandTransactions(connection, quotas), () =>
     requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
   );
   const be = new BeSchemaClient(config, client),
@@ -119,6 +126,7 @@ export async function bootstrap(config: Config) {
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),
       operations: new OperationsQueries(read, config.enterpriseId),
+      memberGroupRemoval: new MemberGroupRemoval(connection, config.enterpriseId),
       connected: () => connection.connected,
       ready: (): boolean => runtime.ready,
       provisioned: () => runtime.provisioned,

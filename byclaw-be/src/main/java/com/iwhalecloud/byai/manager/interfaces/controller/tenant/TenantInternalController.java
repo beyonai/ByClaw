@@ -22,6 +22,9 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/internal/v1")
 @ConditionalOnProperty(name="byclaw.integration.enabled",havingValue="true")
 public class TenantInternalController {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantCommandRecovery recoveries;
+
     private final TenantCommandService commands;
     private final TenantCommandStore store;
     private final TenantExecutionPolicyService policies;
@@ -51,17 +54,46 @@ public class TenantInternalController {
         var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:read");
         return ResponseUtil.success(visible(principal,store.find(identifier(id))).view());
     }
+    @GetMapping("/commands/{id}/recovery")
+    public ResponseUtil<?> recovery(HttpServletRequest http,@PathVariable String id) {
+        var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:read");
+        visible(principal,store.find(identifier(id)));
+        return ResponseUtil.success(recoveries.inspect(identifier(id)));
+    }
+    @PostMapping("/commands/{id}/recoveries")
+    public ResponseEntity<?> recover(HttpServletRequest http,@PathVariable String id,@RequestBody JsonNode body) {
+        var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:provision");
+        visible(principal,store.find(identifier(id)));
+        return ResponseEntity.accepted().body(ResponseUtil.success(recoveries.recover(identifier(id),body)));
+    }
+    @GetMapping("/commands/{id}/recovery-requests/{requestId}")
+    public ResponseUtil<?> recoveryReceipt(HttpServletRequest http,@PathVariable String id,@PathVariable String requestId) {
+        var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:read");
+        visible(principal,store.find(identifier(id)));
+        return ResponseUtil.success(recoveries.receipt(identifier(id),requestId));
+    }
     @GetMapping("/tenants/{id}/runtime")
     public ResponseUtil<?> runtime(HttpServletRequest http,@PathVariable String id) {
         long tenant=authorize(http,id,"tenant:read");
         String state=tenants.selectConfig(tenant,"PROVISION_STATE");
         String stage="UNKNOWN";
         try { stage=json.readTree(state).path("status").asText("UNKNOWN"); } catch(Exception ignored) { }
-        return ResponseUtil.success(Map.of("enterpriseId",id,"stage",stage,"generation","1",
-            "observedAt",Instant.now().toString(),"policy",policies.projection(tenant),
-            "resources",java.util.List.of(resource(tenant,"tenant-opengauss"),resource(tenant,"tenant-data-node")),
-            "capabilities",Map.of("RECREATE_NODE",false,"REPLACE_DATABASE",false,"CHANGE_PROFILE",false,"DELETE",false)));
+        var result=new java.util.LinkedHashMap<String,Object>();
+        result.put("enterpriseId",id);result.put("stage",stage);result.put("status",stage);result.put("generation","1");
+        if ("true".equals(tenants.selectConfig(tenant,"COMMERCIAL_MANAGED"))) {
+            var command=store.latestProvision(tenant);
+            if(command!=null) {
+                result.put("stage",command.stage());result.put("status",command.status());
+                result.put("errorCode",command.errorCode());result.put("commandId",command.commandId());
+                result.put("commandRevision",Long.toString(command.revision()));
+            }
+        }
+        result.put("observedAt",Instant.now().toString());result.put("policy",policies.projection(tenant));
+        result.put("resources",java.util.List.of(resource(tenant,"tenant-opengauss"),resource(tenant,"tenant-data-node")));
+        result.put("capabilities",Map.of("RECREATE_NODE",false,"REPLACE_DATABASE",false,"CHANGE_PROFILE",false,"DELETE",false));
+        return ResponseUtil.success(result);
     }
+
     private Map<String,Object> resource(long tenant,String type) {
         var row=sandboxes.latestRecord(tenant,type);
         var result=new java.util.LinkedHashMap<String,Object>();

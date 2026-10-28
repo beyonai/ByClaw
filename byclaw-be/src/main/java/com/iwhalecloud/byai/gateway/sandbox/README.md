@@ -84,6 +84,16 @@ mvn -B -f byclaw-be/pom.xml \
 mvn -B -f byclaw-be/pom.xml verify
 ```
 
+## 按工号启动的自动释放策略
+
+`POST /sandbox/launchByUserCode` 接受必填 `userCode`，可选 `serviceKey` 和 `autoRelease`。
+`autoRelease` 为整数 `0`（手动释放）或 `1`（自动空闲释放），也兼容字符串 `"0"`/`"1"`；缺失或 null 沿用全局默认策略，其他值返回参数错误。
+显式值仅影响本次新建的独占沙箱，同步设置记录的 `auto_release` 和 `lease_policy`；复用已有沙箱不修改原设置。
+remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`，legacy 本地创建采用同样规则。
+共享用户上下文仍由宿主/共享池管理，不通过该参数修改宿主回收策略。
+手动释放模式会按既有机制持续续约；基础设施故障或续约失败仍可能导致远端实例过期。
+`dsh-tool-env` 插件调用此接口时显式发送 `autoRelease: 1`。
+
 ## 常驻（共享）DSH 宿主
 
 配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 后，系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`
@@ -99,7 +109,11 @@ mvn -B -f byclaw-be/pom.xml verify
 - 查询（`sandboxInfo`）把宿主上的上下文作为一条 `byclaw-dsh` 条目并入结果（宿主 `GET`），不读记录。
 - 心跳/续约/空闲回收对这类上下文不做任何事：宿主按自己的空闲规则回收。
 - 工具沙箱（B）由宿主上的运行时在第一次工具调用时经 `launchByUserCode` 按工具规格（`enabled=0`）启动；
-  这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。B 目前不自动释放。
+  这类规格不会被记为用户首选规格，读取首选规格时也会忽略未开放的规格。新建 B 由插件显式开启自动空闲释放，复用已有实例保留原策略。
+- 指定用户的工具沙箱：系统参数 `BYCLAW_TOOL_SANDBOX_BY_USER` 为 `userCode=service_key` 列表（逗号、分号或空白分隔，
+  例如 `u1=byclaw-dsh-unity,u2=byclaw-dsh-unity`）。名单内用户 PUT 的环境里会带 `BYCLAW_TOOL_ENV_SERVICE_KEY`，宿主据此
+  为该用户的上下文选 B 的规格；不在名单内或参数读取失败时用宿主默认的 `BYCLAW_TOOL_ENV_SERVICE_KEY`。上下文启动时读取，
+  改参数后需该用户的上下文重建（“重启助理”或宿主回收后再次进入）才生效。
 
 决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。

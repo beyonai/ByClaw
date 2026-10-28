@@ -78,6 +78,8 @@ public class GroupChatContextResponse {
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private List<ResourceVo> resourceList = new ArrayList<>();
 
+        private boolean mentionAllUsers;
+
         /** Persisted public forwarding envelope; it carries no resource execution capability. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private java.util.Map<String, Object> forward;

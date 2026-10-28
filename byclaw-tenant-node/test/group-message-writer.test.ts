@@ -34,6 +34,36 @@ function setup(payload: Record<string, any>, coordinatorAgentId?: string) {
 }
 
 describe("tenant group message", () => {
+  it("indexes all current humans once, excluding sender, without dispatching agents", async () => {
+    const { context, query } = setup({
+      chatContent: "@所有人 通知",
+      resourceList: [{ resourceType: "HUMAN", resourceId: "42" }],
+      mentionAllUsers: true,
+    });
+    const original = query.getMockImplementation()!;
+    query.mockImplementation(async (sql, parameters = []) => {
+      if (sql.includes("SELECT mem_obj_id") && sql.includes("mem_obj_type='USER'"))
+        return [{ mem_obj_id: "20" }, { mem_obj_id: "42" }, { mem_obj_id: "43" }];
+      return original(sql, parameters);
+    });
+    expect((await sendGroupMessage(context)).dispatches).toEqual([]);
+    const mentions = query.mock.calls.filter(([sql]) =>
+      sql.startsWith("MERGE INTO byai.byai_group_chat_mention"),
+    );
+    expect(mentions.map(([, parameters]) => parameters[2])).toEqual(["42", "43"]);
+    const saved = query.mock.calls.find(([sql]) => sql.startsWith("INSERT INTO byai.byai_message"));
+    expect(
+      saved![1].some(
+        (value) => typeof value === "string" && value.includes('"mentionAllUsers":true'),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects non boolean mention-all flags", async () => {
+    const { context } = setup({ chatContent: "通知", resourceList: [], mentionAllUsers: "true" });
+    await expect(sendGroupMessage(context)).rejects.toThrow();
+  });
+
   it("saves distinct human mentions using openGauss-compatible idempotent writes", async () => {
     const { context, query } = setup({
       chatContent: "{{HUMAN_21}} {{HUMAN_22}} 你好",

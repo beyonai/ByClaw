@@ -174,7 +174,7 @@ public class TenantExecutionPolicyService {
     private void bridgeMemberLimit(long enterpriseId, JsonNode policy) {
         JsonNode member = policy.path("limits").get("memberLimit");
         if (member == null) return;
-        // Serialize with the database member guard before reading the package snapshot.
+        // Serialize policy changes with application-side member admission before reading the snapshot.
         int changed = jdbc.update("UPDATE byai.tenant_config SET params_version=COALESCE(params_version,0)+1 WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", enterpriseId);
         if (changed != 1) throw denied("POLICY_PACKAGE_SNAPSHOT_MISSING");
         String raw = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class, enterpriseId);
@@ -197,7 +197,8 @@ public class TenantExecutionPolicyService {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("policy mutation requires transaction");
     }
     public static Map<String, Boolean> capabilities() {
-        return Map.of("memberLimit", true, "groupLimit", false, "groupMemberLimit", false,
+        // Existing internal member checks do not yet cover every invitation and membership writer.
+        return Map.of("memberLimit", false, "groupLimit", false, "groupMemberLimit", false,
             "storageBytes", false, "agentLimit", false, "parallelTaskLimit", false, "nodePolicyConsumer", false);
     }
     private static PolicyDeniedException denied(String code) { return new PolicyDeniedException(code); }

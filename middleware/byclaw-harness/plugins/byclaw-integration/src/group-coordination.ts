@@ -99,6 +99,8 @@ export class ByClawGroupCoordinationRuntime implements GroupCoordinationPolicy {
     catalogDir: string
     resolveModel: (bindingId: string, modelId?: string) => Promise<ModelSelection>
     supportedWorkerTypes: readonly string[]
+    /** Prepare direct grants before acquiring the template publication read lease. */
+    prepareEmployee?: (id: string) => Promise<void>
     installMemberBoundary?: (agentCtx: Context, agent?: Agent) => () => void
     loadScopedEmployee?: (coordination: GroupCoordinationSpec, id: string) => Promise<{ employee: ByClawDigitalEmployee; template: DshAgentTemplate }>
     executeExternal?: (request: GroupExternalRequest, scope: GroupAgentScope, workerAgentType: string) => Promise<{ output: string }>
@@ -150,9 +152,33 @@ export class ByClawGroupCoordinationRuntime implements GroupCoordinationPolicy {
   }
 
   async validate(coordination: GroupCoordinationSpec): Promise<void> {
+    await this.options.prepareEmployee?.(coordination.coordinatorAgentId)
     await this.employeeTemplate(coordination.coordinatorAgentId, coordination)
     if (coordination.mode === 'COORDINATED') {
-      for (const id of coordination.allowedAgentIds) await this.employeeTemplate(id, coordination)
+      for (const id of coordination.allowedAgentIds) {
+        if (id !== coordination.coordinatorAgentId) await this.options.prepareEmployee?.(id)
+        await this.employeeTemplate(id, coordination)
+      }
+    }
+  }
+
+  /** Called before taking a catalog read lease, including cold DIRECT members. */
+  async prepareSelected(coordination: GroupCoordinationSpec, templateId: string): Promise<void> {
+    const id = templateId.replace(/^byclaw-employee-/u, '')
+    if (templateId !== `byclaw-employee-${id}`
+      || (id !== coordination.coordinatorAgentId && !coordination.allowedAgentIds.includes(id))) {
+      throw new Error('Employee template is outside the server-bound group scope')
+    }
+    await this.options.prepareEmployee?.(id)
+    if (this.options.resources().directEmployeeIds.includes(id)) this.privateEmployees.delete(`${scopeIdentity(coordination)}:${id}`)
+  }
+
+  /** A DIRECT conversation loads allowed members only when it starts using a team. */
+  async prepareTeam(agentId: string): Promise<void> {
+    const scope = this.get(agentId)
+    if (scope === undefined || scope.role !== 'coordinator') throw new Error('Only the bound group coordinator may prepare a team')
+    for (const id of scope.coordination.allowedAgentIds) {
+      await this.prepareSelected(scope.coordination, `byclaw-employee-${id}`)
     }
   }
 

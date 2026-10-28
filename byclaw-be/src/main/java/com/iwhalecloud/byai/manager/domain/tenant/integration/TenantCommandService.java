@@ -3,12 +3,14 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.hook.HookPublisher;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -25,12 +27,19 @@ public class TenantCommandService {
     private final ObjectMapper json;
     private final HookPublisher hooks;
     private final TenantExecutionPolicyService policies;
+    private final TenantSandboxProperties sandboxProperties;
     private final TransactionTemplate tx;
     public TenantCommandService(TenantCommandStore store,JdbcTemplate jdbc,TenantAdminTenantMapper tenants,
         SequenceService ids,ObjectMapper json,HookPublisher hooks,TenantExecutionPolicyService policies,
         PlatformTransactionManager transactions) {
+        this(store,jdbc,tenants,ids,json,hooks,policies,transactions,new TenantSandboxProperties());
+    }
+    @Autowired
+    public TenantCommandService(TenantCommandStore store,JdbcTemplate jdbc,TenantAdminTenantMapper tenants,
+        SequenceService ids,ObjectMapper json,HookPublisher hooks,TenantExecutionPolicyService policies,
+        PlatformTransactionManager transactions,TenantSandboxProperties sandboxProperties) {
         this.store=store; this.jdbc=jdbc; this.tenants=tenants; this.ids=ids; this.json=json; this.hooks=hooks;
-        this.policies=policies; this.tx=new TransactionTemplate(transactions);
+        this.policies=policies; this.tx=new TransactionTemplate(transactions); this.sandboxProperties=sandboxProperties;
     }
     public TenantCommandStore.Command provision(TenantCommandRequest request) {
         var existing=store.byRequest(request.sourceSystem(),request.requestId());
@@ -51,14 +60,16 @@ public class TenantCommandService {
             config(enterprise,"PROVISION_REQUEST_ID","internal-"+id);
             config(enterprise,"PACKAGE_NAME_SNAPSHOT","external");
             JsonNode body=read(request.snapshot());
-            var snapshot=json.createObjectNode().put("profileKey",request.profileKey());
+            // Resolve defaults only for a new reservation; explicit trusted profiles and frozen retries take precedence.
+            String profile=request.profileKey()==null?sandboxProperties.getProfileKey():request.profileKey();
+            var snapshot=json.createObjectNode().put("profileKey",profile);
             snapshot.set("memberLimit",body.path("initialPolicy").path("limits").path("memberLimit"));
             config(enterprise,"PACKAGE_CONTENT_SNAPSHOT",snapshot.toString());
             config(enterprise,"COMMERCIAL_MANAGED","true");
             config(enterprise,"INTEGRATION_SOURCE_SYSTEM",request.sourceSystem());
             config(enterprise,"PROVISION_STATE","{\"status\":\"RESERVED\",\"generation\":\"1\",\"fencingToken\":\"1\"}");
             policies.prepare(enterprise,body.get("initialPolicy"));
-            // Initial snapshot must exist before OWNER insertion so the same member guard applies from birth.
+            // Reserve the initial member snapshot before writing the OWNER relationship.
             tenants.insertOwner(ids.nextVal(),enterprise,request.ownerUserId());
             jdbc.update("INSERT INTO byai.tenant_runtime_operation(enterprise_id,active_command_id,state) VALUES (?,?,'ACTIVE')",enterprise,id);
             hooks.publishDurable("tenant.created",1,Long.toString(enterprise),"1","1",Long.toString(id),

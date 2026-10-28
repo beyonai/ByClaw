@@ -41,7 +41,7 @@ class WorkerRouteReadinessServiceTest {
         service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> { });
 
         verify(sandboxService, never()).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
-        verify(sandboxService, never()).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
+        verify(sandboxService, never()).waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_EXE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000));
     }
 
     @Test
@@ -51,13 +51,13 @@ class WorkerRouteReadinessServiceTest {
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
         when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
-        when(sandboxService.waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS))
+        when(sandboxService.waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_EXE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000)))
             .thenReturn(true);
 
         service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> { });
 
         verify(sandboxService).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
-        verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
+        verify(sandboxService).waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_EXE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000));
     }
 
     @Test
@@ -84,7 +84,7 @@ class WorkerRouteReadinessServiceTest {
                 allowLaunchToFinish.await(5, TimeUnit.SECONDS);
                 return new SandboxLaunchData();
             });
-        when(sandboxService.waitWorkerReadySync("BYCLAW_CODE_u1", SandboxService.WORKER_READY_TIMEOUT_MS))
+        when(sandboxService.waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_CODE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000)))
             .thenReturn(true);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -110,7 +110,7 @@ class WorkerRouteReadinessServiceTest {
         verify(sandboxService, times(1))
             .restartSandboxForTargetWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
         verify(sandboxService, times(1))
-            .waitWorkerReadySync("BYCLAW_CODE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
+            .waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_CODE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000));
     }
 
     @Test
@@ -120,13 +120,79 @@ class WorkerRouteReadinessServiceTest {
             .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
         when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
             .thenReturn(new SandboxLaunchData());
-        when(sandboxService.waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS))
+        when(sandboxService.waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_EXE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000)))
             .thenReturn(false);
 
         assertThatThrownBy(() -> service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> { }))
             .isInstanceOf(IllegalStateException.class);
 
-        verify(sandboxService, times(WorkerRouteReadinessService.SANDBOX_STARTUP_WAIT_ROUNDS))
-            .waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
+        verify(sandboxService, times(1))
+            .waitWorkerReadySync(org.mockito.ArgumentMatchers.eq("BYCLAW_EXE_u1"), org.mockito.ArgumentMatchers.longThat(value -> value > 0 && value <= 60000));
     }
+    @Test
+    void followerTimesOutWithoutCancelingAnUnfinishedLeader() throws Exception {
+        WorkerRouteReadinessService bounded = new WorkerRouteReadinessService(workerRegistry, sandboxService, targetAgentResolver, 40);
+        when(targetAgentResolver.isUserSandboxAgentType("BYCLAW_EXE_u1", "u1")).thenReturn(true);
+        when(workerRegistry.hasOnlineAgentType("BYCLAW_EXE_u1", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+            .thenAnswer(invocation -> { entered.countDown(); release.await(3, TimeUnit.SECONDS); return new SandboxLaunchData(); });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> leader = executor.submit(() -> bounded.ensureReady("u1", null, "BYCLAW_EXE_u1", null));
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> bounded.ensureReady("u1", null, "BYCLAW_EXE_u1", null))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("did not become ready");
+            assertThat(leader.isDone()).isFalse();
+            verify(sandboxService, times(1)).restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
+            release.countDown();
+            assertThatThrownBy(() -> leader.get(2, TimeUnit.SECONDS)).isInstanceOf(java.util.concurrent.ExecutionException.class);
+            verify(sandboxService, never()).waitWorkerReadySync(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong());
+        }
+        finally { release.countDown(); executor.shutdownNow(); }
+    }
+
+    @Test
+    void interruptedFollowerExitsAndPreservesItsInterruptFlag() throws Exception {
+        when(targetAgentResolver.isUserSandboxAgentType("BYCLAW_EXE_u1", "u1")).thenReturn(true);
+        when(workerRegistry.hasOnlineAgentType("BYCLAW_EXE_u1", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1), joined = new CountDownLatch(1), exited = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+            .thenAnswer(invocation -> { entered.countDown(); release.await(3, TimeUnit.SECONDS); return new SandboxLaunchData(); });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Thread follower = new Thread(() -> {
+            try { service.ensureReady("u1", null, "BYCLAW_EXE_u1", phase -> {
+                if (phase == WorkerRouteReadinessService.ReadinessPhase.WAITING) joined.countDown();
+            }); }
+            catch (IllegalStateException expected) { interrupted.set(Thread.currentThread().isInterrupted()); }
+            finally { exited.countDown(); }
+        });
+        try {
+            executor.submit(() -> service.ensureReady("u1", null, "BYCLAW_EXE_u1", null));
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            follower.start();
+            assertThat(joined.await(2, TimeUnit.SECONDS)).isTrue();
+            follower.interrupt();
+            assertThat(exited.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(interrupted).isTrue();
+        }
+        finally { follower.interrupt(); release.countDown(); executor.shutdownNow(); }
+    }
+
+    @Test
+    void launchTimeConsumesTheReadinessBudgetInsteadOfAddingAnotherFullWait() {
+        WorkerRouteReadinessService bounded = new WorkerRouteReadinessService(workerRegistry, sandboxService, targetAgentResolver, 10);
+        when(targetAgentResolver.isUserSandboxAgentType("BYCLAW_EXE_u1", "u1")).thenReturn(true);
+        when(workerRegistry.hasOnlineAgentType("BYCLAW_EXE_u1", true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(false, Collections.emptyList()));
+        when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+            .thenAnswer(invocation -> { Thread.sleep(30); return new SandboxLaunchData(); });
+        assertThatThrownBy(() -> bounded.ensureReady("u1", null, "BYCLAW_EXE_u1", null))
+            .isInstanceOf(IllegalStateException.class);
+        verify(sandboxService, never()).waitWorkerReadySync(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
 }

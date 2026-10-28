@@ -3,6 +3,7 @@ import type { ConnectionManager } from "../../application/connection-manager.js"
 import type { TenantCommand } from "../../application/command.js";
 import type { CommandTransaction, CommandTransactions } from "../../application/command-service.js";
 import type { SqlSession } from "../../application/database-ports.js";
+import type { SharedQuotaReader } from "../../application/shared-quota.js";
 import claimWelcome from "./claimWelcome.js";
 import { CommandContext } from "./command-context.js";
 import { first } from "./sql-utils.js";
@@ -65,13 +66,19 @@ const handlers = {
 };
 /** 把业务命令映射到租户事务，接入统一的写入资格检查。 */
 export class SqlCommandTransactions implements CommandTransactions {
-  constructor(private readonly connection: ConnectionManager) {}
+  constructor(
+    private readonly connection: ConnectionManager,
+    private readonly quotas?: SharedQuotaReader,
+  ) {}
   run<T>(work: (tx: CommandTransaction) => Promise<T>): Promise<T> {
-    return this.connection.write((db) => work(new SqlCommandTransaction(db)));
+    return this.connection.write((db) => work(new SqlCommandTransaction(db, this.quotas)));
   }
 }
 class SqlCommandTransaction implements CommandTransaction {
-  constructor(private readonly db: SqlSession) {}
+  constructor(
+    private readonly db: SqlSession,
+    private readonly quotas?: SharedQuotaReader,
+  ) {}
   /** 会话级事务锁与镜像写入共用同一锁键，避免成员、消息和幂等记录交错更新。 */
   async lock(sessionId: string): Promise<void> {
     await lockSessions(this.db, [sessionId]);
@@ -90,7 +97,9 @@ class SqlCommandTransaction implements CommandTransaction {
     return row ? JSON.parse(row.extParamValue) : null;
   }
   async apply(command: TenantCommand): Promise<Record<string, any>> {
-    const messageId = await handlers[command.operation](new CommandContext(this.db, command));
+    const messageId = await handlers[command.operation](
+      new CommandContext(this.db, command, this.quotas),
+    );
     return {
       sessionId: command.sessionId,
       requestId: command.requestId,

@@ -206,3 +206,48 @@ test('image tool resolves ordinary session-file references and returns durable l
     assert.equal(tool.output.schema.properties.imageArtifacts.type, 'array')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('a host whose session tree lives elsewhere supplies the file operations', async () => {
+  // The shared DSH host keeps the user tree in the tool sandbox: no local path exists.
+  const root = '/remote-tool-sandbox/by/.sessions/s1'
+  const files = new Map()
+  const directories = new Set()
+  const artifactIo = {
+    realpath: async path => { if (path !== root && !directories.has(path) && !files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return path },
+    mkdir: async path => { directories.add(path) },
+    writeExclusive: async (path, bytes) => {
+      if (files.has(path)) throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+      files.set(path, Buffer.from(bytes))
+    },
+    writeReplace: async (path, bytes) => { files.set(path, Buffer.from(bytes)) },
+    readBytes: async (path, maxBytes) => {
+      const bytes = files.get(path)
+      if (bytes === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      if (bytes.length > maxBytes) throw new Error('too large')
+      return bytes
+    },
+    remove: async path => { files.delete(path) },
+  }
+  let setup, tool
+  const references = []
+  const ctx = { on: (_name, handler) => { setup = handler }, effect: fn => fn() }
+  const agentCtx = { tools: { register: value => { tool = value; return () => {} } }, effect: fn => fn() }
+  const host = { userCode: 'test', resolveSessionRoot: () => root, artifactIo,
+    resolveMediaModel: async () => ({ id: 'm1', provider: 'OPENAI', model: 'image', timeoutMs: 1000 }) }
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64')
+  const generate = async (_model, _args, options) => { references.push(options.referenceImage); return [{ mimeType: 'image/png', bytes: png }] }
+  mountMediaPlugin(ctx, { kind: 'image', generate })
+  await setup({ agentCtx, host, agent: { id: 'a1' }, command: { header: { userCode: 'test', sessionId: 's1' } } })
+  const first = await tool.execute({ prompt: 'a red circle' }, {})
+  // The model sees the session's virtual path; the bytes went to the session tree through the io.
+  const path = first.artifacts[0].path
+  assert.match(path, /^\/by\/\.sessions\/s1\/image\/[0-9a-f-]+\.png$/u)
+  const id = path.slice(path.lastIndexOf('/') + 1)
+  assert.ok(files.get(`${root}/image/${id}`)?.equals(png), 'the image is written through the host io')
+  assert.equal(first.imageArtifacts[0].width, 1)
+  assert.deepEqual(JSON.parse(files.get(`${root}/image/${id}.artifact.json`).toString()), first.imageArtifacts[0])
+  // Editing reads the reference back through the same io.
+  const second = await tool.execute({ prompt: 'bluer', referenceImage: id }, {})
+  assert.ok(references[1]?.bytes.equals(png))
+  assert.equal(second.imageArtifacts[0].parentId, id)
+})

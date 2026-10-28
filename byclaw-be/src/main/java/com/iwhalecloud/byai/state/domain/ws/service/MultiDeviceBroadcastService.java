@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.service;
 
 import com.iwhalecloud.byai.state.domain.chat.service.ChatChainLog;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatReplyLog;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -133,6 +134,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
         if (userId == null || contextKey == null || message == null) {
             return 0;
         }
+        ChatReplyLog.prepareFrame(message);
         Set<Channel> channels = channelManager.getChannels(userId);
         if (channels.isEmpty()) {
             return 0;
@@ -204,7 +206,14 @@ public class MultiDeviceBroadcastService implements MessageListener {
         status.put("type", "SCOPED_SESSION_STATUS");
         status.put("sessionId", scopedSessionId);
         status.put("streamId", message.getString("streamId"));
+        if (message.get("enterpriseId") != null) status.put("enterpriseId", message.get("enterpriseId"));
         status.put("data", statusData);
+        JSONObject statusIdentity = ChatReplyLog.envelope(message);
+        if (statusIdentity != null) {
+            statusIdentity.remove("frameId");
+            status.put("chatChain", statusIdentity);
+            ChatReplyLog.prepareFrame(status);
+        }
         String text = status.toJSONString();
         String signature = statusData.toJSONString();
         return new ScopedFrame(new ProjectionKey("status:" + scopedSessionId, null), status, text,
@@ -345,8 +354,10 @@ public class MultiDeviceBroadcastService implements MessageListener {
                         Math.max(1, scopedWriteTimeoutMillis), TimeUnit.MILLISECONDS);
                 }
                 transportFrame = new TextWebSocketFrame(outbound.text());
-                channel.writeAndFlush(transportFrame)
-                    .addListener(result -> complete(writeGeneration, result.isSuccess(), outbound.frame()));
+                long writeStarted = System.nanoTime();
+                var writeFuture = channel.writeAndFlush(transportFrame);
+                ChatChainLog.wsWritten(writeFuture, ChatChainLog.terminalFrame(outbound.text()), writeStarted);
+                writeFuture.addListener(result -> complete(writeGeneration, result.isSuccess(), outbound.frame()));
             }
             catch (Exception failure) {
                 ReferenceCountUtil.safeRelease(transportFrame);
@@ -363,6 +374,8 @@ public class MultiDeviceBroadcastService implements MessageListener {
             if (delta == null) {
                 return new OutboundWrite(frame, frame.text());
             }
+            JSONObject identity = ChatReplyLog.envelope(frame.message());
+            if (identity != null) delta.put("chatChain", identity);
             String deltaText = delta.toJSONString();
             return ByteBufUtil.utf8Bytes(deltaText) < frame.bytes()
                 ? new OutboundWrite(frame, deltaText)
@@ -501,6 +514,13 @@ public class MultiDeviceBroadcastService implements MessageListener {
         message.put("requestId", ChatChainLog.requestId(dataJson));
         message.put("traceId", dataJson.getString("trace_id"));
         message.put("streamId", dataJson.getString("stream_id"));
+        JSONObject replyIdentity = ChatReplyLog.envelope(dataJson);
+        if (replyIdentity != null) {
+            replyIdentity.put("frameId", java.util.UUID.randomUUID().toString());
+            replyIdentity.put("targetSessionId", String.valueOf(sessionId));
+            replyIdentity.put("frameClientRequestId", clientRequestId);
+            message.put("chatChain", replyIdentity);
+        }
 
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata != null) {
@@ -523,7 +543,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
         if (userId == null || message == null) {
             return 0;
         }
-        String frameText = message.toJSONString();
+        String frameText = ChatReplyLog.frame(message.toJSONString());
         String messageType = message.getString("type");
         int sentCount = broadcastLocally(userId, frameText, senderChannel, messageType);
         publish(userId, frameText, messageType);
@@ -533,7 +553,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
     public int broadcastTenantRawToUser(TenantRequestContext tenant, JSONObject message, Channel senderChannel) {
         String enterpriseId = Long.toString(tenant.enterpriseId());
         message.put("enterpriseId", enterpriseId);
-        String frameText = message.toJSONString();
+        String frameText = ChatReplyLog.frame(message.toJSONString());
         String messageType = message.getString("type");
         int sentCount = broadcastLocally(tenant.userId(), enterpriseId, frameText, senderChannel, messageType);
         publish(tenant.userId(), enterpriseId, frameText, messageType);
@@ -583,6 +603,7 @@ public class MultiDeviceBroadcastService implements MessageListener {
     }
 
     private void broadcastFrame(Long userId, String enterpriseId, String frameText, Channel senderChannel, String messageType) {
+        frameText = ChatReplyLog.frame(frameText);
         broadcastLocally(userId, enterpriseId, frameText, senderChannel, messageType);
         publish(userId, enterpriseId, frameText, messageType);
     }
@@ -615,6 +636,8 @@ public class MultiDeviceBroadcastService implements MessageListener {
                     userId, messageType, e);
             }
         }
+        ChatReplyLog.log("be.ws_route", terminal, null, sentCount > 0 ? "local_write_started" : "no_local_match",
+            "channelCount", channels.size(), "writeCount", sentCount, "targetUserId", userId, "targetTenantId", enterpriseId);
         return sentCount;
     }
 
@@ -648,10 +671,16 @@ public class MultiDeviceBroadcastService implements MessageListener {
             envelope.put("contextKey", contextKey);
             envelope.put("terminal", terminal);
         }
+        long publishStarted = System.nanoTime();
+        JSONObject diagnostics = ChatChainLog.terminalFrame(frameText);
         try {
-            stringRedisTemplate.convertAndSend(pubsubTopicName, envelope.toJSONString());
+            Long subscribers = stringRedisTemplate.convertAndSend(pubsubTopicName, envelope.toJSONString());
+            ChatReplyLog.log("be.reply_broadcast", diagnostics, null, "ok", "subscriberCount", subscribers,
+                "durationMs", (System.nanoTime() - publishStarted) / 1_000_000);
         }
         catch (Exception e) {
+            ChatReplyLog.log("be.reply_broadcast", diagnostics, null, "failed",
+                "durationMs", (System.nanoTime() - publishStarted) / 1_000_000);
             // 本机推送已经完成；Redis 暂时不可用不应反向影响当前实例上的客户端。
             log.warn("跨实例 WebSocket 广播发布失败, userId: {}, messageType: {}, error: {}",
                 userId, envelope.getString("messageType"), e.getMessage());

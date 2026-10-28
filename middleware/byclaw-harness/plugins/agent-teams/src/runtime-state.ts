@@ -1,5 +1,6 @@
 /** Host-owned AgentTeams state. Workspace files are business artifacts, never the team database. */
 import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { cpSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
@@ -24,6 +25,7 @@ interface SessionCwdCarrier {
 /** Resolves team state roots for one DSH context; its aliases never leak to another context. */
 export class TeamStateRuntime {
   readonly #aliases = new Map<string, { target: string; owners: number }>()
+  readonly #scopedAliases = new AsyncLocalStorage<ReadonlyMap<string, string>>()
 
   constructor(readonly options: TeamStateRuntimeOptions = {}) {}
 
@@ -70,10 +72,26 @@ export class TeamStateRuntime {
     }
   }
 
+  /** Separate concurrent conversation bookkeeping while their tools share a project execution cwd. */
+  runWithWorkspaceAlias<T>(workspace: string, stateWorkspace: string, operation: () => T): T {
+    const aliases = new Map(this.#scopedAliases.getStore())
+    const key = this.workspacePath(workspace)
+    const target = this.workspacePath(stateWorkspace)
+    if (key !== target) aliases.set(key, target)
+    return this.#scopedAliases.run(aliases, operation)
+  }
+
   /** Deterministic across restarts; migrate the old bookkeeping directory out of a host-local workspace once. */
   resolveTeamStateRoot(workspace: string, stateDir: string): string {
     const executionCwd = this.workspacePath(workspace)
-    const cwd = this.#aliases.get(executionCwd)?.target ?? executionCwd
+    let cwd = executionCwd
+    const visited = new Set<string>()
+    while (!visited.has(cwd)) {
+      visited.add(cwd)
+      const next = this.#scopedAliases.getStore()?.get(cwd) ?? this.#aliases.get(cwd)?.target
+      if (next === undefined || next === cwd) break
+      cwd = next
+    }
     const base = this.runtimeRoot()
     if (this.workspaceOnToolEnvironment) {
       // The workspace is not on this host: no legacy in-workspace state can exist here.

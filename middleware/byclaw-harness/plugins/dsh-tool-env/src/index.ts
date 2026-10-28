@@ -44,6 +44,12 @@ export interface Config {
   idleMs: number
   /** Processes left on B keep it alive past idle for at most this long. */
   busyProcessMaxMs: number
+  /**
+   * The user's launch environment (what BE rendered for the user's own sandbox),
+   * laid under the environment of every process started on B. The shared host
+   * passes it per user and renews it with every PUT.
+   */
+  launchEnv: Record<string, string>
   requestTimeoutMs: number
   leaseMs: number
   /** `static` backend endpoint; `wsUrl` (ws/wss/http/https) makes it a WebSocket bridge to sshd. */
@@ -92,6 +98,7 @@ export class ToolEnv extends ToolEnvConnection {
     workspace: schema.string().default('/by'),
     idleMs: schema.natural().default(600_000),
     busyProcessMaxMs: schema.natural().default(6 * 60 * 60 * 1000),
+    launchEnv: schema.dict(schema.string()).default({}),
     requestTimeoutMs: schema.natural().default(30_000),
     leaseMs: schema.natural().default(30_000),
     host: schema.string().default('127.0.0.1'),
@@ -142,6 +149,7 @@ export class ToolEnv extends ToolEnvConnection {
       },
       ptcLaunch: { kind: 'node-script', executable: process.execPath, bootstrapPath },
       idleMs: config.idleMs,
+      launchEnv: config.launchEnv,
       busy: {
         // DSH's own account of work on A, read from its services when the timer fires.
         dsh: () => isDshBusy(ctx.get('agents') as AgentsView | undefined, ctx.get('jobs') as JobsView | undefined),

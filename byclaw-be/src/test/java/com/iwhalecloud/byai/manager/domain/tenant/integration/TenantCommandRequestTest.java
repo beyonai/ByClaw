@@ -47,4 +47,46 @@ class TenantCommandRequestTest {
         value.remove("actor");
         assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(value));
     }
+
+    @Test void supportedProfilesDoNotRequireLegacyBindingVersion() throws Exception {
+        for (String profile : new String[]{"s", "m", "l"}) {
+            var value = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request);
+            var spec = (com.fasterxml.jackson.databind.node.ObjectNode) value.get("resourceSpec");
+            spec.remove("bindingVersion");
+            spec.put("profileKey", profile);
+            var parsed = TenantCommandRequest.parse(value);
+            assertEquals(profile, parsed.profileKey());
+            assertFalse(json.readTree(parsed.snapshot()).path("resourceSpec").has("bindingVersion"));
+        }
+    }
+
+    @Test void omittedProfileKeepsOriginalBusinessDigestUntilAcceptance() throws Exception {
+        var value = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request);
+        value.remove("resourceSpec");
+        var omitted = TenantCommandRequest.parse(value);
+        assertNull(omitted.profileKey());
+        assertFalse(json.readTree(omitted.snapshot()).has("resourceSpec"));
+        assertEquals(TenantCommandRequest.digest(TenantCommandRequest.canonical(value)), omitted.hash());
+
+        value.putObject("resourceSpec");
+        var emptySpec = TenantCommandRequest.parse(value);
+        assertNull(emptySpec.profileKey());
+        assertTrue(json.readTree(emptySpec.snapshot()).path("resourceSpec").isEmpty());
+        assertNotEquals(omitted.hash(), emptySpec.hash());
+    }
+
+    @Test void unsupportedLegacyBindingsAndMalformedResourceSpecsRemainRejected() throws Exception {
+        var value = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request);
+        var spec = (com.fasterxml.jackson.databind.node.ObjectNode) value.get("resourceSpec");
+        spec.put("bindingVersion", "2");
+        assertEquals("RESOURCE_BINDING_UNSUPPORTED", assertThrows(TenantCommandException.class,
+            () -> TenantCommandRequest.parse(value)).getMessage());
+        spec.remove("bindingVersion");
+        spec.put("profileKey", "xl");
+        assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(value));
+        spec.put("profileKey", "");
+        assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(value));
+        value.putNull("resourceSpec");
+        assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(value));
+    }
 }

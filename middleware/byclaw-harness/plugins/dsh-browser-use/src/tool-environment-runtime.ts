@@ -13,6 +13,8 @@ export interface BrowserSubprocess {
   }): {
     stdin: NodeJS.WritableStream | undefined; stdout: NodeJS.ReadableStream | undefined
     done: Promise<unknown>; terminate(): void
+    /** Bounded stderr the provider collected (DSH subprocess `collected.stderr`). */
+    collected?: { stderr?: { readFrom(fromByte: number): { text: string } } }
   }
 }
 
@@ -28,6 +30,8 @@ export interface ToolEnvironmentBrowserOptions {
   viewer?: 'none' | 'novnc' | 'shared-novnc'
   viewerPort?: number
   goalEnabled?: boolean
+  /** Receives why the bridge on B ended with an error (its stderr tail). */
+  log?: (message: string) => void
 }
 
 /** A private local socket carrying broker frames over the existing SSH subprocess service. */
@@ -86,7 +90,8 @@ export class ToolEnvironmentBrowserRuntime implements BrowserBrokerRuntime {
     stdin.on('error', () => socket.destroy())
     stdout.on('error', () => socket.destroy())
     socket.once('close', () => { stdin.end(); child.terminate() })
-    const done = child.done.catch(() => undefined).finally(() => { this.#children.delete(done); socket.destroy() })
+    const done = child.done.then(outcome => this.#reportExit(outcome, child), () => undefined)
+      .finally(() => { this.#children.delete(done); socket.destroy() })
     this.#children.add(done)
     stdin.write(JSON.stringify({ id: this.#options.contextId ?? this.#id, secret: this.secret,
       idleBrowserMs: this.#options.idleBrowserMs ?? 30_000,
@@ -98,6 +103,16 @@ export class ToolEnvironmentBrowserRuntime implements BrowserBrokerRuntime {
     socket.pipe(stdin)
     stdout.pipe(socket)
     socket.resume()
+  }
+
+  /** A bridge that failed says why on stderr; without this the tool only sees a closed broker connection. */
+  #reportExit(outcome: unknown, child: { collected?: { stderr?: { readFrom(fromByte: number): { text: string } } } }): void {
+    const exitCode = (outcome as { exitCode?: number | null } | undefined)?.exitCode
+    if (exitCode === 0 || exitCode === undefined) return
+    let stderr = ''
+    try { stderr = child.collected?.stderr?.readFrom(0).text ?? '' } catch { /* nothing collected */ }
+    const tail = stderr.trim().split('\n').slice(-5).join(' | ').slice(0, 1000)
+    this.#options.log?.(`browser bridge on the tool environment exited ${String(exitCode)}${tail === '' ? '' : `: ${tail}`}`)
   }
 
   stop(): Promise<void> {

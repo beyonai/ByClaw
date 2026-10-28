@@ -1,14 +1,10 @@
-import {
-  listSharedMembers,
-  listSharedRecords,
-  releaseSharedInstance,
-  type SharedMember,
-  type SharedRecord,
-} from '@/pages/manager/service/SharedSandbox';
+import { listSharedRecords, releaseSharedInstance, type SharedRecord } from '@/pages/manager/service/SharedSandbox';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
-import { Alert, Button, Drawer, Input, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import SharedMembersDrawer from './SharedMembersDrawer';
+import { formatReleaseReason } from './releaseReasonUtils';
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -29,13 +25,8 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<SharedRecord>();
-  const [members, setMembers] = useState<SharedMember[]>([]);
-  const [memberPage, setMemberPage] = useState({ pageIndex: 1, pageSize: 20, total: 0 });
-  const [memberLoading, setMemberLoading] = useState(false);
-  const [memberError, setMemberError] = useState('');
   const [releasing, setReleasing] = useState<string>();
   const generation = useRef(0);
-  const memberGeneration = useRef(0);
 
   const load = useCallback(
     async (pageIndex = 1, pageSize = 20) => {
@@ -68,28 +59,14 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
     void load();
     return () => {
       generation.current++;
-      memberGeneration.current++;
     };
   }, [load]);
 
-  const loadMembers = async (record: SharedRecord, pageIndex = 1, pageSize = 20) => {
-    const run = ++memberGeneration.current;
-    setSelected(record);
-    setMembers([]);
-    setMemberLoading(true);
-    setMemberError('');
-    try {
-      const result = await listSharedMembers({ sandboxRecordId: record.id, pageIndex, pageSize });
-      if (run !== memberGeneration.current) return;
-      setMembers(result.records);
-      setMemberPage({ pageIndex, pageSize, total: result.total });
-    } catch (failure) {
-      if (run === memberGeneration.current) {
-        setMemberError(errorMessage(failure, intl.formatMessage({ id: 'sandboxMgr.shared.loadFailed' })));
-      }
-    } finally {
-      if (run === memberGeneration.current) setMemberLoading(false);
-    }
+  const currentQuery = useRef({ load, page });
+  currentQuery.current = { load, page };
+  const refresh = () => {
+    const query = currentQuery.current;
+    return query.load(query.page.pageIndex, query.page.pageSize);
   };
 
   const release = async (record: SharedRecord) => {
@@ -180,13 +157,17 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           },
           { title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }), dataIndex: 'createTime', render: time },
           { title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }), dataIndex: 'releaseTime', render: time },
-          { title: intl.formatMessage({ id: 'sandboxMgr.table.releaseReason' }), dataIndex: 'releaseReason' },
+          {
+            title: intl.formatMessage({ id: 'sandboxMgr.table.releaseReason' }),
+            dataIndex: 'releaseReason',
+            render: (value) => formatReleaseReason(intl, value),
+          },
           {
             title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
             fixed: 'right',
             render: (_, row) => (
               <Space>
-                <Button type="link" onClick={() => loadMembers(row)}>
+                <Button type="link" onClick={() => setSelected(row)}>
                   {intl.formatMessage({ id: 'sandboxMgr.shared.viewUsers' })}
                 </Button>
                 {canManage && ['STARTING', 'RUNNING'].includes(row.status) && (
@@ -207,53 +188,15 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           },
         ]}
       />
-      <Drawer
-        title={intl.formatMessage(
-          { id: 'sandboxMgr.shared.membersTitle' },
-          { sandboxId: selected?.sandboxId || selected?.id || '' }
-        )}
-        width={1000}
-        open={!!selected}
-        onClose={() => {
-          memberGeneration.current++;
-          setSelected(undefined);
-        }}
-      >
-        {memberError && <Alert type="error" message={memberError} showIcon />}
-        <Table<SharedMember>
-          rowKey="id"
-          dataSource={members}
-          loading={memberLoading}
-          scroll={{ x: 900 }}
-          pagination={{
-            current: memberPage.pageIndex,
-            pageSize: memberPage.pageSize,
-            total: memberPage.total,
-            onChange: (current, size) => selected && loadMembers(selected, current, size),
-          }}
-          columns={[
-            { title: intl.formatMessage({ id: 'sandboxMgr.table.userCode' }), dataIndex: 'userCode' },
-            { title: intl.formatMessage({ id: 'sandboxMgr.shared.tenant' }), dataIndex: 'enterpriseId' },
-            { title: intl.formatMessage({ id: 'sandboxMgr.table.status' }), dataIndex: 'status', render: formatStatus },
-            {
-              title: intl.formatMessage({ id: 'sandboxMgr.shared.assignedAt' }),
-              dataIndex: 'assignedAt',
-              render: time,
-            },
-            {
-              title: intl.formatMessage({ id: 'sandboxMgr.shared.lastHeartbeatAt' }),
-              dataIndex: 'lastHeartbeatAt',
-              render: time,
-            },
-            {
-              title: intl.formatMessage({ id: 'sandboxMgr.shared.releasedAt' }),
-              dataIndex: 'releasedAt',
-              render: time,
-            },
-            { title: intl.formatMessage({ id: 'sandboxMgr.shared.exitReason' }), dataIndex: 'releaseReason' },
-          ]}
+      {selected && (
+        <SharedMembersDrawer
+          key={selected.id}
+          record={selected}
+          canManage={canManage}
+          onClose={() => setSelected(undefined)}
+          onReleased={refresh}
         />
-      </Drawer>
+      )}
     </Space>
   );
 }

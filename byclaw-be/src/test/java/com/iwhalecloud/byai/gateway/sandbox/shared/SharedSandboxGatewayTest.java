@@ -46,10 +46,59 @@ class SharedSandboxGatewayTest {
         assertThat(gateway.tryAcquire("alice", "byclaw-dsh").getWorkerAgentType())
             .isEqualTo("BYCLAW_DSH_SHARED_context_1");
         clearInvocations(client, users);
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0, "data", 1));
 
         assertThat(gateway.tryAcquire("alice", "byclaw-dsh")).isNull();
         verify(policy, times(2)).eligible("alice");
-        verifyNoInteractions(client, users);
+        verify(client).call(eq("releaseAll"), argThat(p -> !p.containsKey("requestedServiceKey")
+            && Long.valueOf(10).equals(p.get("enterpriseId")) && "eligibility.revoked".equals(p.get("reason"))));
+        verify(client, never()).call(eq("lookup"), anyMap());
+        verify(client, never()).call(eq("acquire"), anyMap());
+    }
+
+    @Test
+    void revokedUserAfterBeRestartMustFinishCleanupBeforeExclusiveFallback() {
+        var gateway = gateway();
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", -1, "msg", "context is busy; draining"));
+        assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh")).hasMessageContaining("draining");
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0, "data", 1));
+        assertThat(gateway.tryAcquire("alice", "byclaw-dsh")).isNull();
+    }
+
+    @Test
+    void userWithoutSharedMappingContinuesExclusivePathAfterNoopCleanup() {
+        var gateway = gateway();
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0, "data", 0));
+        assertThat(gateway.tryAcquire("alice", "byclaw-dsh")).isNull();
+        verify(client).call(eq("releaseAll"), anyMap());
+    }
+
+    @Test
+    void unknownCleanupAcknowledgementCannotEnableExclusiveFallback() {
+        var gateway = gateway();
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0));
+        assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh")).hasMessageContaining("共享释放响应格式错误");
+    }
+
+    @Test
+    void revokedWorkerLookupDoesNotReturnTheOldSharedTarget() {
+        var gateway = gateway();
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("workerAgentType", "BYCLAW_DSH_SHARED_old_1")));
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0, "data", 1));
+        assertThat(gateway.currentWorkerTarget("alice")).isNull();
+        verify(client, never()).call(eq("lookup"), anyMap());
+    }
+
+    @Test
+    void observedRevokedUserHeartbeatReleasesInsteadOfRenewing() {
+        var gateway = gateway();
+        when(client.call(eq("lookupAll"), anyMap())).thenReturn(Map.of("code", 0, "data", List.of(Map.of("sandboxId", "old"))));
+        gateway.infos("alice");
+        when(client.call(eq("releaseAll"), anyMap())).thenReturn(Map.of("code", 0, "data", 1));
+        assertThat(gateway.heartbeat("alice")).isFalse();
+        verify(client).call(eq("releaseAll"), argThat(p -> "eligibility.revoked".equals(p.get("reason"))));
+        verify(client, never()).call(eq("heartbeatAll"), anyMap());
     }
 
     @Test
@@ -82,7 +131,19 @@ class SharedSandboxGatewayTest {
         when(client.call(eq("acquire"), anyMap())).thenReturn(Map.of("code", 0, "data", Map.of("sandboxId", "pool2")));
         assertThat(gateway.tryAcquire("alice", "byclaw-dsh").getSandboxId()).isEqualTo("pool2");
         verify(client).call(eq("acquire"), argThat(p -> Long.valueOf(10).equals(p.get("enterpriseId"))
-            && Boolean.TRUE.equals(p.get("byTenant")) && "byclaw-dsh".equals(p.get("requestedServiceKey"))));
+            && Boolean.TRUE.equals(p.get("byTenant")) && Boolean.TRUE.equals(p.get("replaceExclusive"))
+            && "byclaw-dsh".equals(p.get("requestedServiceKey"))));
+    }
+
+    @Test
+    void newlyEligibleWorkerRoutingAcquiresSharedEvenWhileOldExclusiveWorkerIsOnline() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0));
+        when(client.call(eq("acquire"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("workerAgentType", "BYCLAW_DSH_SHARED_new_2")));
+        assertThat(gateway.currentWorkerTarget("alice")).isEqualTo("BYCLAW_DSH_SHARED_new_2");
+        verify(client).call(eq("acquire"), argThat(p -> Boolean.TRUE.equals(p.get("replaceExclusive"))));
     }
 
     @Test
@@ -97,6 +158,7 @@ class SharedSandboxGatewayTest {
     @Test
     void allOperationsPreserveEveryServiceMappingForTheCurrentTenant() {
         var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
         var launches = List.of(Map.of("sandboxId", "one", "requestedServiceKey", "byclaw-dsh"),
             Map.of("sandboxId", "two", "requestedServiceKey", "custom-service"));
         when(client.call(eq("lookupAll"), anyMap())).thenReturn(Map.of("code", 0, "data", launches));

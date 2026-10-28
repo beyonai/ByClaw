@@ -129,6 +129,8 @@ export function applySpecMap(ctx: Context, config: ResolvedConfig, state: TouchS
     // refreshes the cache the assembly after this waterfall reads — and
     // short-circuiting later pre-step listeners is never the price of that.
     const downstream = await next()
+    const workspacePolicy = ctx.get('byclawWorkspacePolicy') as { automaticDiscoveryEnabled: boolean } | undefined
+    if (workspacePolicy?.automaticDiscoveryEnabled === false) return downstream
     const touches = state.get(agent)
     if (touches === undefined) return downstream
     const { repoRoot, specRoot } = workspaceOf(agent, config)

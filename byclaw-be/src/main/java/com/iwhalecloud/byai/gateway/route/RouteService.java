@@ -169,6 +169,8 @@ public class RouteService {
      * storeMessage / afterProcess，最终由 cleanupResources 关闭流。
      */
     public void route(ChatProcessContext ctx) throws Exception {
+        com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.bindSession(ctx.getSessionId());
+        ChatChainLog.accept(ctx.assistantChatDto);
         if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null) {
             var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
             if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
@@ -188,10 +190,14 @@ public class RouteService {
                 I18nUtil.get("groupchat.team.channelUnsupported"), null);
         }
         if (interfaceIntegration) {
+            ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.route", "point", "ok", 0,
+                "routeKind", "interface");
             interfaceRouteService.route(ctx);
             return;
         }
         if (a2aIntegration) {
+            ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.route", "point", "ok", 0,
+                "routeKind", "a2a");
             a2aRouteService.route(ctx);
             return;
         }
@@ -204,6 +210,8 @@ public class RouteService {
             ? ctx.loginInfo.getUserCode()
             : "";
         if (userCode.isEmpty()) {
+            ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.route", "point", "failed", 0,
+                "errorCode", "USER_CONTEXT_MISSING");
             return;
         }
 
@@ -214,9 +222,20 @@ public class RouteService {
         Long agentId = ctx.assistantChatDto.getAgentId();
         List<ResourceVo> resourceList = chatDto.getResourceList();
 
-        String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, agentId,
-            chatDto.getSourceAgentType(), userCode);
+        long routeStarted = System.nanoTime();
+        ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "start", "running", 0, "agentId", agentId);
+        String targetAgentType;
+        try {
+            targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, agentId,
+                chatDto.getSourceAgentType(), userCode);
+        } catch (RuntimeException error) {
+            ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "end", "failed", routeStarted,
+                "errorCode", "TARGET_ROUTE_FAILED", "errorType", error.getClass().getSimpleName());
+            throw error;
+        }
         ctx.targetAgentType = targetAgentType;
+        ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "end", "ok", routeStarted,
+            "targetAgentType", targetAgentType, "agentId", agentId);
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
         // 运营任务自动发送时保留开头的员工引用，普通单员工聊天仍沿用原有的占位符精简逻辑。
@@ -241,10 +260,8 @@ public class RouteService {
         try (ChatGatewaySendGuard.Lease lease = sendGuard == null ? () -> { } : sendGuard.open(ctx)) {
             runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
             try {
+                com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.check();
                 ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
-                long readyMs = (System.nanoTime() - dispatchStarted) / 1_000_000;
-                ChatChainLog.record("be.worker_ready", ChatChainLog.requestId(ctx), sessionId, "ok",
-                    "traceId", traceId, "targetAgentType", targetAgentType, "readyMs", readyMs);
                 if (laneRoutes.isEmpty()) {
                     GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
                         userCode,
@@ -259,9 +276,8 @@ public class RouteService {
                         agentId,
                         ctx
                     );
-                    ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
-                        "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
-                        "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs);
+                    ChatChainLog.stage(chatDto, traceId, "be.dispatched", "end", "ok", dispatchStarted,
+                        "targetAgentType", targetAgentType, "workerId", response.getTargetWorkerId());
                 } else {
                     Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
                         multiAgentMetadata, laneRoutes);
@@ -278,13 +294,12 @@ public class RouteService {
                         agentId,
                         ctx
                     );
-                    ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "ok",
-                        "traceId", traceId, "workerId", response.getTargetWorkerId(), "readyMs", readyMs,
-                        "dispatchMs", (System.nanoTime() - dispatchStarted) / 1_000_000 - readyMs, "lanes", laneRoutes.size());
+                    ChatChainLog.stage(chatDto, traceId, "be.dispatched", "end", "ok", dispatchStarted,
+                        "targetAgentType", targetAgentType, "workerId", response.getTargetWorkerId(), "lanes", laneRoutes.size());
                 }
             } catch (Exception e) {
-                ChatChainLog.record("be.dispatched", ChatChainLog.requestId(ctx), sessionId, "failed",
-                    "durationMs", (System.nanoTime() - dispatchStarted) / 1_000_000, "errorType", e.getClass().getSimpleName());
+                ChatChainLog.stage(chatDto, traceId, "be.dispatched", "end", "failed", dispatchStarted,
+                    "errorCode", "GATEWAY_INITIATION_FAILED", "errorType", e.getClass().getSimpleName());
                 chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
                 throw e;
             }
@@ -394,8 +409,15 @@ public class RouteService {
 
     private void ensureWorkerReadyBeforeFirstSend(ChatProcessContext ctx, String userCode, Long agentId,
             String targetAgentType) {
+        long started = System.nanoTime();
+        boolean[] coldStart = {false};
+        ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "start", "running", 0,
+            "targetAgentType", targetAgentType);
         try {
             workerRouteReadinessService.ensureReady(userCode, agentId, targetAgentType, phase -> {
+                coldStart[0] = true;
+                ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "progress", "running", 0,
+                    "targetAgentType", targetAgentType, "step", phase.name());
                 switch (phase) {
                     case STARTING -> sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogStart,
                         I18nUtil.get("sandbox.launch.progress.start"));
@@ -407,8 +429,13 @@ public class RouteService {
                     }
                 }
             });
+            ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "end", "ok", started,
+                "targetAgentType", targetAgentType, "mode", coldStart[0] ? "cold_start" : "existing_or_not_required");
         }
         catch (RuntimeException exception) {
+            ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "end", "failed", started,
+                "targetAgentType", targetAgentType, "errorCode", "WORKER_READINESS_FAILED",
+                "errorType", exception.getClass().getSimpleName());
             String failureMessage = resolveSandboxLaunchFailureMessage(exception);
             sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);
             throw exception;
@@ -724,9 +751,13 @@ public class RouteService {
 
         // 构建项目信息
         Long projectId = chatDto.getProjectId();
-        String workspace = resolveSandboxWorkspace(sessionId);
+        boolean dshRuntime = targetAgentType != null
+            && (targetAgentType.startsWith("BYCLAW_DSH_") || targetAgentType.startsWith("HARNESS_"));
+        String workspace = dshRuntime && projectId != null
+            ? "/by/.shared/project_" + projectId : resolveSandboxWorkspace(sessionId);
+        metadata.put("runtimeType", dshRuntime ? "dsh" : "openclaw");
         if (projectId != null) {
-            // 项目空间仍作为资源地址提供；会话执行和过程文件不再共享项目 cwd。
+            // 项目源码目录继续作为资源地址提供，与 DSH 项目共享工作目录区分。
             JSONObject projectInfo = this.buildProjectInfo(projectId, resolveSandboxProjectWorkspace(projectId));
             metadata.put("project_info", projectInfo);
         }
@@ -770,25 +801,52 @@ public class RouteService {
             }
         }
 
+        // Group decorators retain their own metadata, but must not replace the resolved DSH project cwd.
+        if (dshRuntime && projectId != null) {
+            gatewayParams.put("cwd", workspace);
+        }
+
         while (true) {
+            com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.check();
             // 沙箱重启后的每次重试都重新读撤回屏障，不复用 decorator 的检查结果。
             ChatGatewaySendGuard sendGuard = sendGuardProvider == null ? null : sendGuardProvider.getIfAvailable();
             if (sendGuard != null) sendGuard.beforeSend(ctx);
             ResumeRoutingTraceLogger.logGatewayEgress(chatDto, sessionId, traceId, targetAgentType, answerMessageId,
                 parentMessageId, messageContent, gatewayParams, metadata, retryAttemptsAfterWorkerReady + 1);
-            GatewayClient.SendResponse response = gatewayClient.sendMessage(
-                targetAgentType,
-                sessionId,
-                messageContent,
-                userCode,
-                currentUserName,
-                actionType,
-                parentMessageId,
-                answerMessageId,
-                traceId,
-                gatewayParams,
-                metadata
-            );
+            int attempt = retryAttemptsAfterWorkerReady + 1;
+            Map<String, Object> chain = ChatChainLog.dispatchIdentity(chatDto, attempt);
+            // Replace untrusted inbound diagnostics, and never mutate a previous attempt's metadata.
+            Map<String, Object> attemptMetadata = new HashMap<>(metadata);
+            attemptMetadata.put("chatChain", chain);
+            long publishStarted = System.nanoTime();
+            ChatChainLog.stage(chatDto, traceId, "be.dispatch", "start", "running", 0,
+                "dispatchId", chain.get("dispatchId"), "attempt", attempt,
+                "targetAgentType", targetAgentType, "messageId", answerMessageId, "actionType", actionType);
+            GatewayClient.SendResponse response;
+            try {
+                response = gatewayClient.sendMessage(
+                    targetAgentType,
+                    sessionId,
+                    messageContent,
+                    userCode,
+                    currentUserName,
+                    actionType,
+                    parentMessageId,
+                    answerMessageId,
+                    traceId,
+                    gatewayParams,
+                    attemptMetadata
+                );
+            } catch (RuntimeException error) {
+                ChatChainLog.stage(chatDto, traceId, "be.dispatch", "end", "failed", publishStarted,
+                    "dispatchId", chain.get("dispatchId"), "attempt", attempt, "targetAgentType", targetAgentType,
+                    "errorCode", "GATEWAY_SEND_EXCEPTION", "errorType", error.getClass().getSimpleName());
+                throw error;
+            }
+            ChatChainLog.stage(chatDto, traceId, "be.dispatch", "end", response.isSuccess() ? "ok" : "failed",
+                publishStarted, "dispatchId", chain.get("dispatchId"), "attempt", attempt,
+                "targetAgentType", targetAgentType, "workerId", response.getTargetWorkerId(),
+                "errorCode", response.getErrorCode());
 
             if (response.isSuccess()) {
                 return response;
@@ -802,7 +860,19 @@ public class RouteService {
                 retryAttemptsAfterWorkerReady++;
                 log.info("Gateway SDK 消息发送失败，按远端沙箱退出处理并重拉后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
                     sessionId, userCode, agentId, targetAgentType, response.getErrorCode());
-                restartSandboxWithProgress(ctx, userCode, agentId, targetAgentType);
+                long restartStarted = System.nanoTime();
+                ChatChainLog.stage(chatDto, traceId, "be.worker_restart", "start", "running", 0,
+                    "dispatchId", chain.get("dispatchId"), "targetAgentType", targetAgentType);
+                try {
+                    restartSandboxWithProgress(ctx, userCode, agentId, targetAgentType);
+                    ChatChainLog.stage(chatDto, traceId, "be.worker_restart", "end", "ok", restartStarted,
+                        "dispatchId", chain.get("dispatchId"), "targetAgentType", targetAgentType);
+                } catch (RuntimeException error) {
+                    ChatChainLog.stage(chatDto, traceId, "be.worker_restart", "end", "failed", restartStarted,
+                        "dispatchId", chain.get("dispatchId"), "targetAgentType", targetAgentType,
+                        "errorCode", "WORKER_RESTART_FAILED", "errorType", error.getClass().getSimpleName());
+                    throw error;
+                }
                 continue;
             }
 

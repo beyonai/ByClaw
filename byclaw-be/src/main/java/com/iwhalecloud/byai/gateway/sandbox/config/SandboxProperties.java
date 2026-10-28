@@ -159,6 +159,9 @@ public class SandboxProperties {
         /** PUT waits for the user's context to boot; keep it below {@code sandboxCreationLockTtl}. */
         private Duration requestTimeout = Duration.ofSeconds(100);
 
+        /** Service key of the users' tool sandbox, which carries their browser; the host's {@code BYCLAW_TOOL_ENV_SERVICE_KEY}. */
+        private String toolServiceKey = "byclaw-dsh-tools";
+
         public boolean isEnabled() {
             return baseUrl != null && !baseUrl.isBlank();
         }

@@ -4,7 +4,6 @@ import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicySe
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
 import java.util.List;
 import java.util.Map;
 import java.time.LocalDateTime;
@@ -13,6 +12,7 @@ import java.time.format.DateTimeParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantRow;
@@ -45,14 +45,21 @@ public class TenantAdminTenantService {
     private final TenantAdminTenantMapper tenantMapper;
     private final SequenceService sequenceService;
     private final ObjectMapper objectMapper;
-    private final HookPublisher hookPublisher;
+    private final TenantSandboxProperties sandboxProperties;
 
     public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
-                                    ObjectMapper objectMapper, HookPublisher hookPublisher) {
+                                    ObjectMapper objectMapper) {
+        this(tenantMapper, sequenceService, objectMapper, new TenantSandboxProperties());
+    }
+
+    @Autowired
+    public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
+                                    ObjectMapper objectMapper,
+                                    TenantSandboxProperties sandboxProperties) {
         this.tenantMapper = tenantMapper;
         this.sequenceService = sequenceService;
         this.objectMapper = objectMapper;
-        this.hookPublisher = hookPublisher;
+        this.sandboxProperties = sandboxProperties;
     }
 
     @Transactional(readOnly = true)
@@ -131,18 +138,9 @@ public class TenantAdminTenantService {
         insertConfig(enterpriseId, "PROVISION_REQUEST_ID", requestId);
         insertConfig(enterpriseId, "PACKAGE_SPEC_ID", Long.toString(packageId));
         insertConfig(enterpriseId, "PACKAGE_NAME_SNAPSHOT", selectedPackage.getPackageName());
-        insertConfig(enterpriseId, "PACKAGE_CONTENT_SNAPSHOT", selectedPackage.getPackageContent());
+        insertConfig(enterpriseId, "PACKAGE_CONTENT_SNAPSHOT", packageSnapshot(selectedPackage.getPackageContent()));
         insertConfig(enterpriseId, "PROVISION_STATE", state);
         tenantMapper.insertOwner(sequenceService.nextVal(), enterpriseId, userId);
-        // 仅新建租户发布事件；幂等请求已在前面返回，HTTP 由 Hook 机制在事务提交后异步执行。
-        hookPublisher.publish("tenant.created", 1, Map.of(
-            "enterpriseId", Long.toString(enterpriseId),
-            "enterpriseName", name,
-            "packageId", Long.toString(packageId),
-            "packageName", selectedPackage.getPackageName(),
-            "createdBy", userId.toString(),
-            "requestId", requestId,
-            "provisionState", "RESERVED"));
         return new TenantView(Long.toString(enterpriseId), name, selectedPackage.getPackageName(), "RESERVED",
             "RESERVED", null, null, null);
     }
@@ -154,11 +152,22 @@ public class TenantAdminTenantService {
     private boolean validPackage(String json) {
         try {
             JsonNode content = objectMapper.readTree(json);
-            return content.path("memberLimit").asInt() > 0
-                && List.of("s", "m", "l").contains(content.path("profileKey").asText());
+            return content.isObject() && content.path("memberLimit").asInt() > 0;
         }
         catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private String packageSnapshot(String packageContent) {
+        try {
+            ObjectNode snapshot = (ObjectNode) objectMapper.readTree(packageContent);
+            // Preserve package limits and metadata while freezing the deployment's independent resource profile.
+            snapshot.put("profileKey", sandboxProperties.getProfileKey());
+            return objectMapper.writeValueAsString(snapshot);
+        }
+        catch (JsonProcessingException e) {
+            throw new IllegalStateException("tenant package snapshot serialization failed", e);
         }
     }
 
@@ -182,8 +191,13 @@ public class TenantAdminTenantService {
         catch (Exception ignored) {
             // Invalid persisted state never grants tenant access.
         }
+        // Commercial command truth supersedes the older provisioning snapshot after a paused worker.
+        if (row.getCommandStatus()!=null && !"DELETED".equals(status) && !"DELETING".equals(status)) {
+            status="SUCCEEDED".equals(row.getCommandStatus()) ? "READY" : row.getCommandStatus();
+            stage=row.getCommandStage();
+        }
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getFailureReason()));
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getCommandStatus()!=null ? row.getCommandErrorCode() : row.getFailureReason()));
     }
 
     /** 后台任务保存稳定错误键；读取时按查看者语言展示，历史诊断原文保持可读。 */

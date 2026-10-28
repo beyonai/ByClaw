@@ -830,8 +830,10 @@ public class ScriptService extends AbstractChatProcess {
         }
         try {
             if (ctx.chatResponse != null) {
+                JSONObject response = JSON.parseObject(JSON.toJSONString(ctx.chatResponse));
+                ChatReplyLog.attach(response, ctx, ctx.traceId);
                 multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse), ctx.senderChannel);
+                    SseResponseEventEnum.appStreamResponse, response.toJSONString(), ctx.senderChannel);
             }
         }
         catch (Exception e) {

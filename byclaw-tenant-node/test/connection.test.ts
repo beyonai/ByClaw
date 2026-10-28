@@ -81,4 +81,31 @@ describe("connection authority", () => {
     await expect(s.manager.write(async () => {})).rejects.toThrow("TENANT_SCHEMA_UPGRADING");
     expect(s.db.transaction).not.toHaveBeenCalled();
   });
+  it("requires fresh schema verification after a task completes", async () => {
+    const s = setup();
+    await s.manager.refresh();
+    s.manager.setSchemaReady(true);
+    const revision = s.manager.schemaRevision;
+    s.manager.setSchemaBusy(true);
+    s.manager.setSchemaBusy(false);
+    expect(s.manager.schemaRevision).toBeGreaterThan(revision);
+    expect(s.manager.ready).toBe(false);
+    await expect(s.manager.write(async () => {})).rejects.toThrow("NOT_READY");
+    s.manager.setSchemaReady(true);
+    expect(s.manager.ready).toBe(true);
+  });
+  it("invalidates schema verification only when the connection pool changes", async () => {
+    const s = setup();
+    await s.manager.refresh();
+    s.manager.setSchemaReady(true);
+    const revision = s.manager.schemaRevision;
+    await s.manager.refresh();
+    expect(s.manager.schemaRevision).toBe(revision);
+    expect(s.manager.ready).toBe(true);
+    s.ports.open.mockResolvedValue(database());
+    s.change(snapshot({ credentialVersion: "2" }));
+    await s.manager.refresh();
+    expect(s.manager.schemaRevision).toBeGreaterThan(revision);
+    expect(s.manager.ready).toBe(false);
+  });
 });

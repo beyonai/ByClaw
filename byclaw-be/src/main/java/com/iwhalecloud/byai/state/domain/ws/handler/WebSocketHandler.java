@@ -69,8 +69,22 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     @Autowired
     private MultiDeviceBroadcastService multiDeviceBroadcastService;
 
+    private final WebSocketChatDispatcher chatDispatcher;
+    private final WebSocketPollDispatcher pollDispatcher;
+
     public WebSocketHandler() {
+        this(new WebSocketChatDispatcher(), new WebSocketPollDispatcher());
+    }
+
+    public WebSocketHandler(WebSocketChatDispatcher chatDispatcher) {
+        this(chatDispatcher, new WebSocketPollDispatcher());
+    }
+
+    @Autowired
+    public WebSocketHandler(WebSocketChatDispatcher chatDispatcher, WebSocketPollDispatcher pollDispatcher) {
         super(true);
+        this.chatDispatcher = chatDispatcher;
+        this.pollDispatcher = pollDispatcher;
     }
 
     @Override
@@ -81,6 +95,8 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         log.info("Connection closed: {}", ctx.channel().remoteAddress());
+        chatDispatcher.closeChannel(ctx.channel());
+        pollDispatcher.closeChannel(ctx.channel());
         CloseUtil.close(ctx);
     }
 
@@ -88,6 +104,8 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
         if (evt instanceof IdleStateEvent event && event.state() == IdleState.READER_IDLE) {
             log.info("No data received for 60 seconds, closing connection");
+            chatDispatcher.closeChannel(ctx.channel());
+            pollDispatcher.closeChannel(ctx.channel());
             CloseUtil.close(ctx);
         }
     }
@@ -128,13 +146,18 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                     case HEARTBEAT -> handleHeartbeat(ctx, chatMessage);
                     case LLM_MESSAGE -> {
                         tenantChatFrame = TenantRequestContextHolder.get() != null;
-                        chatService.llmChat(ctx, chatMessage);
+                        dispatchChat(ctx, chatMessage);
                     }
-                    case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
-                    case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
+                    case SSE_STREAM -> dispatchChat(ctx, chatMessage);
+                    case NOTIFICATION -> pollDispatcher.submit(ctx.channel(), captureContext().wrap(
+                        () -> notificationService.getRealTimeNotification(ctx, message)));
                     case STOP_CHAT -> {
                         tenantChatFrame = TenantRequestContextHolder.get() != null;
-                        chatService.stopChat(ctx, chatMessage);
+                        ChatMessage stop = chatMessage;
+                        TenantRequestContext tenant = TenantRequestContextHolder.get();
+                        chatService.stopChat(ctx, chatMessage, () -> chatDispatcher.cancel(
+                            new WebSocketChatDispatcher.ChatKey(stop.getSenderId(),
+                                tenant == null ? null : tenant.enterpriseId(), stop.getSessionId())));
                     }
                     case TASK_PLAN_GET -> {
                         // The tenant Node does not persist task plans; keep this optional lookup
@@ -145,7 +168,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                     }
                     case GROUP_CHAT_SEND -> {
                         tenantChatFrame = TenantRequestContextHolder.get() != null;
-                        groupChatWebSocketService.send(ctx, chatMessage);
+                        dispatchChat(ctx, chatMessage);
                     }
                     default -> throw new RuntimeException(
                         I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
@@ -174,7 +197,14 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 sendTenantError(ctx, chatMessage, detail);
             }
             else {
-                NettyResponse.sendErrorResponse(ctx, e.getMessage());
+                if (chatMessage != null && (chatMessage.getType() == MessageType.LLM_MESSAGE
+                    || chatMessage.getType() == MessageType.SSE_STREAM
+                    || chatMessage.getType() == MessageType.GROUP_CHAT_SEND)) {
+                    sendTenantError(ctx, chatMessage, e.getMessage());
+                }
+                else {
+                    NettyResponse.sendErrorResponse(ctx, e.getMessage());
+                }
             }
         }
         finally {
@@ -182,6 +212,60 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             LocaleContextHolder.resetLocaleContext();
             RequestContextUtil.clear();
             log.debug("WebSocket 消息处理结束，清理上下文");
+        }
+    }
+
+    private void dispatchChat(ChannelHandlerContext ctx, ChatMessage message) {
+        ContextSnapshot snapshot = captureContext();
+        chatDispatcher.submit(ctx.channel(), () -> new WebSocketChatDispatcher.ChatKey(snapshot.user().getUserId(),
+            snapshot.tenant() == null ? null : snapshot.tenant().enterpriseId(), message.getSessionId()), snapshot.wrap(() -> {
+            try {
+                if (!ctx.channel().isActive() || Thread.currentThread().isInterrupted()) return;
+                switch (message.getType()) {
+                    case LLM_MESSAGE -> chatService.llmChat(ctx, message);
+                    case SSE_STREAM -> chatService.sseStream(ctx, message);
+                    case GROUP_CHAT_SEND -> groupChatWebSocketService.send(ctx, message);
+                    default -> throw new IllegalStateException("Unsupported dispatched chat frame");
+                }
+            }
+            catch (Exception e) {
+                if (com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.isCancelled()) return;
+                log.error("Async WebSocket chat failed type={}, clientRequestId={}",
+                    message.getType(), message.getClientRequestId(), e);
+                if (ctx.channel().isActive()) {
+                    String detail = snapshot.tenant() == null ? e.getMessage()
+                        : e instanceof ResponseStatusException status && status.getReason() != null
+                            && status.getReason().contains("TENANT_GROUP_AGENT_NOT_READY")
+                                ? I18nUtil.get("tenant.ws.agentNotReady") : I18nUtil.get("tenant.ws.chatFailed");
+                    sendTenantError(ctx, message, detail);
+                }
+            }
+        }));
+    }
+
+    private ContextSnapshot captureContext() {
+        // Snapshot after ingress authorization; a later tenant switch must not change an admitted operation.
+        return new ContextSnapshot(JSON.parseObject(JSON.toJSONString(CurrentUserHolder.getLoginInfo()), LoginInfo.class),
+            TenantRequestContextHolder.get(), LocaleContextHolder.getLocale(), RequestContextUtil.getRequestId());
+    }
+
+    private record ContextSnapshot(LoginInfo user, TenantRequestContext tenant, java.util.Locale locale, Long requestId) {
+        private Runnable wrap(Runnable action) {
+            return () -> {
+                try {
+                    CurrentUserHolder.setLoginInfo(user);
+                    if (tenant != null) TenantRequestContextHolder.set(tenant);
+                    LocaleContextHolder.setLocale(locale);
+                    RequestContextUtil.setRequestId(requestId);
+                    action.run();
+                }
+                finally {
+                    CurrentUserHolder.clearLoginInfo();
+                    TenantRequestContextHolder.clear();
+                    LocaleContextHolder.resetLocaleContext();
+                    RequestContextUtil.clear();
+                }
+            };
         }
     }
 
@@ -262,13 +346,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     }
 
     private void sendTenantError(ChannelHandlerContext ctx, ChatMessage request, String detail) {
-        JSONObject response = new JSONObject();
-        response.put("type", MessageType.ERROR.name());
-        response.put("clientRequestId", request.getClientRequestId());
-        response.put("enterpriseId", request.getEnterpriseId());
-        response.put("chatContent", detail);
-        response.put("message", detail);
-        PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(response.toJSONString()));
+        com.iwhalecloud.byai.state.domain.ws.service.WebSocketErrorResponses.send(ctx, request, detail);
     }
 
     private void handleHeartbeat(ChannelHandlerContext ctx, ChatMessage chatMessage) {
@@ -276,25 +354,28 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
             String scopedSessionId = chatMessage.getScopedSessionId().trim();
             ctx.channel().attr(Constant.ATT_SCOPED_SESSION_ID).set(scopedSessionId.isEmpty() ? null : scopedSessionId);
         }
-        LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
-        if (userInfo != null && ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get() == null) {
-            try {
-                sandboxService.heartbeat(userInfo.getUserCode(), -1L);
-            }
-            catch (Exception e) {
-                log.error("ws 沙箱活跃时间更新异常", e);
-            }
-        }
         ChatMessage heartbeatResponse = new ChatMessage();
         heartbeatResponse.setType(MessageType.HEARTBEAT);
-        heartbeatResponse.setEnterpriseId(ctx.channel().attr(Constant.ATT_ENTERPRISE_ID).get());
+        heartbeatResponse.setEnterpriseId(chatMessage.getEnterpriseId());
         PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(heartbeatResponse)));
+        if (CurrentUserHolder.getLoginInfo() != null && TenantRequestContextHolder.get() == null) {
+            pollDispatcher.submit(ctx.channel(), captureContext().wrap(() -> {
+                try {
+                    sandboxService.heartbeat(CurrentUserHolder.getCurrentUserCode(), -1L);
+                }
+                catch (Exception e) {
+                    log.error("ws 沙箱活跃时间更新异常", e);
+                }
+            }));
+        }
         log.debug("Heartbeat response sent to: {}", ctx.channel().remoteAddress());
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.error("WebSocket error", cause);
+        chatDispatcher.closeChannel(ctx.channel());
+        pollDispatcher.closeChannel(ctx.channel());
         CloseUtil.close(ctx);
     }
 }

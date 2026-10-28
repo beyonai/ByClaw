@@ -253,4 +253,6 @@ noVNC 顶部显示运行状态及暂停/继续/取消。为在服务端隔离人
 
 配置 `workspaceOnToolEnvironment: true`（镜像变量 `BYCLAW_BROWSER_ON_TOOL_ENV=1`）后，浏览器通过当前上下文的 SSH subprocess 在工具沙箱运行；这个分支优先于 `ownsRuntime`，也适用于 multi-host。默认关闭，因此原有本地部署不变。
 
-截图和下载路径属于 B，goal 下载也在 B 内复制。原生浏览器默认端口 8082，与 B 上 byCLI 的 8081 和登录态分开。配置 `BYCLAW_TOOL_BROWSER_VIEWER` / `BYCLAW_TOOL_BROWSER_VIEWER_PORT` 调整桌面；连接断开不重放操作，空闲且没有 lease/请求时释放远程进程。A/B 必须使用配套构建产物。完整构建与部署说明见 [README.slim.md](../../README.slim.md)。
+B 运行浏览器监督进程时（完整工具镜像 `Dockerfile.tools` 的 `tools` 入口），桥接接入这个浏览器而不是另起一个：与用户自己的沙箱一样，一个带 byCLI 扩展的 Chromium、一份 profile、一个桌面。桥接经监督进程的 socket（`BYCLAW_BROWSER_SOCKET`）触发按需启动，从监督进程放在旁边的文件读取 broker 密钥（`broker.secret`，仅浏览器用户可读；`BYCLAW_BROWSER_SECRET_FILE` 可改路径；B 上的命令也以这个用户运行，因此能直接操作用户自己的浏览器，影响不出该用户的沙箱），校验 A 的密钥后换成监督进程的密钥再转发。桌面是监督进程的共享 noVNC（8081，B 的 `vnc` 实例），byCLI 守护进程监听 19825（B 的 `bycli` 实例）；下面的视口设置不适用。
+
+B 上没有监督进程时（slim 工具镜像），桥接自己起浏览器。截图和下载路径属于 B，goal 下载也在 B 内复制。原生浏览器默认端口 8082，与 B 上 byCLI 的 8081 和登录态分开。配置 `BYCLAW_TOOL_BROWSER_VIEWER` / `BYCLAW_TOOL_BROWSER_VIEWER_PORT` 调整桌面；连接断开不重放操作，空闲且没有 lease/请求时释放远程进程。A/B 必须使用配套构建产物。完整构建与部署说明见 [README.slim.md](../../README.slim.md)。

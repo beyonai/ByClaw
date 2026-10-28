@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.hook.*;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -32,6 +33,7 @@ class TenantCommandAcceptanceTest {
     private TenantCommandService service;
     private TenantCommandStore store;
     private HookProperties hooks;
+    private TenantSandboxProperties sandboxProperties;
     @BeforeEach void setup() throws Exception {
         var source = new DriverManagerDataSource("jdbc:h2:mem:acceptance" + System.nanoTime()
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000", "sa", "");
@@ -42,14 +44,15 @@ class TenantCommandAcceptanceTest {
         jdbc.execute("CREATE TABLE byai.tenant_config(id BIGINT PRIMARY KEY,enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),params_code VARCHAR(64),params_value TEXT NOT NULL,params_version BIGINT NOT NULL DEFAULT 1,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,UNIQUE(enterprise_id,params_code))");
         jdbc.execute("CREATE TABLE byai.tenant_user_membership(membership_id BIGINT PRIMARY KEY,enterprise_id BIGINT NOT NULL REFERENCES byai.po_enterprise_info(enterprise_id),user_id BIGINT NOT NULL REFERENCES byai.po_users(user_id),role VARCHAR(16),status VARCHAR(16),created_by BIGINT NOT NULL,UNIQUE(enterprise_id,user_id))");
         Path root = Files.isDirectory(Path.of("deploy")) ? Path.of(".") : Path.of("..");
-        for (String fragment : List.of("internal-commands", "execution-policy", "integration-events")) {
-            String sql = Files.readString(root.resolve("deploy/migrations/versions/V0.6.0/V0.6.0-" + fragment + "__ddl.sql"));
-            // H2 exercises the actual portable table/index DDL; PostgreSQL trigger acceptance remains separate.
-            if (fragment.equals("internal-commands")) sql = sql.substring(0, sql.indexOf("CREATE OR REPLACE FUNCTION"));
-            sql = sql.replace("timestamptz", "TIMESTAMP WITH TIME ZONE");
-            try (var connection = source.getConnection()) {
-                ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
-            }
+        String migration = Files.readString(root.resolve("deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"));
+        String start = "-- BEGIN tenant service integration schema";
+        String end = "-- END tenant service integration schema";
+        int first = migration.indexOf(start), last = migration.indexOf(end);
+        assertTrue(first >= 0 && last > first, "tenant integration schema section must exist in the release DDL");
+        // H2 covers this feature's table/index DDL; PostgreSQL acceptance applies the entire release file.
+        String sql = migration.substring(first + start.length(), last).replace("timestamptz", "TIMESTAMP WITH TIME ZONE");
+        try (var connection = source.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
         }
         jdbc.update("INSERT INTO byai.po_users(user_id,state,is_locked) VALUES(1,'A','N')");
         var factory = new SqlSessionFactoryBean();
@@ -66,8 +69,10 @@ class TenantCommandAcceptanceTest {
         var durable = new DurableHookPublisher(source, hooks, List.of(new HookEventSchema("tenant.created", 1,
             Set.of("enterpriseId", "enterpriseName", "createdBy", "requestId", "provisionState"))));
         store = new TenantCommandStore(jdbc);
+        sandboxProperties = new TenantSandboxProperties();
         service = new TenantCommandService(store, jdbc, mapper, ids, json, new HookPublisher(null, durable),
-            new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source));
+            new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source),
+            sandboxProperties);
     }
     private ObjectNode body(String requestId) throws Exception {
         return (ObjectNode) json.readTree("""
@@ -141,5 +146,51 @@ class TenantCommandAcceptanceTest {
             assertEquals(first.get(15, TimeUnit.SECONDS).commandId(), second.get(15, TimeUnit.SECONDS).commandId());
         }
         assertReservations(1);
+    }
+
+    @Test void omittedProfileIsFrozenOnceAndConfigurationChangesApplyOnlyToNewReservations() throws Exception {
+        var original = body("request-default-profile");
+        original.remove("resourceSpec");
+        var first = service.provision(TenantCommandRequest.parse(original));
+        assertEquals("m", frozenProfile(first));
+        String storedRequest = jdbc.queryForObject("SELECT request_snapshot FROM byai.internal_command WHERE id=?",
+            String.class, Long.parseLong(first.commandId()));
+        assertFalse(json.readTree(storedRequest).has("resourceSpec"));
+
+        // Emulate a new startup setting while replaying the original unmodified business request.
+        sandboxProperties.setProfileKey("l");
+        jdbc.update("UPDATE byai.po_users SET is_locked='Y' WHERE user_id=1");
+        assertEquals(first, service.provision(TenantCommandRequest.parse(original)));
+        assertEquals("m", frozenProfile(first));
+        assertReservations(1);
+
+        jdbc.update("UPDATE byai.po_users SET is_locked='N' WHERE user_id=1");
+        var nextBody = body("request-new-default-profile");
+        nextBody.putObject("resourceSpec");
+        var next = service.provision(TenantCommandRequest.parse(nextBody));
+        assertEquals("l", frozenProfile(next));
+        assertReservations(2);
+    }
+
+    @Test void explicitTrustedProfilesOverrideDeploymentDefaultWithoutBindingVersion() throws Exception {
+        sandboxProperties.setProfileKey("l");
+        for (String profile : new String[]{"s", "m", "l"}) {
+            var value = body("request-explicit-profile-" + profile);
+            value.putObject("resourceSpec").put("profileKey", profile);
+            var accepted = service.provision(TenantCommandRequest.parse(value));
+            assertEquals(profile, frozenProfile(accepted));
+            var snapshot = json.readTree(jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+                + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+                Long.parseLong(accepted.enterpriseId())));
+            assertEquals(2, snapshot.path("memberLimit").asInt());
+        }
+        assertReservations(3);
+    }
+
+    private String frozenProfile(TenantCommandStore.Command command) throws Exception {
+        String snapshot = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+            + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+            Long.parseLong(command.enterpriseId()));
+        return json.readTree(snapshot).path("profileKey").asText();
     }
 }

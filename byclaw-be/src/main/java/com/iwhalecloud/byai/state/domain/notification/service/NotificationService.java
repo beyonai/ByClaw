@@ -388,7 +388,9 @@ public class NotificationService {
     }
 
     public void getRealTimeNotification(ChannelHandlerContext ctx, String message) {
-        LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+        // Periodic work may execute after the channel's selected identity/scope changes.
+        LoginInfo currentUser = CurrentUserHolder.getLoginInfo();
+        if (currentUser == null) currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
         // 沙箱心跳
         try {
             sandboxService.heartbeat(currentUser.getUserCode(), -1L);

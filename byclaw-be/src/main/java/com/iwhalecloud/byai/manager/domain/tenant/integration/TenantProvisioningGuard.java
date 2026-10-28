@@ -69,7 +69,16 @@ public class TenantProvisioningGuard {
         var rows=tx.execute(status -> {
             check();
             var existing=jdbc.queryForList("SELECT status,result FROM byai.internal_command_step WHERE command_id=? AND step_key=?",lease.id(),step);
-            if (!existing.isEmpty()) return existing;
+            if (!existing.isEmpty()) {
+                // Only an audited recovery transaction may authorize a new attempt of this original intent.
+                int resumed = jdbc.update("UPDATE byai.internal_command_step SET status='STARTED',revision=revision+1 "
+                    + "WHERE command_id=? AND step_key=? AND status='RETRY_READY'", lease.id(), step);
+                if (resumed == 1) {
+                    jdbc.update("UPDATE byai.internal_command SET stage=? WHERE id=?", step, lease.id());
+                    return java.util.List.<Map<String,Object>>of();
+                }
+                return existing;
+            }
             jdbc.update("""
                 INSERT INTO byai.internal_command_step(command_id,step_key,status,provider_request_key)
                 VALUES (?,?,'STARTED',?)

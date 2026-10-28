@@ -13,11 +13,12 @@ import {
 } from '../../service/TenantMgr';
 import TenantOrganizationModal from './TenantOrganizationModal';
 import TenantProvisionProgress from './TenantProvisionProgress';
-import { tenantProvisionDisplayStatus } from './provisionStatus';
+import { shouldPollTenantProvision, tenantProvisionDisplayStatus } from './provisionStatus';
 
 const stateColor: Record<string, string> = {
   READY: 'green',
   FAILED: 'red',
+  MANUAL_REQUIRED: 'orange',
   PROVISIONING: 'blue',
   DELETING: 'orange',
   DELETE_FAILED: 'red',
@@ -75,9 +76,7 @@ export default function TenantMgr() {
       .catch(() => setPackages([]));
   }, [isPlatformAdmin]);
 
-  const hasProvisioningTenant = tenants.some(
-    (tenant) => !['READY', 'FAILED', 'UNAVAILABLE'].includes(tenant.provisionState)
-  );
+  const hasProvisioningTenant = tenants.some((tenant) => shouldPollTenantProvision(tenant.provisionState));
   useEffect(() => {
     if (!isPlatformAdmin || !hasProvisioningTenant) return;
     const timer = window.setInterval(() => {
@@ -109,7 +108,7 @@ export default function TenantMgr() {
   };
 
   const retryProvision = async () => {
-    if (!progressTenant) return;
+    if (!progressTenant || progressTenant.provisionState !== 'FAILED') return;
     setRetrying(true);
     try {
       await provisionTenant(progressTenant.enterpriseId);

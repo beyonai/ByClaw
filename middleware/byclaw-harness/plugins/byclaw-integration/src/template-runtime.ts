@@ -182,7 +182,7 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
   catalogDir: string
   subagentProvider: string
   resolveModel: (bindingId: string, modelId?: string) => Promise<ModelSelection>
-  beforeInstantiate?: () => Promise<void>
+  beforeInstantiate?: (templateId: string) => Promise<void>
   routeDelegation?: (parent: Agent, task: string, requestedTemplateId: string, signal: AbortSignal) => Promise<string>
   onRootSetup?: (agent: Agent, template: DshAgentTemplate) => void
   generationLease?: GenerationLease
@@ -301,7 +301,9 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
     childId?: SessionId,
     refresh = true,
   ): Promise<{ childId: SessionId; agent: Agent }> => {
-    if (refresh) await config.beforeInstantiate?.()
+    const scope = config.groupCoordination?.get(String(parent.id))
+    if (scope !== undefined) await config.groupCoordination?.prepareSelected?.(scope.coordination, templateId)
+    else if (refresh) await config.beforeInstantiate?.(templateId)
     return withCatalogRead(async () => {
     const userText = byClawTemplateUserText(task)
     const parentScope = config.groupCoordination?.get(String(parent.id))
@@ -352,7 +354,13 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
 
   const runtime: ByClawTemplateInstanceRuntime = {
     async prepareRoot(templateId, coordination) {
-      if (coordination !== undefined) await config.groupCoordination?.validate(coordination)
+      if (coordination !== undefined) {
+        await config.groupCoordination?.validate(coordination)
+        if (templateId !== `byclaw-employee-${coordination.coordinatorAgentId}`) {
+          await config.groupCoordination?.prepareSelected?.(coordination, templateId)
+        }
+      }
+      else await config.beforeInstantiate?.(templateId)
       return withCatalogRead(async () => {
         const template = coordination === undefined ? await readAgentTemplate(config.catalogDir, templateId)
           : await config.groupCoordination?.resolveTemplate(coordination, templateId)
@@ -409,6 +417,9 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
     },
     instantiate: startTemplate,
     async deliver(parent, templateId, task, childId, signal): Promise<Agent> {
+      const scope = config.groupCoordination?.get(String(parent.id))
+      if (scope !== undefined) await config.groupCoordination?.prepareSelected?.(scope.coordination, templateId)
+      else await config.beforeInstantiate?.(templateId)
       const existing = ctx.agents.get(childId)
       const persisted = existing !== undefined || await ctx.sessionPersistence.stat(childId) !== undefined
       if (!persisted) return (await startTemplate(parent, templateId, task, signal, childId, false)).agent

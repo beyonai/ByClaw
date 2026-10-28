@@ -37,6 +37,15 @@ public class TargetAgentResolver {
     @Value("${byclaw.super-enabled:false}")
     private boolean superEnabled;
 
+    /** 将服务端最终路由转换为前端可消费的运行时类型。 */
+    public String resolveRuntimeType(String targetAgentType) {
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.BYCLAW_DSH.getCode())
+                || StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+            return "dsh";
+        }
+        return StringUtils.isBlank(targetAgentType) ? "unknown" : "openclaw";
+    }
+
     /**
      * 根据基础 workerAgentType、agentId、sourceAgentType 与 userCode 计算最终 targetAgentType。
      *

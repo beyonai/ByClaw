@@ -54,21 +54,52 @@ public class TenantCommandWorker {
                 });
             } catch(Exception error) {
                 // Existing provider adapters cannot prove non-creation after a transport failure. Keep the slot.
+                String rawCode=error instanceof TenantCommandException command ? command.getMessage() : null;
+                String code=rawCode!=null&&rawCode.matches("[A-Z][A-Z0-9_]{1,79}")?rawCode:"PROVIDER_RESULT_UNKNOWN";
                 try {
-                    tx.executeWithoutResult(status -> {
+                    String failedStage=tx.execute(status -> {
                         String stage=store.find(id).stage();
-                        String code=error instanceof TenantCommandException command ? command.getMessage() : "PROVIDER_RESULT_UNKNOWN";
                         store.finish(lease,"MANUAL_REQUIRED",stage,code);
                         hooks.publishDurable("tenant.provisioning.failed",1,Long.toString(lease.enterpriseId()),
                             Long.toString(store.find(id).revision()),"1",Long.toString(id),
                             Map.of("enterpriseId",Long.toString(lease.enterpriseId()),"commandId",Long.toString(id),
                                 "stage",stage,"errorCode",code));
+                        return stage;
                     });
+                    // Log only after the durable acknowledgement commits, and never attach provider exception payloads.
+                    LOG.error("Tenant command failed commandId={} enterpriseId={} status=MANUAL_REQUIRED stage={} errorCode={} exceptionType={} failurePath={}",
+                        id,lease.enterpriseId(),safeStage(failedStage),code,error.getClass().getName(),failurePath(error));
                 } catch(Exception stale) {
                     // The next scan will reclaim an expired command; the old worker must not overwrite it.
-                    LOG.warn("Tenant command {} could not acknowledge completion ({})",id,stale.getClass().getSimpleName());
+                    LOG.warn("Tenant command acknowledgement failed commandId={} enterpriseId={} stage=UNKNOWN errorCode={} exceptionType={} acknowledgementExceptionType={} failurePath={}",
+                        id,lease.enterpriseId(),code,error.getClass().getName(),stale.getClass().getName(),failurePath(error));
                 }
             }
         }
+    }
+
+    /**
+     * Retain bounded cause types and application locations without provider messages, file paths or credentials.
+     * @param failure original provisioning failure
+     * @return cause chain suitable for operational logs
+     */
+    private static String failurePath(Throwable failure) {
+        var path = new java.util.StringJoiner(" <- ");
+        var visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+        for (Throwable cause = failure; cause != null && visited.size() < 8 && visited.add(cause); cause = cause.getCause()) {
+            String location = "";
+            for (StackTraceElement frame : cause.getStackTrace()) {
+                if (frame.getClassName().startsWith("com.iwhalecloud.byai.")) {
+                    location = "@" + frame.getClassName() + "." + frame.getMethodName() + ":" + frame.getLineNumber();
+                    break;
+                }
+            }
+            path.add(cause.getClass().getName() + location);
+        }
+        return path.toString();
+    }
+
+    private static String safeStage(String stage) {
+        return stage!=null&&stage.matches("[A-Z][A-Z0-9_]{1,79}")?stage:"UNKNOWN";
     }
 }

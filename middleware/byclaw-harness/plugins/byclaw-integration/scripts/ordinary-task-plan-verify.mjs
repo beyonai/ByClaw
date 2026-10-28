@@ -53,4 +53,43 @@ const reused = await ordinaryTaskPlan('root', events, async () => ({ label: 'Rev
 ] }))
 assert.deepEqual(reused.todos[0].executions[0].runs, [{ externalSessionId: 'reviewer', childTurn: 1 }, {}],
   'new assignments without a task binding must not silently reuse the old step or open its older run as latest')
+// Direct template/native delegation is valid even when the model never calls todo_write.
+assert.equal(await ordinaryTaskPlan('root', [], read), undefined, 'no plan or local delegation means no panel')
+const directEvents = [catalog(2, 'reviewer')]
+const direct = await ordinaryTaskPlan('root', directEvents, read)
+assert.equal(direct.todos.length, 1)
+assert.equal(direct.todos[0].content, '子代理任务 · PR reviewer')
+assert.equal(direct.todos[0].status, 'in_progress')
+const directWire = JSON.parse(taskPlanCard(direct.todos, direct.planId).content)
+assert.deepEqual(directWire.steps[0].sub_steps[0].executions[0].runs, wire.steps[0].sub_steps[0].executions[0].runs,
+  'direct delegations use the same exact message-binding protocol as explicit plans')
+const finishedChild = { label: 'PR reviewer', events: [...starts(1, 2),
+  { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } }] }
+const finishedDirect = await ordinaryTaskPlan('root', directEvents, async () => finishedChild)
+assert.equal(finishedDirect.planId, direct.planId, 'cold replay and lifecycle changes preserve plan identity')
+assert.equal(finishedDirect.todos[0].taskId, direct.todos[0].taskId)
+assert.equal(finishedDirect.todos[0].status, 'completed')
+assert.equal(finishedDirect.todos[0].executions[0].runs.length, 2, 'all exact historical turns remain openable')
+for (const [kind, status] of [['error', 'failed'], ['aborted', 'pending']]) {
+  const ended = await ordinaryTaskPlan('root', directEvents, async () => ({ label: 'PR reviewer', events: [
+    ...starts(1), { type: 'turn/end', data: { turn: 1, reason: { kind } } },
+  ] }))
+  assert.equal(ended.todos[0].status, status, 'an aborted/error turn must not claim successful completion')
+}
+const notStarted = await ordinaryTaskPlan('root', directEvents, async () => undefined)
+assert.equal(notStarted.todos[0].status, 'pending')
+assert.equal(notStarted.todos[0].executions, undefined, 'creation alone cannot invent an execution turn')
+const multiple = await ordinaryTaskPlan('root', [...directEvents, catalog(3, 'retry'), catalog(4, 'reviewer')], read)
+assert.equal(multiple.todos.length, 2, 'parallel direct children get independent steps; catalog repeats do not duplicate them')
+assert.equal(await ordinaryTaskPlan('root', directEvents, read, 'nested-child'), undefined)
+for (const data of [{ childId: 'remote', mode: 'external' },
+  { childId: 'unknown', mode: 'unknown' },
+  { childId: 'team-member', mode: 'continuable', label: 'agent-teams:team-1:Reviewer' }]) {
+  assert.equal(await ordinaryTaskPlan('root', [{ type: 'subagent/catalog', seq: 1, data }],
+    async () => { throw new Error('external/unknown/team children are not ordinary direct work') }), undefined)
+}
+const authoredLater = await ordinaryTaskPlan('root', [...directEvents, todo(3)], read)
+assert.equal(authoredLater.todos.length, 2)
+assert.equal(authoredLater.todos[0].content, 'Review PR', 'an explicit plan supersedes delegation-only display')
+assert.equal(authoredLater.todos[0].executions, undefined, 'an earlier delegation is not guessed into a later authored step')
 console.log('ordinary task plan: dispatch binding, exact turns, retry history, cold replay, replanning and ambiguity checks passed')

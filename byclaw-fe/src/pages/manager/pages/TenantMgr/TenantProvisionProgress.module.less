@@ -1,6 +1,7 @@
 .summary {
   display: flex;
-  gap: 24px;
+  gap: 12px 24px;
+  flex-wrap: wrap;
   margin: 8px 0 24px 26px;
   color: #728199;
   font-size: 13px;
@@ -63,6 +64,7 @@
 
 .heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -117,4 +119,29 @@
 .content p.failure {
   color: #c34842;
   overflow-wrap: anywhere;
+}
+
+.notice {
+  margin-bottom: 20px;
+}
+
+.paused .circle,
+.paused .badge {
+  background: #fff7e6;
+  color: #ad6800;
+}
+
+@media (max-width: 480px) {
+  .summary {
+    margin-left: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .content {
+    padding-left: 10px;
+  }
+
+  .heading {
+    gap: 8px;
+  }
 }
