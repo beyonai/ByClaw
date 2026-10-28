@@ -10,6 +10,18 @@ import java.time.Duration;
 import java.util.HexFormat;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.AUTHENTICATION_ERROR;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.CLIENT_NOT_CONFIGURED;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.CLIENT_SECRET_INVALID;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.CLOCK_SKEW_INVALID;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.HEADER_INVALID;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.HEADER_MISSING;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.INTEGRATION_DISABLED;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.NONCE_REPLAYED;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.NONCE_STORE_UNAVAILABLE;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.ROUTE_NOT_ALLOWED;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.SIGNATURE_MISMATCH;
+import static com.iwhalecloud.byai.common.integration.security.InternalServiceSecurityException.DiagnosticReason.TIMESTAMP_OUT_OF_WINDOW;
 
 /** Verifies exact transmitted path/query and body before reserving a shared nonce. */
 @Component
@@ -26,34 +38,43 @@ public class InternalServiceAuthenticator {
     }
     public InternalServicePrincipal authenticate(HttpServletRequest request, byte[] body) {
         try {
-            if (!properties.isEnabled()) throw denied();
+            if (!properties.isEnabled()) throw denied(INTEGRATION_DISABLED);
             String id = header(request, "Client-Id"), timestamp = header(request, "Timestamp"), nonce = header(request, "Nonce");
             String signature = header(request, "Signature");
             if (!id.matches("[A-Za-z0-9_-]{1,100}") || !timestamp.matches("[0-9]{1,12}")
-                || !nonce.matches("[A-Za-z0-9_-]{16,128}") || !signature.matches("[0-9a-f]{64}")) throw denied();
+                || !nonce.matches("[A-Za-z0-9_-]{16,128}") || !signature.matches("[0-9a-f]{64}")) throw denied(HEADER_INVALID);
             long seconds = Long.parseLong(timestamp), now = clock.instant().getEpochSecond(), skew = properties.getMaxSkewSeconds();
-            if (skew < 1 || skew > 3600 || seconds < now - skew || seconds > now + skew) throw denied();
+            if (skew < 1 || skew > 3600) throw denied(CLOCK_SKEW_INVALID);
+            if (seconds < now - skew || seconds > now + skew) throw denied(TIMESTAMP_OUT_OF_WINDOW);
             var client = properties.getClients().get(id);
-            if (client == null || client.getSecret() == null || client.getSecret().isBlank()
-                || client.getSecret().getBytes(StandardCharsets.UTF_8).length < 32) throw denied();
+            if (client == null) throw denied(CLIENT_NOT_CONFIGURED);
+            if (client.getSecret() == null || client.getSecret().isBlank()
+                || client.getSecret().getBytes(StandardCharsets.UTF_8).length < 32) throw denied(CLIENT_SECRET_INVALID);
             String expected = sign(client.getSecret(), canonical(request, body));
-            if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII), signature.getBytes(StandardCharsets.US_ASCII))) throw denied();
+            if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII), signature.getBytes(StandardCharsets.US_ASCII))) throw denied(SIGNATURE_MISMATCH);
             var principal = new InternalServicePrincipal(id, client.getSourceSystem(), client.getScopes(), client.getEnterpriseIds(), client.isAllTenants());
             String scope = InternalServiceRoutes.scope(request.getMethod(), request.getRequestURI().substring(request.getContextPath().length()));
-            if (scope == null) throw denied();
+            if (scope == null) throw denied(ROUTE_NOT_ALLOWED);
             principal.requireScope(scope);
             String path = request.getRequestURI().substring(request.getContextPath().length());
             if (path.startsWith("/internal/v1/tenants/")) principal.requireTenant(path.split("/")[4]);
-            if (!nonces.reserve(id + ":" + nonce, Duration.ofSeconds(2 * skew + 1))) throw denied();
+            boolean reserved;
+            try {
+                reserved = nonces.reserve(id + ":" + nonce, Duration.ofSeconds(2 * skew + 1));
+            } catch (RuntimeException exception) {
+                // Redis failures remain fail-closed; connection details must never become diagnostic text.
+                throw denied(NONCE_STORE_UNAVAILABLE);
+            }
+            if (!reserved) throw denied(NONCE_REPLAYED);
             return principal;
         } catch (InternalServiceSecurityException e) { throw e; }
-        catch (Exception e) { throw denied(); }
+        catch (Exception e) { throw denied(AUTHENTICATION_ERROR); }
     }
     private static String header(HttpServletRequest request, String suffix) {
         var values = request.getHeaders("X-ByClaw-" + suffix);
-        if (values == null || !values.hasMoreElements()) throw denied();
+        if (values == null || !values.hasMoreElements()) throw denied(HEADER_MISSING);
         String value = values.nextElement();
-        if (values.hasMoreElements() || value.contains("\n") || value.contains("\r")) throw denied();
+        if (values.hasMoreElements() || value == null || value.contains("\n") || value.contains("\r")) throw denied(HEADER_INVALID);
         return value;
     }
     public static String canonical(HttpServletRequest request, byte[] body) {
@@ -72,5 +93,7 @@ public class InternalServiceAuthenticator {
             return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) { throw new IllegalStateException("HMAC unavailable", e); }
     }
-    private static InternalServiceSecurityException denied() { return new InternalServiceSecurityException(401, "SERVICE_AUTH_INVALID"); }
+    private static InternalServiceSecurityException denied(InternalServiceSecurityException.DiagnosticReason reason) {
+        return new InternalServiceSecurityException(401, "SERVICE_AUTH_INVALID", reason);
+    }
 }

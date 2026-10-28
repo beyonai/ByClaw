@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.ByaiServerApplication;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.manager.domain.log.service.LogExceptionInfoService;
 import com.iwhalecloud.byai.manager.entity.log.LogExceptionInfo;
+import com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException;
+import com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -72,6 +74,13 @@ public class ExceptionLogAspect {
             return result;
         }
         catch (Exception e) {
+            // A missing command is the normal first lookup before idempotent provisioning.
+            // Keep the original 404; the tenant advice owns its diagnostic trace at DEBUG.
+            if (point.getTarget() instanceof TenantInternalController
+                && e instanceof TenantCommandException command
+                && command.status() == 404 && "COMMAND_NOT_FOUND".equals(command.getMessage())) {
+                throw e;
+            }
             // 记录异常日志
             saveExceptionLog(point, e);
             throw e;
