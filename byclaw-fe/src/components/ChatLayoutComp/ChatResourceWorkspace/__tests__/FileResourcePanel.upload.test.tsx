@@ -36,7 +36,9 @@ jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
 jest.mock('@/utils/file', () => ({ downloadFile: jest.fn() }));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
-jest.mock('@/components/QueryInput/withDrag', () => ({ DragType: {} }));
+jest.mock('@/components/QueryInput/withDrag', () => ({
+  DragType: { commonFile: 'commonFile', commonFolder: 'commonFolder' },
+}));
 jest.mock('../useChatResourceProject', () => ({ useChatResourceProject: () => ({}) }));
 jest.mock('@/pages/projectSpace/service', () => ({ getProject: jest.fn() }));
 jest.mock('../FilePreviewPanel', () => ({ __esModule: true, default: () => null }));
@@ -79,6 +81,11 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
         {items.map((item) => (
           <button key={item.path} type="button" onClick={() => onAction('upload', item)}>
             Upload to {item.name}
+          </button>
+        ))}
+        {items.map((item) => (
+          <button key={`quote-${item.path}`} type="button" onClick={() => onAction('quote', item)}>
+            Quote {item.name}
           </button>
         ))}
       </section>
@@ -184,6 +191,29 @@ it('retries failed project names and refreshes renamed projects on list refresh'
     view.rerender(panel(2));
   });
   expect(screen.getByRole('button', { name: 'Open 改名项目' })).toBeInTheDocument();
+});
+
+it('quotes from the shared panel through the menu callback', async () => {
+  const onQuote = jest.fn();
+  jest.mocked(listFiles).mockResolvedValue([{ name: 'report.md', path: '/by/.shared/project_12/report.md' }]);
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="7"
+        projectId={12}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+        onQuote={onQuote}
+      />
+    );
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Quote report.md' }));
+  expect(onQuote).toHaveBeenCalledWith(
+    expect.objectContaining({ name: 'report.md', path: '/by/.shared/project_12/report.md', resourceId: '42' }),
+    expect.anything()
+  );
 });
 
 async function renderPanel(scope: 'shared' | 'project') {

@@ -5,20 +5,22 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Empty, Spin } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import EmployeeList from '@/layout/sider/components/EmployeeList';
-import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
 import ProjectDataSources from '@/components/ProjectDataSources';
 import { useSessionDataSourcesVisible } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useSessionDataSourcesVisible';
-import { getSessionResourceTabKeys } from '@/components/ChatLayoutComp/ChatResourceWorkspace/resourceTabUtils';
+import {
+  getSessionResourceTabKeys,
+  getVisibleSessionResourceTabKeys,
+} from '@/components/ChatLayoutComp/ChatResourceWorkspace/resourceTabUtils';
 import { useChatResourceProject } from '@/components/ChatLayoutComp/ChatResourceWorkspace/useChatResourceProject';
+import { useChatRuntime } from '@/hooks/useChatRuntime';
 import ConnectorControl from '../ConnectorControl';
 import ResourceTabs from '../../RichInput/mentionPopover/resourceTabsCompact';
 import { chatModeMap } from '@/constants/query';
 import { HIDDEN_RESOURCE_MENU_KEYS } from '@/constants/system';
 import { ResourceType } from '../../RichInput/utils/constants';
 import styles from '../../index.module.less';
-import FilePicker from './FilePicker';
 
 interface Props {
   keyword?: string;
@@ -71,26 +73,26 @@ const ResourceToolMenu: React.FC<Props> = ({
   // 项目详情异步刷新前可能仍是上一项目；显式选择（含 -1）必须立即决定入口和资源作用域。
   const project = projectId === undefined || Number(loadedProject?.projectId) === projectId ? loadedProject : undefined;
   const activeEmployee = useActiveSiderAgent();
-  const projectSpaceResourceId =
-    activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
+  const fileResourceId = activeEmployee.resourceId || (project?.resourceId ? `${project.resourceId}` : undefined);
   const resolvedProjectId = Number(projectId ?? project?.projectId);
   const resolvedCloudResourceId = projectCloudResourceId ?? project?.cloudResourceId;
+  const { runtimeType, runtimeReady } = useChatRuntime(sessionId);
   const showDataSources = useSessionDataSourcesVisible(sessionId, resolvedProjectId);
   const visibleFileKeys = useMemo(() => {
     const menuKeyMap = { file: 'processFile', sharedFile: 'file', projectFile: 'projectCloud', code: 'projectCode' };
     // 过程文件属于已创建的会话，新建任务不提供该入口。
-    const keys = getSessionResourceTabKeys(resolvedProjectId, sessionId)
+    const keys = getVisibleSessionResourceTabKeys(getSessionResourceTabKeys(resolvedProjectId, sessionId), runtimeType)
       .filter((key) => key !== 'file' || Boolean(sessionId))
       .map((key) => menuKeyMap[key]);
     // 新建任务只对 -1 默认项目隐藏项目分类；项目尚未返回时仍保留入口。
     if (!sessionId && resolvedProjectId !== -1) {
-      for (const key of ['projectCloud', 'dataSources', 'projectCode']) {
+      for (const key of ['projectCloud', 'dataSources']) {
         if (!keys.includes(key)) keys.push(key);
       }
     }
     if (sessionId && showDataSources) keys.push('dataSources');
     return keys;
-  }, [resolvedProjectId, sessionId, showDataSources]);
+  }, [resolvedProjectId, runtimeType, sessionId, showDataSources]);
   const currentUserInfo = useSelector((state: any) => state.user?.userInfo);
   const defaultDigEmployeeId = useSelector(
     (state: any) => state.employees?.defaultDigEmployeeId || state.user?.userInfo?.defaultDigEmployeeId
@@ -190,18 +192,19 @@ const ResourceToolMenu: React.FC<Props> = ({
       if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return <Spin />;
       return <ProjectDataSources key={`project-${resolvedProjectId}`} projectId={resolvedProjectId} />;
     }
-    if (key === 'file') return <FilePicker onSelect={onSelect} />;
-    if (key === 'projectCode') {
-      // 入口不依赖会话创建；项目选择尚未就绪时不能用无效 ID 请求目录。
-      if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) return <Spin />;
-      // 与右侧边栏共用项目目录组件及资源作用域，普通文件和 Git 仓库均来自同一项目空间。
+    if (key === 'file') {
       return (
-        <ProjectSpaceTab
-          key={resolvedProjectId}
+        <FileResourcePanel
+          scope="shared"
+          sessionId={sessionId || ''}
           projectId={resolvedProjectId}
-          sessionId={sessionId}
-          resourceId={projectSpaceResourceId}
+          runtimeType={runtimeType}
+          runtimeReady={runtimeReady}
+          project={project}
+          resourceId={fileResourceId}
           projectCloudResourceId={resolvedCloudResourceId ? `${resolvedCloudResourceId}` : undefined}
+          onOpenDetail={() => undefined}
+          onQuote={onSelect}
         />
       );
     }

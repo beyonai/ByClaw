@@ -105,6 +105,10 @@ interface FileResourcePanelProps {
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
   onPreviewFile?: (item: FileBrowserItem) => void;
+
+  /** 嵌入引用菜单时直接回传引用，右侧面板则继续通过全局输入事件插入。 */
+  onQuote?: (item: ReturnType<typeof normalizeReferenceItem>, type: DragType) => void;
+
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
 
@@ -130,6 +134,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   refreshKey = 0,
   onOpenDetail,
   onPreviewFile,
+  onQuote,
   cardMode = false,
   hideProjectToolbar = false,
   compactResourceEmpty = false,
@@ -242,7 +247,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     if (scope !== 'shared') return [];
     const currentSegments = browsePath.split('/').filter(Boolean);
     const getSegmentTitle = (segment: string, index: number) => {
-      if (segment === '.shared') return <HomeOutlined aria-label={intl.formatMessage({ id: 'chatResource.localSharedFile' })} />;
+      if (segment === '.shared')
+        return <HomeOutlined aria-label={intl.formatMessage({ id: 'chatResource.localSharedFile' })} />;
       if (index === 2 && /^project_-?\d+$/.test(segment)) return projectNames[segment.slice(8)] || segment;
       return segment;
     };
@@ -390,12 +396,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const quoteFile = useCallback(
     (item: FileBrowserItem) => {
       if (!resourceId) return;
-      EventEmitter.emit('queryInput-insert-item', {
-        item: normalizeReferenceItem(item, resourceId),
-        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
-      });
+      const referenceItem = normalizeReferenceItem(item, resourceId);
+      const referenceType = isDirectory(item) ? DragType.commonFolder : DragType.commonFile;
+      if (onQuote) {
+        onQuote(referenceItem, referenceType);
+      } else {
+        EventEmitter.emit('queryInput-insert-item', { item: referenceItem, type: referenceType });
+      }
     },
-    [EventEmitter, resourceId]
+    [EventEmitter, onQuote, resourceId]
   );
 
   const openPreview = useCallback(

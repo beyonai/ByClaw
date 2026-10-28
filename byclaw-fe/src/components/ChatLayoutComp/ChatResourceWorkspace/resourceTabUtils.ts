@@ -22,3 +22,11 @@ export const getVisibleSessionFileTabKeys = (
   runtimeType?: ChatRuntimeType
 ): SessionFileTabKey[] =>
   tabs.filter((key): key is SessionFileTabKey => key !== 'code' && !(runtimeType !== 'openclaw' && key === 'file'));
+
+/** 聊天资源入口统一遵守运行时能力；项目空间暂停期间不在任一入口展示。 */
+export const getVisibleSessionResourceTabKeys = (
+  tabs: SessionResourceTabKey[],
+  runtimeType?: ChatRuntimeType,
+  showProjectSpace = false
+): SessionResourceTabKey[] =>
+  tabs.filter((key) => (key !== 'code' || showProjectSpace) && !(runtimeType !== 'openclaw' && key === 'file'));
