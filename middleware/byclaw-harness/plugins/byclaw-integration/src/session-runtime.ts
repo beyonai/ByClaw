@@ -1323,6 +1323,8 @@ export function isQuiescentTeamSnapshot(snapshot: Pick<TeamActivitySnapshot, 'ta
 export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   readonly questions: ByClawQuestionBroker
   private readonly handles = new Map<string, RootHandle>()
+  private closing = false
+  private pendingAdmissions: Set<Promise<void>> | undefined
   private readonly active = new Map<string, ActiveTurn>()
   private readonly foreground = new Map<string, ActiveTurn>()
   private readonly pendingForeground = new Map<string, {
@@ -1448,6 +1450,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async ask(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
+    this.assertAccepting()
     const payload = byClawVoicePayload(command)
     if (!payload) return this.askPrepared(command, context)
     const voice = this.options.voiceRuntime
@@ -1503,16 +1506,26 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             externalSessionId, command.header.userCode, command.header.messageId,
           )
         : undefined
+      this.assertAccepting()
       if (pendingInteraction !== undefined) {
         this.ctx.logger.info(
           `[ASK_USER_QUESTION_RECOVERY_TRACE] PARK_RECLAIMED interaction=${pendingInteraction.interactionId} session=${externalSessionId} message=${command.header.messageId}`,
         )
-        return await this.coldRecoveryParking.park({
+        const parked = this.coldRecoveryParking.park({
           sessionId: externalSessionId,
           userCode: command.header.userCode,
           messageId: command.header.messageId,
           setStreamFinished: finished => context.setStreamFinished(finished),
         })
+        const releaseParked = () => {
+          this.coldRecoveryParking.release(externalSessionId, command.header.userCode, command.header.messageId)
+        }
+        this.sessionOpeningController.signal.addEventListener('abort', releaseParked, { once: true })
+        try {
+          return await parked
+        } finally {
+          this.sessionOpeningController.signal.removeEventListener('abort', releaseParked)
+        }
       }
       const opening = this.options.sessionOpening
       if (opening !== undefined) {
@@ -1594,6 +1607,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private async performForegroundAsk(
     owner: ActiveTurn, command: AskAgentCommand, context: AgentContext, text: string,
   ): Promise<ByClawDshAskResult> {
+    this.assertAccepting()
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     if (text.trim() === '') throw new Error('ByClaw follow-up requires a non-empty task')
     owner.teamGate.assertHealthy()
@@ -1638,6 +1652,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     } else {
       await setupSession()
     }
+    this.assertAccepting()
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     owner.teamGate.assertHealthy()
     if (this.active.get(owner.rootSessionId) !== owner || !owner.teamGate.waiting) {
@@ -1684,12 +1699,20 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const policy = groupPolicy(this.ctx)
     policy?.recordContext?.(owner.rootSessionId, command.extraPayload['groupContextSnapshot'])
     policy?.recordUserInput?.(owner.rootSessionId, command.header.messageId)
+    let cancelForeground!: () => void
+    const closed = new Promise<never>((_resolve, reject) => {
+      cancelForeground = () => reject(new TaskCancelledError('ByClaw runtime closed'))
+    })
+    this.sessionOpeningController.signal.addEventListener('abort', cancelForeground, { once: true })
     try {
       if (steerWhileBusy) agent.steer(input)
       else agent.followup(input)
       // Return after this admitted turn, even if queued member reports keep the driver busy.
       // A pre-admission idle belongs to the gap between the previous turn and this one.
-      await waitForAdmittedTurnCompletion(finished, started, () => agent.whenIdle())
+      await Promise.race([
+        waitForAdmittedTurnCompletion(finished, started, () => agent.whenIdle()),
+        closed,
+      ])
       if (steerWhileBusy && this.pendingForeground.get(owner.responseSessionId)?.turn === turn) {
         throw new Error('ByClaw steering input was not admitted before the captain became idle')
       }
@@ -1712,6 +1735,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         ...finalAnswer === undefined ? {} : { finalAnswer },
       }
     } finally {
+      this.sessionOpeningController.signal.removeEventListener('abort', cancelForeground)
       teamModelOverrides?.set(owner.rootSessionId, undefined)
       try {
         await owner.cancellation
@@ -1731,6 +1755,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }
 
   async resume(command: ResumeCommand, context?: AgentContext): Promise<boolean | ByClawDshAskResult> {
+    this.assertAccepting()
     const structured = parseDshInteractionResponse(command)
     const resumed = structured !== undefined
       ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
@@ -1881,8 +1906,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     return turn.cancellation
   }
 
-  async close(): Promise<void> {
+  async close(options: { requireStopped?: boolean } = {}): Promise<void> {
+    // Fence synchronous and queued admission before joining async model/session setup.
+    this.closing = true
     this.sessionOpeningController.abort()
+    await Promise.allSettled(this.pendingAdmissions ?? [])
     await Promise.allSettled(this.sessionOpeningJobs)
     this.sessionOpeningHeaders.clear()
     for (const controller of this.voiceControllers.values()) controller.abort()
@@ -1899,9 +1927,30 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.pendingForeground.clear()
     this.foreground.clear()
     this.options.onActivityChange?.()
-    const handles = [...this.handles.values()]
-    this.handles.clear()
-    await Promise.allSettled(handles.map(entry => entry.handle.dispose()))
+    const handles = [...this.handles.entries()]
+    if (!options.requireStopped) this.handles.clear()
+    const results = await Promise.allSettled(handles.map(async ([key, entry]) => {
+      if (options.requireStopped && entry.mode === 'reuse') {
+        // Borrowed live roots have a no-op handle disposer; stop their execution explicitly.
+        const agent = entry.handle.agent
+        agent.cancel({ kind: 'hook', reason: 'ByClaw runtime closed' })
+        await cancelCaptainTeam(this.ctx, agent, this.options.stateDir)
+        const children = await this.ctx.subagents.listChildren(agent.id)
+        await this.ctx.subagents.drainChildren(agent, children.map(child => child.id))
+        await agent.whenIdle()
+        await cancelCaptainTeam(this.ctx, agent, this.options.stateDir)
+        const lateChildren = await this.ctx.subagents.listChildren(agent.id)
+        await this.ctx.subagents.drainChildren(agent, lateChildren.map(child => child.id))
+        agent.cancel({ kind: 'hook', reason: 'ByClaw runtime closed' })
+        await agent.whenIdle()
+      }
+      await entry.handle.dispose()
+      if (options.requireStopped && this.handles.get(key) === entry) this.handles.delete(key)
+    }))
+    if (options.requireStopped) {
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      if (failures.length > 0) throw new AggregateError(failures.map(result => result.reason), 'ByClaw execution teardown failed')
+    }
   }
 
   sandboxBusySnapshot(): ByClawSandboxActivity {
@@ -1910,7 +1959,28 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     )
   }
 
+  private assertAccepting(): void {
+    if (this.closing) throw new TaskCancelledError('ByClaw runtime closed')
+  }
+
   private async performAsk(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
+    this.assertAccepting()
+    let resolveAdmission!: () => void
+    const admission = new Promise<void>(resolve => { resolveAdmission = resolve })
+    const admissions = this.pendingAdmissions ??= new Set()
+    admissions.add(admission)
+    const admitted = () => { admissions.delete(admission); resolveAdmission() }
+    try {
+      return await this.performAdmittedAsk(command, context, admitted)
+    } finally {
+      admitted()
+    }
+  }
+
+  private async performAdmittedAsk(
+    command: AskAgentCommand, context: AgentContext, admitted: () => void,
+  ): Promise<ByClawDshAskResult> {
+    this.assertAccepting()
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const text = extractByClawUserText(command.content)
@@ -1946,6 +2016,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       override,
       resolveModel: this.options.resolveModel,
     })
+    this.assertAccepting()
     const diagnostic = selection as ModelSelection & {
       sourceModelId?: string
       protocol?: string
@@ -1955,7 +2026,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
     await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(sessionRoot)
+    this.assertAccepting()
     const entry = await this.handleFor(command, selection, preparedRoot)
+    this.assertAccepting()
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
     const teamModelOverrides = this.ctx.get(AGENT_TEAMS_MODEL_OVERRIDES) as AgentTeamsModelOverrideService | undefined
@@ -2031,6 +2104,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     )
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     await resumeCaptainTeam(rootAgent, this.options.stateDir, this.ctx)
+    this.assertAccepting()
     if (context.isCancelRequested()) throw new TaskCancelledError('ByClaw task cancelled')
     this.active.set(String(rootAgent.id), turn)
     this.queueRuntimeProjection(turn, turn.runtime.observeTurnActive(true))
@@ -2040,6 +2114,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       // the resumed captain can answer, even if no member status edge arrives.
       turn.teamSnapshots.request()
       await turn.teamSnapshots.flush()
+      this.assertAccepting()
       const agent = directTarget === undefined
         ? await this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
         : (() => {
@@ -2047,6 +2122,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             return rootAgent
       })()
       this.messageAgents.set(command.header.messageId, agent)
+      admitted()
       await agent.whenIdle()
       this.ctx.logger.info(
         `[ASK_USER_QUESTION_RECOVERY_TRACE] AGENT_IDLE session=${command.header.sessionId} message=${command.header.messageId} dsh_session=${agent.id} status=${agent.status}`,
@@ -2110,6 +2186,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     route: ByClawCommandSessionRoute,
     text: string,
   ): Promise<Agent> {
+    this.assertAccepting()
     const targetSessionId = route.targetDshSessionId
     if (targetSessionId === undefined || targetSessionId === String(rootAgent.id)) {
       rootAgent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
@@ -2150,7 +2227,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       SessionId(targetSessionId),
       [{ type: 'text', text }],
       { kind: 'user' },
-      new AbortController().signal,
+      this.sessionOpeningController.signal,
     )
     const target = this.ctx.agents.get(SessionId(targetSessionId))
     if (target === undefined) {
@@ -2172,6 +2249,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     selected: ModelSelection,
     preparedRoot?: Awaited<ReturnType<ByClawTemplateInstanceRuntime['prepareRoot']>>,
   ): Promise<RootHandle> {
+    this.assertAccepting()
     const route = byClawCommandSessionRoute(command, this.options.byRoot)
     const externalRootSessionId = route.externalRootSessionId
     const coordination = groupCoordinationFromExtra(command.extraPayload)
@@ -2369,6 +2447,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             agentOptions: { provider: selected.provider, model: selected.model },
             setup,
           })
+    const entry = {
+      handle,
+      selection,
+      mode,
+      ...preparedRoot === undefined ? {} : { templateId: preparedRoot.templateId },
+    }
     try {
       await this.ensureRootMetadata(handle.agent.session, externalRootSessionId, requestedBinding, mode, coordination)
       if (mode === 'reuse') preparedRoot?.bindLiveGroupScope?.(handle.agent)
@@ -2379,16 +2463,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         try {
           await handle.dispose()
         } catch (disposeError: unknown) {
+          // A failed setup can still own execution. Preserve its handle for strict close/retry.
+          this.handles.set(key, entry)
           throw new AggregateError([error, disposeError], `ByClaw session ${externalRootSessionId} metadata validation and handle cleanup failed`)
         }
       }
       throw error
-    }
-    const entry = {
-      handle,
-      selection,
-      mode,
-      ...preparedRoot === undefined ? {} : { templateId: preparedRoot.templateId },
     }
     this.handles.set(key, entry)
     return entry

@@ -201,7 +201,7 @@ try {
 
   const prepared = await runtime.prepareRoot('byclaw-employee-1')
   assert.equal(prepared.templateId, 'byclaw-employee-1')
-  assert.equal(refreshes, 0, 'inbound root preparation synchronously refreshed remote resources')
+  assert.equal(refreshes, 1, 'inbound root must prepare its selected template')
 
   let personaOrder
   prepared.setup({
@@ -236,7 +236,7 @@ try {
   assert.equal(binds, initialBinds + 2, 'cold resume did not restore template skills')
   assert.equal(publications, 2)
   assert.equal(commits, 2, 'registry setup publication commit was lost')
-  assert.equal(refreshes, 1, 'cold delivery unexpectedly refreshed the catalog')
+  assert.equal(refreshes, 3, 'cold delivery must reauthorize its selected template')
   await runtime.deliver(parentState.agent, 'byclaw-employee-1', 'next assignment', fresh.childId, signal)
   assert.equal(queued, 2)
   assert.equal(publications, 2, 'live delivery recreated the child')

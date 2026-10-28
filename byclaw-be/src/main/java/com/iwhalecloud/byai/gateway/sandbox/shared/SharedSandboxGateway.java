@@ -42,7 +42,10 @@ public class SharedSandboxGateway {
         // Recheck every request before discovering or reusing a mapping, including historical Resume targets.
         boolean eligible = policy.eligible(user);
         log.debug("Shared sandbox allocation eligibility, userCode={}, serviceKey={}, eligible={}", user, type, eligible);
-        if (!eligible) return null;
+        if (!eligible) {
+            releaseAll(user, "eligibility.revoked");
+            return null;
+        }
         if (clients.getIfAvailable() == null) {
             throw new BdpRuntimeException("共享沙箱需要配置 byclaw.platform.base-url");
         }
@@ -53,18 +56,24 @@ public class SharedSandboxGateway {
             return json.convertValue(existing, SandboxLaunchData.class);
         }
         identity.put("byTenant", policy.byTenant());
+        identity.put("replaceExclusive", true);
         Object allocated = call("acquire", identity);
         if (allocated != null) observedSharedUsers.put(user, true);
         return allocated == null ? null : json.convertValue(allocated, SandboxLaunchData.class);
     }
 
     public String currentWorkerTarget(String user) {
-        SandboxLaunchData data = lookup(user, DSH_SERVICE);
+        // A live exclusive worker must not bypass a newly enabled shared policy.
+        SandboxLaunchData data = tryAcquire(user, DSH_SERVICE);
         return data == null ? null : data.getWorkerAgentType();
     }
 
     private SandboxLaunchData lookup(String user, String service) {
         if (clients.getIfAvailable() == null || StringUtils.isBlank(user)) return null;
+        if (!policy.eligible(user)) {
+            releaseAll(user, "eligibility.revoked");
+            return null;
+        }
         Object value = call("lookup", identity(user, service));
         if (value != null) observedSharedUsers.put(user, true);
         return value == null ? null : json.convertValue(value, SandboxLaunchData.class);
@@ -111,20 +120,34 @@ public class SharedSandboxGateway {
     }
 
     private boolean shouldHeartbeatShared(String user) {
-        if (Boolean.TRUE.equals(observedSharedUsers.get(user))) return true;
+        boolean observed = Boolean.TRUE.equals(observedSharedUsers.get(user));
+        boolean eligible;
         try {
-            return policy.eligible(user);
+            eligible = policy.eligible(user);
         }
         catch (RuntimeException unavailable) {
-            // Heartbeat never allocates: keep the existing exclusive path available.
+            if (observed) throw unavailable;
+            // Unrelated users can keep their existing exclusive heartbeat during a policy outage.
             return false;
         }
+        if (eligible) return true;
+        if (observed) releaseAll(user, "eligibility.revoked");
+        return false;
     }
 
     public boolean release(String user) {
+        return releaseAll(user, "manual");
+    }
+
+    private boolean releaseAll(String user, String reason) {
         if (clients.getIfAvailable() == null || StringUtils.isBlank(user)) return false;
-        Object count = call("releaseAll", identity(user, null));
-        if (!(count instanceof Number)) throw new BdpRuntimeException("共享释放响应格式错误");
+        Map<String, Object> params = identity(user, null);
+        params.put("reason", reason);
+        // The platform confirms fenced deletion and releases ownership atomically. A busy
+        // context or uncertain response must throw here, before callers enter exclusive launch.
+        Object count = call("releaseAll", params);
+        if (!(count instanceof Number) || ((Number) count).longValue() < 0)
+            throw new BdpRuntimeException("共享释放响应格式错误");
         observedSharedUsers.remove(user);
         return ((Number) count).intValue() > 0;
     }

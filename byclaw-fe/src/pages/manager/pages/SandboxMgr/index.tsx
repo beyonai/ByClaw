@@ -60,6 +60,7 @@ import EndpointLinks from './EndpointLinks';
 import RecoveryPanel from './RecoveryPanel';
 import SharedConfigPanel from './SharedConfig';
 import SharedResources from './SharedResources';
+import { formatReleaseReason } from './releaseReasonUtils';
 import { primarySandboxEndpoint } from './endpointUtils';
 import styles from './index.module.less';
 
@@ -1605,7 +1606,7 @@ const SandboxMgr = () => {
       align: 'center' as const,
       width: 180,
       ellipsis: true,
-      render: renderEllipsisText,
+      render: (value: string) => renderEllipsisText(formatReleaseReason(intl, value)),
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.version' }),

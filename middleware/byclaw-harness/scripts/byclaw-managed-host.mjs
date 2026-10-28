@@ -198,7 +198,11 @@ export class ManagedUserRegistry {
       const saved = await this.check(key, value)
       if (!saved?.deleted) await this.persist(key, { ...fence(value), deleted: true })
       const e = this.get(key)
-      if (e) { e.draining = true; e.hooks.cancelStartup?.() }
+      if (e) {
+        e.forceRemoval ||= value.force === true
+        e.draining = true
+        e.hooks.cancelStartup?.()
+      }
       return e
     })
     if (!entry) return
@@ -207,7 +211,11 @@ export class ManagedUserRegistry {
     await entry.booted.catch(() => {})
     if (entry.handle) {
       await entry.handle.stopAdmission?.()
-      if ((await this.activity(entry)).busy) throw fail('context is busy; draining', 409)
+      if (entry.forceRemoval) {
+        if (typeof entry.handle.forceStop !== 'function') throw fail('forced context stop is not supported', 503)
+        entry.interruption ??= Promise.resolve().then(() => entry.handle.forceStop()).catch(error => { entry.interruption = undefined; throw error })
+        await entry.interruption
+      } else if ((await this.activity(entry)).busy) throw fail('context is busy; draining', 409)
       entry.disposal ??= Promise.resolve().then(() => entry.handle.dispose()).catch(error => { entry.disposal = undefined; throw error })
       await entry.disposal
     }

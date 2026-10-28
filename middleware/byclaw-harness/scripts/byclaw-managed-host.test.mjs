@@ -270,3 +270,38 @@ test('an actual managed boot failure remains sticky until fenced removal', async
   await r.remove('failed-context', value)
   assert.equal(releases, 1)
 })
+
+test('forced mode switch interrupts only its fenced user and awaits disposal before freeing capacity', async t => {
+  const started = deferred(); const disposed = deferred(); const stopped = []; const released = []
+  const r = await registry(t, { capacity: 2, release: async key => released.push(key), boot: async key => ({
+    activity: () => ({ busy: true, activeRequests: 1 }), stopAdmission() {},
+    forceStop: async () => { stopped.push(key) },
+    dispose: async () => { if (key === 'alpha') { started.resolve(); await disposed.promise } },
+  }) })
+  const alpha = request('alpha', { capacity: 2 }); const beta = request('beta', { capacity: 2 })
+  await r.ensure('alpha', alpha); await r.ensure('beta', beta)
+  await assert.rejects(r.remove('alpha', { ...alpha, generation: 2, force: true }), /fence/)
+  const removing = r.remove('alpha', { ...alpha, force: true })
+  removing.catch(() => started.resolve())
+  await started.promise
+  try {
+    assert.deepEqual(stopped, ['alpha']); assert.deepEqual(released, [])
+    assert.equal(r.admitting('alpha'), false); assert.equal(r.admitting('beta'), true)
+  } finally { disposed.resolve() }
+  await removing
+  assert.deepEqual(released, ['alpha']); assert.equal(r.get('alpha'), undefined)
+  assert.equal(r.admitting('beta'), true)
+})
+
+test('failed forced stop retains the context and claim for retry', async t => {
+  let attempts = 0; let released = false
+  const r = await registry(t, { release: async () => { released = true }, boot: async () => ({
+    activity: () => ({ busy: true, activeRequests: 1 }), stopAdmission() {},
+    forceStop: async () => { if (++attempts === 1) throw new Error('cancel failed') }, dispose: async () => {},
+  }) })
+  await r.ensure('tenant-a', request())
+  await assert.rejects(r.remove('tenant-a', { ...request(), force: true }), /cancel failed/)
+  assert.equal(released, false); assert.ok(r.get('tenant-a'))
+  await r.remove('tenant-a', { ...request(), force: true })
+  assert.equal(released, true); assert.equal(r.get('tenant-a'), undefined)
+})

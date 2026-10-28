@@ -37,6 +37,8 @@ export interface SharedMember {
   enterpriseId?: string;
   userId?: string;
   userCode: string;
+  userName?: string;
+  generation: number;
   status: string;
   lastHeartbeatAt?: string | number;
   assignedAt?: string | number;
@@ -65,3 +67,11 @@ export const deleteSharedConfig = (config: SharedConfig) => request<void>('delet
 export const listSharedRecords = (params: object) => request<SharedPage<SharedRecord>>('listRecords', params);
 export const listSharedMembers = (params: object) => request<SharedPage<SharedMember>>('listMembers', params);
 export const releaseSharedInstance = (sandboxRecordId: string) => request<void>('releaseInstance', { sandboxRecordId });
+
+export const releaseSharedMember = (member: SharedMember) =>
+  request<boolean>('releaseMember', {
+    mappingId: member.id,
+    generation: member.generation,
+    reason: 'manual',
+    force: true,
+  });

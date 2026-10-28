@@ -3,7 +3,7 @@ import http from 'node:http'
 import net from 'node:net'
 import test from 'node:test'
 import {
-  webStartupValues,
+  webStartupValues, prepareUserProfile,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
   parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
@@ -18,6 +18,23 @@ const beSpec = {
   ...spec, toolEnvBackend: 'byclaw-be',
   toolEnvBe: { baseUrl: 'http://be:8086/byaiService', systemCode: '', serviceKey: 'byclaw-dsh-tools5', sshInstance: 'ssh', hostTemplate: '', publishKeys: true, readyTimeoutMs: 180000, requestTimeoutMs: 180000 },
 }
+
+test('user boot uses one patch snapshot and isolates identity overlays between contexts', () => {
+  let reads = 0
+  const source = [{ insert: [{ id: 'storage-json', name: 'storage', config: { root: '/old', keep: true } }] }]
+  const runtime = {
+    readProfilePatches: () => { reads++; return structuredClone(source) },
+    composeEntries: ([patches]) => patches[0].insert,
+  }
+  const first = prepareUserProfile(runtime, { home: '/alice' }, {}, 'alice', spec)
+  const second = prepareUserProfile(runtime, { home: '/bob' }, {}, 'bob', spec)
+  assert.equal(reads, 2, 'each boot reads its user patches exactly once')
+  assert.deepEqual(first.patches.at(-1).config, { root: '/alice/storages', keep: true })
+  assert.deepEqual(second.patches.at(-1).config, { root: '/bob/storages', keep: true })
+  first.patches[0].insert[0].config.keep = false
+  assert.equal(second.patches[0].insert[0].config.keep, true)
+  assert.equal(source[0].insert[0].config.root, '/old')
+})
 
 // --- overlays ---------------------------------------------------------------
 

@@ -29,6 +29,7 @@ import {
   createRedis,
 } from '@byclaw/by-framework'
 import { createLazyByClawSkillLoader } from './lazy-skills.ts'
+import { ByClawOnDemandResources } from './on-demand-resources.ts'
 import { parseByClawDigitalEmployee } from './resources.ts'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -38,7 +39,7 @@ import { AGENT_TEAMS_EXECUTION_LOCATION } from '@byclaw/dsh-agent-teams'
 import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
-import { defaultAgentTemplateDir, listAgentTemplates, readAgentTemplate } from './agent-template.ts'
+import { defaultAgentTemplateDir, readAgentTemplate } from './agent-template.ts'
 import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
 import { lazyToolEnvironment, lazyToolEnvironmentFiles, toolEnvironmentFiles } from './tool-environment-files.ts'
 import { mediaProjectionRoot } from './media-generation/runtime-config.ts'
@@ -99,13 +100,13 @@ import { resolvePluginMediaModel } from './media-generation/plugin-model.ts'
 /** Root bindings consumed by the optional employee-selector preset plugin. */
 export interface ByClawEmployeeRoots {
   list(): ByClawRoutingEmployee[]
-  prepare(templateId: string): Promise<{ setup(agent: Agent): void; authorize(): void }>
+  prepare(templateId: string): Promise<{ setup(agent: Agent): void; authorize(): Promise<void> }>
 }
 declare module '@deepseek-ai/cordis' {
   interface Context {
     byclawEmployeeRoots: ByClawEmployeeRoots
     byclawManagedAdmission: ManagedAdmissionLease
-    byclawManagedRuntime: { ready: boolean; activity(): { busy: boolean; activeRequests: number }; stopAdmission(): void }
+    byclawManagedRuntime: { ready: boolean; activity(): { busy: boolean; activeRequests: number }; stopAdmission(): void; stopExecution(): Promise<void> }
   }
 }
 
@@ -587,7 +588,10 @@ async function activate(ctx: Context, config: Config): Promise<void> {
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
   const generationLease = new ByClawGenerationLease()
   const lazySkills = createLazyByClawSkillLoader({
-    loadResources: () => loadAuthorizedByClawResources({ redis, userCode, baseUrl,
+    loadResources: template => loadAuthorizedByClawResources({ redis, userCode, baseUrl,
+      resourceIds: new Set([template.source.resourceId, ...resources.groups
+        .filter(group => group.members.some(member => member.employeeId === template.source.resourceId))
+        .map(group => group.id)]),
       snapshotConcurrency: config.snapshotConcurrency ?? 8, excludedResourceIds: deletedResourceIds }),
     baseUrl: () => baseUrl, cacheRoot: skillCacheDir, concurrency: projectionConcurrency,
     allowFailure: config.allowSkillSyncFailure ?? true,
@@ -673,6 +677,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       try { await operation() } catch (error: unknown) { failures.push(error) }
     }
     await settle(resourceWatch === undefined ? undefined : () => resourceWatch?.close() ?? Promise.resolve())
+    await settle(() => resourceRuntime.close())
     await settle(() => generationLease.close())
     await settle(() => sessionMetadata.close())
     await settle(() => refresh)
@@ -685,23 +690,23 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     if (failures.length > 0) throw new AggregateError(failures, 'byclaw-dsh resource disposal failed')
   }
   closeRuntime = close
-  const synchronize = (reason = 'on-demand'): Promise<AuthorizedByClawResources> => {
-    if (!acceptingRefresh) return Promise.reject(new Error('byclaw-dsh resource refresh rejected during disposal'))
-    const operation = refresh.then(async () => {
-      const skippedSkillCodes = new Set<string>()
-      const employeeModelErrors = new Map<string, string>()
-      const next = await loadAuthorizedByClawResources({
-        redis,
-        userCode,
-        baseUrl,
-        snapshotConcurrency: config.snapshotConcurrency ?? 8,
-        excludedResourceIds: deletedResourceIds,
-        onResourceLoadError: (resourceId, error) => {
-          ctx.logger.error(`[byclaw-dsh] Resource ${resourceId} load failed; skipping this resource: ${startupErrorDetail(error)}`)
-        },
-      })
+  const resourceRuntime = new ByClawOnDemandResources({
+    load: selection => loadAuthorizedByClawResources({
+      redis, userCode, baseUrl, ...selection,
+      snapshotConcurrency: config.snapshotConcurrency ?? 8,
+      excludedResourceIds: deletedResourceIds,
+      onResourceLoadError: (resourceId, error) => ctx.logger.error(
+        `[byclaw-dsh] Resource ${resourceId} unavailable: ${startupErrorDetail(error)}`),
+    }),
+    onCatalog: next => {
+      resources = next
+      resourceWatch?.updateWatchedResources(new Set(next.watchedResourceIds))
+    },
+    publish: async (next, retainTemplateIds, requiredTemplateId) => {
       const projection = await projectByClawResourcesToTemplates({
         resources: next,
+        retainTemplateIds,
+        requiredTemplateId,
         agentTemplateDir,
         teamCatalogDir: catalogDir,
         cacheRoot: skillCacheDir,
@@ -709,78 +714,54 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         generationLease,
         projectionConcurrency,
         deferSkillSync: true,
-        onPhase: (phase, elapsedMs) => ctx.logger.info(`[byclaw-dsh] projection reason=${resourceLogValue(reason)}; phase=${phase}; elapsedMs=${elapsedMs}`),
+        onPhase: (phase, elapsedMs) => ctx.logger.info(`[byclaw-dsh] projection reason=on-demand; phase=${phase}; elapsedMs=${elapsedMs}`),
         allowSkillSyncFailure: config.allowSkillSyncFailure ?? true,
         skillSyncTimeoutMs: config.skillSyncTimeoutMs ?? 60_000,
         skillSyncAttempts: config.skillSyncAttempts ?? 3,
         skillSyncRetryDelayMs: config.skillSyncRetryDelayMs ?? 250,
         onSkillSyncError: (ref, error) => {
-          skippedSkillCodes.add(ref.code)
           const action = config.allowSkillSyncFailure === false
             ? 'rejecting this staged generation'
             : 'continuing without this Skill'
           ctx.logger.error(`[byclaw-dsh] Skill ${ref.code} sync failed; ${action}: ${startupErrorDetail(error)}`)
         },
         onEmployeeProjectionError: (employeeId, error) => {
-          employeeModelErrors.set(employeeId, startupErrorDetail(error))
           ctx.logger.error(`[byclaw-dsh] Digital employee ${employeeId} projection failed; skipping this employee: ${startupErrorDetail(error)}`)
         },
         onGroupProjectionError: (groupId, error) => {
           ctx.logger.error(`[byclaw-dsh] Expert group ${groupId} projection failed; skipping this group: ${startupErrorDetail(error)}`)
         },
         resolveModel: (bindingId, modelId) => models.resolve(bindingId, modelId),
-        prepareSkillGeneration: (templates, stagedRoot) => skillRuntime.prepareGeneration(
+        prepareSkillGeneration: (templates, stagedRoot, retainedTemplateIds) => skillRuntime.prepareGeneration(
           templates,
           stagedRoot,
           skillCacheDir,
           {
             allowSkillFailure,
+            deferEmployeeTemplates: true,
+            retainTemplateIds: retainedTemplateIds,
             onSkillError: (error) => {
-              skippedSkillCodes.add(error.code)
               reportSkillPreparationError(error)
             },
             onSkillRename: reportSkillPreparationRename,
           },
         ),
       })
-      const acceptedEmployeeIds = new Set(projection.acceptedEmployeeIds)
-      const acceptedGroupIds = new Set(projection.acceptedGroupIds)
-      resources = {
-        ...next,
-        employees: next.employees.filter(employee => acceptedEmployeeIds.has(employee.id)),
-        groups: next.groups.filter(group => acceptedGroupIds.has(group.id)),
-      }
-      const inventory = byClawResourceInventoryLines(resources, {
-        reason,
-        skippedSkillCodes,
-        employeeModels: projection.employeeModels,
-        employeeModelErrors,
-        discoveredEmployees: next.employees,
-      })
-      const inventorySignature = byClawResourceInventoryLines(resources, {
-        reason: 'state',
-        skippedSkillCodes,
-        employeeModels: projection.employeeModels,
-        employeeModelErrors,
-        discoveredEmployees: next.employees,
-      }).join('\n')
+      return projection.agents.map(template => template.id)
+    },
+  })
+  const synchronize = (reason = 'on-demand'): Promise<AuthorizedByClawResources> => {
+    if (!acceptingRefresh) return Promise.reject(new Error('byclaw-dsh resource refresh rejected during disposal'))
+    const operation = resourceRuntime.discover().then(next => {
+      const inventorySignature = byClawResourceInventoryLines(next, { reason: 'state' }).join('\n')
       if (inventorySignature !== lastResourceInventory) {
-        for (const line of inventory) ctx.logger.info(line)
+        for (const line of byClawResourceInventoryLines(next, { reason })) ctx.logger.info(line)
+        lastResourceInventory = inventorySignature
       }
-      else ctx.logger.info(`[byclaw-dsh] Resource inventory unchanged: reason=${resourceLogValue(reason)}`)
-      lastResourceInventory = inventorySignature
-      resourceWatch?.updateWatchedResources(new Set(next.watchedResourceIds))
-      return resources
+      return next
     })
     refresh = operation.catch(() => undefined)
     return operation
-  }
-  const synchronizeOrRetain = async (): Promise<void> => {
-    try {
-      await synchronize()
-    } catch (error: unknown) {
-      ctx.logger.error(`[byclaw-dsh] resource refresh failed; retaining last-good templates and Skills: ${startupErrorDetail(error)}`)
-    }
   }
   try {
     await redis.ping()
@@ -810,30 +791,11 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         resourceIds: [],
       },
     }
-    const startupFallback = resources
+    // Startup discovers only Redis routing metadata. Templates, models and group
+    // runtimes are prepared only after an employee/group is actually selected.
     resources = await synchronizeByClawResourcesAtStartup({
-      synchronize: () => synchronize('cold-start'),
-      fallback: resources,
-      logger: ctx.logger,
+      synchronize: () => synchronize('cold-start-catalog'), fallback: resources, logger: ctx.logger,
     })
-    // Restore cached views only on startup sync failure. A successful sync has already
-    // prepared and published the complete authorized generation; do not read it twice.
-    if (resources === startupFallback) {
-      try {
-        (await skillRuntime.prepareGeneration(
-          await listAgentTemplates(agentTemplateDir),
-          skillCacheDir,
-          skillCacheDir,
-          {
-            allowSkillFailure,
-            onSkillError: reportSkillPreparationError,
-            onSkillRename: reportSkillPreparationRename,
-          },
-        ))()
-      } catch (error: unknown) {
-        ctx.logger.warn(`[byclaw-dsh] local Skill generation unavailable; waiting for resource synchronization: ${startupErrorDetail(error)}`)
-      }
-    }
     startupPhase('resources-ready')
     if (lastResourceInventory === '') {
       lastResourceInventory = byClawResourceInventoryLines(resources, { reason: 'state' }).join('\n')
@@ -856,6 +818,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         for (const resourceId of nextAuthorization) {
           if (!previousAuthorization.has(resourceId)) deletedResourceIds.delete(resourceId)
         }
+        resourceRuntime.invalidate()
         await synchronize('authorization-change')
       },
       onResourceChange: async changes => {
@@ -863,6 +826,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
           if (change.eventType === 'DIG_EMPLOYEE_DELETED') deletedResourceIds.add(change.resourceId)
           else deletedResourceIds.delete(change.resourceId)
         }
+        resourceRuntime.invalidate()
         await synchronize('resource-change')
       },
     })
@@ -875,6 +839,9 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     let groupBoundary: GroupStateBoundary
     const groupCoordination = new ByClawGroupCoordinationRuntime({
       resources: () => resources, catalogDir: agentTemplateDir,
+      prepareEmployee: async id => {
+        if (resources.directEmployeeIds.includes(id)) await resourceRuntime.prepare(`byclaw-employee-${id}`)
+      },
       resolveModel: (bindingId, modelId) => models.resolve(bindingId, modelId),
       supportedWorkerTypes: resolveWorkerAgentTypes(config.agentTypes, userCode),
       installMemberBoundary: (agentCtx, agent) => groupBoundary.bindMember(agentCtx, agent),
@@ -928,7 +895,14 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         || (scope.role === 'member' && ['byclaw_instantiate_template', 'byclaw_route_task'].includes(exec.name)))) {
         return { kind: 'deny', reason: 'Group task delegation is limited to the bound coordinator and its permitted employee roster.' }
       }
-      if (scope !== undefined) return next()
+      if (scope !== undefined) {
+        if (scope.role === 'coordinator' && ['agent_teams_create', 'agent_teams_add_member'].includes(exec.name)) {
+          // AgentTeams acquires its catalog read lease inside execute; prepare
+          // allowed DIRECT members here so publication cannot deadlock on it.
+          await groupCoordination.prepareTeam(String(exec.agent!.id))
+        }
+        return next()
+      }
       if (agentRouterBlocksDelegationTool(exec.name, isSuperAssistant(exec.agent))) {
         return { kind: 'deny', reason: 'Jev routing is enabled. The super assistant must delegate employees through byclaw_instantiate_template so Jev selects the executor. Generic spawning and direct team delegation are blocked for the super assistant.' }
       }
@@ -936,7 +910,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     })
 
     const decideDelegation = async (task: string, signal: AbortSignal, agent?: Agent) => {
-      await synchronizeOrRetain()
+      await synchronize()
       const fullCatalog = resourceRoutingCatalog(agent === undefined ? resources : groupCoordination.resourcesFor(String(agent.id)))
       const visible = agent === undefined ? undefined : groupCoordination.visibleEmployeeIds(String(agent.id))
       const catalog = visible === undefined ? fullCatalog : { ...fullCatalog, employees: fullCatalog.employees.filter(employee => visible.has(employee.id)), groups: [] }
@@ -953,7 +927,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
       catalogDir: agentTemplateDir,
       subagentProvider: config.subagentProvider ?? 'spawn',
       resolveModel: (bindingId, modelId) => models.resolve(bindingId, modelId),
-      beforeInstantiate: synchronizeOrRetain,
+      beforeInstantiate: templateId => resourceRuntime.prepare(templateId),
       onRootSetup: (agent, template) => {
         rootEmployeeCodes.set(agent, template.kind === 'agent' ? template.source.resourceCode : '')
         if (isSuperAssistant(agent) && groupCoordination.get(String(agent.id)) === undefined) superAssistantPolicy.bind(agent.ctx, agent)
@@ -982,16 +956,21 @@ async function activate(ctx: Context, config: Config): Promise<void> {
     ctx.effect(() => ctx.provide('byclawEmployeeRoots', {
       list: () => resourceRoutingCatalog(resources).employees,
       prepare: async (templateId: string) => {
-        await synchronizeOrRetain()
         const authorize = (): void => {
           if (!resourceRoutingCatalog(resources).employees.some(entry => entry.template_id === templateId)) {
             throw new Error(`Digital employee ${templateId} is no longer authorized`)
           }
         }
-        authorize()
         const prepared = await templateRuntime.prepareRoot(templateId)
+        const authorizeCurrent = async (): Promise<void> => {
+          const authorization = await resolveByClawAuthorization(redis, userCode)
+          if (!authorization.resourceIds.includes(templateId.replace(/^byclaw-employee-/u, ''))
+            || deletedResourceIds.has(templateId.replace(/^byclaw-employee-/u, ''))) {
+            throw new Error(`Digital employee ${templateId} is no longer authorized`)
+          }
+        }
         return {
-          authorize,
+          authorize: authorizeCurrent,
           setup(agent: Agent): void {
             authorize()
             const agentCtx = agent.ctx
@@ -1017,7 +996,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
                 name: 'byclaw-dsh:authorized-resources', order: 116, text: () => rosterPrompt(resources),
               }))
             }
-            agentCtx.on('agent/pre-step', async (_payload, next) => { authorize(); return next() })
+            agentCtx.on('agent/pre-step', async (_payload, next) => { await authorizeCurrent(); return next() })
             ctx.logger.info(`[byclaw-dsh] Employee root bound: template=${templateId}; session=${agent.id}`)
           },
         }
@@ -1033,7 +1012,7 @@ async function activate(ctx: Context, config: Config): Promise<void> {
         render: (_args, value) => [{ type: 'text', text: value.json }],
       },
       execute: async (_args, exec) => {
-        await synchronizeOrRetain()
+        await synchronize()
         const catalog = resourceRoutingCatalog(exec.agent === undefined ? resources : groupCoordination.resourcesFor(String(exec.agent.id)))
         const visible = exec.agent === undefined ? undefined : groupCoordination.visibleEmployeeIds(String(exec.agent.id))
         return { json: JSON.stringify(visible === undefined ? catalog : { ...catalog, employees: catalog.employees.filter(employee => visible.has(employee.id)), groups: [] }) }
@@ -1185,6 +1164,11 @@ async function activate(ctx: Context, config: Config): Promise<void> {
           return { busy: snapshot.busy || activeRequests > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount) }
         },
         stopAdmission: () => runtimeWorker.stopAdmission(),
+        stopExecution: async () => {
+          runtimeWorker.stopAdmission()
+          // Cancel this user's sessions before joining the worker during context disposal.
+          await runtimeSessions.close({ requireStopped: true })
+        },
       }), 'byclaw-managed-runtime')
     }
 

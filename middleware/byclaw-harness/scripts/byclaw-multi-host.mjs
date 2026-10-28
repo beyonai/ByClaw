@@ -1131,10 +1131,29 @@ export function managedRuntimeActivity(ctx) {
 }
 
 /**
+ * Read one user-owned configuration snapshot, then append the host's identity
+ * overlays. Re-reading every bundle/home patch for boot both repeats work and
+ * lets the overlay calculation and the actual boot see different revisions.
+ */
+export function prepareUserProfile(runtime, base, profile, user, spec) {
+  const patches = runtime.readProfilePatches(BIN, base, profile)
+  const entries = runtime.composeEntries([patches])
+  const overlays = composeUserOverlays(entries, user, base.home, spec)
+  return { profileContext: { ...base, overlays }, patches: [...patches, ...overlays] }
+}
+
+/**
  * Boot one user's DSH context; resolves to a registry handle.
  * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
  */
 async function bootUserContext(config, user, request, hooks, tokenSource) {
+  const started = performance.now()
+  let previous = started
+  const phase = name => {
+    const now = performance.now()
+    log(`context ${user} boot phase=${name}; phaseMs=${Math.round(now - previous)}; elapsedMs=${Math.round(now - started)}`)
+    previous = now
+  }
   const {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = await import('@deepseek-ai/dsh-app-boot')
@@ -1148,9 +1167,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   await ensureLink(join(config.managedProfile, 'node_modules'), join(dir, 'node_modules'))
   await writeFile(join(dir, 'cordis.yml'), '[]\n')
   await writeFile(join(dir, 'cordis.patch.yml'), '[]\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error })
+  phase('directories-ready')
 
   const profile = loadProfileDirectory(BIN, dir, config.installAnchor)
   const resolution = await createRuntimeResolution({ installAnchor: config.installAnchor, profile })
+  phase('resolution-ready')
   const base = {
     name: 'web', dir, patchPath: profile.patchPath ?? join(dir, 'cordis.patch.yml'), installAnchor: config.installAnchor,
     startedBundles: profile.layers.map(layer => layer.packageName),
@@ -1166,13 +1187,12 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     toolEnvIdleMs: config.toolEnvIdleMs,
     publicUrl: userPublicUrl(config.publicBase, user),
   }
-  const entries = composeEntries([readProfilePatches(BIN, base, profile)])
-  const profileContext = { ...base, overlays: composeUserOverlays(entries, user, home, spec) }
+  const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
   const environment = createLaunchEnvironmentSnapshot([
     { source: 'process', values: launchEnvironmentValues(process.env, request.env, request.managed ? request.userCode : user, request.managed) },
   ])
-  const started = Date.now()
-  const ctx = await boot(BIN, join(dir, 'cordis.yml'), readProfilePatches(BIN, profileContext, profile), async (hostCtx) => {
+  phase('overlays-ready')
+  const ctx = await boot(BIN, join(dir, 'cordis.yml'), patches, async (hostCtx) => {
     if (request.managed) hostCtx.provide('byclawManagedAdmission', hooks.admission)
     hooks.isPluginFailure = reason => isLoaderFailure(hostCtx, reason)
     hostCtx.dshHomePath = (...parts) => join(home, ...parts)
@@ -1186,6 +1206,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
     await hostCtx.plugin(PluginPackages, { resolution })
   })
+  phase('plugins-ready')
   const handle = {
     get port() { return ctx.get('webServer')?.port },
     auth: createUpstreamAuth({
@@ -1198,6 +1219,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     }),
     activity: () => managedRuntimeActivity(ctx),
     stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
+    forceStop: async () => {
+      const runtime = ctx.get('byclawManagedRuntime')
+      if (typeof runtime?.stopExecution !== 'function') throw new Error('forced context stop is not supported')
+      await runtime.stopExecution()
+    },
     dispose: () => ctx.fiber.dispose(),
     // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
     // using the one from boot otherwise, which expires long before a resident
@@ -1213,7 +1239,8 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     await ctx.fiber.dispose()
     throw new Error('context booted without a web listener')
   }
-  log(`user ${user} ready in ${String(Date.now() - started)} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
+  phase('worker-ready')
+  log(`user ${user} ready in ${String(Math.round(performance.now() - started))} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
   return handle
 }
 

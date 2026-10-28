@@ -6,7 +6,7 @@ import { mapConcurrent } from './startup-concurrency.ts'
 import { byClawSkillCacheDir, syncByClawSkill } from './skill-sync.ts'
 
 export function createLazyByClawSkillLoader(options: {
-  loadResources(): Promise<AuthorizedByClawResources>
+  loadResources(template: DshAgentTemplate): Promise<AuthorizedByClawResources>
   baseUrl(): string
   cacheRoot: string
   concurrency: number
@@ -28,7 +28,7 @@ export function createLazyByClawSkillLoader(options: {
   )
   const resolve = async (template: DshAgentTemplate): Promise<DshAgentTemplate> => {
     if (closed) throw new Error('ByClaw lazy Skill loader is closed')
-    const before = await options.loadResources()
+    const before = await options.loadResources(template)
     const employee = before.employees.find(item => item.id === template.source.resourceId)
     if (employee === undefined) throw new Error(`ByClaw employee ${template.source.resourceId} is no longer authorized`)
     const expected = fingerprint(employee.skills)
@@ -57,7 +57,7 @@ export function createLazyByClawSkillLoader(options: {
         if (tails.get(ref.code) === pending) tails.delete(ref.code)
       }
     })
-    const after = await options.loadResources()
+    const after = await options.loadResources(template)
     const current = after.employees.find(item => item.id === employee.id)
     if (closed || current === undefined || fingerprint(current.skills) !== expected) {
       throw new Error('ByClaw Skill authorization changed during loading; retry lookup')

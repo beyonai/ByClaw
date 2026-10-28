@@ -731,3 +731,82 @@ it('does not publish an in-flight lazy Skill after its authorization generation 
   await rejected
   expect(f.runtime.entries('byclaw-employee-1').some(x => x.path === f.html.path)).toBe(false)
 })
+
+it('retains an unrelated employee view and its in-flight lazy Skill during incremental publication', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    entered(); await gate
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  const deferred = { ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }
+  ;(await f.runtime.prepareGeneration([deferred], f.cache, f.cache))()
+  const lookup = f.ctx.skills.get('html-artifact', { scope: f.a })
+  await started
+  ;(await f.runtime.prepareGeneration([deferred, f.templates[1]!], f.cache, f.cache,
+    { retainTemplateIds: new Set([deferred.id]) }))()
+  release()
+  expect((await lookup)?.content).toContain('Bound HTML body')
+  expect(f.runtime.entries(deferred.id).some(entry => entry.path === f.html.path)).toBe(true)
+  expect(f.runtime.entries(f.templates[1]!.id).some(entry => entry.name === 'other-employee')).toBe(true)
+})
+
+it('discovers new associations for an initially empty lazy employee and observes their removal', async () => {
+  let associations: DshAgentTemplate['skills'] = []
+  const f = await fixture({ resolveDeferredTemplate: async t => ({ ...t, skills: associations }) })
+  const empty = { ...f.templates[0]!, skills: [] }
+  ;(await f.runtime.prepareGeneration([empty], f.cache, f.cache, { deferEmployeeTemplates: true }))()
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toBe('Wrong body')
+  associations = [f.html]
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toContain('Bound HTML body')
+  associations = []
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toBe('Wrong body')
+})
+
+it('prepares a cold coordinated root before reading its template and binds its employee Skills', async () => {
+  let associations: DshAgentTemplate['skills'] = []
+  const f = await fixture({ resolveDeferredTemplate: async t => ({ ...t, skills: associations }) })
+  associations = [f.html]
+  ;(await f.runtime.prepareGeneration([], f.cache, f.cache))()
+  const { ByClawGroupCoordinationRuntime } = await import('../src/group-coordination.ts')
+  const catalogDir = join(f.root, 'cold-coordination')
+  const employee = { id: '1', name: 'Employee', code: 'EMP_1', description: '', capabilities: '', persona: '', workerAgentType: 'BYCLAW_DSH', skills: [] }
+  const employeeTemplate = { ...f.templates[0]!, source: { ...f.templates[0]!.source, resourceId: '1' } }
+  const coordination = { schemaVersion: 'byclaw.group-coordination/v1' as const, mode: 'DIRECT' as const,
+    groupSessionId: 'group', taskSessionId: 'task', coordinatorAgentId: '1', allowedAgentIds: ['2'] }
+  const preparations: string[] = []
+  const preparedTemplates = new Map<string, DshAgentTemplate>()
+  const policy = new ByClawGroupCoordinationRuntime({
+    resources: () => ({ employees: [employee, { ...employee, id: '2' }], groups: [], directEmployeeIds: ['1', '2'], watchedResourceIds: ['1', '2'], authHeaders: {},
+      authorization: { userId: 'test', authKey: 'test', resourceIds: ['1', '2'] } }),
+    catalogDir, supportedWorkerTypes: ['BYCLAW_DSH'], resolveModel: async () => ({ provider: 'test', model: 'test' }),
+    prepareEmployee: async id => {
+      preparations.push(id)
+      const selected = { ...employeeTemplate, id: `byclaw-employee-${id}`, source: { ...employeeTemplate.source, resourceId: id } }
+      preparedTemplates.set(id, selected)
+      await writeAgentTemplate(catalogDir, selected)
+      ;(await f.runtime.prepareGeneration([...preparedTemplates.values()], f.cache, f.cache, { deferEmployeeTemplates: true }))()
+    },
+  })
+  const runtime = registerAgentTemplateRuntime(f.ctx, { catalogDir, subagentProvider: 'spawn',
+    resolveModel: async () => ({ provider: 'test', model: 'test' }), groupCoordination: policy,
+    workspaceRegistry: new ByClawSessionWorkspaceRegistry(), skillRuntime: f.runtime })
+  const prepared = await runtime.prepareRoot('byclaw-employee-1', coordination)
+  expect(preparations).toEqual(['1'])
+  const cold = agent('cold-coordinator')
+  const scope = createScope(f.ctx, cold)
+  cleanups.push(() => scope.dispose())
+  await scope.ctx.plugin({ inject: ['systemPrompt'], apply(ctx: Context) { prepared.setup(ctx.extend({ agent: cold }), cold) } })
+  expect((await f.ctx.skills.get('html-artifact', { scope: cold }))?.content).toContain('Bound HTML body')
+  const memberPrepared = await runtime.prepareRoot('byclaw-employee-2', coordination)
+  expect(preparations).toEqual(['1', '1', '2'])
+  const member = agent('cold-direct-member')
+  const memberScope = createScope(f.ctx, member)
+  cleanups.push(() => memberScope.dispose())
+  await memberScope.ctx.plugin({ inject: ['systemPrompt'], apply(ctx: Context) { memberPrepared.setup(ctx.extend({ agent: member }), member) } })
+  expect((await f.ctx.skills.get('html-artifact', { scope: member }))?.content).toContain('Bound HTML body')
+})

@@ -2,4 +2,14 @@
 
 通过 DSH 官方 agent-presets 扩展点向会话选择器注入已授权数字员工，无需修改 DSH 页面源码。点击新会话输入框上方的“标准模式”，选择员工，随后发送消息。会话绑定会持久化；恢复会话仍加载同一员工。子代理不继承根员工身份。模板 persona、Skills 和模型来自 ByClaw 同步结果，超级助手额外挂载授权目录与 Jev 路由提示。
 
-依赖启用 @byclaw/dsh-integration。安装：`dsh plugin --profile byclaw-local add link:/absolute/path/plugins/employee-selector`。插件仅维护带自身标记的 `~/.dsh/.agent-presets/byclaw-employee-*` 目录，每五秒同步授权目录；执行前再次检查当前授权。退出进程后这些预设保留，插件卸载后可删除带标记的目录。
+依赖启用 @byclaw/dsh-integration。安装：`dsh plugin --profile byclaw-local add link:/absolute/path/plugins/employee-selector`。插件通过内存注册表每五秒同步授权目录，卸载时移除员工定义；执行前再次检查当前授权。启动时仅清理旧版本在 `$DSH_HOME/.agent-presets/byclaw-employee-*` 中写入、带本插件标记的目录，不再写入预设文件。
+
+注册预设时不预加载员工资源；首次创建该员工的根代理或恢复执行时才准备资源。同一根代理的并发请求共用准备结果，失败后允许重试；新根代理重新校验当前定义，模板内容与版本缓存由集成插件复用；子代理不触发员工资源准备，每个根代理执行前仍检查授权。
+
+每次选择插件初始化时，在用户 Context 根内建立一份去掉 `persona` 的标准能力快照，即使初始员工目录为空也只建立一次；每名员工仅注册身份绑定行。公共定义通过公开 `register`、`mount`、`composeFrom` 和 `createScope` API 建立，挂载到保留作用域后立即从可选名单注销，不访问注册表私有字段。员工名称刷新不会重建公共工具树，不同用户根不会共享配置、工具实例或员工资源。
+
+删除员工定义立即撤销其选择入口，已有会话继续持有原预设版本，执行前仍按当前授权拒绝已撤销员工。清空员工目录时仅移除员工定义，保留公共快照供后续重新授权复用；卸载选择插件时先移除定义，再释放公共作用域；活动会话仍有引用时，其能力树继续保留，最后一个引用释放后才清理。插件重载创建新的不可变快照，已有会话继续使用旧快照。整个插件生命周期不会因空目录或重新授权而重建公共能力。
+
+公开 API 的边界：公共定义仅在插件初始化时临时注册，初始化完成前已注销。共享宿主禁用 HMR，并在上下文完成初始化后对外就绪，因此正常运行中的授权刷新不会再次注册公共条目；允许实时重载的其他宿主若并发读取初始化中的名单，仍可能短暂看到该条目。初始化完成后的名单只包含标准模式和授权员工。`agentPresets.composedPreset` 和组合检查仍返回员工预设身份。`agentPresets.serviceFor` 只检查直接预设，不能跨作用域链取得公共能力树的隔离服务；工具、提示词和事件使用公开作用域继承，公共树内部插件继续在原隔离域中访问服务。
+
+验证：在具备声明的 DSH workspace 开发依赖或同版本已构建 peers 的环境运行 `npm test`。`tests/runtime.test.js` 使用真实 Loader、AgentPresetRegistry、Scope、Agent、Tools、SystemPrompt 和 Session 运行时，覆盖 56 人仅挂载一份员工公共能力、两用户根隔离、身份和 persona、授权撤销、刷新、空目录撤销与重新授权、重载、子代理及引用释放。测试使用临时 DSH_HOME，避免触及本地用户预设文件。
