@@ -186,7 +186,7 @@ export type ResourceCardProps = {
   metaNode?: React.ReactNode;
   hoverExtra?: React.ReactNode;
   className?: string;
-  variant?: 'default' | 'skillPoster';
+  variant?: 'default' | 'skillPoster' | 'employeeManagement' | 'employeeRow';
   digitalEmployeeActionMode?: boolean;
   enableFavorites?: boolean;
 };
@@ -1573,6 +1573,108 @@ const RenderContent = (props: ResourceCardProps) => {
     }
   };
 
+  if (variant === 'employeeRow') {
+    const isEnterpriseRow = actionConfig?.scene === 'enterprise';
+    const currentUserId = String(userInfo?.userId ?? userInfo?.id ?? '');
+    const employeeCreatorId = String(resource.creatorId ?? resource.createBy ?? resource.createdBy ?? '');
+    const isCreatedByCurrentUser =
+      currentUserId !== '' && employeeCreatorId !== '' && currentUserId === employeeCreatorId;
+    let ownershipLabel = intl.formatMessage({ id: 'common.none' });
+    if (isCreatedByCurrentUser) {
+      ownershipLabel = intl.formatMessage({ id: 'myEmployees.createdByMe' });
+    } else if (isTruthyFlag(resource.hasManagePermission)) {
+      ownershipLabel = intl.formatMessage({ id: 'myEmployees.managedByMe' });
+    }
+    // 仅将编辑放在固定操作位；其余操作保留原菜单的权限、加载态和确认流程。
+    const editItem = effectiveMenuItems.find((item) => item?.key === 'edit');
+    const rowMenuItems = effectiveMenuItems.filter((item) => item?.key !== 'edit');
+
+    return (
+      <>
+        <td>
+          <div className={styles.employeeRowName}>
+            <span className={styles.employeeRowAvatar} aria-hidden="true">
+              {avatarNode}
+            </span>
+            <div className={styles.employeeRowIdentity}>
+              <button
+                type="button"
+                className={styles.employeeRowTitle}
+                title={displayTitle}
+                disabled={isCancelledResource || isCardClickDisabled || !effectiveCardClick}
+                onClick={() => effectiveCardClick?.(resource)}
+              >
+                {displayTitle}
+              </button>
+              {isDefaultDigitalEmployee && (
+                <span className={styles.employeeRowDefault}>
+                  {intl.formatMessage({ id: 'resource.defaultDigitalEmployee' })}
+                </span>
+              )}
+            </div>
+          </div>
+        </td>
+        <td>
+          <div className={styles.employeeRowDescription}>{displayDescription}</div>
+        </td>
+        <td>
+          <div className={styles.employeeRowDescription} title={creatorName}>
+            {creatorName}
+          </div>
+        </td>
+        <td>
+          <span className={classnames(styles.employeeRowType, { [styles.employeeRowGroup]: isDigitalEmployeeGroup })}>
+            {intl.formatMessage({ id: isDigitalEmployeeGroup ? 'myEmployees.group' : 'myEmployees.employee' })}
+          </span>
+        </td>
+        {isEnterpriseRow && (
+          <>
+            <td>{ownershipLabel}</td>
+            <td>
+              <span className={classnames(styles.tag, styles.digitalEmployeeStatusTag, styles[statusTagClass])}>
+                <span className={styles.tagText}>{effectiveTopRightTag}</span>
+              </span>
+            </td>
+          </>
+        )}
+        <td>
+          <div className={styles.employeeRowActions}>
+            {editItem && (
+              <Button
+                className={styles.employeeRowEditAction}
+                type="link"
+                size="small"
+                disabled={'disabled' in editItem && editItem.disabled}
+                onClick={() => onEdit()}
+              >
+                {intl.formatMessage({ id: 'common.edit' })}
+              </Button>
+            )}
+            {rowMenuItems.length > 0 && (
+              <Dropdown
+                menu={{ items: rowMenuItems }}
+                placement="bottomRight"
+                trigger={['click']}
+                open={digitalEmployeeMenuOpen}
+                onOpenChange={setDigitalEmployeeMenuOpen}
+              >
+                <Button
+                  className={styles.employeeRowMoreAction}
+                  type="link"
+                  size="small"
+                  aria-label={intl.formatMessage({ id: 'myEmployees.moreActions' })}
+                >
+                  {intl.formatMessage({ id: 'myEmployees.moreActions' })}
+                </Button>
+              </Dropdown>
+            )}
+            {!editItem && rowMenuItems.length === 0 && <span>-</span>}
+          </div>
+        </td>
+      </>
+    );
+  }
+
   if (isSkillPosterResource) {
     return (
       <div
@@ -1738,7 +1840,22 @@ const RenderContent = (props: ResourceCardProps) => {
                 className={classnames(styles.resourceName, 'ub-f1')}
                 ellipsis={{ rows: 1, tooltip: `${displayTitle}` }}
               >
-                {displayTitle}
+                {variant === 'employeeManagement' ? (
+                  <button
+                    type="button"
+                    className={styles.employeeCardTitle}
+                    title={displayTitle}
+                    disabled={isCancelledResource || isCardClickDisabled || !effectiveCardClick}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      effectiveCardClick?.(resource);
+                    }}
+                  >
+                    {displayTitle}
+                  </button>
+                ) : (
+                  displayTitle
+                )}
               </Paragraph>
               {effectiveTopRightTag ? (
                 <span
@@ -1890,11 +2007,20 @@ function ResourceCard(props: ResourceCardProps) {
       ? props.cardClickDisabled(displayResource)
       : !!props.cardClickDisabled);
 
+  if (variant === 'employeeRow') {
+    return (
+      <tr className={styles.employeeRow}>
+        <RenderContent {...props} resource={displayResource} cardClickDisabled={isCardClickDisabled} />
+      </tr>
+    );
+  }
+
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        [styles.digitalEmployeeCard]: variant === 'default' && isDigitalEmployeeResource,
+        [styles.digitalEmployeeCard]: ['default', 'employeeManagement'].includes(variant) && isDigitalEmployeeResource,
+        [styles.employeeManagementCard]: variant === 'employeeManagement',
         [styles.knowledgeCard]: variant === 'default' && isKnowledgeResource,
         pointer:
           (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,

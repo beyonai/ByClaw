@@ -26,6 +26,7 @@ jest.mock('@umijs/max', () => {
         user: {
           userInfo: {
             defaultDigEmployeeId: 'default-agent-1',
+            userId: 'creator-1',
           },
         },
         employees: {
@@ -323,5 +324,119 @@ describe('digital employee publication entry', () => {
     );
 
     expect(screen.queryByTestId('resource-menu-deleteData')).not.toBeInTheDocument();
+  });
+});
+
+describe('employee management table actions', () => {
+  it.each([
+    ['zh-CN', '编辑', '发布到企业'],
+    ['en-US', 'Edit', 'Publish to enterprise'],
+  ])('keeps edit inline and moves publication into more actions in %s', async (locale, editLabel, publishLabel) => {
+    (getLocale as jest.Mock).mockReturnValue(locale);
+    (openEmployeePublication as jest.Mock).mockClear().mockResolvedValue(undefined);
+    const onEdit = jest.fn();
+    const onCardClick = jest.fn();
+    renderWithQueryClient(
+      <table>
+        <tbody>
+          <ResourceCard
+            variant="employeeRow"
+            resourceType="DIG_EMPLOYEE"
+            resource={{
+              resourceId: 'row-1',
+              resourceName: 'Personal employee',
+              ownerType: 'personal',
+              canEdit: true,
+              canPublishEmployee: true,
+            }}
+            onCardClick={onCardClick}
+            actionConfig={{ scene: 'personal', onEdit }}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.getAllByRole('cell')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: editLabel }));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: publishLabel })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: locale === 'en-US' ? 'More' : '更多' })).toBeInTheDocument();
+    const publicationMenuItem = screen.getByTestId('resource-menu-publishEmployee');
+    expect(publicationMenuItem).toHaveTextContent(publishLabel);
+    fireEvent.click(publicationMenuItem);
+    await waitFor(() => expect(openEmployeePublication).toHaveBeenCalledWith('row-1'));
+    expect(onCardClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Personal employee' }));
+    expect(onCardClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows enterprise group metadata and calls the existing authorization handler', () => {
+    const onAuth = jest.fn();
+    renderWithQueryClient(
+      <table>
+        <tbody>
+          <ResourceCard
+            variant="employeeRow"
+            resourceType="DIG_EMPLOYEE"
+            resource={{
+              resourceId: 'default-agent-1',
+              resourceName: 'Team',
+              creatorId: 'creator-1',
+              creatorName: 'Creator',
+              ownerType: 'enterprise',
+              agentType: '017',
+              resourceStatus: 3,
+              canManageAuth: true,
+              canUseAuth: true,
+            }}
+            actionConfig={{
+              onAuth,
+              scene: 'enterprise',
+              // 与我的员工页面一致：状态列展示上下架状态，而非资源类型标签。
+              showDigitalEmployeeTypeTag: false,
+            }}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.getAllByRole('cell')).toHaveLength(7);
+    expect(screen.getByText('数字员工组')).toBeInTheDocument();
+    expect(screen.getByText('我创建的')).toBeInTheDocument();
+    expect(screen.getByText('已下架')).toBeInTheDocument();
+    expect(screen.getByText('默认')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理授权' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '更多' })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('resource-menu-authorize'));
+    expect(onAuth).toHaveBeenCalledWith('mgrAuth');
+    fireEvent.click(screen.getByTestId('resource-menu-use'));
+    expect(onAuth).toHaveBeenLastCalledWith('useAuth');
+  });
+
+  it.each([2, -1])('does not expose actions without permissions or on cancelled rows (%s)', (resourceStatus) => {
+    renderWithQueryClient(
+      <table>
+        <tbody>
+          <ResourceCard
+            variant="employeeRow"
+            resourceType="DIG_EMPLOYEE"
+            resource={{
+              resourceStatus,
+              resourceId: 'row-1',
+              resourceName: 'Read only',
+              ownerType: 'personal',
+              canEdit: resourceStatus === -1,
+              canPublishEmployee: resourceStatus === -1,
+              canDelete: resourceStatus === -1,
+            }}
+            actionConfig={{ scene: 'personal', enableDigitalEmployeeDelete: true }}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发布到企业' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('resource-menu-deleteData')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('cell')[4]).toHaveTextContent('-');
   });
 });

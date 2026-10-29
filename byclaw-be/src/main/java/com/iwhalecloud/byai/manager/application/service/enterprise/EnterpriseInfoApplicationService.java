@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.manager.application.service.enterprise;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import org.springframework.beans.factory.ObjectProvider;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
-import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -29,7 +28,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -85,27 +83,12 @@ public class EnterpriseInfoApplicationService {
     /**
      * 查询当前登录用户关联的企业列表。系统预置默认企业始终可进入，不依赖租户成员关系。
      *
-     * @return 企业简要信息列表（企业标识、名称、编码、角色、成员状态）
+     * @return 按企业创建时间倒序排列的企业简要信息列表
      */
     public List<UserEnterpriseVo> listUserEnterprises() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        List<UserEnterpriseVo> enterprises = new ArrayList<>(tenantUserMembershipService.listUserEnterprises(userId));
-        boolean containsDefaultEnterprise = enterprises.stream()
-            .anyMatch(enterprise -> enterprise != null
-                && DEFAULT_ENTERPRISE_ID.equals(enterprise.getEnterpriseId()));
-        if (!containsDefaultEnterprise) {
-            EnterpriseInfo defaultEnterprise = enterpriseInfoService.findById(DEFAULT_ENTERPRISE_ID);
-            if (defaultEnterprise != null) {
-                UserEnterpriseVo defaultEnterpriseVo = new UserEnterpriseVo();
-                defaultEnterpriseVo.setEnterpriseId(defaultEnterprise.getEnterpriseId());
-                defaultEnterpriseVo.setComAcctName(defaultEnterprise.getComAcctName());
-                defaultEnterpriseVo.setComAcctCode(defaultEnterprise.getComAcctCode());
-                defaultEnterpriseVo.setRole(TenantUserMembershipRole.MEMBER);
-                defaultEnterpriseVo.setStatus(TenantUserMembershipStatus.ACTIVE);
-                enterprises.add(0, defaultEnterpriseVo);
-            }
-        }
-        return enterprises;
+        // 查询统一包含系统默认企业，避免应用层插到首位破坏创建时间排序。
+        return tenantUserMembershipService.listUserEnterprises(userId);
     }
 
     /**

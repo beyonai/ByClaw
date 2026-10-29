@@ -1,21 +1,21 @@
-import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
-import useEmployeeRowRefresh, {
-  employeeRowId,
-  removeEmployeeRow,
-  updateEmployeeRow,
-} from '@/hooks/useEmployeeRowRefresh';
-import { LeftOutlined, SearchOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BarsOutlined, LeftOutlined, SearchOutlined } from '@ant-design/icons';
 import { getIntl, useNavigate, useIntl } from '@umijs/max';
-import { Empty, Input, Spin, Tabs, message } from 'antd';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Empty, Input, Spin, Tabs, message } from 'antd';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import {
   ResourceQuickFilterBar,
   ResourceQuickFilterGroup,
 } from '@/components/Resources/components/ResourceQuickFilters';
-import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
-import type { IAgentCache } from '@/typescript/agent';
+import useEmployeeRowRefresh, {
+  employeeRowId,
+  removeEmployeeRow,
+  updateEmployeeRow,
+} from '@/hooks/useEmployeeRowRefresh';
+import { EmployeePreviewModal } from '@/pages/digitalEmployees';
+import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
+import { applyResourceUse } from '@/pages/manager/service/resources';
 import {
   deleteDigitalEmployee,
   queryManagedEnterpriseEmployees,
@@ -23,25 +23,38 @@ import {
   shelfDigitalEmployee,
   unShelfDigitalEmployee,
 } from '@/service/digitalEmployees';
-import { applyResourceUse } from '@/pages/manager/service/resources';
+import type { IAgentCache } from '@/typescript/agent';
+import { getAgentChatAvatar, agentHandler } from '@/utils/agent';
+import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import styles from './index.module.less';
-import { EmployeePreviewModal } from '@/pages/digitalEmployees';
-import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 
 type OwnerTab = 'personal' | 'enterprise';
 type ResourceFilter = 'all' | 'employee' | 'group';
 type EnterpriseScope = 'all' | 'created' | 'managed';
 type EmployeeStatusFilter = 'all' | '0' | '1' | '2' | '3' | '-1';
-const PAGE_SIZE = 20;
+type ViewMode = 'card' | 'list';
+const PAGE_SIZE = 12;
+const VIEW_STORAGE_KEY = 'byclaw-my-employees-view';
 
-const normalizeList = (value: any) =>
-  (value?.list || value?.data?.list || [])
+function readViewMode(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'card';
+  } catch {
+    // 浏览器禁止存储时仍可正常使用默认卡片视图。
+    return 'card';
+  }
+}
+
+function normalizeList(value: any): IAgentCache[] {
+  return (value?.list || value?.data?.list || [])
     .filter((item: any) => `${item?.resourceStatus ?? item?.metaStatus ?? ''}` !== '-1')
     .map((item: any) => agentHandler(item));
+}
 
-const MyEmployeesPage: React.FC = () => {
+function MyEmployeesPage() {
   const intl = useIntl();
   const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState<ViewMode>(readViewMode);
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
   const [keyword, setKeyword] = useState('');
@@ -51,7 +64,7 @@ const MyEmployeesPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IAgentCache[]>([]);
   const [pageNum, setPageNum] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const shouldKeepEmployee = useCallback(
     (employee: IAgentCache) => {
       const selectedStatus = `${statusFilter}`;
@@ -60,14 +73,7 @@ const MyEmployeesPage: React.FC = () => {
     },
     [statusFilter]
   );
-  const refreshEmployee = useEmployeeRowRefresh(
-    list,
-    setList,
-    () => {
-      setTotal((current) => Math.max(0, current - 1));
-    },
-    shouldKeepEmployee
-  );
+  const refreshEmployee = useEmployeeRowRefresh(list, setList, () => undefined, shouldKeepEmployee);
   const [preview, setPreview] = useState<IAgentCache | null>(null);
   const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
   const [authRecord, setAuthRecord] = useState<IAgentCache | null>(null);
@@ -79,14 +85,17 @@ const MyEmployeesPage: React.FC = () => {
 
   const loadEmployees = useCallback(
     async (requestedPage = 1) => {
+      // 滚动和不足一屏的自动补齐可能同时触发，只允许一个追加请求在途。
       if (requestedPage > 1 && employeeLoadingRef.current) return;
-      const requestId = ++employeeRequestRef.current;
+      employeeRequestRef.current += 1;
+      const requestId = employeeRequestRef.current;
       employeeLoadingRef.current = true;
       setLoading(true);
       if (requestedPage === 1) {
         setList([]);
-        setTotal(0);
         setPageNum(1);
+        setHasMore(false);
+        document.getElementById('myEmployeesScroller')?.scrollTo?.({ top: 0 });
       }
       try {
         const request = activeTab === 'personal' ? queryMyCreated : queryManagedEnterpriseEmployees;
@@ -105,9 +114,13 @@ const MyEmployeesPage: React.FC = () => {
         });
         if (requestId !== employeeRequestRef.current) return;
         const nextList = normalizeList(res);
+        const nextTotal = Number(res?.total ?? res?.data?.total ?? 0);
+
+        // 两种视图共用已加载记录；继续加载只追加，筛选和搜索从首批重新查询。
         setList((current) => (requestedPage === 1 ? nextList : [...current, ...nextList]));
         setPageNum(requestedPage);
-        setTotal(Number(res?.total ?? res?.data?.total ?? 0));
+        // 空批次也终止续载，避免服务端总数滞后时不断请求空页。
+        setHasMore(nextList.length > 0 && requestedPage * PAGE_SIZE < nextTotal);
       } catch (error: any) {
         if (requestId === employeeRequestRef.current) {
           message.error(error?.message || intl.formatMessage({ id: 'common.operateFailed' }));
@@ -133,9 +146,34 @@ const MyEmployeesPage: React.FC = () => {
     void loadEmployees();
     return () => {
       employeeRequestRef.current += 1;
-      employeeLoadingRef.current = false;
     };
   }, [loadEmployees]);
+
+  function changeView(nextView: ViewMode) {
+    setViewMode(nextView);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, nextView);
+    } catch {
+      // 存储不可用只影响下次打开时的偏好，不影响本次视图切换。
+    }
+  }
+
+  function resetFilters() {
+    setResourceFilter('all');
+    setEnterpriseScope('all');
+    setStatusFilter('all');
+    setKeyword('');
+    setDebouncedKeyword('');
+  }
+
+  function searchEmployees() {
+    // 回车和搜索按钮立即使用当前输入，避免防抖尚未完成时请求上一个关键词。
+    if (keyword !== debouncedKeyword) {
+      setDebouncedKeyword(keyword);
+      return;
+    }
+    void loadEmployees();
+  }
 
   const handleChat = useCallback(
     (employee: IAgentCache, question?: string) => {
@@ -231,7 +269,7 @@ const MyEmployeesPage: React.FC = () => {
             }
           )
         );
-        // 仅更新操作员工的状态与权限，保留分页和滚动位置。
+        // 仅更新操作员工的状态与权限，保留已加载记录和滚动位置。
         const refreshPromise = refreshEmployee(employee);
         updateEmployeeRow({
           resourceId: String(resourceId),
@@ -265,137 +303,221 @@ const MyEmployeesPage: React.FC = () => {
     [intl]
   );
 
-  // 搜索挂载在页签行右侧，沿用已有的关键词防抖与回车搜索入口。
+  // 搜索与视图切换共用顶部工具栏，窄屏由样式整体换行。
   const employeeSearch = (
     <Input
       className={styles.employeeSearch}
-      suffix={<SearchOutlined onClick={() => void loadEmployees()} />}
+      suffix={
+        <button
+          type="button"
+          className={styles.searchButton}
+          aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
+          onClick={searchEmployees}
+        >
+          <SearchOutlined />
+        </button>
+      }
       allowClear
+      aria-label={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
       placeholder={intl.formatMessage({ id: 'myEmployees.searchPlaceholder' })}
       value={keyword}
       onChange={(event) => {
         setKeyword(event.target.value);
       }}
-      onPressEnter={() => void loadEmployees()}
+      onPressEnter={searchEmployees}
     />
   );
 
-  return (
-    <div id="myEmployeesScroller" className={styles.container}>
-      <div className={styles.back} onClick={() => navigate('/digitalEmployees')}>
-        <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
+  const employeeTools = (
+    <div className={styles.headerTools}>
+      {employeeSearch}
+      <div className={styles.viewSwitch} role="group" aria-label={intl.formatMessage({ id: 'myEmployees.view' })}>
+        {(['card', 'list'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            className={viewMode === mode ? styles.activeView : undefined}
+            aria-pressed={viewMode === mode}
+            onClick={() => changeView(mode)}
+          >
+            {/* 图标仅作装饰，按钮的无障碍名称统一使用下方国际化文案。 */}
+            {mode === 'card' ? <AppstoreOutlined aria-hidden="true" /> : <BarsOutlined aria-hidden="true" />}
+            {intl.formatMessage({ id: `myEmployees.${mode}View` })}
+          </button>
+        ))}
       </div>
-      <Tabs
-        className={styles.header}
-        activeKey={activeTab}
-        items={tabItems}
-        tabBarExtraContent={{ right: employeeSearch }}
-        onChange={(key) => {
-          setActiveTab(key as OwnerTab);
-          setResourceFilter('all');
-          setKeyword('');
-          setStatusFilter('all');
-          setEnterpriseScope('all');
+    </div>
+  );
+  const hasFilters = resourceFilter !== 'all' || enterpriseScope !== 'all' || statusFilter !== 'all' || keyword !== '';
+  const columnLabels = [
+    'myEmployees.employeeName',
+    'myEmployees.description',
+    'resource.creator',
+    'myEmployees.type',
+    ...(activeTab === 'enterprise' ? ['common.belong', 'myEmployees.status'] : []),
+    'myEmployees.actions',
+  ];
+  // 卡片和表格使用同一资源组件，确保发布、授权和注销始终遵循同一套权限及确认流程。
+  function renderEmployee(employee: IAgentCache) {
+    return (
+      <ResourceCard
+        variant={viewMode === 'list' ? 'employeeRow' : 'employeeManagement'}
+        key={employee.resourceId || employee.id || employee.agentId}
+        resource={employee}
+        resourceType="DIG_EMPLOYEE"
+        avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
+        onCardClick={(resource) => setPreview((resource || employee) as IAgentCache)}
+        digitalEmployeeActionMode
+        actionConfig={{
+          scene: activeTab,
+          // 授权入口统一消费后端权限，个人资源由后端返回 false，不再按页签二次过滤。
+          hiddenMenuItemKeys: [],
+          onChat: () => handleChat(employee),
+          onApplyUse: () => handleApplyUse(employee),
+          onEdit: () => handleEdit(employee),
+          onAuth: (type) => handleAuth(employee, type),
+          onDelete: (feedback) => handleDelete(employee, feedback),
+          // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
+          onDeleteData: (feedback) => handleDelete(employee, feedback),
+          onShelf: (feedback) => handleShelfStatusChange(employee, 'shelf', feedback),
+          onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
+          // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
+          showDigitalEmployeeTypeTag: false,
+          // 个人归属的上下架限制由后端控制，不再按页签隐藏获准操作。
+          enableDigitalEmployeeLifecycle: true,
+          // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
+          enableDigitalEmployeeDelete: true,
         }}
       />
-      <div className={styles.toolbar}>
-        <ResourceQuickFilterBar className={styles.filters}>
-          <ResourceQuickFilterGroup
-            title={intl.formatMessage({ id: 'resource.type' })}
-            value={resourceFilter}
-            options={[
-              { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
-              { value: 'employee', label: intl.formatMessage({ id: 'myEmployees.employee' }) },
-              { value: 'group', label: intl.formatMessage({ id: 'myEmployees.group' }) },
-            ]}
-            onChange={(value) => {
-              setResourceFilter(value as ResourceFilter);
-            }}
-          />
-          {activeTab === 'enterprise' && (
-            <>
-              <ResourceQuickFilterGroup
-                title={intl.formatMessage({ id: 'common.belong' })}
-                value={enterpriseScope}
-                options={[
-                  { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
-                  { value: 'created', label: intl.formatMessage({ id: 'myEmployees.createdByMe' }) },
-                  { value: 'managed', label: intl.formatMessage({ id: 'myEmployees.managedByMe' }) },
-                ]}
-                onChange={(value) => {
-                  setEnterpriseScope(value as EnterpriseScope);
-                }}
-              />
-              <ResourceQuickFilterGroup
-                title={intl.formatMessage({ id: 'common.status' })}
-                value={statusFilter}
-                options={[
-                  { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
-                  { value: '0', label: intl.formatMessage({ id: 'resourceStatus.draft' }) },
-                  { value: '2', label: intl.formatMessage({ id: 'resourceStatus.published' }) },
-                  { value: '3', label: intl.formatMessage({ id: 'resourceStatus.unpublished' }) },
-                ]}
-                onChange={(value) => {
-                  setStatusFilter(value as EmployeeStatusFilter);
-                }}
-              />
-            </>
-          )}
-        </ResourceQuickFilterBar>
-      </div>
-      <Spin spinning={loading}>
-        <InfiniteScroll
-          autoFill
-          isLoading={loading}
-          next={() => loadEmployees(pageNum + 1)}
-          hasMore={list.length < total}
-          dataLength={list.length}
-          scrollableTarget="myEmployeesScroller"
-          appendItemsAutoScrollBottom={false}
-          scrollThreshold="50px"
-          style={{ overflow: 'visible' }}
-          loader={<Spin />}
-        >
-          {list.length ? (
-            <div className={styles.grid}>
-              {list.map((employee) => (
-                <ResourceCard
-                  key={employee.resourceId || employee.id || employee.agentId}
-                  resource={employee}
-                  resourceType="DIG_EMPLOYEE"
-                  avatarNode={<div className={styles.avatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}
-                  onCardClick={(resource) => setPreview((resource || employee) as IAgentCache)}
-                  digitalEmployeeActionMode
-                  actionConfig={{
-                    scene: activeTab,
-                    // 授权入口统一消费后端权限，个人资源由后端返回 false，不再按页签二次过滤。
-                    hiddenMenuItemKeys: [],
-                    onChat: () => handleChat(employee),
-                    onApplyUse: () => handleApplyUse(employee),
-                    onEdit: () => handleEdit(employee),
-                    onAuth: (type) => handleAuth(employee, type),
-                    onDelete: (feedback) => handleDelete(employee, feedback),
-                    // 删除数据使用独立回调，复用删除接口及成功后的列表移除逻辑。
-                    onDeleteData: (feedback) => handleDelete(employee, feedback),
-                    onShelf: (feedback) => handleShelfStatusChange(employee, 'shelf', feedback),
-                    onUnShelf: (feedback) => handleShelfStatusChange(employee, 'unShelf', feedback),
-                    // 我的员工卡片统一按资源状态展示标签，并保留创建人/管理人的操作权限。
-                    showDigitalEmployeeTypeTag: false,
-                    // 个人归属的上下架限制由后端控制，不再按页签隐藏获准操作。
-                    enableDigitalEmployeeLifecycle: true,
-                    // 个人、企业页签统一按后端 canDelete 展示删除数据入口。
-                    enableDigitalEmployeeDelete: true,
+    );
+  }
+
+  return (
+    <div className={styles.container}>
+      <div className={styles.fixedHeader}>
+        <button type="button" className={styles.back} onClick={() => navigate('/digitalEmployees')}>
+          <LeftOutlined /> {intl.formatMessage({ id: 'myEmployees.backToAll' })}
+        </button>
+        <Tabs
+          className={styles.header}
+          activeKey={activeTab}
+          items={tabItems}
+          tabBarExtraContent={{ right: employeeTools }}
+          onChange={(key) => {
+            setActiveTab(key as OwnerTab);
+            resetFilters();
+          }}
+        />
+        <div className={styles.toolbar}>
+          <ResourceQuickFilterBar className={styles.filters}>
+            <ResourceQuickFilterGroup
+              title={intl.formatMessage({ id: 'resource.type' })}
+              value={resourceFilter}
+              options={[
+                { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
+                { value: 'employee', label: intl.formatMessage({ id: 'myEmployees.employee' }) },
+                { value: 'group', label: intl.formatMessage({ id: 'myEmployees.group' }) },
+              ]}
+              onChange={(value) => {
+                setResourceFilter(value as ResourceFilter);
+              }}
+            />
+            {activeTab === 'enterprise' && (
+              <>
+                <ResourceQuickFilterGroup
+                  title={intl.formatMessage({ id: 'common.belong' })}
+                  value={enterpriseScope}
+                  options={[
+                    { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
+                    { value: 'created', label: intl.formatMessage({ id: 'myEmployees.createdByMe' }) },
+                    { value: 'managed', label: intl.formatMessage({ id: 'myEmployees.managedByMe' }) },
+                  ]}
+                  onChange={(value) => {
+                    setEnterpriseScope(value as EnterpriseScope);
                   }}
                 />
-              ))}
-            </div>
-          ) : (
-            <div className={styles.emptyState}>
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            </div>
-          )}
-        </InfiniteScroll>
-      </Spin>
+                <ResourceQuickFilterGroup
+                  title={intl.formatMessage({ id: 'common.status' })}
+                  value={statusFilter}
+                  options={[
+                    { value: 'all', label: intl.formatMessage({ id: 'myEmployees.all' }) },
+                    { value: '0', label: intl.formatMessage({ id: 'resourceStatus.draft' }) },
+                    { value: '2', label: intl.formatMessage({ id: 'resourceStatus.published' }) },
+                    { value: '3', label: intl.formatMessage({ id: 'resourceStatus.unpublished' }) },
+                  ]}
+                  onChange={(value) => {
+                    setStatusFilter(value as EmployeeStatusFilter);
+                  }}
+                />
+              </>
+            )}
+          </ResourceQuickFilterBar>
+        </div>
+        {hasFilters && (
+          <div className={styles.filterActions}>
+            <Button type="link" size="small" onClick={resetFilters}>
+              {intl.formatMessage({ id: 'myEmployees.resetFilters' })}
+            </Button>
+          </div>
+        )}
+      </div>
+      <div id="myEmployeesScroller" className={styles.listScroller}>
+        <Spin spinning={loading && list.length === 0}>
+          <InfiniteScroll
+            autoFill
+            isLoading={loading}
+            next={() => loadEmployees(pageNum + 1)}
+            hasMore={hasMore}
+            dataLength={list.length}
+            scrollableTarget="myEmployeesScroller"
+            appendItemsAutoScrollBottom={false}
+            scrollThreshold="50px"
+            style={{ overflow: 'visible' }}
+            loader={
+              <div className={styles.loadMore}>
+                <Spin />
+              </div>
+            }
+          >
+            {list.length > 0 && viewMode === 'card' && <div className={styles.grid}>{list.map(renderEmployee)}</div>}
+            {list.length > 0 && viewMode === 'list' && (
+              <div
+                className={activeTab === 'enterprise' ? styles.enterpriseTableWrap : styles.tableWrap}
+                role="region"
+                aria-label={intl.formatMessage({ id: 'myEmployees.listView' })}
+                tabIndex={0}
+              >
+                <table className={activeTab === 'enterprise' ? styles.enterpriseTable : styles.employeeTable}>
+                  <thead>
+                    <tr>
+                      {columnLabels.map((label) => (
+                        <th key={label} scope="col">
+                          {intl.formatMessage({ id: label })}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>{list.map(renderEmployee)}</tbody>
+                </table>
+              </div>
+            )}
+            {list.length === 0 && (
+              <div className={styles.emptyState}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={intl.formatMessage({ id: 'myEmployees.empty' })}
+                >
+                  {hasFilters && (
+                    <Button type="link" onClick={resetFilters}>
+                      {intl.formatMessage({ id: 'myEmployees.clearFilters' })}
+                    </Button>
+                  )}
+                </Empty>
+              </div>
+            )}
+          </InfiniteScroll>
+        </Spin>
+      </div>
       <EmployeePreviewModal
         employee={preview}
         onClose={() => setPreview(null)}
@@ -431,6 +553,6 @@ const MyEmployeesPage: React.FC = () => {
       )}
     </div>
   );
-};
+}
 
 export default MyEmployeesPage;
