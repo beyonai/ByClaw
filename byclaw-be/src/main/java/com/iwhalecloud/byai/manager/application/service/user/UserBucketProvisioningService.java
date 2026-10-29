@@ -30,6 +30,9 @@ public class UserBucketProvisioningService {
     @Autowired
     private FileStorageUserSpaceProvisioner fileStorageUserSpaceProvisioner;
 
+    @Autowired
+    private PersonalStoragePrewarm personalStoragePrewarm;
+
     @Value("${file.storage.type:minio}")
     private String storageType;
 
@@ -38,6 +41,7 @@ public class UserBucketProvisioningService {
      * 因此这里提供一个静默包装方法：真实失败只打日志，方便后续补偿或人工排查。
      */
     public void ensureUserBucketQuietly(String userCode) {
+        if (personalStoragePrewarm != null) personalStoragePrewarm.afterCommit(userCode);
         try {
             ensureUserBucket(userCode);
         } catch (Exception e) {

@@ -43,6 +43,7 @@ class WorkerLoginStartupConcurrencyTest extends I18nTestSupport {
     @ValueSource(longs = {123L})
     void firstChatJoinsLoginLaunchThroughPlatformEvenFromAnotherBackend(Long chatResourceId) throws Exception {
         PlatformControlClient client = mock(PlatformControlClient.class);
+        when(client.call(eq("storage"), eq("quota-check"), any())).thenReturn(Map.of("code", 0));
         WorkerRegistry registry = mock(WorkerRegistry.class);
         AtomicBoolean online = new AtomicBoolean();
         when(registry.hasOnlineAgentType("BYCLAW_DSH_u1", true)).thenAnswer(invocation ->
