@@ -69,6 +69,25 @@ describe('useVncOpener', () => {
     expect(mockRefreshSandboxes).not.toHaveBeenCalled();
   });
 
+  it('opens the desktop instance it is asked for', async () => {
+    mockAppState.sandboxesInfo = [
+      {
+        status: 'RUNNING',
+        instanceEndpoints: {
+          vnc: '/v1/sandboxes/test/proxy/8081?token=test-token',
+          desktop: '/v1/sandboxes/test/proxy/8083?token=test-token',
+        },
+      },
+    ];
+    const { result } = renderHook(() => useVncOpener('session-a'));
+    act(() => result.current({ instance: 'desktop' }));
+    await flush();
+
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-main-driver-message', {
+      url: `${window.location.origin}/v1/sandboxes/test/proxy/8083/?token=test-token&autoconnect=true&resize=scale`,
+    });
+  });
+
   it('refreshes an empty cache and opens when the sandbox becomes ready', async () => {
     mockAppState.sandboxesInfo = [];
     mockRefreshSandboxes.mockResolvedValue(readySandboxes);
@@ -115,7 +134,9 @@ describe('useVncOpener', () => {
 
   it('waits for the desktop to answer before opening it', async () => {
     // The sandbox proxy answers 502 until the browser's desktop listens in the tool sandbox.
-    mockFetch.mockResolvedValueOnce({ type: 'basic', status: 502 }).mockResolvedValueOnce({ type: 'basic', status: 502 })
+    mockFetch
+      .mockResolvedValueOnce({ type: 'basic', status: 502 })
+      .mockResolvedValueOnce({ type: 'basic', status: 502 })
       .mockResolvedValue({ type: 'opaqueredirect', status: 0 });
     mockRefreshSandboxes.mockResolvedValue(readySandboxes);
     const { result } = renderHook(() => useVncOpener('session-a'));
