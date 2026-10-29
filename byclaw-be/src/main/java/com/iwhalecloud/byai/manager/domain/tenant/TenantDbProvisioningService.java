@@ -141,7 +141,7 @@ public class TenantDbProvisioningService {
     }
 
     public void requestRestart(long enterpriseId, String sandboxType, long recordId) {
-        requireLegacyOperation(enterpriseId);
+        // 商业租户同样允许维修重启；这里只维护技术资源，不修改商业订阅或执行策略。
         if (deletionRequested(enterpriseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }

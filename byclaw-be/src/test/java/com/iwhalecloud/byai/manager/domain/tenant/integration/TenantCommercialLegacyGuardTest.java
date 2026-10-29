@@ -8,13 +8,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class TenantCommercialLegacyGuardTest {
-    @Test void oldOperationsCannotBypassDurableCommercialSlot() {
+    @Test void initialProvisioningCannotBypassDurableCommercialSlot() {
         var tenants=mock(TenantAdminTenantMapper.class);
         when(tenants.selectConfig(42,"COMMERCIAL_MANAGED")).thenReturn("true");
         var service=new TenantDbProvisioningService(tenants,null,null,null,null,null,null,new ObjectMapper(),Runnable::run,"");
         assertThrows(org.springframework.web.server.ResponseStatusException.class,()->service.provision(42));
         assertThrows(org.springframework.web.server.ResponseStatusException.class,()->service.request(42));
-        assertThrows(org.springframework.web.server.ResponseStatusException.class,()->service.requestRestart(42,"tenant-opengauss",1));
     }
 
     @org.junit.jupiter.params.ParameterizedTest
