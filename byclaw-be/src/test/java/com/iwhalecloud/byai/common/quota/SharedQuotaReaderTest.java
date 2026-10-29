@@ -96,6 +96,16 @@ class SharedQuotaReaderTest {
         assertEquals(503, assertThrows(ResponseStatusException.class, () -> reader.read(42)).getStatusCode().value());
     }
 
+    @Test void requiredReadNeverUsesMissingUnlimitedOrOutageAsPermission() throws Exception {
+        when(redis.opsForHash()).thenReturn(hashes);
+        when(hashes.entries(anyString())).thenReturn(Map.of());
+        assertThrows(SharedQuotaReader.SharedQuotaUnavailableException.class, () -> reader.readRequired(42));
+        when(hashes.entries(anyString())).thenReturn(snapshot("UNLIMITED",1,"42","7",1));
+        assertThrows(SharedQuotaReader.SharedQuotaUnavailableException.class, () -> reader.readRequired(42));
+        when(hashes.entries(anyString())).thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("offline"));
+        assertThrows(SharedQuotaReader.SharedQuotaUnavailableException.class, () -> reader.readRequired(42));
+    }
+
     private Map<Object, Object> snapshot(String mode, int schema, String enterprise, String revision, int members) throws Exception {
         String payload = "{\"schemaVersion\":" + schema + ",\"enterpriseId\":\"" + enterprise
             + "\",\"revision\":\"" + revision + "\",\"mode\":\"" + mode

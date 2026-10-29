@@ -2,12 +2,10 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import java.util.Map;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -31,16 +29,15 @@ public class TenantManagedDeletionService {
     private final TenantExecutionPolicyService policies;
     private final SequenceService ids;
     private final ObjectMapper json;
-    private final HookPublisher hooks;
     private final StringRedisTemplate redis;
 
     public TenantManagedDeletionService(TenantCommandStore store, JdbcTemplate jdbc,
         PlatformTransactionManager transactions, TenantAdminTenantMapper tenants, TenantSandboxService sandboxes,
-        TenantExecutionPolicyService policies, SequenceService ids, ObjectMapper json, HookPublisher hooks,
+        TenantExecutionPolicyService policies, SequenceService ids, ObjectMapper json,
         StringRedisTemplate redis) {
         this.store = store; this.jdbc = jdbc; this.tx = new TransactionTemplate(transactions);
         this.tenants = tenants; this.sandboxes = sandboxes; this.policies = policies;
-        this.ids = ids; this.json = json; this.hooks = hooks; this.redis = redis;
+        this.ids = ids; this.json = json; this.redis = redis;
     }
 
     /** Administrative cleanup remains available even when external provisioning is disabled. */
@@ -69,7 +66,7 @@ public class TenantManagedDeletionService {
     public String request(long tenant, String name, long actor) {
         return tx.execute(transaction -> {
             // UPDATE serializes with provisioning/recovery; no SELECT FOR UPDATE or network call under this lock.
-            if (jdbc.update("UPDATE byai.tenant_runtime_operation SET revision=revision+1 WHERE enterprise_id=?", tenant) != 1)
+            if (jdbc.update("UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1 WHERE enterprise_id=?", tenant) != 1)
                 throw conflict("tenant.delete.operationMissing");
             String source = tenants.selectConfig(tenant, "INTEGRATION_SOURCE_SYSTEM");
             if (source == null || source.isBlank()) throw conflict("tenant.delete.operationMissing");
@@ -81,45 +78,32 @@ public class TenantManagedDeletionService {
                 if ("SUCCEEDED".equals(existing.status())) return "COMPLETED";
                 requireSlot(tenant, Long.parseLong(existing.commandId()));
                 if ("MANUAL_REQUIRED".equals(existing.status()) || "FAILED".equals(existing.status())) {
-                    jdbc.update("UPDATE byai.internal_command SET status='PENDING',error_code=NULL,lease_until=NULL,"
+                    jdbc.update("UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,lease_until=NULL,"
                         + "fencing_token=fencing_token+1,revision=revision+1,next_attempt_at=CURRENT_TIMESTAMP WHERE id=?",
                         Long.parseLong(existing.commandId()));
                     state(tenant, "DELETING", null);
                 }
                 return "ACCEPTED";
             }
-            Long previous = jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_runtime_operation WHERE enterprise_id=?",
+            Long previous = jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=?",
                 Long.class, tenant);
             if (previous != null) {
                 var command = store.find(previous);
                 if (command == null || !"PROVISION".equals(command.type()) || "RUNNING".equals(command.status())
                     || "RECONCILING".equals(command.status())) throw conflict("tenant.delete.commandRunning");
                 // A live worker may have claimed the command while we waited for the operation slot.
-                if (jdbc.update("UPDATE byai.internal_command SET status='FAILED',error_code='TENANT_DELETION_REQUESTED',"
+                if (jdbc.update("UPDATE byai.tenant_task SET status='FAILED',error_code='TENANT_DELETION_REQUESTED',"
                     + "fencing_token=fencing_token+1,revision=revision+1,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP "
                     + "WHERE id=? AND revision=? AND status IN ('PENDING','RETRY_WAIT','MANUAL_REQUIRED','FAILED')",
                     previous, command.revision()) != 1) throw conflict("tenant.delete.commandRunning");
-                hooks.publishDurable("tenant.provisioning.failed", 1, Long.toString(tenant),
-                    Long.toString(store.find(previous).revision()), "1", Long.toString(previous),
-                    Map.of("enterpriseId", Long.toString(tenant), "commandId", Long.toString(previous),
-                        "stage", command.stage(), "errorCode", "TENANT_DELETION_REQUESTED"));
             }
-            // Suspend access before releasing resources, preserving the immutable policy history.
-            var rows = jdbc.queryForList("SELECT c.desired_revision,p.payload FROM byai.tenant_policy_cursor c "
-                + "JOIN byai.tenant_execution_policy p ON p.enterprise_id=c.enterprise_id AND p.revision=c.desired_revision "
-                + "WHERE c.enterprise_id=?", tenant);
-            if (rows.size() != 1) throw conflict("tenant.delete.operationMissing");
-            long revision = ((Number) rows.getFirst().get("desired_revision")).longValue();
-            ObjectNode policy = object(rows.getFirst().get("payload").toString());
-            policy.put("revision", Long.toString(revision + 1)).put("accessMode", "SUSPENDED");
-            policies.update(tenant, revision, policy);
+            // 删除是技术生命周期关闭：持久 DELETING 状态阻止 Java 写入，不伪造 HACU 的商业规则。
             long id = ids.nextVal();
             String snapshot = json.createObjectNode().put("enterpriseName", name).put("actor", Long.toString(actor)).toString();
             store.insert(id, source, requestId, TenantCommandRequest.digest(snapshot), "DELETE", tenant, actor, snapshot);
-            jdbc.update("UPDATE byai.tenant_runtime_operation SET active_command_id=?,state='ACTIVE',"
-                + "fencing_token=fencing_token+1 WHERE enterprise_id=?", id, tenant);
+            jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=? "
+                + "WHERE enterprise_id=?", id, tenant);
             state(tenant, "DELETING", null);
-            event("tenant.deletion.requested", tenant, id, "DELETING", null);
             return "ACCEPTED";
         });
     }
@@ -144,7 +128,6 @@ public class TenantManagedDeletionService {
                 + "('PROVISION_REQUEST_ID','PROVISION_STATE','COMMERCIAL_MANAGED','INTEGRATION_SOURCE_SYSTEM')", tenant);
             state(tenant, "DELETED", null);
             store.finish(lease, "SUCCEEDED", "DELETED", null);
-            event("tenant.deleted", tenant, lease.id(), "DELETED", null);
         });
     }
 
@@ -158,9 +141,8 @@ public class TenantManagedDeletionService {
         tx.executeWithoutResult(t -> {
             check(lease);
             store.finish(lease, pending ? "RETRY_WAIT" : "MANUAL_REQUIRED", "DELETE_RESOURCES", result);
-            jdbc.update("UPDATE byai.internal_command SET next_attempt_at=CURRENT_TIMESTAMP + INTERVAL '30' SECOND WHERE id=?", lease.id());
+            jdbc.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP + INTERVAL '30' SECOND WHERE id=?", lease.id());
             state(lease.enterpriseId(), pending ? "DELETING" : "DELETE_FAILED", pending ? null : result);
-            if (!pending) event("tenant.deletion.failed", lease.enterpriseId(), lease.id(), "DELETE_RESOURCES", result);
         });
     }
 
@@ -169,8 +151,8 @@ public class TenantManagedDeletionService {
         requireSlot(lease.enterpriseId(), lease.id());
     }
     private void requireSlot(long tenant, long command) {
-        Integer count = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_runtime_operation "
-            + "WHERE enterprise_id=? AND active_command_id=? AND state='ACTIVE'", Integer.class, tenant, command);
+        Integer count = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_operation_state "
+            + "WHERE enterprise_id=? AND active_command_id=?", Integer.class, tenant, command);
         if (count == null || count != 1) throw conflict("tenant.delete.operationMissing");
     }
     private void state(long tenant, String status, String error) {
@@ -183,13 +165,6 @@ public class TenantManagedDeletionService {
     private ObjectNode object(String value) {
         try { return (ObjectNode) json.readTree(value); }
         catch (Exception error) { throw conflict("tenant.delete.operationMissing"); }
-    }
-    private void event(String kind, long tenant, long command, String stage, String error) {
-        var payload = new java.util.LinkedHashMap<String, Object>();
-        payload.put("enterpriseId", Long.toString(tenant)); payload.put("commandId", Long.toString(command));
-        payload.put("stage", stage); if (error != null) payload.put("errorCode", error);
-        hooks.publishDurable(kind, 1, Long.toString(tenant), Long.toString(store.find(command).revision()),
-            "1", Long.toString(command), payload);
     }
     private ResponseStatusException conflict(String code) {
         return new ResponseStatusException(HttpStatus.CONFLICT, code);

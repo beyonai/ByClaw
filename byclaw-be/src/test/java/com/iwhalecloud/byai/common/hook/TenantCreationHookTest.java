@@ -154,7 +154,6 @@ class TenantCreationHookTest {
         new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
             .withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
             .withPropertyValues("spring.config.additional-location=" + yaml.toUri(), "byclaw.hooks.enabled=true",
-                "byclaw.hooks.durable.enabled=false",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",
                 "byclaw.hooks.subscriptions.tenant-sync.enabled=true",
                 "TENANT_CREATED_HOOK_URL=http://127.0.0.1:" + receiver.getAddress().getPort() + "/tenant",

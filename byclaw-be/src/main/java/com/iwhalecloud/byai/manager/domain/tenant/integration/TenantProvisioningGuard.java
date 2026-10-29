@@ -8,18 +8,20 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** Persist intent before a provider call. An unacknowledged intent is never blindly replayed. */
 public class TenantProvisioningGuard {
     private final TenantCommandStore store;
+    private final com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService policies;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
     private final TenantCommandStore.Lease lease;
     public TenantProvisioningGuard(TenantCommandStore store,JdbcTemplate jdbc,TransactionTemplate tx,
-                                   ObjectMapper json,TenantCommandStore.Lease lease) {
-        this.store=store; this.jdbc=jdbc; this.tx=tx; this.json=json; this.lease=lease;
+                                   ObjectMapper json,TenantCommandStore.Lease lease,
+                                   com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService policies) {
+        this.policies=policies; this.store=store; this.jdbc=jdbc; this.tx=tx; this.json=json; this.lease=lease;
     }
     public long fencingToken() { return lease.fencingToken(); }
     public long leaseDeadlineEpochSeconds() {
         java.sql.Timestamp deadline = jdbc.queryForObject(
-            "SELECT lease_until FROM byai.internal_command WHERE id=? AND fencing_token=?",
+            "SELECT lease_until FROM byai.tenant_task WHERE id=? AND fencing_token=?",
             java.sql.Timestamp.class, lease.id(), lease.fencingToken());
         if (deadline == null) throw new TenantCommandException(409, "STALE_COMMAND_LEASE");
         return deadline.toInstant().getEpochSecond();
@@ -32,58 +34,43 @@ public class TenantProvisioningGuard {
     private void check() {
         store.fence(lease);
         Integer owned = jdbc.queryForObject("""
-            SELECT count(*) FROM byai.tenant_runtime_operation
-            WHERE enterprise_id=? AND active_command_id=? AND state='ACTIVE'
+            SELECT count(*) FROM byai.tenant_operation_state
+            WHERE enterprise_id=? AND active_command_id=?
             """,Integer.class,lease.enterpriseId(),lease.id());
         if (owned == null || owned != 1) throw new TenantCommandException(409,"OPERATION_SLOT_LOST");
         // Serialize local writes with policy updates; generation changes invalidate the original provisioning command.
-        if (jdbc.update("UPDATE byai.tenant_policy_cursor SET desired_revision=desired_revision "
-            + "WHERE enterprise_id=? AND generation IN ('0','1')", lease.enterpriseId()) != 1) {
+        if (jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=policy_revision "
+            + "WHERE enterprise_id=? AND runtime_generation IN ('0','1')", lease.enterpriseId()) != 1) {
             throw policyDisabled();
         }
-        var policies = jdbc.query("SELECT p.payload FROM byai.tenant_policy_cursor c "
-            + "JOIN byai.tenant_execution_policy p ON p.enterprise_id=c.enterprise_id "
-            + "AND p.revision=c.desired_revision WHERE c.enterprise_id=?",
-            (rs, index) -> rs.getString(1), lease.enterpriseId());
-        try {
-            if (policies.size() != 1) throw policyDisabled();
-            var policy = json.readTree(policies.getFirst());
-            if (!java.util.Set.of("PREPARED", "ENABLED").contains(policy.path("accessMode").asText())) {
-                throw policyDisabled();
-            }
-            var expiry = policy.get("effectiveUntil");
-            if (expiry != null && !expiry.isNull()
-                && (!expiry.isTextual() || !java.time.Instant.now().isBefore(java.time.Instant.parse(expiry.asText())))) {
-                throw policyDisabled();
-            }
-        } catch (TenantCommandException denied) {
-            throw denied;
-        } catch (Exception invalidPolicy) {
+        try { policies.requireProvisioning(lease.enterpriseId()); }
+        catch (com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService.PolicyDeniedException denied) {
             throw policyDisabled();
         }
     }
+
     private TenantCommandException policyDisabled() {
         return new TenantCommandException(409, "POLICY_EXECUTION_DISABLED");
     }
     public <T> T external(String step,Class<T> resultType,ExternalCall<T> action) throws Exception {
         var rows=tx.execute(status -> {
             check();
-            var existing=jdbc.queryForList("SELECT status,result FROM byai.internal_command_step WHERE command_id=? AND step_key=?",lease.id(),step);
+            var existing=jdbc.queryForList("SELECT status,result FROM byai.tenant_task_step WHERE command_id=? AND step_key=?",lease.id(),step);
             if (!existing.isEmpty()) {
                 // Only an audited recovery transaction may authorize a new attempt of this original intent.
-                int resumed = jdbc.update("UPDATE byai.internal_command_step SET status='STARTED',revision=revision+1 "
+                int resumed = jdbc.update("UPDATE byai.tenant_task_step SET status='STARTED',revision=revision+1 "
                     + "WHERE command_id=? AND step_key=? AND status='RETRY_READY'", lease.id(), step);
                 if (resumed == 1) {
-                    jdbc.update("UPDATE byai.internal_command SET stage=? WHERE id=?", step, lease.id());
+                    jdbc.update("UPDATE byai.tenant_task SET stage=? WHERE id=?", step, lease.id());
                     return java.util.List.<Map<String,Object>>of();
                 }
                 return existing;
             }
             jdbc.update("""
-                INSERT INTO byai.internal_command_step(command_id,step_key,status,provider_request_key)
+                INSERT INTO byai.tenant_task_step(command_id,step_key,status,provider_request_key)
                 VALUES (?,?,'STARTED',?)
                 """,lease.id(),step,providerRequestKey(step));
-            jdbc.update("UPDATE byai.internal_command SET stage=? WHERE id=?",step,lease.id());
+            jdbc.update("UPDATE byai.tenant_task SET stage=? WHERE id=?",step,lease.id());
             return java.util.List.<Map<String,Object>>of();
         });
         if (rows != null && !rows.isEmpty()) {
@@ -98,7 +85,7 @@ public class TenantProvisioningGuard {
         tx.executeWithoutResult(status -> check());
         T result=action.run();
         String encoded=json.writeValueAsString(result);
-        local(() -> jdbc.update("UPDATE byai.internal_command_step SET status='SUCCEEDED',result=?,revision=revision+1 WHERE command_id=? AND step_key=?",encoded,lease.id(),step));
+        local(() -> jdbc.update("UPDATE byai.tenant_task_step SET status='SUCCEEDED',result=?,revision=revision+1 WHERE command_id=? AND step_key=?",encoded,lease.id(),step));
         return result;
     }
     /** Replay only Redis projections whose receiver enforces fencing and the server lease deadline. */
@@ -107,15 +94,15 @@ public class TenantProvisioningGuard {
             throw new IllegalArgumentException("Only fenced Redis configuration projections may replay");
         }
         local(() -> {
-            var existing = jdbc.queryForList("SELECT status FROM byai.internal_command_step WHERE command_id=? AND step_key=?", lease.id(), step);
+            var existing = jdbc.queryForList("SELECT status FROM byai.tenant_task_step WHERE command_id=? AND step_key=?", lease.id(), step);
             if (existing.isEmpty()) {
-                jdbc.update("INSERT INTO byai.internal_command_step(command_id,step_key,status,provider_request_key) "
+                jdbc.update("INSERT INTO byai.tenant_task_step(command_id,step_key,status,provider_request_key) "
                     + "VALUES (?,?,'STARTED',?)", lease.id(), step, providerRequestKey(step));
             } else {
-                jdbc.update("UPDATE byai.internal_command_step SET status='STARTED',result=NULL,revision=revision+1 "
+                jdbc.update("UPDATE byai.tenant_task_step SET status='STARTED',result=NULL,revision=revision+1 "
                     + "WHERE command_id=? AND step_key=?", lease.id(), step);
             }
-            jdbc.update("UPDATE byai.internal_command SET stage=? WHERE id=?", step, lease.id());
+            jdbc.update("UPDATE byai.tenant_task SET stage=? WHERE id=?", step, lease.id());
         });
         // Rebuild the projection every time so recovered workers publish their own fence and deadline.
         tx.executeWithoutResult(status -> check());
@@ -123,7 +110,7 @@ public class TenantProvisioningGuard {
         if (!Boolean.TRUE.equals(result)) {
             throw new TenantCommandException(409, "CONFIG_PROJECTION_REJECTED");
         }
-        local(() -> jdbc.update("UPDATE byai.internal_command_step SET status='SUCCEEDED',result='true',revision=revision+1 "
+        local(() -> jdbc.update("UPDATE byai.tenant_task_step SET status='SUCCEEDED',result='true',revision=revision+1 "
             + "WHERE command_id=? AND step_key=?", lease.id(), step));
         return true;
     }

@@ -31,11 +31,11 @@ WITH payload AS (
      AND state.params_value::jsonb->>'status'='READY'
     WHERE (p.item->>'nextVersion')::bigint=(p.item->>'oldVersion')::bigint+1
       AND (p.item->>'nextEnvelope') IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM byai.internal_command cmd
+      AND NOT EXISTS (SELECT 1 FROM byai.tenant_task cmd
           WHERE cmd.enterprise_id=old_password.enterprise_id AND cmd.status NOT IN ('SUCCEEDED','FAILED'))
-      AND NOT EXISTS (SELECT 1 FROM byai.tenant_runtime_operation op
+      AND NOT EXISTS (SELECT 1 FROM byai.tenant_operation_state op
           WHERE op.enterprise_id=old_password.enterprise_id
-            AND (op.state<>'IDLE' OR op.active_command_id IS NOT NULL))
+            AND op.active_command_id IS NOT NULL)
 )
 UPDATE byai.tenant_config target
 SET params_value=CASE target.params_code

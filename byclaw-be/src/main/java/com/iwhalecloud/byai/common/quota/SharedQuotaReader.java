@@ -29,6 +29,15 @@ public class SharedQuotaReader {
     }
 
     public Optional<QuotaSnapshot> read(long enterpriseId) {
+        return read(enterpriseId, false);
+    }
+
+    /** 商业执行必须有明确的受限快照；Redis 故障或缺失不能按不限额放行。 */
+    public QuotaSnapshot readRequired(long enterpriseId) {
+        return read(enterpriseId, true).orElseThrow(SharedQuotaReader::unavailable);
+    }
+
+    private Optional<QuotaSnapshot> read(long enterpriseId, boolean required) {
         if (enterpriseId <= 0) throw new IllegalArgumentException("Quota enterpriseId must be positive");
         String key = properties.getKeyPrefix() + "{" + enterpriseId + "}";
         Map<Object, Object> fields;
@@ -36,7 +45,7 @@ public class SharedQuotaReader {
             fields = redis.opsForHash().entries(key);
         } catch (RuntimeException failure) {
             // WRONGTYPE is a present corrupt snapshot, never permission to bypass the package.
-            if (hasWrongType(failure) || properties.getFailurePolicy() == SharedQuotaProperties.FailurePolicy.REJECT) {
+            if (required || hasWrongType(failure) || properties.getFailurePolicy() == SharedQuotaProperties.FailurePolicy.REJECT) {
                 throw unavailable();
             }
             LOG.warn("Shared quota Redis unavailable; allowing admission for enterpriseId={}", enterpriseId);
@@ -64,14 +73,23 @@ public class SharedQuotaReader {
             JsonNode limits = root.path("limits");
             QuotaSnapshot snapshot = new QuotaSnapshot(enterpriseId, revision, limit(limits, "memberLimit"),
                 limit(limits, "groupLimit"), limit(limits, "groupMemberLimit"), limit(limits, "agentLimit"));
+            for (String field : java.util.List.of("accessMode", "effectiveFrom", "effectiveTo")) {
+                JsonNode value = root.get(field);
+                if (value != null && !value.isNull() && !value.isTextual()) throw new IllegalArgumentException();
+            }
             String accessMode = root.path("accessMode").isTextual() ? root.path("accessMode").textValue() : null;
+            if (required && (accessMode == null || !java.util.Set.of("PREPARED", "ENABLED", "READ_ONLY", "SUSPENDED").contains(accessMode)))
+                throw new IllegalArgumentException();
             java.time.OffsetDateTime from = root.path("effectiveFrom").isTextual() ? java.time.OffsetDateTime.parse(root.path("effectiveFrom").textValue()) : null;
             java.time.OffsetDateTime to = root.path("effectiveTo").isTextual() ? java.time.OffsetDateTime.parse(root.path("effectiveTo").textValue()) : null;
             snapshot = new QuotaSnapshot(enterpriseId, revision, snapshot.memberLimit(), snapshot.groupLimit(), snapshot.groupMemberLimit(), snapshot.agentLimit(), accessMode, from, to);
             if (!root.path("mode").isTextual()) throw new IllegalArgumentException();
             return switch (root.path("mode").textValue()) {
                 case "LIMITED" -> Optional.of(snapshot);
-                case "UNLIMITED" -> Optional.empty();
+                case "UNLIMITED" -> {
+                    if (required) throw unavailable();
+                    yield Optional.empty();
+                }
                 default -> throw new IllegalArgumentException();
             };
         } catch (Exception invalid) {
@@ -97,7 +115,11 @@ public class SharedQuotaReader {
         }
         return false;
     }
+    /** 专用于共享快照等待重试；不能把任意 Provider 503 当作创建可重试。 */
+    public static class SharedQuotaUnavailableException extends ResponseStatusException {
+        public SharedQuotaUnavailableException() { super(HttpStatus.SERVICE_UNAVAILABLE, "tenant.quota.unavailable"); }
+    }
     private static ResponseStatusException unavailable() {
-        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.quota.unavailable");
+        return new SharedQuotaUnavailableException();
     }
 }

@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -28,7 +27,6 @@ class TenantManagedDeletionAvailabilityTest {
                 beans.registerSingleton("policies",mock(TenantExecutionPolicyService.class));
                 beans.registerSingleton("ids",mock(SequenceService.class));
                 beans.registerSingleton("json",new ObjectMapper());
-                beans.registerSingleton("hooks",mock(HookPublisher.class));
                 beans.registerSingleton("redis",mock(StringRedisTemplate.class));
             });
         context.run(c -> assertThat(c).hasSingleBean(TenantManagedDeletionService.class));

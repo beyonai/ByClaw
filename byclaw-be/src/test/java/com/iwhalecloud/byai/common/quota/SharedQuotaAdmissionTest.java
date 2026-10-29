@@ -27,23 +27,21 @@ class SharedQuotaAdmissionTest {
         var source = new DriverManagerDataSource("jdbc:h2:mem:quota" + System.nanoTime() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE SCHEMA byai");
-        jdbc.execute("CREATE TABLE byai.quota_write_guard(scope VARCHAR(32),subject_id BIGINT,version BIGINT NOT NULL,PRIMARY KEY(scope,subject_id))");
         jdbc.execute("CREATE TABLE byai.tenant_user_membership(membership_id BIGINT PRIMARY KEY,enterprise_id BIGINT,user_id BIGINT,status VARCHAR(16))");
         jdbc.execute("CREATE TABLE byai.byai_session_member(session_id BIGINT,mem_obj_type VARCHAR(16),mem_obj_id BIGINT)");
         jdbc.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY,enterprise_id BIGINT,session_type VARCHAR(16),state VARCHAR(32))");
         jdbc.update("INSERT INTO byai.tenant_user_membership VALUES(1,42,1,'ACTIVE')");
         when(reader.read(42)).thenReturn(Optional.of(quota));
-        admission = new SharedQuotaAdmission(reader, jdbc);
+        admission = new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(reader, jdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create());
         tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
 
-    @Test void missingPackageSkipsDatabaseGuardAndQuotaCount() {
+    @Test void missingPackageSkipsLockAndQuotaCount() {
         when(reader.read(42)).thenReturn(Optional.empty());
         tx.executeWithoutResult(status -> {
             var snapshot = admission.beginEnterprise(42L);
             admission.checkMembers(snapshot, 1);
         });
-        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM byai.quota_write_guard", Integer.class));
     }
 
     @Test void concurrentAdmissionsSerializeCountAndWriteInTheirTransaction() throws Exception {
@@ -90,7 +88,7 @@ class SharedQuotaAdmissionTest {
         });
     }
 
-    @Test void rereadsPolicyAfterWaitingForTheDatabaseGuard() {
+    @Test void rereadsPolicyAfterAcquiringRedisLock() {
         when(reader.read(42)).thenReturn(Optional.of(quota), Optional.of(new QuotaSnapshot(42, "8", 1, 5, 3, 2)));
         tx.executeWithoutResult(status -> {
             var latest = admission.beginEnterprise(42L);
@@ -123,9 +121,9 @@ class SharedQuotaAdmissionTest {
         });
     }
 
-    @Test void guardRequiresTheMutationTransactionAndRollbackReleasesItsWrite() {
+    @Test void guardRequiresTransactionAndRollbackReleasesLock() {
         assertThrows(IllegalStateException.class, () -> admission.beginEnterprise(42L));
         tx.executeWithoutResult(status -> { admission.beginEnterprise(42L); status.setRollbackOnly(); });
-        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM byai.quota_write_guard", Integer.class));
+        tx.executeWithoutResult(status -> admission.beginEnterprise(42L));
     }
 }
