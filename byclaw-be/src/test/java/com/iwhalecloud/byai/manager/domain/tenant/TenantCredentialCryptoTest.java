@@ -56,7 +56,7 @@ class TenantCredentialCryptoTest {
         TenantCredentialCrypto withoutSecret = new TenantCredentialCrypto(new ObjectMapper(), "");
         assertThatThrownBy(() -> withoutSecret.encrypt(123L, "byclaw_t_123", "Password1@"))
             .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("BYCLAW_TENANT_CREDENTIAL_MASTER_KEY");
+            .hasMessageContaining("Tenant runtime identity");
     }
 
     @Test
@@ -73,6 +73,19 @@ class TenantCredentialCryptoTest {
             encoder.encodeToString(Arrays.copyOfRange(sealed, sealed.length - 16, sealed.length))));
 
         assertThat(crypto.decrypt(123L, "byclaw_t_123", envelope)).isEqualTo("LegacyPassword1@");
+    }
+
+    @Test
+    void rewrapKeepsDatabasePasswordAndSurvivesApplicationRestart() throws Exception {
+        var json = new ObjectMapper();
+        String seed = "deployment-secret-with-at-least-thirty-two-bytes";
+        var derived = new TenantCredentialCrypto(json, new TenantRuntimeIdentity(seed));
+        String oldEnvelope = crypto.encrypt(123L, "byclaw_t_123", "ExistingPassword1@");
+        String rewrapped = derived.encrypt(123L, "byclaw_t_123", crypto.decrypt(123L, "byclaw_t_123", oldEnvelope));
+        var restarted = new TenantCredentialCrypto(json, new TenantRuntimeIdentity(seed));
+        assertThat(restarted.decrypt(123L, "byclaw_t_123", rewrapped)).isEqualTo("ExistingPassword1@");
+        assertThatThrownBy(() -> crypto.decrypt(123L, "byclaw_t_123", rewrapped))
+            .isInstanceOf(GeneralSecurityException.class);
     }
 
     private record LegacyEnvelope(String alg, String keyId, String nonce, String ciphertext, String tag) {

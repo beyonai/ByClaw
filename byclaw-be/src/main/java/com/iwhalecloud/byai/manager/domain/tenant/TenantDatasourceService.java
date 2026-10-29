@@ -37,9 +37,15 @@ public class TenantDatasourceService {
     private final TenantCredentialCrypto credentialCrypto;
     private final String dbProbeHost;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
+                                   TenantCredentialCrypto credentialCrypto) {
+        this(tenantMapper, sandboxMapper, credentialCrypto, "");
+    }
+
     public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
                                    TenantCredentialCrypto credentialCrypto,
-                                   @Value("${BYCLAW_TENANT_DB_PROBE_HOST:}") String dbProbeHost) {
+                                   String dbProbeHost) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;
         this.credentialCrypto = credentialCrypto;

@@ -28,11 +28,13 @@ class TenantSandboxPersistentVolumeTest {
         doAnswer(call -> { call.<com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord>getArgument(0).setId(31L); return 1; })
             .when(records).insert(any(com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord.class));
         var service = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class), specs,
-            records, new ObjectMapper(), "tenant-db", "/not-a-mounted-volume",
-            "node", "redis", "6379", "0", "default", "password", "http://be", "token", "host.containers.internal");
+            records, new ObjectMapper(), "/not-a-mounted-volume", "redis", "6379", "0", "default", "password", "http://be", "token", "host.containers.internal");
         ReflectionTestUtils.setField(service, "platformTenantFiles", files);
         assertThrows(ResponseStatusException.class, () -> service.launchOpenGauss(42,"m","byclaw_t_42","bc_t_42_admin","password"));
-        verify(lifecycle).launchSandbox(any());
+        var launch = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        verify(lifecycle).launchSandbox(launch.capture());
+        assertFalse(launch.getValue().getEnvs().containsKey("IMAGE_OPENGAUSS"));
+        assertFalse(launch.getValue().getEnvs().containsKey("IMAGE_TENANT_NODE"));
         verify(files, never()).prepare(any(), any(), any());
         verify(files, never()).copy(any(), any(), any());
     }
@@ -50,7 +52,7 @@ class TenantSandboxPersistentVolumeTest {
         record.setStatus("RELEASED"); record.setLockVersion(2);
         when(records.selectTenantRecords(42L)).thenReturn(List.of(record));
         var service = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class), specs,
-            records, new ObjectMapper(), "db", "/not-mounted", "node", "redis", "6379", "0",
+            records, new ObjectMapper(), "/not-mounted", "redis", "6379", "0",
             "default", "password", "http://be", "token", "host");
         ReflectionTestUtils.setField(service, "platformTenantFiles", files);
         when(lifecycle.removeSandbox(any())).thenReturn(com.iwhalecloud.byai.common.feign.response.SandboxResponse.success(null));

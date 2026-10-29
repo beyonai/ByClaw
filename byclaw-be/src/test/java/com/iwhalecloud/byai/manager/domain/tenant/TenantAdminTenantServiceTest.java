@@ -31,9 +31,15 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
 
     private final TenantAdminTenantMapper mapper = mock(TenantAdminTenantMapper.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
-    private final TenantSandboxProperties sandboxProperties = new TenantSandboxProperties();
+    private final TenantSandboxProperties sandboxProperties = org.mockito.Mockito.mock(TenantSandboxProperties.class);
     private final TenantAdminTenantService service = new TenantAdminTenantService(mapper, sequenceService,
         new ObjectMapper(), sandboxProperties);
+
+    @org.junit.jupiter.api.BeforeEach
+    void defaultProfiles() {
+        when(sandboxProperties.getProfileKey()).thenReturn("m");
+        when(sandboxProperties.getNodeProfileKey()).thenReturn("m");
+    }
 
     @AfterEach
     void clearLogin() {
@@ -64,14 +70,15 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
         assertThat(tenant.enterpriseId()).isEqualTo("123");
         assertThat(tenant.provisionState()).isEqualTo("RESERVED");
         verify(mapper).insertEnterprise(123L, "测试租户01");
-        verify(mapper).insertConfig(127L, 123L, "PACKAGE_CONTENT_SNAPSHOT", "{\"profileKey\":\"m\",\"memberLimit\":10}");
+        verify(mapper).insertConfig(127L, 123L, "PACKAGE_CONTENT_SNAPSHOT", "{\"profileKey\":\"m\",\"memberLimit\":10,\"nodeProfileKey\":\"m\"}");
         verify(mapper).insertOwner(129L, 123L, 1L);
     }
 
     @Test
     void configuredProfileIsIndependentOfPackageResourceFields() throws Exception {
         platformAdmin();
-        sandboxProperties.setProfileKey("s");
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("s");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
         TenantPackageRow selectedPackage = new TenantPackageRow();
         selectedPackage.setId(1L);
         selectedPackage.setPackageName("企业版");
@@ -86,6 +93,7 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
         verify(mapper).insertConfig(anyLong(), eq(123L), eq("PACKAGE_CONTENT_SNAPSHOT"), snapshot.capture());
         var content = new ObjectMapper().readTree(snapshot.getValue());
         assertThat(content.path("profileKey").asText()).isEqualTo("s");
+        assertThat(content.path("nodeProfileKey").asText()).isEqualTo("l");
         assertThat(content.path("memberLimit").asInt()).isEqualTo(50);
         assertThat(content.path("description").asText()).isEqualTo("Enterprise");
         verify(mapper).insertConfig(anyLong(), eq(123L), eq("PACKAGE_SPEC_ID"), eq("1"));
@@ -95,7 +103,8 @@ class TenantAdminTenantServiceTest extends I18nTestSupport {
     @Test
     void replayDoesNotRewriteExistingTenantWhenDeploymentProfileChanges() {
         platformAdmin();
-        sandboxProperties.setProfileKey("l");
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
         TenantPackageRow selectedPackage = new TenantPackageRow();
         selectedPackage.setId(1L);
         selectedPackage.setPackageName("基础版");

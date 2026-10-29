@@ -94,7 +94,7 @@ class TenantCreationHookTest {
     void outerTransactionRollbackNeverSends() {
         runner.run(context -> {
             // 保留显式外层事务，确认旧入口即使回滚也不会登记通知。
-            var target = new TenantAdminTenantService(database, sequence, new ObjectMapper());
+            var target = new TenantAdminTenantService(database, sequence, new ObjectMapper(), defaults());
             new TransactionTemplate(new HookIntegrationTest.TestTransactions()).executeWithoutResult(status -> {
                 target.create("测试企业", 12L, "tenant-request-01");
                 assertThat(requests).isEmpty();
@@ -154,6 +154,7 @@ class TenantCreationHookTest {
         new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
             .withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
             .withPropertyValues("spring.config.additional-location=" + yaml.toUri(), "byclaw.hooks.enabled=true",
+                "byclaw.hooks.durable.enabled=false",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",
                 "byclaw.hooks.subscriptions.tenant-sync.enabled=true",
                 "TENANT_CREATED_HOOK_URL=http://127.0.0.1:" + receiver.getAddress().getPort() + "/tenant",
@@ -173,11 +174,17 @@ class TenantCreationHookTest {
     }
 
     private TenantAdminTenantService service() {
-        var target = new TenantAdminTenantService(database, sequence, new ObjectMapper());
+        var target = new TenantAdminTenantService(database, sequence, new ObjectMapper(), defaults());
         var proxy = new ProxyFactory(target);
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(new HookIntegrationTest.TestTransactions(),
             new AnnotationTransactionAttributeSource()));
         return (TenantAdminTenantService) proxy.getProxy();
+    }
+    private static com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties defaults() {
+        var settings=org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties.class);
+        org.mockito.Mockito.when(settings.getProfileKey()).thenReturn("m");
+        org.mockito.Mockito.when(settings.getNodeProfileKey()).thenReturn("m");
+        return settings;
     }
 }

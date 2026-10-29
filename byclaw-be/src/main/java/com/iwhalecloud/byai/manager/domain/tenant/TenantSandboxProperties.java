@@ -1,24 +1,44 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import java.util.Set;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
-/** Startup default for newly reserved tenant resources, independent of commercial package limits. */
+/** Reads current table defaults only when reserving a new tenant; retries use the frozen snapshot. */
 @Component
-@ConfigurationProperties(prefix = "byclaw.tenant.sandbox")
 public class TenantSandboxProperties {
-    private String profileKey = "m";
+    private final SandboxServiceSpecEntityMapper specs;
+    private final SandboxServiceProfileEntityMapper profiles;
 
-    public String getProfileKey() {
-        return profileKey;
+    public TenantSandboxProperties(SandboxServiceSpecEntityMapper specs, SandboxServiceProfileEntityMapper profiles) {
+        this.specs = specs;
+        this.profiles = profiles;
     }
 
-    public void setProfileKey(String profileKey) {
-        // Reject deployment mistakes during binding instead of persisting unusable tenant snapshots.
-        if (profileKey == null || !Set.of("s", "m", "l").contains(profileKey)) {
-            throw new IllegalArgumentException("byclaw.tenant.sandbox.profile-key must be one of s, m, l");
-        }
-        this.profileKey = profileKey;
+    public String getProfileKey() {
+        return profile("tenant-opengauss");
+    }
+
+    public String getNodeProfileKey() {
+        return profile("tenant-data-node");
+    }
+
+    private ResponseStatusException unavailable(String service) {
+        return new ResponseStatusException(HttpStatus.CONFLICT, "tenant-data-node".equals(service)
+            ? "tenant.node.profile.unavailable" : "tenant.database.profile.unavailable");
+    }
+
+    private String profile(String service) {
+        var spec = specs.selectProfileAwareByServiceKey(service);
+        if (spec == null || !Integer.valueOf(1).equals(spec.getEnabled()) || !"TENANT".equals(spec.getOwnerScope())
+            || !Set.of("s", "m", "l").contains(spec.getDefaultProfileKey() == null ? "" : spec.getDefaultProfileKey()))
+            throw unavailable(service);
+        String type = spec.getServiceType() == null || spec.getServiceType().isBlank() ? service : spec.getServiceType();
+        if (profiles.selectEnabledProfile(type, spec.getDefaultProfileKey()) == null)
+            throw unavailable(service);
+        return spec.getDefaultProfileKey();
     }
 }

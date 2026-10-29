@@ -58,8 +58,6 @@ public class TenantSandboxService {
     private final SandboxServiceSpecRepository specRepository;
     private final SsSandboxRecordMapper recordMapper;
     private final ObjectMapper objectMapper;
-    private final String image;
-    private final String nodeImage;
     private final String volumeRoot;
     private final String redisHost;
     private final String redisPort;
@@ -70,27 +68,40 @@ public class TenantSandboxService {
     private final String internalToken;
     private final String nodeAdvertiseHost;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TenantSandboxService(SandboxLifecycleFacade lifecycleFacade, OpenSandboxClient openSandboxClient,
                                 SandboxServiceSpecRepository specRepository,
                                 SsSandboxRecordMapper recordMapper, ObjectMapper objectMapper,
-                                @Value("${IMAGE_OPENGAUSS:}") String image,
                                 @Value("${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:}") String volumeRoot,
-                                @Value("${IMAGE_TENANT_NODE:}") String nodeImage,
-                                @Value("${BYCLAW_TENANT_REDIS_HOST:host.containers.internal}") String redisHost,
-                                @Value("${BYCLAW_TENANT_REDIS_PORT:6379}") String redisPort,
-                                @Value("${REDIS_DATABASE:0}") String redisDatabase,
-                                @Value("${REDIS_USERNAME:default}") String redisUsername,
-                                @Value("${REDIS_PASSWORD:}") String redisPassword,
+                                @Value("${spring.redis.host:${REDIS_HOST:}}") String redisHost,
+                                @Value("${spring.redis.port:${REDIS_PORT:6379}}") String redisPort,
+                                @Value("${spring.redis.database:${REDIS_DATABASE:0}}") String redisDatabase,
+                                @Value("${spring.redis.username:${REDIS_USERNAME:default}}") String redisUsername,
+                                @Value("${spring.redis.password:${REDIS_PASSWORD:}}") String redisPassword,
                                 @Value("${BYCLAW_TENANT_BE_INTERNAL_URL:}") String beInternalUrl,
-                                @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken,
-                                @Value("${BYCLAW_TENANT_NODE_ADVERTISE_HOST:host.containers.internal}") String nodeAdvertiseHost) {
+                                com.iwhalecloud.byai.manager.domain.tenant.TenantRuntimeIdentity identity) {
+        this(lifecycleFacade, openSandboxClient, specRepository, recordMapper, objectMapper, volumeRoot,
+            redisHost, redisPort, redisDatabase, redisUsername, redisPassword, beInternalUrl,
+            identity.internalToken(), "");
+    }
+
+    public TenantSandboxService(SandboxLifecycleFacade lifecycleFacade, OpenSandboxClient openSandboxClient,
+                                SandboxServiceSpecRepository specRepository,
+                                SsSandboxRecordMapper recordMapper, ObjectMapper objectMapper,
+                                @Value("${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:}") String volumeRoot,
+                                @Value("${spring.redis.host:${REDIS_HOST:}}") String redisHost,
+                                @Value("${spring.redis.port:${REDIS_PORT:6379}}") String redisPort,
+                                @Value("${spring.redis.database:${REDIS_DATABASE:0}}") String redisDatabase,
+                                @Value("${spring.redis.username:${REDIS_USERNAME:default}}") String redisUsername,
+                                @Value("${spring.redis.password:${REDIS_PASSWORD:}}") String redisPassword,
+                                @Value("${BYCLAW_TENANT_BE_INTERNAL_URL:}") String beInternalUrl,
+                                String internalToken,
+                                String nodeAdvertiseHost) {
         this.lifecycleFacade = lifecycleFacade;
         this.openSandboxClient = openSandboxClient;
         this.specRepository = specRepository;
         this.recordMapper = recordMapper;
         this.objectMapper = objectMapper;
-        this.image = image;
-        this.nodeImage = nodeImage;
         this.volumeRoot = volumeRoot;
         this.redisHost = redisHost;
         this.redisPort = redisPort;
@@ -112,7 +123,7 @@ public class TenantSandboxService {
         validateProviderRequestKey(providerRequestKey);
         if (enterpriseId <= 0 || dbRecordId <= 0 || generation <= 0
             || profileKey == null || !PROFILES.contains(profileKey)
-            || nodeImage == null || nodeImage.isBlank() || volumeRoot == null || volumeRoot.isBlank()
+            || volumeRoot == null || volumeRoot.isBlank()
             || redisHost == null || redisHost.isBlank() || redisPassword == null || redisPassword.isBlank()
             || beInternalUrl == null || !beInternalUrl.startsWith("http://")
             || internalToken == null || internalToken.isBlank()) {
@@ -165,7 +176,6 @@ public class TenantSandboxService {
         envs.put("COMMERCIAL_MANAGED", Boolean.toString(commercialManaged(enterpriseId)));
         envs.put("TENANT_GENERATION", Long.toString(generation));
         envs.put("DB_SANDBOX_RECORD_ID", Long.toString(dbRecordId));
-        envs.put("IMAGE_TENANT_NODE", nodeImage);
         envs.put("NODE_ADVERTISE_HOST", nodeAdvertiseHost);
         envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", volumeRoot);
         envs.put("BE_INTERNAL_URL", beInternalUrl);
@@ -352,7 +362,7 @@ public class TenantSandboxService {
             || !("byclaw_t_" + enterpriseId).equals(dbName)
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
             || dbPassword == null || dbPassword.isBlank()
-            || image == null || image.isBlank() || volumeRoot == null || volumeRoot.isBlank()) {
+            || volumeRoot == null || volumeRoot.isBlank()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.launch.incomplete");
         }
 
@@ -415,7 +425,6 @@ public class TenantSandboxService {
         envs.put("DB_NAME", dbName);
         envs.put("DB_USER", dbUser);
         envs.put("DB_PASSWORD", dbPassword);
-        envs.put("IMAGE_OPENGAUSS", image);
         envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", volumeRoot);
         request.setEnvs(envs);
         request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),

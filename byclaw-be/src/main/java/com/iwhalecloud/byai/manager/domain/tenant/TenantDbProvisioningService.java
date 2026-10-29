@@ -57,13 +57,23 @@ public class TenantDbProvisioningService {
     }
 
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantDbProvisioningService(TenantAdminTenantMapper tenantMapper, TenantSandboxService sandboxService,
+                                       TenantCredentialCrypto credentialCrypto, TenantConfigPublisher configPublisher,
+                                       TenantNodeSchemaService schemaService,
+                                       SequenceService sequenceService,
+                                       StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+                                       @Qualifier("projectInitExecutor") Executor taskExecutor) {
+        this(tenantMapper, sandboxService, credentialCrypto, configPublisher, schemaService, sequenceService, redisTemplate, objectMapper, taskExecutor, "");
+    }
+
     public TenantDbProvisioningService(TenantAdminTenantMapper tenantMapper, TenantSandboxService sandboxService,
                                        TenantCredentialCrypto credentialCrypto, TenantConfigPublisher configPublisher,
                                        TenantNodeSchemaService schemaService,
                                        SequenceService sequenceService,
                                        StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
                                        @Qualifier("projectInitExecutor") Executor taskExecutor,
-                                       @Value("${BYCLAW_TENANT_DB_PROBE_HOST:}") String dbProbeHost) {
+                                       String dbProbeHost) {
         this.tenantMapper = tenantMapper;
         this.sandboxService = sandboxService;
         this.credentialCrypto = credentialCrypto;
@@ -215,12 +225,13 @@ public class TenantDbProvisioningService {
             }
             JsonNode packageContent = objectMapper.readTree(config.get("PACKAGE_CONTENT_SNAPSHOT"));
             String profileKey = packageContent.path("profileKey").asText();
+            String nodeProfileKey = packageContent.path("nodeProfileKey").asText(profileKey);
             String dbRecord = config.get("DB_SANDBOX_RECORD_ID");
             if (dbRecord == null || !dbRecord.matches("[1-9][0-9]*")) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.recordMissing");
             }
             replacing = true;
-            TenantSandboxView node = sandboxService.recreateDataNode(enterpriseId, profileKey,
+            TenantSandboxView node = sandboxService.recreateDataNode(enterpriseId, nodeProfileKey,
                 Long.parseLong(dbRecord), state.path("generation").asLong());
             upsertConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID", Long.toString(node.recordId()));
             if (!configPublisher.publish(enterpriseId, readConfig(enterpriseId))) {
@@ -288,6 +299,7 @@ public class TenantDbProvisioningService {
         if (deletionRequested(enterpriseId)) throw new IllegalStateException("tenant deletion in progress");
         JsonNode spec = objectMapper.readTree(config.get("PACKAGE_CONTENT_SNAPSHOT"));
         String profile = spec.path("profileKey").asText();
+        String nodeProfile = spec.path("nodeProfileKey").asText(profile);
         String dbName = "byclaw_t_" + enterpriseId;
         String dbUser = "bc_t_" + enterpriseId + "_admin";
         String envelope = config.get("DB_PASSWORD");
@@ -318,7 +330,7 @@ public class TenantDbProvisioningService {
             return true;
         });
         TenantSandboxView node = guard.external("NODE_CREATE", TenantSandboxView.class,
-            () -> sandboxService.launchDataNode(enterpriseId, profile, database.recordId(), 1, guard.providerRequestKey("NODE_CREATE")));
+            () -> sandboxService.launchDataNode(enterpriseId, nodeProfile, database.recordId(), 1, guard.providerRequestKey("NODE_CREATE")));
         guard.local(() -> upsertConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID", Long.toString(node.recordId())));
         guard.external("SCHEMA_INIT", Boolean.class, () -> {
             if (!schemaService.initialized(enterpriseId)) {
@@ -374,6 +386,7 @@ public class TenantDbProvisioningService {
         }
         JsonNode packageContent = objectMapper.readTree(config.get("PACKAGE_CONTENT_SNAPSHOT"));
         String profileKey = packageContent.path("profileKey").asText();
+        String nodeProfileKey = packageContent.path("nodeProfileKey").asText(profileKey);
         String dbName = "byclaw_t_" + enterpriseId;
         String dbUser = "bc_t_" + enterpriseId + "_admin";
         String envelope = config.get("DB_PASSWORD");
@@ -412,7 +425,7 @@ public class TenantDbProvisioningService {
         }
         setState(enterpriseId, "REDIS_PUBLISHED");
         setState(enterpriseId, "NODE_CREATING");
-        TenantSandboxView node = sandboxService.launchDataNode(enterpriseId, profileKey, sandbox.recordId(), 1);
+        TenantSandboxView node = sandboxService.launchDataNode(enterpriseId, nodeProfileKey, sandbox.recordId(), 1);
         upsertConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID", Long.toString(node.recordId()));
         setState(enterpriseId, "ADMIN_ONLY");
         if (!schemaService.initialized(enterpriseId)) {
