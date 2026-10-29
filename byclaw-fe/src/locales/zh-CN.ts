@@ -4079,6 +4079,7 @@ export default {
 
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
   'sandbox.status.running': '沙箱运行中',
+  'sandbox.storage.migration': '个人存储历史需要迁移，请联系管理员完成后再开始会话',
   'sandbox.storage.preparing': '正在准备个人存储配额，完成后即可开始会话',
   'sandbox.storage.failed': '个人存储准备失败，请联系管理员检查配额状态',
   'sandbox.status.transitioning': '沙箱启动/停止中',

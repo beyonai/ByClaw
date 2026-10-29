@@ -31,6 +31,15 @@ class SharedUserStoragePreparationTest {
         assertThat(service.status("alice")).containsEntry("enabled",false);
         verifyNoInteractions(gateway);
     }
+    @Test void firstLoginPreparesPersonalNasBeforeAServicePreferenceExists() {
+        var policy=mock(SharedSandboxPolicy.class);var gateway=mock(SharedSandboxGateway.class);
+        var sandboxes=mock(SandboxService.class);
+        var service=new SharedUserStoragePreparation(policy,gateway,sandboxes,Runnable::run);
+        var login=new LoginInfo();login.setUserCode("alice");login.setUserId(7L);login.setEnterpriseId(9L);
+        when(policy.userNasEnabled("alice","byclaw-dsh")).thenReturn(true);
+        service.trigger(login);
+        verify(gateway).call(eq("prepareUserStorage"),argThat(p->"alice".equals(p.get("userCode"))));
+    }
     @Test void disabledWhileQueuedCancelsPreparation() {
         var policy=mock(SharedSandboxPolicy.class);var gateway=mock(SharedSandboxGateway.class);
         var sandboxes=mock(SandboxService.class);List<Runnable> queue=new ArrayList<>();

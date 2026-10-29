@@ -812,3 +812,24 @@ test('multi-pool home follows immutable user binding across hosts and rejects mi
   await assert.rejects(host.verifyUserStorageHome(config, key, request, async () => ({ isDirectory: () => true, isSymbolicLink: () => true })), /unsafe/)
   assert.throws(() => host.userContextPaths(config, key, { storageBinding: { ...binding, home: '/tmp/other' } }), /invalid/)
 })
+
+test('a mounted user pool admits later users without changing the host and rejects an unmounted pool', async () => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const key = `ctx_${'a'.repeat(64)}`, space = 'c'.repeat(64), parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared', mountPath: `/data/byclaw-context-pools/${parent}` }
+  const binding = { version: 3, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: space, parentSpaceKey: parent,
+    poolId: 'pool', namespace: 'shared', home: `${mount.mountPath}/${space}/by/byclaw/.dsh` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts', storageMounts: host.parseStorageMounts(JSON.stringify([mount])) }
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, directory)
+  const laterSpace = 'd'.repeat(64)
+  await host.verifyUserStorageHome(config, key, { storageBinding: { ...binding, spaceKey: laterSpace, home: `${mount.mountPath}/${laterSpace}/by/byclaw/.dsh` } }, directory)
+  const otherParent = userNasPoolKey('new-pool')
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: { ...binding, poolId: 'new-pool', parentSpaceKey: otherParent,
+    home: `/data/byclaw-context-pools/${otherParent}/${space}/by/byclaw/.dsh` } }, directory), /NAS mount/)
+  const { kind, ...legacyProof } = mount
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [legacyProof] }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async path => ({
+    isDirectory: () => true, isSymbolicLink: () => path === binding.home,
+  })), /unsafe/)
+})

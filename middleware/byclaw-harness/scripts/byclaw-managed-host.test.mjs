@@ -1,3 +1,4 @@
+import { validateStorageBinding, userNasPoolKey } from './byclaw-managed-host.mjs'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -337,4 +338,13 @@ test('NAS binding cannot redirect a context into another user home', async t => 
     poolId: 'pool-1', home: '/data/byclaw-contexts/other/dsh-home',
   } })), /storage binding/)
   assert.equal(r.list().length, 0)
+})
+
+test('personal NAS binding uses the same persistent home across context tenants', () => {
+  const a = `ctx_${'a'.repeat(64)}`, b = `ctx_${'b'.repeat(64)}`, space = 'c'.repeat(64)
+  const binding = { version: 3, mode: 'USER_NAS_QUOTA', spaceKey: space, parentSpaceKey: userNasPoolKey('pool'),
+    poolId: 'pool', namespace: 'shared', contextKey: a, home: `/data/byclaw-context-pools/${userNasPoolKey('pool')}/${space}/by/byclaw/.dsh` }
+  assert.equal(validateStorageBinding(a, binding).home, validateStorageBinding(b, { ...binding, contextKey: b }).home)
+  assert.throws(() => validateStorageBinding(a, { ...binding, parentSpaceKey: 'd'.repeat(64) }))
+  assert.throws(() => validateStorageBinding(a, { ...binding, home: `${binding.home}/../other` }))
 })

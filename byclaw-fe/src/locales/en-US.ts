@@ -4222,6 +4222,7 @@ export default {
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'sandbox.status.running': 'Sandbox Running',
+  'sandbox.storage.migration': 'Your storage history needs migration. Contact an administrator before starting a chat.',
   'sandbox.storage.preparing': 'Preparing your storage quota. Chat will be available when ready.',
   'sandbox.storage.failed': 'Storage preparation failed. Contact an administrator to check the quota.',
   'sandbox.status.transitioning': 'Sandbox Starting/Stopping',

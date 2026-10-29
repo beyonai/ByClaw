@@ -104,7 +104,12 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
 
   const storagePending = storage?.enabled && !storage.ready;
   const storageMessage = intl.formatMessage({
-    id: storage?.state === 'FAILED' ? 'sandbox.storage.failed' : 'sandbox.storage.preparing',
+    id:
+      storage?.state === 'MIGRATION_REQUIRED'
+        ? 'sandbox.storage.migration'
+        : storage?.state === 'FAILED'
+          ? 'sandbox.storage.failed'
+          : 'sandbox.storage.preparing',
   });
   if (storagePending) {
     menuItems.unshift({ key: 'user-storage', label: storageMessage, disabled: true });

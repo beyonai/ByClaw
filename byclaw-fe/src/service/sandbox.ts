@@ -81,7 +81,7 @@ export async function renewSandbox(params: { userCode?: string; resourceId?: num
 export interface SharedUserStorageStatus {
   enabled: boolean;
   ready: boolean;
-  state: 'LOGICAL' | 'PREPARING_STORAGE' | 'WAITING_QUOTA' | 'READY_TO_ADMIT' | 'FAILED';
+  state: 'LOGICAL' | 'PREPARING_STORAGE' | 'WAITING_QUOTA' | 'READY_TO_ADMIT' | 'MIGRATION_REQUIRED' | 'FAILED';
   quotaGiB?: number;
   confirmedGiB?: number;
   usedBytes?: number;

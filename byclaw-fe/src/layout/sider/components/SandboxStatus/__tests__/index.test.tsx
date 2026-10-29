@@ -134,3 +134,16 @@ it('shows quota preparation without offering a release action for a pending allo
   expect(screen.getByText('sandbox.storage.preparing')).toBeDisabled();
   expect(screen.queryByText('sandbox.action.reconnect')).not.toBeInTheDocument();
 });
+
+it('explains that history migration requires intervention rather than ordinary quota waiting', () => {
+  (useSandboxStatus as jest.Mock).mockReturnValue({
+    status: 'transitioning',
+    storage: { enabled: true, ready: false, state: 'MIGRATION_REQUIRED' },
+    sandboxes: [],
+    refetch: jest.fn(),
+    restartSandbox: mockRestartSandbox,
+  });
+  render(<SandboxStatusIndicator userCode="alice" />);
+  expect(screen.getByText('sandbox.storage.migration')).toBeDisabled();
+  expect(screen.queryByText('sandbox.storage.preparing')).not.toBeInTheDocument();
+});

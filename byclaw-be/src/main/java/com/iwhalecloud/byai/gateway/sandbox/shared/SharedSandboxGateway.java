@@ -82,7 +82,7 @@ public class SharedSandboxGateway {
             return Map.of("enabled", true, "ready", false, "state", "FAILED");
         }
         Map<String, Object> safe = new LinkedHashMap<>();
-        for (String key : List.of("enabled", "ready", "state", "quotaGiB", "confirmedGiB", "usedBytes")) {
+        for (String key : List.of("enabled", "ready", "state", "quotaGiB", "confirmedGiB", "usedBytes", "quotaSubmittedAt")) {
             if (status.containsKey(key)) safe.put(key, status.get(key));
         }
         return safe;

@@ -1,3 +1,4 @@
+import { userNasPoolKey } from './byclaw-managed-host.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -8,7 +9,7 @@ import test from 'node:test'
 import { userContextPaths } from './byclaw-multi-host.mjs'
 
 // Uses built upstream packages, no model calls. Supply a built DSH checkout explicitly.
-for (const mode of ['legacy', 'multi-pool']) test(`real DSH JSONL backend reopens the same business session after host replacement (${mode})`, {
+for (const mode of ['legacy', 'multi-pool', 'personal']) test(`real DSH JSONL backend reopens the same business session after host replacement (${mode})`, {
   skip: !process.env.DSH_SOURCE_ROOT && 'set DSH_SOURCE_ROOT to a built DSH checkout',
 }, async t => {
   const require = createRequire(join(process.env.DSH_SOURCE_ROOT, 'packages/session/session-persistence-jsonl/package.json'))
@@ -24,7 +25,10 @@ for (const mode of ['legacy', 'multi-pool']) test(`real DSH JSONL backend reopen
   })
   const config = { root: join(root, 'host-a'), userRoot: join(root, 'contexts'), managed: true }
   const user = `ctx_${'a'.repeat(64)}`, otherUser = `ctx_${'b'.repeat(64)}`
-  const request = key => mode === 'legacy' ? {} : { storageBinding: {
+  const request = key => mode === 'legacy' ? {} : mode === 'personal' ? { storageBinding: {
+    version: 3, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: key.slice(4), parentSpaceKey: userNasPoolKey('pool-two'),
+    poolId: 'pool-two', namespace: 'shared', home: `/data/byclaw-context-pools/${userNasPoolKey('pool-two')}/${key.slice(4)}/by/byclaw/.dsh`,
+  } } : { storageBinding: {
     version: 2, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: 'c'.repeat(64), poolId: 'pool-two',
     parentSpaceKey: 'd'.repeat(64), namespace: 'shared',
     home: `/data/byclaw-context-pools/${'d'.repeat(64)}/${key}/dsh-home`,

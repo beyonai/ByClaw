@@ -44,8 +44,9 @@ public class SharedUserStoragePreparation {
         try {
             executor.execute(() -> {
                 try {
-                    if (policy.userNasEnabled(user, SharedSandboxGateway.DSH_SERVICE)
-                        && SharedSandboxGateway.DSH_SERVICE.equals(sandboxes.getPreferredServiceKey(user))) {
+                    // Personal NAS is shared by execution modes. First login often has no preference yet;
+                    // persist the intent now so the scheduled provisioner can work before the first chat.
+                    if (policy.userNasEnabled(user, SharedSandboxGateway.DSH_SERVICE)) {
                         gateway.call("prepareUserStorage", identity);
                     }
                 } catch (RuntimeException failure) {

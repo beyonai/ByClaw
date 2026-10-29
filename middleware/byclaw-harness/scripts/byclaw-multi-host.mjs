@@ -68,7 +68,7 @@
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
-import { ManagedUserRegistry, limitContextStartup, startupDiagnostics, validateStorageBinding } from './byclaw-managed-host.mjs'
+import { ManagedUserRegistry, limitContextStartup, startupDiagnostics, validateStorageBinding, userNasPoolKey } from './byclaw-managed-host.mjs'
 export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -1259,12 +1259,14 @@ export function parseStorageMounts(value) {
   if (!Array.isArray(mounts) || mounts.length > 20) throw new Error('invalid shared NAS mounts')
   const parents = new Set(), pools = new Set()
   for (const mount of mounts) {
-    if (!mount || typeof mount !== 'object' || Object.keys(mount).sort().join(',') !== 'mountPath,namespace,parentSpaceKey,poolId'
+    const personal = mount?.kind === 'USER_POOL'
+    if (!mount || typeof mount !== 'object' || Object.keys(mount).sort().join(',') !== (personal ? 'kind,mountPath,namespace,parentSpaceKey,poolId' : 'mountPath,namespace,parentSpaceKey,poolId')
       || !/^[a-f0-9]{64}$/.test(mount.parentSpaceKey ?? '') || !/^[A-Za-z0-9_-]{1,128}$/.test(mount.poolId ?? '')
       || !/^[a-z][a-z0-9-]{0,62}$/.test(mount.namespace ?? '')
       || mount.mountPath !== `/data/byclaw-context-pools/${mount.parentSpaceKey}`
-      || parents.has(mount.parentSpaceKey) || pools.has(mount.poolId)) throw new Error('invalid shared NAS mounts')
-    parents.add(mount.parentSpaceKey); pools.add(mount.poolId); Object.freeze(mount)
+      || (personal && mount.parentSpaceKey !== userNasPoolKey(mount.poolId))
+      || parents.has(mount.parentSpaceKey) || pools.has(`${personal}:${mount.poolId}`)) throw new Error('invalid shared NAS mounts')
+    parents.add(mount.parentSpaceKey); pools.add(`${personal}:${mount.poolId}`); Object.freeze(mount)
   }
   return Object.freeze(mounts)
 }
@@ -1276,12 +1278,15 @@ export async function verifyUserStorageHome(config, user, request, inspect = lst
   if (storageBinding) {
     let root = config.userRoot
     let paths
-    if (storageBinding.version === 2) {
+    if ([2, 3].includes(storageBinding.version)) {
       const mount = config.storageMounts?.find(m => m.parentSpaceKey === storageBinding.parentSpaceKey
-        && m.poolId === storageBinding.poolId && m.namespace === storageBinding.namespace)
+        && m.poolId === storageBinding.poolId && m.namespace === storageBinding.namespace
+        && (storageBinding.version === 3 ? m.kind === 'USER_POOL' : m.kind == null))
       root = `/data/byclaw-context-pools/${storageBinding.parentSpaceKey}`
       if (!config.managed || mount?.mountPath !== root) throw new Error('user NAS binding requires the configured shared NAS mount')
-      paths = ['/data/byclaw-context-pools', root, join(root, user), home]
+      paths = storageBinding.version === 3 ? ['/data/byclaw-context-pools', root, join(root, storageBinding.spaceKey),
+        join(root, storageBinding.spaceKey, 'by'), join(root, storageBinding.spaceKey, 'by/byclaw'), home]
+        : ['/data/byclaw-context-pools', root, join(root, user), home]
     } else {
       if (!config.managed || root !== '/data/byclaw-contexts' || home !== storageBinding.home
         || config.storagePoolId !== storageBinding.poolId || config.storageParentSpaceKey !== storageBinding.parentSpaceKey
