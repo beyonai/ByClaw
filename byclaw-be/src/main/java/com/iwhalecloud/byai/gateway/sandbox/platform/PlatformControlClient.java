@@ -35,9 +35,14 @@ public interface PlatformControlClient {
         @Bean
         @Override
         public Request.Options platformAlertOptions() {
+            long startupTimeout = env.getProperty("byclaw.gateway.worker-readiness-timeout-ms", Long.class,
+                    env.getProperty("BYCLAW_SANDBOX_STARTUP_TIMEOUT_MS", Long.class, 60000L));
+            // Keep transport headroom when operators extend the startup budget.
+            int defaultReadTimeout = (int) Math.max(130000L,
+                    Math.min(Integer.MAX_VALUE - 10000L, startupTimeout) + 10000L);
             return new Request.Options(
                     env.getProperty("byclaw.platform.connect-timeout-ms", Integer.class, 5000),
-                    env.getProperty("byclaw.platform.read-timeout-ms", Integer.class, 130000),
+                    env.getProperty("byclaw.platform.read-timeout-ms", Integer.class, defaultReadTimeout),
                     false);
         }
     }

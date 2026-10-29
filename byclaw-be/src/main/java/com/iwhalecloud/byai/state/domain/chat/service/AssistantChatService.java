@@ -576,6 +576,7 @@ public class AssistantChatService {
     private void handleBdpRuntimeException(BdpRuntimeException e, AssistantChatDto assistantChatDto,
                                            OutputStream outputStream) {
         logger.error(e.toString(), e);
+        if (ChatStartupFailureException.wasReported(e)) return;
 
         // 特殊处理用户被移除群聊的情况
         if (e.getMessage() != null && e.getMessage().contains("你不在当前群聊")) {
