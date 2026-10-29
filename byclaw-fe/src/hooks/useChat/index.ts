@@ -44,6 +44,7 @@ import {
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
   hasChatStreamContext,
+  rebindChatStreamAnswerMessage,
   refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
@@ -1141,13 +1142,45 @@ function useChat(props: IProps) {
     let hasFreshResumeTarget = false;
     const llmMessageId = get(restPayload, 'llmMessageId');
 
+    const persistedResumeAnswer = isResumeChat && llmMessageId
+      ? messageListRef.current.find(
+        (item) =>
+          item.fromBeyond &&
+            `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
+            (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
+      )
+      : undefined;
+
     hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
       sessionId,
       messageId: llmMessageId,
       queryMsgId: inheritQryMsgId,
     });
-    if (isColdResume && hasFreshResumeTarget) {
-      resumeTargetAnswer = sendProps.resumeAnswerMsg;
+    // 历史消息刷新后，交互组件拿到的消息对象可能没有 sessionId。此时不能把它当成新回答，
+    // 应用服务端 messageId 找回列表中的原回答，并保留其 msgId / 数字员工身份。
+    if (
+      !hasFreshResumeTarget &&
+      persistedResumeAnswer &&
+      sendProps.resumeAnswerMsg?.fromBeyond &&
+      `${sendProps.resumeAnswerMsg.messageId ?? ''}` === `${llmMessageId ?? ''}`
+    ) {
+      hasFreshResumeTarget = true;
+      resumeTargetAnswer = {
+        ...persistedResumeAnswer,
+        ...sendProps.resumeAnswerMsg,
+        msgId: persistedResumeAnswer.msgId,
+        sessionId: persistedResumeAnswer.sessionId || sessionId,
+        queryMsgId: persistedResumeAnswer.queryMsgId || inheritQryMsgId,
+        agentId: persistedResumeAnswer.agentId || sendProps.resumeAnswerMsg.agentId,
+        agentCode: persistedResumeAnswer.agentCode || sendProps.resumeAnswerMsg.agentCode,
+        agentName: persistedResumeAnswer.agentName || sendProps.resumeAnswerMsg.agentName,
+      };
+    }
+    if (hasFreshResumeTarget) {
+      resumeTargetAnswer ||= sendProps.resumeAnswerMsg;
+      if (resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+        resumeTargetAnswer.traceId = `${payload.traceId}`;
+      }
     }
 
     if (inheritQryMsgId) {
@@ -1180,19 +1213,23 @@ function useChat(props: IProps) {
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
       }
-      if (isContinuingRunningTrace && hasFreshResumeTarget && sendProps.resumeAnswerMsg) {
+      if (isContinuingRunningTrace && hasFreshResumeTarget && resumeTargetAnswer) {
         const refreshed = refreshChatStreamAnswerMessage(
           { sessionId, traceId: payload.traceId },
-          sendProps.resumeAnswerMsg
+          resumeTargetAnswer
         );
-        if (!refreshed) {
+        const rebound = rebindChatStreamAnswerMessage(
+          { sessionId, traceId: payload.traceId },
+          resumeTargetAnswer
+        ) || refreshed;
+        if (!rebound) {
           isContinuingRunningTrace = false;
           isColdResume = true;
         }
       }
       if (isColdResume) {
         resumeTargetAnswer = hasFreshResumeTarget
-          ? sendProps.resumeAnswerMsg
+          ? resumeTargetAnswer
           : messageListRef.current.find(
             (item) =>
               item.fromBeyond &&
@@ -1213,6 +1250,10 @@ function useChat(props: IProps) {
           })
         );
       }
+    }
+
+    if (isResumeChat && resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+      resumeTargetAnswer.traceId = `${payload.traceId}`;
     }
 
     if (isResumeChat && resumeTargetAnswer?.agentId) {

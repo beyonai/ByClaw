@@ -66,3 +66,13 @@ export function resolveDshResumeRoute<T extends { parentRunId?: string; interact
     interactionId: resolveDshInteractionId(metadataRoute.interactionId, cardInteractionId),
   };
 }
+
+/** History rows may lose the parent IMessage.traceId while the persisted 3014 card still carries it. */
+export function resolveResumeTraceId(messageTraceId: unknown, cardContent: unknown): string | undefined {
+  const card = cardContent && typeof cardContent === 'object' ? (cardContent as Record<string, any>) : {};
+  const values = [messageTraceId, card.traceId, card.substance?.traceId];
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}

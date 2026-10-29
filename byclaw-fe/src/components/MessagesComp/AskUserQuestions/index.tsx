@@ -20,7 +20,12 @@ import Md from '@/components/Preview/Md';
 import { updateMessageStructById } from '@/service/message';
 import styles from './index.module.less';
 import { IMessageState } from '@/constants/message';
-import { buildDshInteractionResumePayload, isDshInteractionResume, resolveDshResumeRoute } from './resumePayload';
+import {
+  buildDshInteractionResumePayload,
+  isDshInteractionResume,
+  resolveDshResumeRoute,
+  resolveResumeTraceId,
+} from './resumePayload';
 
 type IAskUserQuestion = {
   question: string;
@@ -471,6 +476,7 @@ export function AskUserQuestions(props: IProps) {
             loading={submitting}
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
+              const resumeTraceId = resolveResumeTraceId(messageInfo.traceId, messageListItemContent);
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
               const resumeRoute = resolveDshResumeRoute(
                 getUserInteractionResumeRoute(resumeMetadata),
@@ -487,7 +493,7 @@ export function AskUserQuestions(props: IProps) {
               ].filter(Boolean);
               if (missingRouteFields.length > 0) {
                 console.error('[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE', {
-                  traceId: messageInfo.traceId,
+                  traceId: resumeTraceId,
                   sessionId: messageInfo.sessionId,
                   messageId: messageInfo.messageId,
                   resumeMessageId,
@@ -536,7 +542,7 @@ export function AskUserQuestions(props: IProps) {
               const payload: Record<string, unknown> = {
                 actionType: 'RESUME',
                 llmMessageId: messageInfo.messageId,
-                traceId: messageInfo.traceId,
+                traceId: resumeTraceId,
                 sourceAgentType,
                 resumeMessageId,
                 ...(isDshResume
@@ -561,7 +567,7 @@ export function AskUserQuestions(props: IProps) {
                   content: JSON.stringify(persistedContent),
                   updateField,
                   sessionId: messageInfo.sessionId,
-                  traceId: messageInfo.traceId,
+                  traceId: resumeTraceId,
                 });
 
                 const finishedAnswerMessage = updateMessageListItemContent(finishedContent);

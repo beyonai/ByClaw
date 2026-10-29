@@ -201,6 +201,13 @@ export const fetchMessageHandler = (item: any) => {
     taskPlan: taskPlan || undefined,
   };
 
+  if (fromBeyond) {
+    myMessage.agentId = `${metadataObject.agentId || metadataObject.resourceId || ''}` || undefined;
+    myMessage.agentCode = metadataObject.agentCode || metadataObject.resourceCode || undefined;
+    myMessage.agentName = metadataObject.agentName || metadataObject.resourceName || undefined;
+    myMessage.agentType = metadataObject.agentType || undefined;
+  }
+
   if (fromBeyond && metadataObject.session_scope === 'child' && metadataObject.child_name) {
     myMessage.agentName = metadataObject.child_name;
   }

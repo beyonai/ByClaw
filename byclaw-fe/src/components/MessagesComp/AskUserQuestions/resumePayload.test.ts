@@ -3,6 +3,7 @@ import {
   isDshInteractionResume,
   resolveDshInteractionId,
   resolveDshResumeRoute,
+  resolveResumeTraceId,
 } from './resumePayload';
 
 describe('buildDshInteractionResumePayload', () => {
@@ -66,5 +67,10 @@ describe('buildDshInteractionResumePayload', () => {
     expect(isDshInteractionResume(undefined, 'interaction-1', undefined)).toBe(true);
     expect(isDshInteractionResume('BYCLAW_DSH_u1', 'interaction-1', undefined)).toBe(true);
     expect(isDshInteractionResume(undefined, 'interaction-1', 'run-1')).toBe(false);
+  });
+
+  it('recovers the resume trace id embedded in a persisted interaction card', () => {
+    expect(resolveResumeTraceId(undefined, { substance: { traceId: ' card-trace ' } })).toBe('card-trace');
+    expect(resolveResumeTraceId(' message-trace ', { substance: { traceId: 'card-trace' } })).toBe('message-trace');
   });
 });

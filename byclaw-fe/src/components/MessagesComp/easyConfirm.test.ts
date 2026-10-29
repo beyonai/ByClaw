@@ -67,6 +67,44 @@ describe('easyConfirm message extraction', () => {
     expect(updateMessage).toHaveBeenCalledWith(nextMessage);
   });
 
+  it('marks the matching ask_user_question tool call done when the interaction is finished', () => {
+    const toolCall = {
+      ...createItem('tool-call-1', SSEMessageType.toolCall, {
+        orderId: 'tool-order-1',
+        substance: {
+          title: 'ask_user_question',
+          input: { questions: [] },
+          status: '_START_',
+        },
+      }),
+      seq: 1,
+    };
+    const pendingItem = {
+      ...createItem('pending-1', SSEMessageType.askUserQuestions, {
+        substance: { questions: [] },
+        formStatus: IFormStatus.INIT,
+      }),
+      seq: 2,
+    };
+    const message = createMessage({ thinkList: [toolCall, pendingItem] });
+    const [descriptor] = collectEasyConfirmItems(message, (nextMessage) => nextMessage);
+
+    const nextMessage = descriptor.updateMessageListItemContent({
+      ...pendingItem.content,
+      formStatus: IFormStatus.FINISH,
+    });
+
+    expect(nextMessage.thinkList?.[0]).toMatchObject({
+      status: '_DONE_',
+      content: {
+        substance: {
+          title: 'ask_user_question',
+          status: '_DONE_',
+        },
+      },
+    });
+  });
+
   it('excludes completed and non-answer interactions', () => {
     const completedItem = createItem('completed-1', SSEMessageType.thinkTaskUserInput, {
       substance: {

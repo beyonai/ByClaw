@@ -19,6 +19,7 @@ import {
   handleParsedChatStream,
   handleSessionRuntimeState,
   handleTaskPlanSnapshot,
+  rebindChatStreamAnswerMessage,
   refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
@@ -117,11 +118,12 @@ describe('hooks/useChat/chatRuntime', () => {
   it('refreshes only the completed interaction while preserving newer stream state', () => {
     const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
     const answerMsg: any = {
-      msgId: 'a1',
+      msgId: 'runtime-placeholder',
       messageId: 'm1',
       queryMsgId: 'q1',
       sessionId: 's1',
       fromBeyond: true,
+      agentId: undefined,
       text: 'newer streamed text',
       streamId: 'stream-2',
       messageList: [
@@ -134,6 +136,9 @@ describe('hooks/useChat/chatRuntime', () => {
     };
     const freshAnswer: any = {
       ...answerMsg,
+      msgId: 'persisted-answer',
+      agentId: 'zht',
+      agentName: 'ZHT',
       text: 'older rendered text',
       streamId: 'stream-1',
       messageList: [
@@ -158,12 +163,203 @@ describe('hooks/useChat/chatRuntime', () => {
     expect(refreshChatStreamAnswerMessage({ sessionId: 's1' }, freshAnswer)).toBe(true);
     expect(updateMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        msgId: 'persisted-answer',
+        agentId: 'zht',
+        agentName: 'ZHT',
         text: 'newer streamed text',
         streamId: 'stream-2',
         messageList: [expect.objectContaining({ content: freshAnswer.messageList[0].content })],
       }),
       { isAssign: true }
     );
+  });
+
+  it('rebinds a restored synthetic answer so resume output stays on the persisted assistant message', () => {
+    jest.useFakeTimers();
+    const queryMsg: any = { msgId: 'q1', sessionId: 's1' };
+    const syntheticAnswer: any = {
+      msgId: 'synthetic-answer',
+      messageId: 'synthetic-message',
+      queryMsgId: 'q1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      fromBeyond: true,
+      text: '已到达的恢复增量',
+      streamId: 'stream-2',
+      messageList: [
+        {
+          uuid: 'interaction-1',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 0, substance: { formStatus: 0 } },
+        },
+      ],
+    };
+    const persistedAnswer: any = {
+      msgId: 'persisted-answer',
+      messageId: 'persisted-message',
+      queryMsgId: 'q1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      fromBeyond: true,
+      text: '持久化旧文本',
+      streamId: 'stream-1',
+      messageList: [
+        {
+          uuid: 'interaction-1',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 2, substance: { formStatus: 2 } },
+        },
+      ],
+    };
+    const updateMessage = jest.fn((message) => message);
+    const flowHandler = jest.fn(({ newAnswerMsg, sseRes }) => {
+      newAnswerMsg.messageTip = sseRes.message.content.substance.msg;
+    });
+    const restoredContext = {
+      clientRequestId: 'restored-client',
+      queryMsg,
+      answerMsg: syntheticAnswer,
+      getMessageList: () => [queryMsg, persistedAnswer],
+      flowHandler,
+      updateMessage,
+      restored: true,
+    } as any;
+
+    registerPendingChatContext(restoredContext);
+    registerSessionChatContext('s1', restoredContext);
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'restored-client',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      restored: true,
+    });
+
+    expect(rebindChatStreamAnswerMessage({ sessionId: 's1', traceId: 'trace-1' }, persistedAnswer)).toBe(true);
+    expect(persistedAnswer.text).toBe('已到达的恢复增量');
+    expect(persistedAnswer.streamId).toBe('stream-2');
+    expect(persistedAnswer.messageList[0].content.formStatus).toBe(2);
+
+    handleParsedChatStream(
+      createParsed({
+        eventName: 'error',
+        formattedPayload: {
+          sessionId: 's1',
+          traceId: 'trace-1',
+          message: {
+            contentType: SSEMessageType.error,
+            content: { substance: { msg: '平台请求失败，HTTP 500' } },
+            status: 'failed',
+          },
+        },
+        rawMessage: {
+          type: 'CHAT_STREAM',
+          sessionId: 's1',
+          traceId: 'trace-1',
+          data: {},
+        },
+      })
+    );
+    jest.runOnlyPendingTimers();
+
+    expect(persistedAnswer.messageTip).toBe('平台请求失败，HTTP 500');
+    expect(syntheticAnswer.messageTip).toBeUndefined();
+    expect(updateMessage).toHaveBeenLastCalledWith(persistedAnswer, { isAssign: true });
+    jest.useRealTimers();
+  });
+
+  it('refuses to rebind an ambiguous resume context without a lane identity', () => {
+    const updateMessage = jest.fn((message) => message);
+    const registerLane = (clientRequestId: string, laneId: string) => {
+      const context = {
+        clientRequestId,
+        laneId,
+        queryMsg: { msgId: `query-${laneId}`, sessionId: 's1' },
+        answerMsg: {
+          msgId: `answer-${laneId}`,
+          messageId: `message-${laneId}`,
+          sessionId: 's1',
+          traceId: 'trace-1',
+          laneId,
+        },
+        getMessageList: () => [],
+        flowHandler: jest.fn(),
+        updateMessage,
+        restored: true,
+      } as any;
+      registerPendingChatContext(context);
+      registerSessionChatContext('s1', context);
+      chatSessionRuntimeManager.register({
+        clientRequestId,
+        sessionId: 's1',
+        traceId: 'trace-1',
+        laneId,
+        restored: true,
+      });
+    };
+    registerLane('client-lane-1', 'lane-1');
+    registerLane('client-lane-2', 'lane-2');
+
+    const persistedAnswer: any = {
+      msgId: 'persisted-answer',
+      messageId: 'persisted-message',
+      sessionId: 's1',
+      traceId: 'trace-1',
+    };
+
+    expect(rebindChatStreamAnswerMessage({ sessionId: 's1', traceId: 'trace-1' }, persistedAnswer)).toBe(false);
+    expect(
+      rebindChatStreamAnswerMessage(
+        { sessionId: 's1', traceId: 'trace-1' },
+        { ...persistedAnswer, laneId: 'missing-lane' }
+      )
+    ).toBe(false);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('rebinds every duplicate lane-less restored context to the persisted resume answer', () => {
+    const updates: any[] = [];
+    const registerDuplicate = (clientRequestId: string, msgId: string) => {
+      const context = {
+        clientRequestId,
+        queryMsg: { msgId: 'query-1', sessionId: 's1' },
+        answerMsg: {
+          msgId,
+          messageId: 'message-1',
+          queryMsgId: 'query-1',
+          sessionId: 's1',
+          traceId: 'trace-1',
+          fromBeyond: true,
+        },
+        getMessageList: () => [],
+        flowHandler: jest.fn(),
+        updateMessage: jest.fn((message) => {
+          updates.push(message);
+          return message;
+        }),
+        restored: true,
+      } as any;
+      registerPendingChatContext(context);
+      registerSessionChatContext('s1', context);
+    };
+    registerDuplicate('runtime:s1:trace-1', 'runtime-placeholder');
+    registerDuplicate('original-client', 'old-client-placeholder');
+
+    const persistedAnswer: any = {
+      msgId: 'persisted-answer',
+      messageId: 'message-1',
+      queryMsgId: 'query-1',
+      sessionId: 's1',
+      traceId: 'trace-1',
+      fromBeyond: true,
+      agentId: 'zht',
+    };
+
+    expect(rebindChatStreamAnswerMessage({ sessionId: 's1', traceId: 'trace-1' }, persistedAnswer)).toBe(true);
+    expect(updates).toHaveLength(2);
+    expect(updates).toEqual([
+      expect.objectContaining({ msgId: 'persisted-answer', agentId: 'zht' }),
+      expect.objectContaining({ msgId: 'persisted-answer', agentId: 'zht' }),
+    ]);
   });
 
   it('does not refresh a stream context whose answer identity differs', () => {

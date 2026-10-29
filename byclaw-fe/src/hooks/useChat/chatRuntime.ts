@@ -355,6 +355,73 @@ const findChatStreamContext = (
 
 export const hasChatStreamContext = (rawMessage: any, res?: any) => !!findChatStreamContext(rawMessage, res);
 
+const mergeResumeAnswerItems = (liveItems: IMessage['messageList'], persistedItems: IMessage['messageList']) => {
+  if (!liveItems?.length) return persistedItems;
+  if (!persistedItems?.length) return liveItems;
+
+  const persistedById = new Map(persistedItems.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+  const liveIds = new Set(liveItems.filter((item) => item.uuid).map((item) => item.uuid));
+  return [
+    ...liveItems.map((item) => {
+      const persistedItem = persistedById.get(item.uuid);
+      return persistedItem ? { ...item, content: persistedItem.content } : item;
+    }),
+    ...persistedItems.filter((item) => !item.uuid || !liveIds.has(item.uuid)),
+  ];
+};
+
+/**
+ * Point a restored stream context at the persisted assistant message selected by Resume.
+ * A refreshed page can reconstruct a synthetic answer from runningStatus before the
+ * persisted ask-user card is available. Resume output must update the persisted message
+ * instead of publishing that synthetic object as a second assistant response.
+ */
+export const rebindChatStreamAnswerMessage = (rawMessage: any, answerMsg: IMessage, res?: any) => {
+  const sessionId = answerMsg.sessionId || getChatStreamSessionId(rawMessage, res);
+  const laneId = answerMsg.laneId || getChatStreamLaneId(rawMessage, res);
+  const sessionContexts = getSessionContexts(sessionId);
+  let candidates = sessionContexts ? Array.from(sessionContexts.values()) : [];
+  if (laneId) {
+    candidates = candidates.filter(
+      (candidate) => `${candidate.laneId || candidate.answerMsg.laneId || ''}` === `${laneId}`
+    );
+  }
+  if (candidates.length > 1 && !laneId) {
+    const distinctLanes = new Set(
+      candidates.map((candidate) => `${candidate.laneId || candidate.answerMsg.laneId || ''}`).filter(Boolean)
+    );
+    if (distinctLanes.size > 0) return false;
+  }
+  if (!candidates.length && !laneId && !sessionContexts?.size) {
+    const fallback = findChatStreamContext(rawMessage, res);
+    if (fallback) candidates = [fallback];
+  }
+  if (!candidates.length) return false;
+
+  candidates.forEach((context) => {
+    const liveAnswer = context.answerMsg;
+    const reboundAnswer = {
+      ...answerMsg,
+      ...liveAnswer,
+      msgId: answerMsg.msgId,
+      messageId: answerMsg.messageId,
+      queryMsgId: answerMsg.queryMsgId,
+      sessionId: answerMsg.sessionId,
+      fromBeyond: answerMsg.fromBeyond,
+      agentId: answerMsg.agentId || liveAnswer.agentId,
+      agentCode: answerMsg.agentCode || liveAnswer.agentCode,
+      agentName: answerMsg.agentName || liveAnswer.agentName,
+      agentType: answerMsg.agentType || liveAnswer.agentType,
+      metadata: answerMsg.metadata || liveAnswer.metadata,
+      messageList: mergeResumeAnswerItems(liveAnswer.messageList, answerMsg.messageList),
+      thinkList: mergeResumeAnswerItems(liveAnswer.thinkList, answerMsg.thinkList),
+    };
+    Object.assign(answerMsg, reboundAnswer);
+    context.answerMsg = context.updateMessage(answerMsg, { isAssign: true });
+  });
+  return true;
+};
+
 const normalizedMessageIdentity = (message: IMessage) =>
   [message.sessionId, message.messageId, message.queryMsgId].map((value) => `${value ?? ''}`.trim());
 
@@ -377,7 +444,22 @@ export const refreshChatStreamAnswerMessage = (rawMessage: any, answerMsg: IMess
   if (!context || !hasSameCompleteMessageIdentity(context.answerMsg, answerMsg)) return false;
 
   let interactionMatched = false;
-  const nextAnswerMsg = { ...context.answerMsg };
+  const nextAnswerMsg = {
+    ...context.answerMsg,
+    // The live runtime object may be a synthetic placeholder reconstructed after refresh.
+    // Once the persisted interaction answer is available, keep live stream state but switch
+    // the context to the persisted message and employee identity.
+    msgId: answerMsg.msgId,
+    messageId: answerMsg.messageId,
+    queryMsgId: answerMsg.queryMsgId,
+    sessionId: answerMsg.sessionId,
+    fromBeyond: answerMsg.fromBeyond,
+    agentId: answerMsg.agentId || context.answerMsg.agentId,
+    agentCode: answerMsg.agentCode || context.answerMsg.agentCode,
+    agentName: answerMsg.agentName || context.answerMsg.agentName,
+    agentType: answerMsg.agentType || context.answerMsg.agentType,
+    metadata: answerMsg.metadata || context.answerMsg.metadata,
+  };
   (['thinkList', 'messageList'] as const).forEach((listKey) => {
     const freshItems = answerMsg[listKey] || [];
     if (!freshItems.length || !context.answerMsg[listKey]?.length) return;

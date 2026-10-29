@@ -324,6 +324,7 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend.mock.calls[0]?.[1]?.clientRequestId).toMatch(/_answer-client$/);
   });
 
   it('refreshes an existing restored stream context before continuing a resume', async () => {
@@ -407,6 +408,7 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend.mock.calls[0]?.[1]?.clientRequestId).toMatch(/_answer-client$/);
   });
 
   it('falls back to cold resume when the restored context disappears before send', async () => {
@@ -548,6 +550,67 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockUpdateMessage).not.toHaveBeenCalled();
+  });
+
+  it('reuses the persisted zht answer when the refreshed interaction card omits sessionId', async () => {
+    const queryMessage = {
+      msgId: 'query-client',
+      text: '原始问题',
+      agentType: 'agent',
+      sessionId: '101',
+    };
+    const persistedAnswer = {
+      msgId: 'answer-client',
+      messageId: '201',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Done,
+      sessionId: '101',
+      agentId: 'zht',
+      messageList: [{ contentType: SSEMessageType.askUserQuestions, content: { formStatus: 0 } }],
+    };
+    const completedCardWithoutSessionId = {
+      ...persistedAnswer,
+      sessionId: undefined,
+      messageList: [{ contentType: SSEMessageType.askUserQuestions, content: { formStatus: 2 } }],
+    };
+    mockMessageList = [queryMessage, persistedAnswer];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: completedCardWithoutSessionId,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        },
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        msgId: 'answer-client',
+        sessionId: '101',
+        agentId: 'zht',
+        traceId: 'trace-1',
+        messageList: completedCardWithoutSessionId.messageList,
+      }),
+      { isAssign: true }
+    );
+    expect(mockSend).toHaveBeenCalledWith(
+      '苹果',
+      expect.objectContaining({
+        agentId: null,
+        agentCode: 'zht',
+      })
+    );
   });
 
   it('reuses the restored answer when refresh dropped the client query id', async () => {
