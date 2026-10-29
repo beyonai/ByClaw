@@ -361,8 +361,22 @@ class WebSocketManager {
     });
   }
 
-  public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
+  public async requiresCloudStorage(): Promise<boolean> {
+    await this.desktopChatConfigReady;
+    return !this.desktopChatWsUrl;
+  }
+
+  public async sendMessageWhenReady(
+    message: WebSocketMessage,
+    signal?: AbortSignal,
+    isCurrent: () => boolean = () => true
+  ): Promise<void> {
+    const token = getToken();
+    const scope = this.scopedSessionId;
+    const current = () => !signal?.aborted && token === getToken() && scope === this.scopedSessionId && isCurrent();
+    if (!current()) throw new DOMException('Cancelled', 'AbortError');
     await this.waitUntilConnected();
+    if (!current()) throw new DOMException('Cancelled', 'AbortError');
     this.sendMessage(message);
   }
 
@@ -387,6 +401,10 @@ class WebSocketManager {
   /**
    * 注册消息处理器
    */
+  public getScopedSessionId(): string {
+    return this.scopedSessionId;
+  }
+
   public onMessage(type: string, handler: MessageHandler): void {
     if (!this.messageHandlers.has(type)) {
       this.messageHandlers.set(type, []);

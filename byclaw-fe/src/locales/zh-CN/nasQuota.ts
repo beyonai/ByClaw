@@ -1,4 +1,12 @@
 export default {
+  'storageReadiness.title': '正在开通个人网盘',
+  'storageReadiness.waiting': '正在准备网盘资源，完成后将自动继续当前操作，请稍候。',
+  'storageReadiness.recovering': '暂时无法获取开通状态，正在自动重试。您可以取消本次操作。',
+  'storageReadiness.timeout': '等待时间较长，已暂停等待。您可以重试或取消；不会重复提交原操作。',
+  'storageReadiness.blocked': '历史网盘资料需要迁移，请联系管理员处理后重试。',
+  'storageReadiness.retry': '重试',
+  'storageReadiness.cancel': '取消本次操作',
+
   'nasQuota.full': '网盘空间已用满，剩余空间为 0 B。',
   'nasQuota.title': '网盘空间超限',
   'nasQuota.summary': '当前配额：{quota}；已用空间：{used}。',

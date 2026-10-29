@@ -352,8 +352,12 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
   });
 
   // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
-  return getDesktopLocalRequest(url, method, myData).then((desktop) =>
-    instance
+  return getDesktopLocalRequest(url, method, myData).then(async (desktop) => {
+    if (!desktop && /\/(?:chat\/uploadFiles|datasetController\/uploadFiles|fileBrowser\/)/.test(url)) {
+      const { requiresPersonalStorage, waitForPersonalStorage } = await import('@/utils/personalStorageReadiness');
+      if (requiresPersonalStorage(url)) await waitForPersonalStorage(cancelToken?.signal);
+    }
+    return instance
       .request({
         ...config,
         headers: desktop ? desktopHeaders(desktop.token) : headers,
@@ -396,8 +400,8 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
         }
         return checkFactoryRes(res.data, res, responseCfg);
       })
-      .finally(() => requestFinish({ url }))
-  );
+      .finally(() => requestFinish({ url }));
+  });
 }
 
 /**

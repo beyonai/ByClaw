@@ -1,4 +1,13 @@
 export default {
+  'storageReadiness.title': 'Preparing your personal drive',
+  'storageReadiness.waiting': 'Preparing storage. Your operation will continue automatically when ready.',
+  'storageReadiness.recovering':
+    'Status is temporarily unavailable. Retrying automatically; you may cancel this operation.',
+  'storageReadiness.timeout': 'Waiting has timed out. Retry or cancel; your original operation has not been submitted.',
+  'storageReadiness.blocked': 'Existing drive data needs migration. Contact your administrator, then retry.',
+  'storageReadiness.retry': 'Retry',
+  'storageReadiness.cancel': 'Cancel operation',
+
   'nasQuota.full': 'Your drive is full. Remaining storage: 0 B.',
   'nasQuota.title': 'Drive storage quota exceeded',
   'nasQuota.summary': 'Current quota: {quota}; used storage: {used}.',

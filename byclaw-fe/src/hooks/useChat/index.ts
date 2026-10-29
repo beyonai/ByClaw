@@ -1464,6 +1464,17 @@ function useChat(props: IProps) {
       sendResult.cancel();
     };
 
+    void sendResult.promise?.then((outcome) => {
+      if (!('failed' in outcome) || !outcome.failed) return;
+      laneEntries.forEach((entry) => {
+        set(entry.answerMsg, 'messageState', IMessageState.Cancel);
+        updateMessage(entry.answerMsg);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
+        unregisterPendingChatContext(entry.lane.clientRequestId);
+        unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
+      });
+    });
+
     if (isContinuingRunningTrace) {
       return { cancel };
     }

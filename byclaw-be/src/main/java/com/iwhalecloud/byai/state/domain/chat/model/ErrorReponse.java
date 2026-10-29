@@ -8,6 +8,9 @@ public class ErrorReponse {
         if(failure instanceof com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException exceeded) {
             response.errorCode="NAS_QUOTA_EXCEEDED";response.quota=exceeded.details();
         }
+        if(failure instanceof com.iwhalecloud.byai.state.common.exception.StoragePreparingException preparing) {
+            response.errorCode="STORAGE_PREPARING";response.quota=preparing.details();
+        }
         return response;
     }
     private String statusCode;

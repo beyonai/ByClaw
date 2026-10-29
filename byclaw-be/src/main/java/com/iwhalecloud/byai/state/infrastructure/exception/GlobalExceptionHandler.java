@@ -67,6 +67,13 @@ public class GlobalExceptionHandler implements MessageSourceAware {
         return ResponseEntity.status(507).body(body);
     }
 
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StoragePreparingException.class)
+    public ResponseEntity<ResponseUtil<Object>> storagePreparing(com.iwhalecloud.byai.state.common.exception.StoragePreparingException failure,HttpServletResponse response) {
+        if(response.isCommitted())return null;
+        ResponseUtil<Object> body=ResponseUtil.fail(failure.getMessage());body.setData(failure.details());
+        return ResponseEntity.status(409).body(body);
+    }
+
     @ExceptionHandler(value = BaseRuntimeException.class)
     public void baseExceptionHandler(HttpServletResponse response, BaseRuntimeException baseRuntimeException)
         throws IOException {
