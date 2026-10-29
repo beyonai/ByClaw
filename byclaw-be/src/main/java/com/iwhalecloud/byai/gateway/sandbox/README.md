@@ -117,3 +117,16 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
 
 决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。
+
+
+### ACS 失败启动后的释放
+
+平台托管模式下，管理页允许重试释放 `FAILED` 和 `RELEASING` 的个人沙箱记录。
+Platform 必须确认该记录的远端实例消失、记录为 `RELEASED` 且执行占用已清除后，
+管理接口才返回成功。取消请求仍在等待创建结果时，接口返回“释放尚未完成”，可稍后重试。
+启动失败且没有 `sandbox_id` 时，按 `userCode + serviceKey + recordId` 定位残留，
+删除前重新核对身份并使用 Kubernetes UID 前置条件，防止删除同名的新实例；NAS 数据不随之删除。
+
+BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，默认端口 `8086`。
+端口依次取 `SERVER_PORT`、`BE_SERVER_PORT`、默认值；上下文路径可由
+`SERVER_SERVLET_CONTEXT_PATH` 覆盖（空值表示根路径）。

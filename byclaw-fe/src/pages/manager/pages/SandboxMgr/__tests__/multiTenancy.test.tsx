@@ -187,3 +187,15 @@ test('shows the user name returned for a user sandbox record', () => {
   );
   expect(screen.getByText('Test User')).toBeInTheDocument();
 });
+
+test.each(['FAILED', 'RELEASING'])('allows retrying release for a %s user record', (status) => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [{ id: 12969, ownerScope: 'USER', userCode: 'user001', sandboxType: 'byclaw-dsh', status }],
+    })
+  );
+  expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
+});
