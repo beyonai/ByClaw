@@ -68,7 +68,7 @@
  * Tests: node --test scripts/byclaw-multi-host.test.mjs (pure parts only; importing
  * this module starts nothing and loads no DSH package).
  */
-import { ManagedUserRegistry, limitContextStartup, startupDiagnostics } from './byclaw-managed-host.mjs'
+import { ManagedUserRegistry, limitContextStartup, startupDiagnostics, validateStorageBinding } from './byclaw-managed-host.mjs'
 export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -426,6 +426,10 @@ export function readHostConfig(env) {
     listenHost: env.BYCLAW_MULTI_HOST_LISTEN_HOST || '0.0.0.0',
     hostId: env.BYCLAW_MULTI_HOST_ID || hostname(),
     root, userRoot,
+    storageMounts: parseStorageMounts(env.BYCLAW_MULTI_HOST_STORAGE_MOUNTS),
+    storagePoolId: env.BYCLAW_MULTI_HOST_NAS_POOL_ID,
+    storageParentSpaceKey: env.BYCLAW_MULTI_HOST_NAS_SPACE_KEY,
+    storageNamespace: env.BYCLAW_MULTI_HOST_STORAGE_NAMESPACE,
     managed, capacity, startupConcurrency, startupQueueCapacity,
     preloadUsers: managed ? [] : preloadUsers,
     publicBase,
@@ -1235,17 +1239,61 @@ export async function preloadHostRuntime(config) {
 }
 
 /** Durable homes follow stable context identity; profiles and sockets follow the executor. */
-export function userContextPaths(config, user) {
+export function userContextPaths(config, user, request = {}) {
   if (!isValidUserCode(user)) throw new Error('invalid user context path')
   if (config.userRoot && !config.managed) throw new Error('shared user homes require managed mode')
   const userDir = join(config.root, 'users', user)
-  const home = join(config.userRoot ? join(config.userRoot, user) : userDir, 'dsh-home')
+  const binding = validateStorageBinding(user, request.storageBinding)
+  const home = binding?.home ?? join(config.userRoot ? join(config.userRoot, user) : userDir, 'dsh-home')
   return {
     home,
     profile: join(userDir, 'profile'),
     runtimeDir: config.userRoot
       ? join('/tmp/byclaw-multi-host', createHash('sha256').update(`${config.hostId ?? ''}\n${config.root}\n${user}`).digest('hex').slice(0, 24), 'browser')
       : join(config.root, 'run', createHash('sha256').update(home).digest('hex').slice(0, 24), 'browser'),
+  }
+}
+
+export function parseStorageMounts(value) {
+  const mounts = value == null ? [] : JSON.parse(value)
+  if (!Array.isArray(mounts) || mounts.length > 20) throw new Error('invalid shared NAS mounts')
+  const parents = new Set(), pools = new Set()
+  for (const mount of mounts) {
+    if (!mount || typeof mount !== 'object' || Object.keys(mount).sort().join(',') !== 'mountPath,namespace,parentSpaceKey,poolId'
+      || !/^[a-f0-9]{64}$/.test(mount.parentSpaceKey ?? '') || !/^[A-Za-z0-9_-]{1,128}$/.test(mount.poolId ?? '')
+      || !/^[a-z][a-z0-9-]{0,62}$/.test(mount.namespace ?? '')
+      || mount.mountPath !== `/data/byclaw-context-pools/${mount.parentSpaceKey}`
+      || parents.has(mount.parentSpaceKey) || pools.has(mount.poolId)) throw new Error('invalid shared NAS mounts')
+    parents.add(mount.parentSpaceKey); pools.add(mount.poolId); Object.freeze(mount)
+  }
+  return Object.freeze(mounts)
+}
+
+/** Verify provider-derived mount identity before touching a durable context directory. */
+export async function verifyUserStorageHome(config, user, request, inspect = lstat) {
+  const { home } = userContextPaths(config, user, request)
+  const storageBinding = validateStorageBinding(user, request.storageBinding)
+  if (storageBinding) {
+    let root = config.userRoot
+    let paths
+    if (storageBinding.version === 2) {
+      const mount = config.storageMounts?.find(m => m.parentSpaceKey === storageBinding.parentSpaceKey
+        && m.poolId === storageBinding.poolId && m.namespace === storageBinding.namespace)
+      root = `/data/byclaw-context-pools/${storageBinding.parentSpaceKey}`
+      if (!config.managed || mount?.mountPath !== root) throw new Error('user NAS binding requires the configured shared NAS mount')
+      paths = ['/data/byclaw-context-pools', root, join(root, user), home]
+    } else {
+      if (!config.managed || root !== '/data/byclaw-contexts' || home !== storageBinding.home
+        || config.storagePoolId !== storageBinding.poolId || config.storageParentSpaceKey !== storageBinding.parentSpaceKey
+        || config.storageNamespace !== storageBinding.namespace) throw new Error('user NAS binding requires the configured shared NAS mount')
+      paths = [root, join(root, user), home]
+    }
+    // Reject aliases at every controlled parent before mkdir. Plugins remain trusted in this shared process.
+    for (const path of paths) {
+      const info = await inspect(path).catch(error => { if (error.code !== 'ENOENT') throw error })
+      if (!info && (path === root || path === '/data/byclaw-context-pools')) throw new Error('user NAS mount is missing')
+      if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('unsafe user NAS home')
+    }
   }
 }
 
@@ -1266,7 +1314,8 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = appBoot
   const { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } = launchEnvironment
-  const { home, profile: dir, runtimeDir } = userContextPaths(config, user)
+  const { home, profile: dir, runtimeDir } = userContextPaths(config, user, request)
+  await verifyUserStorageHome(config, user, request)
   await mkdir(home, { recursive: true, mode: 0o700 })
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await writeFile(join(dir, 'package.json'), await readFile(join(config.managedProfile, 'package.json'), 'utf8'))

@@ -3,12 +3,28 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 const fail = (message, status = 409) => Object.assign(new Error(message), { status })
 const keyPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const same = (a, b) => a.instanceId === b.instanceId && a.mappingId === b.mappingId && a.generation === b.generation
 const fence = value => ({ managed: true, instanceId: value.instanceId, mappingId: value.mappingId, generation: value.generation })
+
+/** A trusted platform binding selects only this context's existing durable home. */
+export function validateStorageBinding(key, value) {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value) || ![1, 2].includes(value.version)
+    || value.mode !== 'USER_NAS_QUOTA' || value.contextKey !== key || !/^ctx_[a-f0-9]{64}$/.test(key)
+    || !/^[a-f0-9]{64}$/.test(value.parentSpaceKey ?? '')
+    || !/^[a-f0-9]{64}$/.test(value.spaceKey ?? '') || !/^[A-Za-z0-9_-]{1,128}$/.test(value.poolId ?? '')
+    || !/^[a-z][a-z0-9-]{0,62}$/.test(value.namespace ?? '')
+    || value.home !== (value.version === 1 ? `/data/byclaw-contexts/${key}/dsh-home` : `/data/byclaw-context-pools/${value.parentSpaceKey}/${key}/dsh-home`)
+    || Object.keys(value).sort().join(',') !== 'contextKey,home,mode,namespace,parentSpaceKey,poolId,spaceKey,version') {
+    throw fail('invalid user storage binding', 400)
+  }
+  return Object.freeze({ ...value })
+}
 
 /** Bound cold context startup independently of resident capacity. Never release an active boot early. */
 export function limitContextStartup(boot, concurrency = 1, { queueCapacity = 128, now = Date.now, log = () => {} } = {}) {
@@ -146,6 +162,7 @@ export class ManagedUserRegistry {
     await this.locked(() => this.check(key, value))
     const entry = this.get(key)
     return { ...fence(value), contextKey: key, status: entry?.status ?? 'absent', hostId: this.hostId,
+      ...(entry?.request.storageBinding ? { storageBinding: entry.request.storageBinding } : {}),
       ...(entry ? { ...await this.activity(entry), ...startupDiagnostics(entry.hooks, this.now) } : { activeRequests: 0, busy: false, lastActiveAt: this.now() }),
       ...(this.admitting(key) ? { webPath: `/u/${key}/`, webToken: entry.webToken } : {}) }
   }
@@ -157,8 +174,10 @@ export class ManagedUserRegistry {
       if (request.managed !== true || request.sandboxId !== this.hostId || request.capacity !== this.capacity
         || !keyPattern.test(request.userCode ?? '') || !Number.isSafeInteger(request.leaseExpiresAt)
         || request.leaseExpiresAt <= this.now() || request.workerAgentType !== `BYCLAW_DSH_SHARED_${key}_${request.generation}`) throw fail('invalid managed identity or expired lease', 400)
+      const storageBinding = validateStorageBinding(key, request.storageBinding)
       const current = this.get(key)
       if (current) {
+        if (!isDeepStrictEqual(current.request.storageBinding, storageBinding)) throw fail('live storage binding mismatch')
         if (current.draining || current.request.leaseExpiresAt <= this.now()) throw fail('context lease expired/released')
         if (current.request.userCode !== request.userCode || current.request.enterpriseId !== request.enterpriseId || current.request.userId !== request.userId) throw fail('tenant identity mismatch')
         current.request.leaseExpiresAt = Math.max(current.request.leaseExpiresAt, request.leaseExpiresAt)
@@ -171,7 +190,7 @@ export class ManagedUserRegistry {
       for (const [name, value] of Object.entries(request.env)) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || typeof value !== 'string') throw fail('invalid env', 400)
       if (this.entries.size >= this.capacity) throw fail('host capacity exceeded', 429)
       await this.persist(key, { ...fence(request), deleted: false })
-      const e = { user: key, status: 'starting', request: { ...request, env: { ...request.env } }, hooks: {}, sockets: new Set(), webRequests: 0, lastActiveAt: this.now(), webToken: randomBytes(32).toString('base64url') }
+      const e = { user: key, status: 'starting', request: { ...request, storageBinding, env: { ...request.env } }, hooks: {}, sockets: new Set(), webRequests: 0, lastActiveAt: this.now(), webToken: randomBytes(32).toString('base64url') }
       e.hooks.admission = { allowed: () => !e.draining && e.request.leaseExpiresAt > this.now() }
       this.entries.set(key, e)
       this.start(e, true)

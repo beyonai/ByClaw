@@ -317,3 +317,24 @@ test('shared user root is explicit, managed-only and separate from host-owned fi
   }
   assert.throws(() => host.readHostConfig({ ...env, BYCLAW_MULTI_HOST_MANAGED: '0' }), /managed/)
 })
+
+test('user NAS binding is immutable within a live generation and acknowledged by the host', async t => {
+  const r = await registry(t)
+  const key = 'ctx_' + 'a'.repeat(64)
+  const binding = { version: 1, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared',
+    parentSpaceKey: 'd'.repeat(64), spaceKey: 'b'.repeat(64), poolId: 'pool-1', home: `/data/byclaw-contexts/${key}/dsh-home` }
+  await r.ensure(key, request(key, { storageBinding: binding }))
+  assert.deepEqual((await r.describe(key, request(key))).storageBinding, binding)
+  await assert.rejects(r.ensure(key, request(key, { storageBinding: { ...binding, spaceKey: 'c'.repeat(64) } })), /storage binding/)
+  await assert.rejects(r.ensure(key, request(key)), /storage binding/)
+})
+
+test('NAS binding cannot redirect a context into another user home', async t => {
+  const r = await registry(t)
+  const key = 'ctx_' + 'a'.repeat(64)
+  await assert.rejects(r.ensure(key, request(key, { storageBinding: {
+    version: 1, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared', parentSpaceKey: 'd'.repeat(64), spaceKey: 'b'.repeat(64),
+    poolId: 'pool-1', home: '/data/byclaw-contexts/other/dsh-home',
+  } })), /storage binding/)
+  assert.equal(r.list().length, 0)
+})

@@ -161,6 +161,17 @@ export default function SharedMembersDrawer({
             { title: intl.formatMessage({ id: 'sandboxMgr.shared.tenant' }), dataIndex: 'enterpriseId' },
             { title: intl.formatMessage({ id: 'sandboxMgr.table.status' }), dataIndex: 'status', render: formatStatus },
             {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.storageMode' }),
+              dataIndex: 'storageMode',
+              render: (value) =>
+                intl.formatMessage({
+                  id:
+                    value === 'USER_NAS_QUOTA'
+                      ? 'sandboxMgr.shared.storage.userQuota'
+                      : 'sandboxMgr.shared.storage.logical',
+                }),
+            },
+            {
               title: intl.formatMessage({ id: 'sandboxMgr.shared.assignedAt' }),
               dataIndex: 'assignedAt',
               render: time,

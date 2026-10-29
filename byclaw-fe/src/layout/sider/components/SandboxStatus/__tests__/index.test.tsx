@@ -121,3 +121,16 @@ describe('SandboxStatusIndicator', () => {
     );
   });
 });
+
+it('shows quota preparation without offering a release action for a pending allocation', () => {
+  (useSandboxStatus as jest.Mock).mockReturnValue({
+    status: 'transitioning',
+    storage: { enabled: true, ready: false, state: 'WAITING_QUOTA' },
+    sandboxes: [],
+    refetch: jest.fn(),
+    restartSandbox: mockRestartSandbox,
+  });
+  render(<SandboxStatusIndicator userCode="alice" />);
+  expect(screen.getByText('sandbox.storage.preparing')).toBeDisabled();
+  expect(screen.queryByText('sandbox.action.reconnect')).not.toBeInTheDocument();
+});

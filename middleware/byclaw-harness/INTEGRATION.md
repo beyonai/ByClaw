@@ -168,8 +168,8 @@ platform 的 `SHARED` 规格使用 `sharedStorageNamespace=byclaw-shared-dsh`，
 共享存储启用时 Redis 占用键按 contextKey 互斥，generation 保留在持有者值内；释放原子校验持有者。
 DSH 自身会话文件锁继续作为写入保护，NAS 跨 Pod 锁语义需要部署验收。
 
-升级需同时更新 platform 和 Harness 镜像，执行 platform V0.6.0 的 DDL/DML 增量后重建宿主。
-不能混用新旧宿主继续接单：先排空并停止旧上下文，更新完成后再重建宿主。
+升级需更新 platform 和 Harness 镜像，并执行 platform V0.6.0 的 DDL/DML 增量。
+新宿主使用新镜像；已有宿主保持运行，不为新增用户或挂载新池强制重启。新准入校验实际挂载清单，缺少目标池的旧宿主不接收该池的新上下文，已有上下文继续服务，空闲释放后才替换宿主。
 本次不迁移旧宿主历史会话，旧 NAS 空间保留；新布局产生的会话支持后续跨共享宿主恢复。
 若实际部署使用静态 PVC，路径前还有 `shared/byclaw-shared-dsh/`；使用 NAS pool 时平台会将
 这一逻辑前缀替换为对应的 `spaces/<spaceKey>/`。
@@ -187,3 +187,19 @@ DSH_SOURCE_ROOT=/path/to/built/deepseek-harness node --test \
 其中 Redis 测试启动独立临时 Redis；恢复测试使用指定 DSH 构建的真实 JSONL 后端，不调用模型。
 云端需验证：A 宿主完成会话→排空释放→B 宿主恢复相同会话并正确回答历史信息；同时确认不同
 租户/用户不可串读、双写被拒绝、NAS 不可用时启动失败、释放宿主后数据仍存在。
+
+## Shared user NAS quotas (V0.6.0)
+
+`BYCLAW_SANDBOX_SHARED_USER_NAS_ENABLED` is a business system parameter (default `0`), not a container environment switch. At `1`, only eligible shared DSH users prepare storage at login. Platform admits the context only after the user directory's enforcement quota and the shared parent's capacity budget are confirmed ready. Quota preparation is asynchronous; a pending quota does not reserve a shared host slot.
+
+The deployment still uses **one resident Harness process per shared Pod**. Plugin modules are shared; contexts, credentials and mutable state remain user-scoped. Canonical identity includes source service, tenant and immutable user ID. Legacy session directories receive child quotas in place, with no migration utility. New users can spill into another pool when the original pool is full; users with legacy history cannot silently move to an empty directory.
+
+New quota-capable hosts mount the SERVICE namespace's `contexts` directory from every READY pool, including prepared spare pools, at `/data/byclaw-context-pools/<parentSpaceKey>`. They never mount other services' roots or the whole filesystem. Each user's V2 `storageBinding` selects `<mount>/<contextKey>/dsh-home`. The legacy `/data/byclaw-contexts` mount and V1 binding remain supported. Host-local profiles, tokens and browser temporary files do not become shared session state.
+
+Platform freezes each new host's mount snapshot before provisioning. ACS validates every parent owner, pool and subpath and derives `BYCLAW_MULTI_HOST_STORAGE_MOUNTS` from the mounted directories. Harness validates that proof and immutable user binding before boot. The allocator sends a new user only to a host covering that user's parent/pool. A future unmounted pool is handled by NEW hosts; no existing Pod is patched, restarted or drained to add mounts. ACTIVE and already reserved generations retain their mode/binding across policy changes and quota-control-plane delays. Disabling the flag stops new quota allocation; users already bound to NAS continue using the same home even after release and reacquisition.
+
+Parent headroom is reserved once, so new users do not repeatedly enlarge the parent quota. Quota readiness gates NEW quota-mode admission only. Releasing a context never deletes its directory or quota. Start new hosts from the upgraded image before enabling the parameter; keep occupied older hosts running until their contexts naturally release. Resource exhaustion blocks new admissions rather than evicting active users.
+
+Local tests exercise allocation, fixed mount snapshots, provider manifests, binding validation and real DSH JSONL reopen/write ownership using temporary local directories. ACS/NAS nested quota enforcement, cross-Pod file locking, actual mount behavior and concurrent chat latency still require deployment acceptance.
+
+A NAS quota limits storage consumption. A shared process and UID are a trusted execution boundary; this is **not** an operating-system security boundary against malicious plugins or arbitrary code that can access other mounted directories. Browser temporary files remain ephemeral and host-local. Container restarts do not remove durable homes.

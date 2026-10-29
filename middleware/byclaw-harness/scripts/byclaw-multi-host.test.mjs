@@ -776,3 +776,39 @@ test('legacy homes stay unchanged and context path traversal is rejected', () =>
   assert.equal(host.userContextPaths({ root: '/data/host' }, 'alice').home, '/data/host/users/alice/dsh-home')
   assert.throws(() => host.userContextPaths({ root: '/data/host', userRoot: '/data/shared', managed: true }, '../alice'))
 })
+
+test('quota context verifies the mounted pool and rejects symlinks before boot', async () => {
+  const key = `ctx_${'a'.repeat(64)}`
+  const binding = { version: 1, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared',
+    parentSpaceKey: 'b'.repeat(64), spaceKey: 'c'.repeat(64), poolId: 'pool', home: `/data/byclaw-contexts/${key}/dsh-home` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts', storagePoolId: 'pool',
+    storageParentSpaceKey: binding.parentSpaceKey, storageNamespace: 'shared' }
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, directory)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storagePoolId: 'other' }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async () => ({
+    isDirectory: () => false, isSymbolicLink: () => true,
+  })), /unsafe user NAS home/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async () => {
+    throw Object.assign(new Error('missing mount'), { code: 'ENOENT' })
+  }), /NAS mount/)
+})
+
+test('multi-pool home follows immutable user binding across hosts and rejects missing pool', async () => {
+  const key = `ctx_${'c'.repeat(64)}`
+  const parent = 'a'.repeat(64)
+  const binding = { version: 2, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: 'b'.repeat(64),
+    parentSpaceKey: parent, poolId: 'pool-two', namespace: 'shared',
+    home: `/data/byclaw-context-pools/${parent}/${key}/dsh-home` }
+  const mount = { parentSpaceKey: parent, poolId: 'pool-two', namespace: 'shared', mountPath: `/data/byclaw-context-pools/${parent}` }
+  const config = { managed: true, root: '/data/host-one', userRoot: '/data/byclaw-contexts', storageMounts: [mount] }
+  const request = { storageBinding: binding }
+  assert.equal(host.userContextPaths(config, key, request).home, binding.home)
+  assert.equal(host.userContextPaths({ ...config, root: '/data/host-two' }, key, request).home, binding.home)
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, request, directory)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [] }, key, request, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [{ ...mount, poolId: 'wrong' }] }, key, request, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, request, async () => ({ isDirectory: () => true, isSymbolicLink: () => true })), /unsafe/)
+  assert.throws(() => host.userContextPaths(config, key, { storageBinding: { ...binding, home: '/tmp/other' } }), /invalid/)
+})

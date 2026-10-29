@@ -8,7 +8,7 @@ import test from 'node:test'
 import { userContextPaths } from './byclaw-multi-host.mjs'
 
 // Uses built upstream packages, no model calls. Supply a built DSH checkout explicitly.
-test('real DSH JSONL backend reopens the same business session after host replacement', {
+for (const mode of ['legacy', 'multi-pool']) test(`real DSH JSONL backend reopens the same business session after host replacement (${mode})`, {
   skip: !process.env.DSH_SOURCE_ROOT && 'set DSH_SOURCE_ROOT to a built DSH checkout',
 }, async t => {
   const require = createRequire(join(process.env.DSH_SOURCE_ROOT, 'packages/session/session-persistence-jsonl/package.json'))
@@ -23,12 +23,21 @@ test('real DSH JSONL backend reopens the same business session after host replac
     await rm(root, { recursive: true, force: true })
   })
   const config = { root: join(root, 'host-a'), userRoot: join(root, 'contexts'), managed: true }
-  const first = userContextPaths(config, 'ctx_alice')
-  const second = userContextPaths({ ...config, root: join(root, 'host-b') }, 'ctx_alice')
+  const user = `ctx_${'a'.repeat(64)}`, otherUser = `ctx_${'b'.repeat(64)}`
+  const request = key => mode === 'legacy' ? {} : { storageBinding: {
+    version: 2, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: 'c'.repeat(64), poolId: 'pool-two',
+    parentSpaceKey: 'd'.repeat(64), namespace: 'shared',
+    home: `/data/byclaw-context-pools/${'d'.repeat(64)}/${key}/dsh-home`,
+  } }
+  const first = userContextPaths(config, user, request(user))
+  const second = userContextPaths({ ...config, root: join(root, 'host-b') }, user, request(user))
+  assert.equal(first.home, second.home)
   const backend = async home => {
     const ctx = new Context()
     contexts.push(ctx)
-    await ctx.plugin(persistence, { root: join(home, 'sessions'), compression: 'none' })
+    // Local stand-in for the same NAS mounts in two hosts; no cloud filesystem is exercised.
+    const physicalHome = home.startsWith('/data/') ? join(root, 'mounts', home.slice(6)) : home
+    await ctx.plugin(persistence, { root: join(physicalHome, 'sessions'), compression: 'none' })
     return ctx.sessionPersistence
   }
   await mkdir(first.profile, { recursive: true })
@@ -49,6 +58,6 @@ test('real DSH JSONL backend reopens the same business session after host replac
   await resumed.append([{ type: 'turn/start', seq: 2, time: 3, data: { turn: 2 } }])
   assert.deepEqual((await resumed.read()).events.map(e => e.seq), [0, 1, 2])
   await resumed.close()
-  const other = await backend(userContextPaths(config, 'ctx_bob').home)
+  const other = await backend(userContextPaths(config, otherUser, request(otherUser)).home)
   await assert.rejects(other.open(sessionId, 'read'), /not found|does not exist/i)
 })

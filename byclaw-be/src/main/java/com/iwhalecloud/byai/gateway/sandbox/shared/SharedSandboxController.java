@@ -19,10 +19,19 @@ public class SharedSandboxController {
     private final SharedSandboxGateway gateway;
 
     private final UsersMapper users;
+    private final SharedUserStoragePreparation storagePreparation;
 
-    public SharedSandboxController(SharedSandboxGateway gateway, UsersMapper users) {
+    public SharedSandboxController(SharedSandboxGateway gateway, UsersMapper users, SharedUserStoragePreparation storagePreparation) {
         this.gateway = gateway;
         this.users = users;
+        this.storagePreparation = storagePreparation;
+    }
+
+    @PostMapping("/userStorageStatus")
+    public ResponseUtil<?> userStorageStatus() {
+        String user = CurrentUserHolder.getCurrentUserCode();
+        if (user == null || user.isBlank()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        return ResponseUtil.successResponse(storagePreparation.status(user));
     }
 
     @PostMapping("/{operation}")
