@@ -113,6 +113,23 @@ class TenantCommandAcceptanceTest {
         assertEquals("PREPARED", json.readTree(jdbc.queryForObject("SELECT payload FROM byai.tenant_execution_policy", String.class)).path("accessMode").asText());
         assertEquals(first.commandId(), jdbc.queryForObject("SELECT correlation_id FROM byai.integration_outbox", String.class));
     }
+    /** Policy success means the access snapshot was stored, not that every quota consumer acknowledged it. */
+    @Test void enablingPolicyReturnsSuccessAndStableReceiptWithoutConsumers() throws Exception {
+        var reservation = service.provision(TenantCommandRequest.parse(body("request-enable-policy")));
+        long enterprise = Long.parseLong(reservation.enterpriseId());
+        var enabled = ((ObjectNode) body("unused-policy-body").get("initialPolicy")).deepCopy()
+            .put("revision", "2").put("accessMode", "ENABLED")
+            .put("effectiveFrom", "2026-10-25T00:00:00Z").put("effectiveUntil", "2999-01-01T00:00:00Z");
+        var request = json.createObjectNode().put("requestId", "request-enable-state").put("expectedRevision", "1");
+        request.set("policy", enabled);
+        var receipt = service.policy("HACU", enterprise, request);
+        assertEquals("SUCCEEDED", receipt.status());
+        assertNull(receipt.errorCode());
+        assertEquals(receipt, service.policy("HACU", enterprise, request));
+        assertEquals(0, count("tenant_policy_consumer"));
+        assertEquals(2, count("tenant_execution_policy"));
+    }
+
     @Test void differentPayloadConflictsAndSameRequestIdIsScopedBySource() throws Exception {
         var original = body("request-source-scope");
         service.provision(TenantCommandRequest.parse(original));

@@ -66,7 +66,7 @@ export async function bootstrap(config: Config) {
       app.log.warn({ code, enterpriseId }, "Shared quota Redis read failed"),
   });
   const commands = new CommandService(new SqlCommandTransactions(connection, quotas), () =>
-    requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
+    requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged ?? false, quotas),
   );
   const be = new BeSchemaClient(config, client),
     schemaState = new SchemaReadiness(connection, be);
@@ -103,7 +103,7 @@ export async function bootstrap(config: Config) {
     {
       commands,
       requireExecution: () =>
-        requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged),
+        requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged ?? false, quotas),
       forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,

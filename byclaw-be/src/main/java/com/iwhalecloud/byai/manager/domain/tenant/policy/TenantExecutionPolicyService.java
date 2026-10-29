@@ -119,7 +119,7 @@ public class TenantExecutionPolicyService {
             || (view.effectiveUntil() != null && !now.isBefore(Instant.parse(view.effectiveUntil()))))
             throw denied("POLICY_NOT_EFFECTIVE");
         if (!"ENABLED".equals(view.accessMode())) throw denied("POLICY_EXECUTION_DISABLED");
-        throw denied("POLICY_CAPABILITY_UNSUPPORTED");
+        // ENABLED and its effective interval decide admission; incomplete quota consumers do not deny all use.
     }
 
     /** SaaS tenant creation must enter the authenticated commercial reservation transaction. */
@@ -173,7 +173,7 @@ public class TenantExecutionPolicyService {
         });
         if ("ENABLED".equals(policy.path("accessMode").asText())) {
             if (from == null || until == null) throw new IllegalArgumentException("enabled policy needs effective interval");
-            throw denied("POLICY_CAPABILITY_UNSUPPORTED");
+            // Accept the access state independently of the capability report; do not fabricate consumer ACKs.
         }
         return policy.deepCopy();
     }

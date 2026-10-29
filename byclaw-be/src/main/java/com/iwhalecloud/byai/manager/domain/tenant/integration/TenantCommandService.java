@@ -83,7 +83,8 @@ public class TenantCommandService {
         long expected=TenantCommandRequest.decimal(body.get("expectedRevision"));
         return mutation(source,enterprise,"POLICY",body,() -> {
             policies.update(enterprise,expected,body.get("policy"));
-            return "POLICY_CONSUMER_UNAVAILABLE";
+            // This command stores the access snapshot; quota capability and consumer delivery are separate facts.
+            return null;
         });
     }
     public TenantCommandStore.Command mutation(String source,long enterprise,String type,JsonNode body,Supplier<String> action) {
