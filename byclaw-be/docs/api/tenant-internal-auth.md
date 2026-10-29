@@ -40,6 +40,13 @@ Verify timestamp inclusively within the configured skew and compare signatures i
 | PUT `/internal/v1/tenants/{decimalId}/enterprise` | `tenant:manage` |
 | GET `/internal/v1/tenants/{decimalId}/members` | `tenant:read` |
 | POST `/internal/v1/tenants/{decimalId}/members` | `tenant:manage` |
+| POST `/internal/v1/shared-workspaces/{decimalId}/members` | `tenant:manage` |
+
+The shared-workspace member route is a generic technical integration boundary for a pre-initialized
+workspace that does not run a separate tenant Node. It is restricted to an all-tenants service
+principal and does not accept package, trial, price or entitlement fields. HACU owns those commercial
+facts and calls this route only to apply the resulting generic `MEMBER` membership change; the route
+does not require an OWNER row in the shared workspace.
 
 The filter requires credential tenant permission for URL tenant IDs. Controllers obtain `InternalServicePrincipal.require(request)` and **must** call `requireSource` for supplied sourceSystem and `requireTenant` for body targets or command-owned enterprise IDs before reading/mutating business state. Actor is audit data only. Never derive source authority from the body. The immutable principal exposes only configured identity and authorities; secrets are excluded.
 

@@ -71,6 +71,32 @@ public class TenantInternalEnterpriseService {
         jdbc.update("INSERT INTO byai.tenant_user_membership(membership_id,enterprise_id,user_id,role,status,created_by) VALUES (?,?,?,'MEMBER','ACTIVE',?)", id, enterpriseId, userId, auditUserId);
         return new MemberView(Long.toString(id), Long.toString(userId), "MEMBER", "ACTIVE");
     }
+
+    /**
+     * 共享工作区只需要通用 MEMBER 关系，不要求存在可管理该空间的 OWNER。
+     * 商业资格和试用状态由 HACU 管理，本方法只执行 ByClaw 的成员事实写入。
+     */
+    @Transactional
+    public MemberView addSharedWorkspaceMember(long enterpriseId, JsonNode payload) {
+        requireTransaction();
+        fields(payload, Set.of("userId", "role", "createdByUserId"));
+        long userId = decimal(payload.get("userId")), auditUserId = decimal(payload.get("createdByUserId"));
+        if (!payload.path("role").isTextual() || !"MEMBER".equals(payload.path("role").textValue()))
+            throw error(HttpStatus.BAD_REQUEST, "MEMBER_ROLE_UNSUPPORTED");
+        getEnterprise(enterpriseId);
+        validUser(userId); validUser(auditUserId);
+        var quota = quotaAdmission.beginEnterprise(enterpriseId);
+        var existing = jdbc.query("SELECT membership_id,user_id,role,status FROM byai.tenant_user_membership WHERE enterprise_id=? AND user_id=?",
+            (rs, index) -> new MemberView(Long.toString(rs.getLong(1)), Long.toString(rs.getLong(2)), rs.getString(3), rs.getString(4)), enterpriseId, userId);
+        if (!existing.isEmpty()) {
+            if (!"ACTIVE".equals(existing.getFirst().status())) throw error(HttpStatus.CONFLICT, "MEMBER_ALREADY_EXISTS");
+            return existing.getFirst();
+        }
+        quotaAdmission.checkMembers(quota, 1);
+        long id = sequence.nextVal();
+        jdbc.update("INSERT INTO byai.tenant_user_membership(membership_id,enterprise_id,user_id,role,status,created_by) VALUES (?,?,?,'MEMBER','ACTIVE',?)", id, enterpriseId, userId, auditUserId);
+        return new MemberView(Long.toString(id), Long.toString(userId), "MEMBER", "ACTIVE");
+    }
     private void validUser(long id) {
         Long count = jdbc.queryForObject("SELECT COUNT(*) FROM byai.po_users WHERE user_id=? AND state='A' AND UPPER(COALESCE(is_locked,'N'))<>'Y' AND (user_eff_date IS NULL OR user_eff_date<=CURRENT_TIMESTAMP) AND (user_exp_date IS NULL OR user_exp_date>CURRENT_TIMESTAMP)", Long.class, id);
         if (count == null || count != 1) throw error(HttpStatus.BAD_REQUEST, "MEMBER_USER_INVALID");

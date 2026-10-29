@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.integration.*;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -136,6 +137,24 @@ public class TenantInternalController {
         long tenant=authorize(http,id,"tenant:manage");auditMutation(body);
         return accepted(commands.mutation(InternalServicePrincipal.require(http).sourceSystem(),tenant,"MEMBER_ADD",body,
             () -> { enterprises.addMember(tenant,body.get("data"));return null; }));
+    }
+
+    /**
+     * 为不启动独立 Node 的共享工作区增加成员。该接口只表达通用成员写入，
+     * 不携带套餐或试用语义；商业开通由 HACU 负责。
+     */
+    @PostMapping("/shared-workspaces/{id}/members")
+    public ResponseEntity<?> addSharedWorkspaceMember(HttpServletRequest http,@PathVariable String id,
+        @RequestBody JsonNode body) {
+        var principal = InternalServicePrincipal.require(http);
+        principal.requireScope("tenant:manage");
+        if (!principal.allTenants()) throw new TenantCommandException(403,"TENANT_MANAGE_SCOPE_REQUIRED");
+        long tenant = identifier(id);
+        if (!TenantContextService.isSharedWorkspace(tenant)) {
+            throw new TenantCommandException(404,"SHARED_WORKSPACE_NOT_FOUND");
+        }
+        auditMutation(body);
+        return ResponseEntity.ok(ResponseUtil.success(enterprises.addSharedWorkspaceMember(tenant,body.get("data"))));
     }
     private void auditMutation(JsonNode body) {
         TenantCommandRequest.fields(body,Set.of("requestId","actor","reason","data"));
