@@ -1,3 +1,4 @@
+import { showNasQuotaError } from '@/utils/nasQuota';
 import { ERROR_CODE, EXCEED_LIMITED_LOGIN_NUMBER, TOKEN_ERROR_CODE } from '@/constants/error/errorCode';
 import {
   type AuthSnapshot,
@@ -120,6 +121,11 @@ function checkFactoryRes(
       }
     });
     return Promise.reject();
+  }
+
+  if (code !== 0) {
+    const quotaMessage = showNasQuotaError(resData);
+    if (quotaMessage) return Promise.reject(quotaMessage);
   }
 
   if (customHandle) {
@@ -260,6 +266,8 @@ instance.interceptors.response.use(
     const { config, response } = err;
     const status = err.status ?? response?.status;
     const { url } = config || {};
+    const quotaMessage = showNasQuotaError(response?.data);
+    if (quotaMessage) return Promise.reject(quotaMessage);
     if (status === 409 && config?.preserveErrorResponse && response) {
       return Promise.reject(err);
     }

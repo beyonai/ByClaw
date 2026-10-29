@@ -40,6 +40,7 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('antd', () => ({
+  Modal: { error: jest.fn((config) => config.afterClose()) },
   message: {
     error: jest.fn(() => Promise.resolve()),
   },
@@ -92,7 +93,7 @@ jest.mock('axios', () => {
 });
 
 import axios from 'axios';
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 
 import { EXCEED_LIMITED_LOGIN_NUMBER } from '@/constants/error/errorCode';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
@@ -133,6 +134,30 @@ describe('Service Common Request', () => {
     window.sessionStorage.clear();
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
+  });
+
+  it('shows the quota modal for HTTP 507 without replacing it with a generic error', async () => {
+    const error = {
+      response: {
+        status: 507,
+        data: { code: -1, data: { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024, usedBytes: 2048 } },
+      },
+      config: {},
+    };
+    await expect(rejectWithResponseInterceptor(error)).rejects.toEqual(expect.any(String));
+    expect(Modal.error).toHaveBeenCalledTimes(1);
+    expect(showRequestErrorModal).not.toHaveBeenCalled();
+  });
+
+  it('blocks structured quota business failures even with custom handling enabled', async () => {
+    mockRequest.mockResolvedValueOnce({
+      data: { code: -1, data: { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024 } },
+      config: { url: '/byaiService/fileBrowser/upload' },
+    });
+    await expect(POST('/byaiService/fileBrowser/upload', {}, { responseCfg: { customHandle: true } })).rejects.toEqual(
+      expect.any(String)
+    );
+    expect(Modal.error).toHaveBeenCalledTimes(1);
   });
 
   it.each([approveUseApply, rejectUseApply, queryResourceUseApplyAudit, queryUseApplyList])(

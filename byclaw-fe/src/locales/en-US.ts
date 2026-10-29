@@ -1,3 +1,4 @@
+import nasQuota from './en-US/nasQuota';
 import adapterRecorder from './en-US/adapterRecorder';
 import imageCanvas from './en-US/imageCanvas';
 import employeePublication from './en-US/employeePublication';
@@ -7,6 +8,7 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': 'Only adminvip in the open-source edition can manage workgroup templates.',
   'workgroupTemplate.title': 'Workgroup templates',

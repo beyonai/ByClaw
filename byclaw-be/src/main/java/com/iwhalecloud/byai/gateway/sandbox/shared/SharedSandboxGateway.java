@@ -50,12 +50,12 @@ public class SharedSandboxGateway {
             throw new BdpRuntimeException("共享沙箱需要配置 byclaw.platform.base-url");
         }
         Map<String, Object> identity = identity(user, type);
+        if (policy.userNasEnabled(user, type)) requireUserStorage(identity);
         Object existing = call("lookup", identity);
         if (existing != null) {
             observedSharedUsers.put(user, true);
             return json.convertValue(existing, SandboxLaunchData.class);
         }
-        if (policy.userNasEnabled(user, type)) requireUserStorage(identity);
         identity.put("byTenant", policy.byTenant());
         identity.put("replaceExclusive", true);
         Object allocated = call("acquire", identity);
@@ -200,12 +200,16 @@ public class SharedSandboxGateway {
             result = client.call(operation, params);
         }
         catch (feign.FeignException failure) {
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
+            if(quota!=null)throw quota;
             throw new BdpRuntimeException("共享沙箱平台请求失败，HTTP " + failure.status());
         }
         if (result == null || !(result.get("code") instanceof Number code)) {
             throw new BdpRuntimeException("共享沙箱平台响应格式错误");
         }
         if (code.intValue() != 0) {
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(result);
+            if(quota!=null)throw quota;
             String message = Objects.toString(result.get("msg"), "共享沙箱操作失败");
             if (message.startsWith("SHARED_USER_NAS_") || message.startsWith("NAS_")) throw storageFailure(message);
             throw new BdpRuntimeException(message);

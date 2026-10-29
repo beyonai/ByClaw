@@ -138,3 +138,12 @@ Align with [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md):
 Commits: [Conventional Commits](https://www.conventionalcommits.org/) as described in [.github/commit-convention.md](.github/commit-convention.md).
 
 @RTK.md
+
+## Redis 单机与集群兼容（业务代码强制约定）
+
+- 新增或修改任何使用 Redis 的业务功能，必须同时支持 Redis 单机和 Redis Cluster；不得以当前部署为单机为由省略集群兼容。
+- 优先复用项目已有 Redis 客户端和协调抽象，禁止新增只适配单机的连接或执行旁路。按现有客户端约定管理连接：独占连接正确归还，共享或集群句柄不得擅自关闭。
+- 多键命令、事务和 Lua 脚本必须检查 Cluster 哈希槽约束。跨槽业务应拆分操作或采用现有协调设计；必须原子操作的相关键使用经设计的同槽键方案。不得为规避 CROSSSLOT 擅自修改已有业务键、哈希标签、前缀、序列化、TTL 或 Stream 语义。
+- Lua 脚本访问的 Redis 键必须通过 KEYS 显式传入，不能把隐藏键放在 ARGV 中或在脚本内拼接访问其他槽。锁的续期、释放和 CAS 操作仍须校验持有者身份。
+- 不依赖 SELECT 切换逻辑数据库、单节点 KEYS/SCAN 结果或单节点连接语义实现集群业务；扫描、批处理、管道和错误重试必须使用客户端提供的集群兼容能力，明确部分失败与幂等处理。
+- 涉及 Redis 的行为变更应覆盖单机和真实 Cluster 的相关集成验证，重点检查 CROSSSLOT、锁/CAS、TTL、并发与失败重试。模拟测试不能替代集群验证；未验证的环境必须在交付中明确说明，不得声称已经兼容。

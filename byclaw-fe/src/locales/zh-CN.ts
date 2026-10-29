@@ -1,3 +1,4 @@
+import nasQuota from './zh-CN/nasQuota';
 import adapterRecorder from './zh-CN/adapterRecorder';
 import imageCanvas from './zh-CN/imageCanvas';
 import employeePublication from './zh-CN/employeePublication';
@@ -7,6 +8,7 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': '仅开源版 adminvip 可访问工作组模板管理。',
   'workgroupTemplate.title': '工作组模板',
