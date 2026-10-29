@@ -155,6 +155,24 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
+    void sharedWorkspaceCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 999L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        GroupChatCreateRequest request = new GroupChatCreateRequest();
+        request.setName("共享工作组");
+        ProceedingJoinPoint invocation = call("create", request);
+        when(invocation.proceed()).thenAnswer(ignored -> {
+            assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+            return "public-group";
+        });
+
+        assertThat(aspect.route(invocation)).isEqualTo("public-group");
+
+        verify(invocation).proceed();
+        verifyNoInteractions(creation, node, legacy, memberships);
+    }
+
+    @Test
     void developmentTenantCreateUsesLegacyDatabaseController() throws Throwable {
         TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221859L, "MEMBER"));
         GroupChatCreateRequest request = new GroupChatCreateRequest();
