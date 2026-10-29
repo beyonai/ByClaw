@@ -15,6 +15,13 @@ import { formatStreamPayload, parseChatStreamMessage, subscribeChatStream } from
 import webSocketManager from '@/utils/websocket';
 
 describe('hooks/useSseSender/chatStream', () => {
+  it('preserves structured quota data in terminal errors', () => {
+    const quota = { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024, exceededBytes: 20 };
+    const parsed = parseChatStreamMessage({ event: 'error', data: JSON.stringify({ message: 'quota', quota }) });
+    expect(parsed?.isError).toBe(true);
+    expect(parsed?.formattedPayload).toMatchObject({ message: { content: { substance: { quota } } } });
+  });
+
   it.each(['finalAnswer', 'final_answer'])('preserves the final body for %s without ending the stream', (event) => {
     const parsed = parseChatStreamMessage({
       event,

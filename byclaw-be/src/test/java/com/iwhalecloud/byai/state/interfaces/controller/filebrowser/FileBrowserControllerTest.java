@@ -109,4 +109,26 @@ class FileBrowserControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTes
         assertThat(response.isSuccess()).isTrue();
         verify(fileBrowserService).upload("user001", 42L, "/by/.shared/", files);
     }
+    @Test
+    void uploadPreservesStructuredQuotaForTheGlobalHandler() throws Exception {
+        MultipartFile file = mock(MultipartFile.class);
+        MultipartFile[] files = {file};
+        var failure = com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(
+            java.util.Map.of("data", java.util.Map.of("errorType", "NAS_QUOTA_EXCEEDED", "quotaBytes", 1024L)));
+        org.mockito.Mockito.doThrow(failure).when(fileBrowserService).upload("user001", 42L, "/", files);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.upload(files, 42L, "/"))
+            .isSameAs(failure);
+    }
+
+    @Test
+    void knowledgeCopyAlsoPreservesStructuredQuota() throws Exception {
+        var transfer = mock(com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserKnowledgeTransferApplicationService.class);
+        ReflectionTestUtils.setField(controller, "knowledgeTransferApplicationService", transfer);
+        var request = new com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserSaveToKnowledgeRequest();
+        var failure = com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(
+            java.util.Map.of("data", java.util.Map.of("errorType", "NAS_QUOTA_EXCEEDED")));
+        when(transfer.saveToKnowledge("user001", request)).thenThrow(failure);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.saveToKnowledge(request)).isSameAs(failure);
+    }
+
 }

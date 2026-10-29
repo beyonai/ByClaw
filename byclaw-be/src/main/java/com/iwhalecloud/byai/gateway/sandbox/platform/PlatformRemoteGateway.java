@@ -49,6 +49,8 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
+            if(quota!=null)throw quota;
             throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
         }
     }
@@ -61,7 +63,36 @@ public class PlatformRemoteGateway {
         return data(envelope(area, operation, params));
     }
 
+    public void checkPersonalQuota(String operation,long requestedBytes) {
+        if(!remote)return;
+        String user=CurrentUserHolder.getCurrentUserCode();
+        if(user==null || user.isBlank())return;
+        call("storage","quota-check",params("userCode",user,"operation",operation,"requestedBytes",requestedBytes));
+    }
+
+    /** A generic runtime filesystem error is not evidence of a personal NAS failure.
+     * Recheck that user's capacity and only return a verified structured rejection. */
+    public Map<String,Object> recheckPersonalQuota(String user) {
+        if(!remote || user==null || user.isBlank())return null;
+        try { call("storage","quota-check",params("userCode",user,"operation","CHAT","requestedBytes",0)); }
+        catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
+        return null;
+    }
+
+    public Map<String,Object> reportQuotaRejection(String user,String requestId) {
+        if(!remote || user==null || user.isBlank())return null;
+        try { call("storage","quota-rejected",params("userCode",user,"operation","CHAT","requestId",requestId)); }
+        catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
+        return null;
+    }
+
     public Object data(Map<String, Object> response) {
+        if(response!=null && response.get("data") instanceof Map<?,?> details
+                && "NAS_QUOTA_PREPARING".equals(details.get("errorType")))
+            throw new BdpRuntimeException(ResourceBundle.getBundle("i18n.messages",
+                org.springframework.context.i18n.LocaleContextHolder.getLocale()).getString("sandbox.shared.userNas.preparing"));
+        var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(response);
+        if(quota!=null)throw quota;
         if (response == null || !(response.get("code") instanceof Number))
             throw new BdpRuntimeException(I18nUtil.get("platform.response.invalid"));
         if (((Number) response.get("code")).intValue() != 0)

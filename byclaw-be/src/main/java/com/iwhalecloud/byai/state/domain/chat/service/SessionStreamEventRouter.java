@@ -348,6 +348,7 @@ public class SessionStreamEventRouter {
         errorPayload.put("message", errorMsg);
         errorPayload.put("traceback", errorMsg);
         errorPayload.put("sessionId", String.valueOf(ctx.sessionId));
+        gatewayStreamEventProcessor.enrichQuotaError(ctx,metadata,errorPayload);
         JSONObject diagnostics = ChatReplyLog.envelope(dataJson);
         if (diagnostics != null) errorPayload.put("chatChain", diagnostics);
         gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);

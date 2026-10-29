@@ -60,6 +60,13 @@ public class GlobalExceptionHandler implements MessageSourceAware {
     @Value("${exception.log.sysCode:}")
     private String sysCode;
 
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.class)
+    public ResponseEntity<ResponseUtil<Object>> quotaExceeded(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException failure,HttpServletResponse response) {
+        if(response.isCommitted())return null;
+        ResponseUtil<Object> body=ResponseUtil.fail(failure.getMessage());body.setData(failure.details());
+        return ResponseEntity.status(507).body(body);
+    }
+
     @ExceptionHandler(value = BaseRuntimeException.class)
     public void baseExceptionHandler(HttpServletResponse response, BaseRuntimeException baseRuntimeException)
         throws IOException {

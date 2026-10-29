@@ -123,7 +123,7 @@ class SharedSandboxGatewayTest {
     }
 
     @Test
-    void quotaPendingBlocksOnlyNewAcquisition() {
+    void quotaPendingBlocksAcquisitionBeforeLookup() {
         var gateway=gateway();
         when(policy.eligible("alice")).thenReturn(true);
         when(policy.userNasEnabled("alice","byclaw-dsh")).thenReturn(true);
@@ -135,18 +135,19 @@ class SharedSandboxGatewayTest {
                 assertThat(error.getErrorService()).isEqualTo("SHARED_USER_NAS_WAITING_QUOTA");
                 assertThat(error.getMessage()).doesNotContain("SHARED_USER_NAS");
             });
-        verify(client).call(eq("lookup"),anyMap());
+        verify(client,never()).call(eq("lookup"),anyMap());
         verify(client,never()).call(eq("acquire"),anyMap());
     }
 
     @Test
-    void activeMappingBypassesNewQuotaPreparation() {
+    void activeMappingRechecksStorageBeforeReuse() {
         var gateway=gateway();
         when(policy.eligible("alice")).thenReturn(true);
         when(policy.userNasEnabled("alice","byclaw-dsh")).thenReturn(true);
         when(client.call(eq("lookup"),anyMap())).thenReturn(Map.of("code",0,"data",Map.of("sandboxId","existing")));
+        when(client.call(eq("prepareUserStorage"),anyMap())).thenReturn(Map.of("code",0,"data",Map.of("enabled",true,"ready",true)));
         assertThat(gateway.tryAcquire("alice","byclaw-dsh").getSandboxId()).isEqualTo("existing");
-        verify(client,never()).call(eq("prepareUserStorage"),anyMap());
+        verify(client).call(eq("prepareUserStorage"),anyMap());
     }
 
     @Test

@@ -54,6 +54,40 @@ public class GatewayStreamEventProcessor {
     @Autowired(required = false)
     private ModelErrorPresentationService modelErrorPresentationService = new ModelErrorPresentationService();
 
+    @Autowired(required=false)
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway quotaGateway;
+
+    /** Runtime attribution requires a trusted storage marker. Generic EDQUOT only triggers a capacity recheck. */
+    public void enrichQuotaError(ChatProcessContext ctx, JSONObject metadata, JSONObject payload) {
+        if (ctx == null || ctx.tenantContext != null || ctx.loginInfo == null || quotaGateway == null
+            || !quotaGateway.isRemote()) return;
+        if (metadata != null && "MODEL".equals(metadata.getString("error_domain"))) return;
+        boolean personalNas = metadata != null && "STORAGE".equals(metadata.getString("error_domain"))
+            && "NAS_QUOTA_EXCEEDED".equals(metadata.getString("error_code"))
+            && "USER_NAS".equals(metadata.getString("storage_scope"));
+        String error = metadata == null ? null : metadata.getString("error");
+        if (error == null) error = payload.getString("message");
+        boolean filesystemQuota = error != null
+            && java.util.regex.Pattern.compile("(?i)(\\bEDQUOT\\b|disk quota exceeded)").matcher(error).find();
+        if (!personalNas && !filesystemQuota) return;
+        try {
+            String request = ctx.currentStreamId == null ? java.util.UUID.randomUUID().toString() : "stream-" + ctx.currentStreamId;
+            Map<String, Object> quota = personalNas
+                ? quotaGateway.reportQuotaRejection(ctx.loginInfo.getUserCode(), request)
+                : quotaGateway.recheckPersonalQuota(ctx.loginInfo.getUserCode());
+            if (quota != null && "NAS_QUOTA_EXCEEDED".equals(quota.get("errorType"))) {
+                payload.put("quota", quota);
+                payload.put("errorCode", "NAS_QUOTA_EXCEEDED");
+            }
+        } catch (RuntimeException unavailable) {
+            log.warn("NAS quota rejection check unavailable: {}", unavailable.getClass().getSimpleName());
+            if (personalNas) {
+                payload.put("quota", java.util.Collections.singletonMap("errorType", "NAS_QUOTA_EXCEEDED"));
+                payload.put("errorCode", "NAS_QUOTA_EXCEEDED");
+            }
+        }
+    }
+
     private final Map<String, HistoryBatch> historyBatchMap = new ConcurrentHashMap<>();
 
     /**
@@ -140,6 +174,7 @@ public class GatewayStreamEventProcessor {
             if (clientMetadata != null && !clientMetadata.isEmpty()) {
                 eventPayload.put("metadata", clientMetadata.toJSONString());
             }
+            if(SseResponseEventEnum.error.equals(dataJson.getString("event_type")))enrichQuotaError(ctx,metadata,eventPayload);
             enrichLaneMetadata(ctx, dataJson, metadata, eventPayload);
             return eventPayload.toJSONString();
         }
@@ -147,6 +182,7 @@ public class GatewayStreamEventProcessor {
             JSONObject dataObj = JSON.parseObject(eventData);
             if (dataObj != null) {
                 applyModelErrorPresentation(dataObj, metadata);
+                if(SseResponseEventEnum.error.equals(dataJson.getString("event_type")))enrichQuotaError(ctx,metadata,dataObj);
                 dataObj.put("sourceAgentType", sourceAgentType);
                 dataObj.put("runtimeType", targetAgentResolver.resolveRuntimeType(sourceAgentType));
                 dataObj.put("sessionId", sessionId);

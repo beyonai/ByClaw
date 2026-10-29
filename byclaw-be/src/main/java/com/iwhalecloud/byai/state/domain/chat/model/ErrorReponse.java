@@ -1,6 +1,15 @@
 package com.iwhalecloud.byai.state.domain.chat.model;
 
 public class ErrorReponse {
+    private java.util.Map<String,Object> quota;
+    public java.util.Map<String,Object> getQuota(){return quota;}
+    public static ErrorReponse error(Throwable failure) {
+        ErrorReponse response=error(failure.getMessage());
+        if(failure instanceof com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException exceeded) {
+            response.errorCode="NAS_QUOTA_EXCEEDED";response.quota=exceeded.details();
+        }
+        return response;
+    }
     private String statusCode;
     private String message;
     private String errorCode;

@@ -168,6 +168,9 @@ public class AssistantChatService {
     @Autowired
     private AIService aiService;
 
+    @Autowired(required=false)
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway quotaGateway;
+
     @Autowired
     private AiPromptService aiPromptService;
 
@@ -202,6 +205,10 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 AssistantAccessChannel.fromAccessTerminal(assistantChatDto.getAccessTerminal())
                     .ifPresent(ch -> ch.ensureChannelTypeInExtension(assistantChatDto));
+            }
+
+            if (quotaGateway != null && TenantRequestContextHolder.get() == null) {
+                quotaGateway.checkPersonalQuota("CHAT",0);
             }
 
             // 处理固化记忆
@@ -581,7 +588,7 @@ public class AssistantChatService {
 
         // 其他异常的处理
         CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.error,
-            JSON.toJSONString(ErrorReponse.error(e.getMessage())), assistantChatDto.getSessionId());
+            JSON.toJSONString(ErrorReponse.error(e)), assistantChatDto.getSessionId());
         throw e;
     }
 

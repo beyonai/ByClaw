@@ -24,6 +24,20 @@ import org.springframework.test.util.ReflectionTestUtils;
 class PlatformMessageI18nTest extends I18nTestSupport {
     @ParameterizedTest
     @CsvSource(value = {
+        "zh-CN|正在准备您的个人存储配额，请等待配额就绪后再开始会话。",
+        "en-US|Your personal storage quota is being prepared. Please wait until it is ready before starting a chat."
+    }, delimiter = '|')
+    void quotaPreparationUsesTheRequestLocale(String language, String expected) {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag(language));
+        var env = new MockEnvironment();
+        ObjectProvider<PlatformControlClient> clients = mock(ObjectProvider.class);
+        var gateway = new PlatformRemoteGateway(new PlatformBackgroundExecution(env), clients, new ObjectMapper(), env);
+        assertThatThrownBy(() -> gateway.data(Map.of("code", -1, "data", Map.of("errorType", "NAS_QUOTA_PREPARING"))))
+            .hasMessage(expected);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
         "zh-CN|平台响应无效|平台操作失败|平台请求失败，HTTP 503",
         "en-US|Invalid platform response|Platform operation failed|Platform request failed, HTTP 503"
     }, delimiter = '|')
