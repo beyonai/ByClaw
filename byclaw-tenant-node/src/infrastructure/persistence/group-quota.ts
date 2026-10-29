@@ -22,7 +22,8 @@ export async function requireGroupMemberCapacity(
         "SELECT COUNT(*)::text AS current_count FROM byai.byai_session WHERE enterprise_id=$1 AND session_type='hs_as' AND (state IS NULL OR state NOT IN('CLOSED','GROUP_DISSOLVED'))",
         [command.enterpriseId],
       );
-      const current = String(count[0]?.currentCount ?? "");
+      // Direct SQL queries preserve column aliases; only the first() helper converts them to camelCase.
+      const current = String(count[0]?.current_count ?? "");
       if (!/^\d+$/.test(current)) throw new DomainError("QUOTA_UNAVAILABLE");
       if (BigInt(current) > BigInt(groupQuota.limits.groupLimit))
         throw new DomainError("GROUP_LIMIT_EXCEEDED");

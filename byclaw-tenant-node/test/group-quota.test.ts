@@ -211,6 +211,13 @@ describe("tenant group membership quota", () => {
     expect(effects.filter((effect) => effect.startsWith("insert"))).toEqual([]);
   });
 
+  it.each([1, 150])("admits CREATE_GROUP when the inserted group fits limit %i", async (groupLimit) => {
+    const { db, reader } = fixture({ ...quota, limits: { ...quota.limits, groupLimit } }, []);
+    const context = new CommandContext(db, command({ operation: "CREATE_GROUP" }), reader);
+    // The count includes the new session already inserted in the command transaction.
+    await expect(requireGroupMemberCapacity(context, [user("20"), agent("90")])).resolves.toBeUndefined();
+  });
+
   it("guards an entire initial CREATE_GROUP batch including owner and default coordinator", async () => {
     const { db, reader, effects } = fixture(
       { ...quota, limits: { ...quota.limits, agentLimit: 0 } },

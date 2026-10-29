@@ -384,4 +384,6 @@ ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态�
 
 ### 2026-10-29 READY 开通兼容
 
+创建工作组时，LIMITED 配额按事务中已包含新工作组的数量与 `groupLimit` 比较，等于上限允许创建，超过上限返回 `GROUP_LIMIT_EXCEEDED`。计数读取原始 SQL 列名 `current_count`，避免将正常计数误判为 `QUOTA_UNAVAILABLE`。此修复需要更新已有租户 Node 的运行程序，仅更新 BE 或 Redis 配额不会生效。
+
 `requireExecutionPolicy` 不再因 COMMERCIAL_MANAGED 一律返回 POLICY_CAPABILITY_UNSUPPORTED，改用现有共享权益读取端口核实企业身份、ENABLED 和有效期。HTTP 业务写入与队列命令复用该入口；鉴权、Schema 就绪和业务授权照常执行。HACU 不等待本 Node 的 ACK；权益异步发布未到达时仍可能暂时拒绝写入。已有沙箱需要更新实际运行的 Node 程序，单独部署 byclaw-be 不会更新现有 Node。已改测试源文件，未执行构建、测试或部署。
