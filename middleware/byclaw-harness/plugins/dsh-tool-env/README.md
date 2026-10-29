@@ -302,6 +302,13 @@ The plugin releases B on idle/disposal; BE also applies automatic idle release t
   goes.
 - **A goes away.** Closing the connection (the context is disposed, the host
   shuts down) releases B the same way, with a short grace period.
+- **The user's tool sandbox changes.** The state directory records the service
+  key of the last launched B (`tool-sandbox.json`). A host that dies without
+  disposing its contexts leaves that B running; when the user's next context
+  serves a different service (BE assigns another tool sandbox, for example through
+  `BYCLAW_TOOL_SANDBOX_BY_USER`), the first launch releases the old service's B
+  first, since both mount the user's tool home. A failed release is logged and the
+  launch goes on.
 - **Credentials.** The `BEYOND_TOKEN` BE injected is the user's JWT and expires,
   while a context on the shared host stays resident for days. The host therefore
   hands every later PUT's token to the context (`ToolEnv.renewBeToken`; BE mints a
