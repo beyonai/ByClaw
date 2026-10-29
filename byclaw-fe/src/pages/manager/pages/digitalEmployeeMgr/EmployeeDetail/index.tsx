@@ -1,4 +1,8 @@
 // @ts-nocheck
+import { v4 as uuidv4 } from 'uuid';
+import { checkEmployeeAudit } from '@/pages/manager/service/DigitalEmployeeMgr';
+import EmployeeVersionHistoryPanel from '@/components/EmployeeVersions/History';
+import { getEmployeeVersions, saveEmployeeVersion } from '@/service/employeeVersions';
 import PublicationToolbar from '@/components/EmployeePublication/Toolbar';
 import PublicationEditionGuard from '@/components/EmployeePublication/EditionGuard';
 import PublicationLoading from '@/components/EmployeePublication/Loading';
@@ -487,6 +491,31 @@ const EmployeeDetail = ({ loading }) => {
   const [officialUpdateRequiresReview, setOfficialUpdateRequiresReview] = useState(false);
   const [officialUpdateNotice, setOfficialUpdateNotice] = useState('');
   const officialUpdate = useOfficialUpdate();
+  const [versionState, setVersionState] = useState();
+  const [versionError, setVersionError] = useState('');
+  const [versionReload, setVersionReload] = useState(0);
+  const [editingBaseVersion, setEditingBaseVersion] = useState();
+  useEffect(() => {
+    let disposed = false;
+    setVersionState(undefined);
+    setVersionError('');
+    if (agentId && !publicationId && _readOnly !== 'true') {
+      getEmployeeVersions(String(agentId))
+        .then((result) => {
+          if (!disposed) {
+            setVersionState(result);
+            setEditingBaseVersion(result.activeVersionId);
+          }
+        })
+        .catch((error) => {
+          if (!disposed) setVersionError(publicationErrorMessage(error, '版本信息加载失败，请刷新后重试'));
+        });
+    }
+    return () => {
+      disposed = true;
+    };
+  }, [agentId, publicationId, _readOnly, versionReload]);
+
   useEffect(() => {
     setOfficialUpdateRequiresReview(false);
     setOfficialUpdateNotice('');
@@ -1623,6 +1652,59 @@ const EmployeeDetail = ({ loading }) => {
           }
         }
 
+        if (currentResourceId) {
+          try {
+            if (!versionState) throw new Error(versionError || '版本信息加载中，请稍后重试');
+            setAuditLoading(true);
+            const audit = await checkEmployeeAudit(savePayload);
+            if (audit?.code !== 0) throw new Error(audit?.msg || '合规校验失败');
+            const issuesToConfirm = (Array.isArray(audit.data) ? audit.data : []).filter(
+              (item) => item && (item.compliance === false || item.key === 'coreCompetencies')
+            );
+            setAuditLoading(false);
+            if (issuesToConfirm.length && !(await showAuditConfirm(issuesToConfirm))) {
+              setIssues(issuesToConfirm);
+              return;
+            }
+            const activate = params?.saveOnly !== true;
+            const outcome = await saveEmployeeVersion({
+              resourceId: String(currentResourceId),
+              expectedRevision: versionState.revision,
+              baseVersionId: editingBaseVersion || versionState.activeVersionId,
+              requestId: uuidv4(),
+              activate,
+              employee: { ...savePayload, resourceId: currentResourceId, isFrontAccess: _isFrontAccess },
+            });
+            setIsConfigChanged(false);
+            setVersionState((previous) => ({
+              ...previous,
+              revision: outcome.revision,
+              latestVersionId: outcome.versionId,
+            }));
+            setEditingBaseVersion(outcome.versionId);
+            if (outcome.publicationId) {
+              message.success('版本已保存，请确认发布申请；全部组织审核通过后统一生效');
+              history.push(
+                `/digitalEmployeesCreate?appId=${currentResourceId}&publicationId=${outcome.publicationId}&log=false&manage=false`
+              );
+            } else if (!activate) {
+              message.success('版本已保存，当前生效配置未改变');
+            } else {
+              if (outcome.status === 'SYNC_FAILED') message.warning('配置已生效，但运行态同步失败，请在版本历史中重试');
+              else message.success('版本已保存并生效');
+              getCompositeAppInfo('reload');
+              setVersionReload((value) => value + 1);
+              EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
+            }
+          } catch (error) {
+            message.error(publicationErrorMessage(error, '保存版本失败'));
+          } finally {
+            setSubmitLoading(false);
+            setAuditLoading(false);
+          }
+          return;
+        }
+
         if (officialUpdateRequiresReview && effectiveOwnerType === 'enterprise' && currentResourceId) {
           try {
             const outcome = await officialUpdate.save(String(currentResourceId), savePayload);
@@ -1771,6 +1853,9 @@ const EmployeeDetail = ({ loading }) => {
       publicationId,
       publicationDetail,
       officialUpdateRequiresReview,
+      versionState,
+      versionError,
+      editingBaseVersion,
       officialUpdate.save,
       getCompositeAppInfo,
     ]
@@ -1887,6 +1972,22 @@ const EmployeeDetail = ({ loading }) => {
         </div>
       )}
       <Space className={styles.headerRight}>
+        {agentId && !publicationId && _readOnly !== 'true' && (
+          <EmployeeVersionHistoryPanel
+            resourceId={String(agentId)}
+            onChanged={() => {
+              getCompositeAppInfo('reload');
+              setVersionReload((value) => value + 1);
+            }}
+          />
+        )}
+        {versionError && (
+          <Tooltip title={versionError}>
+            <Button danger onClick={() => setVersionReload((value) => value + 1)}>
+              重试加载版本
+            </Button>
+          </Tooltip>
+        )}
         {activeTab === 'config' && _readOnly !== 'true' && !publicationId && (
           <>
             {issues.length > 0 && (
@@ -1895,8 +1996,14 @@ const EmployeeDetail = ({ loading }) => {
                 style={{ color: '#CF1322', fontSize: '20px' }}
               />
             )}
+            {agentId && (
+              <Button disabled={!versionState || submitLoading} onClick={() => updateResource({ saveOnly: true })}>
+                仅保存版本
+              </Button>
+            )}
             <Button
               type="primary"
+              disabled={!!agentId && !versionState}
               onClick={() => updateResource()}
               loading={
                 submitLoading ||
@@ -1904,7 +2011,11 @@ const EmployeeDetail = ({ loading }) => {
                 loading?.effects['employeeMgr/updateResource']
               }
             >
-              {intl.formatMessage({ id: 'employeeDetail.save' })}
+              {agentId
+                ? versionState?.requiresReview
+                  ? '保存并申请生效'
+                  : '保存并生效'
+                : intl.formatMessage({ id: 'employeeDetail.save' })}
             </Button>
           </>
         )}

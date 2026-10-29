@@ -62,6 +62,10 @@ public class DigitalEmployeeController {
     @Autowired
     private AuthApplicationService authApplicationService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeVersionSync employeeVersionSync;
+
+
     private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeController.class);
 
     @Autowired
@@ -144,7 +148,8 @@ public class DigitalEmployeeController {
         SsResource ssResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
 
         // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
-        digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId(), digitalEmployeeDTO);
+        if (employeeVersionSync != null) employeeVersionSync.refresh(ssResource.getResourceId());
+        else digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId(), digitalEmployeeDTO);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(ssResource.getResourceId());

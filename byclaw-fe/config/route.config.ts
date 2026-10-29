@@ -258,6 +258,10 @@ export default [
             component: './manager/pages/digitalEmployeeMgr/EmployeeDetail',
           },
           {
+            path: '/employeeVersionCompare',
+            component: './employeeVersionCompare',
+          },
+          {
             path: '/achievementSpace',
             name: 'achievementSpace',
             component: './achievementSpace',

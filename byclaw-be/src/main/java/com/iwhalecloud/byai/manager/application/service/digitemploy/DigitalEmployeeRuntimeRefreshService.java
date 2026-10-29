@@ -103,7 +103,21 @@ public class DigitalEmployeeRuntimeRefreshService {
         requests.merge(request.digitalEmployeeId(), request, DigitalEmployeeRuntimeRefreshService::mergeRequest);
     }
 
+    @Autowired
+    private EmployeeVersionSync employeeVersionSync;
+    @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper versionResources;
+
     private void refreshNow(RuntimeRefreshRequest request) {
+        if (employeeVersionSync != null && versionResources != null) {
+            var resource = versionResources.selectById(request.digitalEmployeeId());
+            if (resource != null && resource.getPendingActivationId() != null) {
+                employeeVersionSync.refresh(request.digitalEmployeeId());
+                if (versionResources.selectById(request.digitalEmployeeId()).getPendingActivationId() == null)
+                    digEmployeeChangeEventPublisher.publishNowQuietly(request.eventType(), request.digitalEmployeeId(), request.source());
+                return;
+            }
+        }
         Long digitalEmployeeId = request.digitalEmployeeId();
         Exception failure = null;
         for (int attempt = 1; attempt <= 3; attempt++) {

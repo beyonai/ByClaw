@@ -57,6 +57,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SkillGroupApplicationService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeVersionLock employeeVersionLock;
+
     private static final String SKILL_GROUP = ResourceBizTypeEnum.SKILL_GROUP.name();
     private static final String SKILL = ResourceBizTypeEnum.SKILL.name();
     private static final String RESOURCE_TYPE_COMBIN = "COMBIN";
@@ -524,6 +527,7 @@ public class SkillGroupApplicationService {
 
     private SsResource loadManagedDigitalEmployeeForSnapshot(
             Long digitalEmployeeId, Long tenantId, SsResource group) {
+        if (employeeVersionLock != null) employeeVersionLock.acquire(tenantId, digitalEmployeeId);
         SsResource digitalEmployee = skillGroupMapper.selectDigitalEmployeeForUpdate(digitalEmployeeId, tenantId);
         validateManagedDigitalEmployee(digitalEmployee, tenantId, group);
         return digitalEmployee;

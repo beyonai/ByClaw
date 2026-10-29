@@ -166,6 +166,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  */
 @Service
 public class DigitalEmployeeApplicationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionStore employeeVersionStore;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionAccess employeeVersionAccess;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionLock employeeVersionLock;
+
 
     @Autowired
     private DigitalEmployeeGovernanceService employeeGovernance;
@@ -1005,6 +1012,7 @@ public class DigitalEmployeeApplicationService {
         }
 
 
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(ssResource, digitalEmployeeDTO, "CREATE");
         ResourceExtDigEmployeeDto resourceExtDigEmployeeDto = new ResourceExtDigEmployeeDto();
         BeanUtil.copyProperties(ssResource, resourceExtDigEmployeeDto);
         resourceExtDigEmployeeDto.setSsResExtDigEmployee(ssResExtDigEmployee);
@@ -1160,6 +1168,27 @@ public class DigitalEmployeeApplicationService {
      * @param digitalEmployeeDTO 修改对象
      * @return SsResource
      */
+    public void validateVersionDependencies(DigitalEmployeeDTO configuration) {
+        List<Long> requested = this.mergeRelSkillIds(configuration.getRelIds(), configuration.getRelSkills());
+        if (CollectionUtils.isEmpty(requested)) return;
+        List<SsResource> dependencies = this.findInstallRelResources(requested);
+        for (SsResource dependency : dependencies) {
+            if (!Objects.equals(dependency.getComAcctId(), CurrentUserHolder.getEnterpriseId())
+                || !authApplicationService.hasResourceUsePermission(dependency))
+                throw new BaseException("历史版本包含当前无权使用的资源：" + dependency.getResourceName());
+        }
+    }
+
+    public void validateVersionConfiguration(DigitalEmployeeDTO configuration) {
+        if (configuration == null || StringUtils.isBlank(configuration.getResourceName()))
+            throw new BaseException("数字员工名称不能为空");
+        this.normalizeRelSkillsForSave(configuration);
+        this.validateDigitalEmployeeTextFieldLengths(configuration);
+        if (!DigitalEmployType.isValid(configuration.getAgentType())) throw new BaseException("数字员工类型不正确");
+        if ("017".equals(configuration.getAgentType()) && CollectionUtils.isEmpty(configuration.getEmployeeGroupMembers()))
+            throw new BaseException("员工组至少需要一名成员");
+    }
+
     public SsResource updateDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
@@ -1178,6 +1207,7 @@ public class DigitalEmployeeApplicationService {
         // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
         SsResource ssResource = this.lockDigitalEmployeeForSkillRelationMutation(resourceId);
         this.validateDigitalEmployeeUpdatePermission(ssResource);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(ssResource);
         if (digitalEmployeeDTO.getOwnerType() == null) digitalEmployeeDTO.setOwnerType(ssResource.getOwnerType());
         if (!Objects.equals(ssResource.getOwnerType(), digitalEmployeeDTO.getOwnerType())) {
             throw new BaseException(I18nUtil.get("employee.publication.owner.change.forbidden"));
@@ -1199,10 +1229,15 @@ public class DigitalEmployeeApplicationService {
         // back to BYCLAW_* based on agentType.
         boolean harnessRuntime = StringUtils.equalsIgnoreCase(
             StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), WorkerAgentType.HARNESS.getCode());
+        Integer previousStatus = ssResource.getResourceStatus();
+        Long activeVersion = ssResource.getResourceRVerid();
+        Long savedVersion = ssResource.getResourceDVerid();
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
+        ssResource.setResourceRVerid(activeVersion);
+        ssResource.setResourceDVerid(savedVersion);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
-        ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        ssResource.setResourceStatus(EmployeeVersionContext.target() == null ? ResourceStatus.ON_SHELF.getNum() : previousStatus);
         // 归属不可通过编辑变更，个人到企业必须经过发布流程。
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         if (harnessRuntime) {
@@ -1237,7 +1272,7 @@ public class DigitalEmployeeApplicationService {
         // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
 
         // 前台的直接上架
-        if (isFrontAccess) {
+        if (isFrontAccess && Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
             resourceEventService.sendResourceShelfEvent(ssResource);
         }
 
@@ -1263,6 +1298,12 @@ public class DigitalEmployeeApplicationService {
             // 使用新的 memoryConfigList 方式保存(带用户ID条件删除)
             templateRuleInfoApplicationService.saveResourceTemplateRelationsByMemoryConfig(resourceId, memoryConfigList,
                 currentUserId, memoryLibraryId);
+        }
+
+        if (employeeVersionStore != null) {
+            ssResource.setResourceRVerid(activeVersion);
+            ssResource.setResourceDVerid(savedVersion);
+            employeeVersionStore.recordCurrent(ssResource, digitalEmployeeDTO, "EDIT");
         }
 
         if (!isEmployeeGroup) {
@@ -1364,6 +1405,7 @@ public class DigitalEmployeeApplicationService {
                 ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
             }
         }
+        if (employeeVersionStore != null) ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         this.validateResourceInstallPermission(ssResource, installRelResources);
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
@@ -1399,6 +1441,7 @@ public class DigitalEmployeeApplicationService {
         SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
         Long currentUserId = this.requireCurrentUserId();
         List<Long> snapshotSkillIds = this.normalizeSnapshotSkillIds(digitalEmployee, groupId, skillIds);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
         result.setTotalSkillIds(new ArrayList<>(snapshotSkillIds));
 
@@ -1478,6 +1521,7 @@ public class DigitalEmployeeApplicationService {
     public SkillGroupInstallResultVo uninstallSkillGroupSnapshot(
         SsResource digitalEmployee, Long groupId, SkillGroupUninstallMode mode, String previewToken) {
         this.validateSnapshotContext(digitalEmployee, groupId);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         SkillGroupUninstallMode effectiveMode = mode == null
             ? SkillGroupUninstallMode.PRESERVE_SHARED : mode;
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
@@ -1676,7 +1720,8 @@ public class DigitalEmployeeApplicationService {
             return this.findDetailsById(employeeIdDTO);
         }
 
-        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        SsResource ssResource = employeeVersionStore == null ? ssResourceService.findById(digitalEmployeeId)
+            : this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         validateDigitalEmployeeResourceUninstallPermission(ssResource);
 
         List<LegacyWorkspaceSkill> legacyWorkspaceSkills = this.findLegacyWorkspaceSkillsToDelete(ssResource,
@@ -1695,6 +1740,7 @@ public class DigitalEmployeeApplicationService {
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
         robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
         // 与编辑保存一致：关联删除提交后再重建 Redis 快照并发送 UPDATED，避免同步读到旧关联。
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(ssResource, null, "BINDING_CHANGE");
         digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(digitalEmployeeId, null);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
@@ -2017,6 +2063,7 @@ public class DigitalEmployeeApplicationService {
         Long digitalEmployeeId = digitalEmployee.getResourceId();
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         operationLogService.recordOperationLog(digitalEmployee, OperationTypeEnum.UPDATE);
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(digitalEmployee, null, "BINDING_CHANGE");
         digitalEmployeeRuntimeRefreshService.scheduleSkillRuntimeRefreshAfterCommit(List.of(digitalEmployeeId));
     }
 
@@ -2066,10 +2113,12 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
+        if (employeeVersionLock != null) employeeVersionLock.acquire(tenantId, digitalEmployeeId);
         SsResource digitalEmployee = skillGroupMapper.selectDigitalEmployeeForUpdate(digitalEmployeeId, tenantId);
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         return digitalEmployee;
     }
 
@@ -2388,6 +2437,12 @@ public class DigitalEmployeeApplicationService {
      * validateDigitalEmployeeUpdatePermission。
      */
     private void validateDigitalEmployeeUpdatePermission(SsResource ssResource) {
+        if (employeeVersionAccess != null) {
+            employeeVersionAccess.requireManage(ssResource);
+            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource))
+                throw new BaseException("企业员工配置变更需提交更新审核，所有已发布组织通过后生效");
+            return;
+        }
         if (employeeGovernance != null) employeeGovernance.requireDirectMutationAllowed(ssResource);
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));

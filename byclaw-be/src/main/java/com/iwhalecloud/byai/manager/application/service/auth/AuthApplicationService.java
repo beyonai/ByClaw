@@ -128,6 +128,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Service
 public class AuthApplicationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeVersionAccess employeeVersionAccess;
+
 
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService employeeGovernance;
@@ -4189,7 +4192,7 @@ public class AuthApplicationService {
         vo.setCanPublishEmployee(canPublishEmployee != null ? canPublishEmployee : employeeGovernance.canPublish(resource));
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
-            vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
+            vo.setOfficialUpdateRequiresReview(true);
             // 配置更新审核与日常授权、上下架分开判定，避免作者只有编辑入口却无法维护授权。
             vo.setCanEdit(employeeGovernance.canMaintainOfficial(resource));
             boolean canManage = vo.isHasManagePermission();
@@ -4214,6 +4217,10 @@ public class AuthApplicationService {
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
             vo.setCanDelete(false);
+        }
+        if (employeeVersionAccess != null
+            && com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)) {
+            vo.setCanEdit(employeeVersionAccess.canManage(resource));
         }
     }
 

@@ -78,7 +78,6 @@ class GroupChatTaskTurnLifecycleTest {
         Long second = service.startTurn(60L);
         assertThat(second).isEqualTo(102L);
         assertThat(mapper.selectById(60L).getCurrentTurnTraceId()).isNull();
-        assertThat(service.startTurn(60L)).isNull();
         service.bindTurn(60L, second, "second-trace");
         service.completeTurn(60L, "second-trace", false);
         assertThat(mapper.selectById(60L).getTurnStatus()).isEqualTo("WAITING_USER");
@@ -99,6 +98,31 @@ class GroupChatTaskTurnLifecycleTest {
         service.completeTurn(60L, "third-trace", true);
         service.failTurnStart(60L, third);
         verifyNoInteractions(publisher);
+        assertThat(mapper.selectById(60L).getTurnStatus()).isEqualTo("WAITING_USER");
+    }
+
+    @Test
+    void admittedNewTurnReplacesRunningTurnWithoutAcceptingOldCallbacks() {
+        Long previous = service.startTurn(60L);
+        service.bindTurn(60L, previous, "previous-trace");
+        Long current = service.startTurn(60L);
+        assertThat(current).isEqualTo(103L);
+        assertThat(mapper.selectById(60L).getCurrentTurnTraceId()).isNull();
+        assertThatThrownBy(() -> service.bindTurn(60L, previous, "previous-trace"))
+            .hasMessageContaining("no longer current");
+        reset(publisher);
+        service.completeTurn(60L, "previous-trace", false);
+        service.failTurnStart(60L, previous);
+        assertThat(mapper.selectById(60L).getCurrentTurnId()).isEqualTo(current);
+        assertThat(mapper.selectById(60L).getTurnStatus()).isEqualTo("RUNNING");
+        verifyNoInteractions(publisher);
+
+        service.bindTurn(60L, current, "current-trace");
+        service.completeTurn(60L, "previous-trace", true);
+        service.failTurnStart(60L, previous);
+        assertThat(mapper.selectById(60L).getTurnStatus()).isEqualTo("RUNNING");
+        verifyNoInteractions(publisher);
+        service.completeTurn(60L, "current-trace", false);
         assertThat(mapper.selectById(60L).getTurnStatus()).isEqualTo("WAITING_USER");
     }
 

@@ -256,11 +256,11 @@ class DigitalEmployeeGovernanceServiceTest {
             CurrentUserHolder.getCurrentUserId(), manageIds, Set.of(), Set.of(), Set.of(), Set.of());
     }
     @ParameterizedTest @ValueSource(strings = {"adminvip", "PLAT_MAN"})
-    void administratorsCanSaveOfficialCopyDirectly(String identity) {
+    void administratorsMustSubmitOfficialConfigurationForReview(String identity) {
         EmployeePublicationApplicationServiceTest.login(identity, 2L, List.of(identity));
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 7L);
         resource.setOwnerType("enterprise"); resource.setPublicationSourceId(9L);
-        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
         assertThat(auth.hasResourceManagePermission(resource)).isTrue();
         assertThat(auth.hasResourceUseSettingPermission(resource)).isTrue();
         assertThatCode(() -> auth.validateEmployeeAuthorizationPermission(resource)).doesNotThrowAnyException();
@@ -271,7 +271,7 @@ class DigitalEmployeeGovernanceServiceTest {
         var permissions = new com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo();
         ReflectionTestUtils.invokeMethod(auth, "applyEmployeeGovernancePermissions", resource, permissions);
         assertThat(permissions.isOfficialPublication()).isTrue();
-        assertThat(permissions.isOfficialUpdateRequiresReview()).isFalse();
+        assertThat(permissions.isOfficialUpdateRequiresReview()).isTrue();
     }
     @ParameterizedTest @ValueSource(strings = {"DRAFT", "PENDING", "APPLYING", "FAILED"})
     void directSaveCannotRaceOutstandingOfficialUpdate(String state) {
@@ -282,7 +282,7 @@ class DigitalEmployeeGovernanceServiceTest {
         var active = new com.iwhalecloud.byai.manager.entity.resource.DigitalEmployeePublication();
         active.setStatus(state);
         when(publications.active(9L, 1L)).thenReturn(active);
-        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("未完成的更新申请");
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
     }
     @ParameterizedTest @ValueSource(strings = {"USER", "ORG_MAN", "BUSINESS_MAN"})
     void officialAuthorSavesRequireReviewRegardlessOfNonPlatformRole(String role) {
@@ -300,7 +300,7 @@ class DigitalEmployeeGovernanceServiceTest {
         SsResource resource = EmployeePublicationApplicationServiceTest.employee(10L, 1L);
         resource.setOwnerType("enterprise");
         resource.setPublicationSourceId(9L);
-        assertThatCode(() -> governance.requireDirectMutationAllowed(resource)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource)).hasMessageContaining("更新审核");
         resource.setCreateBy(7L); resource.setComAcctId(99L);
         assertThatThrownBy(() -> governance.requireDirectMutationAllowed(resource));
     }

@@ -1195,4 +1195,57 @@ class EmployeePublicationApplicationServiceTest {
         assertThat(resources.selectById(published.getOfficialId()).getResourceName()).isEqualTo(existing ? "员工" : "员工(企业)");
         if (existing) assertThat(published.getOfficialId()).isEqualTo(90L);
     }
+
+    @Test void selectedVersionSnapshotIsReadOnlyButCanStillBeSubmitted() {
+        var official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        publication.setOfficialId(90L); publication.setScopeUpdate(true); publication.setTargetVersionId(501L);
+        when(resources.selectById(90L)).thenReturn(official);
+        var versionAccess = mock(EmployeeVersionAccess.class);
+        when(versionAccess.canManage(official)).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versionAccess", versionAccess);
+        var detail = service.detail(100L);
+        assertThat(detail.canEdit()).isFalse(); assertThat(detail.canSubmit()).isTrue();
+        assertThatThrownBy(() -> service.save(request())).hasMessageContaining("版本审核快照不可编辑");
+        verify(employees, never()).updateDigitalEmployee(any());
+    }
+
+    @Test void fixedVersionCannotActivateAfterOnlyOneOrganizationApproves() {
+        login("platform", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
+        var official = employee(90L, 7L); official.setOwnerType("enterprise"); official.setPublicationSourceId(10L);
+        publication.setOfficialId(90L); publication.setScopeUpdate(true); publication.setTargetVersionId(501L);
+        when(resources.selectById(90L)).thenReturn(official);
+        when(scopeService.allApproved(publication)).thenReturn(false);
+        var versions = mock(EmployeeVersionStore.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versionStore", versions);
+        assertThat(service.approve(request()).publication().getStatus()).isEqualTo("PENDING");
+        verify(versions, never()).activate(any(), any(), any(), any());
+        verify(employees, never()).syncPublicationOpenClawWorkSpace(anyLong(), any());
+    }
+    @Test void publishedVersionWithCopiedSkillRecordsActualEnterpriseBindingWithoutMutatingDraft() {
+        var official = employee(90L, 7L);
+        var snapshot = new DigitalEmployeeDTO(); snapshot.setRelIds(List.of(501L));
+        publication.setTargetVersionId(200L);
+        var versions = mock(EmployeeVersionStore.class);
+        var applied = new com.iwhalecloud.byai.manager.entity.resource.SsResourceVersion(); applied.setResourceVersionId(201L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versionStore", versions);
+        when(versions.append(eq(official), eq(snapshot), eq(200L), eq("PUBLICATION"), anyString(), isNull(), any())).thenReturn(applied);
+        service.activatePublishedVersion(publication, official, snapshot, Map.of(401L, 501L), false);
+        assertThat(publication.getTargetVersionId()).isEqualTo(201L);
+        verify(versions).activate(official, applied, null, "PUBLICATION");
+        verify(versions, never()).requireVersion(official, 200L);
+    }
+
+    @Test void rollbackWithUnchangedBindingsReusesSelectedImmutableVersion() {
+        var official = employee(90L, 7L);
+        var snapshot = new DigitalEmployeeDTO(); publication.setTargetVersionId(200L);
+        var versions = mock(EmployeeVersionStore.class);
+        var selected = new com.iwhalecloud.byai.manager.entity.resource.SsResourceVersion(); selected.setResourceVersionId(200L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "versionStore", versions);
+        when(versions.requireVersion(official, 200L)).thenReturn(selected);
+        service.activatePublishedVersion(publication, official, snapshot, Map.of(401L, 401L), false);
+        assertThat(publication.getTargetVersionId()).isEqualTo(200L);
+        verify(versions).activate(official, selected, null, "PUBLICATION");
+        verify(versions, never()).append(any(), any(), any(), any(), any(), any(), any());
+    }
+
 }
