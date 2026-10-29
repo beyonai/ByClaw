@@ -3,7 +3,7 @@
  */
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import CookieUtil from '../cookie';
-import { getDisplayUserNameInChat, getVNCUrl } from '../chat';
+import { getDisplayUserNameInChat, getVNCUrl, hasRunningDesktop } from '../chat';
 
 describe('getVNCUrl', () => {
   const sandbox = (status: string, endpoint: string): ISandboxesInfo => ({
@@ -41,6 +41,38 @@ describe('getVNCUrl', () => {
     expect(getVNCUrl([sandbox('RUNNING', 'https://vnc.example/desktop/vnc.html?token=test-token&resize=remote')])).toBe(
       'https://vnc.example/desktop/vnc.html?token=test-token&resize=scale&autoconnect=true'
     );
+  });
+});
+
+describe('sandbox desktops', () => {
+  const sandbox = (status: string, instanceEndpoints: Record<string, string>): ISandboxesInfo => ({
+    userCode: 'u',
+    sandboxId: `${status}-sandbox`,
+    sandboxType: 'tool',
+    status,
+    instanceEndpoints,
+  });
+
+  afterEach(() => CookieUtil.delete('novncUrl'));
+
+  it('opens the requested instance', () => {
+    const sandboxes = [
+      sandbox('RUNNING', { vnc: '/v1/sandboxes/s/proxy/8081', desktop: '/v1/sandboxes/s/proxy/8083' }),
+    ];
+    expect(getVNCUrl(sandboxes, 'desktop')).toBe(
+      `${window.location.origin}/v1/sandboxes/s/proxy/8083/?autoconnect=true&resize=scale`
+    );
+    expect(getVNCUrl(sandboxes)).toBe(
+      `${window.location.origin}/v1/sandboxes/s/proxy/8081/?autoconnect=true&resize=scale`
+    );
+  });
+
+  it('tells whether a running sandbox declares its own desktop', () => {
+    expect(hasRunningDesktop([sandbox('RUNNING', { desktop: '/d' })])).toBe(true);
+    expect(hasRunningDesktop([sandbox('RUNNING', { vnc: '/v' })])).toBe(false);
+    expect(hasRunningDesktop([sandbox('STARTING', { desktop: '/d' })])).toBe(false);
+    expect(hasRunningDesktop({})).toBe(false);
+    expect(hasRunningDesktop(undefined)).toBe(false);
   });
 });
 

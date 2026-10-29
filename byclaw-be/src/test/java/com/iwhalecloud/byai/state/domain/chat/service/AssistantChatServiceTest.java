@@ -34,6 +34,18 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 @ExtendWith(MockitoExtension.class)
 class AssistantChatServiceTest {
 
+    @Test
+    void alreadyReportedStartupFailureDoesNotEmitADuplicateTerminalAfterPersistence() {
+        var failure = new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("wrapped",
+            new ChatStartupFailureException("startup failed", new IllegalStateException("timeout")));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "handleBdpRuntimeException", failure,
+            new com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto(), output);
+
+        assertThat(output.size()).isZero();
+    }
+
     @InjectMocks
     private AssistantChatService assistantChatService;
 

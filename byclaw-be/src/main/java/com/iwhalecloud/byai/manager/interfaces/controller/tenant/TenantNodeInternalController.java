@@ -40,9 +40,16 @@ public class TenantNodeInternalController {
     private final ObjectMapper objectMapper;
     private final String internalToken;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TenantNodeInternalController(TenantAdminTenantMapper tenantMapper, TenantCredentialCrypto crypto,
                                         JdbcTemplate jdbc, ObjectMapper objectMapper,
-                                        @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken) {
+                                        com.iwhalecloud.byai.manager.domain.tenant.TenantRuntimeIdentity identity) {
+        this(tenantMapper, crypto, jdbc, objectMapper, identity.internalToken());
+    }
+
+    public TenantNodeInternalController(TenantAdminTenantMapper tenantMapper, TenantCredentialCrypto crypto,
+                                        JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                        String internalToken) {
         this.tenantMapper = tenantMapper;
         this.crypto = crypto;
         this.jdbc = jdbc;

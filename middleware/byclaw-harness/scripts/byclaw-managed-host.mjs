@@ -19,13 +19,13 @@ export function userNasPoolKey(poolId) {
 /** A trusted platform binding selects only this context's existing durable home. */
 export function validateStorageBinding(key, value) {
   if (value == null) return undefined
-  if (!value || typeof value !== 'object' || Array.isArray(value) || ![1, 2, 3].includes(value.version)
+  if (!value || typeof value !== 'object' || Array.isArray(value) || ![1, 2, 3, 4].includes(value.version)
     || value.mode !== 'USER_NAS_QUOTA' || value.contextKey !== key || !/^ctx_[a-f0-9]{64}$/.test(key)
     || !/^[a-f0-9]{64}$/.test(value.parentSpaceKey ?? '')
     || !/^[a-f0-9]{64}$/.test(value.spaceKey ?? '') || !/^[A-Za-z0-9_-]{1,128}$/.test(value.poolId ?? '')
     || !/^[a-z][a-z0-9-]{0,62}$/.test(value.namespace ?? '')
-    || (value.version === 3 && value.parentSpaceKey !== userNasPoolKey(value.poolId))
-    || value.home !== (value.version === 3 ? `/data/byclaw-context-pools/${value.parentSpaceKey}/${value.spaceKey}/by/byclaw/.dsh` : value.version === 1 ? `/data/byclaw-contexts/${key}/dsh-home` : `/data/byclaw-context-pools/${value.parentSpaceKey}/${key}/dsh-home`)
+    || ([3, 4].includes(value.version) && value.parentSpaceKey !== userNasPoolKey(value.poolId))
+    || value.home !== ([3, 4].includes(value.version) ? `/data/byclaw-context-pools/${value.parentSpaceKey}/${value.spaceKey}/by/byclaw/.dsh` : value.version === 1 ? `/data/byclaw-contexts/${key}/dsh-home` : `/data/byclaw-context-pools/${value.parentSpaceKey}/${key}/dsh-home`)
     || Object.keys(value).sort().join(',') !== 'contextKey,home,mode,namespace,parentSpaceKey,poolId,spaceKey,version') {
     throw fail('invalid user storage binding', 400)
   }

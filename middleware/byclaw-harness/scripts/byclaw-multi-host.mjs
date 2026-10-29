@@ -1258,9 +1258,18 @@ export function parseStorageMounts(value) {
   const mounts = value == null ? [] : JSON.parse(value)
   if (!Array.isArray(mounts) || mounts.length > 20) throw new Error('invalid shared NAS mounts')
   const parents = new Set(), pools = new Set()
+  let overlays = 0
   for (const mount of mounts) {
     const personal = mount?.kind === 'USER_POOL'
-    if (!mount || typeof mount !== 'object' || Object.keys(mount).sort().join(',') !== (personal ? 'kind,mountPath,namespace,parentSpaceKey,poolId' : 'mountPath,namespace,parentSpaceKey,poolId')
+    const exact = personal && Object.hasOwn(mount, 'spaceKeys')
+    if (exact) {
+      const keys = typeof mount.spaceKeys === 'string' ? mount.spaceKeys.split(',') : []
+      if (!keys.length || keys.length > 500 || new Set(keys).size !== keys.length
+        || keys.some(key => key.length !== 64 || !/^[a-f0-9]{64}$/.test(key))) throw new Error('invalid shared NAS mounts')
+      overlays += keys.length
+      if (overlays > 64) throw new Error('invalid shared NAS mounts')
+    }
+    if (!mount || typeof mount !== 'object' || Object.keys(mount).sort().join(',') !== (personal ? `kind,mountPath,namespace,parentSpaceKey,poolId${exact ? ',spaceKeys' : ''}` : 'mountPath,namespace,parentSpaceKey,poolId')
       || !/^[a-f0-9]{64}$/.test(mount.parentSpaceKey ?? '') || !/^[A-Za-z0-9_-]{1,128}$/.test(mount.poolId ?? '')
       || !/^[a-z][a-z0-9-]{0,62}$/.test(mount.namespace ?? '')
       || mount.mountPath !== `/data/byclaw-context-pools/${mount.parentSpaceKey}`
@@ -1278,15 +1287,19 @@ export async function verifyUserStorageHome(config, user, request, inspect = lst
   if (storageBinding) {
     let root = config.userRoot
     let paths
-    if ([2, 3].includes(storageBinding.version)) {
+    const personal = [3, 4].includes(storageBinding.version)
+    const exact = storageBinding.version === 4
+    if ([2, 3, 4].includes(storageBinding.version)) {
       const mount = config.storageMounts?.find(m => m.parentSpaceKey === storageBinding.parentSpaceKey
         && m.poolId === storageBinding.poolId && m.namespace === storageBinding.namespace
-        && (storageBinding.version === 3 ? m.kind === 'USER_POOL' : m.kind == null))
+        && (personal ? m.kind === 'USER_POOL' : m.kind == null))
       root = `/data/byclaw-context-pools/${storageBinding.parentSpaceKey}`
-      if (!config.managed || mount?.mountPath !== root) throw new Error('user NAS binding requires the configured shared NAS mount')
-      paths = storageBinding.version === 3 ? ['/data/byclaw-context-pools', root, join(root, storageBinding.spaceKey),
+      if (!config.managed || mount?.mountPath !== root
+        || (exact && !mount.spaceKeys?.split(',').includes(storageBinding.spaceKey))) throw new Error('user NAS binding requires the configured shared NAS mount')
+      paths = personal ? ['/data/byclaw-context-pools', root, join(root, storageBinding.spaceKey),
         join(root, storageBinding.spaceKey, 'by'), join(root, storageBinding.spaceKey, 'by/byclaw'), home]
         : ['/data/byclaw-context-pools', root, join(root, user), home]
+      if (exact) paths.unshift('/data')
     } else {
       if (!config.managed || root !== '/data/byclaw-contexts' || home !== storageBinding.home
         || config.storagePoolId !== storageBinding.poolId || config.storageParentSpaceKey !== storageBinding.parentSpaceKey
@@ -1296,7 +1309,10 @@ export async function verifyUserStorageHome(config, user, request, inspect = lst
     // Reject aliases at every controlled parent before mkdir. Plugins remain trusted in this shared process.
     for (const path of paths) {
       const info = await inspect(path).catch(error => { if (error.code !== 'ENOENT') throw error })
-      if (!info && (path === root || path === '/data/byclaw-context-pools')) throw new Error('user NAS mount is missing')
+      // The exact /spaces overlay must exist before creating its first DSH home.
+      // Never create a replacement directory on the underlying /users mount.
+      if (!info && (path === root || path === '/data/byclaw-context-pools'
+        || (exact && (path === '/data' || path === join(root, storageBinding.spaceKey))))) throw new Error('user NAS mount is missing')
       if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('unsafe user NAS home')
     }
   }

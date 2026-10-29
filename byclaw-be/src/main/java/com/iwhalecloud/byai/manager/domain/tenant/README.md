@@ -10,7 +10,9 @@ WebSocket 在原连接上发送 `SWITCH_TENANT` 消息，payload 带 `enterprise
 
 组织沿用平台 `po_organization` 层级，通过 `tenant_organization` 挂靠到企业租户；同一组织可挂靠多个租户。`POST /byaiService/admin/tenants/organizations/tree` 返回组织树和挂靠状态，`/members` 预览所选组织及可选下级组织的 ACTIVE 用户，`/attach` 可仅挂靠组织或同时批量加入其用户。所有参数均在 JSON body 中。批量加入在同一事务中检查套餐人数上限，超限时整批回滚。
 
-`TenantCredentialCrypto` 从环境变量 `BYCLAW_TENANT_CREDENTIAL_MASTER_KEY` 读取 64 位十六进制字符（32 字节）的独立随机密钥，通过 HMAC-SHA256 和租户 `enterpriseId` 派生 128 位密钥，生成 SM4-GCM v2 密文信封。信封的 nonce、ciphertext、tag 使用租户 Node 接受的标准带填充 Base64；AAD 绑定 `enterpriseId` 和固定数据库名。新建租户数据库前必须配置此密钥，并在 BE 实例间保持一致。旧 v1 Base64URL 信封仍可解密以便迁移；它们使用仓库历史共享密钥，应尽快轮换。密钥不得写入规格、SQL 或日志。
+`TenantRuntimeIdentity` 基于已有 `BYAI_PLATFORM.app_secret`，使用用途分离的 HMAC-SHA256 固定规则派生凭据主密钥和内部 Token。相同应用身份在重启、多实例中得到相同结果；不新增密钥存储，不需要租户密钥/Token 环境变量。应用身份必须保持稳定，变更前需迁移存量密文并更新 Node 的内部认证。`TenantCredentialCrypto` 再按企业 ID 派生 SM4-GCM 密钥，AAD 绑定企业与数据库名；旧凭据升级只重新封装相同数据库密码，不修改数据库密码。密钥和 Token 不得写入源码、SQL 或日志。
+
+租户数据库与 Node 的镜像及默认档位分别读取 Platform 的 `sandbox_service_spec` / `sandbox_service_profile`；创建时冻结 `profileKey` 和 `nodeProfileKey`，重试沿用快照。Redis 复用公共 Spring Redis 配置；仅 Node 回调 BE 的内网入口需配置 `BYCLAW_TENANT_BE_INTERNAL_URL`。基线使用内置 ZIP，数据库连接使用 Provider 地址，Node 使用 Pod IP 注册。持久租户事件默认启用；外部订阅仍由 hooks 配置管理。
 # 管理端租户创建
 
 平台管理员通过 `POST /byaiService/admin/tenants/create` 提交 `enterpriseName`、`packageId`、`requestId`，通过 `POST /byaiService/admin/tenants/list` 查看租户。创建事务写入企业、所有者成员关系、套餐快照和 `RESERVED` 开通状态；同一个 `requestId` 重试返回原租户。`RESERVED` 不能切换进入业务空间，必须由沙箱与 schema 开通流程推进到 `READY`。

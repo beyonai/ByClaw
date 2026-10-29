@@ -18,7 +18,7 @@ class TenantSandboxRecoveryTest {
     @Test void strictMetadataAndConnectionEvidenceAreRequiredForAdoption() {
         var client=mock(OpenSandboxClient.class);var records=mock(SsSandboxRecordMapper.class);
         var service=new TenantSandboxService(mock(SandboxLifecycleFacade.class),client,mock(SandboxServiceSpecRepository.class),
-            records,new ObjectMapper(),"image","/tmp","node","redis","6379","0","default","password","http://be","token","node");
+            records,new ObjectMapper(),"/tmp","redis","6379","0","default","password","http://be","token","node");
         var remote=new SandboxDetail();remote.setId("original");
         var status=new SandboxStatus();status.setState("Running");remote.setStatus(status);
         remote.setMetadata(Map.of("enterpriseId","7","ownerScope","TENANT","serviceKey","tenant-opengauss",
@@ -42,7 +42,7 @@ class TenantSandboxRecoveryTest {
         when(specs.findByServiceKeyAndProfile("tenant-opengauss","s")).thenReturn(java.util.Optional.of(spec));
         var impossibleRoot=root.resolve("file");java.nio.file.Files.writeString(impossibleRoot,"not a directory");
         var service=new TenantSandboxService(lifecycle,mock(OpenSandboxClient.class),specs,mock(SsSandboxRecordMapper.class),
-            new ObjectMapper(),"image",impossibleRoot.toString(),"node","redis","6379","0","default","password","http://be","token","node");
+            new ObjectMapper(),impossibleRoot.toString(),"redis","6379","0","default","password","http://be","token","node");
         var failure=assertThrows(com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException.class,
             ()->service.launchOpenGauss(7,"s","byclaw_t_7","bc_t_7_admin","password","command-6:DB_CREATE"));
         assertEquals("PROVIDER_NOT_CALLED_FILE_PREPARATION",failure.getMessage());assertNotNull(failure.getCause());

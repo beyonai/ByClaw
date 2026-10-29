@@ -225,13 +225,14 @@ public class RouteService {
         long routeStarted = System.nanoTime();
         ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "start", "running", 0, "agentId", agentId);
         String targetAgentType;
+        long startupDeadline = workerRouteReadinessService.startupDeadline();
         try {
-            targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, agentId,
-                chatDto.getSourceAgentType(), userCode);
+            targetAgentType = workerRouteReadinessService.resolveTarget(userCode, agentId, workerAgentType,
+                chatDto.getSourceAgentType(), startupDeadline);
         } catch (RuntimeException error) {
             ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "end", "failed", routeStarted,
                 "errorCode", "TARGET_ROUTE_FAILED", "errorType", error.getClass().getSimpleName());
-            throw error;
+            throw reportStartupFailure(ctx, error);
         }
         ctx.targetAgentType = targetAgentType;
         ChatChainLog.stage(chatDto, ctx.traceId, "be.route", "end", "ok", routeStarted,
@@ -249,8 +250,14 @@ public class RouteService {
 
         String reqMetadata = ctx.assistantChatDto.getMetadata();
         MultiAgentMetadata multiAgentMetadata = MultiAgentMetadata.fromExtParams(chatDto.getExtParams());
-        List<MultiAgentLaneRoute> laneRoutes = buildMultiAgentLaneRoutes(ctx, multiAgentMetadata, workerAgentType,
-            agentId, answerMessageId, traceId, userCode);
+        List<MultiAgentLaneRoute> laneRoutes;
+        try {
+            laneRoutes = buildMultiAgentLaneRoutes(ctx, multiAgentMetadata, workerAgentType,
+                agentId, answerMessageId, traceId, userCode, startupDeadline);
+        }
+        catch (RuntimeException failure) {
+            throw reportStartupFailure(ctx, failure);
+        }
         registerMultiAgentContext(ctx, laneRoutes);
 
         long dispatchStarted = System.nanoTime();
@@ -261,7 +268,7 @@ public class RouteService {
             runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
             try {
                 com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.check();
-                ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType);
+                ensureWorkerReadyBeforeFirstSend(ctx, userCode, agentId, targetAgentType, startupDeadline);
                 if (laneRoutes.isEmpty()) {
                     GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
                         userCode,
@@ -300,7 +307,14 @@ public class RouteService {
             } catch (Exception e) {
                 ChatChainLog.stage(chatDto, traceId, "be.dispatched", "end", "failed", dispatchStarted,
                     "errorCode", "GATEWAY_INITIATION_FAILED", "errorType", e.getClass().getSimpleName());
-                chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
+                try {
+                    chatStreamRuntimeCoordinator.stopIfStarted(ctx, runtimeStarted);
+                }
+                catch (RuntimeException cleanupFailure) {
+                    if (cleanupFailure != e) e.addSuppressed(cleanupFailure);
+                    log.warn("Failed to clean up unsuccessful chat startup, sessionId: {}, traceId: {}",
+                        sessionId, traceId, cleanupFailure);
+                }
                 throw e;
             }
         }
@@ -408,7 +422,7 @@ public class RouteService {
     }
 
     private void ensureWorkerReadyBeforeFirstSend(ChatProcessContext ctx, String userCode, Long agentId,
-            String targetAgentType) {
+            String targetAgentType, long deadline) {
         long started = System.nanoTime();
         boolean[] coldStart = {false};
         ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "start", "running", 0,
@@ -428,7 +442,7 @@ public class RouteService {
                     default -> {
                     }
                 }
-            });
+            }, deadline);
             ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "end", "ok", started,
                 "targetAgentType", targetAgentType, "mode", coldStart[0] ? "cold_start" : "existing_or_not_required");
         }
@@ -436,9 +450,7 @@ public class RouteService {
             ChatChainLog.stage(ctx.assistantChatDto, ctx.traceId, "be.worker_ready", "end", "failed", started,
                 "targetAgentType", targetAgentType, "errorCode", "WORKER_READINESS_FAILED",
                 "errorType", exception.getClass().getSimpleName());
-            String failureMessage = resolveSandboxLaunchFailureMessage(exception);
-            sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);
-            throw exception;
+            throw reportStartupFailure(ctx, exception);
         }
     }
 
@@ -569,7 +581,7 @@ public class RouteService {
 
     private List<MultiAgentLaneRoute> buildMultiAgentLaneRoutes(ChatProcessContext ctx,
                                                                 MultiAgentMetadata multiAgentMetadata, String workerAgentType, Long fallbackAgentId, String fallbackAnswerMessageId,
-                                                                String fallbackTraceId, String userCode) {
+                                                                String fallbackTraceId, String userCode, long startupDeadline) {
         if (multiAgentMetadata == null || !multiAgentMetadata.hasLanes()) {
             return Collections.emptyList();
         }
@@ -579,8 +591,8 @@ public class RouteService {
             LaneAgentInfo laneAgentInfo = resolveLaneAgentInfo(lane, ctx.getParams(), fallbackAgentId);
             String laneAnswerMessageId = StringUtils.defaultIfBlank(lane.getAnswerMessageId(), fallbackAnswerMessageId);
             String laneTraceId = resolveLaneTraceId(lane, fallbackTraceId);
-            String laneTargetAgentType = targetAgentResolver.resolveAgentType(workerAgentType,
-                laneAgentInfo.agentId, ctx.getAssistantChatDto().getSourceAgentType(), userCode);
+            String laneTargetAgentType = workerRouteReadinessService.resolveTarget(userCode, laneAgentInfo.agentId,
+                workerAgentType, ctx.getAssistantChatDto().getSourceAgentType(), startupDeadline);
             Map<String, Object> laneParams = buildLaneParams(ctx.getParams(), multiAgentMetadata, lane,
                 laneAgentInfo, laneTraceId);
             JSONObject laneMetadata = multiAgentMetadata.buildLanePayload(lane, laneTraceId);
@@ -980,6 +992,22 @@ public class RouteService {
             cursor = cursor.getCause();
         }
         return null;
+    }
+
+    private RuntimeException reportStartupFailure(ChatProcessContext ctx, RuntimeException failure) {
+        if (ctx.res == null || com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.isCancelled()
+            || Thread.currentThread().isInterrupted()) return failure;
+        String message = resolveSandboxLaunchFailureMessage(failure);
+        sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, message);
+        JSONObject payload = (JSONObject) JSON.toJSON(
+            com.iwhalecloud.byai.state.domain.chat.model.ErrorReponse.error(failure));
+        payload.put("message", message);
+        payload.put("messageId", ctx.modelAnswerMessageId);
+        payload.put("queryMessageId", ctx.userMessageId);
+        payload.put("traceId", ctx.traceId);
+        payload.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
+        CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, payload.toJSONString(), ctx.sessionId);
+        return new com.iwhalecloud.byai.state.domain.chat.service.ChatStartupFailureException(message, failure);
     }
 
     private void sendSandboxProgressMessage(ChatProcessContext ctx, String event, String message) {

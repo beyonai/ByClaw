@@ -32,7 +32,7 @@ class TenantInternalControllerTest {
         };
         var transactions = new org.springframework.jdbc.datasource.DataSourceTransactionManager(
             new org.springframework.jdbc.datasource.DriverManagerDataSource("jdbc:h2:mem:controller", "sa", ""));
-        var commands = new TenantCommandService(store, null, null, null, new ObjectMapper(), null, null, transactions) {
+        var commands = new TenantCommandService(store, null, null, null, new ObjectMapper(), null, null, transactions, org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties.class)) {
             @Override public TenantCommandStore.Command provision(TenantCommandRequest request) { return command; }
             @Override public TenantCommandStore.Command policy(String source, long enterpriseId, com.fasterxml.jackson.databind.JsonNode body) {
                 org.junit.jupiter.api.Assertions.assertTrue(body.isObject()); return command;

@@ -29,11 +29,6 @@ public class TenantCommandService {
     private final TenantExecutionPolicyService policies;
     private final TenantSandboxProperties sandboxProperties;
     private final TransactionTemplate tx;
-    public TenantCommandService(TenantCommandStore store,JdbcTemplate jdbc,TenantAdminTenantMapper tenants,
-        SequenceService ids,ObjectMapper json,HookPublisher hooks,TenantExecutionPolicyService policies,
-        PlatformTransactionManager transactions) {
-        this(store,jdbc,tenants,ids,json,hooks,policies,transactions,new TenantSandboxProperties());
-    }
     @Autowired
     public TenantCommandService(TenantCommandStore store,JdbcTemplate jdbc,TenantAdminTenantMapper tenants,
         SequenceService ids,ObjectMapper json,HookPublisher hooks,TenantExecutionPolicyService policies,
@@ -62,7 +57,8 @@ public class TenantCommandService {
             JsonNode body=read(request.snapshot());
             // Resolve defaults only for a new reservation; explicit trusted profiles and frozen retries take precedence.
             String profile=request.profileKey()==null?sandboxProperties.getProfileKey():request.profileKey();
-            var snapshot=json.createObjectNode().put("profileKey",profile);
+            var snapshot=json.createObjectNode().put("profileKey",profile)
+                .put("nodeProfileKey", request.profileKey()==null?sandboxProperties.getNodeProfileKey():request.profileKey());
             snapshot.set("memberLimit",body.path("initialPolicy").path("limits").path("memberLimit"));
             config(enterprise,"PACKAGE_CONTENT_SNAPSHOT",snapshot.toString());
             config(enterprise,"COMMERCIAL_MANAGED","true");

@@ -396,7 +396,9 @@ public class DatasetController {
                 fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
                 Boolean.parseBoolean(skipIfDuplicate), parseOptionalBoolean(extractZip), metadata, headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
-        } catch (Exception e) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+                | com.iwhalecloud.byai.state.common.exception.StoragePreparingException e) {throw e;}
+        catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }

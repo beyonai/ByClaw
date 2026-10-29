@@ -72,7 +72,9 @@ class TenantCommandAcceptanceTest {
             new com.iwhalecloud.byai.manager.domain.tenant.hook.TenantHookConfiguration().tenantDeletionRequestedSchema(),
             new com.iwhalecloud.byai.manager.domain.tenant.hook.TenantHookConfiguration().tenantProvisioningFailedSchema()));
         store = new TenantCommandStore(jdbc);
-        sandboxProperties = new TenantSandboxProperties();
+        sandboxProperties = org.mockito.Mockito.mock(TenantSandboxProperties.class);
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("m");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("m");
         service = new TenantCommandService(store, jdbc, mapper, ids, json, new HookPublisher(null, durable),
             new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source),
             sandboxProperties);
@@ -182,7 +184,8 @@ class TenantCommandAcceptanceTest {
         assertFalse(json.readTree(storedRequest).has("resourceSpec"));
 
         // Emulate a new startup setting while replaying the original unmodified business request.
-        sandboxProperties.setProfileKey("l");
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
         jdbc.update("UPDATE byai.po_users SET is_locked='Y' WHERE user_id=1");
         assertEquals(first, service.provision(TenantCommandRequest.parse(original)));
         assertEquals("m", frozenProfile(first));
@@ -197,7 +200,8 @@ class TenantCommandAcceptanceTest {
     }
 
     @Test void explicitTrustedProfilesOverrideDeploymentDefaultWithoutBindingVersion() throws Exception {
-        sandboxProperties.setProfileKey("l");
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
         for (String profile : new String[]{"s", "m", "l"}) {
             var value = body("request-explicit-profile-" + profile);
             value.putObject("resourceSpec").put("profileKey", profile);

@@ -10,7 +10,7 @@
 #   docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
 # Build context is the repository root, like the other harness Dockerfiles.
-ARG HARNESS_IMAGE=byclaw/dsh:latest
+ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0
 
 
 # --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---

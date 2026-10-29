@@ -319,14 +319,18 @@ test('shared user root is explicit, managed-only and separate from host-owned fi
   assert.throws(() => host.readHostConfig({ ...env, BYCLAW_MULTI_HOST_MANAGED: '0' }), /managed/)
 })
 
-test('user NAS binding is immutable within a live generation and acknowledged by the host', async t => {
+for (const version of [1, 4]) test(`user NAS binding is immutable within a live generation and acknowledged by the host (v${version})`, async t => {
   const r = await registry(t)
   const key = 'ctx_' + 'a'.repeat(64)
-  const binding = { version: 1, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared',
-    parentSpaceKey: 'd'.repeat(64), spaceKey: 'b'.repeat(64), poolId: 'pool-1', home: `/data/byclaw-contexts/${key}/dsh-home` }
+  const parent = version === 4 ? userNasPoolKey('pool-1') : 'd'.repeat(64)
+  const binding = { version, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared',
+    parentSpaceKey: parent, spaceKey: 'b'.repeat(64), poolId: 'pool-1',
+    home: version === 4 ? `/data/byclaw-context-pools/${parent}/${'b'.repeat(64)}/by/byclaw/.dsh` : `/data/byclaw-contexts/${key}/dsh-home` }
   await r.ensure(key, request(key, { storageBinding: binding }))
   assert.deepEqual((await r.describe(key, request(key))).storageBinding, binding)
-  await assert.rejects(r.ensure(key, request(key, { storageBinding: { ...binding, spaceKey: 'c'.repeat(64) } })), /storage binding/)
+  const otherBinding = { ...binding, spaceKey: 'c'.repeat(64),
+    home: version === 4 ? `/data/byclaw-context-pools/${parent}/${'c'.repeat(64)}/by/byclaw/.dsh` : binding.home }
+  await assert.rejects(r.ensure(key, request(key, { storageBinding: otherBinding })), /storage binding/)
   await assert.rejects(r.ensure(key, request(key)), /storage binding/)
 })
 
@@ -340,9 +344,9 @@ test('NAS binding cannot redirect a context into another user home', async t => 
   assert.equal(r.list().length, 0)
 })
 
-test('personal NAS binding uses the same persistent home across context tenants', () => {
+for (const version of [3, 4]) test(`personal NAS binding uses the same persistent home across context tenants (v${version})`, () => {
   const a = `ctx_${'a'.repeat(64)}`, b = `ctx_${'b'.repeat(64)}`, space = 'c'.repeat(64)
-  const binding = { version: 3, mode: 'USER_NAS_QUOTA', spaceKey: space, parentSpaceKey: userNasPoolKey('pool'),
+  const binding = { version, mode: 'USER_NAS_QUOTA', spaceKey: space, parentSpaceKey: userNasPoolKey('pool'),
     poolId: 'pool', namespace: 'shared', contextKey: a, home: `/data/byclaw-context-pools/${userNasPoolKey('pool')}/${space}/by/byclaw/.dsh` }
   assert.equal(validateStorageBinding(a, binding).home, validateStorageBinding(b, { ...binding, contextKey: b }).home)
   assert.throws(() => validateStorageBinding(a, { ...binding, parentSpaceKey: 'd'.repeat(64) }))

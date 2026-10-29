@@ -131,7 +131,8 @@ public class FileBrowserController {
             globalFileUploadValidator.validateSize(files);
             fileBrowserService.upload(userCode, resourceId, path, files);
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.uploadFailed", e.getMessage()));
@@ -154,7 +155,8 @@ public class FileBrowserController {
         try {
             return ResponseUtil.successResponse(
                 knowledgeTransferApplicationService.saveToPersonalKnowledge(userCode, request));
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             LOGGER.error("过程文件保存到个人知识库失败: userCode={}, sourceResourceId={}, targetResourceId={}, sourcePath={}",
@@ -177,7 +179,8 @@ public class FileBrowserController {
                 knowledgeTransferApplicationService.saveToKnowledge(userCode, request);
             return ResponseUtil.successResponse(I18nUtil.get("filebrowser.knowledge.saved"), result);
         }
-        catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         }
         catch (Exception e) {
@@ -209,7 +212,8 @@ public class FileBrowserController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encodedFileName)
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(new InputStreamResource(inputStream));
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
@@ -266,7 +270,8 @@ public class FileBrowserController {
         try {
             fileBrowserService.delete(userCode, request.getResourceId(), request.getPaths());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.deleteFailed", e.getMessage()));
@@ -297,7 +302,8 @@ public class FileBrowserController {
         try {
             fileBrowserService.rename(userCode, request.getResourceId(), request.getSourcePath(), request.getNewName());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.renameFailed", e.getMessage()));
@@ -329,7 +335,8 @@ public class FileBrowserController {
             fileBrowserService.move(userCode, request.getResourceId(), request.getSourcePaths(),
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.moveFailed", e.getMessage()));
@@ -361,7 +368,8 @@ public class FileBrowserController {
             fileBrowserService.copy(userCode, request.getResourceId(), request.getSourcePath(),
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.copyFailed", e.getMessage()));
@@ -389,7 +397,8 @@ public class FileBrowserController {
         try {
             fileBrowserService.createFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.mkdirFailed", e.getMessage()));
@@ -417,7 +426,8 @@ public class FileBrowserController {
         try {
             fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             LOGGER.error("初始化文件目录失败: userCode={}, resourceId={}, path={}",
@@ -477,7 +487,8 @@ public class FileBrowserController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
-        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
             throw quota;
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();

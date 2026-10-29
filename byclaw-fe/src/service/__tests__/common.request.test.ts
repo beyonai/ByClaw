@@ -1,3 +1,7 @@
+jest.mock('@/utils/personalStorageReadiness', () => ({
+  requiresPersonalStorage: jest.fn(() => true),
+  waitForPersonalStorage: jest.fn(() => Promise.resolve()),
+}));
 import {
   approveUseApply,
   rejectUseApply,

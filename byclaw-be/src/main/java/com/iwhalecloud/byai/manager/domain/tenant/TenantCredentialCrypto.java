@@ -42,14 +42,19 @@ public class TenantCredentialCrypto {
     private final ObjectMapper objectMapper;
     private final byte[] masterKey;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantCredentialCrypto(ObjectMapper objectMapper, TenantRuntimeIdentity identity) {
+        this(objectMapper, identity.masterKeyHex());
+    }
+
     public TenantCredentialCrypto(ObjectMapper objectMapper,
-                                  @Value("${BYCLAW_TENANT_CREDENTIAL_MASTER_KEY:}") String masterKeyHex) {
+                                  String masterKeyHex) {
         this.objectMapper = objectMapper;
         if (masterKeyHex == null || masterKeyHex.isBlank()) {
             this.masterKey = null;
         }
         else if (!masterKeyHex.matches("[0-9a-fA-F]{64}")) {
-            throw new IllegalArgumentException("BYCLAW_TENANT_CREDENTIAL_MASTER_KEY must be 64 hex characters");
+            throw new IllegalArgumentException("Tenant credential master key must be 64 hex characters");
         }
         else {
             this.masterKey = Hex.decode(masterKeyHex);
@@ -137,7 +142,7 @@ public class TenantCredentialCrypto {
             throw new IllegalArgumentException("enterprise ID must be positive");
         }
         if (masterKey == null) {
-            throw new IllegalStateException("BYCLAW_TENANT_CREDENTIAL_MASTER_KEY is required for tenant credentials");
+            throw new IllegalStateException("Tenant runtime identity is required for tenant credentials");
         }
         try {
             Mac mac = Mac.getInstance("HmacSHA256");

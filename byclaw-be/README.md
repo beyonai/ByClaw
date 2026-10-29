@@ -55,6 +55,20 @@ Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例�
 后续使用同一 `requestId` 对照 Gateway 日志的 `readyMs`、`dispatchMs`，区分沙箱就绪与消息派发。
 完整事件内容不再逐包记录到 INFO。生产效果需部署后用实际钉钉消息验证，单元测试不代表外网或模型可用。
 
+## 登录预热与首次聊天
+
+登录异步预热与首次聊天共用 Platform 的幂等启动流程：专享使用 `sandbox/business/launch`，共享使用 `shared/lookup`、`shared/acquire`。
+首次聊天按最终 Worker 类型确定服务及资源键，复用同一用户的启动结果；不会因 Worker 暂未注册而重启登录正在拉起的沙箱。
+BE 本机合并相同路由的等待，跨实例并发由 Platform 的启动所有权协调。只有消息实际发送失败后的既有恢复路径使用重启。
+
+`.env` 中 `BYCLAW_SANDBOX_STARTUP_TIMEOUT_MS` 默认 `60000` 毫秒，BE 与 Platform 应配置相同值。
+BE 的同一等待预算包含目标解析（含共享分配）、启动 RPC 和后续 Worker 注册等待。调用方到期立即结束等待；后台启动仍保留至远端实际返回，同租户、同路由重试只加入该任务，不取消或重复创建。异步任务保留用户、语言与租户身份，不向已经超时或取消的请求追加进度消息。
+专享沙箱离线就绪检查在 `business/launch` 传递 `verifyExisting=true`，由 Platform 持有启动所有权后核验当前实例；登录预热不额外探测。共享沿用 `shared/lookup`、`shared/acquire` 幂等成员协议。
+已有 `byclaw.gateway.worker-readiness-timeout-ms` 显式配置优先于该环境变量。
+Platform 客户端默认读超时取 `130000` 与启动预算加 `10000` 毫秒的较大值，为传输提供容差；这不会增加 Worker 等待预算。
+若显式覆盖 `byclaw.platform.read-timeout-ms`，应至少比启动预算多 `10000` 毫秒；连接超时仍默认 `5000` 毫秒。
+目标解析或启动失败时，BE 在数据库持久化与运行态清理前立即发送带会话、消息、trace 和 clientRequestId 的 `CHAT_STREAM/error` 终态；前端结束加载，已取消的回答保持取消状态。此变更需配套部署 Platform 的并发启动协调修复。
+
 ## Super 运行时兼容
 
 `byclaw.super-enabled` 默认 `false`，可通过环境变量 `BYCLAW_SUPER_ENABLED` 配置。

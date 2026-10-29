@@ -119,21 +119,16 @@ class EnterpriseInfoApplicationServiceTest {
     }
 
     @Test
-    void listUserEnterprisesIncludesDefaultEnterpriseWithoutMembership() {
+    void listUserEnterprisesPreservesCreationOrderIncludingDefaultEnterprise() {
         UserEnterpriseVo tenant = userEnterprise(21L, "Acme", "acme",
             TenantUserMembershipRole.MEMBER, "ACTIVE");
-        when(tenantUserMembershipService.listUserEnterprises(7L)).thenReturn(List.of(tenant));
-        when(enterpriseInfoService.findById(1L)).thenReturn(enterpriseInfo(1L, "Default", "default"));
+        UserEnterpriseVo defaultEnterprise = userEnterprise(1L, "Default", "default",
+            TenantUserMembershipRole.MEMBER, "ACTIVE");
+        when(tenantUserMembershipService.listUserEnterprises(7L))
+            .thenReturn(List.of(tenant, defaultEnterprise));
 
-        List<UserEnterpriseVo> enterprises = service.listUserEnterprises();
-
-        assertThat(enterprises).hasSize(2);
-        assertThat(enterprises.get(0).getEnterpriseId()).isEqualTo(1L);
-        assertThat(enterprises.get(0).getComAcctName()).isEqualTo("Default");
-        assertThat(enterprises.get(0).getComAcctCode()).isEqualTo("default");
-        assertThat(enterprises.get(0).getRole()).isEqualTo(TenantUserMembershipRole.MEMBER);
-        assertThat(enterprises.get(0).getStatus()).isEqualTo("ACTIVE");
-        assertThat(enterprises.get(1)).isSameAs(tenant);
+        assertThat(service.listUserEnterprises()).containsExactly(tenant, defaultEnterprise);
+        verify(enterpriseInfoService, never()).findById(1L);
     }
 
     @Test

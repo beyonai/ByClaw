@@ -49,6 +49,13 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            if(failure.status()==409) {
+                try {
+                    JsonNode body=json.readTree(failure.contentUTF8());
+                    if("STORAGE_PREPARING".equals(body.path("data").path("errorType").asText()))
+                        throw new com.iwhalecloud.byai.state.common.exception.StoragePreparingException();
+                } catch(java.io.IOException ignored) { /* Preserve the original remote failure. */ }
+            }
             var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
             if(quota!=null)throw quota;
             throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
@@ -64,7 +71,7 @@ public class PlatformRemoteGateway {
     }
 
     public void checkPersonalQuota(String operation,long requestedBytes) {
-        if(!remote)return;
+        if(!remote || com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()!=null)return;
         String user=CurrentUserHolder.getCurrentUserCode();
         if(user==null || user.isBlank())return;
         call("storage","quota-check",params("userCode",user,"operation",operation,"requestedBytes",requestedBytes));
@@ -88,9 +95,8 @@ public class PlatformRemoteGateway {
 
     public Object data(Map<String, Object> response) {
         if(response!=null && response.get("data") instanceof Map<?,?> details
-                && "NAS_QUOTA_PREPARING".equals(details.get("errorType")))
-            throw new BdpRuntimeException(ResourceBundle.getBundle("i18n.messages",
-                org.springframework.context.i18n.LocaleContextHolder.getLocale()).getString("sandbox.shared.userNas.preparing"));
+                && Set.of("NAS_QUOTA_PREPARING","STORAGE_PREPARING").contains(Objects.toString(details.get("errorType"),"")))
+            throw new com.iwhalecloud.byai.state.common.exception.StoragePreparingException();
         var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(response);
         if(quota!=null)throw quota;
         if (response == null || !(response.get("code") instanceof Number))

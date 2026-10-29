@@ -44,9 +44,15 @@ public class TenantNodeSchemaService {
     private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(5)).build();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
-                                   @Value("${BYCLAW_TENANT_BASELINE_BUNDLE:}") String bundlePath,
-                                   @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken,
+                                   TenantRuntimeIdentity identity, TenantNodeClient nodeClient) {
+        this(jdbc, objectMapper, "", identity.internalToken(), nodeClient);
+    }
+
+    public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                   String bundlePath,
+                                   String internalToken,
                                    TenantNodeClient nodeClient) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;

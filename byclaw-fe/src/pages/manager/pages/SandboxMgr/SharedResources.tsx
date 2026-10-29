@@ -3,6 +3,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import SharedLaunch from './SharedLaunch';
 import SharedMembersDrawer from './SharedMembersDrawer';
 import { formatReleaseReason } from './releaseReasonUtils';
 
@@ -17,6 +18,7 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
       id: value === 'ACTIVE' ? 'sandboxMgr.shared.member.active' : `sandboxMgr.status.${value.toLowerCase()}`,
       defaultMessage: value,
     });
+  const [launchOpen, setLaunchOpen] = useState(false);
   const [records, setRecords] = useState<SharedRecord[]>([]);
   const [page, setPage] = useState({ pageIndex: 1, pageSize: 20, total: 0 });
   const [serviceKey, setServiceKey] = useState('');
@@ -116,7 +118,13 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
         <Button icon={<ReloadOutlined />} onClick={() => load(page.pageIndex, page.pageSize)} loading={loading}>
           {intl.formatMessage({ id: 'sandboxMgr.action.refresh' })}
         </Button>
+        {canManage && (
+          <Button type="primary" onClick={() => setLaunchOpen(true)}>
+            {intl.formatMessage({ id: 'sandboxMgr.shared.launch.title' })}
+          </Button>
+        )}
       </Space>
+      {launchOpen && <SharedLaunch onClose={() => setLaunchOpen(false)} onLaunched={() => void refresh()} />}
       {error && <Alert type="error" message={error} showIcon />}
       <Table<SharedRecord>
         rowKey="id"
@@ -154,6 +162,16 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
             title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
             dataIndex: 'status',
             render: (value) => <Tag>{formatStatus(value)}</Tag>,
+          },
+          {
+            title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.policy' }),
+            dataIndex: 'releasePolicy',
+            render: (value) => intl.formatMessage({ id: `sandboxMgr.shared.launch.${value || 'HEARTBEAT'}` }),
+          },
+          {
+            title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.releaseAt' }),
+            dataIndex: 'releaseAt',
+            render: time,
           },
           { title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }), dataIndex: 'createTime', render: time },
           { title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }), dataIndex: 'releaseTime', render: time },

@@ -13,8 +13,50 @@ jest.mock('@/hooks/useSseSender/util', () => ({
 
 import { formatStreamPayload, parseChatStreamMessage, subscribeChatStream } from '../useSseSender/chatStream';
 import webSocketManager from '@/utils/websocket';
+import { IMessageState } from '@/constants/message';
+import { clearChatRuntime, handleParsedChatStream, registerPendingChatContext } from '../useChat/chatRuntime';
 
 describe('hooks/useSseSender/chatStream', () => {
+  it.each([IMessageState.Query, IMessageState.Answer, IMessageState.Cancel])(
+    'ends a correlated startup error without reviving an already cancelled answer (%s)',
+    (initialState) => {
+      clearChatRuntime();
+      const queryMsg: any = { msgId: '1', sessionId: '3' };
+      const answerMsg: any = { msgId: '2', sessionId: '3', messageState: initialState, thinkDone: false };
+      const updateMessage = jest.fn((msg) => msg);
+      registerPendingChatContext({
+        clientRequestId: 'startup-request',
+        queryMsg,
+        answerMsg,
+        getMessageList: () => [queryMsg, answerMsg],
+        flowHandler: jest.fn(),
+        updateMessage,
+      });
+      const parsed = parseChatStreamMessage({
+        type: 'CHAT_STREAM',
+        event: 'error',
+        clientRequestId: 'startup-request',
+        sessionId: '3',
+        data: {
+          event: 'error',
+          clientRequestId: 'startup-request',
+          sessionId: 3,
+          messageId: 2,
+          queryMessageId: 1,
+          traceId: 'startup-trace',
+          message: 'Sandbox startup failed',
+        },
+      });
+      expect(parsed?.isError).toBe(true);
+      handleParsedChatStream(parsed!);
+      expect(answerMsg.messageState).toBe(
+        initialState === IMessageState.Cancel ? IMessageState.Cancel : IMessageState.Error
+      );
+      expect(updateMessage).toHaveBeenCalledWith(answerMsg, expect.any(Object));
+      clearChatRuntime();
+    }
+  );
+
   it('preserves structured quota data in terminal errors', () => {
     const quota = { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024, exceededBytes: 20 };
     const parsed = parseChatStreamMessage({ event: 'error', data: JSON.stringify({ message: 'quota', quota }) });

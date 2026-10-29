@@ -47,11 +47,6 @@ public class TenantAdminTenantService {
     private final ObjectMapper objectMapper;
     private final TenantSandboxProperties sandboxProperties;
 
-    public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
-                                    ObjectMapper objectMapper) {
-        this(tenantMapper, sequenceService, objectMapper, new TenantSandboxProperties());
-    }
-
     @Autowired
     public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
                                     ObjectMapper objectMapper,
@@ -162,8 +157,9 @@ public class TenantAdminTenantService {
     private String packageSnapshot(String packageContent) {
         try {
             ObjectNode snapshot = (ObjectNode) objectMapper.readTree(packageContent);
-            // Preserve package limits and metadata while freezing the deployment's independent resource profile.
+            // Preserve package limits and metadata while freezing the table defaults for each tenant service.
             snapshot.put("profileKey", sandboxProperties.getProfileKey());
+            snapshot.put("nodeProfileKey", sandboxProperties.getNodeProfileKey());
             return objectMapper.writeValueAsString(snapshot);
         }
         catch (JsonProcessingException e) {

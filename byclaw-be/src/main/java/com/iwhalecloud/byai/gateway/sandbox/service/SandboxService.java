@@ -447,7 +447,15 @@ public class SandboxService {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, false);
     }
 
-    /** 对话入口：启动类型与已经解析的目标 Worker 一致，legacy/remote 共用同一路由。 */
+    /** 首次对话仅确保目标沙箱已启动，允许复用登录预热，不销毁正在启动或运行的沙箱。 */
+    public SandboxLaunchData launchSandboxForTargetWithoutWait(String userCode, Long resourceId,
+        String targetAgentType) {
+        SandboxLaunchRouting routing = SandboxTargetRouting.resolve(userCode, targetAgentType,
+            () -> sandboxLaunchContextFactory.resolveRouting(resourceId, userCode));
+        return launchSandboxInternal(userCode, resourceId, routing, null, true);
+    }
+
+    /** 发送失败后的恢复入口：启动类型与已经解析的目标 Worker 一致。 */
     public SandboxLaunchData restartSandboxForTargetWithoutWait(String userCode, Long resourceId,
         String targetAgentType) {
         SandboxLaunchRouting routing = SandboxTargetRouting.resolve(userCode, targetAgentType,
@@ -592,6 +600,11 @@ public class SandboxService {
 
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
         Integer autoRelease) {
+        return launchSandboxInternal(userCode, resourceId, routing, autoRelease, false);
+    }
+
+    private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        Integer autoRelease, boolean verifyExisting) {
         SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
         if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
@@ -599,6 +612,7 @@ public class SandboxService {
             Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
                 "routing", platformGateway().route(routing));
             if (autoRelease != null) params.put("autoRelease", autoRelease);
+            if (verifyExisting) params.put("verifyExisting", true);
             return platformGateway().convert(platformGateway().service("launch", params), SandboxLaunchData.class);
         }
         String lockKey = buildLaunchLockKey(userCode, routing);

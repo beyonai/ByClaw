@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef } from 'react';
 import { message } from 'antd';
 import { getIntl } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
-import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
+import { getVNCUrl, resolveSandboxesInfo, type DesktopInstance } from '@/utils/chat';
 import { normalizeSessionId, type SessionIdInput } from '@/utils/sessionId';
 import useGlobal from './useGlobal';
 
 export type VncOpenOptions = {
   key?: string;
   isCurrent?: () => boolean;
+
+  /** Which declared desktop to open; the browser's (`vnc`) unless given. */
+  instance?: DesktopInstance;
 };
 
 type OpenRequest = VncOpenOptions & {
@@ -103,7 +106,7 @@ export default function useVncOpener(sessionId?: SessionIdInput) {
 
         let url = '';
         try {
-          url = getVNCUrl(Array.isArray(sandboxes) ? sandboxes : []);
+          url = getVNCUrl(Array.isArray(sandboxes) ? sandboxes : [], request.instance);
         } catch {
           // Invalid endpoints must never open an empty or malformed iframe.
         }

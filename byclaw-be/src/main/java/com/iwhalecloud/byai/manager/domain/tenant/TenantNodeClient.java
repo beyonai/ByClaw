@@ -54,9 +54,14 @@ public class TenantNodeClient {
     private final String internalToken;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
+                            ObjectMapper mapper, RedisClient redisClient, TenantRuntimeIdentity identity) {
+        this(tenantMapper, sandboxMapper, mapper, redisClient, identity.internalToken());
+    }
+
     public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
                             ObjectMapper mapper, RedisClient redisClient,
-                            @org.springframework.beans.factory.annotation.Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}")
                             String internalToken) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;

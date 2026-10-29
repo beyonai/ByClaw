@@ -1,4 +1,9 @@
-import { listSharedMembers, listSharedRecords, releaseSharedMember } from '@/pages/manager/service/SharedSandbox';
+import {
+  listSharedConfigs,
+  listSharedMembers,
+  listSharedRecords,
+  releaseSharedMember,
+} from '@/pages/manager/service/SharedSandbox';
 import { act, configure, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
 import SharedResources from '../SharedResources';
 import { ConfigProvider } from 'antd';
@@ -16,6 +21,8 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/pages/manager/service/SharedSandbox', () => ({
+  listSharedConfigs: jest.fn(),
+  launchSharedInstance: jest.fn(),
   listSharedRecords: jest.fn(),
   listSharedMembers: jest.fn(),
   releaseSharedInstance: jest.fn(),
@@ -288,4 +295,16 @@ test('preserves the parent filter if the drawer closes while releasing', async (
   await waitFor(() => expect(listSharedRecords).toHaveBeenCalledTimes(3));
   expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'RELEASED' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('launch dialog offers both duration and calendar schedules to managers only', async () => {
+  (listSharedConfigs as jest.Mock).mockResolvedValue([
+    { serviceKey: 'byclaw-sandbox', profileKey: 's', enabled: true },
+  ]);
+  render(<SharedResources canManage />);
+  fireEvent.click(screen.getByRole('button', { name: '启动共享资源' }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('定期释放'));
+  expect(screen.getByLabelText('指定时长')).toBeInTheDocument();
+  expect(screen.getByLabelText('指定日期时间')).toBeInTheDocument();
 });
