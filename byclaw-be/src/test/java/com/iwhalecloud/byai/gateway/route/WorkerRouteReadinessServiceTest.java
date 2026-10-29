@@ -145,10 +145,10 @@ class WorkerRouteReadinessServiceTest {
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             assertThatThrownBy(() -> bounded.ensureReady("u1", null, "BYCLAW_EXE_u1", null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("did not become ready");
-            assertThat(leader.isDone()).isTrue();
+            // Both callers have deadlines, but their completion threads need not be scheduled in order.
+            assertThatThrownBy(() -> leader.get(2, TimeUnit.SECONDS)).isInstanceOf(java.util.concurrent.ExecutionException.class);
             verify(sandboxService, times(1)).launchSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1");
             release.countDown();
-            assertThatThrownBy(() -> leader.get(2, TimeUnit.SECONDS)).isInstanceOf(java.util.concurrent.ExecutionException.class);
             verify(sandboxService, never()).waitWorkerReadySync(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong());
         }
         finally { release.countDown(); executor.shutdownNow(); }

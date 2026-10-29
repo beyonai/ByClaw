@@ -130,3 +130,12 @@ Platform 必须确认该记录的远端实例消失、记录为 `RELEASED` 且�
 BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，默认端口 `8086`。
 端口依次取 `SERVER_PORT`、`BE_SERVER_PORT`、默认值；上下文路径可由
 `SERVER_SERVLET_CONTEXT_PATH` 覆盖（空值表示根路径）。
+
+### 登录时配额准备中的自动恢复
+
+个人独享沙箱在创建启动记录前调用 Platform 的 `storage/quota-check`，配额准备中返回
+`StoragePreparingException`，交互调用保持等待语义，不生成失败的启动记录。
+登录自启动仅对明确的存储准备状态每 15 秒重试，最多 80 次；等待期间同一用户的重复登录合并，
+已成功的服务不重复启动。调度线程只提交任务，实际调用使用异步执行器并保留登录上下文。
+手动按用户释放会取消本 BE 实例中排队的登录重试；新登录使用独立任务代次。
+此调度状态不跨 BE 实例持久化；进程重启后由下一次登录或聊天重新触发。

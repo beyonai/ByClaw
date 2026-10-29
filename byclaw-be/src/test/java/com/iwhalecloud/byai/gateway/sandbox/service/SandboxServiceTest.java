@@ -61,6 +61,22 @@ import static org.mockito.Mockito.when;
 
 class SandboxServiceTest extends I18nTestSupport {
 
+    @Test
+    void remoteLaunch_waitsForPersonalQuotaBeforeCreatingSandbox() {
+        PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
+        when(gateway.isRemote()).thenReturn(true);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
+        when(gateways.getObject()).thenReturn(gateway);
+        org.mockito.Mockito.doThrow(new com.iwhalecloud.byai.state.common.exception.StoragePreparingException())
+            .when(gateway).call(eq("storage"), eq("quota-check"), any());
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "platformGatewayProvider", gateways);
+        assertThatThrownBy(() -> service.launchSandboxWithServiceKey("user001", "byclaw-dsh"))
+            .isInstanceOf(com.iwhalecloud.byai.state.common.exception.StoragePreparingException.class);
+        verify(gateway, never()).service(eq("launch"), any());
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1})
     @org.junit.jupiter.params.provider.NullSource
@@ -79,6 +95,7 @@ class SandboxServiceTest extends I18nTestSupport {
         @SuppressWarnings("unchecked")
         ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
         when(gateways.getObject()).thenReturn(gateway);
+        when(client.call(eq("storage"), eq("quota-check"), any())).thenReturn(Map.of("code", 0));
         when(client.call(eq("sandbox"), eq("business/launch"), any()))
             .thenReturn(Map.of("code", 0, "data", Map.of("sandboxId", "remote-sandbox")));
         SandboxService service = new SandboxService();
