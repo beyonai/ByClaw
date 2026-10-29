@@ -10,7 +10,7 @@ Node 复用现有 Redis 连接，只读 `byclaw:shared:quota:v1:{enterpriseId}`�
 
 键不存在或有效 `UNLIMITED` 策略允许新增。Redis 读取失败默认记录 `QUOTA_REDIS_UNAVAILABLE` 警告并按 ALLOW 处理；配置 `QUOTA_REDIS_FAILURE_POLICY=REJECT` 时返回 `QUOTA_UNAVAILABLE`（HTTP 503）。该配置只影响额度投影读取，既有数据库、会话与 Schema 租约仍必须有效。存在但结构错误、HASH 类型错误、摘要或租户不匹配、版本不支持的投影始终返回 503。每次新增重新读取，不缓存旧策略，不使用 Redis 用量计数器。
 
-`memberLimit` 与 `groupLimit` 保留在共享数据中，Node 本次仅执行每群 USER 和 AGENT 上限；租户成员总额由相应用例管理，群数量上限尚不在 Node 执行。已有商业租户执行策略门禁继续保持，新增额度读取能力不代表完整商业策略 ACK 或准入能力。
+`memberLimit` 与 `groupLimit` 保留在共享数据中，Node 本次仅执行每群 USER 和 AGENT 上限；租户成员总额由相应用例管理，群数量上限尚不在 Node 执行。商业租户执行门禁现复用共享权益的 ENABLED 和有效期判断，删除商业租户一律拒绝的占位逻辑；无投影、停用、过期仍拒绝写入。首次开通不要求 Node 策略 ACK，新增额度读取能力不代表完整限额覆盖。
 
 回归源码位于 `test/shared-quota.test.ts`、`test/group-quota.test.ts`、`test/config.test.ts`。`test/group-quota-concurrency.test.ts` 复用严格限制地址的 `FORWARD_TEST_PG` 临时数据库与隔离 Redis，覆盖真实事务下 ADD_MEMBERS 与 JOIN_GROUP、自动协调员工插入的最后名额并发竞争，以及超限批次的整体回滚；本次未执行测试、类型检查、构建或迁移，数据库与 Redis 实际联调仍待验证。
 
@@ -380,3 +380,8 @@ BE 创建数据库和 Node 时，将经开通流程校验的企业 ID 同时放�
 ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态目录挂到各租户的 NAS 私有空间，由 Provider 的 init container 初始化目录权限；BE 不再为这类卷写旧 NFS 挂载目录。数据库租户镜像内置启动脚本。Node 镜像包含该初始化器需要的 Python 3，状态目录使用镜像自身的 UID/GID 1000。
 
 数据库端口必须返回 VPC 内网 TCP 地址，不能通过 HTTP 网关连接。Node 通过 Downward API 的 `POD_IP` 注册服务，BE 与 Node 需要能访问该 VPC。BE 的租户主密钥须持久保留，切换存储或更新环境时不能重新生成；内部鉴权配置、Redis 与 BE 内网地址同样需要保留。
+
+
+### 2026-10-29 READY 开通兼容
+
+`requireExecutionPolicy` 不再因 COMMERCIAL_MANAGED 一律返回 POLICY_CAPABILITY_UNSUPPORTED，改用现有共享权益读取端口核实企业身份、ENABLED 和有效期。HTTP 业务写入与队列命令复用该入口；鉴权、Schema 就绪和业务授权照常执行。HACU 不等待本 Node 的 ACK；权益异步发布未到达时仍可能暂时拒绝写入。已有沙箱需要更新实际运行的 Node 程序，单独部署 byclaw-be 不会更新现有 Node。已改测试源文件，未执行构建、测试或部署。

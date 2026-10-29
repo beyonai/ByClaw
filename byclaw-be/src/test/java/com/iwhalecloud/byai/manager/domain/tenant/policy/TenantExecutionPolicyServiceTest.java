@@ -147,14 +147,34 @@ class TenantExecutionPolicyServiceTest {
         assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM byai.tenant_policy_consumer WHERE enterprise_id=12", Integer.class));
     }
 
-    @Test void unsupportedActivationAndUnknownQuotaAreRejected() throws Exception {
+    @Test void enabledPolicyAllowsExecutionWithoutClaimingQuotaCapabilities() throws Exception {
         var prepared = policy("{\"accessMode\":\"PREPARED\"}");
         transaction.executeWithoutResult(status -> service.prepare(12, prepared));
         var active = policy("{\"revision\":\"2\",\"accessMode\":\"ENABLED\",\"effectiveFrom\":\"2026-10-25T00:00:00Z\",\"effectiveUntil\":\"2026-11-25T00:00:00Z\"}");
-        assertThrows(TenantExecutionPolicyService.PolicyDeniedException.class,
-            () -> transaction.executeWithoutResult(status -> service.update(12, 1, active)));
+        transaction.executeWithoutResult(status -> service.update(12, 1, active));
+        assertDoesNotThrow(() -> service.requireExecution(12));
+        assertFalse(service.projection(12).fullyApplied());
+        assertFalse(service.projection(12).capabilities().get("nodePolicyConsumer"));
         var unknown = policy("{\"accessMode\":\"PREPARED\",\"limits\":{\"inventedQuota\":10}}");
         assertThrows(IllegalArgumentException.class,
             () -> transaction.executeWithoutResult(status -> service.prepare(13, unknown)));
     }
+    /** Removing the capability placeholder must not admit expired, future or suspended service. */
+    @Test void executionStillChecksModeAndEffectiveInterval() throws Exception {
+        var initial = policy("{}");
+        transaction.executeWithoutResult(status -> service.prepare(12, initial));
+        String[] overrides = {
+            "{\"revision\":\"2\",\"accessMode\":\"ENABLED\",\"effectiveFrom\":\"2026-10-24T00:00:00Z\",\"effectiveUntil\":\"2026-10-25T00:00:00Z\"}",
+            "{\"revision\":\"3\",\"accessMode\":\"ENABLED\",\"effectiveFrom\":\"2026-10-27T00:00:00Z\",\"effectiveUntil\":\"2026-11-25T00:00:00Z\"}",
+            "{\"revision\":\"4\",\"accessMode\":\"SUSPENDED\"}",
+            "{\"revision\":\"5\",\"accessMode\":\"READ_ONLY\"}"
+        };
+        for (int index = 0; index < overrides.length; index++) {
+            long expected = index + 1;
+            var next = policy(overrides[index]);
+            transaction.executeWithoutResult(status -> service.update(12, expected, next));
+            assertThrows(TenantExecutionPolicyService.PolicyDeniedException.class, () -> service.requireExecution(12));
+        }
+    }
+
 }
