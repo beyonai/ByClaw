@@ -1,4 +1,7 @@
 export default {
+  'sandboxMgr.shared.storageMode': '存储模式',
+  'sandboxMgr.shared.storage.userQuota': '用户独立 NAS 配额',
+  'sandboxMgr.shared.storage.logical': '逻辑隔离',
   'sandboxMgr.releaseReason.release.switch-to-shared': '已切换至共享沙箱',
   'sandboxMgr.status.pending': '等待中',
   'sandboxMgr.releaseReason.release.cancelled-launch': '启动已取消',
@@ -28,6 +31,7 @@ export default {
   'sandboxMgr.releaseReason.instance.empty': '实例空闲且无用户',
   'sandboxMgr.releaseReason.eligibility.revoked': '共享资格已取消',
   'sandboxMgr.releaseReason.eligibility.granted': '已获得共享资格',
+  'sandboxMgr.releaseReason.storage.mode_changed': '用户存储模式已切换',
   'sandboxMgr.releaseReason.host.admission.closed': '宿主停止接入',
   'sandboxMgr.releaseReason.release.remote.missing': '远端沙箱已不存在',
   'sandboxMgr.releaseReason.release.recovered.terminal-ownership': '已回收终止实例的归属',

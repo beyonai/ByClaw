@@ -1,4 +1,7 @@
 export default {
+  'sandboxMgr.shared.storageMode': 'Storage mode',
+  'sandboxMgr.shared.storage.userQuota': 'Per-user NAS quota',
+  'sandboxMgr.shared.storage.logical': 'Logical separation',
   'sandboxMgr.releaseReason.release.switch-to-shared': 'Switched to shared sandbox',
   'sandboxMgr.status.pending': 'Pending',
   'sandboxMgr.releaseReason.release.cancelled-launch': 'Launch cancelled',
@@ -29,6 +32,7 @@ export default {
   'sandboxMgr.releaseReason.instance.empty': 'Instance empty and idle',
   'sandboxMgr.releaseReason.eligibility.revoked': 'Shared eligibility revoked',
   'sandboxMgr.releaseReason.eligibility.granted': 'Shared eligibility granted',
+  'sandboxMgr.releaseReason.storage.mode_changed': 'User storage mode changed',
   'sandboxMgr.releaseReason.host.admission.closed': 'Host admission closed',
   'sandboxMgr.releaseReason.release.remote.missing': 'Remote sandbox no longer exists',
   'sandboxMgr.releaseReason.release.recovered.terminal-ownership': 'Terminal instance ownership recovered',

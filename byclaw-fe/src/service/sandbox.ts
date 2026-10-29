@@ -77,3 +77,16 @@ export async function sandboxHeartbeat(params: { resourceId?: number }): Promise
 export async function renewSandbox(params: { userCode?: string; resourceId?: number }): Promise<ISandboxesInfo> {
   return POST('/byaiService/sandbox/renewSandbox', params);
 }
+
+export interface SharedUserStorageStatus {
+  enabled: boolean;
+  ready: boolean;
+  state: 'LOGICAL' | 'PREPARING_STORAGE' | 'WAITING_QUOTA' | 'READY_TO_ADMIT' | 'FAILED';
+  quotaGiB?: number;
+  confirmedGiB?: number;
+  usedBytes?: number;
+}
+
+export async function getSharedUserStorageStatus(): Promise<SharedUserStorageStatus> {
+  return POST('/byaiService/sandbox/shared/userStorageStatus', {}, silentErrorConfig);
+}

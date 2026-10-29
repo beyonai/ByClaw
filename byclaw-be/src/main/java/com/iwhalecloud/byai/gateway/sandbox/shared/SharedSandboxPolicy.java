@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 @Component
 public class SharedSandboxPolicy {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SharedSandboxPolicy.class);
+    public static final String USER_NAS = "BYCLAW_SANDBOX_SHARED_USER_NAS_ENABLED";
     public static final String USERS = "BYCLAW_SHARED_DSH_HOST_USERS";
     public static final String ALL = "BYCLAW_SANDBOX_SHARED_ALL";
     public static final String BY_TENANT = "BYCLAW_SANDBOX_SHARED_BY_TENANT";
@@ -31,6 +32,14 @@ public class SharedSandboxPolicy {
                 userCode, unavailable.getClass().getSimpleName());
             throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("共享沙箱入口配置读取失败，请稍后重试");
         }
+    }
+
+    public boolean userNasEnabled(String userCode, String serviceKey) {
+        if (!SharedSandboxGateway.DSH_SERVICE.equals(serviceKey)) return false;
+        String value = StringUtils.trimToEmpty(config.getDcSystemConfigValueByCode(USER_NAS));
+        if (value.isEmpty() || "0".equals(value)) return false;
+        if (!"1".equals(value)) throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("INVALID_SHARED_USER_NAS_POLICY");
+        return eligible(userCode);
     }
 
     public boolean byTenant() {
