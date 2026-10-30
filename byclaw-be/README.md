@@ -63,6 +63,8 @@ Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例�
 
 ## 登录预热与首次聊天
 
+仅在 `BE_ENV=development` 时，共享资格失效触发的 `shared/releaseAll` 请求报错会记录 WARN 并继续路由；其他环境及手动释放保持原有报错行为。请求仍使用原有超时配置。
+
 登录异步预热与首次聊天共用 Platform 的幂等启动流程：专享使用 `sandbox/business/launch`，共享使用 `shared/lookup`、`shared/acquire`。
 首次聊天按最终 Worker 类型确定服务及资源键，复用同一用户的启动结果；不会因 Worker 暂未注册而重启登录正在拉起的沙箱。
 BE 本机合并相同路由的等待，跨实例并发由 Platform 的启动所有权协调。只有消息实际发送失败后的既有恢复路径使用重启。

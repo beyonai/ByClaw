@@ -10,6 +10,26 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 class SharedSandboxGatewayTest {
+    @Test
+    void cleanupFailureIsIgnoredOnlyInDevelopment() {
+        String previous = System.getProperty("BE_ENV");
+        var gateway = gateway();
+        when(client.call(eq("releaseAll"), anyMap())).thenThrow(new IllegalStateException("platform unavailable"));
+        try {
+            System.setProperty("BE_ENV", "production");
+            assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh"))
+                .hasMessage("platform unavailable");
+            System.setProperty("BE_ENV", "development");
+            assertThat(gateway.tryAcquire("alice", "byclaw-dsh")).isNull();
+            // 手动释放仍应向调用方报告失败，避免误报释放成功。
+            assertThatThrownBy(() -> gateway.release("alice")).hasMessage("platform unavailable");
+        }
+        finally {
+            if (previous == null) System.clearProperty("BE_ENV");
+            else System.setProperty("BE_ENV", previous);
+        }
+    }
+
     private final SharedSandboxPlatformClient client = mock(SharedSandboxPlatformClient.class);
     private final SharedSandboxPolicy policy = mock(SharedSandboxPolicy.class);
     private final SandboxUserInfoFactory users = mock(SandboxUserInfoFactory.class);

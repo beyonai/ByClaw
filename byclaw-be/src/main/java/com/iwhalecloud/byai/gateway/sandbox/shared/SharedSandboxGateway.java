@@ -4,6 +4,7 @@ import java.util.*;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserInfoFactory;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
@@ -178,7 +179,20 @@ public class SharedSandboxGateway {
         params.put("reason", reason);
         // The platform confirms fenced deletion and releases ownership atomically. A busy
         // context or uncertain response must throw here, before callers enter exclusive launch.
-        Object count = call("releaseAll", params);
+        Object count;
+        try {
+            count = call("releaseAll", params);
+        }
+        catch (RuntimeException failure) {
+            // 本地开发允许平台清理失败后继续路由，其他环境仍要求平台确认释放。
+            if (!RuntimeEnvironment.isDevelopment()
+                || !"eligibility.revoked".equals(reason)) {
+                throw failure;
+            }
+            log.warn("Development shared sandbox cleanup failed; continuing routing, userCode={}, reason={}",
+                user, reason, failure);
+            return false;
+        }
         if (!(count instanceof Number) || ((Number) count).longValue() < 0)
             throw new BdpRuntimeException("共享释放响应格式错误");
         observedSharedUsers.remove(user);
