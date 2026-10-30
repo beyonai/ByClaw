@@ -14,6 +14,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+docker run --rm --entrypoint bash "$image" /usr/local/bin/byclaw-opengauss-verify-runtime
+
 identity=$(docker run --rm --entrypoint bash "$image" -c 'printf "%s:%s" "$(id -u)" "$(id -g)"')
 if [[ "$identity" != '1001:1001' ]]; then
   echo "Expected default UID:GID 1001:1001, got $identity" >&2
