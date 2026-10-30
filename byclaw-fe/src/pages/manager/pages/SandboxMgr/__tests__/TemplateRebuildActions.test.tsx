@@ -93,4 +93,25 @@ describe('MicroVM template actions', () => {
       jest.useRealTimers();
     }
   });
+
+  it('stops pending record requests when capability becomes unavailable', async () => {
+    jest.useFakeTimers();
+    (listTemplateRebuildRecords as jest.Mock).mockResolvedValue({
+      total: 1,
+      records: [{ id: 'pending', state: 'BUILDING' }],
+    });
+    const view = render(<TemplateRebuildActions serviceKey="byclaw-dsh" supported />);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '重建模板记录' }));
+      await act(async () => {});
+      expect(listTemplateRebuildRecords).toHaveBeenCalledTimes(1);
+      view.rerender(<TemplateRebuildActions serviceKey="byclaw-dsh" supported={false} />);
+      await act(async () => jest.advanceTimersByTime(10000));
+      expect(listTemplateRebuildRecords).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: '重建模板' })).not.toBeInTheDocument();
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  });
 });

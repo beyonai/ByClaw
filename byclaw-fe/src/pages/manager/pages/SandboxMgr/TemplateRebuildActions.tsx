@@ -34,7 +34,7 @@ export function useTemplateRebuildSupport(enabled: boolean) {
       active = false;
     };
   }, [enabled]);
-  return { supported, error };
+  return { supported: enabled && supported, error };
 }
 
 export default function TemplateRebuildActions({ serviceKey, supported }: { serviceKey: string; supported: boolean }) {
@@ -66,15 +66,16 @@ export default function TemplateRebuildActions({ serviceKey, supported }: { serv
   }, [serviceKey, page]);
 
   useEffect(() => {
-    if (!recordsOpen) return;
+    if (!supported || !recordsOpen) return;
     void load();
     return () => {
       readVersion.current++;
     };
-  }, [recordsOpen, load]);
+  }, [supported, recordsOpen, load]);
 
   useEffect(() => {
-    if (!recordsOpen || !records.some((record) => record.state === 'NEW' || record.state === 'BUILDING')) return;
+    if (!supported || !recordsOpen || !records.some((record) => record.state === 'NEW' || record.state === 'BUILDING'))
+      return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
@@ -88,7 +89,7 @@ export default function TemplateRebuildActions({ serviceKey, supported }: { serv
       active = false;
       clearTimeout(timer);
     };
-  }, [recordsOpen, records, load]);
+  }, [supported, recordsOpen, records, load]);
 
   const submit = async () => {
     if (submitting) return;

@@ -49,7 +49,6 @@ public class SandboxLoginAutoStartService {
     private static final int MAX_RETRIES = 80;
     private final Map<String, Object> inProgressUsers = new ConcurrentHashMap<>();
 
-    @Autowired
     public SandboxLoginAutoStartService(SandboxServiceSpecEntityMapper serviceSpecMapper,
                                         SandboxService sandboxService,
                                         @Qualifier("defaultAsyncExecutor") Executor executor) {
