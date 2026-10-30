@@ -363,7 +363,10 @@ CREATE TABLE byai.byai_session_member (
     request_count bigint,
     last_read_message_id bigint,
     last_read_time timestamp without time zone,
-    welcome_handled_at timestamp without time zone
+    welcome_handled_at timestamp without time zone,
+    api_key character varying(255),
+    update_date timestamp without time zone,
+    state character varying(64) DEFAULT '00A'
 );
 
 CREATE TABLE byai.byai_session_workspace (

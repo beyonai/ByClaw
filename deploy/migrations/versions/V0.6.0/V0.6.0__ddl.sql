@@ -266,3 +266,11 @@ COMMENT ON COLUMN byai.tenant_task_recovery.created_at IS '恢复受理时间';
 CREATE INDEX idx_tenant_task_recovery_command ON byai.tenant_task_recovery(command_id,created_at);
 COMMIT;
 -- END BYCLAW TENANT COMMAND RECOVERY
+
+ALTER TABLE byai.byai_session_member ADD COLUMN api_key VARCHAR(255);
+ALTER TABLE byai.byai_session_member ADD COLUMN update_date TIMESTAMP;
+ALTER TABLE byai.byai_session_member ADD COLUMN state VARCHAR(64) DEFAULT '00A';
+
+COMMENT ON COLUMN byai.byai_session_member.api_key IS 'api密钥';
+COMMENT ON COLUMN byai.byai_session_member.update_date IS '更新时间';
+COMMENT ON COLUMN byai.byai_session_member.state IS '状态：00A有效，00X无效';

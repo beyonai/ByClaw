@@ -16,6 +16,9 @@
         <result column="last_read_message_id" property="lastReadMessageId" />
         <result column="last_read_time" property="lastReadTime" />
         <result column="com_acct_id" property="comAcctId" />
+        <result column="api_key" property="apiKey" />
+        <result column="update_date" property="updateDate" />
+        <result column="state" property="state" />
     </resultMap>
 
     <resultMap id="GroupMemberSummaryMap"
@@ -100,7 +103,10 @@
             request_count,
             last_read_message_id,
             last_read_time,
-            com_acct_id
+            com_acct_id,
+            api_key,
+            update_date,
+            state
         from byai_session_member
         where session_id = #{sessionId}
           and mem_obj_type = #{memObjType}
@@ -138,6 +144,15 @@
             </if>
             <if test="comAcctId != null">
                 com_acct_id = #{comAcctId},
+            </if>
+            <if test="apiKey != null and apiKey != ''">
+                api_key = #{apiKey},
+            </if>
+            <if test="updateDate != null">
+                update_date = #{updateDate},
+            </if>
+            <if test="state != null and state != ''">
+                state = #{state},
             </if>
         </set>
         where byai_session_member_id = #{byaiSessionMemberId}
@@ -181,7 +196,10 @@
             creator_id,
             mem_name,
             request_count,
-            com_acct_id
+            com_acct_id,
+            api_key,
+            update_date,
+            state
         from byai_session_member
         where mem_obj_id = #{memObjId}
           and mem_obj_type = 'AGENT'

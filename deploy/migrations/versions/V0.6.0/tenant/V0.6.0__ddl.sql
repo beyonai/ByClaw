@@ -79,3 +79,11 @@ ALTER TABLE byai.byai_session_member ADD COLUMN welcome_handled_at TIMESTAMP DEF
 ALTER TABLE byai.byai_session_member ALTER COLUMN welcome_handled_at DROP DEFAULT;
 
 COMMENT ON COLUMN byai.byai_session_member.welcome_handled_at IS '本次成员关系的个人欢迎资格处理时间，NULL 表示未处理；包含存量迁移跳过，不代表实际曝光';
+
+ALTER TABLE byai.byai_session_member ADD COLUMN api_key VARCHAR(255);
+ALTER TABLE byai.byai_session_member ADD COLUMN update_date TIMESTAMP;
+ALTER TABLE byai.byai_session_member ADD COLUMN state VARCHAR(64) DEFAULT '00A';
+
+COMMENT ON COLUMN byai.byai_session_member.api_key IS 'api密钥';
+COMMENT ON COLUMN byai.byai_session_member.update_date IS '更新时间';
+COMMENT ON COLUMN byai.byai_session_member.state IS '状态：00A有效，00X无效';
