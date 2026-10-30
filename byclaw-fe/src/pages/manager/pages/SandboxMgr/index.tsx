@@ -59,6 +59,7 @@ import {
 import EndpointLinks from './EndpointLinks';
 import RecoveryPanel from './RecoveryPanel';
 import SharedConfigPanel from './SharedConfig';
+import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
 import SharedResources from './SharedResources';
 import { formatReleaseReason } from './releaseReasonUtils';
 import { primarySandboxEndpoint } from './endpointUtils';
@@ -303,6 +304,7 @@ const SandboxMgr = () => {
 
   // 沙箱配置抽屉相关状态
   const [specDrawerOpen, setSpecDrawerOpen] = useState(false);
+  const templateRebuild = useTemplateRebuildSupport(specDrawerOpen && isPlatformManager);
   const [specList, setSpecList] = useState<ServiceSpecItem[]>([]);
   const [specLoading, setSpecLoading] = useState(false);
   const [specFormVisible, setSpecFormVisible] = useState(false);
@@ -2210,6 +2212,7 @@ const SandboxMgr = () => {
               label: intl.formatMessage({ id: 'sandboxMgr.config.tab.spec' }),
               children: (
                 <div className={styles.specDrawerContent}>
+                  {templateRebuild.error && <Typography.Text type="warning">{templateRebuild.error}</Typography.Text>}
                   <Row justify="end" style={{ marginBottom: 16 }}>
                     <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
                       {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
@@ -2256,10 +2259,14 @@ const SandboxMgr = () => {
                       },
                       {
                         title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-                        width: 150,
+                        width: templateRebuild.supported ? 390 : 150,
                         align: 'center',
                         render: (_: any, record: ServiceSpecItem) => (
                           <Space size="small">
+                            <TemplateRebuildActions
+                              serviceKey={record.serviceKey}
+                              supported={templateRebuild.supported}
+                            />
                             <Button
                               size="small"
                               type="link"

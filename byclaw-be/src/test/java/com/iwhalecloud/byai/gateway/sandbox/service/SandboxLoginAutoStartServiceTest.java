@@ -27,6 +27,20 @@ import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity
 class SandboxLoginAutoStartServiceTest {
 
     @Test
+    void trigger_preparesUserSpaceEvenWithoutAutoStartSpecs() {
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        SandboxService sandboxService = mock(SandboxService.class);
+        com.iwhalecloud.byai.manager.application.service.user.UserBucketProvisioningService spaces =
+            mock(com.iwhalecloud.byai.manager.application.service.user.UserBucketProvisioningService.class);
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of());
+        new SandboxLoginAutoStartService(mapper, sandboxService, Runnable::run, spaces).trigger("user001");
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(spaces, mapper);
+        order.verify(spaces).ensureUserBucketQuietly("user001");
+        order.verify(mapper).selectAutoStartSpecs();
+        org.mockito.Mockito.verifyNoInteractions(sandboxService);
+    }
+
+    @Test
     void trigger_startsDistinctEnabledSpecsAndContinuesAfterFailure() {
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);

@@ -42,7 +42,7 @@ public class FileStorageUserSpaceProvisioner {
 
         Path privateWorkspace = userRoot.resolve(PRIVATE_WORKSPACE_DIR).normalize();
         try {
-            platformStorageRouting.createDirectoriesWithinRoot(fileRoot, privateWorkspace,
+            platformStorageRouting.createUserSpace(bucketOrRoot,
                 () -> Files.createDirectories(privateWorkspace));
             return privateWorkspace;
         }

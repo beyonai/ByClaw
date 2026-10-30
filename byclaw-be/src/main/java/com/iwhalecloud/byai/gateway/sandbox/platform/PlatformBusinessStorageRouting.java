@@ -38,6 +38,19 @@ public class PlatformBusinessStorageRouting {
                 gateway.params("namespace", "workspace", "bucketOrRoot", bucket, "path", path));
     }
 
+    /** Preserve the owner bucket for remote user-space initialization. */
+    public void createUserSpace(String bucket, DirectoryCreation legacy) throws IOException {
+        if (bucket == null || !bucket.matches("byclaw-[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid user workspace bucket");
+        }
+        if (!gateway.isRemote()) {
+            legacy.run();
+            return;
+        }
+        gateway.call("storage", "create-directories",
+                gateway.params("namespace", "workspace", "bucketOrRoot", bucket, "path", "by"));
+    }
+
     @FunctionalInterface
     public interface DirectoryCreation {
         void run() throws IOException;

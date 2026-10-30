@@ -27,14 +27,24 @@ public class SandboxLoginAutoStartService {
     private final SandboxServiceSpecEntityMapper serviceSpecMapper;
     private final SandboxService sandboxService;
     private final Executor executor;
+    private final com.iwhalecloud.byai.manager.application.service.user.UserBucketProvisioningService userSpaces;
     private final Set<String> inProgressUsers = ConcurrentHashMap.newKeySet();
 
     public SandboxLoginAutoStartService(SandboxServiceSpecEntityMapper serviceSpecMapper,
                                         SandboxService sandboxService,
                                         @Qualifier("defaultAsyncExecutor") Executor executor) {
+        this(serviceSpecMapper, sandboxService, executor, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SandboxLoginAutoStartService(SandboxServiceSpecEntityMapper serviceSpecMapper,
+                                        SandboxService sandboxService,
+                                        @Qualifier("defaultAsyncExecutor") Executor executor,
+                                        com.iwhalecloud.byai.manager.application.service.user.UserBucketProvisioningService userSpaces) {
         this.serviceSpecMapper = serviceSpecMapper;
         this.sandboxService = sandboxService;
         this.executor = TtlExecutors.getTtlExecutor(executor);
+        this.userSpaces = userSpaces;
     }
 
     /**
@@ -57,6 +67,10 @@ public class SandboxLoginAutoStartService {
 
     private void autoStart(String userCode) {
         try {
+            // Login keeps its asynchronous failure boundary; storage preparation does not depend on auto-start specs.
+            if (userSpaces != null) {
+                userSpaces.ensureUserBucketQuietly(userCode);
+            }
             List<SandboxServiceSpecEntity> specs = serviceSpecMapper.selectAutoStartSpecs();
             if (specs == null || specs.isEmpty()) {
                 return;
