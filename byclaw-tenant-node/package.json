@@ -23,10 +23,12 @@
     "pgsql-ast-parser": "12.0.1",
     "reflect-metadata": "0.2.2",
     "typeorm": "0.3.28",
+    "ws": "8.21.3",
     "yauzl": "3.2.0"
   },
   "devDependencies": {
     "@types/node": "22.19.0",
+    "@types/ws": "8.18.1",
     "@types/yauzl": "2.10.3",
     "prettier": "3.6.2",
     "tsx": "4.20.6",

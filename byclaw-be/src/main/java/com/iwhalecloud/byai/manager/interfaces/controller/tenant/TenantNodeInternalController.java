@@ -39,6 +39,8 @@ public class TenantNodeInternalController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final String internalToken;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService sandboxService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public TenantNodeInternalController(TenantAdminTenantMapper tenantMapper, TenantCredentialCrypto crypto,
@@ -72,7 +74,15 @@ public class TenantNodeInternalController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.credential.identity.mismatch");
         }
         String password = crypto.decrypt(enterpriseId, database, stored);
-        return Map.of("plaintext", Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
+        Map<String,String> result=new HashMap<>();
+        result.put("plaintext",Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
+        String host=tenantMapper.selectConfig(enterpriseId,"DB_HOST");
+        if(host!=null && host.endsWith("-vpc.sandbox.aliyuncs.com")) {
+            Map<String,String> transport=sandboxService.privateTransport(enterpriseId,"tenant-opengauss");
+            result.put("databaseWebSocketUrl",transport.get("url").replaceFirst("^https:","wss:")+"/postgresql");
+            result.put("databaseTrafficToken",transport.get("trafficToken"));
+        }
+        return result;
     }
 
     @GetMapping("/tenants/{enterpriseId}/schema/current")

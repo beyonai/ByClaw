@@ -46,6 +46,16 @@ public class TenantSandboxService {
 
     @Value("${file.storage.type:minio}")
     private String recoveryStorageType = "minio";
+    @Value("${REDIS_MODE:standalone}")
+    private String redisMode = "standalone";
+    @Value("${spring.redis.cluster.nodes:${REDIS_CLUSTER_HOST:}}")
+    private String redisClusterHost = "";
+    @Value("${REDIS_CLUSTER_NODES:}")
+    private String redisClusterNodes = "";
+    @Value("${REDIS_KEY_SCHEMA_VERSION:}")
+    private String redisKeySchemaVersion = "";
+    @Value("${REDIS_TLS:false}")
+    private String redisTls = "false";
 
     private static final Logger LOG = LoggerFactory.getLogger(TenantSandboxService.class);
 
@@ -121,10 +131,13 @@ public class TenantSandboxService {
     public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
                                             long generation, String providerRequestKey) {
         validateProviderRequestKey(providerRequestKey);
+        boolean cluster=(redisClusterHost!=null && !redisClusterHost.isBlank()) || "cluster".equals(redisMode);
+        if(!Set.of("standalone","cluster").contains(redisMode) || (cluster && ((redisClusterHost==null || redisClusterHost.isBlank()) && (redisClusterNodes==null || redisClusterNodes.isBlank()) || !"0".equals(redisDatabase))))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"tenant.node.redis.configuration.invalid");
         if (enterpriseId <= 0 || dbRecordId <= 0 || generation <= 0
             || profileKey == null || !PROFILES.contains(profileKey)
             || volumeRoot == null || volumeRoot.isBlank()
-            || redisHost == null || redisHost.isBlank() || redisPassword == null || redisPassword.isBlank()
+            || (!cluster && (redisHost == null || redisHost.isBlank())) || redisPassword == null || redisPassword.isBlank()
             || beInternalUrl == null || !beInternalUrl.startsWith("http://")
             || internalToken == null || internalToken.isBlank()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.launch.incomplete");
@@ -181,7 +194,12 @@ public class TenantSandboxService {
         envs.put("BE_INTERNAL_URL", beInternalUrl);
         envs.put("KMS_DECRYPT_URL", beInternalUrl + "/internal/v1/tenantKms/decrypt");
         envs.put("INTERNAL_API_TOKEN", internalToken);
-        envs.put("REDIS_HOST", redisHost);
+        envs.put("REDIS_MODE",cluster?"cluster":"standalone");
+        envs.put("REDIS_CLUSTER_HOST",redisClusterHost==null?"":redisClusterHost);
+        envs.put("REDIS_CLUSTER_NODES",redisClusterNodes==null?"":redisClusterNodes);
+        envs.put("REDIS_KEY_SCHEMA_VERSION",redisKeySchemaVersion==null?"":redisKeySchemaVersion);
+        envs.put("REDIS_TLS",redisTls);
+        envs.put("REDIS_HOST", redisHost==null?"":redisHost);
         envs.put("REDIS_PORT", redisPort);
         envs.put("REDIS_DATABASE", redisDatabase);
         envs.put("REDIS_USERNAME", redisUsername);
@@ -576,7 +594,12 @@ public class TenantSandboxService {
     }
 
     private boolean isReusable(SsSandboxRecord record) {
-        return record.getEndpoint() != null && record.getEndpoint().startsWith("tcp://") && isRunning(record);
+        if(record.getEndpoint()==null)return false;
+        if(record.getEndpoint().startsWith("tcp://"))return isRunning(record);
+        if(record.getSandboxId()==null || !record.getSandboxId().startsWith("microvm--"))return false;
+        // An unsupported endpoint must never retire a live stateful database.
+        // Connectivity and ownership are verified separately before configuration publication.
+        return isRunning(record);
     }
 
     private SandboxInfo providerInfo(SsSandboxRecord record) {
@@ -604,6 +627,26 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.invalid");
         }
         return instance;
+    }
+
+    /** Tokens are refreshed from the provider and never persisted in tenant_config or Redis. */
+    public Map<String,String> privateTransport(long enterpriseId, String type) {
+        requireTenantType(type);
+        SsSandboxRecord record=recordMapper.selectActiveTenantByResourceAndType(enterpriseId,type);
+        if(record==null || !"RUNNING".equals(record.getStatus()) || record.getEnterpriseId()==null
+            || record.getEnterpriseId()!=enterpriseId || !"TENANT".equals(record.getOwnerScope()))
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.transport.identity.mismatch");
+        if(record.getSandboxId()==null || !record.getSandboxId().startsWith("microvm--"))return Map.of();
+        SandboxRuntimeInstance instance=observeProvider(record);
+        String alias=DB_TYPE.equals(type)?"opengauss":"tenant-node";
+        String endpoint=instance==null || instance.getInstanceEndpoints()==null?null:instance.getInstanceEndpoints().get(alias);
+        String token=instance==null || instance.getEndpointHeaders()==null?null:instance.getEndpointHeaders().get("e2b-traffic-access-token");
+        java.net.URI uri=endpoint==null?null:java.net.URI.create(endpoint);
+        if(uri==null || !"https".equals(uri.getScheme()) || uri.getHost()==null
+            || !uri.getHost().matches("[a-z0-9-]+\\.[a-z0-9-]+-vpc\\.sandbox\\.aliyuncs\\.com")
+            || token==null || token.isBlank())
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.transport.privateEndpoint.required");
+        return Map.of("url",endpoint,"trafficToken",token);
     }
 
     public record TenantSandboxView(long recordId, String sandboxId, String endpoint) {

@@ -8,6 +8,20 @@ COPY src ./src
 RUN pnpm build && pnpm prune --prod
 
 FROM node:22-slim
+ARG BUILD_VERSION=unknown
+ARG BUILD_BRANCH=unknown
+ARG BUILD_COMMIT=unknown
+ARG BUILD_COMMIT_FULL=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_MODULE=byclaw-tenant-node
+ARG BUILD_COMMIT_MSG=unknown
+LABEL org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$BUILD_COMMIT_FULL \
+      org.opencontainers.image.created=$BUILD_TIME \
+      byclaw.build.branch=$BUILD_BRANCH \
+      byclaw.build.commit=$BUILD_COMMIT \
+      byclaw.build.module=$BUILD_MODULE \
+      byclaw.build.commit.message=$BUILD_COMMIT_MSG
 ENV NODE_ENV=production
 ENV NODE_STATE_DIR=/var/lib/byclaw-tenant
 WORKDIR /app

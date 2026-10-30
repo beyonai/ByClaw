@@ -21,6 +21,23 @@ function setup() {
   };
 }
 describe("connection authority", () => {
+  it("refreshes private transport credentials and rebuilds a failed pool even when authority is unchanged", async () => {
+    const s = setup();
+    await s.manager.refresh();
+    vi.mocked(s.db.verifyIdentity).mockRejectedValueOnce(new Error("transport expired"));
+    await expect(s.manager.refresh()).rejects.toThrow("transport expired");
+    expect(s.manager.connected).toBe(false);
+    const replacement = database();
+    s.ports.open.mockResolvedValueOnce(replacement);
+    await s.manager.refresh();
+    expect(s.ports.decrypt).toHaveBeenCalledTimes(2);
+    expect(s.ports.open).toHaveBeenCalledTimes(2);
+    expect(s.db.close).toHaveBeenCalledOnce();
+    expect(s.manager.connected).toBe(true);
+    expect(s.manager.database()).toBe(replacement);
+    await s.manager.close();
+  });
+
   it("starts ADMIN_ONLY and checks authority before commit", async () => {
     const s = setup();
     await s.manager.refresh();

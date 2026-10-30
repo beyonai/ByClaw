@@ -32,6 +32,64 @@ const env = {
   INTERNAL_API_TOKEN: "test-internal-token",
 };
 describe("fixed tenant configuration", () => {
+  it("accepts cluster-only configuration and gives REDIS_CLUSTER_HOST precedence", () => {
+    const cluster = readConfig({
+      ...env,
+      REDIS_HOST: undefined,
+      REDIS_MODE: "standalone",
+      REDIS_CLUSTER_HOST: "redis-a:6379, redis-b:6380",
+      REDIS_KEY_SCHEMA_VERSION: "v2",
+    });
+    expect(cluster.redis).toMatchObject({
+      mode: "cluster",
+      db: 0,
+      clusterNodes: [
+        { host: "redis-a", port: 6379 },
+        { host: "redis-b", port: 6380 },
+      ],
+    });
+    expect(cluster.redis.host).toBeUndefined();
+    expect(readConfig(env).redis.mode).toBe("standalone");
+  });
+  it.each(["sentinel", "cluser", ""])("rejects unsupported Redis mode %s", (mode) => {
+    expect(() => readConfig({ ...env, REDIS_MODE: mode })).toThrow("Invalid REDIS_MODE");
+  });
+  it.each([
+    undefined,
+    "",
+    "redis",
+    "redis:0",
+    "redis:65536",
+    "redis:abc",
+    "redis:6379oops",
+    ":6379",
+    "redis:6379,",
+    "redis host:6379",
+  ])("rejects invalid cluster nodes %s", (nodes) => {
+    expect(() =>
+      readConfig({
+        ...env,
+        REDIS_MODE: "cluster",
+        REDIS_CLUSTER_HOST: nodes,
+        REDIS_KEY_SCHEMA_VERSION: "v2",
+      }),
+    ).toThrow();
+  });
+  it("requires Cluster schema v2 and database zero", () => {
+    const cluster = { ...env, REDIS_CLUSTER_HOST: "redis:6379" };
+    expect(readConfig(cluster).redis.mode).toBe("cluster");
+    expect(() =>
+      readConfig({ ...env, REDIS_MODE: "cluster", REDIS_CLUSTER_NODES: "redis:6379" }),
+    ).toThrow("REDIS_KEY_SCHEMA_VERSION=v2");
+    expect(() => readConfig({ ...cluster, REDIS_KEY_SCHEMA_VERSION: "v1" })).toThrow(
+      "REDIS_KEY_SCHEMA_VERSION=v2",
+    );
+    expect(() =>
+      readConfig({ ...cluster, REDIS_KEY_SCHEMA_VERSION: "v2", REDIS_DATABASE: "1" }),
+    ).toThrow("REDIS_DATABASE=0");
+    expect(() => readConfig({ ...env, REDIS_HOST: undefined })).toThrow("REDIS_HOST");
+  });
+
   it("defaults the shared quota reader to an environment-independent key and ALLOW on Redis failure", () => {
     expect(readConfig(env).quota).toEqual({
       keyPrefix: "byclaw:shared:quota:v1:",

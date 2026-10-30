@@ -253,6 +253,8 @@ public class TenantNodeSchemaService {
             .header("X-Byclaw-Internal-Token", internalToken)
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation));
+        if(uri.getHost()!=null && uri.getHost().endsWith("-vpc.sandbox.aliyuncs.com"))
+            nodeClient.privateHeaders(request,enterpriseId,uri);
         if (contentType != null) request.header("Content-Type", contentType);
         extra.forEach(request::header);
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()

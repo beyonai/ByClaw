@@ -1,8 +1,8 @@
 import { requireExecutionPolicy } from "./application/execution-policy.js";
-import MemberGroupRemoval from './application/MemberGroupRemoval.js';
+import MemberGroupRemoval from "./application/MemberGroupRemoval.js";
 import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
-import { Redis } from "ioredis";
+import { createRedis } from "@byclaw/by-framework";
 import type { Config } from "./config.js";
 import { ConnectionManager } from "./application/connection-manager.js";
 import { CommandService } from "./application/command-service.js";
@@ -20,7 +20,7 @@ import { SqlSessionRepository } from "./infrastructure/persistence/session-repos
 import { SqlHistoryRepository } from "./infrastructure/persistence/history-repository.js";
 import { JsonStore } from "./infrastructure/files/json-store.js";
 import { readTenantSnapshot } from "./infrastructure/connection/redis-config.js";
-import { decryptPassword } from "./infrastructure/connection/kms-decryptor.js";
+import { decryptCredentials } from "./infrastructure/connection/kms-decryptor.js";
 import { MtlsClient, loadTls } from "./infrastructure/http/mtls-client.js";
 import { BeSchemaClient } from "./infrastructure/schema/be-schema-client.js";
 import { SchemaTaskFiles } from "./infrastructure/schema/task-files.js";
@@ -37,13 +37,19 @@ import OperationsQueries from "./application/OperationsQueries.js";
 export async function bootstrap(config: Config) {
   const tls = await loadTls(config),
     client = new MtlsClient(tls, config.internalToken);
-  const redis = new Redis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
+  const redis = createRedis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
   redis.on("error", () => {});
   const state = new JsonStore(config.stateDir);
+  const transports = new WeakMap<object, { url: string; trafficToken: string }>();
   const connection = new ConnectionManager(config, {
     snapshot: () => readTenantSnapshot(redis, config.enterpriseId),
-    decrypt: (snapshot) => decryptPassword(client, config.kmsUrl, snapshot),
-    open: (snapshot, password) => Database.open(snapshot, password, new RedisLeases(redis)),
+    decrypt: async (snapshot) => {
+      const credentials = await decryptCredentials(client, config.kmsUrl, snapshot);
+      if (credentials.transport) transports.set(snapshot, credentials.transport);
+      return credentials.password;
+    },
+    open: (snapshot, password) =>
+      Database.open(snapshot, password, new RedisLeases(redis), transports.get(snapshot)),
     readAuthority: () => state.read("authority.json"),
     saveAuthority: (snapshot) =>
       state.write("authority.json", {
@@ -103,7 +109,12 @@ export async function bootstrap(config: Config) {
     {
       commands,
       requireExecution: () =>
-        requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged ?? false, quotas),
+        requireExecutionPolicy(
+          redis,
+          config.enterpriseId,
+          config.commercialManaged ?? false,
+          quotas,
+        ),
       forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,

@@ -38,16 +38,20 @@ export function credentialEnvelope(json: string): CredentialEnvelope {
   return value;
 }
 /** 以工作负载 mTLS 身份调用 KMS，并绑定租户/库名 AAD；解密结果仅用于建立连接。 */
-export async function decryptPassword(
+export async function decryptCredentials(
   client: MtlsClient,
   url: string,
   snapshot: TenantSnapshot,
-): Promise<string> {
+): Promise<{ password: string; transport?: { url: string; trafficToken: string } }> {
   const envelope = credentialEnvelope(snapshot.passwordEnvelope);
   const aad = Buffer.from(
     `byclaw:tenant-db:v1:${snapshot.enterpriseId}:${snapshot.database}`,
   ).toString("base64");
-  const response = await client.json<{ plaintext: string }>(url, "POST", {
+  const response = await client.json<{
+    plaintext: string;
+    databaseWebSocketUrl?: string;
+    databaseTrafficToken?: string;
+  }>(url, "POST", {
     enterpriseId: snapshot.enterpriseId,
     databaseName: snapshot.database,
     aad,
@@ -56,8 +60,22 @@ export async function decryptPassword(
   const bytes = base64(response?.plaintext);
   if (bytes.length > 512) throw new DomainError("INVALID_KMS_RESPONSE");
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const password = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const transport = response.databaseWebSocketUrl
+      ? { url: response.databaseWebSocketUrl, trafficToken: response.databaseTrafficToken ?? "" }
+      : undefined;
+    if (snapshot.host.endsWith("-vpc.sandbox.aliyuncs.com") && !transport)
+      throw new DomainError("PRIVATE_DATABASE_TRANSPORT_REQUIRED");
+    return { password, transport };
   } catch {
     throw new DomainError("INVALID_KMS_RESPONSE");
   }
+}
+
+export async function decryptPassword(
+  client: MtlsClient,
+  url: string,
+  snapshot: TenantSnapshot,
+): Promise<string> {
+  return (await decryptCredentials(client, url, snapshot)).password;
 }

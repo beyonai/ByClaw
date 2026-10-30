@@ -452,7 +452,19 @@ public class TenantDbProvisioningService {
         // OpenGauss may report its first ready state before the tenant role is usable,
         // then restart once more while finishing initialization. Allow that warm-up.
         retryConnectionProbe(() -> {
-            try (Connection connection = DriverManager.getConnection(url, dbUser, password);
+            java.util.Properties credentials=new java.util.Properties();
+            credentials.setProperty("user",dbUser);credentials.setProperty("password",password);
+            if(endpoint.host().endsWith("-vpc.sandbox.aliyuncs.com")) {
+                long tenantId=Long.parseLong(dbName.substring("byclaw_t_".length()));
+                Map<String,String> transport=sandboxService.privateTransport(tenantId,"tenant-opengauss");
+                String websocket=transport.get("url").replaceFirst("^https:","wss:")+"/postgresql";
+                PrivateDatabaseSocketFactory.privateUrl(websocket);
+                credentials.setProperty("socketFactory",PrivateDatabaseSocketFactory.class.getName());
+                credentials.setProperty("byclawDatabaseUrl",websocket);
+                credentials.setProperty("byclawDatabaseToken",transport.get("trafficToken"));
+                credentials.setProperty("sslmode","disable");
+            }
+            try (Connection connection = DriverManager.getConnection(url, credentials);
                  Statement statement = connection.createStatement();
                  ResultSet result = statement.executeQuery("SELECT current_user, current_database()")) {
                 if (result.next() && dbUser.equals(result.getString(1)) && dbName.equals(result.getString(2))) {
@@ -488,12 +500,18 @@ public class TenantDbProvisioningService {
         if (value.stripLeading().startsWith("{")) {
             var parsed = SandboxEndpointRecordSupport.parseEndpointRecord(value);
             if (parsed.malformedJson()
-                || !parsed.instanceEndpoints().containsKey(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
+                || !(parsed.instanceEndpoints().containsKey("opengauss") || parsed.instanceEndpoints().containsKey(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE))) {
                 throw new IllegalArgumentException("tenant DB endpoint record is invalid");
             }
-            value = parsed.instanceEndpoints().get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+            value = parsed.instanceEndpoints().getOrDefault("opengauss", parsed.instanceEndpoints().get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE));
         }
         URI uri = URI.create(value.contains("://") ? value : "tcp://" + value);
+        if("https".equals(uri.getScheme()) && uri.getHost()!=null
+            && uri.getHost().matches("15432-[a-z0-9-]+\\.[a-z0-9-]+-vpc\\.sandbox\\.aliyuncs\\.com")
+            && (uri.getPort()==-1 || uri.getPort()==443) && uri.getUserInfo()==null
+            && uri.getQuery()==null && uri.getFragment()==null && (uri.getPath().isEmpty() || "/".equals(uri.getPath()))) {
+            return new HostPort(uri.getHost(),443);
+        }
         if (uri.getHost() == null || uri.getPort() <= 0) {
             throw new IllegalArgumentException("tenant DB endpoint is not a TCP host and port");
         }

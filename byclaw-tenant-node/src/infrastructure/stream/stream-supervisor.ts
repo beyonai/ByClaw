@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Redis } from "ioredis";
+import { createRedis } from "@byclaw/by-framework";
+import type { Redis } from "ioredis";
 import type { Config } from "../../config.js";
 import type { MirrorService } from "../../application/mirror-service.js";
 import { MirrorConsumer } from "../../interfaces/stream/mirror-consumer.js";
@@ -20,7 +21,7 @@ export class StreamSupervisor {
       ...Array.from({ length: 16 }, (_v, shard) => outboundStream(config.enterpriseId, shard)),
     ];
     for (const [index, stream] of streams.entries()) {
-      const reader = new Redis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
+      const reader = createRedis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
       reader.on("error", () => {});
       this.readers.push(reader);
       this.consumers.push(

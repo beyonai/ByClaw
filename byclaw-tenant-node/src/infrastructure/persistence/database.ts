@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { databaseStream, type DatabaseTransport } from "../connection/private-database-stream.js";
 import type { LeaseManager, RedisLease } from "../coordination/redis-leases.js";
 import { DataSource, type QueryRunner } from "typeorm";
 import { DomainError } from "../../domain/errors.js";
@@ -20,11 +21,13 @@ export class Database implements TenantDatabase {
     private readonly locks: LeaseManager,
     private readonly locked?: QueryRunner,
     private readonly schemaLease?: RedisLease,
+    private readonly transport?: DatabaseTransport,
   ) {}
   static async open(
     snapshot: TenantSnapshot,
     password: string,
     locks: LeaseManager,
+    transport?: DatabaseTransport,
   ): Promise<Database> {
     const source = new DataSource({
       type: "postgres",
@@ -36,10 +39,15 @@ export class Database implements TenantDatabase {
       synchronize: false,
       migrationsRun: false,
       logging: false,
-      extra: { max: 8, connectionTimeoutMillis: 5000, statement_timeout: 30000 },
+      extra: {
+        max: 8,
+        connectionTimeoutMillis: 5000,
+        statement_timeout: 30000,
+        ...(transport ? { stream: () => databaseStream(transport), ssl: false } : {}),
+      },
     });
     await source.initialize();
-    return new Database(source, snapshot, locks);
+    return new Database(source, snapshot, locks, undefined, undefined, transport);
   }
   async query(sql: string, parameters: unknown[] = []): Promise<SqlRow[]> {
     await this.schemaLease?.check();
@@ -151,7 +159,7 @@ export class Database implements TenantDatabase {
       lease = await this.locks.acquire(`schema:${this.snapshot.enterpriseId}`);
       await runner.connect();
       const result = await work(
-        new Database(this.source, this.snapshot, this.locks, runner, lease),
+        new Database(this.source, this.snapshot, this.locks, runner, lease, this.transport),
       );
       await lease.check();
       return result;
@@ -177,7 +185,7 @@ export class Database implements TenantDatabase {
     const options = this.source.options;
     if (!("password" in options) || typeof options.password !== "string")
       throw new DomainError("NOT_READY");
-    return Database.open(this.snapshot, options.password, this.locks);
+    return Database.open(this.snapshot, options.password, this.locks, this.transport);
   }
   async close(): Promise<void> {
     if (this.source.isInitialized) await this.source.destroy();
