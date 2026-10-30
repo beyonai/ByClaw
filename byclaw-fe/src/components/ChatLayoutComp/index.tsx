@@ -49,7 +49,11 @@ import { isExternalChildSession } from '@/utils/scopedSession';
 import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 import { getLatestDigitalEmployeeMessage } from '@/utils/chatVnc';
 import { changeDraftSessionProject } from '@/service/devloop';
-import { shouldPersistDraftSessionProject } from './draftSessionProject';
+import {
+  buildDraftSessionProjectPatch,
+  shouldPersistDraftSessionProject,
+  type DraftSessionProject,
+} from './draftSessionProject';
 
 type IProps = {
   sessionId: string;
@@ -233,8 +237,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [addSession, currentSession, sessionId]);
 
   const sessionProjectId = useMemo(() => {
-    // 路由状态在刷新或非项目列表入口时可能丢失，优先从当前会话的后端归属字段恢复。
-    const candidateProjectId = projectId ?? currentSession?.projectId;
+    // 已创建会话以会话缓存（由后端归属同步）为准，避免新任务切换项目后继续使用页面进入时的旧项目。
+    const candidateProjectId = currentSession?.projectId ?? projectId;
     const normalizedProjectId = Number(candidateProjectId);
     return Number.isFinite(normalizedProjectId) && (normalizedProjectId === -1 || normalizedProjectId > 0)
       ? normalizedProjectId
@@ -249,6 +253,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     selectedProject?.cloudResourceId ||
     inputSelectedProject?.cloudResourceId ||
     sessionProject?.cloudResourceId;
+  const sessionProjectName = currentSession?.projectName || selectedProject?.projectName || projectName;
 
   const notificationSession = isNotificationSession(currentSession);
   const externalChildSession = isExternalChildSession(currentSession);
@@ -702,13 +707,14 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   );
   const projectSelectorSessionId = preserveNewSessionView && !isBottom ? '' : sessionId;
   const handleNewTaskProjectChange = useCallback(
-    async (project: { projectId: string; projectName: string; cloudResourceId?: string | number }) => {
+    async (project: DraftSessionProject) => {
       if (shouldPersistDraftSessionProject({ preserveNewSessionView, isBottom, sessionId })) {
         await changeDraftSessionProject({ sessionId, projectId: project.projectId });
+        updateSession(buildDraftSessionProjectPatch(sessionId, project));
       }
       setSelectedProject(project);
     },
-    [isBottom, preserveNewSessionView, sessionId]
+    [isBottom, preserveNewSessionView, sessionId, updateSession]
   );
 
   return (
@@ -730,7 +736,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
-                projectName={projectName}
+                projectName={sessionProjectName}
                 // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
                 resourceWorkspaceOpen={resourceListOpen}
                 // 会话标题按钮关闭资源工作区时，需要同时关闭列表和全部多 Tab 预览。
