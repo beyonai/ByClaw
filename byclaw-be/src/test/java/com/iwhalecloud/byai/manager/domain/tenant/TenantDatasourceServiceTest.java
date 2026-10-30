@@ -3,17 +3,97 @@ package com.iwhalecloud.byai.manager.domain.tenant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
+import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.server.ResponseStatusException;
 
 class TenantDatasourceServiceTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void tableListingRefreshesPrivateTransportAndPreservesLegacyTcp(boolean microvm) throws Exception {
+        var tenants = mock(TenantAdminTenantMapper.class);
+        var records = mock(SsSandboxRecordMapper.class);
+        var crypto = mock(TenantCredentialCrypto.class);
+        when(tenants.selectConfig(42, "DB_NAME")).thenReturn("byclaw_t_42");
+        when(tenants.selectConfig(42, "DB_USER")).thenReturn("bc_t_42_admin");
+        when(tenants.selectConfig(42, "DB_PASSWORD")).thenReturn("test-envelope");
+        when(tenants.selectConfig(42, "DB_SANDBOX_RECORD_ID")).thenReturn("31");
+        when(crypto.decrypt(42, "byclaw_t_42", "test-envelope")).thenReturn("test-only-password");
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setEnterpriseId(42L);
+        record.setOwnerScope("TENANT");
+        record.setSandboxType("tenant-opengauss");
+        record.setStatus("RUNNING");
+        record.setSandboxId(microvm ? "microvm--cn-beijing--sbx-test" : "c4858896-dcbb-47d3-a1ff-dd52bcf25f52");
+        record.setEndpoint(microvm ? "https://15432-sbx-test.cn-beijing-vpc.sandbox.aliyuncs.com"
+            : "tcp://192.168.0.83:57571/proxy/5432");
+        when(records.selectById(31L)).thenReturn(record);
+        var connection = mock(Connection.class);
+        var statement = mock(PreparedStatement.class);
+        var rows = mock(ResultSet.class);
+        when(connection.prepareStatement(org.mockito.ArgumentMatchers.anyString())).thenReturn(statement);
+        when(statement.executeQuery()).thenReturn(rows);
+        when(rows.next()).thenReturn(true, false, true, false);
+        when(rows.getString(1)).thenReturn("byai");
+        when(rows.getString(2)).thenReturn("ss_session");
+        when(rows.getString(3)).thenReturn("BASE TABLE");
+        var service = new TenantDatasourceService(tenants, records, crypto);
+        var sandboxService = mock(TenantSandboxService.class);
+        when(sandboxService.privateTransport(42, "tenant-opengauss")).thenReturn(
+            java.util.Map.of("url", record.getEndpoint(), "trafficToken", "test-traffic-token"),
+            java.util.Map.of("url", record.getEndpoint(), "trafficToken", "refreshed-test-token"));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sandboxService", sandboxService);
+        try (var user = mockStatic(CurrentUserHolder.class); var jdbc = mockStatic(DriverManager.class)) {
+            user.when(CurrentUserHolder::isPlatformManager).thenReturn(true);
+            jdbc.when(() -> DriverManager.getConnection(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString())).thenReturn(connection);
+            jdbc.when(() -> DriverManager.getConnection(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Properties.class))).thenReturn(connection);
+            assertThat(service.tables(42)).containsExactly(
+                new TenantDatasourceService.TableInfo("byai", "ss_session", "BASE TABLE"));
+            assertThat(service.tables(42)).hasSize(1);
+            if (microvm) {
+                for (String token : java.util.List.of("test-traffic-token", "refreshed-test-token")) {
+                    jdbc.verify(() -> DriverManager.getConnection(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.argThat(properties ->
+                            PrivateDatabaseSocketFactory.class.getName().equals(properties.getProperty("socketFactory"))
+                            && "wss://15432-sbx-test.cn-beijing-vpc.sandbox.aliyuncs.com/postgresql"
+                                .equals(properties.getProperty("byclawDatabaseUrl"))
+                            && token.equals(properties.getProperty("byclawDatabaseToken"))
+                            && "disable".equals(properties.getProperty("sslmode")))));
+                }
+                verify(sandboxService, times(2)).privateTransport(42, "tenant-opengauss");
+            } else {
+                jdbc.verify(() -> DriverManager.getConnection(org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.argThat(properties ->
+                        properties.getProperty("socketFactory") == null
+                        && properties.getProperty("byclawDatabaseToken") == null
+                        && "bc_t_42_admin".equals(properties.getProperty("user")))), times(2));
+                org.mockito.Mockito.verifyNoInteractions(sandboxService);
+            }
+        }
+        verify(connection, times(2)).close();
+    }
+
     @Test
     void connectsToTenantDatabaseContainerBehindOpenSandboxProxy() {
         SsSandboxRecord record = new SsSandboxRecord();

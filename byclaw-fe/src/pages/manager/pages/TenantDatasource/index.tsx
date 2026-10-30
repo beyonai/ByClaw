@@ -88,6 +88,7 @@ export default function TenantDatasource() {
   const [sqlResult, setSqlResult] = useState<TenantQueryResult>();
   const [sqlElapsed, setSqlElapsed] = useState<number>();
   const [loadingTables, setLoadingTables] = useState(false);
+  const [tableListFailed, setTableListFailed] = useState(false);
   const [runningSql, setRunningSql] = useState(false);
 
   useEffect(() => {
@@ -115,6 +116,7 @@ export default function TenantDatasource() {
     const epoch = ++requestEpoch.current;
     setTenantId(nextTenantId);
     setTables([]);
+    setTableListFailed(false);
     setSelectedTableKey(undefined);
     setOpenTables([]);
     setActiveTab(SQL_TAB);
@@ -127,7 +129,7 @@ export default function TenantDatasource() {
       const items = await listTenantTables(nextTenantId);
       if (requestEpoch.current === epoch) setTables(Array.isArray(items) ? items : []);
     } catch {
-      if (requestEpoch.current === epoch) setTables([]);
+      if (requestEpoch.current === epoch) setTableListFailed(true);
     } finally {
       if (requestEpoch.current === epoch) setLoadingTables(false);
     }
@@ -262,7 +264,12 @@ export default function TenantDatasource() {
           />
           {tenantId && (
             <Tooltip title={intl.formatMessage({ id: 'tenant.datasource.refreshTree' })}>
-              <Button icon={<ReloadOutlined />} loading={loadingTables} onClick={() => void connect(tenantId)} />
+              <Button
+                aria-label={intl.formatMessage({ id: 'tenant.datasource.refreshTree' })}
+                icon={<ReloadOutlined />}
+                loading={loadingTables}
+                onClick={() => void connect(tenantId)}
+              />
             </Tooltip>
           )}
         </div>
@@ -273,7 +280,7 @@ export default function TenantDatasource() {
           <div className={styles.sidebarTitle}>
             <DatabaseOutlined />
             <span>{intl.formatMessage({ id: 'tenant.datasource.objects' })}</span>
-            <Tag>{tables.length}</Tag>
+            <Tag>{!tenantId || loadingTables || tableListFailed ? '—' : tables.length}</Tag>
           </div>
           <Input.Search
             allowClear
@@ -284,6 +291,7 @@ export default function TenantDatasource() {
           <div
             className={styles.objectTree}
             role="tree"
+            aria-busy={loadingTables}
             aria-label={intl.formatMessage({ id: 'tenant.datasource.treeLabel' })}
           >
             {loadingTables ? (
@@ -293,6 +301,8 @@ export default function TenantDatasource() {
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={intl.formatMessage({ id: 'tenant.datasource.select' })}
               />
+            ) : tableListFailed ? (
+              <Alert type="error" showIcon message={intl.formatMessage({ id: 'tenant.datasource.tablesFailed' })} />
             ) : (
               <>
                 <button

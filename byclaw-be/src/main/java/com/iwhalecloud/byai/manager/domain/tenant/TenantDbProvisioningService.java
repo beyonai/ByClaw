@@ -457,12 +457,7 @@ public class TenantDbProvisioningService {
             if(endpoint.host().endsWith("-vpc.sandbox.aliyuncs.com")) {
                 long tenantId=Long.parseLong(dbName.substring("byclaw_t_".length()));
                 Map<String,String> transport=sandboxService.privateTransport(tenantId,"tenant-opengauss");
-                String websocket=transport.get("url").replaceFirst("^https:","wss:")+"/postgresql";
-                PrivateDatabaseSocketFactory.privateUrl(websocket);
-                credentials.setProperty("socketFactory",PrivateDatabaseSocketFactory.class.getName());
-                credentials.setProperty("byclawDatabaseUrl",websocket);
-                credentials.setProperty("byclawDatabaseToken",transport.get("trafficToken"));
-                credentials.setProperty("sslmode","disable");
+                PrivateDatabaseSocketFactory.configure(credentials, transport);
             }
             try (Connection connection = DriverManager.getConnection(url, credentials);
                  Statement statement = connection.createStatement();

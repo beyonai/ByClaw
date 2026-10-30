@@ -6,6 +6,7 @@ import java.net.http.*;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.*;
 import javax.net.SocketFactory;
@@ -15,6 +16,21 @@ public final class PrivateDatabaseSocketFactory extends SocketFactory {
     private static final HttpClient CLIENT = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
     private final Properties properties;
     public PrivateDatabaseSocketFactory(Properties properties) { this.properties = properties; }
+
+    /** Configure JDBC from fresh provider credentials; never fall back to raw TCP. */
+    static void configure(Properties properties, Map<String, String> transport) {
+        String endpoint = transport.get("url");
+        String token = transport.get("trafficToken");
+        if (endpoint == null || token == null || token.isBlank()) {
+            throw new IllegalArgumentException("Private database transport credentials are missing");
+        }
+        String websocket = endpoint.replaceFirst("^https:", "wss:") + "/postgresql";
+        privateUrl(websocket);
+        properties.setProperty("socketFactory", PrivateDatabaseSocketFactory.class.getName());
+        properties.setProperty("byclawDatabaseUrl", websocket);
+        properties.setProperty("byclawDatabaseToken", token);
+        properties.setProperty("sslmode", "disable");
+    }
 
     public static URI privateUrl(String value) {
         URI uri = URI.create(value);

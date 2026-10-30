@@ -11,9 +11,11 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -36,6 +38,9 @@ public class TenantDatasourceService {
     private final SsSandboxRecordMapper sandboxMapper;
     private final TenantCredentialCrypto credentialCrypto;
     private final String dbProbeHost;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantSandboxService sandboxService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
@@ -158,9 +163,15 @@ public class TenantDatasourceService {
         String url = "jdbc:postgresql://" + host + ":" + endpoint.port() + "/" + dbName
             + "?connectTimeout=5&socketTimeout=20";
         try {
-            return DriverManager.getConnection(url, dbUser,
-                credentialCrypto.decrypt(enterpriseId, dbName, envelope));
-        } catch (GeneralSecurityException | SQLException e) {
+            Properties credentials = new Properties();
+            credentials.setProperty("user", dbUser);
+            credentials.setProperty("password", credentialCrypto.decrypt(enterpriseId, dbName, envelope));
+            if (record.getSandboxId() != null && record.getSandboxId().startsWith("microvm--")) {
+                PrivateDatabaseSocketFactory.configure(credentials,
+                    sandboxService.privateTransport(enterpriseId, "tenant-opengauss"));
+            }
+            return DriverManager.getConnection(url, credentials);
+        } catch (GeneralSecurityException | SQLException | IllegalArgumentException e) {
             throw databaseUnavailable(e);
         }
     }

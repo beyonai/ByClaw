@@ -272,6 +272,7 @@ export default {
   'tenant.datasource.treeLabel': 'Tenant database objects',
   'tenant.datasource.select': 'Select a tenant',
   'tenant.datasource.noTables': 'No tables available',
+  'tenant.datasource.tablesFailed': 'Failed to load the table list. Click “Refresh object tree” to retry.',
   'tenant.datasource.openSql': 'Open in SQL query',
   'tenant.datasource.treeHint': 'Click to select; double-click a table to open its data',
   'tenant.datasource.tabs': 'Database workspace tabs',

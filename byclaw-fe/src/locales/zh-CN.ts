@@ -264,6 +264,7 @@ export default {
   'tenant.datasource.treeLabel': '租户数据库对象',
   'tenant.datasource.select': '请选择租户',
   'tenant.datasource.noTables': '暂无数据表',
+  'tenant.datasource.tablesFailed': '数据表列表加载失败，请点击“刷新对象树”重试。',
   'tenant.datasource.openSql': '在 SQL 查询中打开',
   'tenant.datasource.treeHint': '单击选中，双击表名打开数据',
   'tenant.datasource.tabs': '数据库工作标签',
