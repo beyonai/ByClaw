@@ -24,8 +24,8 @@ function fixture(value: SharedQuota | null = quota, existing = [user("20"), agen
   const effects: string[] = [];
   let sequence = 0;
   const query = vi.fn(async (sql: string, args: any[] = []) => {
-    if (sql.startsWith("UPDATE byai.byai_session SET session_id=session_id")) {
-      effects.push("database-guard");
+    if (sql.startsWith("SELECT session_id FROM byai.byai_session WHERE session_id=")) {
+      effects.push("ownership-check");
       return [{ session_id: "30" }];
     }
     if (sql.includes("COUNT(*)::text AS current_count") && sql.includes("session_type='hs_as'")) {
@@ -91,7 +91,7 @@ function fixture(value: SharedQuota | null = quota, existing = [user("20"), agen
   return { context, db, query, reader, rows, effects };
 }
 
-/** Pause only the database guard, so policy changes happen while the real admission flow waits for it. */
+/** Pause only the Redis lock, so policy changes happen while the real admission flow waits for it. */
 function pauseGuard(query: ReturnType<typeof fixture>["query"]) {
   let enter!: () => void, release!: () => void;
   const entered = new Promise<void>((resolve) => {
@@ -102,7 +102,7 @@ function pauseGuard(query: ReturnType<typeof fixture>["query"]) {
   });
   const original = query.getMockImplementation()!;
   query.mockImplementation(async (sql, args = []) => {
-    if (sql.startsWith("UPDATE byai.byai_session SET session_id=session_id")) {
+    if (sql.startsWith("SELECT session_id FROM byai.byai_session WHERE session_id=")) {
       enter();
       await released;
     }
@@ -119,14 +119,14 @@ describe("tenant group membership quota", () => {
       code: "GROUP_AGENT_LIMIT_EXCEEDED",
     });
     expect(effects[0]).toBe("lock:session:30");
-    expect(effects.indexOf("database-guard")).toBeLessThan(effects.indexOf("count"));
+    expect(effects.indexOf("ownership-check")).toBeLessThan(effects.indexOf("count"));
   });
 
-  it("cannot count or admit members without locking an existing group database row", async () => {
+  it("cannot count or admit members without a valid group after acquiring the Redis lock", async () => {
     const { context, query, effects } = fixture();
     const original = query.getMockImplementation()!;
     query.mockImplementation(async (sql, args = []) =>
-      sql.startsWith("UPDATE byai.byai_session SET session_id=session_id")
+      sql.startsWith("SELECT session_id FROM byai.byai_session WHERE session_id=")
         ? []
         : original(sql, args),
     );
@@ -136,7 +136,7 @@ describe("tenant group membership quota", () => {
     expect(effects).not.toContain("count");
   });
 
-  it("applies a lower limit published while waiting for the database guard", async () => {
+  it("applies a lower limit published while waiting for the Redis lock", async () => {
     const { context, query, reader } = fixture();
     let current: SharedQuota | null = quota;
     const read = vi.spyOn(reader, "read").mockImplementation(async () => current);
@@ -150,7 +150,7 @@ describe("tenant group membership quota", () => {
   });
 
   it.each([null, { ...quota, revision: "2", mode: "UNLIMITED" as const }])(
-    "allows a constraint removed while waiting for the database guard: %j",
+    "allows a constraint removed while waiting for the Redis lock: %j",
     async (updated) => {
       const { context, query, reader, effects } = fixture();
       let current: SharedQuota | null = quota;
@@ -247,15 +247,22 @@ describe("tenant group membership quota", () => {
   });
 
   it("rejects CREATE_GROUP when the enterprise workgroup limit is already full", async () => {
-    const { db, reader, effects } = fixture({ ...quota, limits: { ...quota.limits, groupLimit: 0 } }, []);
-    const context = new CommandContext(db, command({
-      operation: "CREATE_GROUP",
-      payload: {
-        projectId: "50",
-        sessionName: "Full",
-        members: [{ ...user("20"), userRole: "OWNER" }],
-      },
-    }), reader);
+    const { db, reader, effects } = fixture(
+      { ...quota, limits: { ...quota.limits, groupLimit: 0 } },
+      [],
+    );
+    const context = new CommandContext(
+      db,
+      command({
+        operation: "CREATE_GROUP",
+        payload: {
+          projectId: "50",
+          sessionName: "Full",
+          members: [{ ...user("20"), userRole: "OWNER" }],
+        },
+      }),
+      reader,
+    );
     vi.spyOn(context, "session").mockResolvedValue(null);
     await expect(createSession(context)).rejects.toMatchObject({ code: "GROUP_LIMIT_EXCEEDED" });
     expect(effects).not.toContain("insert-member");

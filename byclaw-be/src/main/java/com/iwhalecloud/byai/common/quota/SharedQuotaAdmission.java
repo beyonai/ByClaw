@@ -3,29 +3,26 @@ package com.iwhalecloud.byai.common.quota;
 import java.util.Optional;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import com.iwhalecloud.byai.common.lock.TransactionalRedisLockService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.web.server.ResponseStatusException;
 
-/**
- * Package admission shares a database write guard with the actual membership mutation.
- * The UPDATE lock survives arbitrary Redis lease expiry and is released only at transaction end.
- */
+/** Redis exclusion covers quota counting and mutation until transaction completion. */
 @Component
 public class SharedQuotaAdmission {
     public static final String BUSINESS_ENTERPRISE_EXT = "group_business_enterprise_id";
     private final SharedQuotaReader reader;
     private final JdbcTemplate jdbc;
-    @Autowired(required = false) private TransactionalRedisLockService redisLocks;
-    private final ConcurrentHashMap<String, ReentrantLock> localGuardLocks = new ConcurrentHashMap<>();
-    public SharedQuotaAdmission(SharedQuotaReader reader, JdbcTemplate jdbc) { this.reader = reader; this.jdbc = jdbc; }
+    private final TransactionalRedisLockService redisLocks;
+    public SharedQuotaAdmission(SharedQuotaReader reader, JdbcTemplate jdbc, TransactionalRedisLockService redisLocks) {
+        this.reader = reader;
+        this.jdbc = jdbc;
+        this.redisLocks = redisLocks;
+    }
 
     public Optional<QuotaSnapshot> beginEnterprise(Long enterpriseId) {
         var snapshot = read(enterpriseId);
@@ -72,7 +69,7 @@ public class SharedQuotaAdmission {
         var snapshot = beginGroup(enterpriseId, sessionId);
         if (snapshot.isEmpty()) return true;
         if (markers.isEmpty()) throw unconfirmedOwnership();
-        // Recheck identity under the database guard, since a Redis coordination lease can expire.
+        // Recheck identity after acquiring the shared Redis lock.
         Long existing = jdbc.queryForObject("SELECT COUNT(*) FROM byai.byai_session_member WHERE session_id=? AND mem_obj_type=? AND mem_obj_id=?",
             Long.class, sessionId, type, memberId);
         if (existing != null && existing > 0) return false;
@@ -170,28 +167,7 @@ public class SharedQuotaAdmission {
         }
         if (id == null || id <= 0) throw new IllegalArgumentException("Quota scope id must be positive");
         String guardKey = "quota-write-guard:" + scope + ":" + id;
-        if (redisLocks != null) redisLocks.acquire(guardKey);
-        // Redis lock serializes initialization across ByClaw instances. The local
-        // lock is only a constructor-based test fallback and lasts through the transaction.
-        if (redisLocks == null) {
-            ReentrantLock localLock = localGuardLocks.computeIfAbsent(guardKey, ignored -> new ReentrantLock());
-            localLock.lock();
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override public void afterCompletion(int status) { localLock.unlock(); }
-            });
-        }
-        {
-            Integer existing = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM byai.quota_write_guard WHERE scope=? AND subject_id=?",
-                Integer.class, scope, id);
-            if (existing == null || existing == 0) {
-                jdbc.update("INSERT INTO byai.quota_write_guard(scope,subject_id,version) VALUES(?,?,0)", scope, id);
-            }
-        }
-        // The following UPDATE serializes every count and write until the surrounding transaction commits.
-        if (jdbc.update("UPDATE byai.quota_write_guard SET version=version+1 WHERE scope=? AND subject_id=?", scope, id) != 1) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.quota.guard.unavailable");
-        }
+        redisLocks.acquire(guardKey);
     }
     private static void check(Long current, int additions, int limit, String reason) {
         if (additions < 0) throw new IllegalArgumentException("Quota additions cannot be negative");

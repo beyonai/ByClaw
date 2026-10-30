@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TenantLegacyCreationGovernanceTest {
     private TenantExecutionPolicyService policy(boolean enabled) {
-        return new TenantExecutionPolicyService(null, new ObjectMapper(), enabled, Clock.systemUTC());
+        return new TenantExecutionPolicyService(null, new ObjectMapper(), new com.iwhalecloud.byai.common.quota.TestSharedPolicies().reader, enabled, Clock.systemUTC());
     }
 
     @Test void enabledPolicyRejectsLegacyCreationWithoutAnyDatabaseLookup() {

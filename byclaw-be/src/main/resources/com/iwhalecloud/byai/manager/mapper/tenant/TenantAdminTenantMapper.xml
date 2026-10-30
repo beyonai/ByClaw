@@ -51,8 +51,8 @@
         LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
         LEFT JOIN byai.tenant_config commercial ON commercial.enterprise_id = e.enterprise_id AND commercial.params_code = 'COMMERCIAL_MANAGED'
-        LEFT JOIN byai.internal_command recovery_command ON recovery_command.id = (
-            SELECT c.id FROM byai.internal_command c WHERE c.enterprise_id = e.enterprise_id
+        LEFT JOIN byai.tenant_task recovery_command ON recovery_command.id = (
+            SELECT c.id FROM byai.tenant_task c WHERE c.enterprise_id = e.enterprise_id
             AND c.type = 'PROVISION' AND commercial.params_value = 'true' ORDER BY c.created_at DESC,c.id DESC LIMIT 1
         )
         WHERE r.params_code = 'PROVISION_REQUEST_ID' AND r.params_value = #{requestId}
@@ -74,8 +74,8 @@
         LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
         LEFT JOIN byai.tenant_config commercial ON commercial.enterprise_id = e.enterprise_id AND commercial.params_code = 'COMMERCIAL_MANAGED'
-        LEFT JOIN byai.internal_command recovery_command ON recovery_command.id = (
-            SELECT c.id FROM byai.internal_command c WHERE c.enterprise_id = e.enterprise_id
+        LEFT JOIN byai.tenant_task recovery_command ON recovery_command.id = (
+            SELECT c.id FROM byai.tenant_task c WHERE c.enterprise_id = e.enterprise_id
             AND c.type = 'PROVISION' AND commercial.params_value = 'true' ORDER BY c.created_at DESC,c.id DESC LIMIT 1
         )
         LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'

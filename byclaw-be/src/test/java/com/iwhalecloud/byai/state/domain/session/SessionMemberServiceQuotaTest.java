@@ -31,7 +31,6 @@ class SessionMemberServiceQuotaTest {
         var source = new DriverManagerDataSource("jdbc:h2:mem:genericquota" + System.nanoTime() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE SCHEMA byai");
-        jdbc.execute("CREATE TABLE byai.quota_write_guard(scope VARCHAR(32),subject_id BIGINT,version BIGINT NOT NULL,PRIMARY KEY(scope,subject_id))");
         jdbc.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY,enterprise_id BIGINT,session_type VARCHAR(16))");
         jdbc.execute("CREATE TABLE byai.byai_session_ext(session_id BIGINT,ext_param_code VARCHAR(64),ext_param_value VARCHAR(64))");
         jdbc.execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT PRIMARY KEY,session_id BIGINT,mem_obj_type VARCHAR(16),mem_obj_id BIGINT)");
@@ -44,7 +43,7 @@ class SessionMemberServiceQuotaTest {
             return jdbc.update("INSERT INTO byai.byai_session_member VALUES(?,?,?,?)", row.getByaiSessionMemberId(), row.getSessionId(), row.getMemObjType(), row.getMemObjId());
         });
         ReflectionTestUtils.setField(members, "byaiSessionMemberMapper", mapper);
-        ReflectionTestUtils.setField(members, "quotaAdmission", new SharedQuotaAdmission(reader, jdbc));
+        ReflectionTestUtils.setField(members, "quotaAdmission", new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(reader, jdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create()));
         tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
 

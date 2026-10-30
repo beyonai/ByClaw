@@ -91,6 +91,30 @@ class WorkgroupNameServiceTest extends I18nTestSupport {
         verifyNoInteractions(node);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0L, 1L})
+    void sharedWorkspaceChecksPublicGroupNamesWithoutCallingNode(long count) {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 999L, "MEMBER"));
+        when(sessions.selectCount(any())).thenReturn(count);
+
+        assertThat(service.exists("Team", 88L, 999L)).isEqualTo(count > 0);
+
+        LambdaQueryWrapper<ByaiSession> query = query();
+        assertThat(query.getSqlSegment()).contains("enterprise_id =", "creator_id =", "state <>")
+            .doesNotContain("enterprise_id IS NULL");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(88L, "Team", "hs_as", 999L, "GROUP_DISSOLVED");
+        verifyNoInteractions(node);
+    }
+
+    @Test
+    void sharedWorkspaceStillRejectsAnotherUserOrEnterpriseScope() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 999L, "MEMBER"));
+        assertThatThrownBy(() -> service.exists("Team", 89L, 999L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.exists("Team", 88L, 10L)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(node, sessions);
+    }
+
     @Test
     void developmentUsesTheSameTenantScopeInTheLegacyDatabase() {
         TenantRequestContextHolder.set(new TenantRequestContext(88L, 10L, "OWNER"));

@@ -120,7 +120,14 @@ export class GroupForwardRepository {
     if (!row) throw new DomainError("FORWARD_LEASE_LOST");
     return row;
   }
+  private async lockRequestIdentity(row: NewForwardRequest): Promise<void> {
+    await lockBusiness(
+      this.db,
+      `forward-reserve:${JSON.stringify([this.tenantId, row.actorUserId, row.clientRequestId])}`,
+    );
+  }
   async insertRequest(row: NewForwardRequest): Promise<void> {
+    await this.lockRequestIdentity(row);
     await this.db.query(
       `INSERT INTO byai.byai_group_chat_forward_request (request_id, enterprise_id, actor_user_id, source_session_id, client_request_id, mode, request_hash, frozen_json, source_manifest_json, snapshot_version, backend) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
@@ -407,23 +414,29 @@ export class GroupForwardRepository {
     );
   }
   async reserveRequest(row: NewForwardRequest): Promise<boolean> {
-    return (
-      (
-        await this.db.query(
-          `INSERT INTO byai.byai_group_chat_forward_request (request_id,enterprise_id,actor_user_id,source_session_id,client_request_id,mode,request_hash,frozen_json,source_manifest_json,snapshot_version,backend) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}','{}',1,$8) ON CONFLICT (enterprise_id,actor_user_id,client_request_id) DO NOTHING RETURNING request_id`,
-          [
-            row.requestId,
-            this.tenantId,
-            row.actorUserId,
-            row.sourceSessionId,
-            row.clientRequestId,
-            row.mode,
-            row.requestHash,
-            row.backend,
-          ],
-        )
-      ).length === 1
+    await this.lockRequestIdentity(row);
+    const existing = await this.db.query(
+      `SELECT request_id FROM byai.byai_group_chat_forward_request
+       WHERE enterprise_id=$1 AND actor_user_id=$2 AND client_request_id=$3`,
+      [this.tenantId, row.actorUserId, row.clientRequestId],
     );
+    if (existing.length > 0) return false;
+    await this.db.query(
+      `INSERT INTO byai.byai_group_chat_forward_request
+       (request_id,enterprise_id,actor_user_id,source_session_id,client_request_id,mode,request_hash,frozen_json,source_manifest_json,snapshot_version,backend)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'{}','{}',1,$8)`,
+      [
+        row.requestId,
+        this.tenantId,
+        row.actorUserId,
+        row.sourceSessionId,
+        row.clientRequestId,
+        row.mode,
+        row.requestHash,
+        row.backend,
+      ],
+    );
+    return true;
   }
   async finishPreparation(requestId: string, frozen: unknown, manifest: unknown): Promise<void> {
     await this.db.query(

@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -24,21 +23,17 @@ class TenantManagedDeletionServiceTest {
     TenantAdminTenantMapper tenants;
     TenantSandboxService sandboxes;
     TenantExecutionPolicyService policies;
-    HookPublisher hooks;
     org.springframework.transaction.PlatformTransactionManager transactions;
 
     @BeforeEach void setup() {
         var fixture = new TenantCommandStoreTest(); fixture.setup();
         jdbc = fixture.jdbc; store = fixture.store; transactions = fixture.tx.getTransactionManager();
         jdbc.execute("CREATE TABLE byai.tenant_config(id bigint,enterprise_id bigint,params_code varchar(100),params_value text,params_version bigint default 1)");
-        jdbc.execute("CREATE TABLE byai.tenant_policy_cursor(enterprise_id bigint,desired_revision bigint,generation varchar(20) default '1')");
-        jdbc.execute("CREATE TABLE byai.tenant_execution_policy(enterprise_id bigint,revision bigint,payload text)");
         jdbc.execute("CREATE TABLE byai.ss_sandbox_record(enterprise_id bigint,owner_scope varchar(20),sandbox_type varchar(40),status varchar(20),sandbox_id varchar(200))");
-        jdbc.update("UPDATE byai.internal_command SET status='SUCCEEDED',stage='READY' WHERE id=1");
-        jdbc.update("INSERT INTO byai.tenant_runtime_operation(enterprise_id,state) VALUES(2,'IDLE')");
+        jdbc.update("UPDATE byai.tenant_task SET status='SUCCEEDED',stage='READY' WHERE id=1");
+        jdbc.update("INSERT INTO byai.tenant_operation_state(enterprise_id) VALUES(2)");
         jdbc.update("INSERT INTO byai.tenant_config(id,enterprise_id,params_code,params_value) VALUES(1,2,'PROVISION_STATE','{\"status\":\"READY\"}'),(2,2,'INTEGRATION_SOURCE_SYSTEM','hacu'),(3,2,'COMMERCIAL_MANAGED','true'),(4,2,'DB_PASSWORD','encrypted-test'),(5,2,'PACKAGE_CONTENT_SNAPSHOT','{\"memberLimit\":2}')");
-        jdbc.update("INSERT INTO byai.tenant_policy_cursor(enterprise_id,desired_revision) VALUES(2,1)");
-        jdbc.update("INSERT INTO byai.tenant_execution_policy VALUES(2,1,'{\"revision\":\"1\",\"accessMode\":\"PREPARED\",\"limits\":{\"memberLimit\":2,\"groupLimit\":3,\"groupMemberLimit\":4,\"storageBytes\":\"1024\",\"agentLimit\":5,\"parallelTaskLimit\":1}}')");
+        jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=1,runtime_generation='1' WHERE enterprise_id=2");
         tenants = mock(TenantAdminTenantMapper.class);
         when(tenants.selectConfig(anyLong(),anyString())).thenAnswer(c -> {
             var values=jdbc.queryForList("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code=?",String.class,c.<Object>getArgument(0),c.<Object>getArgument(1));
@@ -51,9 +46,9 @@ class TenantManagedDeletionServiceTest {
         doAnswer(c -> jdbc.update("INSERT INTO byai.tenant_config(id,enterprise_id,params_code,params_value) VALUES(?,?,?,?)",c.<Object>getArgument(0),c.<Object>getArgument(1),c.<Object>getArgument(2),c.<Object>getArgument(3)))
             .when(tenants).insertConfig(anyLong(),anyLong(),anyString(),anyString());
         var ids=mock(SequenceService.class);var next=new AtomicLong(10);when(ids.nextVal()).thenAnswer(c -> next.getAndIncrement());
-        sandboxes=mock(TenantSandboxService.class);policies=spy(new TenantExecutionPolicyService(jdbc,new ObjectMapper(),false,""));hooks=mock(HookPublisher.class);
+        sandboxes=mock(TenantSandboxService.class);policies=mock(TenantExecutionPolicyService.class);
         service=new TenantManagedDeletionService(store,jdbc,fixture.tx.getTransactionManager(),tenants,sandboxes,policies,
-            ids,new ObjectMapper(),hooks,mock(StringRedisTemplate.class));
+            ids,new ObjectMapper(),mock(StringRedisTemplate.class));
     }
     String state() { return tenants.selectConfig(2,"PROVISION_STATE"); }
 
@@ -63,29 +58,27 @@ class TenantManagedDeletionServiceTest {
         assertEquals("SUCCEEDED",store.find(1).status());assertEquals("DELETE",store.find(10).type());
         assertTrue(store.snapshot(10).contains("10001"));
         assertTrue(state().contains("DELETING"));
-        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.internal_command",Integer.class));
-        verify(policies,times(1)).update(eq(2L),eq(1L),argThat(p -> "SUSPENDED".equals(p.path("accessMode").asText())));
-        assertEquals("SUSPENDED",policies.projection(2).accessMode());
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
+        verifyNoInteractions(policies);
         verifyNoInteractions(sandboxes);
     }
     @Test void runningProvisionCannotBeInterruptedAndFailedAcceptanceRollsBack() {
-        jdbc.update("UPDATE byai.tenant_runtime_operation SET active_command_id=1,state='ACTIVE' WHERE enterprise_id=2");
+        jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=1 WHERE enterprise_id=2");
         makeProvisionRunning();
         assertThrows(ResponseStatusException.class,()->service.request(2,"tenant",10001));
         assertEquals("RUNNING",store.find(1).status());assertTrue(state().contains("READY"));verifyNoInteractions(policies);
-        jdbc.update("UPDATE byai.internal_command SET status='MANUAL_REQUIRED',lease_until=NULL WHERE id=1");
-        doThrow(new IllegalStateException("outbox unavailable")).when(hooks).publishDurable(anyString(),anyInt(),anyString(),anyString(),anyString(),anyString(),anyMap());
-        assertThrows(IllegalStateException.class,()->service.request(2,"tenant",10001));
-        assertEquals("MANUAL_REQUIRED",store.find(1).status());assertNull(store.find(10));assertTrue(state().contains("READY"));
+        jdbc.update("UPDATE byai.tenant_task SET status='MANUAL_REQUIRED',lease_until=NULL WHERE id=1");
+        assertEquals("ACCEPTED",service.request(2,"tenant",10001));
+        assertEquals("FAILED",store.find(1).status());
+        assertEquals("DELETE",store.find(10).type());
     }
     @Test void pausedProvisionIsFencedAndItsExternalReceiptExplainsDeletion() {
-        jdbc.update("UPDATE byai.tenant_runtime_operation SET active_command_id=1,state='ACTIVE' WHERE enterprise_id=2");
+        jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=1 WHERE enterprise_id=2");
         var lease=makeProvisionRunning();
-        jdbc.update("UPDATE byai.internal_command SET status='MANUAL_REQUIRED',lease_until=NULL WHERE id=1");
+        jdbc.update("UPDATE byai.tenant_task SET status='MANUAL_REQUIRED',lease_until=NULL WHERE id=1");
         service.request(2,"tenant",10001);
         assertEquals("FAILED",store.find(1).status());assertEquals("TENANT_DELETION_REQUESTED",store.find(1).errorCode());
         assertThrows(TenantCommandException.class,()->store.fence(lease));
-        verify(hooks).publishDurable(eq("tenant.provisioning.failed"),eq(1),eq("2"),anyString(),eq("1"),eq("1"),anyMap());
     }
     @Test void pendingNasCleanupRetainsMembershipsAndRetriesBeforePublishingDeleted() {
         service.request(2,"tenant",10001);var lease=store.claim(10,"worker",Duration.ofMinutes(30));
@@ -94,12 +87,11 @@ class TenantManagedDeletionServiceTest {
         assertThrows(ResponseStatusException.class,()->service.execute(lease));service.failed(lease,pending);
         assertEquals("RETRY_WAIT",store.find(10).status());assertTrue(state().contains("DELETING"));
         verify(tenants,never()).deleteTenantMemberships(anyLong());
-        jdbc.update("UPDATE byai.internal_command SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=10");
+        jdbc.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=10");
         var retry=store.claim(10,"worker-2",Duration.ofMinutes(30));service.execute(retry);
         assertEquals("SUCCEEDED",store.find(10).status());assertTrue(state().contains("DELETED"));
         assertNull(tenants.selectConfig(2,"DB_PASSWORD"));assertEquals("hacu",tenants.selectConfig(2,"INTEGRATION_SOURCE_SYSTEM"));
-        assertNull(jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_runtime_operation WHERE enterprise_id=2",Long.class));
-        verify(hooks).publishDurable(eq("tenant.deleted"),eq(1),eq("2"),anyString(),eq("1"),eq("10"),anyMap());
+        assertNull(jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=2",Long.class));
         assertEquals("COMPLETED",service.request(2,"tenant",10001));
     }
     @Test void unknownProviderIdentifiersFailClosedAndRetryKeepsSameCommand() {
@@ -111,13 +103,10 @@ class TenantManagedDeletionServiceTest {
         assertEquals("ACCEPTED",service.request(2,"tenant",10001));assertEquals("PENDING",store.find(10).status());
         assertThrows(TenantCommandException.class,()->service.execute(lease));
     }
-    @Test void failedRequestedEventRollsBackSuspensionCommandAndState() {
-        doThrow(new IllegalStateException("outbox unavailable")).when(hooks).publishDurable(
-            eq("tenant.deletion.requested"),anyInt(),anyString(),anyString(),anyString(),anyString(),anyMap());
+    @Test void failedLifecycleUpdateRollsBackCommandAndState() {
+        doThrow(new IllegalStateException("state update unavailable")).when(tenants).updateConfig(eq(2L),eq("PROVISION_STATE"),anyString());
         assertThrows(IllegalStateException.class,()->service.request(2,"tenant",10001));
-        assertEquals("PREPARED",policies.projection(2).accessMode());
         assertTrue(state().contains("READY"));assertNull(store.latestDeletion(2));
-        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_execution_policy",Integer.class));
     }
     @Test void concurrentClicksReserveOnlyOneCommandAndPolicyRevision() throws Exception {
         var start=new java.util.concurrent.CountDownLatch(1);
@@ -128,15 +117,15 @@ class TenantManagedDeletionServiceTest {
             assertEquals("ACCEPTED",first.get(10,java.util.concurrent.TimeUnit.SECONDS));
             assertEquals("ACCEPTED",second.get(10,java.util.concurrent.TimeUnit.SECONDS));
         }
-        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.internal_command",Integer.class));
-        assertEquals("2",policies.projection(2).desiredRevision());
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
+        assertEquals(1L,jdbc.queryForObject("SELECT policy_revision FROM byai.tenant_operation_state",Long.class));
     }
     @Test void independentScannerDeletesPausedTenantWithoutClaimingOtherProvisionCommands() {
         String old = System.getProperty("BE_ENV");
         try {
             System.setProperty("BE_ENV", "production");
-            jdbc.update("UPDATE byai.internal_command SET status='MANUAL_REQUIRED',stage='SCHEMA_INIT' WHERE id=1");
-            jdbc.update("UPDATE byai.tenant_runtime_operation SET active_command_id=1,state='ACTIVE' WHERE enterprise_id=2");
+            jdbc.update("UPDATE byai.tenant_task SET status='MANUAL_REQUIRED',stage='SCHEMA_INIT' WHERE id=1");
+            jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=1 WHERE enterprise_id=2");
             jdbc.update("INSERT INTO byai.ss_sandbox_record VALUES(2,'TENANT','tenant-opengauss','RUNNING','db-sandbox'),(2,'TENANT','tenant-data-node','RUNNING','node-sandbox')");
             store.insert(100,"hacu","other-provision","hash","PROVISION",3,1,"{}");
             service.request(2,"tenant",10001);
@@ -184,7 +173,7 @@ class TenantManagedDeletionServiceTest {
             assertEquals("RETRY_WAIT",store.latestDeletion(2).status());
             assertEquals("RELEASED",jdbc.queryForObject("SELECT status FROM byai.ss_sandbox_record",String.class));
             assertTrue(state().contains("DELETING"));verify(tenants,never()).deleteTenantMemberships(anyLong());
-            jdbc.update("UPDATE byai.internal_command SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=10");
+            jdbc.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=10");
             coordinator.scan();
             assertEquals("SUCCEEDED",store.latestDeletion(2).status());assertTrue(state().contains("DELETED"));
         } finally {
@@ -192,7 +181,7 @@ class TenantManagedDeletionServiceTest {
         }
     }
     private TenantCommandStore.Lease makeProvisionRunning() {
-        jdbc.update("UPDATE byai.internal_command SET status='PENDING' WHERE id=1");
+        jdbc.update("UPDATE byai.tenant_task SET status='PENDING' WHERE id=1");
         return store.claim(1,"provision-worker",Duration.ofMinutes(30));
     }
 }

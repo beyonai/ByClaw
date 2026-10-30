@@ -4,7 +4,7 @@ import { requireId } from "../../domain/values.js";
 import type { CommandContext } from "./command-context.js";
 import { lockBusiness, lockSessions } from "./session-locks.js";
 
-/** A database row write serializes count and insert even if a paused worker loses its Redis lease. */
+/** Renewable transaction Redis locks serialize quota counts and writes in the tenant database. */
 export async function requireGroupMemberCapacity(
   context: CommandContext,
   members: QuotaMember[],
@@ -12,9 +12,7 @@ export async function requireGroupMemberCapacity(
   if (!context.quotas) return;
   const { db, command } = context;
   if (command.operation === "CREATE_GROUP") {
-    // The session row is already part of this transaction. The enterprise
-    // advisory lock makes concurrent creators observe committed effective
-    // groups without introducing a row-lock query dependency.
+    // The session is already inserted in this transaction; serialize enterprise counts until commit.
     await lockBusiness(db, `enterprise-workgroup:${command.enterpriseId}`);
     let groupQuota = await context.quotas.read(command.enterpriseId);
     if (groupQuota && groupQuota.mode !== "UNLIMITED") {
@@ -32,13 +30,13 @@ export async function requireGroupMemberCapacity(
   await lockSessions(db, [command.sessionId]);
   let quota = await context.quotas.read(command.enterpriseId);
   if (!quota || quota.mode === "UNLIMITED") return;
-  // The write lock lives until commit/rollback; CREATE_GROUP has inserted this row in the same transaction.
+  // Validate ownership after the Redis lock; no dummy database write is needed.
   const guarded = await db.query(
-    "UPDATE byai.byai_session SET session_id=session_id WHERE session_id=$1 AND enterprise_id=$2 AND session_type='hs_as' RETURNING session_id",
+    "SELECT session_id FROM byai.byai_session WHERE session_id=$1 AND enterprise_id=$2 AND session_type='hs_as'",
     [command.sessionId, command.enterpriseId],
   );
   if (guarded.length !== 1) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
-  // The row write may wait behind another transaction; honor policy changes published during that wait.
+  // Honor policy changes published while waiting for the Redis lock.
   quota = await context.quotas.read(command.enterpriseId);
   if (!quota || quota.mode === "UNLIMITED") return;
   const users = new Set<string>(),

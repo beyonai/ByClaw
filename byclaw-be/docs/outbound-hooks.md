@@ -41,9 +41,9 @@ Hook 默认关闭。普通创建入口接入 `user.registered` v1 和 `workgroup
 
 `POST /admin/tenants/create`（`TenantAdminTenantService.create`）保留原有企业、套餐快照与 OWNER 预留及后续开通流程，不再发布普通 `tenant.created` Hook。因此该旧入口不会触发租户创建通知及依赖该通知的外部开户流程，幂等返回同样不发布。
 
-商业开通使用 `POST /internal/v1/tenant-provisionings`：`TenantCommandService` 在企业、OWNER 和初始策略预留事务内，通过 `DurableHookPublisher` 发布持久化 `tenant.created` v1。该事件表示状态为 RESERVED，不表示资源开通成功；后续完成/失败使用各自的持久事件。发送格式、订阅与恢复语义见 [租户持久事件](api/tenant-durable-events.md)。
+商业开通使用 `POST /internal/v1/tenant-provisionings`，状态持久保存在租户任务与步骤中。开通、删除不再发送可靠 Hook；HACU 定时查询原任务及 runtime，见 [租户任务状态查询](api/tenant-task-polling.md)。
 
-通用 `config/examples/hooks.yaml` 中的 `tenant-sync` 仍作为普通 Hook 正文映射示例保留，不会使旧管理入口重新触发事件。商业持久事件需配置对应 durable 订阅，不能依赖该普通订阅替代。
+通用 `config/examples/hooks.yaml` 中的 `tenant-sync` 仅为普通 Hook 正文映射示例，不会使管理或商业开通入口自动发送租户事件。清除部署配置中已移除的 `byclaw.hooks.durable.*` 段。
 
 ## 工作组创建事件
 

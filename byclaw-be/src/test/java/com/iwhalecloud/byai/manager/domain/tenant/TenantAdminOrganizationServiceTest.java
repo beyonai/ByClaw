@@ -34,7 +34,7 @@ class TenantAdminOrganizationServiceTest {
     private final SequenceService sequenceService = mock(SequenceService.class);
     private final SharedQuotaReader quotaReader = mock(SharedQuotaReader.class);
     private final JdbcTemplate quotaJdbc = mock(JdbcTemplate.class);
-    private final SharedQuotaAdmission quota = org.mockito.Mockito.spy(new SharedQuotaAdmission(quotaReader, quotaJdbc));
+    private final SharedQuotaAdmission quota = org.mockito.Mockito.spy(new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(quotaReader, quotaJdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create()));
 
     @org.junit.jupiter.api.BeforeEach
     void quotaCountsUseMembershipState() {

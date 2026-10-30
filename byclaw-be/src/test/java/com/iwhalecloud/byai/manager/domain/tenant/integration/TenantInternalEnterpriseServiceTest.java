@@ -24,7 +24,6 @@ class TenantInternalEnterpriseServiceTest {
         var source = new DriverManagerDataSource("jdbc:h2:mem:members" + System.nanoTime() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE SCHEMA byai");
-        jdbc.execute("CREATE TABLE byai.quota_write_guard(scope VARCHAR(32),subject_id BIGINT,version BIGINT NOT NULL,PRIMARY KEY(scope,subject_id))");
         jdbc.execute("CREATE TABLE byai.po_enterprise_info(enterprise_id BIGINT PRIMARY KEY,com_acct_name VARCHAR(200))");
         jdbc.execute("CREATE TABLE byai.po_users(user_id BIGINT PRIMARY KEY,state VARCHAR(1),is_locked VARCHAR(1),user_eff_date TIMESTAMP,user_exp_date TIMESTAMP)");
         jdbc.execute("CREATE TABLE byai.tenant_config(enterprise_id BIGINT,params_code VARCHAR(64),params_value TEXT,params_version BIGINT DEFAULT 1,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
@@ -38,7 +37,7 @@ class TenantInternalEnterpriseServiceTest {
             @Override public Long nextVal() { return next.getAndIncrement(); }
         };
         limit(2);
-        service = new TenantInternalEnterpriseService(jdbc, sequence, new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(quotas, jdbc));
+        service = new TenantInternalEnterpriseService(jdbc, sequence, new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(quotas, jdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create()));
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
     @Test void insertsValidMemberAndRollsBackWithOuterCommand() throws Exception {

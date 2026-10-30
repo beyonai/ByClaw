@@ -141,7 +141,7 @@ public class TenantDbProvisioningService {
     }
 
     public void requestRestart(long enterpriseId, String sandboxType, long recordId) {
-        requireLegacyOperation(enterpriseId);
+        // 商业租户同样允许维修重启；这里只维护技术资源，不修改商业订阅或执行策略。
         if (deletionRequested(enterpriseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.deletion.inProgress");
         }
@@ -209,7 +209,7 @@ public class TenantDbProvisioningService {
 
     /** Replace a READY tenant's Node with the configured image while keeping its database sandbox. */
     public TenantSandboxView recreateNode(long enterpriseId) {
-        requireLegacyOperation(enterpriseId);
+        // Node image maintenance also supports commercial tenants without replacing their database or authority.
         String lockKey = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL))) {

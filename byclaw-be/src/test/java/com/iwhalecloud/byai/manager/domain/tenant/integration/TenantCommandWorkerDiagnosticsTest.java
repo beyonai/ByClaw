@@ -5,7 +5,6 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import org.junit.jupiter.api.Test;
@@ -43,13 +42,12 @@ class TenantCommandWorkerDiagnosticsTest {
         var provisioner = mock(TenantDbProvisioningService.class);
         var transactions = mock(PlatformTransactionManager.class);
         var policies = mock(TenantExecutionPolicyService.class);
-        var hooks = mock(HookPublisher.class);
-        var worker = new TenantCommandWorker(store, null, transactions, new ObjectMapper(), provisioner, policies, hooks);
+        var worker = new TenantCommandWorker(store, null, transactions, new ObjectMapper(), provisioner, policies);
 
         worker.scan();
 
         // Development must not touch the shared queue, including expired leases and restored commands.
-        verifyNoInteractions(store, provisioner, transactions, policies, hooks);
+        verifyNoInteractions(store, provisioner, transactions, policies);
     }
 
     @Test void nestedFileFailureRetainsCauseTypeAndLocationWithoutPathsOrMessages() throws Exception {
@@ -75,6 +73,41 @@ class TenantCommandWorkerDiagnosticsTest {
         assertFailureLogged(new IllegalArgumentException("private-provider-credential"), "PROVIDER_RESULT_UNKNOWN", true);
     }
 
+    @Test void provider503RemainsUnknownAndIsNotBlindlyRetried() throws Exception {
+        assertFailureLogged(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE),
+            "PROVIDER_RESULT_UNKNOWN");
+    }
+
+    @Test void missingPublicationWaitsWithoutCallingProviderThenSameTaskResumes() throws Exception {
+        var fixture = new TenantCommandStoreTest(); fixture.setup();
+        var db = fixture.jdbc;
+        db.execute("CREATE TABLE byai.tenant_config(enterprise_id bigint,params_code varchar(64),params_value text)");
+        db.execute("CREATE TABLE byai.tenant_task_step(command_id bigint,step_key varchar(64),status varchar(32),provider_request_key varchar(128),result text,revision bigint DEFAULT 0,PRIMARY KEY(command_id,step_key))");
+        db.update("INSERT INTO byai.tenant_operation_state(enterprise_id,active_command_id,policy_revision) VALUES(2,1,1)");
+        var shared = new com.iwhalecloud.byai.common.quota.TestSharedPolicies();
+        var policies = new TenantExecutionPolicyService(db,new ObjectMapper(),shared.reader,false,"");
+        var provisioner = mock(TenantDbProvisioningService.class);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call -> {
+            TenantProvisioningGuard guard = call.getArgument(1);
+            guard.external("DB_CREATE", Boolean.class, () -> { calls.incrementAndGet(); return true; });
+            return null;
+        }).when(provisioner).provisionDurably(eq(2L),any());
+        var worker = new TenantCommandWorker(fixture.store,db,fixture.tx.getTransactionManager(),new ObjectMapper(),provisioner,policies);
+        worker.scan();
+        assertEquals("RETRY_WAIT",fixture.store.find(1).status());
+        assertEquals("SHARED_QUOTA_NOT_READY",fixture.store.find(1).errorCode());
+        assertEquals(0,calls.get());
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM byai.tenant_task_step",Integer.class));
+        shared.publish(2,new ObjectMapper().readTree("{\"revision\":\"1\",\"accessMode\":\"PREPARED\"}"));
+        db.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=1");
+        worker.scan();
+        assertEquals("SUCCEEDED",fixture.store.find(1).status());
+        assertEquals(1,calls.get());
+        assertEquals(1,db.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
+        assertNull(db.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state",Long.class));
+    }
+
     private void assertFailureLogged(RuntimeException failure, String expectedCode) throws Exception {
         assertFailureLogged(failure, expectedCode, false);
     }
@@ -82,7 +115,6 @@ class TenantCommandWorkerDiagnosticsTest {
     private void assertFailureLogged(RuntimeException failure, String expectedCode, boolean acknowledgementFails) throws Exception {
         var store = mock(TenantCommandStore.class);
         var provisioner = mock(TenantDbProvisioningService.class);
-        var hooks = mock(HookPublisher.class);
         var transactions = mock(PlatformTransactionManager.class);
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         var lease = new TenantCommandStore.Lease(10, 42, "worker", 1);
@@ -96,7 +128,7 @@ class TenantCommandWorkerDiagnosticsTest {
                 .when(store).finish(lease, "MANUAL_REQUIRED", "DB_CREATE", expectedCode);
         }
         var worker = new TenantCommandWorker(store, null, transactions, new ObjectMapper(), provisioner,
-            mock(TenantExecutionPolicyService.class), hooks);
+            mock(TenantExecutionPolicyService.class));
         Logger logger = (Logger) LoggerFactory.getLogger(TenantCommandWorker.class);
         Level previousLevel = logger.getLevel();
         var appender = new ListAppender<ILoggingEvent>();
@@ -106,12 +138,6 @@ class TenantCommandWorkerDiagnosticsTest {
         try {
             worker.scan();
             verify(store).finish(lease, "MANUAL_REQUIRED", "DB_CREATE", expectedCode);
-            if (acknowledgementFails) {
-                verifyNoInteractions(hooks);
-            } else {
-                verify(hooks).publishDurable(eq("tenant.provisioning.failed"), eq(1), eq("42"), anyString(),
-                    eq("1"), eq("10"), argThat(payload -> expectedCode.equals(payload.get("errorCode"))));
-            }
             assertEquals(1, appender.list.size());
             var event = appender.list.get(0);
             assertEquals(acknowledgementFails ? Level.WARN : Level.ERROR, event.getLevel());

@@ -143,6 +143,10 @@ public class SandboxService {
     /** 沙箱状态：启动失败 */
     private static final String STATUS_FAILED = "FAILED";
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private SandboxLoginAutoStartService loginAutoStart;
+
     /** 手动释放终止原因前缀。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
 
@@ -609,6 +613,10 @@ public class SandboxService {
         if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
         if (platformRemote()) {
+            // Reject before creating a STARTING record. The structured preparing response lets
+            // both login orchestration and interactive callers wait for quota provisioning.
+            platformGateway().call("storage", "quota-check", platformGateway().params(
+                "userCode", userCode, "operation", "CHAT", "requestedBytes", 0L));
             Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
                 "routing", platformGateway().route(routing));
             if (autoRelease != null) params.put("autoRelease", autoRelease);
@@ -1478,6 +1486,7 @@ public class SandboxService {
      * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
+        if (loginAutoStart != null) loginAutoStart.cancel(userCode);
         String requestedType = StringUtils.trimToNull(requestedSandboxType);
         String resolvedType = resourceId == null ? requestedType
             : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode).getSandboxType();

@@ -12,7 +12,7 @@ WebSocket 在原连接上发送 `SWITCH_TENANT` 消息，payload 带 `enterprise
 
 `TenantRuntimeIdentity` 基于已有 `BYAI_PLATFORM.app_secret`，使用用途分离的 HMAC-SHA256 固定规则派生凭据主密钥和内部 Token。相同应用身份在重启、多实例中得到相同结果；不新增密钥存储，不需要租户密钥/Token 环境变量。应用身份必须保持稳定，变更前需迁移存量密文并更新 Node 的内部认证。`TenantCredentialCrypto` 再按企业 ID 派生 SM4-GCM 密钥，AAD 绑定企业与数据库名；旧凭据升级只重新封装相同数据库密码，不修改数据库密码。密钥和 Token 不得写入源码、SQL 或日志。
 
-租户数据库与 Node 的镜像及默认档位分别读取 Platform 的 `sandbox_service_spec` / `sandbox_service_profile`；创建时冻结 `profileKey` 和 `nodeProfileKey`，重试沿用快照。Redis 复用公共 Spring Redis 配置；仅 Node 回调 BE 的内网入口需配置 `BYCLAW_TENANT_BE_INTERNAL_URL`。基线使用内置 ZIP，数据库连接使用 Provider 地址，Node 使用 Pod IP 注册。持久租户事件默认启用；外部订阅仍由 hooks 配置管理。
+租户数据库与 Node 的镜像及默认档位分别读取 Platform 的 `sandbox_service_spec` / `sandbox_service_profile`；创建时仅冻结技术资源 `profileKey` 和 `nodeProfileKey`，重试沿用快照，商业限额读取 HACU 发布的共享 Redis。Redis 复用公共 Spring Redis 配置；仅 Node 回调 BE 的内网入口需配置 `BYCLAW_TENANT_BE_INTERNAL_URL`。基线使用内置 ZIP，数据库连接使用 Provider 地址，Node 使用 Pod IP 注册。租户开通进度由 HACU 轮询原任务和 runtime，不再发送持久租户事件；通用 best-effort Hook 仍由 hooks 配置管理。
 # 管理端租户创建
 
 平台管理员通过 `POST /byaiService/admin/tenants/create` 提交 `enterpriseName`、`packageId`、`requestId`，通过 `POST /byaiService/admin/tenants/list` 查看租户。创建事务写入企业、所有者成员关系、套餐快照和 `RESERVED` 开通状态；同一个 `requestId` 重试返回原租户。`RESERVED` 不能切换进入业务空间，必须由沙箱与 schema 开通流程推进到 `READY`。

@@ -60,6 +60,17 @@ class UserBucketProvisioningServiceTest {
         verify(fileProvisioner, never()).ensureUserSpace("byclaw-user001");
     }
 
+    @Test
+    void accountCreationSchedulesPersonalQuotaBeforeFirstLogin() {
+        ObjectStorage storage = mock(ObjectStorage.class);
+        UserBucketProvisioningService service = service("minio", storage, mock(FileStorageUserSpaceProvisioner.class));
+        PersonalStoragePrewarm prewarm = mock(PersonalStoragePrewarm.class);
+        ReflectionTestUtils.setField(service, "personalStoragePrewarm", prewarm);
+        org.mockito.Mockito.doThrow(new IllegalStateException("storage offline")).when(storage).init("byclaw-user001");
+        service.ensureUserBucketQuietly("user001");
+        verify(prewarm).afterCommit("user001");
+    }
+
     private UserBucketProvisioningService service(String storageType, ObjectStorage objectStorage,
         FileStorageUserSpaceProvisioner fileProvisioner) {
         UserBucketNamingService namingService = mock(UserBucketNamingService.class);

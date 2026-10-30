@@ -40,7 +40,7 @@ public class TenantCommandRecovery {
     public Map<String,Object> receipt(long id, String requestId) {
         uuid(requestId);
         var command = required(id);
-        var rows = jdbc.queryForList("SELECT command_id,receipt FROM byai.internal_command_recovery WHERE source_system=? AND request_id=?",
+        var rows = jdbc.queryForList("SELECT command_id,receipt FROM byai.tenant_task_recovery WHERE source_system=? AND request_id=?",
             command.sourceSystem(),requestId);
         if (rows.size()!=1 || ((Number)rows.getFirst().get("command_id")).longValue()!=id) {
             throw new TenantCommandException(404,"RECOVERY_NOT_FOUND");
@@ -75,13 +75,13 @@ public class TenantCommandRecovery {
             }
             return tx.execute(status -> {
                 if (jdbc.update("""
-                    UPDATE byai.internal_command SET status='PENDING',error_code=NULL,revision=revision+1,
+                    UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,revision=revision+1,
                     fencing_token=fencing_token+1,lease_owner=NULL,lease_until=NULL,next_attempt_at=CURRENT_TIMESTAMP,
                     updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=? AND status='MANUAL_REQUIRED'
                     """,id,expected)!=1) throw new TenantCommandException(409,"RECOVERY_REVISION_CONFLICT");
                 if (jdbc.update("""
-                    UPDATE byai.tenant_runtime_operation SET fencing_token=fencing_token+1,revision=revision+1
-                    WHERE enterprise_id=? AND active_command_id=? AND state='ACTIVE' AND revision=?
+                    UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1
+                    WHERE enterprise_id=? AND active_command_id=? AND operation_revision=?
                     """,Long.parseLong(command.enterpriseId()),id,inspection.slotRevision())!=1) {
                     throw new TenantCommandException(409,"RECOVERY_OPERATION_SLOT_CHANGED");
                 }
@@ -99,13 +99,13 @@ public class TenantCommandRecovery {
                     String state=inspection.adopted()!=null ? "SUCCEEDED" : "RETRY_READY";
                     String result=inspection.adopted()!=null ? encode(inspection.adopted()) : null;
                     // A successful step stays immutable but still participates in the same revision fence.
-                    if ("SUCCEEDED".equals(step.status()) && jdbc.update("UPDATE byai.internal_command_step SET revision=revision "
+                    if ("SUCCEEDED".equals(step.status()) && jdbc.update("UPDATE byai.tenant_task_step SET revision=revision "
                         + "WHERE command_id=? AND step_key=? AND revision=? AND status='SUCCEEDED' AND provider_request_key=?",
                         id,inspection.command().stage(),step.revision(),step.providerKey())!=1) {
                         throw new TenantCommandException(409,"RECOVERY_STEP_CHANGED");
                     }
                     if (!"SUCCEEDED".equals(step.status()) && jdbc.update("""
-                        UPDATE byai.internal_command_step SET status=?,result=?,error_code=NULL,revision=revision+1
+                        UPDATE byai.tenant_task_step SET status=?,result=?,revision=revision+1
                         WHERE command_id=? AND step_key=? AND revision=? AND status=? AND provider_request_key=?
                         """,state,result,id,inspection.command().stage(),step.revision(),step.status(),step.providerKey())!=1) {
                         throw new TenantCommandException(409,"RECOVERY_STEP_CHANGED");
@@ -118,7 +118,7 @@ public class TenantCommandRecovery {
                 result.put("requestId",request);result.put("commandId",Long.toString(id));result.put("enterpriseId",command.enterpriseId());
                 result.put("status","ACCEPTED");result.put("commandRevision",Long.toString(expected+1));result.put("decision",inspection.decision());
                 jdbc.update("""
-                    INSERT INTO byai.internal_command_recovery(source_system,request_id,command_id,enterprise_id,request_hash,
+                    INSERT INTO byai.tenant_task_recovery(source_system,request_id,command_id,enterprise_id,request_hash,
                     expected_revision,actor_type,actor_id,reason,confirm_no_in_flight,decision,step_key,receipt)
                     VALUES (?,?,?,?,?,?,'PLATFORM_ADMIN',?,?,?,?,?,?)
                     """,command.sourceSystem(),request,id,Long.parseLong(command.enterpriseId()),hash,expected,actor,reason,
@@ -142,11 +142,11 @@ public class TenantCommandRecovery {
         if (!"PROVISION".equals(command.type())) return decision(command,"MANUAL_REQUIRED","COMMAND_TYPE_UNSUPPORTED",null,-1,null,null);
         if ("SUCCEEDED".equals(command.status())) return decision(command,"NOT_REQUIRED","COMMAND_ALREADY_SUCCEEDED",null,-1,null,null);
         if (!"MANUAL_REQUIRED".equals(command.status())) return decision(command,"WAIT","COMMAND_NOT_PAUSED",null,-1,null,null);
-        var slots=jdbc.query("SELECT revision FROM byai.tenant_runtime_operation WHERE enterprise_id=? AND active_command_id=? AND state='ACTIVE'",
+        var slots=jdbc.query("SELECT operation_revision FROM byai.tenant_operation_state WHERE enterprise_id=? AND active_command_id=?",
             (rs,n)->rs.getLong(1),Long.parseLong(command.enterpriseId()),id);
         if (slots.size()!=1) return decision(command,"MANUAL_REQUIRED","RECOVERY_OPERATION_SLOT_CHANGED",null,-1,null,null);
         long slot=slots.getFirst();
-        var rows=jdbc.query("SELECT status,provider_request_key,revision FROM byai.internal_command_step WHERE command_id=? AND step_key=?",
+        var rows=jdbc.query("SELECT status,provider_request_key,revision FROM byai.tenant_task_step WHERE command_id=? AND step_key=?",
             (rs,n)->new Step(rs.getString(1),rs.getString(2),rs.getLong(3)),id,command.stage());
         Step step=rows.isEmpty()?null:rows.getFirst();
         if (step!=null && !("command-"+id+":"+command.stage()).equals(step.providerKey())) {
@@ -189,7 +189,7 @@ public class TenantCommandRecovery {
         var command=store.find(id);if(command==null) throw new TenantCommandException(404,"COMMAND_NOT_FOUND");return command;
     }
     private Map<String,Object> existing(String source,String request,String hash) {
-        var rows=jdbc.queryForList("SELECT request_hash,receipt FROM byai.internal_command_recovery WHERE source_system=? AND request_id=?",source,request);
+        var rows=jdbc.queryForList("SELECT request_hash,receipt FROM byai.tenant_task_recovery WHERE source_system=? AND request_id=?",source,request);
         if(rows.isEmpty()) return null;
         if(!hash.equals(rows.getFirst().get("request_hash"))) throw new TenantCommandException(409,"RECOVERY_REQUEST_CONFLICT");
         return decode(rows.getFirst().get("receipt").toString());

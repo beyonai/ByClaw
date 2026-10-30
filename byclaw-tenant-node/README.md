@@ -274,7 +274,7 @@ pnpm start
 
 正式 baseline/增量 SQL 尚未生成：仓库要求先由用户给出准确迁移版本；本次未修改 deploy/migrations/versions、initdb 或 .applied。制品需包含既有表及方案新增 last_seq、created_seq、storage_version、mirror 序号/ID、clientRequestId/run/answer/command/hash 字段，以及 `readiness.ts` 要求的唯一索引和 seq_any_table。缺结构、索引、catalog 或审计不一致时只进入管理态。
 
-目标 openGauss 的 PostgreSQL 驱动兼容性、advisory lock/ON CONFLICT/catalog 查询、完整 baseline/版本链、COMMIT 故障恢复，以及 BE/KMS/证书/Redis ACL 的实际联调，由实库验收完成。部署约定每租户每代际一个 Node 写入实例；多副本的任务状态共享与协调需另行设计。
+目标 openGauss 的 PostgreSQL 驱动兼容性、Redis 租约互斥/catalog 查询、完整 baseline/版本链、COMMIT 故障恢复，以及 BE/KMS/证书/Redis ACL 的实际联调，由实库验收完成。部署约定每租户每代际一个 Node 写入实例；多副本的任务状态共享与协调需另行设计。
 
 ## D0.5.0 消息命令兼容
 
@@ -387,3 +387,6 @@ ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态�
 创建工作组时，LIMITED 配额按事务中已包含新工作组的数量与 `groupLimit` 比较，等于上限允许创建，超过上限返回 `GROUP_LIMIT_EXCEEDED`。计数读取原始 SQL 列名 `current_count`，避免将正常计数误判为 `QUOTA_UNAVAILABLE`。此修复需要更新已有租户 Node 的运行程序，仅更新 BE 或 Redis 配额不会生效。
 
 `requireExecutionPolicy` 不再因 COMMERCIAL_MANAGED 一律返回 POLICY_CAPABILITY_UNSUPPORTED，改用现有共享权益读取端口核实企业身份、ENABLED 和有效期。HTTP 业务写入与队列命令复用该入口；鉴权、Schema 就绪和业务授权照常执行。HACU 不等待本 Node 的 ACK；权益异步发布未到达时仍可能暂时拒绝写入。已有沙箱需要更新实际运行的 Node 程序，单独部署 byclaw-be 不会更新现有 Node。已改测试源文件，未执行构建、测试或部署。
+
+
+配额及转发幂等写入使用既有 `Database.transaction` Redis 锁，锁随事务提交/回滚释放，支持续租和提交前所有权检查。配额不再使用 session 自更新作为保护，转发请求预留改为锁后查重再普通 INSERT；生产源码不使用 PostgreSQL `ON CONFLICT`。真实 openGauss、Redis 单机/Cluster、跨实例竞争及提交时丢锁仍需环境验收；模拟测试不代表这些环境已验证。共享工作区的 Java 主库与租户 Node 独立库使用各自的锁域，不构成跨数据库的强一致配额账本。

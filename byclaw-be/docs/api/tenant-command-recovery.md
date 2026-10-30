@@ -23,7 +23,7 @@
 
 ## 交付与验证状态
 
-新增 `byai.internal_command_recovery` 位于已授权 V0.6.0 DDL 的 `BEGIN BYCLAW TENANT COMMAND RECOVERY` 至 `END BYCLAW TENANT COMMAND RECOVERY` 事务区块；未运行迁移，未修改 initdb 或 .applied。已补充恢复幂等、确认、CAS 回滚、完整分页、身份匹配、权限边界、guard 单次恢复和旧状态展示的测试源码。按用户要求未执行测试、编译或构建；仅源码静态审阅和 diff 空白检查，不代表已验证真实 Provider 或完成线上恢复。
+新增 `byai.tenant_task_recovery` 位于已授权 V0.6.0 DDL 的 `BEGIN BYCLAW TENANT COMMAND RECOVERY` 至 `END BYCLAW TENANT COMMAND RECOVERY` 事务区块；未运行迁移，未修改 initdb 或 .applied。已补充恢复幂等、确认、CAS 回滚、完整分页、身份匹配、权限边界、guard 单次恢复和旧状态展示的测试源码。按用户要求未执行测试、编译或构建；仅源码静态审阅和 diff 空白检查，不代表已验证真实 Provider 或完成线上恢复。
 
 ## 管理页面状态展示
 

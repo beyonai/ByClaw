@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -31,12 +32,15 @@ public class WorkgroupNameService {
                 || !Long.valueOf(tenant.enterpriseId()).equals(enterpriseId)) {
                 throw new IllegalArgumentException(I18nUtil.get("workgroup.name.scopeMismatch"));
             }
-            NameCheck result = node.request(tenant, "POST", "/internal/v1/group-chats/name-check",
-                Map.of("name", name), new TypeReference<NameCheck>() { });
-            if (result == null || result.exists() == null) {
-                throw new IllegalStateException(I18nUtil.get("workgroup.name.checkUnavailable"));
+            // Shared workspaces keep their groups in the public database and have no tenant Node.
+            if (!TenantContextService.isSharedWorkspace(tenant.enterpriseId())) {
+                NameCheck result = node.request(tenant, "POST", "/internal/v1/group-chats/name-check",
+                    Map.of("name", name), new TypeReference<NameCheck>() { });
+                if (result == null || result.exists() == null) {
+                    throw new IllegalStateException(I18nUtil.get("workgroup.name.checkUnavailable"));
+                }
+                return result.exists();
             }
-            return result.exists();
         }
         long tenantId = enterpriseId == null ? 1L : enterpriseId;
         LambdaQueryWrapper<ByaiSession> query = new LambdaQueryWrapper<>();

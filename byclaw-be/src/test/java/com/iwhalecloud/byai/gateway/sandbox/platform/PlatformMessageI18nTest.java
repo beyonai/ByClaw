@@ -24,8 +24,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 class PlatformMessageI18nTest extends I18nTestSupport {
     @ParameterizedTest
     @CsvSource(value = {
-        "zh-CN|正在准备您的个人存储配额，请等待配额就绪后再开始会话。",
-        "en-US|Your personal storage quota is being prepared. Please wait until it is ready before starting a chat."
+        "zh-CN|正在开通您的个人网盘，完成后将自动继续当前操作。",
+        "en-US|Preparing your personal storage. Please wait; your operation will continue automatically."
     }, delimiter = '|')
     void quotaPreparationUsesTheRequestLocale(String language, String expected) {
         LocaleContextHolder.setLocale(Locale.forLanguageTag(language));
