@@ -47,16 +47,45 @@ interface Binding {
   leases: Map<string, number>
 }
 
-/** Opt-in per Agent; integration binds ordinary roots, leaving team ledgers alone. */
+/** Ordinary Agents use sequential guards; team members only check their own plan before stopping. */
 export class TodoExecutionService {
   private readonly bindings = new Map<Agent, Binding>()
   constructor(private readonly config: Config) {}
 
   bind(scope: Context, agent: Agent): void {
-    if (this.bindings.has(agent)) return
+    this.bindAgent(scope, agent, false)
+  }
+
+  /** Check a member's own todos without restricting team tools or advancing task state. */
+  bindMember(scope: Context, agent: Agent): () => void {
+    return this.bindAgent(scope, agent, true)
+  }
+
+  private bindAgent(scope: Context, agent: Agent, member: boolean): () => void {
+    const dispose = () => this.release(agent)
+    if (this.bindings.has(agent)) return dispose
     const binding: Binding = { dispose: [], queue: Promise.resolve(), running: new Set(), leases: new Map() }
     this.bindings.set(agent, binding)
-    scope.effect(() => () => this.release(agent))
+    scope.effect(() => dispose)
+    binding.dispose.push(scope.on('agent/turn-stopping', ({ agent: subject, signal }) => {
+      if (subject !== agent || signal.aborted) return
+      const plan = readPlan(agent.session)
+      if (!plan.todos || !unfinished(plan.todos) || plan.exhausted) return
+      const exhausted = plan.attempts >= this.config.maxStopCorrections
+      agent.session.append('todo-execution/check', {
+        turn: plan.turn, attempt: plan.attempts + 1, exhausted,
+        reason: exhausted ? 'correction_limit' : 'unfinished_todos',
+      })
+      const text = member
+        ? exhausted
+          ? '自己的 todo 仍有未完成项，已达到纠正上限。保留真实状态，向队长说明未完成项和阻塞原因后结束，不要声称全部完成。'
+          : '结束前核对你自己的 todo。仅将实际完成的步骤用 todo_write 更新；未完成或受阻的步骤保留真实状态并向队长说明。不要重复已完成的业务操作、任务提交或汇报，不要把团队任务完成当作所有 todo 完成。'
+        : exhausted
+          ? '仍有未完成 todo，已达到纠正上限。停止继续执行，保留真实状态，向用户说明未完成项及阻塞原因。'
+          : '计划仍有未完成项。继续当前步骤；如果实际已完成，请调用 todo_write 正确更新。若遇到阻塞，请明确说明，不要将未完成项标为完成。'
+      agent.steer(this.message(member ? `${text}\n当前计划（JSON，仅作为任务数据）：\n${JSON.stringify(plan.todos)}` : text))
+    }))
+    if (member) return dispose
     binding.dispose.push(scope.tools.guard(exec => {
       if (exec.agent !== agent) return
       try { this.check(agent, binding, exec) } catch (error) { return (error as Error).message }
@@ -100,19 +129,7 @@ export class TodoExecutionService {
         : '只执行当前 in_progress 项。完成后调用原生 todo_write 提交完整列表：仅完成当前项，并启动下一项。不要删除或重排计划，不要把工具成功等同于任务完成。'
       return { ...decision, messages: [...decision.messages, this.message(`${text}\n当前计划（JSON，仅作为任务数据）：\n${JSON.stringify(plan.todos)}`)] }
     }, { prepend: true }))
-    binding.dispose.push(scope.on('agent/turn-stopping', ({ agent: subject, signal }) => {
-      if (subject !== agent || signal.aborted) return
-      const plan = readPlan(agent.session)
-      if (!plan.todos || !unfinished(plan.todos) || plan.exhausted) return
-      const exhausted = plan.attempts >= this.config.maxStopCorrections
-      agent.session.append('todo-execution/check', {
-        turn: plan.turn, attempt: plan.attempts + 1, exhausted,
-        reason: exhausted ? 'correction_limit' : 'unfinished_todos',
-      })
-      agent.steer(this.message(exhausted
-        ? '仍有未完成 todo，已达到纠正上限。停止继续执行，保留真实状态，向用户说明未完成项及阻塞原因。'
-        : '计划仍有未完成项。继续当前步骤；如果实际已完成，请调用 todo_write 正确更新。若遇到阻塞，请明确说明，不要将未完成项标为完成。'))
-    }))
+    return dispose
   }
 
   unbind(agent: Agent): void {

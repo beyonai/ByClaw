@@ -14,6 +14,7 @@ import { assertDshModelRoutingRuntime, modelRouterEnabled } from '@byclaw/byclaw
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@byclaw/dsh-todo-execution'
 import { setupTodoExecution } from './todo-execution-setup.ts'
+import { installMemberTodoExecution } from './member-todo-execution.ts'
 import { SuperAssistantPolicy } from './super-assistant-policy.ts'
 import { type Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -594,6 +595,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   const sessionMetadata = await startup.measure('session-metadata', () => ByClawSessionMetadataStore.open(ctx))
   startupPhase('session-metadata-ready')
   const workspaceRegistry = new ByClawSessionWorkspaceRegistry()
+  installMemberTodoExecution(ctx)
   const generationLease = new ByClawGenerationLease()
   const lazySkills = createLazyByClawSkillLoader({
     loadResources: template => loadAuthorizedByClawResources({ redis, userCode, baseUrl,
