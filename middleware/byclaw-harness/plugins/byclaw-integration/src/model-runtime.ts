@@ -117,6 +117,8 @@ export interface ByClawModelFallback {
 
 /** Model-source options resolved once when the integration starts. */
 export interface ByClawModelRuntimeOptions extends ByClawModelFallback {
+  /** Trusted Gateway credential for one live session turn; never stored in model profiles. */
+  resolveRequestApiKey?: (sessionId: string) => string | undefined
   /** Whether runtime bindings may read and register Redis AI-model routes. */
   redisModelsEnabled?: boolean
   /** Safe final-wire request audit level; omission reads `DSH_LLM_LOG`. */
@@ -341,6 +343,7 @@ export function byClawWireThinking(api: Api, payload: unknown): Readonly<Record<
 type RequestAuditSink = (record: ByClawLlmRequestAuditRecord) => void
 
 const REQUEST_THINKING_MODE = new AsyncLocalStorage<'disabled'>()
+const REQUEST_API_KEY = new AsyncLocalStorage<string | undefined>()
 
 /** Keep both definitions intact while avoiding the Bailian false positive seen for their original order. */
 function orderBailianDevflowTools(payload: unknown): Record<string, unknown> | undefined {
@@ -405,16 +408,44 @@ async function* requestThinkingStream(
 }
 
 class ByClawPiAiAdapter extends PiAiAdapter {
+  constructor(
+    config: ConstructorParameters<typeof PiAiAdapter>[0],
+    private readonly resolveRequestApiKey?: (sessionId: string) => string | undefined,
+  ) {
+    super(config)
+  }
+
+  private async *withRequestApiKey(
+    options: GenerateOptions,
+    dispatch: () => AsyncIterable<StreamChunk>,
+  ): AsyncIterable<StreamChunk> {
+    const supplied = options.sessionId === undefined ? undefined : this.resolveRequestApiKey?.(String(options.sessionId))
+    const apiKey = supplied === undefined || supplied.trim() === '' ? undefined : supplied
+    // Freeze auth for the whole lazy stream, including prepared calls and provider retries.
+    // A shared profile or another conversation must never replace this turn's membership key.
+    // Enter an empty scope too, so a nested ordinary call cannot inherit its caller's credential.
+    const iterator = REQUEST_API_KEY.run(apiKey, () => requestThinkingStream(options, dispatch)[Symbol.asyncIterator]())
+    try {
+      while (true) {
+        const next = await REQUEST_API_KEY.run(apiKey, () => iterator.next())
+        if (next.done === true) return
+        yield next.value
+      }
+    } finally {
+      await REQUEST_API_KEY.run(apiKey, async () => { await iterator.return?.() })
+    }
+  }
+
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const prepared = await super.prepareCall(provider, model, signal)
     return {
       model: prepared.model,
-      stream: options => requestThinkingStream(options, () => prepared.stream(options)),
+      stream: options => this.withRequestApiKey(options, () => prepared.stream(options)),
     }
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return requestThinkingStream(options, () => super.stream(options))
+    return this.withRequestApiKey(options, () => super.stream(options))
   }
 }
 
@@ -941,7 +972,7 @@ export class ByClawDynamicModelRuntime {
     }
     this.adapter = new ByClawPiAiAdapter({
       profiles: () => this.profiles,
-      resolveApiKey: async (_provider, profile) => this.tokens.get(profile),
+      resolveApiKey: async (_provider, profile) => REQUEST_API_KEY.getStore() ?? this.tokens.get(profile),
       auth: {
         credentials: new InMemoryCredentialStore(),
         authContext: defaultProviderAuthContext(),
@@ -952,7 +983,7 @@ export class ByClawDynamicModelRuntime {
         hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
         ref,
       ),
-    })
+    }, options.resolveRequestApiKey)
   }
 
   /** Resolve one root/template/member binding from the configured model source. */

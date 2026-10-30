@@ -1756,10 +1756,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       this.pendingForeground.set(owner.responseSessionId, {
         turn, inputMessageId: String(input.id), inboundTurn,
       })
-      this.options.workspaceRegistry.registerPendingSessionTurn(owner.responseSessionId, String(input.id), inboundTurn)
+      this.options.workspaceRegistry.registerPendingSessionTurn(owner.responseSessionId, String(input.id), inboundTurn, command.extraPayload['api_key'])
     } else {
       this.foreground.set(owner.responseSessionId, turn)
-      this.options.workspaceRegistry.registerSessionTurn(owner.responseSessionId, inboundTurn)
+      this.options.workspaceRegistry.registerSessionTurn(owner.responseSessionId, inboundTurn, command.extraPayload['api_key'])
     }
     this.messageAgents.set(command.header.messageId, agent)
     teamModelOverrides?.set(owner.rootSessionId, selection)
@@ -1824,15 +1824,21 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   async resume(command: ResumeCommand, context?: AgentContext): Promise<boolean | ByClawDshAskResult> {
     this.assertAccepting()
+    const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId)
+      && turn.userCode === command.header.userCode)
+    const refreshApiKey = (agentSessionId?: string): void => {
+      if (owner !== undefined) this.options.workspaceRegistry.refreshRequestApiKey(
+        normalizeByClawSessionId(command.header.sessionId), command.extraPayload['api_key'], agentSessionId,
+      )
+    }
     const structured = parseDshInteractionResponse(command)
     const resumed = structured !== undefined
-      ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
-      : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command))
+      ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured, refreshApiKey)
+      : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command), refreshApiKey)
     this.ctx.logger.info(
       `[ASK_USER_QUESTION_RECOVERY_TRACE] RESUME_MATCH session=${command.header.sessionId} message=${command.header.messageId} interaction=${structured?.interactionId ?? interactionId(command) ?? '-'} mode=${resumed === false ? 'unmatched' : resumed}`,
     )
     if (resumed) {
-      const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
     }
     if (resumed === false) {
@@ -2158,7 +2164,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       },
       this.options.sessionMetadata.get(String(rootAgent.id))?.binding,
     )
-    this.options.workspaceRegistry.registerTurn(route.externalRootSessionId, inboundTurn)
+    this.options.workspaceRegistry.registerTurn(route.externalRootSessionId, inboundTurn, command.extraPayload['api_key'])
     const policy = groupPolicy(this.ctx)
     policy?.recordContext?.(String(rootAgent.id), command.extraPayload['groupContextSnapshot'])
     policy?.recordUserInput?.(String(rootAgent.id), command.header.messageId)

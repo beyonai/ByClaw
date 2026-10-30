@@ -14,6 +14,17 @@ import {
 
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
+  /** 仅供 BE 出站调用；用户身份取内部鉴权 actor，群成员关系由当前租户核验。 */
+  async groupMemberApiKey(actor: string, sessionId: string) {
+    await this.access(actor, sessionId, true);
+    return { api_key: await this.repository.groupMemberApiKey(sessionId, actor) };
+  }
+
+  private async publicMembers(sessionId: string) {
+    return (await this.repository.members(sessionId)).map(
+      ({ apiKey: _apiKey, api_key: _rawApiKey, ...member }) => member,
+    );
+  }
   /** BE can observe a dispatch after CHAT hides its execution session; task APIs stay task-only. */
   async dispatch(actor: string, sessionId: string) {
     requireId(sessionId);
@@ -157,7 +168,7 @@ export class GroupHistory extends HistoryAccess {
   }
   async management(actor: string, sessionId: string) {
     const session = await this.access(actor, sessionId, true, true);
-    return { session, members: await this.repository.members(sessionId) };
+    return { session, members: await this.publicMembers(sessionId) };
   }
   async detail(actor: string, sessionId: string) {
     const session = await this.access(actor, sessionId, true);
@@ -167,7 +178,7 @@ export class GroupHistory extends HistoryAccess {
     )?.extParamValue;
     return {
       session,
-      members: await this.repository.members(sessionId),
+      members: await this.publicMembers(sessionId),
       settings: await this.settings(actor, sessionId),
       ...(coordinatorAgentId ? { coordinatorAgentId } : {}),
     };

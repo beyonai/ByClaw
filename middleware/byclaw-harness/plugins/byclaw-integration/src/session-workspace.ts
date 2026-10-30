@@ -136,6 +136,8 @@ export class ByClawSessionWorkspaceRegistry {
   private readonly workspaces = new Map<string, ByClawSessionWorkspace>()
   private readonly turns = new Map<string, ByClawInboundTurnContext>()
   private readonly sessionTurns = new Map<string, ByClawInboundTurnContext>()
+  /** Credentials follow live turn identity without entering durable context or session metadata. */
+  private readonly apiKeys = new WeakMap<ByClawInboundTurnContext, string>()
   private readonly pendingSessionTurns = new Map<string, {
     inputMessageId: string
     context: ByClawInboundTurnContext
@@ -186,8 +188,28 @@ export class ByClawSessionWorkspaceRegistry {
     return this.workspaces.get(String(sessionId))
   }
 
-  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext): void {
+  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.turns.set(externalSessionId, context)
+  }
+
+  /** Resolve the current turn after workspace inheritance and foreground steering have been applied. */
+  requestApiKey(sessionId: string): string | undefined {
+    const turn = this.getTurn(sessionId)
+    return turn === undefined ? undefined : this.apiKeys.get(turn)
+  }
+
+  /** A hot interaction resume refreshes future calls; started streams retain their frozen credential. */
+  refreshRequestApiKey(externalSessionId: string, apiKey: unknown, agentSessionId?: string): void {
+    const turn = agentSessionId === undefined ? this.turns.get(externalSessionId) : this.getTurn(agentSessionId)
+    if (turn === undefined) return
+    // A newly missing/disabled membership key must not leave the old credential active.
+    this.apiKeys.delete(turn)
+    this.bindApiKey(turn, apiKey)
+  }
+
+  private bindApiKey(context: ByClawInboundTurnContext, value: unknown): void {
+    if (typeof value === 'string' && value.trim() !== '') this.apiKeys.set(context, value)
   }
 
   getTurn(sessionId: string): ByClawInboundTurnContext | undefined {
@@ -211,11 +233,13 @@ export class ByClawSessionWorkspaceRegistry {
   }
 
   /** An interactive captain exchange must not change its descendants' task context. */
-  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext): void {
+  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.sessionTurns.set(String(sessionId), context)
   }
 
-  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext): void {
+  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.pendingSessionTurns.set(String(sessionId), { inputMessageId, context })
   }
 

@@ -7898,6 +7898,50 @@
         },
         "description": "The original recall operator may restore message visibility within 120 seconds. Payload must include messageId and the recalledAt epoch milliseconds from the recall response. Cancelled tasks and executions remain cancelled."
       }
+    },
+    "/internal/v1/group-chats/{id}/member-api-key": {
+      "get": {
+        "summary": "BE 内部读取当前 actor 在原群的有效成员模型凭据；不用于公开群详情。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前租户 USER 成员的 state=00A 凭据；缺失或空白为 null。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["api_key"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "api_key": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

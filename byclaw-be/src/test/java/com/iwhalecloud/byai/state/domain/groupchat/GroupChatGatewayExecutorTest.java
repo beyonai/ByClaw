@@ -154,6 +154,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         Map<String, Object> params = new HashMap<>();
         params.put("groupChat", Map.of("conversationKey", "60"));
         String decorated = (String) executor.decorate(context, child.getMessageContent(), params);
+        assertThat(context.getGroupSessionId()).isEqualTo(10L);
         assertThat(decorated).contains("[群聊协议]", "group_request_assistance", "group-members.json", "[任务交付提醒]",
                 "/by/.sessions/60/.byclaw/task-delivery.json")
             .doesNotContain("HUMAN_30", "用户三十");
@@ -185,6 +186,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         context.traceId = ScriptService.getTraceId(81L, 82L);
         Map<String, Object> params = new HashMap<>();
         assertThat((String) executor.decorate(context, "继续任务", params)).startsWith("继续任务");
+        assertThat(context.getGroupSessionId()).isEqualTo(10L);
         Map<?, ?> reference = (Map<?, ?>) params.get("groupChat");
         assertThat(reference.get("beforeMessageId")).isEqualTo("20");
         assertThat(reference.get("contextToken")).isEqualTo("signed-context-token");

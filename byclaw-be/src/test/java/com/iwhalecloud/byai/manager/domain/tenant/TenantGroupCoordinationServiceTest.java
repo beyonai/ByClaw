@@ -242,7 +242,9 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
         AssistantChatDto request = request(43L);
         request.setExtParams(Map.of("tenantGroupCandidate", true));
 
-        String result = service.decorate(executionContext(request), "继续", new HashMap<>()).toString();
+        ChatProcessContext context = executionContext(request);
+        String result = service.decorate(context, "继续", new HashMap<>()).toString();
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
 
         assertThat(request.getExtParams()).doesNotContainKey("tenantGroupCandidate");
         assertThat(result).contains("task-delivery.json").doesNotContain("群聊判定协议");
@@ -285,6 +287,7 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
         ChatProcessContext context = executionContext(request);
         Map<String, Object> gateway = new HashMap<>();
         Object result = service.decorate(context, "协作制作视频", gateway);
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
         assertThat(result.toString()).contains("GROUP_TASK", "不要重新判断", "请先读取", "group-members.json");
         assertThat(request.getExtParams()).doesNotContainKeys("groupChat", "groupContextSnapshot");
         assertThat(((Map<?, ?>) gateway.get("groupChat")).get("beforeMessageId")).isEqualTo("8000000010000000201");
@@ -359,7 +362,9 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
             .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupDispatch", candidate(42)));
 
-        String result = service.decorate(executionContext(request(42L)), "hello", new HashMap<>()).toString();
+        ChatProcessContext context = executionContext(request(42L));
+        String result = service.decorate(context, "hello", new HashMap<>()).toString();
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
 
         assertThat(result).contains("group-members.json", "[群聊协议]", "group_request_assistance")
             .doesNotContain("群内昵称", "文案员工", "检索员工", "未选员工", "HUMAN_20");

@@ -82,6 +82,8 @@ This controls runtime catalogs and standard loading, not filesystem access. Alre
 
 ## Dynamic models
 
+API-key lookup prefers a nonblank incoming Gateway `extraPayload.api_key` over the Redis model `authToken` for that live conversation turn. Roots and their template/team descendants resolve it through the workspace lineage. Model/base-URL resolution, configured headers and provider request serialization retain their existing behavior; supplied credentials do not rewrite or filter headers. Credentials are frozen separately for each stream and kept in a process-local weak map, outside model profiles, message context and persisted session metadata. A foreground follow-up does not change a still-running descendant's original turn credential. Once its turn context is cleared, later requests return to their own authentication. Missing, blank or non-string keys leave the existing model configuration unchanged. Run `pnpm run verify:gateway-api-key` to verify final HTTP authentication headers and concurrent-session isolation without external model calls.
+
 `BYCLAW_REDIS_MODEL_ENABLED` selects the runtime model source for every agent received or instantiated through this plugin. The variable is enabled by default; unset, empty, `true`, `1`, `on`, and `yes` enable Redis model resolution. When enabled:
 
 - Main agent: reads the current unique default LLM from Redis for every ByClaw inbound message.

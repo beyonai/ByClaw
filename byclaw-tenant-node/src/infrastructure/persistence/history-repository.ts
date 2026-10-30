@@ -81,6 +81,14 @@ export class SqlHistoryRepository implements HistoryRepository {
       )[0] ?? null
     );
   }
+  /** 凭据查询独立于公开成员投影，同时限制当前租户和有效真人成员。 */
+  async groupMemberApiKey(sessionId: string, userId: string): Promise<string | null> {
+    const [row] = await this.db.query(
+      "SELECT api_key FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 AND state='00A'",
+      [sessionId, userId, this.tenantId],
+    );
+    return typeof row?.api_key === "string" && row.api_key.trim() !== "" ? row.api_key : null;
+  }
   members(sessionId: string) {
     return this.read(
       "SELECT * FROM byai.byai_session_member WHERE session_id=$1 AND com_acct_id=$2 ORDER BY CASE WHEN mem_obj_type='AGENT' THEN 3 ELSE CASE user_role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END END, byai_session_member_id",

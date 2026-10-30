@@ -2,6 +2,16 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper">
 
+    <!-- 子会话使用归属群 ID；凭据只按已认证用户和有效状态读取。 -->
+    <select id="findActiveUserApiKey" resultType="java.lang.String">
+        SELECT api_key
+        FROM byai.byai_session_member
+        WHERE session_id = #{groupSessionId}
+          AND mem_obj_type = 'USER'
+          AND mem_obj_id = #{userId}
+          AND state = '00A'
+    </select>
+
     <!-- 通用查询映射结果 -->
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember">
         <id column="byai_session_member_id" property="byaiSessionMemberId" />

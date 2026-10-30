@@ -137,6 +137,10 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
 
         routeService = new RouteService();
+        ReflectionTestUtils.setField(routeService, "groupCredentials",
+            new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(
+                mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class),
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);
         ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
@@ -162,6 +166,72 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         project.setProjectName("test-project");
         when(projectService.findById(123L)).thenReturn(project);
         when(userBucketNamingService.buildUserBucketName("u1")).thenReturn("byclaw-u1");
+    }
+
+    @Test
+    void sendsTheActiveOriginalGroupMemberCredentialAfterTrustedDecoration() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getParams().put("api_key", "untrusted-input");
+        var members = mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class);
+        when(members.findActiveUserApiKey(30L, 100L)).thenReturn("group-member-key");
+        ReflectionTestUtils.setField(routeService, "groupCredentials",
+            new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(members,
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
+        ChatGatewayRequestDecorator decorator = (context, content, params) -> {
+            context.setGroupSessionId(30L);
+            return content;
+        };
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ChatGatewayRequestDecorator> decorators = mock(ObjectProvider.class);
+        when(decorators.orderedStream()).thenAnswer(call -> Stream.of(decorator));
+        ReflectionTestUtils.setField(routeService, "requestDecorators", decorators);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(call -> { ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx)); return successResponse(); });
+
+        routeService.route(ctx);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> metadata = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(),
+            anyString(), anyString(), anyString(), payload.capture(), metadata.capture());
+        assertThat(payload.getValue()).containsEntry("api_key", "group-member-key");
+        assertThat(metadata.getValue()).doesNotContainKey("api_key");
+        assertThat(ctx.getParams()).containsEntry("api_key", "untrusted-input");
+    }
+
+    @Test
+    void descendantContinuationUsesItsValidatedInheritedGroupWithoutAnExecutionDecorator() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setSessionId(3L);
+        var coordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(coordination);
+        ReflectionTestUtils.setField(routeService, "groupCoordinationProvider", provider);
+        doAnswer(call -> {
+            AssistantChatDto dto = call.getArgument(0);
+            dto.setExtParams(Map.of("groupCoordination", Map.of("groupSessionId", "30", "taskSessionId", "50", "mode", "DIRECT")));
+            return null;
+        }).when(coordination).validateRequest(ctx.assistantChatDto);
+        var members = mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class);
+        when(members.findActiveUserApiKey(30L, 100L)).thenReturn("inherited-group-key");
+        ReflectionTestUtils.setField(routeService, "groupCredentials",
+            new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(members,
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(),
+            anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(call -> { ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx)); return successResponse(); });
+
+        routeService.route(ctx);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(),
+            anyString(), anyString(), anyString(), payload.capture(), any());
+        assertThat(payload.getValue()).containsEntry("api_key", "inherited-group-key");
     }
 
     @Test

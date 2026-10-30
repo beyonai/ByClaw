@@ -91,8 +91,10 @@ public class ByaiSessionMember {
     private Long comAcctId;
 
     /**
-     * api密钥
+     * 成员模型调用凭据，仅供服务端出站认证，不进入公开成员 JSON。
      */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @com.alibaba.fastjson.annotation.JSONField(serialize = false)
     private String apiKey;
 
     /**

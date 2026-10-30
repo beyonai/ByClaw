@@ -18,6 +18,7 @@ function setup() {
       sessionType: "hs_as",
     })),
     member: vi.fn(async () => ({ memObjId: "20", userRole: "MEMBER" })),
+    groupMemberApiKey: vi.fn(async () => null),
     members: vi.fn(async () => []),
     acknowledgements: vi.fn(async () => []),
     extensions: vi.fn(async () => []),
@@ -43,6 +44,32 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("reads only the authorized actor's group credential through the private endpoint use case", async () => {
+    const { repo, service } = setup();
+    const credential = vi.fn(async () => "tenant-member-key");
+    Object.assign(repo, { groupMemberApiKey: credential });
+    expect(await service.groupMemberApiKey("20", "30")).toEqual({ api_key: "tenant-member-key" });
+    expect(credential).toHaveBeenCalledExactlyOnceWith("30", "20");
+    vi.mocked(repo.member).mockResolvedValue(null);
+    await expect(service.groupMemberApiKey("21", "30")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+    expect(credential).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not include member credentials in public group detail or management responses", async () => {
+    const { repo, service } = setup();
+    vi.mocked(repo.members).mockResolvedValue([
+      {
+        memObjType: "USER",
+        memObjId: "20",
+        userRole: "OWNER",
+        apiKey: "private-key",
+        api_key: "private-key",
+      },
+    ]);
+    expect(JSON.stringify(await service.detail("20", "30"))).not.toContain("private-key");
+    expect(JSON.stringify(await service.management("20", "30"))).not.toContain("private-key");
+  });
+
   it("reads current target-group nicknames for old forwards without changing source snapshots", async () => {
     const { service, repo } = setup();
     const sender = "9007199254740993";

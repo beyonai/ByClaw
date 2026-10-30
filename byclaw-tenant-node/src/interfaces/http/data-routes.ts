@@ -80,6 +80,10 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
       ),
   );
   app.get("/internal/v1/group-chats/:id", async (req) => service.detail(actor(req), session(req)));
+  // 独立内部接口，避免将成员模型凭据混入对外群详情和成员列表。
+  app.get("/internal/v1/group-chats/:id/member-api-key", async (req) =>
+    service.groupMemberApiKey(actor(req), session(req)),
+  );
   app.get("/internal/v1/group-chats/:id/management", async (req) =>
     service.management(actor(req), session(req)),
   );

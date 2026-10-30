@@ -792,6 +792,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       model: config.model,
       redisModelsEnabled,
       llmRequestLogLevel: config.llmRequestLogLevel,
+      resolveRequestApiKey: sessionId => workspaceRegistry.requestApiKey(sessionId),
     })
     installBrowserText(ctx)
     if (modelRouting.enabled) {
