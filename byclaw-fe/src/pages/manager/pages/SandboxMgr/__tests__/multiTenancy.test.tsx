@@ -199,3 +199,40 @@ test.each(['FAILED', 'RELEASING'])('allows retrying release for a %s user record
   );
   expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
 });
+
+test('filters actual provider state independently of the persisted lifecycle', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'sandboxMgr.filter.providerStatus' }));
+  fireEvent.click(screen.getByText('sandboxMgr.status.running', { selector: '.ant-select-item-option-content' }));
+  expect(mockDispatch).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: 'sandboxMgr/listSandboxRecords',
+      payload: expect.objectContaining({ status: '', providerStatus: 'RUNNING', pageIndex: 1 }),
+    })
+  );
+});
+
+test('shows both states and permits releasing a remote instance whose record is released', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 13688,
+          ownerScope: 'USER',
+          userCode: 'user001',
+          sandboxType: 'byclaw-dsh',
+          sandboxId: 'test-instance',
+          status: 'RELEASED',
+          providerStatus: 'RUNNING',
+        },
+      ],
+    })
+  );
+  expect(screen.getByText('sandboxMgr.status.released')).toBeInTheDocument();
+  expect(screen.getByText('sandboxMgr.status.running')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
+});

@@ -1,5 +1,11 @@
 # ByClaw-BE
 
+### 个人网盘容量业务门控
+
+`BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED=false`（属性 `byclaw.storage.personal-admission.enabled`）默认关闭聊天容量预查、账号存储预热与容量错误重查；认证后的 readiness 返回 `enabled=false, ready=true, state=DISABLED`。不修改用户空间绑定、身份、云端配额或容量账本；普通文件请求继续走原存储接口，权限拒绝、文件不存在与实际 IO 错误仍失败。
+
+BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启动时读取。恢复业务门控须同时显式开启部署开关与原数据库 SaaS 开关，并重新构建前端。
+
 > BeyondAI 后端服务 - 企业级 AI 应用平台
 
 [![CI](https://github.com/byclaw/byclaw-be/actions/workflows/ci.yml/badge.svg)](https://github.com/byclaw/byclaw-be/actions)
@@ -1026,3 +1032,8 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 ### 技能运行状态
 
 手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。
+
+
+### 沙箱运行记录与释放
+
+记录生命周期 `status` 与执行引擎观察 `providerStatus` 独立返回及筛选；未观测到实例为 `UNKNOWN`，不据此认定远端已删除。已释放记录仍有远端实例时，可通过按记录 ID 的正式释放接口精确回收，保留后继实例和用户文件。登录自动启动排除带 `runtimeOptions.fileService` 的内部文件计算规格；原生 AgenticFS 共享存储不重复走旧 NAS 绑定。

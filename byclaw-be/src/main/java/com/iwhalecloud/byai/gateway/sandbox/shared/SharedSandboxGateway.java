@@ -65,7 +65,8 @@ public class SharedSandboxGateway {
 
     private void requireUserStorage(Map<String, Object> identity) {
         Object result = call("prepareUserStorage", identity);
-        if (!(result instanceof Map<?, ?> status) || !Boolean.TRUE.equals(status.get("enabled"))) {
+        if (!(result instanceof Map<?, ?> status)
+            || (!Boolean.TRUE.equals(status.get("enabled")) && !nativeAgenticFsReady(status))) {
             throw storageFailure("SHARED_USER_NAS_POLICY_NOT_APPLIED");
         }
         if (!Boolean.TRUE.equals(status.get("ready"))) {
@@ -78,7 +79,7 @@ public class SharedSandboxGateway {
         if (!policy.userNasEnabled(user, DSH_SERVICE)) return Map.of("enabled", false, "ready", true, "state", "LOGICAL");
         Object result = call("userStorageStatus", identity(user, DSH_SERVICE));
         if (!(result instanceof Map<?, ?> status)) throw storageFailure("SHARED_USER_NAS_INVALID_RESPONSE");
-        if (!Boolean.TRUE.equals(status.get("enabled"))) {
+        if (!Boolean.TRUE.equals(status.get("enabled")) && !nativeAgenticFsReady(status)) {
             return Map.of("enabled", true, "ready", false, "state", "FAILED");
         }
         Map<String, Object> safe = new LinkedHashMap<>();
@@ -86,6 +87,12 @@ public class SharedSandboxGateway {
             if (status.containsKey(key)) safe.put(key, status.get(key));
         }
         return safe;
+    }
+
+    private boolean nativeAgenticFsReady(Map<?, ?> status) {
+        // This trusted Platform marker selects native per-owner mounts, not legacy NAS bindings.
+        // Platform still verifies the owner's Access Point before registering the shared context.
+        return "AGENTICFS".equals(status.get("state")) && Boolean.TRUE.equals(status.get("ready"));
     }
 
     public String currentWorkerTarget(String user) {

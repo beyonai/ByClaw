@@ -67,6 +67,16 @@ import styles from './index.module.less';
 
 const { Option } = Select;
 const RELEASABLE_STATUSES = ['STARTING', 'RUNNING', 'FAILED', 'RELEASING'];
+const STATUS_LABELS: Record<string, string> = {
+  STARTING: 'starting',
+  RUNNING: 'running',
+  RELEASING: 'releasing',
+  RELEASED: 'released',
+  FAILED: 'failed',
+  STOPPED: 'stopped',
+  MISSING: 'missing',
+  UNKNOWN: 'unknown',
+};
 const DEFAULT_SERVICE_TYPE = 'openclaw';
 const PROFILE_ORDER: Record<string, number> = { xs: 1, s: 2, m: 3, l: 4 };
 const RESIZE_STRATEGIES = ['IN_PLACE', 'PREFERRED_ONLY', 'HOT_SWITCH'];
@@ -153,7 +163,7 @@ interface SsSandboxRecord {
   sandboxId?: string;
   chatId: string;
   status: string;
-  providerStatus?: 'RUNNING' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
+  providerStatus?: 'STARTING' | 'RUNNING' | 'RELEASING' | 'RELEASED' | 'FAILED' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
   autoRelease: number;
   leasePolicy?: string;
   timeoutSeconds?: number;
@@ -287,7 +297,8 @@ const SandboxMgr = () => {
   tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('RUNNING');
+  const [status, setStatus] = useState('');
+  const [providerStatus, setProviderStatus] = useState('');
   const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
   const ownerScope = canViewTenantResources ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
@@ -355,6 +366,7 @@ const SandboxMgr = () => {
     pageSize?: number;
     keyword?: string;
     status?: string;
+    providerStatus?: string;
     ownerScope?: 'USER' | 'TENANT';
     enterpriseId?: string;
   }>({});
@@ -524,13 +536,15 @@ const SandboxMgr = () => {
       st?: string,
       silent?: boolean,
       scope = ownerScope,
-      tenantId = enterpriseId
+      tenantId = enterpriseId,
+      liveStatus = providerStatus
     ) => {
       const p = {
         pageIndex: myPageInfo.pageIndex,
         pageSize: myPageInfo.pageSize,
         keyword: kw,
         status: st,
+        providerStatus: liveStatus || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
         enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
@@ -562,7 +576,7 @@ const SandboxMgr = () => {
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId, canViewTenantResources]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus]
   );
 
   useEffect(() => {
@@ -702,7 +716,10 @@ const SandboxMgr = () => {
   );
 
   const canReleaseSandbox = useCallback(
-    (record: SsSandboxRecord) => record.ownerScope !== 'TENANT' && RELEASABLE_STATUSES.includes(record.status),
+    (record: SsSandboxRecord) =>
+      record.ownerScope !== 'TENANT' &&
+      (RELEASABLE_STATUSES.includes(record.status) ||
+        Boolean(record.sandboxId && ['STARTING', 'RUNNING', 'RELEASING'].includes(record.providerStatus || ''))),
     []
   );
 
@@ -1480,19 +1497,11 @@ const SandboxMgr = () => {
       ),
     },
     {
-      title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lifecycleStatus' }),
       dataIndex: 'status',
       align: 'center' as const,
       width: 110,
-      render: (value: string, record: SsSandboxRecord) => {
-        if (record.ownerScope === 'TENANT' && value === 'RUNNING') {
-          if (record.providerStatus === 'MISSING' || record.providerStatus === 'STOPPED') {
-            return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerAbnormal' })}</Tag>;
-          }
-          if (record.providerStatus !== 'RUNNING') {
-            return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerUnknown' })}</Tag>;
-          }
-        }
+      render: (value: string) => {
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
@@ -1509,6 +1518,20 @@ const SandboxMgr = () => {
           return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Tag>;
         }
         return <Tag>{value}</Tag>;
+      },
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.providerStatus' }),
+      dataIndex: 'providerStatus',
+      align: 'center' as const,
+      width: 110,
+      render: (value?: string) => {
+        const observed = value || 'UNKNOWN';
+        return (
+          <Tag color={observed === 'RUNNING' ? 'green' : observed === 'FAILED' ? 'red' : 'default'}>
+            {intl.formatMessage({ id: `sandboxMgr.status.${STATUS_LABELS[observed] || 'unknown'}` })}
+          </Tag>
+        );
       },
     },
     {
@@ -2032,6 +2055,7 @@ const SandboxMgr = () => {
     'sandboxId',
     'endpoint',
     'status',
+    'providerStatus',
     'createTime',
     'releaseTime',
     'releaseReason',
@@ -2103,8 +2127,13 @@ const SandboxMgr = () => {
               style={{ width: 300 }}
               allowClear
             />
-            <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
-              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.lifecycleStatus' })}
+              value={status}
+              onChange={handleStatusChange}
+              style={{ width: 150 }}
+            >
+              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.filter.allLifecycle' })}</Option>
               <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
               <Option value="RUNNING">
                 {ownerScope === 'TENANT'
@@ -2114,6 +2143,22 @@ const SandboxMgr = () => {
               <Option value="RELEASING">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Option>
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
               <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
+            </Select>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.providerStatus' })}
+              value={providerStatus}
+              style={{ width: 160 }}
+              onChange={(value: string) => {
+                setProviderStatus(value);
+                loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, ownerScope, enterpriseId, value);
+              }}
+            >
+              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.filter.allProvider' })}</Option>
+              {['STARTING', 'RUNNING', 'RELEASING', 'RELEASED', 'FAILED', 'UNKNOWN'].map((value) => (
+                <Option key={value} value={value}>
+                  {intl.formatMessage({ id: `sandboxMgr.status.${STATUS_LABELS[value]}` })}
+                </Option>
+              ))}
             </Select>
             {ownerScope === 'TENANT' && (
               <Select

@@ -64,6 +64,24 @@ class SandboxLoginAutoStartServiceTest {
     }
 
     @Test
+    void trigger_skipsManagedFileComputeSpecsWithoutDependingOnServiceName() {
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        SandboxService sandboxService = mock(SandboxService.class);
+        SandboxServiceSpecEntity files = spec("custom-file-compute");
+        files.setSpecJson("{\"runtimeOptions\":{\"fileService\":{\"mountDir\":\"/mnt/files\"}}}");
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(files, spec("byclaw-dsh")));
+        SandboxLoginAutoStartService service = new SandboxLoginAutoStartService(mapper, sandboxService, Runnable::run);
+        try {
+            service.trigger("user001");
+            verify(sandboxService, never()).launchSandboxWithServiceKey("user001", "custom-file-compute");
+            verify(sandboxService).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        }
+        finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void trigger_coalescesConcurrentRequestsForSameUser() {
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);

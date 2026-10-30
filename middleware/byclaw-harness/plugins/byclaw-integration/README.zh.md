@@ -140,7 +140,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 - 子 Agent 创建、运行、等待、完成或失败 -> `reasoningLogDelta/3009` 的状态化节点；子 Agent 的思考、正文和工具事件都挂在该节点下
 - DSH 会话 ID、父会话 ID、委派深度、原始事件类型和序号只进入诊断 metadata，不再占用工具卡展示内容
 - Ask 请求成功后，将选中的最终回复正文放入 `AgentTaskResult.content`，由 by-framework 在完成信号之前发送一条 `finalAnswer/1002`。答案仅取负责回复的 Agent 在正常结束轮次的最后一个 Step 中已结算、未中断且不含工具调用块的 Assistant 文本。
-- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；报错与取消沿用既有处理，Resume 不另发最终答案。
+- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；Resume 不另发最终答案。模型、语音和会话执行失败在关闭流之前发送带 `_ERROR_` 状态的可见错误；工具环境或文件系统初始化失败使用 `RUNTIME/TURN_EXECUTION_FAILED`，原始异常仅记录在服务端。取消操作不发送运行失败提示。
 
 入站会话 ID 支持非空字符串或正的安全整数，在路由、交互匹配和输出时统一为字符串，会话路由覆盖字段同样处理。超出 JavaScript 安全整数范围的数字 ID 会被拒绝，上游必须将这些 ID 作为字符串发送。
 

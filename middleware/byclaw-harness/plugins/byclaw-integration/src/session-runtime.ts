@@ -451,12 +451,25 @@ export interface ByClawVoiceError {
 }
 
 export interface ByClawTurnFailurePresentation {
-  code: ByClawModelError['code'] | ByClawVoiceError['code']
+  code: ByClawModelError['code'] | ByClawVoiceError['code'] | 'TURN_EXECUTION_FAILED'
   message: string
 }
 
-/** Preserve the structured MODEL fallback; voice input failures have separate safe guidance. */
-export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError): ByClawTurnFailurePresentation {
+export interface ByClawRuntimeError {
+  schemaVersion: 1
+  domain: 'RUNTIME'
+  code: 'TURN_EXECUTION_FAILED'
+  retryable: boolean
+  httpStatus?: never
+  providerCode?: never
+  providerMessage?: never
+}
+
+/** Keep operational details server-side while giving each failure domain safe guidance. */
+export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError): ByClawTurnFailurePresentation {
+  if (error.domain === 'RUNTIME') {
+    return { code: error.code, message: '会话运行失败，请稍后重试或联系管理员。' }
+  }
   if (error.domain === 'VOICE') {
     return { code: error.code, message: error.code === 'ASR_SPEECH_NOT_DETECTED'
       ? ASR_NO_SPEECH_MESSAGE : '语音转文字失败，请检查 ASR 模型配置或重新录制后重试。' }
@@ -479,7 +492,7 @@ export async function emitByClawTurnFailure(params: {
   rootSessionId: string
   messageId: string
   sourceAgentType: string
-  error: ByClawModelError | ByClawVoiceError
+  error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError
 }): Promise<ByClawTurnFailurePresentation> {
   const failure = byClawTurnFailurePresentation(params.error)
   await params.emitter.emitChunk(params.sessionId, params.traceId, {
@@ -1602,7 +1615,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       return await this.queueAsk(command, context, key)
     } catch (error: unknown) {
       endPreflight?.('failed', { errorCode: 'PREFLIGHT_FAILED', errorType: error instanceof Error ? error.name : 'UnknownError' })
-      if (error instanceof ByClawModelRequestError && !context.isCancelRequested()) {
+      if (!context.isCancelRequested() && !(error instanceof TaskCancelledError)
+        && !(error instanceof Error && error.name === 'TaskCancelledError')) {
         try {
           await emitByClawTurnFailure({
             emitter: this.emitterFor(),
@@ -1611,7 +1625,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             rootSessionId: route.externalRootSessionId,
             messageId: command.header.messageId,
             sourceAgentType: this.options.sourceAgentType,
-            error: error.modelError,
+            error: error instanceof ByClawModelRequestError ? error.modelError : {
+              schemaVersion: 1, domain: 'RUNTIME', code: 'TURN_EXECUTION_FAILED', retryable: true,
+            },
           })
         } catch (emitError: unknown) {
           this.ctx.logger.warn(

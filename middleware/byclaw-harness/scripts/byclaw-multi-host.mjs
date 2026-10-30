@@ -288,6 +288,27 @@ export const DISABLED_UNTIL_MULTI_USER = [
   { package: '@deepseek-ai/dsh-client-ui-sidebar-terminal', reason: 'host PTY instead of the tool environment' },
 ]
 
+// Explicit chat-only hosts never activate execution UIs or remote tool providers.
+const CHAT_ONLY_DISABLED = [
+  ...['byclaw-browser-use', 'better-sidebar', 'agent-teams', 'iron-rules', 'dsh-codegraph']
+    .map(id => ({ id })),
+  ...Object.keys(USER_ROW_OVERLAYS).filter(id => id.startsWith('devflow')).map(id => ({ id })),
+  ...['byclaw-tool-env', 'byclaw-tool-env-fs', 'byclaw-tool-env-subprocess', 'byclaw-tool-env-sandbox', 'byclaw-tool-env-ptc']
+    .map(id => ({ id })),
+]
+
+/** Keep even scoped/later tools unavailable on a shared chat-only host. */
+export function installChatOnlyPolicy(ctx) {
+  const tools = ctx.get('tools')
+  if (!tools) throw new Error('Chat-only host requires the tools policy service')
+  const release = [tools.guard(() => 'BYCLAW_CHAT_ONLY: tool execution is disabled on this shared host')]
+  release.push(ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+    const prompt = await next()
+    return { ...prompt, tools: [] }
+  }, { prepend: true }))
+  ctx.effect(() => () => { for (const dispose of release.reverse()) dispose() })
+}
+
 /**
  * The disable rule a composed row matches, if any.
  * @param row - composed Loader row ({ id, name }).
@@ -315,14 +336,23 @@ export function disabledRule(row, lists = [DISABLED_BY_DESIGN, DISABLED_UNTIL_MU
  */
 export function composeUserOverlays(entries, user, home, spec, tables = {}) {
   if (spec.managed) user = spec.userCode
+  const chatOnly = spec.toolEnvBackend === 'none'
   const rowOverlays = tables.rowOverlays ?? USER_ROW_OVERLAYS
   const webRows = tables.webRows ?? WEB_LISTENER_ROWS
-  const disabledLists = tables.disabled ?? [DISABLED_BY_DESIGN, DISABLED_UNTIL_MULTI_USER]
+  const disabledLists = [...(tables.disabled ?? [DISABLED_BY_DESIGN, DISABLED_UNTIL_MULTI_USER]), ...(chatOnly ? [CHAT_ONLY_DISABLED] : [])]
   const rows = new Map(entries.filter(row => row.id !== undefined).map(row => [row.id, row]))
   const overlays = []
   for (const [id, additions] of Object.entries(rowOverlays)) {
     const row = rows.get(id)
-    if (row !== undefined) overlays.push({ id, config: { ...(row.config ?? {}), ...additions(user, home, spec) } })
+    if (row === undefined || (chatOnly && disabledRule(row, [CHAT_ONLY_DISABLED]))) continue
+    const config = { ...(row.config ?? {}), ...additions(user, home, spec) }
+    if (chatOnly && id === 'byclaw-dsh') {
+      config.workspaceOnToolEnvironment = false
+      config.byRoot = join(home, 'chat-only-workspace')
+      config.userFsRoot = config.byRoot
+      config.workspace = config.byRoot
+    }
+    overlays.push({ id, config })
   }
   for (const [id, config] of Object.entries(webRows)) {
     if (rows.has(id)) overlays.push({ id, inject: [], config: config(user, home, spec) })
@@ -416,9 +446,9 @@ export function readHostConfig(env) {
     if (!publicBase.pathname.endsWith('/')) publicBase.pathname += '/'
   }
   const toolEnvBackend = env.BYCLAW_DSH_TOOL_ENV || 'opensandbox'
-  if (toolEnvBackend !== 'opensandbox' && toolEnvBackend !== 'byclaw-be') throw new Error(`BYCLAW_DSH_TOOL_ENV ${toolEnvBackend} is not opensandbox or byclaw-be`)
+  if (!['none', 'opensandbox', 'byclaw-be'].includes(toolEnvBackend)) throw new Error(`BYCLAW_DSH_TOOL_ENV ${toolEnvBackend} is not none, opensandbox or byclaw-be`)
   const toolEnvTemplate = env.BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE ?? '{}'
-  JSON.parse(toolEnvTemplate.replaceAll('{user}', 'probe'))
+  if (toolEnvBackend !== 'none') JSON.parse(toolEnvTemplate.replaceAll('{user}', 'probe'))
   const toolEnvBe = toolEnvBackend === 'byclaw-be' ? readToolEnvBeConfig(env) : undefined
   return {
     token,
@@ -1247,6 +1277,7 @@ export function userContextPaths(config, user, request = {}) {
   const home = binding?.home ?? join(config.userRoot ? join(config.userRoot, user) : userDir, 'dsh-home')
   return {
     home,
+    workspace: config.toolEnvBackend === 'none' ? join(home, 'chat-only-workspace') : '/by',
     profile: join(userDir, 'profile'),
     runtimeDir: config.userRoot
       ? join('/tmp/byclaw-multi-host', createHash('sha256').update(`${config.hostId ?? ''}\n${config.root}\n${user}`).digest('hex').slice(0, 24), 'browser')
@@ -1335,9 +1366,10 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     boot, composeEntries, createRuntimeResolution, loadProfileDirectory, PluginPackages, readProfilePatches,
   } = appBoot
   const { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } = launchEnvironment
-  const { home, profile: dir, runtimeDir } = userContextPaths(config, user, request)
+  const { home, workspace, profile: dir, runtimeDir } = userContextPaths(config, user, request)
   await verifyUserStorageHome(config, user, request)
   await mkdir(home, { recursive: true, mode: 0o700 })
+  if (config.toolEnvBackend === 'none') await mkdir(workspace, { recursive: true, mode: 0o700 })
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await writeFile(join(dir, 'package.json'), await readFile(join(config.managedProfile, 'package.json'), 'utf8'))
   await ensureLink(join(config.managedProfile, 'node_modules'), join(dir, 'node_modules'))
@@ -1351,7 +1383,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   const base = {
     name: 'web', dir, patchPath: profile.patchPath ?? join(dir, 'cordis.patch.yml'), installAnchor: config.installAnchor,
     startedBundles: profile.layers.map(layer => layer.packageName),
-    cwd: '/by', home, overlays: [], telemetryDisabledEnv: '1',
+    cwd: workspace, home, overlays: [], telemetryDisabledEnv: '1',
   }
   const spec = {
     ...request,
@@ -1383,6 +1415,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
     await hostCtx.plugin(PluginPackages, { resolution })
   })
+  if (config.toolEnvBackend === 'none') installChatOnlyPolicy(ctx)
   phase('plugins-ready')
   const handle = {
     get port() { return ctx.get('webServer')?.port },

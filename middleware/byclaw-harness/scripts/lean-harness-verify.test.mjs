@@ -48,6 +48,13 @@ try {
     await writeFile(capture, '')
     assert.equal(spawnSync('bash', [entry, 'multi-host'], { env }).status, 0)
     assert.equal(await readFile(capture, 'utf8'), '0 0 1 multi-host\n')
+    await writeFile(capture, '')
+    env.BYCLAW_DSH_TOOL_ENV = 'none'
+    assert.equal(spawnSync('bash', [entry, 'web', '--port', '4080'], { env }).status, 0)
+    assert.equal(await readFile(capture, 'utf8'), '1 0 1 web --port 4080\n0 1 1 web --port 4080\n')
+    assert.equal(spawnSync('bash', [entry, 'tools'], { env }).status, 2)
+    env.BYCLAW_DSH_TOOL_ENV = 'invalid'
+    assert.equal(spawnSync('bash', [entry, 'web'], { env }).status, 2)
   }
   for (const name of ['lean-harness-entrypoint.sh', 'tool-slim-entrypoint.sh']) {
     assert.equal(spawnSync('bash', ['-n', join(moduleRoot, 'scripts', name)]).status, 0)

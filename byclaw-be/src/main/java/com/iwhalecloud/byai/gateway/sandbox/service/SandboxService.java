@@ -1536,6 +1536,11 @@ public class SandboxService {
      * @param status 沙箱状态
      * @return 记录ID，未命中时返回 null
      */
+    public Long findRecordIdBySandboxId(String sandboxId) {
+        SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxIdAnyUser(sandboxId);
+        return record == null ? null : record.getId();
+    }
+
     public Long findRecordIdBySandboxIdAndStatus(String sandboxId, String status) {
         SsSandboxRecord record = sandboxRecordMapper.selectBySandboxIdAndStatus(sandboxId, status);
         return record == null ? null : record.getId();

@@ -68,6 +68,53 @@ const beSpec = {
   toolEnvBe: { baseUrl: 'http://be:8086/byaiService', systemCode: '', serviceKey: 'byclaw-dsh-tools5', sshInstance: 'ssh', hostTemplate: '', publishKeys: true, readyTimeoutMs: 180000, requestTimeoutMs: 180000 },
 }
 
+test('explicit none mode needs no tool backend and preserves the default otherwise', () => {
+  const config = readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_DSH_TOOL_ENV: 'none', BYCLAW_TOOL_ENV_OPENSANDBOX_TEMPLATE: 'unused' })
+  assert.equal(config.toolEnvBackend, 'none')
+  assert.equal(config.toolEnvBe, undefined)
+  assert.equal(readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't' }).toolEnvBackend, 'opensandbox')
+})
+
+test('shared chat-only mode disables remote tools and isolates the instruction workspace', () => {
+  const entries = ['byclaw-tool-env', 'byclaw-tool-env-fs', 'byclaw-tool-env-subprocess', 'byclaw-tool-env-sandbox',
+    'byclaw-tool-env-ptc', 'byclaw-browser-use', 'better-sidebar', 'agent-teams', 'devflow', 'dsh-codegraph',
+    'byclaw-dsh', 'storage-json'].map(id => ({ id, name: `fixture-${id}`, config: {} }))
+  const mode = { ...spec, toolEnvBackend: 'none', toolEnvTemplate: 'not-a-backend', env: {} }
+  for (const user of ['alice', 'bob']) {
+    const home = `/private/${user}/dsh-home`
+    const rows = Object.fromEntries(composeUserOverlays(entries, user, home, mode).map(row => [row.id, row]))
+    for (const id of entries.map(row => row.id).filter(id => !['byclaw-dsh', 'storage-json'].includes(id))) {
+      assert.equal(rows[id].disabled, true, id)
+    }
+    assert.equal(rows['byclaw-dsh'].config.workspaceOnToolEnvironment, false)
+    assert.equal(rows['byclaw-dsh'].config.byRoot, `${home}/chat-only-workspace`)
+    assert.equal(rows['byclaw-dsh'].config.userFsRoot, `${home}/chat-only-workspace`)
+    assert.equal(rows['byclaw-dsh'].config.workspace, `${home}/chat-only-workspace`)
+    assert.equal(rows['byclaw-dsh'].config.userCode, user)
+    assert.equal(rows['storage-json'].config.root, `${home}/storages`)
+  }
+  const paths = host.userContextPaths({ root: '/host', toolEnvBackend: 'none' }, 'alice')
+  assert.equal(paths.workspace, `${paths.home}/chat-only-workspace`)
+})
+
+test('chat-only tool policy rejects execution and removes all assembled model tools', async () => {
+  let guard, assemble, dispose
+  const released = []
+  host.installChatOnlyPolicy({
+    get: name => name === 'tools' ? { guard: check => { guard = check; return () => released.push('guard') } } : undefined,
+    on: (name, callback) => { assert.equal(name, 'system-prompt/assemble'); assemble = callback; return () => released.push('assembly') },
+    effect: callback => { dispose = callback() },
+  })
+  for (const name of ['bash', 'read_file', 'custom_scoped_tool']) assert.match(guard({ name }), /CHAT_ONLY/)
+  const prompt = { sections: [{ name: 'identity', text: 'alice' }], tools: [{ name: 'bash' }, { name: 'custom_scoped_tool' }] }
+  const result = await assemble({}, {}, async () => prompt)
+  assert.deepEqual(result.tools, [])
+  assert.deepEqual(result.sections, prompt.sections)
+  assert.equal(prompt.tools.length, 2)
+  dispose()
+  assert.deepEqual(released.sort(), ['assembly', 'guard'])
+})
+
 test('user boot uses one patch snapshot and isolates identity overlays between contexts', () => {
   let reads = 0
   const source = [{ insert: [{ id: 'storage-json', name: 'storage', config: { root: '/old', keep: true } }] }]

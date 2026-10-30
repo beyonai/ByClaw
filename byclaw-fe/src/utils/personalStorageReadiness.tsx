@@ -3,6 +3,7 @@ import { Button, Modal, Space, Spin } from 'antd';
 import { getAuthSnapshot, isCurrentAuthSnapshot } from './auth';
 import webSocketManager from './websocket';
 import { createNasReadinessWaiter, NasReadinessCancelled, ReadinessView, StorageReadiness } from './nasReadinessWaiter';
+import { isPersonalStorageAdmissionEnabled } from './personalStorageAdmission';
 
 let active: { promise: Promise<void>; cancel: () => void; users: number; current: () => boolean } | undefined;
 const t = (id: string) => getIntl().formatMessage({ id: `storageReadiness.${id}` });
@@ -10,6 +11,7 @@ const t = (id: string) => getIntl().formatMessage({ id: `storageReadiness.${id}`
 /** Hold before dispatch. Never automatically replay a request that may already have executed. */
 export async function waitForPersonalStorage(signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw new NasReadinessCancelled();
+  if (!isPersonalStorageAdmissionEnabled()) return;
   if (active && !active.current()) active.cancel();
   if (!active || !active.current()) {
     const auth = getAuthSnapshot();
@@ -107,6 +109,7 @@ export async function waitForPersonalStorage(signal?: AbortSignal): Promise<void
 
 /** Cloud personal-drive operations only; Git/devloop and desktop-local IO retain their existing paths. */
 export function requiresPersonalStorage(url: string): boolean {
+  if (!isPersonalStorageAdmissionEnabled()) return false;
   return /^\/byaiService\/(?:chat\/uploadFiles|datasetController\/uploadFiles|fileBrowser\/(?:upload|createFolder|ensureFolder|copy|move|rename|saveToKnowledge))$/.test(
     url
   );

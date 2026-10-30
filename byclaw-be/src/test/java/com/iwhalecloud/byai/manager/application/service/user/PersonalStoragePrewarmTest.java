@@ -17,7 +17,19 @@ class PersonalStoragePrewarmTest {
     final Queue<Runnable> jobs = new ArrayDeque<>();
     final PersonalStoragePrewarm prewarm = new PersonalStoragePrewarm(platform, jobs::add);
 
+    @org.junit.jupiter.api.BeforeEach void enableAdmissionForExistingPolicyTests() {
+        when(platform.isPersonalStorageAdmissionEnabled()).thenReturn(true);
+    }
+
     @AfterEach void cleanup() { TransactionSynchronizationManager.clear(); }
+
+    @Test void disabledAdmissionDoesNotScheduleAccountStoragePrewarm() {
+        when(platform.isRemote()).thenReturn(true);
+        when(platform.isPersonalStorageAdmissionEnabled()).thenReturn(false);
+        prewarm.afterCommit("new-user");
+        assertThat(jobs).isEmpty();
+        verify(platform, never()).call(anyString(), anyString(), any());
+    }
 
     @Test void waitsForCommitAndDoesNotProvisionRolledBackAccounts() {
         when(platform.isRemote()).thenReturn(true);

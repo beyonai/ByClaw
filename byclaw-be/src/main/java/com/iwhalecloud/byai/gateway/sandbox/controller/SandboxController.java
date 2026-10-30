@@ -485,8 +485,14 @@ public class SandboxController {
 
         Map<String, String> inventory = runtimeInventory.current();
         final String requestedStatus = status;
-        List<String> sandboxIds = inventory.entrySet().stream()
-            .filter(entry -> requestedStatus == null || requestedStatus.equals(entry.getValue()))
+        String providerStatus = params.get("providerStatus") == null ? null : params.get("providerStatus").toString().trim();
+        if (providerStatus != null && providerStatus.isEmpty()) providerStatus = null;
+        if (providerStatus != null && !List.of("RUNNING", "STARTING", "RELEASING", "RELEASED", "FAILED", "UNKNOWN").contains(providerStatus)) {
+            return ResponseUtil.fail("invalid providerStatus");
+        }
+        final String requestedProviderStatus = providerStatus;
+        List<String> sandboxIds = requestedProviderStatus == null || "UNKNOWN".equals(requestedProviderStatus) ? null : inventory.entrySet().stream()
+            .filter(entry -> requestedProviderStatus.equals(entry.getValue()))
             .map(Map.Entry::getKey).collect(Collectors.toList());
         Map<String, Object> query = new HashMap<>();
         query.put("keyword", keyword);
@@ -495,20 +501,18 @@ public class SandboxController {
         query.put("offset", (pageIndex - 1) * pageSize);
         query.put("pageSize", pageSize);
         query.put("sandboxIds", sandboxIds);
+        query.put("observedSandboxIds", "UNKNOWN".equals(requestedProviderStatus) ? inventory.entrySet().stream()
+            .filter(entry -> !"UNKNOWN".equals(entry.getValue())).map(Map.Entry::getKey).collect(Collectors.toList()) : null);
         query.put("status", requestedStatus);
         List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
-                // Display the live runtime state when the engine still has the instance.
-                // This projection never updates the persisted lifecycle record.
-                // Map.of() rejects a null key. Persisted rows can have no sandbox id.
+                // Persisted lifecycle and current provider observation are independent.
+                // An inventory miss is unknown, not proof that a remote instance was deleted.
                 String sandboxId = record.getSandboxId();
                 String liveStatus = sandboxId == null ? null : inventory.get(sandboxId);
-                if (liveStatus != null) {
-                    record.setStatus(liveStatus);
-                }
                 SandboxRecordView view = sandboxService.buildRecordView(record);
                 if (view != null) {
                     view.setStatus(record.getStatus());
-                    view.setProviderStatus(record.getStatus());
+                    view.setProviderStatus(liveStatus == null ? "UNKNOWN" : liveStatus);
                     if (!"TENANT".equals(record.getOwnerScope()) && StringUtils.isNotBlank(record.getUserCode())) {
                         try {
                             view.setUserName(ShareCacheUtil.getShareBfmUser(record.getUserCode()).getUserName());
@@ -569,9 +573,9 @@ public class SandboxController {
             if (StringUtil.isEmpty(sandboxId)) {
                 return ResponseUtil.fail("id or sandboxId is required");
             }
-            id = sandboxService.findRecordIdBySandboxIdAndStatus(sandboxId.trim(), "RUNNING");
+            id = sandboxService.findRecordIdBySandboxId(sandboxId.trim());
             if (id == null) {
-                return ResponseUtil.fail("running sandbox record not found");
+                return ResponseUtil.fail("sandbox record not found");
             }
         }
 

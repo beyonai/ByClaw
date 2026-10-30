@@ -17,7 +17,7 @@ public class PersonalStorageReadinessController {
     @PostMapping("/readiness") public ResponseUtil<?> readiness() {
         String user=CurrentUserHolder.getCurrentUserCode();
         if(user==null || user.isBlank())throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-        if(!gateway.isRemote() || TenantRequestContextHolder.get()!=null)
+        if(!gateway.isPersonalStorageAdmissionEnabled() || !gateway.isRemote() || TenantRequestContextHolder.get()!=null)
             return ResponseUtil.successResponse(Map.of("enabled",false,"ready",true,"state","DISABLED"));
         return ResponseUtil.successResponse(gateway.call("storage","personal/readiness",Map.of("userCode",user)));
     }

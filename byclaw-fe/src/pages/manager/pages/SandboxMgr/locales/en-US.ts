@@ -1,4 +1,13 @@
 export default {
+  'sandboxMgr.filter.lifecycleStatus': 'Record status',
+  'sandboxMgr.filter.providerStatus': 'Actual status',
+  'sandboxMgr.filter.allLifecycle': 'All record statuses',
+  'sandboxMgr.filter.allProvider': 'All actual statuses',
+  'sandboxMgr.table.lifecycleStatus': 'Record status',
+  'sandboxMgr.table.providerStatus': 'Actual status',
+  'sandboxMgr.status.unknown': 'Unknown',
+  'sandboxMgr.status.stopped': 'Stopped',
+  'sandboxMgr.status.missing': 'Missing',
   'sandboxMgr.shared.launch.title': 'Start shared resource',
   'sandboxMgr.shared.launch.service': 'Service specification',
   'sandboxMgr.shared.launch.profile': 'Resource profile',

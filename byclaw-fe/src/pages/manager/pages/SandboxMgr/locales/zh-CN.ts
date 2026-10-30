@@ -1,4 +1,13 @@
 export default {
+  'sandboxMgr.filter.lifecycleStatus': '记录状态',
+  'sandboxMgr.filter.providerStatus': '实际状态',
+  'sandboxMgr.filter.allLifecycle': '全部记录状态',
+  'sandboxMgr.filter.allProvider': '全部实际状态',
+  'sandboxMgr.table.lifecycleStatus': '记录状态',
+  'sandboxMgr.table.providerStatus': '实际状态',
+  'sandboxMgr.status.unknown': '未知',
+  'sandboxMgr.status.stopped': '已停止',
+  'sandboxMgr.status.missing': '不存在',
   'sandboxMgr.shared.launch.title': '启动共享资源',
   'sandboxMgr.shared.launch.service': '服务规格',
   'sandboxMgr.shared.launch.profile': '资源档位',

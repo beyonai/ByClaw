@@ -1,5 +1,9 @@
 # Beyond (鲸智百应)
 
+### 个人网盘容量业务门控
+
+`BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED` 是前端构建期配置，默认 `false`。关闭时聊天和文件请求不等待个人网盘 readiness，也不弹开通/容量模态框；真实 API 失败继续按原错误路径显示并拒绝请求。BE、Platform 同时保持该开关关闭；修改前端配置后须重启开发服务或重新构建。该开关不改变文件访问权限、空间身份或云端物理配额。
+
 > 基于 React 18 + Umi Max + TypeScript 构建的企业级 AI 智能助手平台
 
 [![CI](https://github.com/beyondAI/byclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/beyondAI/byclaw/actions/workflows/ci.yml)
@@ -291,3 +295,6 @@ Copyright 2026 beyondAI
 `{{file_preview_prefix}}` 链接及未指定存储桶的同源 `commonFile` 预览／下载地址归一为同一文件身份；外部链接和显式存储桶链接仍按普通链接处理。
 消息附件与解析结果按路径去重，只有没有路径的旧附件才按名称兜底；不同目录下的同名文件分别展示。
 重复的正文链接只产生一个文件卡片，下载及预览继续使用现有会话鉴权接口。
+
+
+沙箱运行记录分别展示和筛选「记录状态」(`status`) 与「实际状态」(`providerStatus`)。远端清单未观察到实例时显示「未知」，不据此推断实例已删除。默认不过滤两种状态；记录已释放但远端仍在启动、运行或释放时，可通过释放操作重试精确回收该实例，后端保留权限和后继实例保护校验。

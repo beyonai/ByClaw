@@ -30,6 +30,7 @@ class SsSandboxInventoryQueryTest {
             + "(5,'deleted-id','USER','a','RUNNING')");
         try (SqlSession session = new SqlSessionFactoryBuilder().build(config).openSession()) {
             var mapper = session.getMapper(SsSandboxRecordMapper.class);
+            assertThat(mapper.selectLatestBySandboxIdAnyUser("acs-two").getId()).isEqualTo(4L);
             Map<String, Object> query = new HashMap<>();
             query.put("sandboxIds", List.of("acs-one", "acs-two"));
             query.put("ownerScope", "TENANT"); query.put("pageSize", 1); query.put("offset", 0);
@@ -46,6 +47,9 @@ class SsSandboxInventoryQueryTest {
             query.put("keyword", "a"); query.put("offset", 0);
             assertThat(mapper.countInventory(query)).isEqualTo(1);
             query.put("sandboxIds", List.of());
+            query.put("status", "RUNNING");
+            assertThat(mapper.countInventory(query)).isZero();
+            assertThat(mapper.selectInventoryPage(query)).isEmpty();
             query.put("status", "FAILED");
             assertThat(mapper.countInventory(query)).isZero();
             assertThat(mapper.selectInventoryPage(query)).isEmpty();
@@ -57,7 +61,7 @@ class SsSandboxInventoryQueryTest {
             byStatus.put("ownerScope", "USER");
             byStatus.put("pageSize", 20);
             byStatus.put("offset", 0);
-            byStatus.put("sandboxIds", List.of());
+            byStatus.put("sandboxIds", null);
             byStatus.put("status", "RELEASED");
             assertThat(mapper.countInventory(byStatus)).isEqualTo(1);
             assertThat(mapper.selectInventoryPage(byStatus).get(0).getSandboxId()).isEqualTo("released-id");
@@ -65,6 +69,13 @@ class SsSandboxInventoryQueryTest {
             byStatus.put("status", "RELEASED");
             assertThat(mapper.selectInventoryPage(byStatus).stream().map(SsSandboxRecord::getSandboxId).toList())
                 .containsExactly("released-id");
+            jdbc.update("INSERT INTO ss_sandbox_record (id,owner_scope,user_code,status) VALUES (14,'USER','a','FAILED')");
+            Map<String,Object> unknown=new HashMap<>(byStatus);unknown.remove("status");unknown.remove("sandboxIds");
+            unknown.put("observedSandboxIds",List.of("acs-one","acs-two","starting-id","old-released"));
+            assertThat(mapper.selectInventoryPage(unknown).stream().map(SsSandboxRecord::getId).toList())
+                .containsExactly(14L,10L,5L);
+            unknown.put("observedSandboxIds",List.of());
+            assertThat(mapper.countInventory(unknown)).isEqualTo(7);
             byStatus.put("status", "RUNNING");
             byStatus.put("sandboxIds", List.of("acs-one", "acs-two", "released-id"));
             assertThat(mapper.selectInventoryPage(byStatus).stream().map(SsSandboxRecord::getSandboxId).toList())

@@ -71,6 +71,70 @@ if [[ "${1:-}" == multi-host ]]; then
     shift
     launcher=/workspace/scripts/byclaw-multi-host.mjs
     if ((EUID == 0)); then
+        host_root="${BYCLAW_MULTI_HOST_ROOT-/data/multi-host}"
+        python3 - "${host_root}" <<'BYCLAW_SHARED_ROOT'
+import os
+import pwd
+import stat
+import sys
+
+
+def prepare_host_root(path, uid, gid):
+    parts = path.split('/')[1:]
+    if not path.startswith('/') or not parts or any(p in ('', '.', '..') for p in parts):
+        raise RuntimeError('Shared host root must be an absolute directory path')
+    user_root = os.environ.get('BYCLAW_MULTI_HOST_USER_ROOT')
+    if user_root:
+        if not os.path.isabs(user_root) or os.path.commonpath([path, user_root]) in (path, user_root):
+            raise RuntimeError('Shared host root must be separate from user storage')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent = os.open('/', flags)
+    try:
+        for part in parts[:-1]:
+            created = False
+            try:
+                child = os.open(part, flags, dir_fd=parent)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=parent)
+                    created = True
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=parent)
+            info = os.fstat(child)
+            if created:
+                if info.st_uid != os.geteuid():
+                    os.close(child)
+                    raise RuntimeError('Shared host parent changed during creation')
+                # The bootstrap uses umask 077; parents still need traversal after setpriv.
+                os.fchmod(child, 0o755)
+            if info.st_uid not in (0, uid) or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+                os.close(child)
+                raise RuntimeError('Untrusted shared host parent directory')
+            os.close(parent)
+            parent = child
+        try:
+            os.mkdir(parts[-1], 0o700, dir_fd=parent)
+        except FileExistsError:
+            pass
+        directory = os.open(parts[-1], flags, dir_fd=parent)
+        try:
+            info = os.fstat(directory)
+            if info.st_uid not in (0, uid) or info.st_mode & 0o022:
+                raise RuntimeError('Untrusted shared host root directory')
+            if info.st_uid != uid or info.st_gid != gid:
+                os.fchown(directory, uid, gid)
+            os.fchmod(directory, 0o700)
+        finally:
+            os.close(directory)
+    finally:
+        os.close(parent)
+
+
+if __name__ == '__main__':
+    account = pwd.getpwnam('byclaw')
+    prepare_host_root(sys.argv[1], account.pw_uid, account.pw_gid)
+BYCLAW_SHARED_ROOT
         exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
             env HOME=/home/byclaw node "${launcher}" "$@"
     fi

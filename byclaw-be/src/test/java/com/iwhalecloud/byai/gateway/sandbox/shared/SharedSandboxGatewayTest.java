@@ -151,6 +151,48 @@ class SharedSandboxGatewayTest {
     }
 
     @Test
+    void nativeAgenticFsCanProceedWithoutALegacyNasBinding() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("prepareUserStorage"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("enabled", false, "ready", true, "state", "AGENTICFS")));
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0));
+        when(client.call(eq("acquire"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("sandboxId", "native-shared")));
+
+        assertThat(gateway.tryAcquire("alice", "byclaw-dsh").getSandboxId()).isEqualTo("native-shared");
+        verify(client).call(eq("acquire"), argThat(p -> !p.containsKey("storageBinding")));
+    }
+
+    @Test
+    void nativeAgenticFsStatusDoesNotBecomeALegacyNasFailure() {
+        var gateway = gateway();
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("userStorageStatus"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("enabled", false, "ready", true, "state", "AGENTICFS", "binding", Map.of("private", "hidden"))));
+
+        assertThat(gateway.userStorageStatus("alice"))
+            .containsEntry("enabled", false).containsEntry("ready", true).containsEntry("state", "AGENTICFS")
+            .doesNotContainKey("binding");
+    }
+
+    @Test
+    void disabledOrUnreadyStorageCannotBypassSharedAdmission() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        for (var state : List.of(Map.of("enabled", false, "ready", true, "state", "LOGICAL"),
+                Map.of("enabled", false, "ready", false, "state", "AGENTICFS"))) {
+            when(client.call(eq("prepareUserStorage"), anyMap())).thenReturn(Map.of("code", 0, "data", state));
+            assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh"))
+                .isInstanceOf(com.iwhalecloud.byai.state.common.exception.BdpRuntimeException.class);
+        }
+        verify(client, never()).call(eq("lookup"), anyMap());
+        verify(client, never()).call(eq("acquire"), anyMap());
+    }
+
+    @Test
     void eligibleUserUsesTrustedTenantAndSharedHostSpec() {
         var gateway = gateway();
         when(client.call(eq("lookup"), anyMap())).thenReturn(Collections.singletonMap("code", 0));

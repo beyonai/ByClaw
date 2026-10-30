@@ -17,6 +17,7 @@ export default function getUmiConfig(publicPath: string, cwd?: string) {
   return {
     define: {
       ICONFONT_FILE_NAME: iconfontFileName,
+      PERSONAL_STORAGE_ADMISSION_ENABLED: process.env.BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED === 'true',
     },
     links: [
       {
