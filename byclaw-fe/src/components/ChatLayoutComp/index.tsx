@@ -812,6 +812,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     <TaskTemplateEntry
                       projectId={sessionProjectId}
                       sessionId={projectSelectorSessionId}
+                      skipInitialProjectChange={Boolean(sessionId)}
                       onProjectChange={handleNewTaskProjectChange}
                       onApply={() => undefined}
                     />
