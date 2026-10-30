@@ -34,8 +34,10 @@ class GroupChatForwardQueryServiceTest {
         db.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY, enterprise_id BIGINT, session_type VARCHAR, state VARCHAR)");
         db.execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT PRIMARY KEY, session_id BIGINT, mem_obj_type VARCHAR, mem_obj_id BIGINT)");
         db.execute("CREATE TABLE byai.byai_message(message_id BIGINT PRIMARY KEY, session_id BIGINT, usage INT, recalled_at TIMESTAMP, archived_at TIMESTAMP)");
+        // H2 不支持条件索引；这里只验证授权和快照查询，生产索引保留原样。
         db.execute(Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"))
-            .replace("SET search_path TO byai;", "SET SCHEMA byai;"));
+            .replace("SET search_path TO byai;", "SET SCHEMA byai;")
+            .replaceAll("(?is)CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session\\s+ON byai\\.byai_message \\(session_id\\) WHERE usage = 1;", ""));
 
         // 查询用例直接准备已提交快照，避免通过转发创建和提交用例间接启动 Redis。
         // 保留真实 JDBC、转发表结构及查询 SQL，继续验证目标群授权和快照读取边界。

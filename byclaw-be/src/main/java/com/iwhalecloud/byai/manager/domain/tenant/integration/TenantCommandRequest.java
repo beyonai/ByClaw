@@ -14,16 +14,18 @@ import java.util.TreeSet;
  * An omitted profile remains unresolved until new-command acceptance freezes the startup default.
  */
 public record TenantCommandRequest(String sourceSystem, String requestId, long ownerUserId,
-                                  String enterpriseName, String profileKey, String snapshot, String hash) {
+                                  String enterpriseName, String profileKey, String tenantMode, String snapshot, String hash) {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     public static TenantCommandRequest parse(JsonNode body) {
-        fields(body, Set.of("sourceSystem", "requestId", "ownerUserId", "enterpriseName", "actor", "reason", "resourceSpec", "initialPolicy"));
+        fields(body, Set.of("sourceSystem", "requestId", "ownerUserId", "enterpriseName", "tenantMode", "actor", "reason", "resourceSpec", "initialPolicy"));
         String source = text(body, "sourceSystem", 64);
         String request = text(body, "requestId", 128);
         if (!source.matches("[a-zA-Z0-9_-]+") || !request.matches("[a-zA-Z0-9_.:-]{8,128}")) invalid();
         long owner = decimal(body.get("ownerUserId"));
         String name = text(body, "enterpriseName", 200);
+        String tenantMode = body.has("tenantMode") ? text(body, "tenantMode", 32) : "STANDARD";
+        if (!Set.of("STANDARD", "TRIAL").contains(tenantMode)) invalid();
         text(body,"reason",500);
         fields(body.get("actor"), Set.of("type", "id"));
         text(body.get("actor"),"type",64);
@@ -46,7 +48,7 @@ public record TenantCommandRequest(String sourceSystem, String requestId, long o
             || !"1".equals(policy.path("revision").asText()) || !policy.path("revision").isTextual()) invalid();
         // Keep omitted fields omitted so a later startup default cannot change a retry's business digest.
         String snapshot = canonical(body);
-        return new TenantCommandRequest(source,request,owner,name,profile,snapshot,digest(snapshot));
+        return new TenantCommandRequest(source,request,owner,name,profile,tenantMode,snapshot,digest(snapshot));
     }
 
     public static long decimal(JsonNode value) {

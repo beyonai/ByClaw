@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import java.nio.file.Path;
@@ -38,7 +39,7 @@ class WorkgroupProjectNameSqlTest {
             ProjectService projects = new ProjectService();
             ReflectionTestUtils.setField(projects, "projectMapper", session.getMapper(ProjectMapper.class));
             WorkgroupNameService groups = new WorkgroupNameService(mock(TenantNodeClient.class),
-                session.getMapper(ByaiSessionMapper.class));
+                session.getMapper(ByaiSessionMapper.class), mock(TenantModeService.class));
 
             assertThat(projects.existsProjectName("Team", 88L, 10L, null)).isTrue();
             assertThat(projects.existsNonWorkgroupProjectName("Team", 88L, 10L)).isFalse();

@@ -137,7 +137,7 @@ class InternalServiceAuthenticationTest {
         assertTrue(InternalServiceRoutes.matches("GET", "/internal/v1/commands/by-request"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("PUT", "/internal/v1/tenants/42/enterprise"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/tenants/42/members"));
-        assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/shared-workspaces/999/members"));
+        assertFalse(InternalServiceRoutes.matches("POST", "/internal/v1/shared-workspaces/999/members"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/shared-workspaces/999/members"));
         assertEquals("tenant:read", InternalServiceRoutes.scope("GET", "/internal/v1/tenants/42/members"));
         assertFalse(InternalServiceRoutes.matches("DELETE", "/internal/v1/tenants/42/members"));

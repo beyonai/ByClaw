@@ -60,6 +60,7 @@ public class TenantCommandService {
             config(enterprise,"PACKAGE_CONTENT_SNAPSHOT",snapshot.toString());
             config(enterprise,"COMMERCIAL_MANAGED","true");
             config(enterprise,"INTEGRATION_SOURCE_SYSTEM",request.sourceSystem());
+            config(enterprise,"TENANT_MODE",request.tenantMode());
             config(enterprise,"PROVISION_STATE","{\"status\":\"RESERVED\",\"generation\":\"1\",\"fencingToken\":\"1\"}");
             policies.prepare(enterprise,body.get("initialPolicy"));
             // Initial rights stay in the audited request; runtime admission reads HACU's shared Redis snapshot.

@@ -49,7 +49,9 @@ class TenantCommandAcceptanceTest {
         int first = migration.indexOf(start), last = migration.indexOf(end);
         assertTrue(first >= 0 && last > first, "tenant integration schema section must exist in the release DDL");
         // H2 covers this feature's table/index DDL; PostgreSQL acceptance applies the entire release file.
-        String sql = migration.substring(first + start.length(), last).replace("timestamptz", "TIMESTAMP WITH TIME ZONE");
+        // 消息查询的条件索引不是租户受理结构，H2 也不支持该索引语法。
+        String sql = migration.substring(first + start.length(), last).replace("timestamptz", "TIMESTAMP WITH TIME ZONE")
+            .replaceAll("(?is)CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session\\s+ON byai\\.byai_message \\(session_id\\) WHERE usage = 1;", "");
         try (var connection = source.getConnection()) {
             ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
         }
@@ -89,7 +91,8 @@ class TenantCommandAcceptanceTest {
             "tenant_operation_state")) {
             assertEquals(expected, count(table), table);
         }
-        assertEquals(expected * 6, count("tenant_config"));
+        // 每个企业新增一行 TENANT_MODE，包含未显式指定模式时的 STANDARD。
+        assertEquals(expected * 7, count("tenant_config"));
     }
     @Test void lostResponseReplayReturnsOriginalReservationAndStableTask() throws Exception {
         var request = TenantCommandRequest.parse(body("request-lost-response"));

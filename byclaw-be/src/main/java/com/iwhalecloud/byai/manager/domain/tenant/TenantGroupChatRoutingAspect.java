@@ -28,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Aspect
 @Component
 public class TenantGroupChatRoutingAspect {
+    private final TenantModeService tenantModes;
     @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupMessageDisplayService messageDisplayService;
     @org.springframework.beans.factory.annotation.Autowired
@@ -45,12 +46,14 @@ public class TenantGroupChatRoutingAspect {
     private final TenantGroupMemberService memberService;
 
     public TenantGroupChatRoutingAspect(TenantNodeClient node, GroupChatReadService legacy,
-        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService) {
+        ByaiGroupChatMentionMapper mentionMapper, ObjectMapper mapper, TenantGroupMemberService memberService,
+        TenantModeService tenantModes) {
         this.node = node;
         this.legacy = legacy;
         this.mentionMapper = mentionMapper;
         this.mapper = mapper;
         this.memberService = memberService;
+        this.tenantModes = tenantModes;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController.*(..))"
@@ -68,7 +71,7 @@ public class TenantGroupChatRoutingAspect {
             if (context == null) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
         }
-        if (context == null || TenantContextService.isSharedWorkspace(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         if ("defaultAssistant".equals(method)) return call.proceed();
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();

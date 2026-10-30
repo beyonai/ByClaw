@@ -30,23 +30,25 @@ import org.springframework.web.server.ResponseStatusException;
 @Aspect
 @Component
 public class TenantChatRuntimeRoutingAspect {
+    private final TenantModeService tenantModes;
     private final TenantNodeClient node;
     private final RunningOutputStreamRegistry running;
     private final RunningChatSnapshotService snapshots;
     private final AssistantChatApplicationService chat;
 
     public TenantChatRuntimeRoutingAspect(TenantNodeClient node, RunningOutputStreamRegistry running,
-        RunningChatSnapshotService snapshots, AssistantChatApplicationService chat) {
+        RunningChatSnapshotService snapshots, AssistantChatApplicationService chat, TenantModeService tenantModes) {
         this.node = node;
         this.running = running;
         this.snapshots = snapshots;
         this.chat = chat;
+        this.tenantModes = tenantModes;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.chat.AssistantChatController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null || TenantContextService.isSharedWorkspace(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         switch (method) {

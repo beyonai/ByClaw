@@ -69,7 +69,8 @@ class TenantGroupFileRoutingTest {
 
     private GroupChatFileController proxy(TenantNodeClient node, GroupChatFileQueryService local) {
         var aspect = new TenantGroupChatRoutingAspect(node, mock(GroupChatReadService.class),
-            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class));
+            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class),
+            mock(TenantModeService.class));
         var factory = new AspectJProxyFactory(new GroupChatFileController(local));
         factory.setProxyTargetClass(true);
         factory.addAspect(aspect);

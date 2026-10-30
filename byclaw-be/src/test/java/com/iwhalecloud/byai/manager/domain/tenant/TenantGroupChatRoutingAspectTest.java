@@ -40,8 +40,9 @@ class TenantGroupChatRoutingAspectTest {
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
     private final TenantGroupManagementService management = mock(TenantGroupManagementService.class);
     private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
-        new ObjectMapper(), memberService);
+        new ObjectMapper(), memberService, tenantModes);
     private String originalEnvironment;
 
     @BeforeEach
@@ -155,8 +156,9 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void sharedWorkspaceCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 999L, "MEMBER");
+    void trialTenantCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
         TenantRequestContextHolder.set(context);
         GroupChatCreateRequest request = new GroupChatCreateRequest();
         request.setName("共享工作组");

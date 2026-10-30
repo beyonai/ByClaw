@@ -27,13 +27,6 @@ import com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipRow;
 @Service
 public class TenantContextService {
 
-    /** 技术上的共享工作区身份；商业产品含义由 HACU 管理，ByClaw 只处理路由。 */
-    public static final long SHARED_WORKSPACE_ENTERPRISE_ID = 999L;
-
-    public static boolean isSharedWorkspace(long enterpriseId) {
-        return enterpriseId == SHARED_WORKSPACE_ENTERPRISE_ID;
-    }
-
     private static final Logger log = LoggerFactory.getLogger(TenantContextService.class);
 
     private static final Duration CONTEXT_TTL = Duration.ofMinutes(30);
@@ -43,12 +36,14 @@ public class TenantContextService {
     private final TenantMembershipMapper membershipMapper;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
+    private final TenantModeService tenantModes;
 
     public TenantContextService(TenantMembershipMapper membershipMapper, ObjectMapper objectMapper,
-                                StringRedisTemplate redisTemplate) {
+                                StringRedisTemplate redisTemplate, TenantModeService tenantModes) {
         this.membershipMapper = membershipMapper;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+        this.tenantModes = tenantModes;
     }
 
     public TenantSwitchView switchTo(String enterpriseIdText) {
@@ -126,7 +121,7 @@ public class TenantContextService {
         if (RuntimeEnvironment.isDevelopment()) {
             return membership;
         }
-        if (!isSharedWorkspace(enterpriseId) && !"READY".equals(provisionState(membership))) {
+        if (!tenantModes.isTrialTenant(enterpriseId) && !"READY".equals(provisionState(membership))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.notReady");
         }
         return membership;

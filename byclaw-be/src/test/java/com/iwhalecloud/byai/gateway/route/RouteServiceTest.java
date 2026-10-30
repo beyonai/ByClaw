@@ -321,7 +321,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         var proxy = new org.springframework.aop.aspectj.annotation.AspectJProxyFactory(chat);
         proxy.addAspect(new com.iwhalecloud.byai.manager.domain.tenant.TenantChatRuntimeRoutingAspect(node, running,
             mock(com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService.class),
-            mock(com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService.class)));
+            mock(com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService.class),
+            mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class)));
         var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(100, 123, "MEMBER");
         var tenants = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantContextService.class);
         when(tenants.validate("123")).thenReturn(tenant);

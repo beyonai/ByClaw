@@ -33,26 +33,22 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Keeps the public chat API stable while dispatching tenant requests to the owning Node. */
 @Aspect
 @Component
 public class TenantChatRoutingAspect {
+    private final TenantModeService tenantModes;
 
     private final TenantNodeClient node;
     private final ByaiGroupChatMentionMapper mentionMapper;
 
-    @Autowired
-    public TenantChatRoutingAspect(TenantNodeClient node, ByaiGroupChatMentionMapper mentionMapper) {
+    public TenantChatRoutingAspect(TenantNodeClient node, ByaiGroupChatMentionMapper mentionMapper,
+                                   TenantModeService tenantModes) {
         this.node = node;
         this.mentionMapper = mentionMapper;
-    }
-
-    public TenantChatRoutingAspect(TenantNodeClient node) {
-        this.node = node;
-        this.mentionMapper = null;
+        this.tenantModes = tenantModes;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.manage.AssistantManController.*(..))"
@@ -60,7 +56,7 @@ public class TenantChatRoutingAspect {
         + " || execution(* com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.getMessageCountAndPosition(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null || TenantContextService.isSharedWorkspace(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         if (mentionMapper != null && args.length > 0 && args[0] instanceof ByaiSessionQo sessionQuery

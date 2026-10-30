@@ -40,7 +40,7 @@ class TenantWebSocketStopTest extends I18nTestSupport {
         ReflectionTestUtils.setField(service, "runningOutputStreamRegistry", running);
         AspectJProxyFactory proxy = new AspectJProxyFactory(service);
         proxy.addAspect(new TenantChatRuntimeRoutingAspect(node, running,
-            mock(RunningChatSnapshotService.class), application));
+            mock(RunningChatSnapshotService.class), application, mock(TenantModeService.class)));
         TenantContextService tenants = mock(TenantContextService.class);
         when(tenants.validate("123")).thenReturn(tenant);
         WebSocketHandler handler = new WebSocketHandler();

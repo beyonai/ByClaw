@@ -38,7 +38,8 @@ class TenantGroupTopicRoutingTest {
         var context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
         var aspect = new TenantGroupChatRoutingAspect(node, mock(GroupChatReadService.class),
-            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class));
+            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class),
+            mock(TenantModeService.class));
         var factory = new AspectJProxyFactory(new GroupChatTopicController(local, messages));
         factory.setProxyTargetClass(true);
         factory.addAspect(aspect);

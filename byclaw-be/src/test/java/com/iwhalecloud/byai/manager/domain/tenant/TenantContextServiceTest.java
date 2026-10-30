@@ -29,7 +29,7 @@ class TenantContextServiceTest {
     @Test
     void available_preservesLargeEnterpriseIdsAndHidesInternalProvisionFields() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
         LoginInfo login = new LoginInfo();
         login.setUserId(12L);
         CurrentUserHolder.setLoginInfo(login);
@@ -53,7 +53,7 @@ class TenantContextServiceTest {
     @Test
     void available_requiresAuthenticatedUser() {
         TenantContextService service = new TenantContextService(mock(TenantMembershipMapper.class),
-            new ObjectMapper(), redis());
+            new ObjectMapper(), redis(), mock(TenantModeService.class));
 
         assertThatThrownBy(service::available).isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("401");
@@ -62,7 +62,7 @@ class TenantContextServiceTest {
     @Test
     void switchAndEachRequestRecheckCurrentUserMembership() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
         LoginInfo login = new LoginInfo();
         login.setUserId(12L);
         login.setSessionId("login-session-1");
@@ -89,7 +89,7 @@ class TenantContextServiceTest {
     @Test
     void switchIssuesTabContextTokenWithExpiry() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
         LoginInfo login = new LoginInfo();
         login.setUserId(12L);
         login.setSessionId("login-session-1");
@@ -113,7 +113,7 @@ class TenantContextServiceTest {
         try {
             System.setProperty("BE_ENV", "development");
             TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-            TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis());
+            TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
             LoginInfo login = new LoginInfo();
             login.setUserId(12L);
             login.setSessionId("login-session-1");
