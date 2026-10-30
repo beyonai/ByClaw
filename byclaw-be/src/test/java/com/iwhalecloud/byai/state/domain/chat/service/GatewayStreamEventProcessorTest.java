@@ -8,12 +8,39 @@ import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GatewayStreamEventProcessorTest extends I18nTestSupport {
 
     private final GatewayStreamEventProcessor processor = new GatewayStreamEventProcessor();
+
+    @BeforeEach
+    void setUpRuntimeResolver() {
+        ReflectionTestUtils.setField(processor, "targetAgentResolver", new TargetAgentResolver());
+    }
+
+    @Test
+    void filesystemQuotaErrorIsEnrichedButModelQuotaIsNot() {
+        var gateway=org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class);
+        org.mockito.Mockito.when(gateway.isRemote()).thenReturn(true);
+        org.mockito.Mockito.when(gateway.reportQuotaRejection("alice","stream-100-1")).thenReturn(java.util.Map.of("errorType","NAS_QUOTA_EXCEEDED","quotaBytes",1024L));
+        ReflectionTestUtils.setField(processor,"quotaGateway",gateway);
+        ChatProcessContext ctx=new ChatProcessContext(null,new AssistantChatDto());
+        ctx.loginInfo=new com.iwhalecloud.byai.common.login.bean.LoginInfo();ctx.loginInfo.setUserCode("alice");ctx.currentStreamId="100-1";
+        JSONObject metadata=new JSONObject();metadata.put("error","EDQUOT: disk quota exceeded");
+        JSONObject unknown=new JSONObject();processor.enrichQuotaError(ctx,metadata,unknown);
+        assertThat(unknown).isEmpty();
+        org.mockito.Mockito.verify(gateway,org.mockito.Mockito.never()).reportQuotaRejection(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString());
+        metadata.put("error_domain","STORAGE");metadata.put("error_code","NAS_QUOTA_EXCEEDED");metadata.put("storage_scope","USER_NAS");
+        JSONObject payload=new JSONObject();processor.enrichQuotaError(ctx,metadata,payload);
+        assertThat(payload.getJSONObject("quota").getLong("quotaBytes")).isEqualTo(1024L);
+        org.mockito.Mockito.clearInvocations(gateway);metadata.put("error_domain","MODEL");
+        JSONObject model=new JSONObject();processor.enrichQuotaError(ctx,metadata,model);
+        assertThat(model).isEmpty();org.mockito.Mockito.verify(gateway,org.mockito.Mockito.never()).reportQuotaRejection(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString());
+    }
 
     @Test
     void normalizeEventType_preservesExplicitParentAssistantOutput() {

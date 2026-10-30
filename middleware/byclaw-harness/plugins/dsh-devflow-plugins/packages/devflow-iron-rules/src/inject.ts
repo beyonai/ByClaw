@@ -228,6 +228,8 @@ export function applyInject(ctx: Context, config: ResolvedConfig, io: WorkspaceI
     // never a reason to take the decision away from them.
     const downstream = await next()
     if (downstream.kind !== 'enter') return downstream
+    const workspacePolicy = ctx.get('byclawWorkspacePolicy') as { automaticDiscoveryEnabled: boolean } | undefined
+    if (workspacePolicy?.automaticDiscoveryEnabled === false) return downstream
 
     const { rules, warnings } = await loadRules(workspaceOf(agent, config), io)
     for (const warning of warnings) ctx.logger.warn(`devflow-iron-rules: ${warning}`)

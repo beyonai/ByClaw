@@ -92,6 +92,20 @@ class UserProfileApplicationServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void savesPresetAvatarPathInProfileAndLoginSnapshotWithoutUploading() throws Exception {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        String presetAvatar = "beyond/avatar/woman/avatar01.jpg";
+
+        UserProfileResponse result = service.updateProfile(new UserProfileUpdateRequest("新名字", presetAvatar));
+
+        assertThat(result.avatar()).isEqualTo(presetAvatar);
+        assertThat(loginInfo.getAvatar()).isEqualTo(presetAvatar);
+        assertThat(capturedUpdate().getParamNameValuePairs().values()).contains(presetAvatar);
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
     void explicitEmptyOptionalFieldsClearSavedSelections() throws Exception {
         activeUserWithProfile();
         when(mapper.update(isNull(), any())).thenReturn(1);

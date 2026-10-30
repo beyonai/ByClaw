@@ -25,6 +25,7 @@ export function errorStatus(error: DomainError): number {
       "AUTHORITY_CHANGED",
       "LEASE_EXPIRED",
       "UPSTREAM_UNAVAILABLE",
+      "QUOTA_UNAVAILABLE",
     ].includes(error.code)
   )
     return 503;

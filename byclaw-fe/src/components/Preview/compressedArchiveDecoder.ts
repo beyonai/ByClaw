@@ -1,3 +1,4 @@
+import { getPreviewExtension } from './formats';
 import type { LibarchiveWasm } from 'libarchive-wasm';
 import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES, type ArchiveEntry } from './binaryPreview';
 import { archiveEntryLimit, canPreviewArchiveName, isSafeArchivePath } from './archiveDecoder';
@@ -75,7 +76,9 @@ export async function openCompressedArchive(
   const tar = type === 'tgz' || /\.tar$/i.test(name);
   const expanded = await inflateGzip(buffer, tar ? MAX_ARCHIVE_EXPANDED_BYTES : archiveEntryLimit(name));
   if (tar) return openExpandedTar(expanded, await loadTar());
-  const entries: ArchiveEntry[] = [{ name, directory: false, previewable: canPreviewArchiveName(name) }];
+  const entries: ArchiveEntry[] = [
+    { name, directory: false, previewable: !!getPreviewExtension(name) && canPreviewArchiveName(name) },
+  ];
   return {
     entries,
     async extract(selected: string): Promise<ArrayBuffer> {

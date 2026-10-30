@@ -11,6 +11,10 @@ public class VolumeSpec {
      */
     private String key;
 
+    /** Engine-independent persistence, resolved by the execution platform. */
+    private String type;
+    private String volumeRef;
+
     /**
      * PUBLIC shared or PRIVATE per-user.
      */

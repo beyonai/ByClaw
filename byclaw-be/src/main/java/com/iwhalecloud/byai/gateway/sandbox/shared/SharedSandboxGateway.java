@@ -50,6 +50,7 @@ public class SharedSandboxGateway {
             throw new BdpRuntimeException("共享沙箱需要配置 byclaw.platform.base-url");
         }
         Map<String, Object> identity = identity(user, type);
+        if (policy.userNasEnabled(user, type)) requireUserStorage(identity);
         Object existing = call("lookup", identity);
         if (existing != null) {
             observedSharedUsers.put(user, true);
@@ -60,6 +61,31 @@ public class SharedSandboxGateway {
         Object allocated = call("acquire", identity);
         if (allocated != null) observedSharedUsers.put(user, true);
         return allocated == null ? null : json.convertValue(allocated, SandboxLaunchData.class);
+    }
+
+    private void requireUserStorage(Map<String, Object> identity) {
+        Object result = call("prepareUserStorage", identity);
+        if (!(result instanceof Map<?, ?> status) || !Boolean.TRUE.equals(status.get("enabled"))) {
+            throw storageFailure("SHARED_USER_NAS_POLICY_NOT_APPLIED");
+        }
+        if (!Boolean.TRUE.equals(status.get("ready"))) {
+            throw storageFailure("SHARED_USER_NAS_" + Objects.toString(status.get("state"), "PREPARING_STORAGE"));
+        }
+    }
+
+    /** Return only user-facing preparation state; never expose NAS bindings or other users. */
+    public Map<String, Object> userStorageStatus(String user) {
+        if (!policy.userNasEnabled(user, DSH_SERVICE)) return Map.of("enabled", false, "ready", true, "state", "LOGICAL");
+        Object result = call("userStorageStatus", identity(user, DSH_SERVICE));
+        if (!(result instanceof Map<?, ?> status)) throw storageFailure("SHARED_USER_NAS_INVALID_RESPONSE");
+        if (!Boolean.TRUE.equals(status.get("enabled"))) {
+            return Map.of("enabled", true, "ready", false, "state", "FAILED");
+        }
+        Map<String, Object> safe = new LinkedHashMap<>();
+        for (String key : List.of("enabled", "ready", "state", "quotaGiB", "confirmedGiB", "usedBytes", "quotaSubmittedAt")) {
+            if (status.containsKey(key)) safe.put(key, status.get(key));
+        }
+        return safe;
     }
 
     public String currentWorkerTarget(String user) {
@@ -174,13 +200,31 @@ public class SharedSandboxGateway {
             result = client.call(operation, params);
         }
         catch (feign.FeignException failure) {
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
+            if(quota!=null)throw quota;
             throw new BdpRuntimeException("共享沙箱平台请求失败，HTTP " + failure.status());
         }
         if (result == null || !(result.get("code") instanceof Number code)) {
             throw new BdpRuntimeException("共享沙箱平台响应格式错误");
         }
-        if (code.intValue() != 0) throw new BdpRuntimeException(Objects.toString(result.get("msg"), "共享沙箱操作失败"));
+        if (code.intValue() != 0) {
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(result);
+            if(quota!=null)throw quota;
+            String message = Objects.toString(result.get("msg"), "共享沙箱操作失败");
+            if (message.startsWith("SHARED_USER_NAS_") || message.startsWith("NAS_")) throw storageFailure(message);
+            throw new BdpRuntimeException(message);
+        }
         return result.get("data");
+    }
+
+    private BdpRuntimeException storageFailure(String state) {
+        String key = state.endsWith("WAITING_QUOTA") || state.endsWith("PREPARING_STORAGE")
+            ? "sandbox.shared.userNas.preparing" : "sandbox.shared.userNas.failed";
+        String message = ResourceBundle.getBundle("i18n.messages",
+            org.springframework.context.i18n.LocaleContextHolder.getLocale()).getString(key);
+        BdpRuntimeException failure = new BdpRuntimeException(message);
+        failure.setErrorService(state);
+        return failure;
     }
 
     private Map<String, Object> identity(String user, String service) {

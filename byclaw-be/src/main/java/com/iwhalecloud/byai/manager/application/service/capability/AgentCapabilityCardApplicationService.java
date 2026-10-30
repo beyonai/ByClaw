@@ -62,7 +62,7 @@ public class AgentCapabilityCardApplicationService {
     public AgentCapabilityCompileResult compileAndUpsert(Long agentId, AgentCapabilityCompileInput input) {
         requireInput(input);
         if (agentId == null) {
-            throw new BaseException("agentId is required");
+            throw new BaseException("i18n.error.capability.agentId.required");
         }
 
         AgentCapabilityCompileResult compiled = capabilityCardService.compile(input);

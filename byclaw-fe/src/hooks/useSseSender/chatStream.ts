@@ -129,6 +129,7 @@ export function formatStreamPayload(eventName: string, res: any) {
         content: {
           substance: {
             msg: get(res, 'message'),
+            quota: get(res, 'quota'),
             traceback: get(res, 'traceback'),
           },
         },

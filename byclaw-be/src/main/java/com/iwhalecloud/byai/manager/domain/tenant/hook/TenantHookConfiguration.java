@@ -24,4 +24,16 @@ public class TenantHookConfiguration {
         return new HookEventSchema("tenant.provisioning.failed", 1,
             Set.of("enterpriseId", "commandId", "stage", "errorCode"));
     }
+    @Bean
+    public HookEventSchema tenantDeletionRequestedSchema() {
+        return new HookEventSchema("tenant.deletion.requested", 1, Set.of("enterpriseId", "commandId", "stage"));
+    }
+    @Bean
+    public HookEventSchema tenantDeletedSchema() {
+        return new HookEventSchema("tenant.deleted", 1, Set.of("enterpriseId", "commandId", "stage"));
+    }
+    @Bean
+    public HookEventSchema tenantDeletionFailedSchema() {
+        return new HookEventSchema("tenant.deletion.failed", 1, Set.of("enterpriseId", "commandId", "stage", "errorCode"));
+    }
 }

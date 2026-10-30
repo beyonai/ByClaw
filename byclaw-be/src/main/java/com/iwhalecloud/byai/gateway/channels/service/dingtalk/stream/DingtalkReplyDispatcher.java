@@ -8,8 +8,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -22,15 +20,15 @@ import java.util.Map;
 @Service
 public class DingtalkReplyDispatcher {
 
-    private static final Logger logger = LoggerFactory.getLogger(DingtalkReplyDispatcher.class);
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
 
-    private final OkHttpClient okHttpClient = new OkHttpClient();
+    private final OkHttpClient okHttpClient;
     private final ObjectMapper objectMapper;
 
-    public DingtalkReplyDispatcher(ObjectMapper objectMapper) {
+    public DingtalkReplyDispatcher(ObjectMapper objectMapper, DingtalkHttpClientFactory httpClientFactory) {
         this.objectMapper = objectMapper;
+        this.okHttpClient = httpClientFactory.webhookClient();
     }
 
     public void sendTextMessage(String webhook, String replyContent) throws IOException {
@@ -46,8 +44,13 @@ public class DingtalkReplyDispatcher {
         Request request = new Request.Builder().url(webhook).post(body).build();
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                String responseBody = response.body() == null ? "" : response.body().string();
-                logger.warn("DingTalk webhook reply failed, code={}, body={}", response.code(), responseBody);
+                throw new IOException("DingTalk webhook reply failed, httpCode=" + response.code());
+            }
+            if (response.body() != null) {
+                com.fasterxml.jackson.databind.JsonNode result = objectMapper.readTree(response.body().string());
+                if (result != null && result.path("errcode").asInt(0) != 0) {
+                    throw new IOException("DingTalk webhook reply failed, errcode=" + result.path("errcode").asText());
+                }
             }
         }
     }

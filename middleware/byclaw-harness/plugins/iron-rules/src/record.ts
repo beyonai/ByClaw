@@ -20,7 +20,6 @@
  * @module @byclaw/dsh-iron-rules/record
  */
 
-import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -28,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './index.ts'
+import { localRuleFiles, type RuleFiles } from './files.ts'
 import { buildAddition, digestRules } from './inject.ts'
 import { loadRules, resolveProjectRoot, rulesByteSize, validateRuleId, watchStatus, type IronRule, type RuleEnforcement } from './rules.ts'
 
@@ -175,6 +175,7 @@ export function triageDiagnostic(input: RecordInput): string | undefined {
  * @param agent - the agent whose workspace and context receive the rule.
  * @param input - the rule to write, including any ids it replaces.
  * @param config - the resolved plugin configuration.
+ * @param files - where the project lives: this host, or the tool environment.
  * @returns whether the rule was written, with text for the calling surface.
  */
 export async function recordRule(
@@ -182,6 +183,7 @@ export async function recordRule(
   agent: Agent,
   input: RecordInput,
   config: ResolvedConfig,
+  files: RuleFiles = localRuleFiles,
 ): Promise<RecordOutcome> {
   const diagnostic = validateRuleId(input.id)
   if (diagnostic !== undefined) return { ok: false, text: diagnostic }
@@ -189,8 +191,8 @@ export async function recordRule(
   const triage = triageDiagnostic(input)
   if (triage !== undefined) return { ok: false, text: triage }
 
-  const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd())
-  const { rules, rulesDir } = await loadRules(projectRoot, config)
+  const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd(), files)
+  const { rules, rulesDir } = await loadRules(projectRoot, config, files)
 
   // Everything below this line validates BEFORE the first write. A half-applied
   // replacement — new rule written, old one still there — would leave exactly
@@ -239,15 +241,14 @@ export async function recordRule(
     '---',
   ].join('\n')
   try {
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'RULE.md'), `${frontmatter}\n\n${input.body}\n`, 'utf8')
+    await files.writeText(join(dir, 'RULE.md'), `${frontmatter}\n\n${input.body}\n`)
     if (input.enforcement === 'script' && input.check !== undefined) {
-      await writeFile(join(dir, 'check.sh'), input.check.endsWith('\n') ? input.check : `${input.check}\n`, 'utf8')
+      await files.writeText(join(dir, 'check.sh'), input.check.endsWith('\n') ? input.check : `${input.check}\n`)
     }
     // Delete only after the replacement exists. git carries the history, so a
     // removal here is recoverable and reviewable as an ordinary diff.
     for (const id of replaces) {
-      if (id !== input.id) await rm(join(rulesDir, id), { recursive: true, force: true })
+      if (id !== input.id) await files.removeTree(join(rulesDir, id))
     }
   } catch (error: unknown) {
     return { ok: false, text: `写入铁律失败：${String(error)}` }
@@ -312,8 +313,9 @@ const TOOL_DESCRIPTION =
  *
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param files - where the project lives: this host, or the tool environment.
  */
-export function applyRecord(ctx: Context, config: ResolvedConfig): void {
+export function applyRecord(ctx: Context, config: ResolvedConfig, files: RuleFiles = localRuleFiles): void {
   ctx.inject(['commands'], (commandCtx) => {
     commandCtx.commands.register({
       name: 'iron-rule',
@@ -321,8 +323,8 @@ export function applyRecord(ctx: Context, config: ResolvedConfig): void {
       input: { hint: '<想固化的规则>，留空则列出现有铁律' },
       handler: async (invocation) => {
         const { agent, rawInput } = invocation
-        const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd())
-        const { rules } = await loadRules(projectRoot, config)
+        const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd(), files)
+        const { rules } = await loadRules(projectRoot, config, files)
 
         const request = rawInput.trim()
         if (request.length === 0 && rules.length === 0) {
@@ -337,7 +339,7 @@ export function applyRecord(ctx: Context, config: ResolvedConfig): void {
         let text: string
         if (request.length === 0) {
           const measured = await Promise.all(
-            rules.map(async rule => ({ id: rule.id, status: await watchStatus(rule, projectRoot) })),
+            rules.map(async rule => ({ id: rule.id, status: await watchStatus(rule, projectRoot, files) })),
           )
           const stale = measured.filter(m => m.status?.stale === true).map(m => m.id)
           const eroding = measured
@@ -432,7 +434,7 @@ export function applyRecord(ctx: Context, config: ResolvedConfig): void {
           ...args.check !== undefined ? { check: args.check } : {},
           ...args.watches !== undefined ? { watches: args.watches } : {},
           ...args.replaces !== undefined ? { replaces: args.replaces } : {},
-        }, config)
+        }, config, files)
         return { id: args.id, recorded: outcome.ok, detail: outcome.text }
       },
       presentCall: args => ({ card: 'generic', title: `沉淀铁律 [${args.id}]`, kind: 'other', rawInput: args.title }),

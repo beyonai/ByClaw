@@ -22,13 +22,12 @@ export async function readMarker(
     marker.protocolVersion !== 1 ||
     marker.enterpriseId !== enterpriseId ||
     !marker.version ||
-    !/^[a-f0-9]{64}$/.test(marker.catalogDigest) ||
     !/^[a-f0-9]{64}$/.test(marker.scriptDigest)
   )
     throw new DomainError("SCHEMA_MARKER_INVALID");
   return marker;
 }
-/** 指纹覆盖对象、列、约束、索引与序列；发布侧必须采用相同查询、排序和编码。 */
+/** 离线制品诊断工具；运行时开通与就绪检查不使用结构指纹。 */
 export async function catalogDigest(db: SqlSession): Promise<string> {
   const objects =
     await db.query(`SELECT c.relname AS name, c.relkind AS kind, obj_description(c.oid,'pg_class') AS comment
@@ -58,7 +57,7 @@ export async function assertEmpty(db: SqlSession): Promise<boolean> {
     (SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN('byai','public') OR n.nspowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)) AS count`);
   return Number(row?.count) === 0;
 }
-/** 先检查清单对象及类型存在，再比较整个 byai catalog 指纹。 */
+/** 核验制品声明的对象及类型存在；不比较不同数据库引擎的 catalog 表示。 */
 export async function verifyCatalog(db: SqlSession, manifest: SchemaManifest): Promise<void> {
   for (const object of manifest.objects) {
     const kinds =
@@ -70,6 +69,4 @@ export async function verifyCatalog(db: SqlSession, manifest: SchemaManifest): P
     );
     if (!rows.length) throw new DomainError("SCHEMA_OBJECT_MISSING");
   }
-  if ((await catalogDigest(db)) !== manifest.catalogDigest)
-    throw new DomainError("SCHEMA_FINGERPRINT_MISMATCH");
 }

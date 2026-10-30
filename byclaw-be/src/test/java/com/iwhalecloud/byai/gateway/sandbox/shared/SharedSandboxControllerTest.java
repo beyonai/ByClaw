@@ -133,7 +133,7 @@ class SharedSandboxControllerTest {
         try (var session = new MybatisSqlSessionFactoryBuilder().build(configuration).openSession();
             var current = mockStatic(CurrentUserHolder.class)) {
             current.when(CurrentUserHolder::isPlatformManager).thenReturn(true);
-            SharedSandboxController realDirectory = new SharedSandboxController(gateway, session.getMapper(UsersMapper.class));
+            SharedSandboxController realDirectory = new SharedSandboxController(gateway, session.getMapper(UsersMapper.class), mock(SharedUserStoragePreparation.class));
             realDirectory.call("listMembers", Map.of("keyword", " 艾丽丝 "));
             verify(gateway).call(eq("listMembers"), argThat(p -> List.of("alice001", "艾丽丝002").equals(p.get("userCodes"))));
         }

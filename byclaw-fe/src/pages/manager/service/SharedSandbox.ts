@@ -29,9 +29,12 @@ export interface SharedRecord {
   createTime?: string | number;
   releaseTime?: string | number;
   releaseReason?: string;
+  releasePolicy?: 'HEARTBEAT' | 'NEVER' | 'SCHEDULED';
+  releaseAt?: number;
 }
 
 export interface SharedMember {
+  storageMode?: 'LOGICAL' | 'USER_NAS_QUOTA';
   id: string;
   sandboxRecordId: string;
   enterpriseId?: string;
@@ -75,3 +78,12 @@ export const releaseSharedMember = (member: SharedMember) =>
     reason: 'manual',
     force: true,
   });
+
+export const launchSharedInstance = (params: {
+  requestId: string;
+  serviceKey: string;
+  profileKey: string;
+  releasePolicy: 'HEARTBEAT' | 'NEVER' | 'SCHEDULED';
+  durationSeconds?: number;
+  releaseAt?: number;
+}) => request<SharedRecord>('launchInstance', params);

@@ -2,13 +2,14 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.common.hook.HookPublisher;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -23,14 +24,15 @@ public class TenantCommandService {
     private final TenantAdminTenantMapper tenants;
     private final SequenceService ids;
     private final ObjectMapper json;
-    private final HookPublisher hooks;
     private final TenantExecutionPolicyService policies;
+    private final TenantSandboxProperties sandboxProperties;
     private final TransactionTemplate tx;
+    @Autowired
     public TenantCommandService(TenantCommandStore store,JdbcTemplate jdbc,TenantAdminTenantMapper tenants,
-        SequenceService ids,ObjectMapper json,HookPublisher hooks,TenantExecutionPolicyService policies,
-        PlatformTransactionManager transactions) {
-        this.store=store; this.jdbc=jdbc; this.tenants=tenants; this.ids=ids; this.json=json; this.hooks=hooks;
-        this.policies=policies; this.tx=new TransactionTemplate(transactions);
+        SequenceService ids,ObjectMapper json,TenantExecutionPolicyService policies,
+        PlatformTransactionManager transactions,TenantSandboxProperties sandboxProperties) {
+        this.store=store; this.jdbc=jdbc; this.tenants=tenants; this.ids=ids; this.json=json;
+        this.policies=policies; this.tx=new TransactionTemplate(transactions); this.sandboxProperties=sandboxProperties;
     }
     public TenantCommandStore.Command provision(TenantCommandRequest request) {
         var existing=store.byRequest(request.sourceSystem(),request.requestId());
@@ -51,19 +53,20 @@ public class TenantCommandService {
             config(enterprise,"PROVISION_REQUEST_ID","internal-"+id);
             config(enterprise,"PACKAGE_NAME_SNAPSHOT","external");
             JsonNode body=read(request.snapshot());
-            var snapshot=json.createObjectNode().put("profileKey",request.profileKey());
-            snapshot.set("memberLimit",body.path("initialPolicy").path("limits").path("memberLimit"));
+            // Resolve defaults only for a new reservation; explicit trusted profiles and frozen retries take precedence.
+            String profile=request.profileKey()==null?sandboxProperties.getProfileKey():request.profileKey();
+            var snapshot=json.createObjectNode().put("profileKey",profile)
+                .put("nodeProfileKey", request.profileKey()==null?sandboxProperties.getNodeProfileKey():request.profileKey());
             config(enterprise,"PACKAGE_CONTENT_SNAPSHOT",snapshot.toString());
             config(enterprise,"COMMERCIAL_MANAGED","true");
             config(enterprise,"INTEGRATION_SOURCE_SYSTEM",request.sourceSystem());
             config(enterprise,"PROVISION_STATE","{\"status\":\"RESERVED\",\"generation\":\"1\",\"fencingToken\":\"1\"}");
             policies.prepare(enterprise,body.get("initialPolicy"));
-            // Reserve the initial member snapshot before writing the OWNER relationship.
+            // Initial rights stay in the audited request; runtime admission reads HACU's shared Redis snapshot.
             tenants.insertOwner(ids.nextVal(),enterprise,request.ownerUserId());
-            jdbc.update("INSERT INTO byai.tenant_runtime_operation(enterprise_id,active_command_id,state) VALUES (?,?,'ACTIVE')",enterprise,id);
-            hooks.publishDurable("tenant.created",1,Long.toString(enterprise),"1","1",Long.toString(id),
-                Map.of("enterpriseId",Long.toString(enterprise),"enterpriseName",request.enterpriseName(),
-                    "createdBy",Long.toString(request.ownerUserId()),"requestId",request.requestId(),"provisionState","RESERVED"));
+            if (jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=? WHERE enterprise_id=? AND active_command_id IS NULL",id,enterprise) != 1) {
+                throw new TenantCommandException(409,"TENANT_OPERATION_MISSING");
+            }
             return store.find(id);
         });
     }
@@ -72,7 +75,8 @@ public class TenantCommandService {
         long expected=TenantCommandRequest.decimal(body.get("expectedRevision"));
         return mutation(source,enterprise,"POLICY",body,() -> {
             policies.update(enterprise,expected,body.get("policy"));
-            return "POLICY_CONSUMER_UNAVAILABLE";
+            // Confirm the already published shared snapshot without creating a local commercial rule copy.
+            return null;
         });
     }
     public TenantCommandStore.Command mutation(String source,long enterprise,String type,JsonNode body,Supplier<String> action) {
@@ -84,10 +88,16 @@ public class TenantCommandService {
         if (existing!=null) return match(existing,hash);
         return accept(source,request,hash,() -> {
             requireSourceTenant(source,enterprise);
+            // Serialize member/policy writes with administrative deletion before reading lifecycle state.
+            if (jdbc.update("UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1 WHERE enterprise_id=?", enterprise) != 1)
+                throw new TenantCommandException(409,"TENANT_OPERATION_MISSING");
+            var state=read(tenants.selectConfig(enterprise,"PROVISION_STATE"));
+            if (Set.of("DELETING","DELETE_FAILED","DELETED").contains(state.path("status").asText()))
+                throw new TenantCommandException(409,"TENANT_DELETION_IN_PROGRESS");
             long id=ids.nextVal();
             store.insert(id,source,request,hash,type,enterprise,0,snapshot);
             String error=action.get();
-            jdbc.update("UPDATE byai.internal_command SET status=?,stage=?,error_code=? WHERE id=?",
+            jdbc.update("UPDATE byai.tenant_task SET status=?,stage=?,error_code=? WHERE id=?",
                 error==null?"SUCCEEDED":"MANUAL_REQUIRED",type,error,id);
             return store.find(id);
         });

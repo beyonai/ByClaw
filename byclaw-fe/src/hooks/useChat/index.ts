@@ -20,6 +20,7 @@ import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
+import { isChatCheckpoint, recordChatChain } from '@/utils/chatChainLog';
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
@@ -43,6 +44,7 @@ import {
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
   hasChatStreamContext,
+  rebindChatStreamAnswerMessage,
   refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
@@ -156,15 +158,21 @@ const isMatchingResumeAnswer = (
   answer: IMessage | undefined,
   expected: { sessionId?: string; messageId?: unknown; queryMsgId?: IMessage['msgId'] }
 ) => {
-  const actualIds = [answer?.sessionId, answer?.messageId, answer?.queryMsgId].map((value) => `${value ?? ''}`.trim());
-  const expectedIds = [expected.sessionId, expected.messageId, expected.queryMsgId].map((value) =>
-    `${value ?? ''}`.trim()
-  );
+  const actualSessionId = `${answer?.sessionId ?? ''}`.trim();
+  const actualMessageId = `${answer?.messageId ?? ''}`.trim();
+  const actualQueryMsgId = `${answer?.queryMsgId ?? ''}`.trim();
+  const expectedSessionId = `${expected.sessionId ?? ''}`.trim();
+  const expectedMessageId = `${expected.messageId ?? ''}`.trim();
+  const expectedQueryMsgId = `${expected.queryMsgId ?? ''}`.trim();
   return Boolean(
     answer?.fromBeyond &&
-      actualIds.every(Boolean) &&
-      expectedIds.every(Boolean) &&
-      actualIds.every((value, index) => value === expectedIds[index])
+      actualSessionId &&
+      actualMessageId &&
+      expectedSessionId &&
+      expectedMessageId &&
+      actualSessionId === expectedSessionId &&
+      actualMessageId === expectedMessageId &&
+      (!actualQueryMsgId || !expectedQueryMsgId || actualQueryMsgId === expectedQueryMsgId)
   );
 };
 
@@ -634,7 +642,7 @@ function useChat(props: IProps) {
       });
   });
 
-  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string) => {
+  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string, frame?: any) => {
     const projectionSessionId = `${projection?.sessionId || ''}`;
     if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
 
@@ -665,6 +673,15 @@ function useChat(props: IProps) {
     } else {
       updateMessage(message, { isAssign: true, allowCreateSession: false });
       commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    }
+    if (isChatCheckpoint(frame || projection)) {
+      recordChatChain('fe.reply_applied', {
+        ...(frame || projection),
+        streamId,
+        appliedSessionId: projectionSessionId,
+        appliedMessageId: message.messageId,
+        appliedTraceId: message.traceId,
+      });
     }
     scopedProjectionBasesRef.current.set(projectionKey, {
       projection: cloneDeep({ ...projection, sessionId: projectionSessionId }),
@@ -782,7 +799,7 @@ function useChat(props: IProps) {
       if (
         (isCurrentExternalChildSession || isScopedChildProjection(data)) &&
         `${messageSessionId}` === `${sessionId}` &&
-        (await applyScopedChildProjection(data, get(message, 'streamId')))
+        (await applyScopedChildProjection(data, get(message, 'streamId'), message))
       ) {
         return;
       }
@@ -854,7 +871,7 @@ function useChat(props: IProps) {
         await reconcileScopedChildProjection();
         return;
       }
-      await applyScopedChildProjection(next.projection, next.streamId);
+      await applyScopedChildProjection(next.projection, next.streamId, message);
     };
 
     webSocketManager.onMessage('SCOPED_MESSAGE_DELTA', handler);
@@ -1123,6 +1140,48 @@ function useChat(props: IProps) {
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
     let resumeTargetAnswer: IMessage | undefined;
     let hasFreshResumeTarget = false;
+    const llmMessageId = get(restPayload, 'llmMessageId');
+
+    const persistedResumeAnswer = isResumeChat && llmMessageId
+      ? messageListRef.current.find(
+        (item) =>
+          item.fromBeyond &&
+            `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
+            (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
+      )
+      : undefined;
+
+    hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
+      sessionId,
+      messageId: llmMessageId,
+      queryMsgId: inheritQryMsgId,
+    });
+    // 历史消息刷新后，交互组件拿到的消息对象可能没有 sessionId。此时不能把它当成新回答，
+    // 应用服务端 messageId 找回列表中的原回答，并保留其 msgId / 数字员工身份。
+    if (
+      !hasFreshResumeTarget &&
+      persistedResumeAnswer &&
+      sendProps.resumeAnswerMsg?.fromBeyond &&
+      `${sendProps.resumeAnswerMsg.messageId ?? ''}` === `${llmMessageId ?? ''}`
+    ) {
+      hasFreshResumeTarget = true;
+      resumeTargetAnswer = {
+        ...persistedResumeAnswer,
+        ...sendProps.resumeAnswerMsg,
+        msgId: persistedResumeAnswer.msgId,
+        sessionId: persistedResumeAnswer.sessionId || sessionId,
+        queryMsgId: persistedResumeAnswer.queryMsgId || inheritQryMsgId,
+        agentId: persistedResumeAnswer.agentId || sendProps.resumeAnswerMsg.agentId,
+        agentCode: persistedResumeAnswer.agentCode || sendProps.resumeAnswerMsg.agentCode,
+        agentName: persistedResumeAnswer.agentName || sendProps.resumeAnswerMsg.agentName,
+      };
+    }
+    if (hasFreshResumeTarget) {
+      resumeTargetAnswer ||= sendProps.resumeAnswerMsg;
+      if (resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+        resumeTargetAnswer.traceId = `${payload.traceId}`;
+      }
+    }
 
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
@@ -1154,25 +1213,23 @@ function useChat(props: IProps) {
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
       }
-      const llmMessageId = get(restPayload, 'llmMessageId');
-      hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
-        sessionId,
-        messageId: llmMessageId,
-        queryMsgId: inheritQryMsgId,
-      });
-      if (isContinuingRunningTrace && hasFreshResumeTarget && sendProps.resumeAnswerMsg) {
+      if (isContinuingRunningTrace && hasFreshResumeTarget && resumeTargetAnswer) {
         const refreshed = refreshChatStreamAnswerMessage(
           { sessionId, traceId: payload.traceId },
-          sendProps.resumeAnswerMsg
+          resumeTargetAnswer
         );
-        if (!refreshed) {
+        const rebound = rebindChatStreamAnswerMessage(
+          { sessionId, traceId: payload.traceId },
+          resumeTargetAnswer
+        ) || refreshed;
+        if (!rebound) {
           isContinuingRunningTrace = false;
           isColdResume = true;
         }
       }
       if (isColdResume) {
         resumeTargetAnswer = hasFreshResumeTarget
-          ? sendProps.resumeAnswerMsg
+          ? resumeTargetAnswer
           : messageListRef.current.find(
             (item) =>
               item.fromBeyond &&
@@ -1193,6 +1250,14 @@ function useChat(props: IProps) {
           })
         );
       }
+    }
+
+    if (isResumeChat && resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+      resumeTargetAnswer.traceId = `${payload.traceId}`;
+    }
+
+    if (isResumeChat && resumeTargetAnswer?.agentId) {
+      _agentId = `${resumeTargetAnswer.agentId}`;
     }
 
     resourceList = limitToLatestDigitalEmployee(resourceList);
@@ -1439,6 +1504,17 @@ function useChat(props: IProps) {
       }
       sendResult.cancel();
     };
+
+    void sendResult.promise?.then((outcome) => {
+      if (!('failed' in outcome) || !outcome.failed) return;
+      laneEntries.forEach((entry) => {
+        set(entry.answerMsg, 'messageState', IMessageState.Cancel);
+        updateMessage(entry.answerMsg);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
+        unregisterPendingChatContext(entry.lane.clientRequestId);
+        unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
+      });
+    });
 
     if (isContinuingRunningTrace) {
       return { cancel };

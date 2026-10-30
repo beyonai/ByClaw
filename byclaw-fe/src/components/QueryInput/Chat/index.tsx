@@ -26,6 +26,7 @@ import MentionPopover from '../RichInput/mentionPopover';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
 import { createPendingRemoteSession } from '@/utils/session';
+import { resolvePendingSessionProjectId } from '@/components/ChatLayoutComp/draftSessionProject';
 
 type IState = {
   deepThink: boolean;
@@ -538,7 +539,10 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                 sessionType: 'AGENT',
                 sessionId,
                 // 新建任务上传文件会提前创建会话，创建时就传入当前选择的项目，避免先落到默认项目。
-                projectId: this.props.selectedProject?.projectId || this.props.projectId,
+                projectId: resolvePendingSessionProjectId(
+                  this.props.projectId,
+                  this.props.selectedProject?.projectId
+                ),
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onCreateFile({
@@ -557,13 +561,19 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                     sessionId: mySessionId,
                     sessionName,
                     projectName: this.props.selectedProject?.projectName,
-                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
+                    projectId: resolvePendingSessionProjectId(
+                      this.props.projectId,
+                      this.props.selectedProject?.projectId
+                    ),
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
                   }),
                 });
-                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                const projectId = resolvePendingSessionProjectId(
+                  this.props.projectId,
+                  this.props.selectedProject?.projectId
+                );
                 if (projectId !== undefined && projectId !== null) {
                   this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,

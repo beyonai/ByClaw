@@ -16,12 +16,22 @@
             e.enterprise_id,
             e.com_acct_name,
             e.com_acct_code,
-            m.role,
-            m.status
-        FROM tenant_user_membership m
-        INNER JOIN po_enterprise_info e ON e.enterprise_id = m.enterprise_id
-        WHERE m.user_id = #{userId}
-        ORDER BY m.joined_at DESC
+            COALESCE(m.role, 'MEMBER') AS role,
+            COALESCE(m.status, 'ACTIVE') AS status
+        FROM po_enterprise_info e
+        LEFT JOIN tenant_user_membership m
+            ON m.enterprise_id = e.enterprise_id AND m.user_id = #{userId}
+        LEFT JOIN tenant_config creation
+            ON creation.enterprise_id = e.enterprise_id AND creation.params_code = 'PROVISION_REQUEST_ID'
+        LEFT JOIN (
+            SELECT enterprise_id, MIN(joined_at) AS created_at
+            FROM tenant_user_membership
+            GROUP BY enterprise_id
+        ) legacy_creation ON legacy_creation.enterprise_id = e.enterprise_id
+        WHERE m.user_id = #{userId} OR e.enterprise_id = 1
+        <!-- 沿用平台企业创建时间口径；历史企业用最早成员记录兜底，不随当前用户加入时间变化。 -->
+        ORDER BY COALESCE(creation.created_at, legacy_creation.created_at) DESC NULLS LAST,
+                 e.enterprise_id DESC
     </select>
 
 </mapper>

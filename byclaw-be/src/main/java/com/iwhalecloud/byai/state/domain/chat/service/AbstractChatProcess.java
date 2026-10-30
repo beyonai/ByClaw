@@ -33,13 +33,22 @@ public abstract class AbstractChatProcess {
         // 初始化首词响应开始时间
         context.setFirstTextStartTime(firstTextStartTime);
         context.setStartTime(firstTextStartTime);
+        ChatChainLog.accept(assistantChatDto);
+        long paramsStarted = System.nanoTime();
+        boolean paramsFinished = false;
+        boolean gatewayReturned = false;
+        ChatChainLog.stage(assistantChatDto, context.traceId, "be.params", "start", "running", 0);
         try {
             long time01 = System.currentTimeMillis();
             prepareParams(context);
+            paramsFinished = true;
+            ChatChainLog.stage(assistantChatDto, context.traceId, "be.params", "end", "ok", paramsStarted,
+                "messageId", context.modelAnswerMessageId);
             long time02 = System.currentTimeMillis();
 
             // 使用gateway sdk模式
             handleGatewayMode(context);
+            gatewayReturned = true;
 
             if (context.asyncResponse || context.sendByFrameworkMsgOnly) {
                 return;
@@ -53,6 +62,10 @@ public abstract class AbstractChatProcess {
             afterProcess(context);
         }
         catch (Exception e) {
+            if (!paramsFinished) ChatChainLog.stage(assistantChatDto, context.traceId, "be.params", "end", "failed",
+                paramsStarted, "errorCode", "CHAT_PARAMS_FAILED", "errorType", e.getClass().getSimpleName());
+            if (paramsFinished && !gatewayReturned) ChatChainLog.stage(assistantChatDto, context.traceId, "be.initiate", "end", "failed",
+                paramsStarted, "errorCode", "CHAT_INITIATION_FAILED", "errorType", e.getClass().getSimpleName());
             context.setException(e);
             handleException(context);
         }

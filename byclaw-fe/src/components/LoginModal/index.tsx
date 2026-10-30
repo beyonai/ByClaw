@@ -140,7 +140,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
         .then((res) => {
           console.log(res);
           if (!res || res.code !== 0) {
-            message.error(res?.msg || 'Login failed');
+            message.error(res?.msg || intl.formatMessage({ id: 'login.failed' }));
             return;
           }
 
@@ -149,7 +149,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
           message.success(intl.formatMessage({ id: 'login.success' }));
         })
         .catch((e) => {
-          message.error(e || 'Login failed');
+          message.error(e || intl.formatMessage({ id: 'login.failed' }));
         });
     },
     [intl, setUserInfo, checkAgreement]

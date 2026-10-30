@@ -30,6 +30,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -56,6 +57,8 @@ public class OrganizationApplicationService {
 
     @Autowired
     private OrganizationService organizationService;
+    @Autowired
+    private OrganizationAdminService organizationAdmins;
 
     /**
      * 查询组织
@@ -64,7 +67,14 @@ public class OrganizationApplicationService {
      * @return 组织视图对象
      */
     public OrganizationVo searchOrg(SearchOrgQo searchOrgQo) {
-        return organizationMapper.searchOrg(searchOrgQo);
+        OrganizationVo result = organizationMapper.searchOrg(searchOrgQo);
+        if (result != null) {
+            var admins = organizationAdmins.members(result.getOrgId()).stream()
+                .filter(OrganizationAdminService.Member::administrator).toList();
+            result.setAdministratorIds(admins.stream().map(OrganizationAdminService.Member::userId).toList());
+            result.setAdministratorNames(admins.stream().map(OrganizationAdminService.Member::userName).toList());
+        }
+        return result;
     }
 
     /**
@@ -199,16 +209,11 @@ public class OrganizationApplicationService {
      *
      * @param organization 新增组织
      */
+    @Transactional(rollbackFor = Exception.class)
     public ResponseUtil addOrg(Organization organization) {
 
-        if (!(CurrentUserHolder.isPlatformManager()
-                || organizationService.isOrganizationManManager(organization.getParentOrgId()))) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                    I18nUtil.get("organization.add.nopermission"));
-        }
-
-        // 保存组织
-        organizationService.addOrg(organization);
+        // 组织、企业归属及初始管理员在同一事务中保存。
+        organizationAdmins.createOrganization(organization);
 
         // 发布组织新增事件
         eventPublisher.publishEvent(new OrganizationCreatedEvent(this, organization));
@@ -233,6 +238,9 @@ public class OrganizationApplicationService {
         }
 
         Organization updateOrganization = organizationService.updateOrg(organization);
+        if (organization.getAdministratorIds() != null) {
+            organizationAdmins.setAdministrators(organization.getOrgId(), organization.getAdministratorIds());
+        }
 
         // 更新缓存
         ShareCacheUtil.setShareOrganization(updateOrganization);

@@ -6,8 +6,8 @@ import { isTextContentType } from '@/utils/messgae';
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessageListItem, IResComIdsListItem } from '@/typescript/message';
 import { isJSON } from '@/utils/json';
+import { isDshRuntime } from '@/utils/chatRuntime';
 
-const BYCLAW_DSH_AGENT_TYPE_PREFIX = 'BYCLAW_DSH';
 const DSH_RESUME_ACKNOWLEDGEMENT = 'RESUMED';
 
 const setOrderId = (sseDataObj: any, payload: any) => {
@@ -365,6 +365,11 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
   setOrderId(sseDataObj, res);
   setResumeMessageId(sseDataObj, res.message);
 
+  const runtimeType = get(sseDataObj, 'runtimeType');
+  if (runtimeType && isPlainObject(get(res, 'message.content'))) {
+    set(res, 'message.content.runtimeType', runtimeType);
+  }
+
   return res;
 };
 
@@ -384,7 +389,7 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   if (
     `${contentType}` === `${SSEMessageType.thinkTitle}` &&
     `${content}`.trim() === DSH_RESUME_ACKNOWLEDGEMENT &&
-    sourceAgentType.startsWith(BYCLAW_DSH_AGENT_TYPE_PREFIX)
+    isDshRuntime({ sourceAgentType })
   ) {
     return {};
   }

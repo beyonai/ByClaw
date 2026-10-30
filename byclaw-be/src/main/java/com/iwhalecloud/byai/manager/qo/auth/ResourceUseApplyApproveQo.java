@@ -26,5 +26,6 @@ public class ResourceUseApplyApproveQo {
     private Long applyUserId;
 
     /** 为空时兼容原使用权限审核；SKILL_PUBLICATION 表示技能上架审核。 */
+    @jakarta.validation.constraints.Pattern(regexp = "USE|MANAGE|SKILL_PUBLICATION")
     private String auditType;
 }

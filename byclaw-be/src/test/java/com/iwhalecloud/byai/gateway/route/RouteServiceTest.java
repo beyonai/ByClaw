@@ -102,6 +102,9 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentResolver = new TargetAgentResolver();
+        when(workerRouteReadinessService.resolveTarget(any(), nullable(Long.class), any(), nullable(String.class), anyLong()))
+            .thenAnswer(invocation -> targetAgentResolver.resolveAgentType(invocation.getArgument(2),
+                invocation.getArgument(1), invocation.getArgument(3), invocation.getArgument(0)));
         systemParamTargetAgentResolver = mock(SystemParamTargetAgentResolver.class);
         ReflectionTestUtils.setField(targetAgentResolver, "systemParamTargetAgentResolver", systemParamTargetAgentResolver);
         when(systemParamTargetAgentResolver.resolve(any(), nullable(Long.class), anyString()))
@@ -174,9 +177,108 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         routeService.route(ctx);
 
         InOrder inOrder = inOrder(workerRouteReadinessService, gatewayClient);
-        inOrder.verify(workerRouteReadinessService).ensureReady(eq("u1"), isNull(), eq("BYCLAW_EXE_u1"), any());
+        inOrder.verify(workerRouteReadinessService).ensureReady(eq("u1"), isNull(), eq("BYCLAW_EXE_u1"), any(), anyLong());
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"BYCLAW_DSH_u1,platform", "BYCLAW_DSH_SHARED_pool,platform", "BYCLAW_DSH_u1,timeout", "BYCLAW_DSH_SHARED_pool,timeout"})
+    void startupFailureWritesCorrelatedTerminalBeforeLifecycleCleanup(String target, String failure) throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setClientRequestId("startup-request");
+        when(workerRouteReadinessService.resolveTarget(any(), any(), any(), any(), anyLong())).thenReturn(target);
+        RuntimeException error = "timeout".equals(failure)
+            ? new IllegalStateException("Gateway worker did not become ready")
+            : new BdpRuntimeException("平台请求失败 HTTP500");
+        doThrow(error).when(workerRouteReadinessService).ensureReady(any(), any(), any(), any(), anyLong());
+        var channel = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.channel.ChannelInboundHandlerAdapter());
+        java.io.ByteArrayOutputStream output = new com.iwhalecloud.byai.state.domain.ws.manager.NettyArrayOutputStream(
+            channel.pipeline().firstContext(), "startup-request", "CHAT_STREAM");
+        ctx.res = output;
+        doAnswer(invocation -> {
+            assertThat(output.toString(java.nio.charset.StandardCharsets.UTF_8))
+                .contains("\"event\":\"error\"", "startup-request", "\"messageId\"");
+            return null;
+        }).when(chatStreamRuntimeCoordinator).stopIfStarted(eq(ctx), anyBoolean());
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isInstanceOf(RuntimeException.class);
+
+        assertThat(output.toString(java.nio.charset.StandardCharsets.UTF_8))
+            .contains("\"event\":\"error\"", "startup-request", "\"messageId\"");
+        verifyNoInteractions(gatewayClient);
+        verify(sandboxService, never()).restartSandboxForTargetWithoutWait(any(), any(), any());
+        io.netty.handler.codec.http.websocketx.TextWebSocketFrame frame;
+        int terminalCount = 0;
+        while ((frame = channel.readOutbound()) != null) {
+            JSONObject payload = JSONObject.parseObject(frame.text());
+            if ("error".equals(payload.getString("event"))) {
+                terminalCount++;
+                assertThat(payload.getString("type")).isEqualTo("CHAT_STREAM");
+                assertThat(payload.getString("sessionId")).isEqualTo("3");
+                assertThat(payload.getString("clientRequestId")).isEqualTo("startup-request");
+                assertThat(payload.getJSONObject("data").getLong("messageId")).isEqualTo(2L);
+            }
+            frame.release();
+        }
+        assertThat(terminalCount).isEqualTo(1);
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void sharedResolutionFailureIsTerminalBeforeRuntimeRegistrationOrGatewayDelivery() {
+        ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setClientRequestId("resolution-request");
+        when(workerRouteReadinessService.resolveTarget(any(), any(), any(), any(), anyLong()))
+            .thenThrow(new BdpRuntimeException("shared allocation failed"));
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isInstanceOf(RuntimeException.class);
+
+        assertThat(ctx.res.toString()).contains("\"event\":\"error\"", "resolution-request", "\"sessionId\":3", "\"messageId\":2");
+        verify(chatStreamRuntimeCoordinator, never()).startIfNecessary(any());
+        verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
+    void sharedLaneResolutionUsesTheSameDeadlineAndEmitsOnlyOneTerminalOnFailure() {
+        ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setClientRequestId("lane-startup-request");
+        JSONObject multi = new JSONObject(); multi.put("turnId", "turn-1"); multi.put("mode", "parallel");
+        JSONArray lanes = new JSONArray();
+        lanes.add(lane("lane-a", 101L, "agent-a", "Agent A", "client-a", 11L, 21L, 1));
+        multi.put("lanes", lanes);
+        ctx.assistantChatDto.getExtParams().put("multiAgent", multi);
+        when(workerRouteReadinessService.startupDeadline()).thenReturn(123456L);
+        when(workerRouteReadinessService.resolveTarget(eq("u1"), eq(101L), any(), any(), eq(123456L)))
+            .thenThrow(new BdpRuntimeException("shared lane deadline"));
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isInstanceOf(RuntimeException.class);
+
+        verify(workerRouteReadinessService).resolveTarget(eq("u1"), eq(101L), any(), any(), eq(123456L));
+        assertThat(org.apache.commons.lang3.StringUtils.countMatches(ctx.res.toString(), "\"event\":\"error\""))
+            .isEqualTo(1);
+        verify(chatStreamRuntimeCoordinator, never()).startIfNecessary(any());
+        verifyNoInteractions(gatewayClient);
+    }
+
+    @Test
+    void cleanupFailurePreservesTheReportedStartupFailureAndDoesNotEmitAnotherTerminal() {
+        ChatProcessContext ctx = buildContext();
+        BdpRuntimeException startup = new BdpRuntimeException("startup failed");
+        IllegalStateException cleanup = new IllegalStateException("runtime cleanup failed");
+        doThrow(startup).when(workerRouteReadinessService).ensureReady(any(), any(), any(), any(), anyLong());
+        doThrow(cleanup).when(chatStreamRuntimeCoordinator).stopIfStarted(ctx, true);
+
+        Throwable reported = org.assertj.core.api.Assertions.catchThrowable(() -> routeService.route(ctx));
+
+        assertThat(reported).isInstanceOf(com.iwhalecloud.byai.state.domain.chat.service.ChatStartupFailureException.class)
+            .hasCause(startup);
+        assertThat(reported.getSuppressed()).containsExactly(cleanup);
+        ReflectionTestUtils.invokeMethod(new com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService(),
+            "handleBdpRuntimeException", reported, ctx.assistantChatDto, ctx.res);
+        assertThat(org.apache.commons.lang3.StringUtils.countMatches(ctx.res.toString(), "\"event\":\"error\""))
+            .isEqualTo(1);
+        verifyNoInteractions(gatewayClient);
     }
 
     @ParameterizedTest
@@ -196,7 +298,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
                 try { release.await(); } catch (InterruptedException ignored) { }
             }
             return null;
-        }).when(workerRouteReadinessService).ensureReady(any(), any(), any(), any());
+        }).when(workerRouteReadinessService).ensureReady(any(), any(), any(), any(), anyLong());
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
             anyString(), anyString(), anyString(), anyString(), any(), any())).thenReturn(successResponse());
         var assistant = mock(com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService.class);
@@ -308,6 +410,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     @Test
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setMetadata("{\"chatChain\":{\"invocationId\":\"forged\"},\"requestId\":\"forged\"}");
+        ctx.assistantChatDto.setExtParams(Map.of("requestId", "retry-root"));
         when(sequenceService.nextVal()).thenReturn(100L);
         when(sandboxService.restartSandboxForTargetWithoutWait("u1", null, "BYCLAW_EXE_u1"))
                 .thenReturn(new SandboxLaunchData());
@@ -339,6 +443,17 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
                 anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
+        Map<String, Object> firstMetadata = metadataCaptor.getAllValues().get(0);
+        Map<String, Object> secondMetadata = metadataCaptor.getAllValues().get(1);
+        Map<?, ?> firstChain = (Map<?, ?>) firstMetadata.get("chatChain");
+        Map<?, ?> secondChain = (Map<?, ?>) secondMetadata.get("chatChain");
+        assertThat(firstMetadata).isNotSameAs(secondMetadata);
+        assertThat(firstChain.get("invocationId")).isEqualTo(secondChain.get("invocationId"));
+        assertThat(firstChain.get("invocationId")).isNotEqualTo("forged");
+        assertThat(firstChain.get("requestId")).isEqualTo("retry-root");
+        assertThat(firstChain.get("dispatchId")).isNotEqualTo(secondChain.get("dispatchId"));
+        assertThat(firstChain.get("attempt")).isEqualTo(1);
+        assertThat(secondChain.get("attempt")).isEqualTo(2);
         assertThat(output(ctx))
                 .contains("reasoningLogStart")
                 .contains("reasoningLogEnd")
@@ -461,7 +576,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         routeService.route(ctx);
 
         InOrder ordered = inOrder(workerRouteReadinessService, gatewayClient);
-        ordered.verify(workerRouteReadinessService).ensureReady(eq("u1"), eq(agentId), eq("BYCLAW_DSH_u1"), any());
+        ordered.verify(workerRouteReadinessService).ensureReady(eq("u1"), eq(agentId), eq("BYCLAW_DSH_u1"), any(), anyLong());
         ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
         ordered.verify(gatewayClient).sendMessage(eq("BYCLAW_DSH_u1"), eq("3"), eq("hello"),
                 eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
@@ -495,6 +610,27 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
                         "conversationKey", "3",
                         "beforeMessageId", "1"));
         verifyNoInteractions(sandboxService);
+    }
+
+    @Test
+    void route_usesProjectSharedCwdForDshIncludingDefaultProject() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
+        ctx.getAssistantChatDto().setProjectId(-1L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+            .thenAnswer(invocation -> {
+                ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                return successResponse();
+            });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq("BYCLAW_DSH_u1"), anyString(), any(), anyString(), any(),
+            anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), metadataCaptor.capture());
+        assertThat(paramsCaptor.getValue()).containsEntry("cwd", "/by/.shared/project_-1");
+        assertThat(metadataCaptor.getValue()).containsEntry("runtimeType", "dsh");
     }
 
     @Test

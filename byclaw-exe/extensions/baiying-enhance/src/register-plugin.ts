@@ -1,3 +1,4 @@
+import { createSkillReadiness, registerSkillReadiness } from "./skill-readiness.js";
 import { registerConfiguredThinkingAdapter } from "./configured-thinking.js";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -316,6 +317,14 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     | ReturnType<typeof import("./main-context-template-watch.js").createMainContextTemplateWatch>
     | undefined;
   let serviceStopped = false;
+  const skillReadiness = createSkillReadiness({
+    api, registry, store: redisJsonStore,
+    getAuthorizedIds: () => digEmployeeAuthWatch?.getAuthorizedIds(),
+    flush: async () => { await agentWatch?.__flushNow?.(); },
+    autoSync: pluginCfg.hubSkillAutoSync !== false,
+  });
+  registerSkillReadiness(api, skillReadiness);
+
 
   api.registerService({
     id: "baiying-enhance-watchdogs",
@@ -434,6 +443,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         );
       }
       agentWatch = createAgentWatchdog({
+        onSkillsPrepared: (agents, configStamp) => skillReadiness.recordApplied(agents, configStamp),
         api,
         registry,
         redisJsonStore,
@@ -470,6 +480,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         });
       }
       await agentWatch.start({ deferInitialFlush: true });
+      skillReadiness.start();
       await syncZreadDefaultModelFromRedis().catch((err) => {
         api.logger.warn(
           `baiying-enhance: initial Zread default model sync failed: ${
@@ -523,6 +534,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     },
     stop: async () => {
       serviceStopped = true;
+      skillReadiness.stop();
       await digEmployeeChangeSubscriber?.stop();
       digEmployeeChangeSubscriber = undefined;
       await mainContextTemplateWatch?.stop();

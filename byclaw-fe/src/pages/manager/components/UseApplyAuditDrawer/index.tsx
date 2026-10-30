@@ -1,3 +1,4 @@
+import { getRequestErrorMessage } from '@/utils/requestError';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Empty, Space, Spin, Table, Tag, message } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -55,10 +56,12 @@ const UseApplyAuditDrawer: React.FC<UseApplyAuditDrawerProps> = ({ open, record,
     try {
       const res: any = await queryUseApplyList({ resourceId: record.resourceId });
       setDataSource(res?.data || res || []);
+    } catch (error) {
+      message.error(getRequestErrorMessage(error, intl.formatMessage({ id: 'common.operationFailed' })));
     } finally {
       setLoading(false);
     }
-  }, [open, record?.resourceId]);
+  }, [intl, open, record?.resourceId]);
 
   useEffect(() => {
     loadData();
@@ -78,6 +81,8 @@ const UseApplyAuditDrawer: React.FC<UseApplyAuditDrawerProps> = ({ open, record,
         message.success(intl.formatMessage({ id: 'resource.useApplyApproveSuccess' }));
         await loadData();
         onSuccess?.();
+      } catch (error) {
+        message.error(getRequestErrorMessage(error, intl.formatMessage({ id: 'common.operationFailed' })));
       } finally {
         setApproveLoadingUserId('');
       }
@@ -99,6 +104,8 @@ const UseApplyAuditDrawer: React.FC<UseApplyAuditDrawerProps> = ({ open, record,
         message.success(intl.formatMessage({ id: 'resource.useApplyRejectSuccess' }));
         await loadData();
         onSuccess?.();
+      } catch (error) {
+        message.error(getRequestErrorMessage(error, intl.formatMessage({ id: 'common.operationFailed' })));
       } finally {
         setRejectLoadingUserId('');
       }

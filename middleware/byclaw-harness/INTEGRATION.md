@@ -147,3 +147,88 @@ python3 scripts/browser-supervisor-verify.py
 ```
 
 完整结果见[启动优化与验收边界](docs/startup-2026-10-22/startup-extreme-report.md)。
+
+
+## 共享宿主跨实例恢复会话
+
+受管共享宿主可配置 `BYCLAW_MULTI_HOST_USER_ROOT=/data/byclaw-contexts`，将用户的
+`<contextKey>/dsh-home` 放在所有共享宿主共用的 NAS 目录。`contextKey` 包含稳定的业务服务、
+租户、用户身份，与宿主 ID、容量档位、分配 generation 无关。未设置该参数时保留旧目录布局；
+非受管模式或与宿主根目录重叠的路径会拒绝启动。
+
+`BYCLAW_MULTI_HOST_ROOT=/data/multi-host` 继续保存当前宿主的 profile 和 managed-fences。
+共享模式下浏览器 socket 放在容器 `/tmp/byclaw-multi-host/<宿主及用户哈希>/browser`，不放 NAS。
+JSONL、版本化/压缩会话、storages、附件、team-state 等随用户 home 保留。释放上下文不删除 home。
+新宿主复用原 ByClaw session ID 和 `/by` 工作目录，调用现有 DSH resume；不保证恢复正在执行的
+外部工具调用或浏览器进程。不要将宿主的 managed-fences/profile/socket 复制到另一宿主。
+
+platform 的 `SHARED` 规格使用 `sharedStorageNamespace=byclaw-shared-dsh`，卷仍为 PRIVATE。
+服务拥有一个独立 SERVICE NAS 空间，里面分别挂载 `hosts/${user_code}/multi-host` 和 `contexts`。
+禁止使用 PUBLIC 卷绕过归属校验。当前空间配额沿用 NAS 默认配额，应按留存量监控和扩容。
+共享存储启用时 Redis 占用键按 contextKey 互斥，generation 保留在持有者值内；释放原子校验持有者。
+DSH 自身会话文件锁继续作为写入保护，NAS 跨 Pod 锁语义需要部署验收。
+
+升级需更新 platform 和 Harness 镜像，并执行 platform V0.6.0 的 DDL/DML 增量。
+新宿主使用新镜像；已有宿主保持运行，不为新增用户或挂载新池强制重启。新准入校验实际挂载清单，缺少目标池的旧宿主不接收该池的新上下文，已有上下文继续服务，空闲释放后才替换宿主。
+本次不迁移旧宿主历史会话，旧 NAS 空间保留；新布局产生的会话支持后续跨共享宿主恢复。
+若实际部署使用静态 PVC，路径前还有 `shared/byclaw-shared-dsh/`；使用 NAS pool 时平台会将
+这一逻辑前缀替换为对应的 `spaces/<spaceKey>/`。
+
+本地验证：
+
+```bash
+DSH_SOURCE_ROOT=/path/to/built/deepseek-harness node --test \
+  middleware/byclaw-harness/scripts/byclaw-multi-host.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-managed-host.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-shared-storage-claims.test.mjs \
+  middleware/byclaw-harness/scripts/byclaw-shared-session-resume.test.mjs
+```
+
+其中 Redis 测试启动独立临时 Redis；恢复测试使用指定 DSH 构建的真实 JSONL 后端，不调用模型。
+云端需验证：A 宿主完成会话→排空释放→B 宿主恢复相同会话并正确回答历史信息；同时确认不同
+租户/用户不可串读、双写被拒绝、NAS 不可用时启动失败、释放宿主后数据仍存在。
+
+## Shared user NAS quotas (V0.6.0)
+
+`BYCLAW_SANDBOX_SHARED_USER_NAS_ENABLED` is a business system parameter (default `0`), not a container environment switch. At `1`, only eligible shared DSH users prepare storage at login. Platform admits the context only after the user directory's enforcement quota and the shared parent's capacity budget are confirmed ready. Quota preparation is asynchronous; a pending quota does not reserve a shared host slot.
+
+The deployment still uses **one resident Harness process per shared Pod**. Plugin modules are shared; contexts, credentials and mutable state remain user-scoped. Canonical identity includes source service, tenant and immutable user ID. Legacy session directories receive child quotas in place, with no migration utility. New users can spill into another pool when the original pool is full; users with legacy history cannot silently move to an empty directory.
+
+New quota-capable hosts mount the SERVICE namespace's `contexts` directory from every READY pool, including prepared spare pools, at `/data/byclaw-context-pools/<parentSpaceKey>`. They never mount other services' roots or the whole filesystem. Each user's V2 `storageBinding` selects `<mount>/<contextKey>/dsh-home`. The legacy `/data/byclaw-contexts` mount and V1 binding remain supported. Host-local profiles, tokens and browser temporary files do not become shared session state.
+
+Personal NAS bindings use the same home for shared and exclusive runtimes. V3 selects
+`/data/byclaw-context-pools/<userNasPoolKey>/<spaceKey>/by/byclaw/.dsh` from the pool's
+`/users` mount. V4 keeps exactly the same binding fields and virtual home, while Platform
+overlays each existing `USER/global` registry root `/spaces/<spaceKey>` at
+`<userNasPoolMount>/<spaceKey>`. It must mount each approved directory separately, never
+the whole `/spaces` tree. Neither version moves files or migrates an older logical home.
+
+For V4, the `USER_POOL` entry in `BYCLAW_MULTI_HOST_STORAGE_MOUNTS` must include `spaceKeys`:
+a comma-separated string of 1–500 distinct, lowercase 64-hex space keys, with at most 64
+exact overlays across all pool entries in one host snapshot. Pool entries without overlays
+do not consume this limit. Empty entries,
+whitespace, null, duplicates and extra fields are rejected. The original five-field
+`USER_POOL` entries remain valid for V3; legacy SERVICE entries and V1/V2 bindings retain
+their existing contracts. V4 admission requires an exact key match in this immutable mount
+snapshot. A new legacy-root overlay therefore needs a newly provisioned host that includes
+it; it cannot be inferred from the pool's `/users` mount or added by creating an empty home.
+
+Before boot, V4 requires `/data`, the pool mount and the exact `<spaceKey>` overlay directory
+to exist as real directories without symlinks. Existing parents through `.dsh` must also be
+real directories without symlinks; missing `by/byclaw/.dsh` components can be created only
+after the overlay is verified, allowing a user with existing drive files to start DSH for the
+first time. A missing overlay fails admission. V3 keeps its existing lazy creation behavior.
+The mount inventory is trusted Platform configuration; local path checks do not establish
+that an arbitrary host-supplied manifest represents a real NFS mount. Session JSONL and
+other durable state remain under the selected personal home; profiles and browser sockets
+remain host-local. Deploy the matching Platform and rebuilt Harness image before sending
+V4 bindings. Local tests cover parsing, missing/aliased paths, user boundaries and session
+reopening; actual ACS overlay mounts and NAS persistence still require deployment acceptance.
+
+Platform freezes each new host's mount snapshot before provisioning. ACS validates every parent owner, pool and subpath and derives `BYCLAW_MULTI_HOST_STORAGE_MOUNTS` from the mounted directories. Harness validates that proof and immutable user binding before boot. The allocator sends a new user only to a host covering that user's parent/pool. A future unmounted pool is handled by NEW hosts; no existing Pod is patched, restarted or drained to add mounts. ACTIVE and already reserved generations retain their mode/binding across policy changes and quota-control-plane delays. Disabling the flag stops new quota allocation; users already bound to NAS continue using the same home even after release and reacquisition.
+
+Parent headroom is reserved once, so new users do not repeatedly enlarge the parent quota. Quota readiness gates NEW quota-mode admission only. Releasing a context never deletes its directory or quota. Start new hosts from the upgraded image before enabling the parameter; keep occupied older hosts running until their contexts naturally release. Resource exhaustion blocks new admissions rather than evicting active users.
+
+Local tests exercise allocation, fixed mount snapshots, provider manifests, binding validation and real DSH JSONL reopen/write ownership using temporary local directories. ACS/NAS nested quota enforcement, cross-Pod file locking, actual mount behavior and concurrent chat latency still require deployment acceptance.
+
+A NAS quota limits storage consumption. A shared process and UID are a trusted execution boundary; this is **not** an operating-system security boundary against malicious plugins or arbitrary code that can access other mounted directories. Browser temporary files remain ephemeral and host-local. Container restarts do not remove durable homes.

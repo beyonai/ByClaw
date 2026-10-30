@@ -3,6 +3,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { App, Button, Modal } from 'antd';
 import { downloadResourceFile } from '@/service/file';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 interface DownloadFileProps {
   resourceId: string | number;
@@ -46,7 +47,11 @@ const DownloadFile = ({ resourceId, resourceName }: DownloadFileProps) => {
       setOpen(false);
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' })
+        localizeErrorMessage(
+          error instanceof Error ? error.message : '',
+          intl.formatMessage({ id: 'knowledgeDetail.downloadFailed' }),
+          intl.locale
+        )
       );
     } finally {
       downloadingRef.current = false;

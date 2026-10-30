@@ -9,6 +9,22 @@ import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import java.util.Date;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Supplier;
+import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.i18n.LocaleContext;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +36,19 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class SessionTitleService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SessionTitleService.class);
+    public static final String SUMMARY_PENDING_CODE = "summary_title_pending";
+
+    @Autowired
+    @Qualifier("sessionTitleExecutor")
+    private Executor titleExecutor;
+
+    @Autowired
+    private MultiDeviceBroadcastService broadcastService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
 
     public static final String INITIAL_TITLE_PENDING_CODE = "initial_title_pending";
 
@@ -105,6 +134,99 @@ public class SessionTitleService {
      */
     public void cancelInitialTitle(Long sessionId) {
         sessionExtService.deleteBySessionIdAndParamCode(sessionId, INITIAL_TITLE_PENDING_CODE);
+        sessionExtService.deleteBySessionIdAndParamCode(sessionId, SUMMARY_PENDING_CODE);
+    }
+
+    /** Persist before publishing createSession, so a later manual rename can cancel the summary. */
+    public void markSummaryPending(Long sessionId) {
+        try {
+            ByaiSessionExt pending = new ByaiSessionExt();
+            pending.setExtId(sequenceService.nextVal());
+            pending.setSessionId(sessionId);
+            pending.setExtParamCode(SUMMARY_PENDING_CODE);
+            pending.setExtParamName("Summary Title Pending");
+            pending.setExtParamValue("1");
+            sessionExtService.save(pending);
+        }
+        catch (RuntimeException error) {
+            log.warn("Could not schedule session title, sessionId={}", sessionId);
+        }
+    }
+
+    /** Return immediately; retain the local title on overload, model failure or a process restart. */
+    public void summarizeAsync(Long sessionId, String initialTitle, Supplier<String> generate) {
+        LoginInfo login = CurrentUserHolder.getLoginInfo();
+        LocaleContext locale = LocaleContextHolder.getLocaleContext();
+        Runnable submit = () -> {
+            try {
+                titleExecutor.execute(() -> {
+                    LoginInfo previousLogin = CurrentUserHolder.getLoginInfo();
+                    LocaleContext previousLocale = LocaleContextHolder.getLocaleContext();
+                    try {
+                        CurrentUserHolder.setLoginInfo(login);
+                        LocaleContextHolder.setLocaleContext(locale);
+                        String title = StringUtils.substring(StringUtils.trimToEmpty(generate.get()), 0, 255);
+                        if (StringUtils.isBlank(title)) return;
+                        Date now = new Date();
+                        Long userId = login == null ? null : login.getUserId();
+                        if (userId == null) return;
+                        ByaiSession update = new ByaiSession();
+                        update.setSessionId(sessionId);
+                        update.setSessionName(title);
+                        update.setUpdateBy(userId);
+                        update.setUpdateTime(now);
+                        // Claim the marker and update the title in one transaction. A concurrent manual
+                        // rename waits for this DELETE, then writes its own title after we commit.
+                        Boolean changed = new TransactionTemplate(transactionManager).execute(status -> {
+                            if (sessionExtService.deleteBySessionIdAndParamCode(sessionId, SUMMARY_PENDING_CODE) <= 0) {
+                                return false;
+                            }
+                            // Session state is nullable JSON/text, not an active/deleted flag.
+                            // Deleted sessions have no row; ownership still fences the update.
+                            return byaiSessionMapper.update(update, new LambdaUpdateWrapper<ByaiSession>()
+                                .eq(ByaiSession::getSessionId, sessionId)
+                                .eq(ByaiSession::getCreatorId, userId)) > 0;
+                        });
+                        if (Boolean.TRUE.equals(changed)) {
+                            var event = (com.alibaba.fastjson.JSONObject) JSON.toJSON(update);
+                            event.put("previousSessionName", initialTitle);
+                            broadcastService.broadcastToUserDevices(userId, sessionId,
+                                SseResponseEventEnum.sessionTitleUpdated, event.toJSONString(), null);
+                        }
+                    }
+                    catch (RuntimeException error) {
+                        log.warn("Session title enrichment failed, sessionId={}", sessionId);
+                    }
+                    finally {
+                        clearSummaryPending(sessionId);
+                        if (previousLogin == null) CurrentUserHolder.clearLoginInfo();
+                        else CurrentUserHolder.setLoginInfo(previousLogin);
+                        LocaleContextHolder.setLocaleContext(previousLocale);
+                    }
+                });
+            }
+            catch (RejectedExecutionException error) {
+                clearSummaryPending(sessionId);
+                log.debug("Session title queue full, retaining local title, sessionId={}", sessionId);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+            && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() { submit.run(); }
+            });
+        }
+        else submit.run();
+    }
+
+    private void clearSummaryPending(Long sessionId) {
+        try {
+            sessionExtService.deleteBySessionIdAndParamCode(sessionId, SUMMARY_PENDING_CODE);
+        }
+        catch (RuntimeException error) {
+            log.warn("Could not clear session title marker, sessionId={}", sessionId);
+        }
     }
 
     private String normalizeChatContent(String chatContent) {

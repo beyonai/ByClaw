@@ -24,6 +24,23 @@ test('both image builds link installation peers after plugin install and before 
   }
 })
 
+test('every business image verifies the actual shared launcher and packed employee scopes', async () => {
+  for (const name of ['Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim']) {
+    const source = await readFile(new URL(`../${name}`, import.meta.url), 'utf8')
+    const copy = source.indexOf('scripts/verify-shared-runtime.mjs /workspace/scripts/')
+    const install = source.indexOf('pnpm dsh plugin --profile web add')
+    const guard = source.indexOf('node scripts/verify-shared-runtime.mjs /workspace')
+    assert.ok(copy >= 0 && copy < install && guard > install, name)
+  }
+})
+
+test('slim final runtime receives and verifies the shared launcher across the stage boundary', async () => {
+  const source = await readFile(new URL('../Dockerfile.slim', import.meta.url), 'utf8')
+  const final = source.slice(source.lastIndexOf('\nFROM '))
+  assert.match(final, /COPY --from=profile-builder[^\n]* \/workspace\/scripts\/byclaw-multi-host\.mjs \/workspace\/scripts\/byclaw-managed-host\.mjs \/workspace\/scripts\/verify-shared-runtime\.mjs \/workspace\/scripts\//)
+  assert.match(final, /node \/workspace\/scripts\/verify-shared-runtime\.mjs \/workspace/)
+})
+
 // Run inside the pinned DSH builder workspace with:
 // DSH_ROOT=/workspace node --test scripts/dsh-profile-runtime.test.mjs
 // The test uses DSH's real runtime resolution and isolated business packages.

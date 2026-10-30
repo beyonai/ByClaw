@@ -21,6 +21,22 @@
 
 > **配置格式**：OpenClaw 网关从 **`~/.openclaw/openclaw.json`** 读取配置（内容为 **JSON**，亦支持 **JSON5**：注释与尾随逗号）。接入本插件时，请在同一文件中配置 `plugins.entries`，见下文示例。插件同步托管 Agent 时也会通过 `writeConfigFile` 写回**当前生效的配置文件路径**（通常为上述 `openclaw.json`）。
 
+## 技能准备与运行端回执
+
+资源中心手工关联和资源同步自动关联保留各自的权限、来源及撤销规则，在事务提交后共同使用 `DigitalEmployeeRuntimeRefreshService` 发布员工配置并触发本插件的 Hub 技能下载。后端同步成功仅表示配置发布完成。自动关联目标仍是 `userCode_personal` 固定个人助理。
+
+本插件增加 `baiying_skills`（`status` / `prepare`）工具。它只处理当前用户有权使用且当前员工已关联的技能，不搜索或安装整个 `SKILL_*` 目录。首次消息在 `before_dispatch` 中最多等待约 5 秒进行准备，超时后后台继续；模型通过同一个工具查询实际进度，准备成功后继续原任务。`before_prompt_build` 只查询状态，不在运行中的会话内改写配置。显式关闭 `hubSkillAutoSync` 时不会自动下载。
+
+部署插件时须同时更新 `dist/` 和 `openclaw.plugin.json`；`contracts.tools` 必须声明 `baiying_skills`，否则运行框架会拒绝向模型暴露该工具。
+
+工具发现与服务启动可能分别注册插件。对话工具和提示注入会按沙箱状态目录及用户定位进程内正在运行的准备服务，共用其授权、配置应用记录和回执 ID；未启动服务时返回 `RUNTIME_NOT_STARTED`，不会误报员工未授权。
+
+Hub 技能的 `READY` 必须同时满足：当前员工 Redis 快照已应用、运行中配置已热加载、技能包版本已确认、`SKILL.md` 位于 `${OPENCLAW_STATE_DIR}/skills/<resourceCode>/`，并且其 frontmatter `name` 已挂载到员工的技能列表。代码目录名可以是数字资源编码。就绪表示技能定义可读取并调用，不代表技能内的每个外部服务、依赖或业务操作已经执行成功。内置技能在页面单独标识，不使用 Hub 下载回执。
+
+运行端每 15 秒更新 `byai:skill_runtime:<userId>:<employeeId>` Hash，以进程 UUID 为字段。回执包含员工快照 SHA-256、观测时间、60 秒有效期和各技能的版本/状态/受控错误码；Hash TTL 为 120 秒，回执不含本地路径或凭据。后端接口 `/digitalEmployeeController/querySkillRuntimeStatus` 重新校验使用权限和数据库关联，并比对当前快照及技能版本。没有有效回执显示“等待运行端确认”；存在多个活跃实例时须全部就绪才显示“可调用”。
+
+`/digitalEmployeeController/prepareSkills` 仅写当前用户的重试请求，不改变关联或授权。运行端按 15/30/60 秒退避补偿未完成的准备，每分钟重新检查包版本，覆盖 Pub/Sub 丢失和同编码升级。页面重试请求在下一次 15 秒检查中生效，首次对话和工具调用会立即触发准备。失败时页面和模型显示准备失败及错误码，而不是把已关联技能解释为不存在。旧版运行端没有回执，升级并启动用户运行实例后才能确认可用。
+
 ## 依赖与安装
 
 - **正常使用（`npm install -g openclaw` / `pnpm add -g openclaw` 等官方包）**  
@@ -206,7 +222,7 @@ MiniMax HTTP 客户端。`baiying-redis-image` provider 在每次原生工具调
 - 若 JSON **根**上存在非空的 **`relSkills`**，则写入 **`agents.list[].skills`**。兼容旧字符串数组（例如 `["dws","clawhub"]`），也支持对象数组：对象带 `skillPath` / `skillDocObjectKey`，或这些字段在 `targetContent` JSON 中时，不论 `skillType` 是否为 `inner`，都按路径型 skill 处理：插件会从路径指向的 workspace skill 或 `${OPENCLAW_STATE_DIR}/plugin-skills/<目录>` 读取 `SKILL.md` frontmatter `name`，读不到才退回路径末段目录名，不再把资源码误当成 OpenClaw skill filter；没有路径信息的 `{ "skillCode": "dws", "skillType": "inner" }` 会先用 `${OPENCLAW_STATE_DIR}/plugin-skills/<skillCode>/SKILL.md` 解析实际 filter name，找不到时才保留 `skillCode`。`{ "skillCode": "guizang-ppt-skill-main", "skillType": "hub", "skillUrl": "/byaiService/tool/downloadSkillZip?skillId=10026639", "versionUrl": "/byaiService/tool/getSkillVersion?skillId=10026639" }` 会写入 `skillCode` 并进入 hub 同步。
 - 对 `skillType: "hub"` 的对象，`hubSkillAutoSync` 默认开启：插件会从 Redis 服务注册表 `byai_gateway:sd:instances:ByaiService` 发现 ByaiService，先请求 `versionUrl`，当本地 `${OPENCLAW_STATE_DIR}/skills/<skillCode>/.baiying-hub-skill.json` 版本不一致或缺少 `SKILL.md` 时，再请求 `skillUrl` 下载 zip 并覆盖 `${OPENCLAW_STATE_DIR}/skills/<skillCode>`。鉴权复用登录态/Redis 登录 Hash/环境变量中的 `Beyond-Token`、`Sso-Token`、`Authorization`、`X-User-Id`。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；`relSkills` / `skills` 也兼容 JSON 字符串数组快照；仍无则为 **`[]`**。
-- 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<目录>/SKILL.md`，并监听 `${OPENCLAW_STATE_DIR}/plugin-skills`：workspace skill 默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent；`plugin-skills` 用来把已声明的 `skillCode`/路径解析成实际 OpenClaw skill filter name，不会把目录下所有 skill 无差别并入每个 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
+- 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<目录>/SKILL.md`，并监听 `${OPENCLAW_STATE_DIR}/plugin-skills` 和 `${OPENCLAW_STATE_DIR}/skills`：workspace skill 默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent；`plugin-skills` 和全局 `skills/<skillCode>` 用来把已声明的 `skillCode`/路径解析成实际 OpenClaw skill filter name，不会把目录下所有 skill 无差别并入每个 agent。Hub 包更新后会重新解析名称，撤销关联后不再启用该技能；单个技能的版本检查、下载或解包失败会记录错误并继续同步同一员工的其它技能。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
 - 对 rclone/FUSE 等网盘挂载，`fs.watch` 与目录类型上报可能不可靠；插件会依赖周期扫描，并在 `Dirent` 类型未知时用 `stat()` 兜底识别 skill 目录。
 
 更细的说明见 [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md) 与 [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)。
@@ -284,3 +300,11 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 模型同步为未配置的 `agents.defaults.compaction.timeoutSeconds` 写入 **300 秒**默认值，保留管理员已有的显式配置。它控制整轮摘要流程，与 Provider 的请求超时独立。压缩默认沿用会话模型；本次不自动更换专用压缩模型，也不修改 OpenClaw 核心代码。
 
 发布时需同时更新 `baiying-enhance` 和 `byai-channel` 插件，完成模型同步和配置热加载。验收应检查运行时窗口与平台配置一致、摘要请求实际携带关闭思考参数，并使用受控长会话验证恢复；仅通过单元测试或构建不能证明原线上长会话已经恢复。百应侧最多 3 次恢复及 10 分钟总上限详见 `../byai-channel/README.md`。
+
+### 关联工具的热刷新
+
+数字员工的 `relResourceList` 通过 `baiying_call` 暴露给模型。关联资源增删、名称/描述/调用配置变化，
+以及授权过滤导致的可用资源变化，均参与工具快照刷新判断；即使原生 `relTools` 不变，也会更新内部 reload 标记。
+该标记仅存储调用元数据的摘要，不写入原始凭据。启动时也会核对上次保存的摘要，以更新已有会话的工具快照。
+
+旧运行镜像缺少 `unzip` 时，Hub 技能下载器会使用已有的 `python3` 标准库解压，并在写入前校验路径、拒绝符号链接及超限包；不会因 ZIP 损坏而切换解压器。两种工具都不可用时回执为 `RUNTIME_DEPENDENCY_MISSING`，不能误报技能包损坏。正式镜像仍应保留 Dockerfile 中已有的 `unzip` 依赖。

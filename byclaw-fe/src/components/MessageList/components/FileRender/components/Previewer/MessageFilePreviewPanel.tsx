@@ -1,7 +1,7 @@
 import { useIntl } from '@umijs/max';
 import React, { useEffect, useMemo } from 'react';
 import { CloseOutlined } from '@ant-design/icons';
-import { Spin } from 'antd';
+import { Alert, Spin } from 'antd';
 
 import type { IFile } from '@/typescript/file';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
@@ -48,6 +48,7 @@ const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileI
       </div>
       <div className={fileSiderStyles.previewBody}>
         <Spin spinning={previewing || previewInfo.loading} wrapperClassName="full-height-spin">
+          {previewInfo.error && <Alert type="warning" showIcon message={previewInfo.error} />}
           {previewInfo.blob && (
             <React.Suspense fallback={null}>
               <PreViewFile

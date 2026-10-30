@@ -1,3 +1,5 @@
+import { isDshRuntime } from '@/utils/chatRuntime';
+
 type Question = {
   id?: string;
 };
@@ -13,7 +15,7 @@ export function isDshInteractionResume(
   interactionId: string | undefined,
   parentRunId: string | undefined
 ): boolean {
-  return sourceAgentType?.startsWith('BYCLAW_DSH') === true || Boolean(interactionId && !parentRunId);
+  return isDshRuntime({ sourceAgentType }) || Boolean(interactionId && !parentRunId);
 }
 
 /** Build the fields consumed directly by BYCLAW_DSH ResumeCommand. */
@@ -63,4 +65,14 @@ export function resolveDshResumeRoute<T extends { parentRunId?: string; interact
     ...metadataRoute,
     interactionId: resolveDshInteractionId(metadataRoute.interactionId, cardInteractionId),
   };
+}
+
+/** History rows may lose the parent IMessage.traceId while the persisted 3014 card still carries it. */
+export function resolveResumeTraceId(messageTraceId: unknown, cardContent: unknown): string | undefined {
+  const card = cardContent && typeof cardContent === 'object' ? (cardContent as Record<string, any>) : {};
+  const values = [messageTraceId, card.traceId, card.substance?.traceId];
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
 }

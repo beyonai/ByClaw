@@ -419,6 +419,14 @@ public class FilesApplicationService {
             logger.info("公共文件输入流获取成功，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
                 response.isCommitted());
 
+            int firstByte = inputStream.read();
+            if (firstByte == -1) {
+                response.setStatus(422);
+                return;
+            }
+            response.setHeader("Cache-Control", "no-store");
+            response.setHeader("X-Content-Type-Options", "nosniff");
+
             String fileName = filePath;
             if (filePath.contains("/")) {
                 fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
@@ -434,6 +442,7 @@ public class FilesApplicationService {
             response.setHeader("Content-Disposition", contentDisposition);
             logger.info("开始写入公共文件响应，bucketName={}, filePath={}, contentDisposition={}", bucketName, filePath,
                 contentDisposition);
+            response.getOutputStream().write(firstByte);
             IOUtils.copy(inputStream, response.getOutputStream());
             logger.info("公共文件响应写入完成，bucketName={}, filePath={}, responseCommitted={}", bucketName, filePath,
                 response.isCommitted());
@@ -441,7 +450,11 @@ public class FilesApplicationService {
         catch (Exception e) {
             logger.error("公共文件预览失败，style={}, bucketName={}, filePath={}, responseCommitted={}", style, bucketName,
                 filePath, response.isCommitted(), e);
-            throw new IllegalStateException("公共文件预览失败: " + filePath, e);
+            if (!response.isCommitted()) {
+                response.reset();
+                response.setStatus(e instanceof java.io.FileNotFoundException
+                    ? HttpServletResponse.SC_NOT_FOUND : HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            }
         }
     }
 

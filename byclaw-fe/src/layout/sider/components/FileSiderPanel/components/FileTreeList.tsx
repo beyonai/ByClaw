@@ -39,6 +39,7 @@ interface FileTreeListProps {
   onAction: (key: Key, item: FileBrowserItem) => void;
   getTooltipPath?: (item: FileBrowserItem) => string | undefined;
   getNodeExtra?: (item: FileTreeItem) => React.ReactNode;
+  getDisplayName?: (item: FileBrowserItem) => string;
 }
 
 export const FilePathTooltip: React.FC<{ item: FileBrowserItem; path?: string; children: React.ReactNode }> = ({
@@ -129,16 +130,15 @@ const formatFileSize = (size?: number) => {
 const formatFileUpdatedAt = (value?: string) => {
   if (!value) return '';
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString('zh-CN', {
-      hour12: false,
-      ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const FileTreeList: React.FC<FileTreeListProps> = ({
@@ -159,6 +159,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   onAction,
   getTooltipPath,
   getNodeExtra,
+  getDisplayName,
 }) => {
   const treeData = useMemo(() => {
     const expandedDirectoryKeySet = new Set(
@@ -235,7 +236,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                           .filter(Boolean)
                           .join(' ')}
                       >
-                        <span className={styles.treeTitleText}>{item.name}</span>
+                        <span className={styles.treeTitleText}>{getDisplayName?.(item) || item.name}</span>
                         {hasItemMeta ? (
                           <span className={styles.treeTitleMeta}>
                             {!isDirectory(item) && (

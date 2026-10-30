@@ -46,7 +46,7 @@ public class TenantChatRuntimeRoutingAspect {
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.chat.AssistantChatController.*(..))")
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
-        if (context == null) return call.proceed();
+        if (context == null || TenantContextService.isSharedWorkspace(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         switch (method) {

@@ -49,6 +49,15 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            if(failure.status()==409) {
+                try {
+                    JsonNode body=json.readTree(failure.contentUTF8());
+                    if("STORAGE_PREPARING".equals(body.path("data").path("errorType").asText()))
+                        throw new com.iwhalecloud.byai.state.common.exception.StoragePreparingException();
+                } catch(java.io.IOException ignored) { /* Preserve the original remote failure. */ }
+            }
+            var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
+            if(quota!=null)throw quota;
             throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
         }
     }
@@ -61,7 +70,35 @@ public class PlatformRemoteGateway {
         return data(envelope(area, operation, params));
     }
 
+    public void checkPersonalQuota(String operation,long requestedBytes) {
+        if(!remote || com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()!=null)return;
+        String user=CurrentUserHolder.getCurrentUserCode();
+        if(user==null || user.isBlank())return;
+        call("storage","quota-check",params("userCode",user,"operation",operation,"requestedBytes",requestedBytes));
+    }
+
+    /** A generic runtime filesystem error is not evidence of a personal NAS failure.
+     * Recheck that user's capacity and only return a verified structured rejection. */
+    public Map<String,Object> recheckPersonalQuota(String user) {
+        if(!remote || user==null || user.isBlank())return null;
+        try { call("storage","quota-check",params("userCode",user,"operation","CHAT","requestedBytes",0)); }
+        catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
+        return null;
+    }
+
+    public Map<String,Object> reportQuotaRejection(String user,String requestId) {
+        if(!remote || user==null || user.isBlank())return null;
+        try { call("storage","quota-rejected",params("userCode",user,"operation","CHAT","requestId",requestId)); }
+        catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
+        return null;
+    }
+
     public Object data(Map<String, Object> response) {
+        if(response!=null && response.get("data") instanceof Map<?,?> details
+                && Set.of("NAS_QUOTA_PREPARING","STORAGE_PREPARING").contains(Objects.toString(details.get("errorType"),"")))
+            throw new com.iwhalecloud.byai.state.common.exception.StoragePreparingException();
+        var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(response);
+        if(quota!=null)throw quota;
         if (response == null || !(response.get("code") instanceof Number))
             throw new BdpRuntimeException(I18nUtil.get("platform.response.invalid"));
         if (((Number) response.get("code")).intValue() != 0)

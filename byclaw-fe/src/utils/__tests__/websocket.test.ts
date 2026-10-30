@@ -11,6 +11,12 @@ jest.mock('../auth', () => ({
 
 jest.mock('@umijs/max', () => ({
   getLocale: (...args: any[]) => mockGetLocale(...args),
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      ({ 'websocket.tokenUnavailable': 'WebSocket 凭证不可用', 'websocket.connectionTimeout': 'WebSocket 连接超时' }[
+        id
+      ] || id),
+  }),
 }));
 
 const createJwt = (payload: Record<string, unknown>) => {
@@ -67,6 +73,28 @@ describe('utils/websocket', () => {
     (global as any).WebSocket = WebSocketMock;
   });
 
+  it.each(['auth', 'scope'])(
+    'never dispatches a retained operation after %s changes during connection wait',
+    async (kind) => {
+      mockGetToken.mockReturnValue('old-token');
+      const manager = require('../websocket').default;
+      let connect: () => void = () => {};
+      jest.spyOn(manager, 'waitUntilConnected').mockReturnValue(
+        new Promise<void>((resolve) => {
+          connect = resolve;
+        })
+      );
+      const send = jest.spyOn(manager, 'sendMessage');
+      const outcome = manager.sendMessageWhenReady({ type: 'LLM_MESSAGE', chatContent: 'old operation' });
+      if (kind === 'auth') mockGetToken.mockReturnValue('new-token');
+      else manager.setScopedSessionId('new-scope');
+      send.mockClear();
+      connect();
+      await expect(outcome).rejects.toMatchObject({ name: 'AbortError' });
+      expect(send).not.toHaveBeenCalled();
+    }
+  );
+
   afterEach(() => {
     const manager = (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
     manager?.dispose?.();
@@ -105,7 +133,7 @@ describe('utils/websocket', () => {
     expect(WebSocketMock).not.toHaveBeenCalled();
     expect(mockClearToken).toHaveBeenCalled();
     expect(mockLoginRedirect).toHaveBeenCalledWith({ openLoginModal: '1' });
-    await expect(ws.waitUntilConnected()).rejects.toThrow('WebSocket token unavailable');
+    await expect(ws.waitUntilConnected()).rejects.toThrow('WebSocket 凭证不可用');
   });
 
   it('creates websocket with correct url in development and reports connecting state', () => {

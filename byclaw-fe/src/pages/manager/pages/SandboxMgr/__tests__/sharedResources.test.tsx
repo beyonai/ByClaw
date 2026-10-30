@@ -1,10 +1,17 @@
-import { listSharedMembers, listSharedRecords, releaseSharedMember } from '@/pages/manager/service/SharedSandbox';
-import { act, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
+import {
+  listSharedConfigs,
+  listSharedMembers,
+  listSharedRecords,
+  releaseSharedMember,
+} from '@/pages/manager/service/SharedSandbox';
+import { act, configure, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
 import SharedResources from '../SharedResources';
 import { ConfigProvider } from 'antd';
 import type { ReactElement } from 'react';
 
 jest.setTimeout(20000);
+// Drawer rendering can exceed the default one-second wait in the full regression suite.
+configure({ asyncUtilTimeout: 5000 });
 const render = (element: ReactElement) =>
   renderComponent(<ConfigProvider theme={{ token: { motion: false } }}>{element}</ConfigProvider>);
 
@@ -14,6 +21,8 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/pages/manager/service/SharedSandbox', () => ({
+  listSharedConfigs: jest.fn(),
+  launchSharedInstance: jest.fn(),
   listSharedRecords: jest.fn(),
   listSharedMembers: jest.fn(),
   releaseSharedInstance: jest.fn(),
@@ -22,6 +31,7 @@ jest.mock('@/pages/manager/service/SharedSandbox', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  [listSharedMembers, listSharedRecords, releaseSharedMember].forEach((mock) => (mock as jest.Mock).mockReset());
   mockLocale = 'zh-CN';
   (releaseSharedMember as jest.Mock).mockResolvedValue(true);
   (listSharedRecords as jest.Mock).mockResolvedValue({
@@ -285,4 +295,16 @@ test('preserves the parent filter if the drawer closes while releasing', async (
   await waitFor(() => expect(listSharedRecords).toHaveBeenCalledTimes(3));
   expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'RELEASED' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('launch dialog offers both duration and calendar schedules to managers only', async () => {
+  (listSharedConfigs as jest.Mock).mockResolvedValue([
+    { serviceKey: 'byclaw-sandbox', profileKey: 's', enabled: true },
+  ]);
+  render(<SharedResources canManage />);
+  fireEvent.click(screen.getByRole('button', { name: '启动共享资源' }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('定期释放'));
+  expect(screen.getByLabelText('指定时长')).toBeInTheDocument();
+  expect(screen.getByLabelText('指定日期时间')).toBeInTheDocument();
 });

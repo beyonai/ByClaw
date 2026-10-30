@@ -226,13 +226,21 @@ describe('utils/messgae', () => {
       messageId: 'm2',
       messageStruct,
       inferLog,
-      metadata: '{"agentId":"a1"}',
+      metadata: JSON.stringify({
+        agentId: 'a1',
+        resourceId: 'a1',
+        resourceName: 'Agent One',
+        resourceCode: 'agent-one',
+      }),
       relatedResources,
       createTime: '101',
       sessionId: 's1',
     });
 
     expect(message.fromBeyond).toBe(true);
+    expect(message.agentId).toBe('a1');
+    expect(message.agentCode).toBe('agent-one');
+    expect(message.agentName).toBe('Agent One');
     expect(message.thinkDone).toBe(true);
     expect(message.thinkList).toHaveLength(2);
     expect(message.messageList).toHaveLength(2);

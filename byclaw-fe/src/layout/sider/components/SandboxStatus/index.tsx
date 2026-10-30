@@ -21,7 +21,7 @@ interface SandboxStatusIndicatorProps {
 
 const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCode, className, style }) => {
   const intl = useIntl();
-  const { status, sandboxes, refetch, restartSandbox } = useSandboxStatus(userCode);
+  const { status, storage, sandboxes, refetch, restartSandbox } = useSandboxStatus(userCode);
   const [isRestarting, setIsRestarting] = useState(false);
   const [restartTarget, setRestartTarget] = useState<ISandboxesInfo | null>(null);
   const summary = summarizeSandboxes(sandboxes);
@@ -102,7 +102,21 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
     ];
   }
 
+  const storagePending = storage?.enabled && !storage.ready;
+  const storageMessage = intl.formatMessage({
+    id:
+      storage?.state === 'MIGRATION_REQUIRED'
+        ? 'sandbox.storage.migration'
+        : storage?.state === 'FAILED'
+          ? 'sandbox.storage.failed'
+          : 'sandbox.storage.preparing',
+  });
+  if (storagePending) {
+    menuItems.unshift({ key: 'user-storage', label: storageMessage, disabled: true });
+  }
+
   const getStatusText = () => {
+    if (storagePending) return storageMessage;
     if (summary.total > 1) {
       return intl.formatMessage(
         { id: 'sandbox.status.summary' },

@@ -1,6 +1,6 @@
 # 配置式 HTTP Hook
 
-Hook 默认关闭。此版本接入 `user.registered` v1、`tenant.created` v1 和 `workgroup.created` v1，在对应业务创建事务提交后异步发送 HTTP；不保存任务，默认不自动重试，可按订阅开启有界内存重试，不保证重启恢复，也没有管理页面。HTTP 结果不会修改业务接口响应。多个订阅独立执行，不保证发送顺序。
+Hook 默认关闭。普通创建入口接入 `user.registered` v1 和 `workgroup.created` v1，在对应业务创建事务提交后异步发送 HTTP；不保存任务，默认不自动重试，可按订阅开启有界内存重试，不保证重启恢复，也没有管理页面。HTTP 结果不会修改业务接口响应。多个订阅独立执行，不保证发送顺序。
 
 ## 启用与环境隔离
 
@@ -39,23 +39,11 @@ Hook 默认关闭。此版本接入 `user.registered` v1、`tenant.created` v1 �
 
 ## 企业（租户）创建事件
 
-`POST /admin/tenants/create` 经 `TenantAdminTenantService.create` 首次创建企业、套餐快照与拥有者后，发布 `tenant.created` v1。HTTP 通知仅在该创建事务提交后异步发送；失败或回滚不发送。相同 `requestId` 的幂等返回不重复发布。
+`POST /admin/tenants/create`（`TenantAdminTenantService.create`）保留原有企业、套餐快照与 OWNER 预留及后续开通流程，不再发布普通 `tenant.created` Hook。因此该旧入口不会触发租户创建通知及依赖该通知的外部开户流程，幂等返回同样不发布。
 
-该事件表示企业记录已创建、开通状态为 `RESERVED`，不代表数据库、Node 或沙箱已开通成功。Controller 随后调用 `provisioner.request` 请求开通；如果开通请求失败，已提交的租户创建事件仍可能送达。后续开通状态不属于本事件。
+商业开通使用 `POST /internal/v1/tenant-provisionings`，状态持久保存在租户任务与步骤中。开通、删除不再发送可靠 Hook；HACU 定时查询原任务及 runtime，见 [租户任务状态查询](api/tenant-task-polling.md)。
 
-| 路径 | 类型 | 含义 |
-| --- | --- | --- |
-| `data.enterpriseId` | string | 企业（租户）ID |
-| `data.enterpriseName` | string | 企业名称 |
-| `data.packageId` | string | 创建时选择的套餐 ID |
-| `data.packageName` | string | 套餐名称快照 |
-| `data.createdBy` | string | 创建者用户 ID |
-| `data.requestId` | string | 创建请求的幂等标识 |
-| `data.provisionState` | string | 创建时状态，固定为 `RESERVED` |
-
-事件元数据仍使用 `event.id`、`event.type`、`event.version`、`event.occurredAt`。不包含套餐完整内容、数据库连接信息、Node 凭据或其他租户配置。
-
-通用 `config/examples/hooks.yaml` 的 `tenant-sync` 订阅展示了本事件的正文映射。默认不启用该订阅；启用时配置接收地址及认证方式。
+通用 `config/examples/hooks.yaml` 中的 `tenant-sync` 仅为普通 Hook 正文映射示例，不会使管理或商业开通入口自动发送租户事件。清除部署配置中已移除的 `byclaw.hooks.durable.*` 段。
 
 ## 工作组创建事件
 

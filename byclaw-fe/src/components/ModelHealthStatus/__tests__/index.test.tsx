@@ -149,6 +149,9 @@ it('keeps all 3 failures across tabs and refreshes a repair made on another devi
   await seed({ ...failure(), models: failure().models.slice(0, 1) });
   await seed(failure('PUBLIC'));
   const view = render(<Page combined />);
+  // The login probe is independent of opening cached diagnostics or refreshing on focus.
+  await waitFor(() => expect((POST as jest.Mock).mock.calls.some(([url]) => url.endsWith('/healthCheck'))).toBe(true));
+  (POST as jest.Mock).mockClear();
   expect(screen.getByRole('status')).toHaveTextContent('Last check: 3 issue(s) in total');
   fireEvent.click(screen.getByRole('button', { name: 'Personal models: 1 issue(s) · View details' }));
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Personal models'));

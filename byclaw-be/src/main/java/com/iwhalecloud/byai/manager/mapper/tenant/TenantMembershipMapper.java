@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface TenantMembershipMapper {
 
+
     @Select("""
         SELECT CAST(m.enterprise_id AS VARCHAR) AS "enterpriseId",
                e.com_acct_name AS "enterpriseName",

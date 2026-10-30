@@ -142,6 +142,15 @@ class FilesApplicationServiceTest {
     }
 
     @Test
+    void previewReturnsErrorInsteadOfSuccessfulEmptyResponseWhenStorageFails() {
+        doThrow(new IllegalStateException("storage unavailable")).when(commonFileStorage).read(any());
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(response.getStatus()).isEqualTo(500);
+        assertThat(response.getContentAsByteArray()).isEmpty();
+    }
+
+    @Test
     void previewRendersPdfInlineWithoutChangingOtherFileDownloads() {
         when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
 
@@ -154,17 +163,17 @@ class FilesApplicationServiceTest {
     }
 
     @Test
-    void previewPropagatesStorageFailureWithContext() {
-        doThrow(new IllegalStateException("raw path missing")).when(commonFileStorage).read(any());
-        doThrow(new IllegalStateException("user fs path missing")).when(commonFileStorage)
-            .read(argThat(userFsLocation("")));
+    void previewRejectsEmptyContentAndDisablesCachingForValidContent() throws Exception {
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[0]));
+        MockHttpServletResponse empty = new MockHttpServletResponse();
+        filesApplicationService.preview(empty, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(empty.getStatus()).isEqualTo(422);
 
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        assertThatThrownBy(() -> filesApplicationService.preview(response, "minio", BUCKET_NAME, SESSION_FILE_PATH))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining(SESSION_FILE_PATH)
-            .hasCauseInstanceOf(IllegalStateException.class);
+        when(commonFileStorage.read(any())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2, 3}));
+        MockHttpServletResponse valid = new MockHttpServletResponse();
+        filesApplicationService.preview(valid, "minio", BUCKET_NAME, SESSION_FILE_PATH);
+        assertThat(valid.getContentAsByteArray()).containsExactly(1, 2, 3);
+        assertThat(valid.getHeader("Cache-Control")).isEqualTo("no-store");
     }
 
     private static ArgumentMatcher<StorageLocation> userFsLocation(String shareType) {

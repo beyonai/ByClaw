@@ -363,7 +363,10 @@ CREATE TABLE byai.byai_session_member (
     request_count bigint,
     last_read_message_id bigint,
     last_read_time timestamp without time zone,
-    welcome_handled_at timestamp without time zone
+    welcome_handled_at timestamp without time zone,
+    api_key character varying(255),
+    update_date timestamp without time zone,
+    state character varying(64) DEFAULT '00A'
 );
 
 CREATE TABLE byai.byai_session_workspace (
@@ -458,6 +461,9 @@ ALTER TABLE byai.byai_group_chat_forward_target ADD CONSTRAINT fk_forward_target
 ALTER TABLE byai.byai_group_chat_pending_publication ADD CONSTRAINT fk_group_chat_pending_task FOREIGN KEY (task_session_id) REFERENCES byai.byai_group_chat_task(task_session_id);
 
 CREATE INDEX idx_byai_message_session_message ON byai.byai_message USING btree (session_id, message_id);
+
+CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session
+    ON byai.byai_message (session_id) WHERE usage = 1;
 
 CREATE INDEX idx_byai_message_session_ref ON byai.byai_message USING btree (session_id, message_ref);
 

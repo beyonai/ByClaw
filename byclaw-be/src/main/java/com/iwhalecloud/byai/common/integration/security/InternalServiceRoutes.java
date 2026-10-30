@@ -7,11 +7,17 @@ public final class InternalServiceRoutes {
         return scope(method, path) != null;
     }
     public static String scope(String method, String path) {
+        if ("POST".equals(method) && path.matches("/internal/v1/shared-workspaces/[1-9][0-9]*/members")) {
+            return "tenant:manage";
+        }
         if (path.matches("/internal/v1/tenants/[1-9][0-9]*/(?:enterprise|members)")) {
             if ("GET".equals(method)) return "tenant:read";
             if (("PUT".equals(method) && path.endsWith("/enterprise"))
                 || ("POST".equals(method) && path.endsWith("/members"))) return "tenant:manage";
         }
+        if ("POST".equals(method) && path.matches("/internal/v1/commands/[1-9][0-9]*/recoveries")) return "tenant:provision";
+        if ("GET".equals(method) && (path.matches("/internal/v1/commands/[1-9][0-9]*/recovery")
+            || path.matches("/internal/v1/commands/[1-9][0-9]*/recovery-requests/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))) return "tenant:read";
         if ("POST".equals(method) && "/internal/v1/tenant-provisionings".equals(path)) return "tenant:provision";
         if ("GET".equals(method) && (path.matches("/internal/v1/commands/(?:[1-9][0-9]*|by-request)")
             || path.matches("/internal/v1/tenants/[1-9][0-9]*/runtime"))) return "tenant:read";

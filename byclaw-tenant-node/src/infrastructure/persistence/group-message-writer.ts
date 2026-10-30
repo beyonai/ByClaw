@@ -8,6 +8,7 @@ import { indexGroupMessage, indexGroupMention } from "./group-message-index.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 import { readGroupCoordination } from "./group-coordination.js";
 import type { GroupDispatch } from "./group-task-create.js";
+import { requireGroupMemberCapacity } from "./group-quota.js";
 
 /** Commits a human group message in the owning tenant database, keyed by client request ID. */
 export interface GroupMessageResult {
@@ -116,6 +117,9 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       if (!member) {
         if (payload.coordinatorAuthorized !== true)
           throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        await requireGroupMemberCapacity(context, [
+          { memObjType: "AGENT", memObjId: coordinatorAgentId },
+        ]);
         await insert(db, "byai_session_member", {
           byai_session_member_id: await nextId(db, command.enterpriseId),
           session_id: command.sessionId,

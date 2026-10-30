@@ -1,3 +1,4 @@
+import nasQuota from './en-US/nasQuota';
 import adapterRecorder from './en-US/adapterRecorder';
 import imageCanvas from './en-US/imageCanvas';
 import employeePublication from './en-US/employeePublication';
@@ -7,6 +8,7 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': 'Only adminvip in the open-source edition can manage workgroup templates.',
   'workgroupTemplate.title': 'Workgroup templates',
@@ -163,6 +165,10 @@ export default {
   'connector.connectKnowledge': 'Connect {name} as an AI knowledge base',
   'connector.getCredentials': 'Get credentials from {name}',
   'sandbox.userResources': 'User resources',
+  'tenant.status.MANUAL_REQUIRED': 'Manual action required',
+  'tenant.progress.paused': 'Paused',
+  'tenant.progress.manualRequired':
+    'Provisioning is paused. A platform administrator must verify the original request and resources before recovery.',
   'tenant.status.RESERVED': 'Not provisioned',
   'tenant.status.PROVISIONING': 'Provisioning',
   'tenant.status.READY': 'Ready',
@@ -208,6 +214,7 @@ export default {
   'tenant.addMember': 'Add members',
   'tenant.retryDelete': 'Retry deletion',
   'tenant.delete': 'Delete tenant',
+  'tenant.deleteFailed': 'The deletion request failed. Retry, or contact an administrator to check the service logs.',
   'tenant.confirmDelete': 'Confirm deletion',
   'tenant.deleteWarning':
     "Deletion releases the tenant's database and data service sandboxes and removes its private persistent data. This action cannot be undone.",
@@ -354,6 +361,50 @@ export default {
   'modelMgr.modal.ttsInputInvalid': 'Enter a JSON object containing text',
   'modelMgr.modal.ttsDefaultText': 'Hello, welcome to ByClaw.',
   ...imageCanvas,
+  'skillRuntime.error.NO_RUNTIME_RECEIPT': 'Start a conversation to prepare skills automatically',
+  'skillRuntime.error.CONFIG_PENDING': 'Loading skill configuration',
+  'skillRuntime.error.VERSION_PENDING': 'Updating skill version',
+  'skillRuntime.error.PACKAGE_MISSING': 'Preparing skill files',
+  'skillRuntime.error.DOWNLOAD_PENDING': 'Downloading skill files',
+  'skillRuntime.error.DOWNLOAD_UNAUTHORIZED': 'Download denied; check skill access permissions',
+  'skillRuntime.error.PACKAGE_NOT_FOUND': 'Skill package missing; publish it again',
+  'skillRuntime.error.INVALID_PACKAGE': 'Skill package validation failed',
+  'skillRuntime.error.INVALID_PACKAGE_REFERENCE': 'Skill package information is incomplete',
+  'skillRuntime.error.BACKEND_UNAVAILABLE': 'Preparation service unavailable; will retry',
+  'skillRuntime.error.DOWNLOAD_FAILED': 'Download failed; will retry',
+  'skillRuntime.error.DOWNLOAD_TIMEOUT': 'Download timed out; will retry',
+  'skillRuntime.error.AUTO_SYNC_DISABLED': 'Automatic skill downloads are disabled',
+  'skillRuntime.READY': 'Ready',
+  'skillRuntime.PREPARING': 'Preparing',
+  'skillRuntime.FAILED': 'Preparation failed',
+  'skillRuntime.WAITING_RUNTIME': 'Awaiting employee startup',
+  'skillRuntime.BUILT_IN': 'Built-in skill',
+  'skillRuntime.UNKNOWN': 'Status unconfirmed',
+  'skillRuntime.retry': 'Retry preparation',
+  'skillRuntime.detail': 'Preparation status: {code}',
+  'skillRuntime.associated': 'Associated; preparing skills',
+
+  'digitalEmployees.audienceOrganizations': 'Organizations',
+  'digitalEmployees.audienceOrganizations.unset': 'No organization set',
+  'resource.resourceManageAudit': 'Management access',
+  'digitalEmployees.applyManage': 'Request management access',
+  'digitalEmployees.manageApplyPending': 'Management request pending',
+  'digitalEmployees.manageApplySubmitted': 'Management request submitted',
+  'ui.employee.notFound': 'The digital employee does not exist',
+  'ui.card.urlRequired': 'A link URL is required',
+  'ui.chat.errorDetails': 'Error details',
+  'openClaw.websocket.invalidUrl': 'Invalid WebSocket URL',
+  'openClaw.websocket.credentialsRequired': 'A token or password is required to connect to WebSocket',
+  'openClaw.websocket.notOpen': 'WebSocket connection is not open',
+  'openClaw.websocket.chatTimeout': 'WebSocket chat timed out',
+  'openClaw.websocket.requestFailed': 'WebSocket request failed',
+  'websocket.tokenUnavailable': 'WebSocket credentials are unavailable',
+  'websocket.connectionTimeout': 'WebSocket connection timed out',
+  'openClaw.websocket.closed': 'WebSocket connection closed',
+  'openClaw.websocket.reconnectFailed': 'WebSocket could not reconnect',
+  'websocket.connectionError': 'WebSocket connection failed',
+  'websocket.initFailed': 'WebSocket could not start',
+  'websocket.tokenExpired': 'WebSocket credentials expired',
   ...employeePublication,
   // 补齐页面直接使用的文案，避免缺失翻译时显示国际化键名。
   'toolCall.defaultTitle': 'Tool call',
@@ -385,6 +436,10 @@ export default {
   'orgMgr.digital.ownerType.enterprise': 'Enterprise',
   'orgMgr.digital.ownerType.default': 'Default',
   'common.fail': 'Failed',
+  'login.failed': 'Login failed. Please try again.',
+  'ui.employee.notFound': 'The digital employee does not exist',
+  'ui.card.urlRequired': 'A link URL is required',
+  'ui.chat.errorDetails': 'Error details',
   'operation.testSetResult.previewFail': 'Preview failed',
   'employeeDetail.debugTip': 'Save changes to the digital employee settings before testing the latest configuration.',
   'employeeDetail.auditLoading':
@@ -646,6 +701,7 @@ export default {
   'common.import': 'Import',
   'common.localFile': 'Local File',
   'common.remoteComputer': 'Remote Computer',
+  'common.remoteComputerUnavailable': "The remote desktop is not available: the assistant's browser is not open",
   'common.curlImport': 'Curl Import',
   'common.pasteCurlCommand': 'Please paste Curl command',
   'common.curlImportHint':
@@ -1140,6 +1196,24 @@ export default {
   'chatResource.createChildFolder': 'Create subfolder',
   'chatResource.move': 'Move',
   'chatResource.saveToProject': 'Save to project drive',
+  'chatResource.personalKnowledge.save': 'Save to Personal Knowledge Base',
+  'chatResource.personalKnowledge.empty': 'No personal knowledge bases you can manage',
+  'chatResource.personalKnowledge.saveOnly': 'Save Only',
+  'chatResource.personalKnowledge.confirm': 'Save and Build',
+  'chatResource.personalKnowledge.overwriteOnly': 'Confirm Overwrite and Save',
+  'chatResource.personalKnowledge.savedSummary': 'Saved {files} files and created {folders} folders',
+  'chatResource.personalKnowledge.saveOnlyTip':
+    'No document builds were submitted. You can build them from the knowledge base later.',
+  'chatResource.personalKnowledge.overwrite': 'Confirm Overwrite and Build',
+  'chatResource.personalKnowledge.result': 'Save Results',
+  'chatResource.personalKnowledge.retryBuild': 'Retry Build',
+  'chatResource.personalKnowledge.close': 'Close',
+  'chatResource.personalKnowledge.summary':
+    'Saved {files} files, created {folders} folders, submitted {builds} document builds',
+  'chatResource.personalKnowledge.buildTip':
+    'Documents build in the background. Check progress in the knowledge base; completed documents can be searched. Empty folders require no build.',
+  'chatResource.personalKnowledge.importFailed': 'Save failed',
+  'chatResource.personalKnowledge.buildFailed': 'Saved, but build submission failed',
   'chatResource.saveToShared': 'Save to local shared files',
   'chatResource.rootDirectory': 'Root directory',
   'chatResource.driveNotInitialized': 'Project drive has not been initialized',
@@ -1680,6 +1754,14 @@ export default {
   // Digital Employees Page
   'digitalEmployees.title': 'Digital Employees',
   'digitalEmployees.available': 'My employees',
+  'myEmployees.view': 'Switch view',
+  'myEmployees.cardView': 'Cards',
+  'myEmployees.listView': 'List',
+  'myEmployees.description': 'Description',
+  'myEmployees.resetFilters': 'Reset filters',
+  'myEmployees.clearFilters': 'Clear search and filters',
+  'myEmployees.empty': 'No matching digital employees',
+  'myEmployees.moreActions': 'More',
   'myEmployees.personal': 'Personal employees',
   'myEmployees.enterprise': 'Enterprise employees',
   'myEmployees.auditCenter': 'Audit center',
@@ -3947,6 +4029,14 @@ export default {
   'chatSettings.memoryDesc': 'Beyond Q&A information memory',
 
   // Preview Html Component
+  'preview.source': 'Source',
+  'preview.expand': 'Expand',
+  'preview.mermaidFailed': 'Unable to render the diagram. Check the Mermaid syntax or view the source.',
+  'preview.textMode': 'Text / source',
+  'preview.resourceFailed': 'Some preview resources failed to load: {resources}',
+  'preview.binaryText': 'This file is not readable text. Download it to view.',
+  'preview.empty': 'The file is empty and cannot be previewed.',
+  'preview.tooLarge': 'Text files over 2 MiB must be downloaded.',
   'preview.htmlPreview': 'HTML Preview',
 
   // PersonnelModel Component
@@ -4142,6 +4232,9 @@ export default {
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'sandbox.status.running': 'Sandbox Running',
+  'sandbox.storage.migration': 'Your storage history needs migration. Contact an administrator before starting a chat.',
+  'sandbox.storage.preparing': 'Preparing your storage quota. Chat will be available when ready.',
+  'sandbox.storage.failed': 'Storage preparation failed. Contact an administrator to check the quota.',
   'sandbox.status.transitioning': 'Sandbox Starting/Stopping',
   'sandbox.status.stopped': 'Sandbox Stopped',
   'sandbox.status.noServices': 'No sandbox services',

@@ -164,6 +164,82 @@ class DigitalEmployeeRedisConfigSyncTest extends com.iwhalecloud.byai.common.i18
     }
 
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("relatedResourceCases")
+    void employeeSnapshotIsPublishedOnlyAfterRelatedResourceSnapshot(String type, String extType, String mode) throws Exception {
+        var syncing = spy(service);
+        var details = new DigitalEmployeeDetailsDTO(); details.setResourceId(9L);
+        doReturn(details).when(syncing).findDetailsById(any());
+        var employeeExt = new SsResExtDigEmployee(); employeeExt.setResourceId(9L);
+        when(ssResExtDigEmployeeService.findById(9L)).thenReturn(employeeExt);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(500L); resource.setResourceBizType(type); resource.setResourceStatus(2);
+        resource.setOwnerType("enterprise"); resource.setSystemCode("BYAI"); resource.setResourceCode("external");
+        resource.setThirdSyncRevision(1L); resource.setUseAuthControlled(true);
+        var relation = new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail();
+        relation.setResourceId(9L); relation.setRelResourceId(500L);
+        var resources = mock(SsResourceService.class);
+        when(resources.findByIdList(java.util.List.of(500L))).thenReturn(java.util.List.of(resource));
+        ReflectionTestUtils.setField(syncing, "ssResourceService", resources);
+        var relations = mock(SsResourceRelDetailService.class);
+        when(relations.findByResourceId(9L)).thenReturn(java.util.List.of(relation));
+        ReflectionTestUtils.setField(syncing, "ssResourceRelDetailService", relations);
+        // Exercise each real extension lookup, including the shared KG_* document extension.
+        var extension = Class.forName("com.iwhalecloud.byai.manager.entity.resource.SsResExt" + extType)
+            .getDeclaredConstructor().newInstance();
+        ReflectionTestUtils.setField(extension, "targetContent", "missing".equals(mode) ? null : "{\"resourceId\":\"500\"}");
+        var extensionService = mock(Class.forName("com.iwhalecloud.byai.manager.domain.resource.service.SsResExt" + extType + "Service"));
+        when(ReflectionTestUtils.invokeMethod(extensionService, "findById", 500L)).thenReturn(extension);
+        ReflectionTestUtils.setField(syncing, "ssResExt" + extType + "Service", extensionService);
+        var storage = mock(ResourceArtifactStorageService.class);
+        when(storage.existsResourceJsonByBizType(type, 500L)).thenReturn(true);
+        ReflectionTestUtils.setField(syncing, "resourceArtifactStorageService", storage);
+        ReflectionTestUtils.setField(syncing, "ssResourceArtifactService", mock(SsResourceArtifactService.class));
+        if ("redis-failure".equals(mode)) org.mockito.Mockito.doThrow(new IllegalStateException("redis"))
+            .when(valueOperations).set(eq(type + "_500"), any(String.class));
+        assertThat(syncing.synOpenClawWorkSpace(9L)).isEqualTo("ok".equals(mode));
+        if ("ok".equals(mode)) {
+            var order = org.mockito.Mockito.inOrder(valueOperations);
+            order.verify(valueOperations).set(eq(type + "_500"), any(String.class));
+            var json = ArgumentCaptor.forClass(String.class);
+            order.verify(valueOperations).set(eq(DigEmployeeRedisKeys.configJsonKey(9L)), json.capture());
+            assertThat(com.alibaba.fastjson2.JSON.parseObject(json.getValue()).getJSONArray("controlledResources")
+                .getJSONObject(0).getBooleanValue("requiresExplicitUse")).isEqualTo(!type.startsWith("KG_"));
+        } else {
+            verify(valueOperations, never()).set(eq(DigEmployeeRedisKeys.configJsonKey(9L)), any(String.class));
+        }
+    }
+
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> relatedResourceCases() {
+        return java.util.stream.Stream.of(new String[]{"TOOLKIT", "ToolKit"}, new String[]{"MCP", "Mcp"},
+            new String[]{"AGENT", "Agent"}, new String[]{"KG_DOC", "Doc"}, new String[]{"KG_DB", "Doc"},
+            new String[]{"KG_QA", "Doc"}, new String[]{"KG_TERM", "Doc"})
+            .flatMap(resource -> java.util.stream.Stream.of("ok", "missing", "redis-failure")
+                .map(mode -> org.junit.jupiter.params.provider.Arguments.of(resource[0], resource[1], mode)));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"missing-extension", "write-failure"})
+    void snapshotPersistenceFailureStopsRuntimePublication(String mode) {
+        var syncing = spy(service);
+        var details = new DigitalEmployeeDetailsDTO(); details.setResourceId(9L);
+        doReturn(details).when(syncing).findDetailsById(any());
+        ReflectionTestUtils.setField(syncing, "ssResourceService", mock(SsResourceService.class));
+        var storage = mock(ResourceArtifactStorageService.class);
+        ReflectionTestUtils.setField(syncing, "resourceArtifactStorageService", storage);
+        var artifacts = mock(SsResourceArtifactService.class);
+        ReflectionTestUtils.setField(syncing, "ssResourceArtifactService", artifacts);
+        if ("write-failure".equals(mode)) {
+            var extension = new SsResExtDigEmployee(); extension.setResourceId(9L);
+            when(ssResExtDigEmployeeService.findById(9L)).thenReturn(extension);
+            org.mockito.Mockito.doThrow(new IllegalStateException("snapshot write failed"))
+                .when(ssResExtDigEmployeeService).update(extension);
+        }
+
+        assertThat(syncing.synOpenClawWorkSpace(9L)).isFalse();
+        org.mockito.Mockito.verifyNoInteractions(storage, artifacts, valueOperations);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void publicationSyncReadsUncommittedVersionAndRollsBackArtifactWithEmployee(boolean existing,
         @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {
@@ -212,7 +288,7 @@ class DigitalEmployeeRedisConfigSyncTest extends com.iwhalecloud.byai.common.i18
             status.setRollbackOnly();
         });
         var json = ArgumentCaptor.forClass(String.class);
-        verify(storage).syncResourceJsonByBizType(json.capture(), eq("DIG_EMPLOYEE"), eq(9L));
+        verify(storage).publishResourceJson(json.capture(), eq("DIG_EMPLOYEE"), eq(9L));
         assertThat(JSONObject.parseObject(json.getValue()).getString("resourceName")).isEqualTo("本次待发布版本");
         verify(valueOperations).set(DigEmployeeRedisKeys.configJsonKey(9L), json.getValue());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artifact", Integer.class)).isZero();

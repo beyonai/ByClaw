@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +28,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserKnowledgeTransferApplicationService;
+import com.iwhalecloud.byai.state.application.service.upload.GlobalFileUploadValidator;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserCopyRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserDeleteRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserListRequest;
@@ -49,11 +52,16 @@ import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserSaveToKnowled
 @RequestMapping("/fileBrowser")
 public class FileBrowserController {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(FileBrowserController.class);
+
     @Autowired
     private FileBrowserApplicationService fileBrowserService;
 
     @Autowired
     private FileBrowserKnowledgeTransferApplicationService knowledgeTransferApplicationService;
+
+    @Autowired
+    private GlobalFileUploadValidator globalFileUploadValidator;
 
     /**
      * 获取指定目录下的文件和文件夹列表
@@ -68,7 +76,7 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         String path = StringUtils.defaultIfBlank(request.getPath(), "/");
         // 将排序策略透传给文件浏览服务，由服务统一处理目录和名称排序。
@@ -89,7 +97,7 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (resourceId == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         String defaultPath = fileBrowserService.getDefaultPath(resourceId);
         return ResponseUtil.successResponse(defaultPath);
@@ -113,14 +121,19 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (resourceId == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (files == null || files.length == 0) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.upload.fileRequired"));
         }
         try {
+            // 所有文件先通过大小校验，避免后续超限时已写入部分文件。
+            globalFileUploadValidator.validateSize(files);
             fileBrowserService.upload(userCode, resourceId, path, files);
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.uploadFailed", e.getMessage()));
         }
@@ -132,6 +145,28 @@ public class FileBrowserController {
      * @param request 源文件模块路径与目标知识库目录
      * @return 保存结果
      */
+    @PostMapping("/saveToPersonalKnowledge")
+    public ResponseUtil<FileBrowserSaveToKnowledgeVo> saveToPersonalKnowledge(
+        @RequestBody FileBrowserSaveToKnowledgeRequest request) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        try {
+            return ResponseUtil.successResponse(
+                knowledgeTransferApplicationService.saveToPersonalKnowledge(userCode, request));
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
+        } catch (Exception e) {
+            LOGGER.error("过程文件保存到个人知识库失败: userCode={}, sourceResourceId={}, targetResourceId={}, sourcePath={}",
+                userCode, request == null ? null : request.getResourceId(),
+                request == null ? null : request.getTargetResourceId(),
+                request == null ? null : request.getSourcePath(), e);
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
     @PostMapping("/saveToKnowledge")
     public ResponseUtil<FileBrowserSaveToKnowledgeVo> saveToKnowledge(
         @RequestBody FileBrowserSaveToKnowledgeRequest request) {
@@ -143,6 +178,10 @@ public class FileBrowserController {
             FileBrowserSaveToKnowledgeVo result =
                 knowledgeTransferApplicationService.saveToKnowledge(userCode, request);
             return ResponseUtil.successResponse(I18nUtil.get("filebrowser.knowledge.saved"), result);
+        }
+        catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         }
         catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("filebrowser.knowledge.saveFailed", e.getMessage()));
@@ -173,6 +212,9 @@ public class FileBrowserController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encodedFileName)
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(new InputStreamResource(inputStream));
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -194,10 +236,10 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (StringUtils.isBlank(sessionId)) {
-            return ResponseUtil.fail("sessionId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sessionId.required");
         }
         if (StringUtils.isBlank(uuid)) {
-            return ResponseUtil.fail("uuid is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.uuid.required");
         }
         try {
             return ResponseUtil.successResponse(fileBrowserService.getChangedFileDiff(sessionId, uuid));
@@ -220,14 +262,17 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (request.getPaths() == null || request.getPaths().isEmpty()) {
-            return ResponseUtil.fail("paths is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.paths.required");
         }
         try {
             fileBrowserService.delete(userCode, request.getResourceId(), request.getPaths());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.deleteFailed", e.getMessage()));
         }
@@ -246,17 +291,20 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getSourcePath())) {
-            return ResponseUtil.fail("sourcePath is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePath.required");
         }
         if (StringUtils.isBlank(request.getNewName())) {
-            return ResponseUtil.fail("newName is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.newName.required");
         }
         try {
             fileBrowserService.rename(userCode, request.getResourceId(), request.getSourcePath(), request.getNewName());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.renameFailed", e.getMessage()));
         }
@@ -275,18 +323,21 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (request.getSourcePaths() == null || request.getSourcePaths().isEmpty()) {
-            return ResponseUtil.fail("sourcePaths is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePaths.required");
         }
         if (StringUtils.isBlank(request.getTargetDirectory())) {
-            return ResponseUtil.fail("targetDirectory is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.targetDirectory.required");
         }
         try {
             fileBrowserService.move(userCode, request.getResourceId(), request.getSourcePaths(),
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.moveFailed", e.getMessage()));
         }
@@ -305,18 +356,21 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getSourcePath())) {
-            return ResponseUtil.fail("sourcePath is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.sourcePath.required");
         }
         if (StringUtils.isBlank(request.getTargetDirectory())) {
-            return ResponseUtil.fail("targetDirectory is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.targetDirectory.required");
         }
         try {
             fileBrowserService.copy(userCode, request.getResourceId(), request.getSourcePath(),
                 request.getTargetDirectory());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.copyFailed", e.getMessage()));
         }
@@ -335,14 +389,17 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getPath())) {
-            return ResponseUtil.fail("path is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.path.required");
         }
         try {
             fileBrowserService.createFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.mkdirFailed", e.getMessage()));
         }
@@ -361,15 +418,20 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getPath())) {
-            return ResponseUtil.fail("path is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.path.required");
         }
         try {
             fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
+            LOGGER.error("初始化文件目录失败: userCode={}, resourceId={}, path={}",
+                userCode, request.getResourceId(), request.getPath(), e);
             return ResponseUtil.fail(I18nUtil.get("fileBrowser.operation.mkdirFailed", e.getMessage()));
         }
     }
@@ -388,10 +450,10 @@ public class FileBrowserController {
             return ResponseUtil.fail(I18nUtil.get("auth.notLoggedIn"));
         }
         if (request.getResourceId() == null) {
-            return ResponseUtil.fail("resourceId is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.resourceId.required");
         }
         if (StringUtils.isBlank(request.getKeyword())) {
-            return ResponseUtil.fail("keyword is required");
+            return ResponseUtil.failI18n("i18n.error.fileBrowser.keyword.required");
         }
         String path = StringUtils.defaultIfBlank(request.getPath(), "/");
         List<FileBrowserItemVo> items = fileBrowserService.search(userCode, request.getResourceId(), path, request.getKeyword());
@@ -425,6 +487,9 @@ public class FileBrowserController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+            | com.iwhalecloud.byai.state.common.exception.StoragePreparingException quota) {
+            throw quota;
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

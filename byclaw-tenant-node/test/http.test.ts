@@ -51,7 +51,7 @@ describe("protected tenant HTTP", () => {
   it("blocks direct HTTP mutations with the commercial policy guard", async () => {
     const { app, execute } = setup(true, async () => {
       const { DomainError } = await import("../src/domain/errors.js");
-      throw new DomainError("POLICY_CAPABILITY_UNSUPPORTED");
+      throw new DomainError("POLICY_EXECUTION_DISABLED");
     });
     const response = await app.inject({
       method: "POST",
@@ -60,7 +60,7 @@ describe("protected tenant HTTP", () => {
       payload: command({ operation: "CLAIM_WELCOME", payload: {} }),
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe("POLICY_CAPABILITY_UNSUPPORTED");
+    expect(response.json().error.code).toBe("POLICY_EXECUTION_DISABLED");
     expect(execute).not.toHaveBeenCalled();
   });
   it("routes welcome claims and rejects a different group, tenant or actor", async () => {

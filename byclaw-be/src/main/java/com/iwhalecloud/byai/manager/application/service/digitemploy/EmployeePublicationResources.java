@@ -289,6 +289,11 @@ public class EmployeePublicationResources {
     }
 
     public Map<Long, Long> materialize(List<Dependency> dependencies, Long tenantId, Long officialEmployeeId) {
+        return materialize(dependencies, tenantId, officialEmployeeId, null);
+    }
+
+    public Map<Long, Long> materialize(List<Dependency> dependencies, Long tenantId, Long officialEmployeeId,
+        List<Long> audience) {
         Map<Long, Long> mapping = new LinkedHashMap<>();
         for (Dependency dependency : dependencies) {
             SsResource source = dependency.getResource();
@@ -313,7 +318,8 @@ public class EmployeePublicationResources {
                     || !"enterprise".equals(target.getOwnerType())) throw new BaseException("employee.publication.skillCopyInvalid");
                 dependency.setTargetId(targetId);
                 auth.ensureCreatorDefaultPrivileges(target);
-                grantAudience(target, tenantId);
+                if (audience == null || audience.equals(List.of(-1L))) grantAudience(target, tenantId);
+                else grantAudience(target, tenantId, audience);
                 mapping.put(sourceId, targetId);
             } catch (Exception error) {
                 // B 已开始写入时必须回滚，不能留下未完成的企业资源并声称发布成功。
@@ -373,6 +379,36 @@ public class EmployeePublicationResources {
         grant.setGrantType("FORCE_USE");
         grant.setRedList(subjects);
         auth.handleAuth(grant);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.sys.service.SequenceService sequence;
+
+    /** Add only the approved organization subjects; never replace unrelated manual grants. */
+    public void grantAudience(SsResource resource, Long tenantId, List<Long> orgIds) {
+        if (resource == null || !Objects.equals(resource.getComAcctId(), tenantId)
+            || orgIds == null || orgIds.isEmpty() || orgIds.contains(-1L)) {
+            throw new BaseException("组织发布授权范围无效");
+        }
+        // Visibility is scoped together with use permission, including copied skills.
+        resource.setViewAuthControlled(true);
+        resources.updateResourceEntity(resource);
+        for (Long orgId : orgIds.stream().distinct().toList()) {
+          for (String grantType : List.of("ALLOW_VIEW", "FORCE_USE")) {
+            var match = new LambdaQueryWrapper<PrivilegeGrant>().eq(PrivilegeGrant::getGrantObjId, resource.getResourceId())
+                .eq(PrivilegeGrant::getGrantObjType, resource.getResourceBizType()).eq(PrivilegeGrant::getGrantType, grantType)
+                .eq(PrivilegeGrant::getGrantToObjType, "ORG").eq(PrivilegeGrant::getGrantToObjId, orgId)
+                .eq(PrivilegeGrant::getGrantToType, "RED").eq(PrivilegeGrant::getStatusCd, "A");
+            if (grants.selectCount(match) > 0) continue;
+            PrivilegeGrant grant = new PrivilegeGrant();
+            grant.setPrivilegeGrantId(sequence.nextVal()); grant.setGrantObjId(resource.getResourceId());
+            grant.setGrantObjType(resource.getResourceBizType()); grant.setGrantType(grantType);
+            grant.setGrantToObjType("ORG"); grant.setGrantToObjId(orgId); grant.setGrantToType("RED");
+            grant.setOperType("READ"); grant.setStatusCd("A"); grant.setEffDate(new Date());
+            grant.setCreateDate(new Date()); grant.setCreateStaff(CurrentUserHolder.getCurrentUserId());
+            grants.insert(grant);
+          }
+        }
     }
 
     private void requireAvailable(SsResource resource, Long tenantId) {

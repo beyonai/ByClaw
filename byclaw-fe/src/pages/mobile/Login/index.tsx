@@ -85,7 +85,7 @@ export default function Login() {
       loginByUsername(params)
         .then((res) => {
           if (!res || res.code !== 0) {
-            message.error(res?.msg || 'Login failed');
+            message.error(res?.msg || intl.formatMessage({ id: 'login.failed' }));
             return;
           }
           message.success(intl.formatMessage({ id: 'login.success' }));
@@ -94,7 +94,7 @@ export default function Login() {
           navigateAfterLogin();
         })
         .catch((e) => {
-          message.error(e || 'Login failed');
+          message.error(e || intl.formatMessage({ id: 'login.failed' }));
         })
         .finally(() => {
           setLoginLoading(false);

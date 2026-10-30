@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getSandboxInfo, removeSandbox, launchSandboxByUserCode } from '@/service/sandbox';
+import { getSandboxInfo, removeSandbox, launchSandboxByUserCode, getSharedUserStorageStatus } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import { calculateSandboxStatus, type SandboxAggregateStatus } from './statusUtils';
 
@@ -11,6 +11,14 @@ const POLL_INTERVAL_TRANSITIONING = 5000;
 
 export default function useSandboxStatus(userCode: string) {
   const [status, setStatus] = useState<SandboxAggregateStatus>('stopped');
+
+  const { data: storage } = useQuery({
+    queryKey: ['sharedUserStorage', userCode],
+    queryFn: getSharedUserStorageStatus,
+    enabled: !!userCode,
+    refetchInterval: (latest) =>
+      latest?.enabled && !latest.ready ? POLL_INTERVAL_TRANSITIONING : POLL_INTERVAL_STABLE,
+  });
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['sandboxStatus', userCode],
@@ -48,7 +56,8 @@ export default function useSandboxStatus(userCode: string) {
   };
 
   return {
-    status,
+    status: storage?.enabled && !storage.ready ? ('transitioning' as const) : status,
+    storage,
     isLoading,
     sandboxes: data || [],
     refetch,

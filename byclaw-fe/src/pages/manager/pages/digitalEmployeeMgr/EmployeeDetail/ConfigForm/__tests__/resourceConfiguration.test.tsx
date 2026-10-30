@@ -7,6 +7,7 @@ import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import ConfigForm from '..';
 import { isSuperAssistant } from '../../resourceConfiguration';
 import type { RobotConfig } from '../robotConfig';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 // 此处验证资源配置行为，禁用弹窗动画，避免在入场准备阶段判断可见性。
 const render = (ui: Parameters<typeof renderComponent>[0]) =>
@@ -50,7 +51,11 @@ jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
   getDcSystemConfigListByStandType: jest.fn().mockResolvedValue([]),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
-  getDcSystemConfig: jest.fn().mockResolvedValue({ paramValue: '[]' }),
+  getDcSystemConfig: jest
+    .fn()
+    .mockImplementation(({ paramCode }) =>
+      Promise.resolve({ paramValue: paramCode === 'BYAI_BRAND_VERSION' ? 'commercial' : '[]' })
+    ),
 }));
 jest.mock('@/pages/manager/service/resources', () => ({
   listResourceUseAuth: jest.fn().mockResolvedValue({ list: [], total: 0 }),
@@ -197,6 +202,25 @@ function Editor({
 }
 
 describe('employee editor resource configuration entries', () => {
+  it('hides open-source knowledge and tools without clearing existing bindings or skills', async () => {
+    (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+      Promise.resolve({ paramValue: paramCode === 'BYAI_BRAND_VERSION' ? 'openSource' : '[]' })
+    );
+    try {
+      render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
+      await waitFor(() => expect(screen.getByText('employeeDetail.configureBundledSkills')).toBeVisible());
+      expect(screen.queryByText('employeeDetail.configureKnowledge')).not.toBeInTheDocument();
+      expect(screen.queryByText('employeeDetail.configureSkills')).not.toBeInTheDocument();
+      expect(screen.queryByText('Existing knowledge')).not.toBeInTheDocument();
+      expect(screen.queryByText('Existing tool')).not.toBeInTheDocument();
+      expect(tools).toHaveLength(1);
+      expect(knowledge[0].items).toHaveLength(1);
+    } finally {
+      (getDcSystemConfig as jest.Mock).mockImplementation(({ paramCode }) =>
+        Promise.resolve({ paramValue: paramCode === 'BYAI_BRAND_VERSION' ? 'commercial' : '[]' })
+      );
+    }
+  });
   beforeEach(() => {
     mockShowBaseList.mockClear();
     mockUpdateResource.mockReset();

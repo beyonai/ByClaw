@@ -54,9 +54,14 @@ public class TenantNodeClient {
     private final String internalToken;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
+                            ObjectMapper mapper, RedisClient redisClient, TenantRuntimeIdentity identity) {
+        this(tenantMapper, sandboxMapper, mapper, redisClient, identity.internalToken());
+    }
+
     public TenantNodeClient(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
                             ObjectMapper mapper, RedisClient redisClient,
-                            @org.springframework.beans.factory.annotation.Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}")
                             String internalToken) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;
@@ -96,6 +101,15 @@ public class TenantNodeClient {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "operations.request.invalid");
         }
         return requestBound(new ServiceIdentity(enterpriseId, null), method, path, body, responseType);
+    }
+
+    /** 企业成员移除只开放快照与原子交接路径，不伪造普通群成员身份。 */
+    public <I, O> O memberGroupRemoval(long enterpriseId, String operation, I body, TypeReference<O> responseType) {
+        if (enterpriseId <= 0 || !("snapshot".equals(operation) || "apply".equals(operation))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.node.request.invalid");
+        }
+        return requestBound(new ServiceIdentity(enterpriseId, null), "POST",
+            "/internal/v1/member-group-removal/" + operation, body, responseType);
     }
 
     private record ServiceIdentity(long enterpriseId, Long userId) { }
@@ -241,6 +255,18 @@ public class TenantNodeClient {
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
                                   List<ServiceInstance> instances) {
+        return registeredEndpoint(name, enterpriseId, generation, dbRecordId, instances, false);
+    }
+
+    /** Schema bootstrap precedes READY; only this internal operation accepts ADMIN_ONLY nodes. */
+    URI schemaEndpoint(long enterpriseId, long generation, long dbRecordId) {
+        String name = "TENANT_DATA_" + enterpriseId;
+        return registeredEndpoint(name, enterpriseId, generation, Long.toString(dbRecordId),
+            discovery.getInstances(name), true);
+    }
+
+    private static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
+                                           List<ServiceInstance> instances, boolean schemaBootstrap) {
         if (instances == null || instances.size() != 1) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.unavailable");
         }
@@ -251,7 +277,8 @@ public class TenantNodeClient {
             || !Long.toString(enterpriseId).equals(registration.enterpriseId())
             || !Long.toString(generation).equals(registration.generation())
             || !dbRecordId.equals(registration.dbSandboxRecordId())
-            || !"READY".equals(registration.mode())
+            || !("READY".equals(registration.mode())
+                || (schemaBootstrap && "ADMIN_ONLY".equals(registration.mode())))
             || !name.equals(registration.agentType())
             || !"http".equals(instance.getProtocol()) || instance.getHost() == null
             || instance.getPort() <= 0 || instance.getPort() > 65535) {
@@ -321,7 +348,11 @@ public class TenantNodeClient {
         NodeRejection(int nodeStatus, String code) {
             super(nodeStatus == 404 ? HttpStatus.NOT_FOUND
                 : nodeStatus == 403 ? HttpStatus.FORBIDDEN
-                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY,
+                    : nodeStatus == 400 ? HttpStatus.BAD_REQUEST
+                        : nodeStatus == 409 && java.util.Set.of("GROUP_MEMBER_LIMIT_EXCEEDED", "GROUP_AGENT_LIMIT_EXCEEDED").contains(code)
+                            ? HttpStatus.CONFLICT
+                            : nodeStatus == 503 && "QUOTA_UNAVAILABLE".equals(code)
+                                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY,
                 "tenant Node rejected request: " + code);
             this.nodeStatus = nodeStatus;
             this.code = code;

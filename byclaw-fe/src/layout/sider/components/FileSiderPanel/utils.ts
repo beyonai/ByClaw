@@ -1,5 +1,4 @@
-import { getPreviewExtension, resolvePreviewType, TEXT_PREVIEW_TYPES } from '@/components/Preview/formats';
-import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import { canPreviewName, resolvePreviewType } from '@/components/Preview/formats';
 import { getFileIconType } from '@/constants/icon';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -18,163 +17,7 @@ import {
   type FileCopyTargetType,
 } from './constants';
 
-/** 在线按文本读取的最大文件大小，避免浏览器一次性加载过大的源码/配置文件。 */
-export const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
-
-const TEXT_FILE_NAMES = new Set([
-  '.gitattributes',
-  '.gitignore',
-  '.gitmodules',
-  '.dockerignore',
-  'dockerfile',
-  'makefile',
-  'license',
-  'procfile',
-  'readme',
-]);
-
-const BINARY_EXTENSIONS = new Set([
-  'ppm',
-  'tga',
-  '7z',
-  // 尚无解码器的常见二进制文件必须阻止文本兜底，避免预览乱码。
-  'ai',
-  'amr',
-  '3gp',
-  'db',
-  'dps',
-  'et',
-  'flv',
-  'key',
-  'numbers',
-  'odp',
-  'ods',
-  'rtf',
-  'odt',
-  // 笔记本走专用结构化预览；即使文件名只有 .ipynb，也不能退回 2 MiB 纯文本路径。
-  'ipynb',
-  // 邮件与 Office 变体由专用预览器解析，包含隐藏文件名场景，不能按源码兜底。
-  'eml',
-  'msg',
-  'docm',
-  'dotx',
-  'xlsm',
-  'xltx',
-  'pptm',
-  'ppsx',
-  'potx',
-  'pages',
-  'parquet',
-  'psd',
-  'sketch',
-  'sqlite',
-  'sqlite3',
-  'tgz',
-  'wps',
-  'aac',
-  'avif',
-  'heic',
-  'heif',
-  'hif',
-  'jxl',
-  'jfif',
-  'jpe',
-  'jif',
-  'pjp',
-  'pjpeg',
-  // 相机 RAW 和 JPEG 2000 尚无解码器，不能用文本兜底假装支持照片预览。
-  'raw',
-  'dng',
-  'cr2',
-  'cr3',
-  'nef',
-  'nrw',
-  'arw',
-  'srf',
-  'sr2',
-  'raf',
-  'rw2',
-  'orf',
-  'pef',
-  'srw',
-  'jp2',
-  'jpx',
-  'j2k',
-  'jpf',
-  'jpm',
-  'mj2',
-  'heics',
-  'heifs',
-  'm4a',
-  'm4v',
-  'ogg',
-  'oga',
-  'ogv',
-  'opus',
-  'tif',
-  'tiff',
-  'avi',
-  'bmp',
-  'class',
-  'deb',
-  'dmg',
-  'doc',
-  'docx',
-  'dll',
-  'epub',
-  'exe',
-  'flac',
-  'gif',
-  'gz',
-  'ico',
-  'iso',
-  'jar',
-  'jpeg',
-  'jpg',
-  'mkv',
-  'mov',
-  'mp3',
-  'mp4',
-  'otf',
-  'pdf',
-  'png',
-  'ppt',
-  'pptx',
-  'rar',
-  'tar',
-  'so',
-  'ttf',
-  'wav',
-  'wasm',
-  'webp',
-  'webm',
-  'woff',
-  'woff2',
-  'xls',
-  'xlsx',
-  'zip',
-]);
-
-const getLowerFileName = (name: string) => name.split('/').pop()?.toLowerCase() || '';
-
-/** 没有标准扩展名的代码/配置文件按纯文本展示，例如 .gitignore、Dockerfile。 */
-export function isTextFallbackFile(name: string) {
-  const fileName = getLowerFileName(name);
-  if (TEXT_FILE_NAMES.has(fileName)) return true;
-  if (fileName.startsWith('.')) {
-    return !BINARY_EXTENSIONS.has(getPreviewExtension(fileName));
-  }
-  if (!fileName.includes('.')) return !BINARY_EXTENSIONS.has(fileName);
-  return !BINARY_EXTENSIONS.has(getPreviewExtension(fileName)) && !isPreviewable(fileName);
-}
-
-export function isTextPreviewFile(name: string) {
-  const extension = getLowerFileName(name).split('.').pop() || '';
-  return (
-    isTextFallbackFile(name) ||
-    ['md', 'markdown', 'html', 'htm', 'h5', 'svg', ...TEXT_PREVIEW_TYPES].includes(extension)
-  );
-}
+export { MAX_TEXT_PREVIEW_SIZE, isTextFallbackFile, isTextPreviewFile } from '@/components/Preview/formats';
 
 export function getIconType(name: string, isDir: boolean): string {
   return getFileIconType(name, {
@@ -188,11 +31,7 @@ export function isDirectory(item: FileBrowserItem) {
 }
 
 export function canPreviewFile(item: FileBrowserItem) {
-  if (isDirectory(item)) return false;
-  if (isTextPreviewFile(item.name)) {
-    return item.size === undefined || item.size <= MAX_TEXT_PREVIEW_SIZE;
-  }
-  return isPreviewable(item.name);
+  return !isDirectory(item) && canPreviewName(item.name, item.size);
 }
 
 export function unwrapListResponse<T>(res: any): T[] {
@@ -241,7 +80,7 @@ export function getFileType(name: string): string {
 }
 
 export function getPreviewFileType(name: string) {
-  return isTextFallbackFile(name) ? 'txt' : getFileType(name);
+  return getFileType(name);
 }
 
 export function getNormalizedSessionId(sessionId?: string) {
@@ -251,6 +90,12 @@ export function getNormalizedSessionId(sessionId?: string) {
 export function getSessionFilePath(sessionId?: string) {
   const normalizedSessionId = getNormalizedSessionId(sessionId);
   return normalizedSessionId ? `${SESSION_FILE_PATH}${normalizedSessionId}/` : SESSION_FILE_PATH;
+}
+
+export function getProjectSharedFilePath(projectId?: string | number) {
+  const normalizedProjectId = `${projectId ?? ''}`.trim();
+  if (!normalizedProjectId || !/^[A-Za-z0-9_-]+$/.test(normalizedProjectId)) return SHARED_FILE_PATH;
+  return `${SHARED_FILE_PATH}project_${normalizedProjectId}/`;
 }
 
 export function getDefaultFileCategoryKey(sessionId?: string): FileCategoryKey {

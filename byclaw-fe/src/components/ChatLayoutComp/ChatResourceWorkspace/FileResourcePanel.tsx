@@ -1,6 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { Button, Dropdown, Empty, Modal, Spin, Tooltip, Tree, Typography, Upload, message, type MenuProps } from 'antd';
-import { EllipsisOutlined, FolderAddOutlined, UploadOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
+import {
+  Breadcrumb,
+  Button,
+  Dropdown,
+  Empty,
+  Modal,
+  Spin,
+  Tooltip,
+  Tree,
+  Typography,
+  Upload,
+  message,
+  type MenuProps,
+} from 'antd';
+import { EllipsisOutlined, FolderAddOutlined, HomeOutlined, UploadOutlined } from '@ant-design/icons';
 import { getLocale, useIntl } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
@@ -14,6 +27,7 @@ import {
   canPreviewFile,
   ensureDirectoryPath,
   getParentDirectoryPath,
+  getProjectSharedFilePath,
   getSessionFilePath,
   isDirectory,
   normalizeFileBrowserPath,
@@ -24,6 +38,7 @@ import {
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
+import { isUploadFileCountExceeded, isUploadFileSizeExceeded } from '@/components/QueryInput/utils/fileUpload';
 import useGlobal from '@/hooks/useGlobal';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
@@ -57,12 +72,18 @@ import { downloadFile as downloadUrlFile } from '@/utils/file';
 import { downloadResourceFile } from '@/service/file';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FilePreviewPanel from './FilePreviewPanel';
+import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
+import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
 import { filterSessionRootItems } from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
+import type { ChatRuntimeType } from '@/utils/chatRuntime';
+import { getProject } from '@/pages/projectSpace/service';
+import { normalizeProjectDetail } from '@/pages/projectSpace/utils';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 type ProjectFileItem = FileBrowserItem & {
   fileId: number;
@@ -77,6 +98,8 @@ interface FileResourcePanelProps {
   scope: 'session' | 'shared' | 'project';
   sessionId: string;
   projectId?: number;
+  runtimeType?: ChatRuntimeType;
+  runtimeReady?: boolean;
   project?: ProjectSpace;
 
   /** 过程文件保存到项目云盘时使用的目标知识库 ID。 */
@@ -85,6 +108,10 @@ interface FileResourcePanelProps {
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
   onPreviewFile?: (item: FileBrowserItem) => void;
+
+  /** 嵌入引用菜单时直接回传引用，右侧面板则继续通过全局输入事件插入。 */
+  onQuote?: (item: ReturnType<typeof normalizeReferenceItem>, type: DragType) => void;
+
   // 项目大详情使用卡片视图；会话资源继续复用原文件树交互。
   cardMode?: boolean;
 
@@ -102,12 +129,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   scope,
   sessionId,
   projectId: projectIdProp,
+  runtimeType,
+  runtimeReady = true,
   project,
   projectCloudResourceId: projectCloudResourceIdProp,
   resourceId,
   refreshKey = 0,
   onOpenDetail,
   onPreviewFile,
+  onQuote,
   cardMode = false,
   hideProjectToolbar = false,
   compactResourceEmpty = false,
@@ -116,7 +146,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const language = getLocale();
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, uploadFileConfig } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   // Tree 会缓存已触发过 loadData 的目录；刷新时必须同步清空，否则再次展开不会发起请求。
@@ -152,16 +182,102 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   });
   const [visibleProjectItemCount, setVisibleProjectItemCount] = useState(20);
   const clickTimerRef = useRef<number | null>(null);
+  const clearFileClickTimer = useCallback(() => {
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = null;
+  }, []);
+  const knowledgeSave = useSaveToKnowledge({
+    resourceId: resourceId || '',
+    personalOnly: true,
+    clearClickTimer: clearFileClickTimer,
+  });
+  const { openSaveToKnowledge } = knowledgeSave;
   // 项目详情异步加载期间也使用外部项目 ID，确保首次会话文件请求即可过滤仓库目录。
   const projectId = projectIdProp ?? Number(resolvedProject?.projectId);
   const projectCloudResourceId = projectCloudResourceIdProp || resolvedProject?.cloudResourceId;
   // 三类文件使用显式作用域，避免再根据项目 ID 推断本地共享文件和项目云盘的数据源。
   const usesFileBrowser = scope !== 'project';
+  const sharedRootPath = runtimeType === 'dsh' && projectId ? getProjectSharedFilePath(projectId) : SHARED_FILE_PATH;
   const rootPath =
     scope === 'project'
       ? '/'
-      : `${DISPLAY_FILE_PATH_PREFIX}${scope === 'shared' ? SHARED_FILE_PATH : getSessionFilePath(sessionId)}`;
+      : `${DISPLAY_FILE_PATH_PREFIX}${scope === 'shared' ? sharedRootPath : getSessionFilePath(sessionId)}`;
+  const navigationEnabled = scope === 'shared';
+  const browseContext = `${sessionId}:${resourceId}:${rootPath}`;
+  const [browseLocation, setBrowseLocation] = useState({ context: browseContext, path: rootPath });
+  const browsePath = browseLocation.context === browseContext ? browseLocation.path : rootPath;
+  const setBrowsePath = (path: string) => setBrowseLocation({ context: browseContext, path });
+  const currentDirectoryPath = scope === 'shared' ? browsePath : rootPath;
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
+  const projectDirectoryIds = useMemo(() => {
+    if (scope !== 'shared') return [];
+    const paths = [
+      browsePath,
+      ...items.map((item) => item.path),
+      ...Object.values(childrenByPath)
+        .flat()
+        .map((item) => item.path),
+    ];
+    return [
+      ...new Set(
+        paths
+          .map((path) => /^\/by\/\.shared\/project_(-?\d+)(?:\/|$)/.exec(path)?.[1])
+          .filter((id): id is string => !!id)
+      ),
+    ];
+  }, [browsePath, childrenByPath, items, scope]);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      projectDirectoryIds.map(async (id) => {
+        if (id === '-1') return [id, intl.formatMessage({ id: 'projectSpace.projectForm.type.default' })] as const;
+        if (id === String(resolvedProject?.projectId) && resolvedProject?.projectName) {
+          return [id, resolvedProject.projectName] as const;
+        }
+        try {
+          const project = normalizeProjectDetail(await getProject(Number(id)));
+          return [id, project?.projectName || `project_${id}`] as const;
+        } catch {
+          return [id, `project_${id}`] as const;
+        }
+      })
+    ).then((entries) => {
+      if (!cancelled) {
+        setProjectNames((current) =>
+          entries.some(([id, name]) => current[id] !== name) ? { ...current, ...Object.fromEntries(entries) } : current
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [intl, projectDirectoryIds, refreshKey, resolvedProject?.projectId, resolvedProject?.projectName]);
+  const getSharedDisplayName = (item: FileBrowserItem) => {
+    const match = /^\/by\/\.shared\/project_(-?\d+)\/?$/.exec(item.path);
+    return isDirectory(item) && match ? projectNames[match[1]] || item.name : item.name;
+  };
+  const sharedBreadcrumbItems = useMemo(() => {
+    if (scope !== 'shared') return [];
+    const currentSegments = browsePath.split('/').filter(Boolean);
+    const getSegmentTitle = (segment: string, index: number) => {
+      if (segment === '.shared')
+        return <HomeOutlined aria-label={intl.formatMessage({ id: 'chatResource.localSharedFile' })} />;
+      if (index === 2 && /^project_-?\d+$/.test(segment)) return projectNames[segment.slice(8)] || segment;
+      return segment;
+    };
+    return currentSegments
+      .map((segment, index) => ({
+        title: getSegmentTitle(segment, index),
+        path: `/${currentSegments.slice(0, index + 1).join('/')}/`,
+        clickable: index < currentSegments.length - 1 && index >= 1,
+      }))
+      .slice(1);
+  }, [browsePath, intl, projectNames, scope]);
   const loadRoot = useCallback(async () => {
+    if (scope === 'shared' && !runtimeReady) {
+      setItems([]);
+      return;
+    }
     if (scope === 'session' && (!resourceId || !sessionId)) {
       setItems([]);
       return;
@@ -185,7 +301,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setLoadError(undefined);
     try {
       if (scope === 'shared') {
-        const response = await listFiles({ resourceId: resourceId!, path: rootPath, language });
+        if (runtimeType === 'dsh' && projectId && browsePath === rootPath) {
+          await ensureFolder({ resourceId: resourceId!, path: rootPath });
+        }
+        const response = await listFiles({ resourceId: resourceId!, path: browsePath, language });
         setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
       } else if (scope === 'project') {
         const cloudItems = await queryProjectCloudDrive(resourceId, '/', language);
@@ -194,7 +313,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         // eslint-disable-next-line lines-around-comment
         // 文件与仓库并行查询，但等两者都结束后再更新列表，避免仓库目录先闪现后消失。
         const [filesResult, reposResult] = await Promise.allSettled([
-          listFiles({ resourceId: resourceId!, path: rootPath, language }),
+          listFiles({ resourceId: resourceId!, path: browsePath, language }),
           projectId ? listProjectRepos(projectId) : Promise.resolve<DevloopProjectRepo[]>([]),
         ]);
         if (filesResult.status === 'rejected') throw filesResult.reason;
@@ -218,7 +337,19 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [intl, language, projectId, resourceId, rootPath, scope, sessionId, usesFileBrowser]);
+  }, [
+    browsePath,
+    intl,
+    language,
+    projectId,
+    resourceId,
+    rootPath,
+    runtimeReady,
+    runtimeType,
+    scope,
+    sessionId,
+    usesFileBrowser,
+  ]);
 
   useEffect(() => {
     setChildrenByPath({});
@@ -250,14 +381,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const nextItems = sortFileBrowserItems(
         scope === 'project' ? response : unwrapListResponse<FileBrowserItem>(response)
       );
-      if (normalizedPath === rootPath) {
+      if (normalizedPath === browsePath) {
         setItems(nextItems);
       } else {
         setChildrenByPath((current) => ({ ...current, [normalizedPath]: nextItems }));
       }
       setLoadedDirectoryKeys((current) => (current.includes(normalizedPath) ? current : [...current, normalizedPath]));
     },
-    [language, resourceId, rootPath, scope]
+    [browsePath, language, resourceId, scope]
   );
 
   const handleLoadData = useCallback(
@@ -278,12 +409,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const quoteFile = useCallback(
     (item: FileBrowserItem) => {
       if (!resourceId) return;
-      EventEmitter.emit('queryInput-insert-item', {
-        item: normalizeReferenceItem(item, resourceId),
-        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
-      });
+      const referenceItem = normalizeReferenceItem(item, resourceId);
+      const referenceType = isDirectory(item) ? DragType.commonFolder : DragType.commonFile;
+      if (onQuote) {
+        onQuote(referenceItem, referenceType);
+      } else {
+        EventEmitter.emit('queryInput-insert-item', { item: referenceItem, type: referenceType });
+      }
     },
-    [EventEmitter, resourceId]
+    [EventEmitter, onQuote, resourceId]
   );
 
   const openPreview = useCallback(
@@ -380,7 +514,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         } else if (resourceId) {
           await deleteFiles({ resourceId, paths: [item.path] });
           const parentPath = getParentDirectoryPath(item.path);
-          if (parentPath === rootPath) await loadRoot();
+          if (parentPath === currentDirectoryPath) await loadRoot();
           else await loadDirectory(parentPath);
         }
         message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
@@ -388,7 +522,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
       }
     },
-    [intl, loadDirectory, loadRoot, projectId, resourceId, rootPath, scope]
+    [currentDirectoryPath, intl, loadDirectory, loadRoot, projectId, resourceId, scope]
   );
 
   const loadSaveDirectories = useCallback(
@@ -396,8 +530,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const rows =
         destination === 'project'
           ? await queryProjectCloudDrive(projectCloudResourceId!, path, language)
-          : unwrapListResponse<FileBrowserItem>(await listFiles({ resourceId: resourceId!, path, language }));
-      return rows
+          : await listFiles({ resourceId: resourceId!, path, language }, { hideErrorTips: true });
+      return unwrapListResponse<FileBrowserItem>(rows)
         .filter(isDirectory)
         .map((item) => ({ title: item.name, key: ensureDirectoryPath(item.path), isLeaf: false }));
     },
@@ -419,7 +553,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setSaveTreeData([]);
       setSaveTreeLoading(true);
       try {
-        if (destination === 'shared') await ensureFolder({ resourceId, path: targetRootPath });
+        if (destination === 'shared') {
+          await ensureFolder({ resourceId, path: targetRootPath }, { hideErrorTips: true });
+        }
         const children = await loadSaveDirectories(targetRootPath, destination);
         setSaveTreeData([
           {
@@ -433,7 +569,13 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setSaveExpandedKeys([targetRootPath]);
       } catch (error: any) {
         setSaveTarget(null);
-        message.error(error?.message || intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }));
+        message.error(
+          localizeErrorMessage(
+            typeof error === 'string' ? error : error?.message,
+            intl.formatMessage({ id: `chatResource.directoryLoadFailed.${destination}` }),
+            intl.locale
+          )
+        );
       } finally {
         setSaveTreeLoading(false);
       }
@@ -624,7 +766,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         // 项目云盘由后端按条目创建人、项目创建人及 adminvip 返回操作权限。
         ...(usesFileBrowser || (scope === 'project' && resourceId) ? ['rename', 'delete'] : []),
         ...(scope === 'session' && projectId && projectId !== -1 ? ['saveToProject'] : []),
-        ...(scope === 'session' && resourceId ? ['saveToShared'] : []),
+        ...(scope === 'session' && resourceId ? ['saveToShared', 'saveToPersonalKnowledge'] : []),
       ];
       const labels: Record<string, string> = {
         quote: intl.formatMessage({ id: 'common.quote' }),
@@ -638,6 +780,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         delete: intl.formatMessage({ id: 'fileBrowser.action.delete' }),
         saveToProject: intl.formatMessage({ id: 'chatResource.saveToProject' }),
         saveToShared: intl.formatMessage({ id: 'chatResource.saveToShared' }),
+        saveToPersonalKnowledge: intl.formatMessage({ id: 'chatResource.personalKnowledge.save' }),
       };
       return keys.map((key) => ({
         key,
@@ -653,8 +796,20 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   );
 
   const handleUpload = useCallback(
-    async (fileList: File[], targetPath = rootPath) => {
+    async (fileList: File[], targetPath = currentDirectoryPath) => {
       if (!resourceId || !fileList.length || uploading) return;
+
+      // 项目云盘与知识库共用上传接口，数量校验保持一致，避免选择后才被后端拒绝。
+      if (scope === 'project' && isUploadFileCountExceeded(uploadFileConfig, fileList.length)) {
+        message.error(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig?.maxFileCount }));
+        return;
+      }
+
+      // 根目录和子目录上传共用单文件上限，整批校验通过后才开始写入。
+      if (fileList.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
+        message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
+        return;
+      }
       setUploading(true);
       try {
         if (scope === 'project') {
@@ -680,7 +835,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setUploading(false);
       }
     },
-    [intl, loadRoot, resourceId, rootPath, scope, uploading]
+    [currentDirectoryPath, intl, loadRoot, resourceId, scope, uploadFileConfig, uploading]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -726,7 +881,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'preview') openPreview(item);
       if (key === 'download') void downloadResource(item);
       if (key === 'move') {
-        setMoveTargetDirectory(rootPath);
+        setMoveTargetDirectory(currentDirectoryPath);
         setMoveTarget(item);
       }
       if (key === 'upload') {
@@ -747,6 +902,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (key === 'rename') setRenameTarget(item);
       if (key === 'saveToProject') void openSaveResource(item, 'project');
       if (key === 'saveToShared') void openSaveResource(item, 'shared');
+      if (key === 'saveToPersonalKnowledge') openSaveToKnowledge(item);
       if (key === 'delete') {
         Modal.confirm({
           title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
@@ -756,7 +912,19 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         });
       }
     },
-    [deleteResource, downloadResource, handleUpload, intl, openPreview, quoteFile, rootPath, openSaveResource, scope]
+    [
+      currentDirectoryPath,
+      deleteResource,
+      downloadResource,
+      handleUpload,
+      intl,
+      openPreview,
+      quoteFile,
+      rootPath,
+      openSaveResource,
+      openSaveToKnowledge,
+      scope,
+    ]
   );
 
   const handleRename = useCallback(
@@ -790,7 +958,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         } else if (resourceId) {
           const parentPath = getParentDirectoryPath(renameTarget.path);
           await renameFile({ resourceId, sourcePath: renameTarget.path, newName });
-          if (parentPath === rootPath) await loadRoot();
+          if (parentPath === currentDirectoryPath) await loadRoot();
           else await loadDirectory(parentPath);
         }
         message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
@@ -810,7 +978,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setRenameLoading(false);
       }
     },
-    [intl, loadDirectory, loadRoot, projectId, renameTarget, resourceId, rootPath, scope]
+    [currentDirectoryPath, intl, loadDirectory, loadRoot, projectId, renameTarget, resourceId, scope]
   );
 
   const handleNodeClick = useCallback(
@@ -819,10 +987,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
       clickTimerRef.current = window.setTimeout(() => {
         clickTimerRef.current = null;
+        if (isDirectory(item) && navigationEnabled) {
+          setBrowsePath(ensureDirectoryPath(normalizeFileBrowserPath(item.path)));
+          return;
+        }
         if (!isDirectory(item)) openPreview(item);
       }, 220);
     },
-    [openPreview]
+    [browseContext, navigationEnabled, openPreview]
   );
 
   const handleNodeDoubleClick = useCallback(
@@ -974,13 +1146,15 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   return (
     <>
+      {scope === 'session' && <PersonalKnowledgeSaveDialogs key={`${resourceId}-${sessionId}`} state={knowledgeSave} />}
       <FileSpaceBlock
+        getDisplayName={scope === 'shared' ? getSharedDisplayName : undefined}
         title={null}
         hideHeader
         fillContainer
         loading={loading}
         items={items}
-        currentPath={rootPath}
+        currentPath={currentDirectoryPath}
         resourceEmptyStyle
         compactResourceEmpty={compactResourceEmpty}
         showItemMeta
@@ -991,14 +1165,68 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             : intl.formatMessage({ id: emptyTextId }))
         }
         contentBefore={
-          scope !== 'session' && resourceId && !hideProjectToolbar ? (
+          navigationEnabled ? (
+            <>
+              <div className={styles.localSharedBreadcrumb}>
+                <Breadcrumb
+                  items={sharedBreadcrumbItems.map((item) => ({
+                    title: item.clickable ? (
+                      <button
+                        type="button"
+                        className={styles.localSharedBreadcrumbButton}
+                        onClick={() => setBrowsePath(item.path)}
+                      >
+                        {item.title}
+                      </button>
+                    ) : (
+                      item.title
+                    ),
+                  }))}
+                />
+              </div>
+              {resourceId && !hideProjectToolbar && (
+                <div className={styles.localSharedToolbar}>
+                  <Upload
+                    showUploadList={false}
+                    multiple
+                    disabled={uploading}
+                    beforeUpload={(file, fileList) => {
+                      if (file === fileList[0]) void handleUpload(fileList as unknown as File[], currentDirectoryPath);
+                      return false;
+                    }}
+                  >
+                    <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+                      <Button
+                        size="small"
+                        aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                        icon={<UploadOutlined />}
+                        loading={uploading}
+                      />
+                    </Tooltip>
+                  </Upload>
+                  <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
+                    <Button
+                      size="small"
+                      aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+                      icon={<FolderAddOutlined />}
+                      onClick={() => {
+                        setCreateFolderPath(currentDirectoryPath);
+                        setCreateFolderName('');
+                        setCreateFolderOpen(true);
+                      }}
+                    />
+                  </Tooltip>
+                </div>
+              )}
+            </>
+          ) : scope !== 'session' && resourceId && !hideProjectToolbar ? (
             <div className={styles.localSharedToolbar}>
               <Upload
                 showUploadList={false}
                 multiple
                 disabled={uploading}
                 beforeUpload={(file, fileList) => {
-                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[], rootPath);
+                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[], currentDirectoryPath);
                   return false;
                 }}
               >
@@ -1017,7 +1245,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
                   aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
                   icon={<FolderAddOutlined />}
                   onClick={() => {
-                    setCreateFolderPath(rootPath);
+                    setCreateFolderPath(currentDirectoryPath);
                     setCreateFolderName('');
                     setCreateFolderOpen(true);
                   }}

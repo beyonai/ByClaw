@@ -60,6 +60,29 @@ class TenantDeletionServiceTest {
     }
 
     @Test
+    void managedDeletionStillRequiresExactNameBeforeRouting() {
+        platformAdmin();
+        when(tenants.selectConfig(TENANT_ID, "COMMERCIAL_MANAGED")).thenReturn("true");
+        when(tenants.selectManagedEnterpriseName(TENANT_ID)).thenReturn("commercial");
+        assertThatThrownBy(() -> service.request(Long.toString(TENANT_ID), "wrong"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.delete.nameMismatch");
+        verify(executor, never()).execute(any());
+    }
+
+    @Test
+    void confirmedManagedDeletionUsesDurableAuthorityInsteadOfLegacyExecutor() {
+        platformAdmin();
+        when(tenants.selectConfig(TENANT_ID, "COMMERCIAL_MANAGED")).thenReturn("true");
+        when(tenants.selectManagedEnterpriseName(TENANT_ID)).thenReturn("commercial");
+        var managed = mock(com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "managedDeletion", managed);
+        when(managed.request(eq(TENANT_ID), eq("commercial"), org.mockito.ArgumentMatchers.anyLong())).thenReturn("ACCEPTED");
+        assertThat(service.request(Long.toString(TENANT_ID), "commercial")).isEqualTo("ACCEPTED");
+        verify(executor, never()).execute(any());
+        verify(sandboxes, never()).deleteTenantResources(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
     void commercialTenantCannotUseLegacyDeletionEvenForPlatformAdmin() {
         platformAdmin();
         when(tenants.selectConfig(TENANT_ID, "COMMERCIAL_MANAGED")).thenReturn("true");

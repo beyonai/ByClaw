@@ -35,15 +35,24 @@ public final class SharedDshHostContexts {
 
     /** System parameter: user codes that run on the shared host; absent, blank or {@code *} = nobody. */
     public static final String USERS_PARAM = "BYCLAW_SHARED_DSH_HOST_USERS";
+    /**
+     * System parameter: which users get which tool sandbox (B), as {@code userCode=service_key} pairs separated
+     * by commas, semicolons or whitespace. Users not listed get the host's default tool sandbox.
+     */
+    public static final String TOOL_SANDBOX_PARAM = "BYCLAW_TOOL_SANDBOX_BY_USER";
+    /** Launch-environment key the host reads to pick a context's tool sandbox spec. */
+    public static final String TOOL_SANDBOX_ENV = "BYCLAW_TOOL_ENV_SERVICE_KEY";
     public static final String WEB_INSTANCE = "openclaw";
     private static final Pattern USER_LIST_SEPARATOR = Pattern.compile("[,;\\s]+");
     private static final String SANDBOX_TYPE = SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
+    private static final String DEFAULT_TOOL_SERVICE_KEY = "byclaw-dsh-tools";
 
     private final SharedDshHostClient client;
     private final String webBaseUrl;
     private final Predicate<String> sharedUsers;
     private final Function<String, Map<String, String>> launchEnv;
     private final Executor prewarmExecutor;
+    private final String toolServiceKey;
 
     /**
      * @param client      the host's admin API
@@ -54,11 +63,24 @@ public final class SharedDshHostContexts {
      */
     public SharedDshHostContexts(SharedDshHostClient client, String webBaseUrl, Predicate<String> sharedUsers,
                                  Function<String, Map<String, String>> launchEnv, Executor prewarmExecutor) {
+        this(client, webBaseUrl, sharedUsers, launchEnv, prewarmExecutor, DEFAULT_TOOL_SERVICE_KEY);
+    }
+
+    /** @param toolServiceKey service key of the users' tool sandbox, which carries their browser */
+    public SharedDshHostContexts(SharedDshHostClient client, String webBaseUrl, Predicate<String> sharedUsers,
+                                 Function<String, Map<String, String>> launchEnv, Executor prewarmExecutor,
+                                 String toolServiceKey) {
+        this.toolServiceKey = StringUtils.defaultIfBlank(toolServiceKey, DEFAULT_TOOL_SERVICE_KEY);
         this.client = client;
         this.webBaseUrl = StringUtils.removeEnd(StringUtils.trimToEmpty(webBaseUrl), "/");
         this.sharedUsers = sharedUsers;
         this.launchEnv = launchEnv;
         this.prewarmExecutor = prewarmExecutor;
+    }
+
+    /** Service key of the users' tool sandbox, which carries their browser (desktop {@code vnc}, byCLI {@code bycli}). */
+    public String toolServiceKey() {
+        return toolServiceKey;
     }
 
     /** This user's {@code byclaw-dsh} is a context on the host. */
@@ -152,6 +174,40 @@ public final class SharedDshHostContexts {
         }
         Set<String> users = new java.util.HashSet<>(java.util.Arrays.asList(USER_LIST_SEPARATOR.split(value)));
         return users.contains(StringUtils.trimToEmpty(userCode));
+    }
+
+    /**
+     * Tool sandbox lookup backed by the {@value #TOOL_SANDBOX_PARAM} system parameter, read on every call. A
+     * context takes its tool sandbox when it boots, so a changed mapping applies from the user's next context.
+     * Unreadable configuration leaves the user on the default tool sandbox.
+     */
+    public static Function<String, String> toolSandboxLookup(Supplier<String> configuredMapping) {
+        return userCode -> {
+            String value;
+            try {
+                value = configuredMapping.get();
+            }
+            catch (RuntimeException e) {
+                log.warn("读取系统参数 {} 失败，使用默认工具沙箱：{}", TOOL_SANDBOX_PARAM, e.getMessage());
+                return null;
+            }
+            return toolSandboxOf(value, userCode);
+        };
+    }
+
+    /** The service key mapped to {@code userCode}, or {@code null}; entries without {@code =} are ignored. */
+    static String toolSandboxOf(String configuredMapping, String userCode) {
+        String user = StringUtils.trimToEmpty(userCode);
+        if (user.isEmpty()) {
+            return null;
+        }
+        for (String entry : USER_LIST_SEPARATOR.split(StringUtils.trimToEmpty(configuredMapping))) {
+            int separator = entry.indexOf('=');
+            if (separator > 0 && user.equals(entry.substring(0, separator))) {
+                return StringUtils.trimToNull(entry.substring(separator + 1));
+            }
+        }
+        return null;
     }
 
     private SandboxLaunchData launchData(String userCode, String webPath, String webToken) {

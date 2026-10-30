@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.infrastructure.exception;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,8 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void responseStatusException_preservesStatusAndReason() {
+    void responseStatusException_preservesStatusAndLocalizesRawEnglishReason() {
+        LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
         GlobalExceptionHandler handler = handlerWithMessages();
 
         var response = handler.handleResponseStatusException(
@@ -42,8 +44,23 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getCode()).isEqualTo(-1);
-        assertThat(response.getBody().getMsg()).isEqualTo("task plan version conflict");
+        assertThat(response.getBody().getMsg()).isEqualTo("系统发生错误，请稍后重试");
         assertThat(response.getBody().getData()).isNull();
+    }
+
+    @Test
+    void unexpectedEnglishExceptionUsesLocalizedPublicMessage() {
+        GlobalExceptionHandler handler = handlerWithMessages();
+        LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        var response = handler.exception(new MockHttpServletRequest(),
+            new IllegalStateException("Failed to connect to an internal service"));
+        assertThat(response.getBody().getMsg()).isEqualTo("系统发生错误，请稍后重试");
+
+        LocaleContextHolder.setLocale(java.util.Locale.US);
+        response = handler.exception(new MockHttpServletRequest(),
+            new IllegalStateException("Failed to connect to an internal service"));
+        assertThat(response.getBody().getMsg())
+            .isEqualTo("An unexpected system error occurred. Please try again later");
     }
 
     @Test
@@ -88,7 +105,11 @@ class GlobalExceptionHandlerTest {
         "zh-CN|403|resource.favorite.loginRequired|请登录后再使用收藏功能",
         "en-US|403|resource.favorite.loginRequired|Please sign in to use resource favorites",
         "zh-CN|503|resource.favorite.notReady|收藏功能暂不可用，请联系管理员完成数据库升级",
-        "en-US|503|resource.favorite.notReady|Resource favorites are temporarily unavailable; please contact an administrator to complete the database upgrade"
+        "en-US|503|resource.favorite.notReady|Resource favorites are temporarily unavailable; please contact an administrator to complete the database upgrade",
+        "zh-CN|403|i18n.status.enterprise.access.denied|无权访问该企业",
+        "en-US|403|i18n.status.enterprise.access.denied|enterprise access denied",
+        "zh-CN|409|i18n.status.tenant.is.not.ready|租户尚未就绪",
+        "en-US|409|i18n.status.tenant.is.not.ready|tenant is not ready"
     }, delimiter = '|')
     void responseStatusExceptionLocalizesMessageKeys(String language, int status, String key, String expected) {
         LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));

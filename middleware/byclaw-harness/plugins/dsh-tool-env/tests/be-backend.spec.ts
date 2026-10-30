@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { createServer as createTcpServer, type Server as TcpServer } from 'node:net'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -470,6 +470,61 @@ describe('ByClawBeBackend', () => {
     await backend.pause()
     await backend.dispose()
     expect(fake.calls).toHaveLength(0)
+  })
+
+  describe('a B of another service left from an earlier spec', () => {
+    const recordFile = () => join(dir, 'state', 'tool-sandbox.json')
+    const leaveBehind = async (serviceKey: string, sandboxId: string) => {
+      await mkdir(join(dir, 'state'), { recursive: true })
+      await writeFile(recordFile(), JSON.stringify({ serviceKey, sandboxId }))
+      fake.records.set(`u1/${serviceKey}`, { sandboxId, instanceEndpoints: { ...fake.nextEndpoints } })
+    }
+
+    it('records the launched service and forgets it when B is released', async () => {
+      const backend = new ByClawBeBackend(config, identity, () => {})
+      await backend.ensure()
+      expect(JSON.parse(await readFile(recordFile(), 'utf8'))).toMatchObject({ serviceKey: 'byclaw-dsh-tools', sandboxId: 'sb1' })
+      await backend.pause()
+      await expect(access(recordFile())).rejects.toThrow()
+    })
+
+    it('is released before the first launch of a different service', async () => {
+      await leaveBehind('byclaw-dsh-tools', 'old-1')
+      const backend = new ByClawBeBackend({ ...config, serviceKey: 'byclaw-dsh-unity' }, identity, message => logs.push(message))
+      await backend.ensure()
+      expect(fake.calls.map(call => [call.path.split('/').pop(), call.body['sandboxType'] ?? call.body['serviceKey']])).toEqual([
+        ['removeSandbox', 'byclaw-dsh-tools'],
+        ['launchByUserCode', 'byclaw-dsh-unity'],
+      ])
+      expect(fake.records.has('u1/byclaw-dsh-tools')).toBe(false)
+      expect(logs).toContain('released tool environment old-1 of type byclaw-dsh-tools: this user\'s tool sandbox is now byclaw-dsh-unity')
+      expect(JSON.parse(await readFile(recordFile(), 'utf8'))).toMatchObject({ serviceKey: 'byclaw-dsh-unity' })
+    })
+
+    it('is kept when the user still has the same service', async () => {
+      await leaveBehind('byclaw-dsh-tools', 'sb-same')
+      const backend = new ByClawBeBackend(config, identity, () => {})
+      await backend.ensure()
+      expect(fake.calls.map(call => call.path.split('/').pop())).toEqual(['launchByUserCode'])
+      expect(backend.sandboxId).toBe('sb-same')
+    })
+
+    it('does not block the launch when its release fails', async () => {
+      await leaveBehind('byclaw-dsh-tools', 'old-2')
+      fake.removeFailure = 'Unknown sandbox service key: byclaw-dsh-tools'
+      const backend = new ByClawBeBackend({ ...config, serviceKey: 'byclaw-dsh-unity' }, identity, message => logs.push(message))
+      expect(await backend.ensure()).toEqual({ hostName: '127.0.0.1', port })
+      expect(logs.some(line => line.startsWith('release of the earlier tool environment of type byclaw-dsh-tools failed'))).toBe(true)
+    })
+
+    it('is looked for once per process', async () => {
+      const backend = new ByClawBeBackend({ ...config, serviceKey: 'byclaw-dsh-unity' }, identity, () => {})
+      await backend.ensure()
+      await leaveBehind('byclaw-dsh-tools', 'late')
+      await backend.pause()
+      await backend.ensure()
+      expect(fake.calls.filter(call => call.body['sandboxType'] === 'byclaw-dsh-tools')).toHaveLength(0)
+    })
   })
 
   it('releases a B it owns when its A context is disposed', async () => {

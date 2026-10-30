@@ -199,6 +199,7 @@ export default class SendHelper {
                 content: {
                   substance: {
                     msg: get(res, 'message'),
+                    quota: get(res, 'quota'),
                     traceback: get(res, 'traceback'),
                   },
                 },

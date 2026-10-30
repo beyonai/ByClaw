@@ -25,10 +25,17 @@
  * launch window; the backoff it leaves behind is lifted when a new token arrives.
  * Idle and A-context disposal release only this user's configured tool service.
  * The next runtime operation obtains a new B through the same get-or-create API.
+ *
+ * The state directory remembers which tool service last ran for the user
+ * (`tool-sandbox.json`). A process that dies without disposing its contexts (a host
+ * restart) leaves that B running; when the user's next context serves a different
+ * service (BE now assigns the user another tool sandbox), it releases the old one
+ * before launching: both mount the user's tool home, and the old B would keep
+ * holding what the new one needs (its browser profile lock, for one).
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import { createHash } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
 
@@ -75,6 +82,9 @@ interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; val
 interface Envelope { code?: number; msg?: string; data?: unknown }
 interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
 interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string> }
+
+/** What `tool-sandbox.json` in the state directory records about the user's last launched B. */
+interface LaunchedRecord { serviceKey?: string; sandboxId?: string }
 
 /** `ResponseUtil.SUCCESS` in ByClaw BE; failures are `-1` with `msg`. */
 const SUCCESS = 0
@@ -143,6 +153,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   get sandboxId(): string | undefined { return this.currentId }
   private ownsSandbox = false
+  /** Whether this process already looked for a B of another service left from an earlier spec. */
+  private previousChecked = false
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -246,6 +258,10 @@ export class ByClawBeBackend implements ToolEnvBackend {
     // B's sshd reads the keys from A's state directory, so they must exist before B starts.
     const keys = await this.identity.keys()
     if (this.config.publishKeys) await this.publishKeys(keys)
+    if (!this.previousChecked) {
+      await this.releasePreviousService()
+      this.previousChecked = true
+    }
     const first = await this.launchWithin(this.launchRetryWindowMs)
     try {
       await waitForEndpoint(first, this.config.readyTimeoutMs)
@@ -311,6 +327,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     this.ownsSandbox = true
+    await this.writeLaunched({ serviceKey, ...(this.currentId === undefined ? {} : { sandboxId: this.currentId }) })
     return endpoint
   }
 
@@ -320,9 +337,40 @@ export class ByClawBeBackend implements ToolEnvBackend {
       await this.call('/sandbox/removeSandbox', { userCode, sandboxType })
       this.ownsSandbox = false
       this.log(`released tool environment of type ${sandboxType}`)
+      await rm(this.launchedFile, { force: true })
     } catch (error) {
       this.log(`release of tool environment ${sandboxType} failed: ${message(error)}`)
       throw error
+    }
+  }
+
+  /**
+   * Release the B of another service that the last launch for this user left behind
+   * (see the module comment). A failed release is logged and the launch goes on: the
+   * user keeps their tools if the old B is already gone or its spec was removed.
+   */
+  private async releasePreviousService(): Promise<void> {
+    let previous: LaunchedRecord
+    try { previous = JSON.parse(await readFile(this.launchedFile, 'utf8')) as LaunchedRecord } catch { return }
+    const sandboxType = previous.serviceKey
+    if (typeof sandboxType !== 'string' || sandboxType === '' || sandboxType === this.config.serviceKey) return
+    try {
+      await this.call('/sandbox/removeSandbox', { userCode: this.config.userCode, sandboxType })
+      const id = previous.sandboxId === undefined ? '' : ` ${previous.sandboxId}`
+      this.log(`released tool environment${id} of type ${sandboxType}: this user's tool sandbox is now ${this.config.serviceKey}`)
+      await rm(this.launchedFile, { force: true })
+    } catch (error) {
+      this.log(`release of the earlier tool environment of type ${sandboxType} failed (${message(error)}); launching ${this.config.serviceKey} anyway`)
+    }
+  }
+
+  private get launchedFile(): string { return join(this.identity.directory, 'tool-sandbox.json') }
+
+  private async writeLaunched(record: LaunchedRecord): Promise<void> {
+    try {
+      await writeFile(this.launchedFile, JSON.stringify({ ...record, at: new Date().toISOString() }), { mode: 0o600 })
+    } catch (error) {
+      this.log(`recording the launched tool environment failed: ${message(error)}`)
     }
   }
 

@@ -128,6 +128,91 @@ class SandboxLoginAutoStartServiceTest {
         }
     }
 
+    @Test
+    void pendingQuota_retriesWithoutNewLoginAndCoalescesWhileWaiting() {
+        var mapper = mock(SandboxServiceSpecEntityMapper.class);
+        var sandbox = mock(SandboxService.class);
+        var timer = mock(java.util.concurrent.ScheduledExecutorService.class);
+        Queue<Runnable> retries = new ArrayDeque<>();
+        doAnswer(call -> { retries.add(call.getArgument(0)); return null; })
+            .when(timer).schedule(org.mockito.ArgumentMatchers.any(Runnable.class),
+                org.mockito.ArgumentMatchers.eq(15L), org.mockito.ArgumentMatchers.eq(TimeUnit.SECONDS));
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(spec("openclaw"), spec("byclaw-dsh")));
+        var launches = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call -> {
+            if (launches.getAndIncrement() == 0) {
+                throw new com.iwhalecloud.byai.state.common.exception.StoragePreparingException();
+            }
+            if (launches.get() == 2) {
+                org.assertj.core.api.Assertions.assertThat(CurrentUserHolder.getSessionId()).isEqualTo("login-context");
+            }
+            return null;
+        }).when(sandbox).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run, timer);
+        LoginInfo login = new LoginInfo();
+        login.setSessionId("login-context");
+        CurrentUserHolder.setLoginInfo(login);
+        try {
+            service.trigger("user001");
+        }
+        finally {
+            CurrentUserHolder.clearLoginInfo();
+        }
+        service.trigger("user001");
+        org.assertj.core.api.Assertions.assertThat(retries).hasSize(1);
+        verify(mapper).selectAutoStartSpecs();
+        retries.remove().run();
+        verify(sandbox, org.mockito.Mockito.times(2)).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        verify(sandbox).launchSandboxWithServiceKey("user001", "openclaw");
+        org.assertj.core.api.Assertions.assertThat(retries).isEmpty();
+        service.trigger("user001");
+        verify(mapper, org.mockito.Mockito.times(2)).selectAutoStartSpecs();
+    }
+
+    @Test
+    void permanentStorageFailure_doesNotRetry() {
+        var mapper = mock(SandboxServiceSpecEntityMapper.class);
+        var sandbox = mock(SandboxService.class);
+        var timer = mock(java.util.concurrent.ScheduledExecutorService.class);
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(spec("byclaw-dsh")));
+        doThrow(new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("NAS_MIGRATION_REQUIRED"))
+            .when(sandbox).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run, timer).trigger("user001");
+        org.mockito.Mockito.verifyNoInteractions(timer);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "SHARED_USER_NAS_WAITING_QUOTA", "SHARED_USER_NAS_PREPARING_STORAGE", "NAS_SPACE_NOT_READY"
+    })
+    void temporaryStates_areBoundedAndCancelledRetriesDoNotAffectNewLogin(String state) {
+        var mapper = mock(SandboxServiceSpecEntityMapper.class);
+        var sandbox = mock(SandboxService.class);
+        var timer = mock(java.util.concurrent.ScheduledExecutorService.class);
+        Queue<Runnable> retries = new ArrayDeque<>();
+        doAnswer(call -> { retries.add(call.getArgument(0)); return null; })
+            .when(timer).schedule(org.mockito.ArgumentMatchers.any(Runnable.class),
+                org.mockito.ArgumentMatchers.eq(15L), org.mockito.ArgumentMatchers.eq(TimeUnit.SECONDS));
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(spec("byclaw-dsh")));
+        var failure = new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("preparing");
+        failure.setErrorService(state);
+        doThrow(failure).when(sandbox).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run, timer);
+        service.trigger("user001");
+        Runnable stale = retries.remove();
+        service.cancel("user001");
+        service.trigger("user001");
+        stale.run();
+        service.trigger("user001");
+        verify(mapper, org.mockito.Mockito.times(2)).selectAutoStartSpecs();
+        int count = 0;
+        while (!retries.isEmpty() && count < 100) { retries.remove().run(); count++; }
+        org.assertj.core.api.Assertions.assertThat(count).isEqualTo(80);
+        org.assertj.core.api.Assertions.assertThat(retries).isEmpty();
+        service.trigger("user001");
+        verify(mapper, org.mockito.Mockito.times(3)).selectAutoStartSpecs();
+    }
+
     private static SandboxServiceSpecEntity spec(String serviceKey) {
         SandboxServiceSpecEntity entity = new SandboxServiceSpecEntity();
         entity.setServiceKey(serviceKey);

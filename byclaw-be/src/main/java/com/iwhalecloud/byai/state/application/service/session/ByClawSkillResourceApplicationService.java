@@ -392,7 +392,7 @@ public class ByClawSkillResourceApplicationService {
         SsResExtSkill ext = ssResExtSkillService.findById(resourceId);
         if (resource == null || ext == null) throw new IllegalStateException(I18nUtil.get("resource.sync.skill.not.found"));
         syncSkillTargetContent(CurrentUserHolder.getCurrentUserCode(), resource, ext, false);
-        resourceArtifactStorageService.syncResourceJsonByBizType(ext.getTargetContent(), "SKILL", resourceId);
+        resourceArtifactStorageService.publishResourceJson(ext.getTargetContent(), "SKILL", resourceId);
     }
 
     public ObjectZipImportResult previewSkillZipImportConflicts(MultipartFile[] files, String ownerType) {
@@ -902,6 +902,7 @@ public class ByClawSkillResourceApplicationService {
         SkillPackageMetadata metadata = inspectSkillPackage(file);
         String resolvedOwnerType = resolveOwnerType(ownerType);
         Long resolvedCatalogId = catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId;
+        ssResourceService.lockSkillImport(metadata.skillCode());
         List<SsResource> existingSkills = findExistingSkillsByNaturalKey(metadata.skillCode());
         if (CollectionUtils.isEmpty(existingSkills)) {
             return importNewSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId, sourceType);

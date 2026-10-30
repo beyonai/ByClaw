@@ -31,7 +31,7 @@ public final class RsaDecrypt {
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
-            throw new BaseException("Token format error, unified authentication failed", e);
+            throw new BaseException("i18n.error.auth.token.invalid", e);
         }
         return output;
     }

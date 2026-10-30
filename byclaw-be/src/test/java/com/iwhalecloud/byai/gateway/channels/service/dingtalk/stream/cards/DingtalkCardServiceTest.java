@@ -6,6 +6,8 @@ import com.aliyun.dingtalkcard_1_0.models.StreamingUpdateRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkTokenService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkHttpClientFactory;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkRobotChannelConfig;
 import org.junit.jupiter.api.Test;
 
@@ -24,12 +26,14 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class DingtalkCardServiceTest {
+class DingtalkCardServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    private final DingtalkHttpClientFactory httpClientFactory = new DingtalkHttpClientFactory(new DingtalkStreamProperties());
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final DingtalkRobotConfigService robotConfigService = new DingtalkRobotConfigService(objectMapper);
-    private final DingtalkTokenService tokenService = new DingtalkTokenService(robotConfigService);
-    private final DingtalkCardService service = new DingtalkCardService(objectMapper, tokenService, robotConfigService);
+    private final DingtalkTokenService tokenService = new DingtalkTokenService(robotConfigService, httpClientFactory);
+    private final DingtalkCardService service = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory);
 
     @Test
     void shouldConvertCardDataToStringValues() {
@@ -54,7 +58,7 @@ class DingtalkCardServiceTest {
     void shouldBuildAssistantReplyCardParamMap() {
         assertThat(service.buildAssistantReplyCardParamMap("测试智能体"))
                 .containsEntry("lastMessage", "来自 测试智能体 的回复")
-                .containsEntry("content", "来自 测试智能体 的回复")
+                .containsEntry("content", "正在思考...")
                 .containsEntry("copyContent", "")
                 .containsEntry("resources", "[]")
                 .containsEntry("users", "[]")
@@ -112,7 +116,7 @@ class DingtalkCardServiceTest {
         config.setCardTemplateId("robot-card-template.schema");
         localRobotConfigService.replaceRobotConfigsForResource(1L, List.of(config));
 
-        DingtalkCardService cardService = new DingtalkCardService(objectMapper, new DingtalkTokenService(localRobotConfigService), localRobotConfigService);
+        DingtalkCardService cardService = new DingtalkCardService(objectMapper, new DingtalkTokenService(localRobotConfigService, httpClientFactory), localRobotConfigService, httpClientFactory);
 
         assertThat(cardService.resolveCardTemplateId("robot-001")).isEqualTo("robot-card-template.schema");
     }
@@ -127,7 +131,7 @@ class DingtalkCardServiceTest {
         config.setClientSecret("secret-001");
         localRobotConfigService.replaceRobotConfigsForResource(1L, List.of(config));
 
-        DingtalkCardService cardService = new DingtalkCardService(objectMapper, new DingtalkTokenService(localRobotConfigService), localRobotConfigService);
+        DingtalkCardService cardService = new DingtalkCardService(objectMapper, new DingtalkTokenService(localRobotConfigService, httpClientFactory), localRobotConfigService, httpClientFactory);
 
         assertThat(cardService.resolveCardTemplateId("robot-001")).isEqualTo("9b643b4e-9602-4dab-811a-290d13299e14.schema");
         assertThat(cardService.resolveCardTemplateId("unknown-robot")).isEqualTo("9b643b4e-9602-4dab-811a-290d13299e14.schema");
@@ -175,7 +179,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 latestContent.set(content);
@@ -208,7 +212,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 latestContent.set(content);
@@ -245,7 +249,7 @@ class DingtalkCardServiceTest {
     void appStreamResponseShouldFinalizeCardAndCompleteStream() throws Exception {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 latestContent.set(content);
@@ -278,7 +282,7 @@ class DingtalkCardServiceTest {
 
     @Test
     void completionIdleTimeoutShouldResetAfterEachWrite() throws Exception {
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 if (isFinalize) {
@@ -326,7 +330,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -375,7 +379,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 latestContent.set(content);
@@ -416,7 +420,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -465,7 +469,7 @@ class DingtalkCardServiceTest {
         List<String> streamedContents = new ArrayList<>();
         AtomicReference<String> latestContent = new AtomicReference<>("");
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -506,7 +510,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -552,7 +556,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -596,7 +600,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestCopyContent = new AtomicReference<>("");
         AtomicReference<String> latestContent = new AtomicReference<>("");
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 latestContent.set(content);
@@ -636,7 +640,7 @@ class DingtalkCardServiceTest {
         AtomicReference<String> latestContent = new AtomicReference<>("");
         AtomicBoolean finalized = new AtomicBoolean(false);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);
@@ -675,7 +679,7 @@ class DingtalkCardServiceTest {
         List<Boolean> finalizedStates = new ArrayList<>();
         AtomicLong nowMillis = new AtomicLong(1_000L);
 
-        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService, httpClientFactory) {
             @Override
             public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
                 streamedContents.add(content);

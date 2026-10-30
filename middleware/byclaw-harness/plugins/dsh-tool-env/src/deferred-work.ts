@@ -1,8 +1,8 @@
 /**
- * Work on the tool environment that must not start it: a context boots and a
- * turn begins without B (only a tool call pays for B), so directory creation
- * and projection writes meant for B wait here, keyed so the latest write per
- * key wins, and run once B is connected, before the first operation is served.
+ * Work on the tool environment that must not start it: a context boots without
+ * B (a turn is what starts B), so directory creation and projection writes
+ * meant for B wait here, keyed so the latest write per key wins, and run once B
+ * is connected, before the first operation is served.
  */
 export class DeferredToolEnvironmentWork {
   private readonly pending = new Map<string, () => Promise<void>>()

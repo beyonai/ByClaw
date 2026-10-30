@@ -74,4 +74,13 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
     int updateSessionNameWhenExtExists(@Param("sessionId") Long sessionId,
                                        @Param("sessionName") String sessionName, @Param("extParamCode") String extParamCode,
                                        @Param("updateBy") Long updateBy, @Param("updateTime") Date updateTime);
+
+    /**
+     * 仅在会话尚未产生用户问题时变更项目归属。
+     *
+     * @return 更新记录数；0 表示会话不存在、无权修改或已经开始问答
+     */
+    int updateDraftSessionProject(@Param("sessionId") Long sessionId,
+                                  @Param("projectId") Long projectId,
+                                  @Param("currentUserId") Long currentUserId);
 }

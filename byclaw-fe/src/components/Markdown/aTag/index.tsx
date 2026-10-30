@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { get } from 'lodash';
 import classnames from 'classnames';
 import { useIntl } from '@umijs/max';
+import { message } from 'antd';
 import { domToReact } from 'html-react-parser';
 import { CloudDownloadOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons';
 import useGlobal from '@/hooks/useGlobal';
@@ -9,14 +10,18 @@ import useGlobal from '@/hooks/useGlobal';
 import IconRender from '@/components/MessageList/components/FileRender/components/IconRender';
 
 import { downloadFile, getFileUrl } from '@/utils/file';
-import { isManagedChatFileArtifactPath } from '@/utils/chatFileArtifact';
+import { isManagedChatFileArtifactPath, isRelativeChatFileArtifactPath } from '@/utils/chatFileArtifact';
+import { downloadChatFileArtifact, downloadRelativeChatFileArtifact } from '@/service/chatFileArtifact';
+import { resolvePreviewType } from '@/components/Preview/formats';
 import { PREVIEWABLE } from '@/components/MessageList/components/FileRender';
-import { createRelativeResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
+import {
+  createRelativePathResourceResolver,
+  createRelativeResourceResolver,
+} from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
+import type { MarkdownImageResolver } from '@/components/Preview/Md';
 
 import previewStyle from '@/components/MessageList/components/FileRender/components/Previewer/index.module.less';
 import styles from './index.module.less';
-
-const previewCaches: Record<string, Blob> = {};
 
 const getFileTypeFromUrl = (href?: string) => {
   if (!href) return '';
@@ -30,7 +35,7 @@ const getFileTypeFromUrl = (href?: string) => {
   }
 };
 
-function ATag({ domNode }: { domNode: any }) {
+function ATag({ domNode, sessionId, messageId }: { domNode: any; sessionId?: string; messageId?: string }) {
   const intl = useIntl();
   const { href } = domNode.attribs || {};
   const name: string = get(domNode, 'children.0.data') || href || '';
@@ -40,14 +45,20 @@ function ATag({ domNode }: { domNode: any }) {
   const [previewing, setPreviewing] = useState(false);
 
   const nameArr = name?.split('.');
-  const fileType = ((nameArr?.length > 1 ? nameArr?.pop() : '') || getFileTypeFromUrl(href)).toLowerCase();
+  const fileType = resolvePreviewType((nameArr?.length > 1 ? nameArr?.pop() : '') || getFileTypeFromUrl(href), name);
+  const relativeFile = isRelativeChatFileArtifactPath(href);
 
   const canPreview = !!href && PREVIEWABLE.includes(fileType.toLowerCase());
   const canDownload = !!href;
   const isLoading = previewing;
 
-  const openOnDrawer = (previewInfo: { blob: Blob | null; resourceUrl: string }) => {
-    const resolveRelativeResource = createRelativeResourceResolver(previewInfo.resourceUrl);
+  const openOnDrawer = (previewInfo: {
+    blob: Blob;
+    resourceUrl?: string;
+    resolvePreviewResource?: MarkdownImageResolver;
+  }) => {
+    const resolveRelativeResource =
+      previewInfo.resolvePreviewResource || createRelativeResourceResolver(previewInfo.resourceUrl);
     EventEmitter.emit('beyond-main-driver-open-type', {
       title: name,
       width: '50vw',
@@ -70,30 +81,52 @@ function ATag({ domNode }: { domNode: any }) {
     event.stopPropagation();
   };
 
-  const onPreview = (event: React.MouseEvent) => {
+  const onPreview = async (event: React.MouseEvent) => {
     stopFileActionEvent(event);
     if (!href) return;
-    const url = getFileUrl(href);
+    setPreviewing(true);
+    try {
+      if (relativeFile) {
+        const { file, path } = await downloadRelativeChatFileArtifact({ href, sessionId, messageId });
+        if (!(file instanceof Blob) || !file.size) throw new Error('Empty file');
+        openOnDrawer({
+          blob: file,
+          resolvePreviewResource: createRelativePathResourceResolver(path, async (resourcePath) => {
+            if (!sessionId) throw new Error('Missing session');
+            return (await downloadChatFileArtifact({ sessionId, path: resourcePath })).file;
+          }),
+        });
+      } else {
+        const url = getFileUrl(href);
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(response.statusText);
+        const blob = await response.blob();
+        if (!blob.size) throw new Error('Empty file');
+        openOnDrawer({ blob, resourceUrl: url });
+      }
+    } catch {
+      message.warning(intl.formatMessage({ id: 'fileRender.previewUnavailable' }));
+    } finally {
+      setPreviewing(false);
+    }
+  };
 
-    if (previewCaches[url]) {
-      openOnDrawer({ blob: previewCaches[url], resourceUrl: url });
+  const onDownload = async (event: React.MouseEvent) => {
+    stopFileActionEvent(event);
+    if (!relativeFile) {
+      downloadFile({ fileUrl: href, fileName: name });
       return;
     }
-
     setPreviewing(true);
-    fetch(url)
-      .then((res) => res.blob())
-      .then((blob) => {
-        previewCaches[url] = blob;
-        openOnDrawer({ blob, resourceUrl: url });
-      })
-      .catch((error) => {
-        console.error(error);
-        // setPreviewInfo((prev) => ({ ...prev, open: false, loading: false }));
-      })
-      .finally(() => {
-        setPreviewing(false);
-      });
+    try {
+      const { file, fileName } = await downloadRelativeChatFileArtifact({ href, sessionId, messageId });
+      if (!(file instanceof Blob) || !file.size) throw new Error('Empty file');
+      downloadFile({ file, fileName: fileName || name });
+    } catch {
+      message.warning(intl.formatMessage({ id: 'fileRender.previewUnavailable' }));
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   // 会话产物由消息级组件统一校验并渲染，避免这里用原始路径再生成一张不可鉴权的重复卡片。
@@ -121,10 +154,7 @@ function ATag({ domNode }: { domNode: any }) {
           {!isLoading && canDownload && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer download')}
-              onClick={(event) => {
-                stopFileActionEvent(event);
-                downloadFile({ fileUrl: href, fileName: name });
-              }}
+              onClick={onDownload}
               title={intl.formatMessage({ id: 'common.download' })}
             >
               <CloudDownloadOutlined style={{ fontSize: '18px' }} />

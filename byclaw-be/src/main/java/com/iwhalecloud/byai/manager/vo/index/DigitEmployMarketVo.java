@@ -16,6 +16,11 @@ import java.util.Date;
 @Setter
 public class DigitEmployMarketVo {
 
+    /** 当前查看者可见的生效组织；空列表表示未设置可展示的组织范围。 */
+    private java.util.List<AudienceOrganization> audienceOrganizations;
+
+    public record AudienceOrganization(String orgId, String orgName) { }
+
     private Boolean favorited;
 
     private Long favoriteCount;

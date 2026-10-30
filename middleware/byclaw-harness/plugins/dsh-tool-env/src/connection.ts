@@ -30,6 +30,8 @@ export interface ToolEnvConnectionOptions {
   ptcLaunch: { kind: 'node-script'; executable: string; bootstrapPath: string }
   /** Pause the tool environment after this long without operations or open streams; 0 disables. */
   idleMs: number
+  /** The user's launch environment, laid under every process's own; see {@link launchEnvironment}. */
+  launchEnv?: Readonly<Record<string, string>>
   /**
    * What else counts as busy once the connection itself is idle (see busy.ts):
    * `dsh` answers whether A has an Agent in a turn or a job running; `residual`
@@ -64,6 +66,8 @@ export class ToolEnvConnection extends Service {
   private pausing: Promise<void> | undefined
   /** When residual processes on B first postponed a pause; cleared by any operation or a release. */
   private residualSince: number | undefined
+  /** The user's launch environment; see {@link launchEnvironment}. */
+  private launchEnv: Readonly<Record<string, string>>
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
 
   constructor(
@@ -73,6 +77,7 @@ export class ToolEnvConnection extends Service {
     private readonly identity: ToolEnvIdentity,
   ) {
     super(ctx, 'ssh')
+    this.launchEnv = options.launchEnv ?? {}
     ctx.effect(() => () => { void this.close() })
   }
 
@@ -82,9 +87,10 @@ export class ToolEnvConnection extends Service {
   }
 
   /**
-   * Only a tool call is meant to start B. When an operation arrives while B is
-   * down and no start is in flight, name it: this is the line to read when B
-   * starts earlier than expected.
+   * A turn starts B (its instruction-file and Skill reads, then its tools); a
+   * context's boot does not. When an operation arrives while B is down and no
+   * start is in flight, name it: this is the line to read when B starts at an
+   * unexpected moment.
    */
   private noteStartReason(method: string, params: unknown): void {
     if (this.connected || this.current !== undefined || this.closed) return
@@ -92,6 +98,11 @@ export class ToolEnvConnection extends Service {
     const target = detail['target'] as { displayPath?: string } | undefined
     const where = target?.displayPath ?? detail['path'] ?? detail['cwd'] ?? (Array.isArray(detail['argv']) ? (detail['argv'] as unknown[])[0] : undefined) ?? detail['endpoint'] ?? ''
     this.ctx.logger('byclaw-tool-env').info(`tool environment start requested by ${method} ${typeof where === 'string' ? where : JSON.stringify(where)}`)
+  }
+
+  /** Replace the user's launch environment, e.g. when the host receives a newer one; later processes get it. */
+  setLaunchEnvironment(env: Readonly<Record<string, string>>): void {
+    this.launchEnv = { ...env }
   }
 
   /** Whether B is connected right now; `false` never starts it. */
@@ -141,14 +152,14 @@ export class ToolEnvConnection extends Service {
         if (local !== undefined) return result.parse(local)
       }
     }
-    // A turn resolves its session directory and probes for files (git roots, cwd) before the model
-    // runs; answer those without B: queued directories are empty directories, the rest is absent.
+    // What this host can say without B (queued directories, DSH's own homes, path resolution);
+    // everything else, a turn's instruction-file and Skill probes included, goes to B and starts it.
     if (!this.connected && this.current === undefined && !this.closed) {
       const answer = answerWhileDown(method, params, this.deferred.pendingDirectories(), undefined, this.deferred.createdDirectories())
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)
-    const scrubbed = scrubEnvironment(params)
+    const scrubbed = scrubEnvironment(launchEnvironment(method, params, this.launchEnv))
     return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
   }
 
@@ -316,6 +327,28 @@ export class ToolEnvConnection extends Service {
  * Every remote spawn and lookup carries its environment in a top-level `env`.
  */
 const PRIVATE_ENVIRONMENT = /^BYCLAW_(?:DSH_)?TOOL_ENV(?:_|$)/u
+
+/**
+ * Before the split, every process the user started inherited the runtime's own
+ * environment: the variables BE rendered from the harness spec at launch (user
+ * identity, Redis, model, platform keys). On B a process gets B's image and spec
+ * environment plus whatever its caller sends, so lay the user's launch
+ * environment under the caller's for every process, terminals included. The
+ * caller's values, tombstones included, still win.
+ */
+export function launchEnvironment(method: string, params: unknown, launch: Readonly<Record<string, string>>): unknown {
+  if (method !== 'process.prepare' || typeof params !== 'object' || params === null) return params
+  const kept = Object.entries(launch).filter(([name]) => !SANDBOX_OWN_ENVIRONMENT.test(name))
+  if (kept.length === 0) return params
+  const env = (params as { env?: Record<string, string | null> }).env
+  return { ...params, env: { ...Object.fromEntries(kept), ...env } }
+}
+
+/**
+ * Paths, the interpreter and loader, the display and the browser belong to B's
+ * image and its browser supervisor, not to the runtime's launch.
+ */
+const SANDBOX_OWN_ENVIRONMENT = /^(?:PATH|HOME|USER|LOGNAME|SHELL|PWD|TMPDIR|HOSTNAME|DISPLAY|NODE_OPTIONS|NODE_PATH|PLAYWRIGHT_BROWSERS_PATH|LD_.*|XDG_.*|DSH_HOME|DSH_ROOT|DSH_AGENTS_HOME|BYCLAW_BROWSER_.*)$/u
 
 export function scrubEnvironment(params: unknown): unknown {
   if (typeof params !== 'object' || params === null || !('env' in params)) return params

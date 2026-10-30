@@ -14,6 +14,11 @@ class TenantInternalEnterpriseServiceTest {
     private JdbcTemplate jdbc;
     private TransactionTemplate transaction;
     private TenantInternalEnterpriseService service;
+    private final com.iwhalecloud.byai.common.quota.SharedQuotaReader quotas = org.mockito.Mockito.mock(com.iwhalecloud.byai.common.quota.SharedQuotaReader.class);
+    private void limit(int members) {
+        org.mockito.Mockito.when(quotas.read(42L)).thenReturn(java.util.Optional.of(
+            new com.iwhalecloud.byai.common.quota.QuotaSnapshot(42L, "1", members, 5, 5, 5)));
+    }
     private final ObjectMapper mapper = new ObjectMapper();
     @BeforeEach void setup() {
         var source = new DriverManagerDataSource("jdbc:h2:mem:members" + System.nanoTime() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
@@ -31,7 +36,8 @@ class TenantInternalEnterpriseServiceTest {
             private final java.util.concurrent.atomic.AtomicLong next = new java.util.concurrent.atomic.AtomicLong(10);
             @Override public Long nextVal() { return next.getAndIncrement(); }
         };
-        service = new TenantInternalEnterpriseService(jdbc, mapper, sequence);
+        limit(2);
+        service = new TenantInternalEnterpriseService(jdbc, sequence, new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(quotas, jdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create()));
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
     @Test void insertsValidMemberAndRollsBackWithOuterCommand() throws Exception {
@@ -46,9 +52,9 @@ class TenantInternalEnterpriseServiceTest {
     }
     @Test void quotaAndInvalidUsersCannotBypassMembershipConstraint() throws Exception {
         var body = mapper.readTree("{\"userId\":\"2\",\"role\":\"MEMBER\",\"createdByUserId\":\"1\"}");
-        jdbc.update("UPDATE byai.tenant_config SET params_value='{\"memberLimit\":1}'");
+        limit(1);
         assertThrows(RuntimeException.class, () -> transaction.executeWithoutResult(status -> service.addMember(42, body)));
-        jdbc.update("UPDATE byai.tenant_config SET params_value='{\"memberLimit\":3}'");
+        limit(3);
         var invalid = body.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) invalid).put("userId", "3");
         assertThrows(RuntimeException.class, () -> transaction.executeWithoutResult(status -> service.addMember(42, invalid)));
         assertEquals(1, service.listMembers(42).size());
@@ -66,7 +72,7 @@ class TenantInternalEnterpriseServiceTest {
                         transaction.executeWithoutResult(status -> service.addMember(42, body));
                         return true;
                     } catch (org.springframework.web.server.ResponseStatusException denied) {
-                        assertEquals("MEMBER_LIMIT_EXCEEDED", denied.getReason());
+                        assertEquals("tenant.member.limit.reached", denied.getReason());
                         return false;
                     }
                 }));
@@ -77,6 +83,15 @@ class TenantInternalEnterpriseServiceTest {
             assertEquals(1, successes);
             assertEquals(2, service.listMembers(42).size());
         }
+    }
+    @Test void missingPackageAllowsValidMembersAndRepeatedActiveAdmissionConsumesNoSeat() throws Exception {
+        org.mockito.Mockito.when(quotas.read(42L)).thenReturn(java.util.Optional.empty());
+        jdbc.update("DELETE FROM byai.tenant_config");
+        var body = mapper.readTree("{\"userId\":\"2\",\"role\":\"MEMBER\",\"createdByUserId\":\"1\"}");
+        transaction.executeWithoutResult(status -> service.addMember(42, body));
+        limit(1);
+        transaction.executeWithoutResult(status -> assertEquals("2", service.addMember(42, body).userId()));
+        assertEquals(2, service.listMembers(42).size());
     }
     @Test void updateIsNarrowAndOwnerMutationUnsupported() throws Exception {
         var name = mapper.readTree("{\"enterpriseName\":\"Changed\"}");

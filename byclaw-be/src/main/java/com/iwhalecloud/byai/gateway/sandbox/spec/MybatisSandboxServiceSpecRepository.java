@@ -27,7 +27,6 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
 
     private final SandboxServiceSpecEntityMapper specEntityMapper;
     private final SandboxServiceProfileEntityMapper profileEntityMapper;
-    private final SandboxProperties properties;
     private final ObjectMapper objectMapper;
 
     public MybatisSandboxServiceSpecRepository(SandboxServiceSpecEntityMapper specEntityMapper,
@@ -35,7 +34,6 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
                                                SandboxProperties properties) {
         this.specEntityMapper = specEntityMapper;
         this.profileEntityMapper = profileEntityMapper;
-        this.properties = properties;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -60,7 +58,7 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
     private SandboxServiceSpec queryOne(String serviceKey, String requestedProfileKey) {
         try {
             SandboxServiceSpecEntity entity = querySpecEntity(serviceKey);
-            if (entity == null) {
+            if (entity == null || Integer.valueOf(0).equals(entity.getEnabled())) {
                 return null;
             }
             String specJson = entity.getSpecJson();
@@ -95,15 +93,8 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
     }
 
     private SandboxServiceSpecEntity querySpecEntity(String serviceKey) {
-        SandboxServiceSpecEntity byKey = isProfileEnabled()
-            ? specEntityMapper.selectProfileAwareByServiceKey(serviceKey)
-            : specEntityMapper.selectLegacyByServiceKey(serviceKey);
-        if (byKey != null) {
-            return byKey;
-        }
-        if (!isProfileEnabled()) {
-            return null;
-        }
+        SandboxServiceSpecEntity byKey = specEntityMapper.selectProfileAwareByServiceKey(serviceKey);
+        if (byKey != null) return byKey;
         String serviceType = parseServiceType(serviceKey);
         if (serviceType == null || serviceType.equals(serviceKey)) {
             return null;
@@ -114,7 +105,7 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
     private SandboxServiceProfileEntity resolveProfile(SandboxServiceSpecEntity entity,
                                                        String serviceType,
                                                        String requestedProfileKey) {
-        if (!isProfileEnabled() || profileEntityMapper == null || serviceType == null || serviceType.isBlank()) {
+        if (profileEntityMapper == null || serviceType == null || serviceType.isBlank()) {
             return null;
         }
         String profileKey = requestedProfileKey;
@@ -127,11 +118,9 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
         if (profileKey == null || profileKey.isBlank()) {
             return null;
         }
-        return profileEntityMapper.selectEnabledProfile(serviceType, profileKey.trim());
-    }
-
-    private boolean isProfileEnabled() {
-        return properties != null && properties.getProfile() != null && properties.getProfile().isEnabled();
+        SandboxServiceProfileEntity profile = profileEntityMapper.selectEnabledProfile(serviceType, profileKey.trim());
+        if (profile == null) throw new IllegalArgumentException("Sandbox profile is missing or disabled: " + serviceType + "/" + profileKey);
+        return profile;
     }
 
     private String resolveServiceType(SandboxServiceSpecEntity entity, String serviceKey) {

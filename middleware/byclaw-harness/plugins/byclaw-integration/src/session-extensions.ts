@@ -18,6 +18,10 @@ export interface ByClawSessionHost {
   resolveSessionRoot?(agentId: string): string | undefined
   /** Resolve enabled media configuration without exposing credentials to tools. */
   resolveMediaModel?(type: 'IMAGE_GENERATION' | 'TTS' | 'ASR', modelId?: string): Promise<MediaModel>
+  /** File operations on the session tree when it is not on this host (the tool environment). */
+  readonly artifactIo?: ReturnType<typeof import('./tool-environment-files.ts').mediaArtifactIo>
+  /** The user tree's files when it is not on this host (the tool environment); `byRoot` paths resolve there. */
+  readonly userFiles?: import('./tool-environment-files.ts').ToolEnvironmentFiles
 }
 
 /** Trusted command and Agent context supplied before input admission. */

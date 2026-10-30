@@ -8,6 +8,19 @@ import org.junit.jupiter.api.Test;
 
 class SharedSandboxPolicyTest {
     @Test
+    void userNasRequiresExactEnabledFlagAndEligibleDshUser() {
+        var config=mock(ByaiSystemConfigService.class);
+        var policy=new SharedSandboxPolicy(config);
+        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isFalse();
+        verify(config,never()).getDcSystemConfigValueByCode(SharedSandboxPolicy.ALL);
+        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.USER_NAS)).thenReturn("1");
+        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isFalse();
+        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.USERS)).thenReturn("alice");
+        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isTrue();
+        assertThat(policy.userNasEnabled("alice", "openclaw")).isFalse();
+    }
+
+    @Test
     void exactWhitelistAndAllSwitchAreIndependentOfPoolScope() {
         var config = mock(ByaiSystemConfigService.class);
         var policy = new SharedSandboxPolicy(config);

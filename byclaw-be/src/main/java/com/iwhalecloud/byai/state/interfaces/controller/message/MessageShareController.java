@@ -109,7 +109,7 @@ public class MessageShareController {
         }
         catch (Exception e) {
             logger.error("validateShareLinkAccess unknown error, token={}, err={}", token, e.getMessage(), e);
-            return ResponseUtil.fail("validateShareLinkAccess error");
+            return ResponseUtil.failI18n("i18n.error.messageShare.access.failed");
         }
     }
 

@@ -19,7 +19,12 @@ interface Props {
   projectId?: number;
   sessionId?: string;
   onApply: (prompt: string) => void;
-  onProjectChange?: (project: { projectId: string; projectName: string; cloudResourceId?: string | number }) => void;
+  onProjectChange?: (project: {
+    projectId: string;
+    projectName: string;
+    cloudResourceId?: string | number;
+  }) => void | Promise<void>;
+  skipInitialProjectChange?: boolean;
 }
 
 type RecommendedQuestionTemplate = {
@@ -41,7 +46,13 @@ const getSavedProjectId = (response: any) =>
   `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
-const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
+const TaskTemplateEntry: React.FC<Props> = ({
+  projectId,
+  sessionId,
+  onApply,
+  onProjectChange,
+  skipInitialProjectChange = false,
+}) => {
   const intl = useIntl();
   const PROJECT_TYPE_TITLE: Record<Exclude<ProjectType, 'default'>, string> = {
     // 三类项目统一采用运营项目弹窗的“项目类型 · 选择任务模板”标题格式。
@@ -57,6 +68,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [recommendedLoading, setRecommendedLoading] = useState(false);
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
+  const [projectChangeLoading, setProjectChangeLoading] = useState(false);
   const createdProjectNameRef = useRef('');
   // 从会话详情切换到新任务时，父级项目上下文会在同一轮渲染后清空；保留初始显式项目，
   // 避免项目列表请求完成前把侧边栏刚选中的项目作用域重置为列表第一项。
@@ -92,16 +104,20 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   }, [projects.length, projectsLoading]);
 
   useEffect(() => {
-    if (sessionId || !selectedProjectValue) return;
+    if (sessionId || skipInitialProjectChange || !selectedProjectValue) return;
     const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`);
     if (selectedProject) {
-      onProjectChange?.({
-        projectId: `${selectedProject.projectId}`,
-        projectName: selectedProject.projectName,
-        cloudResourceId: selectedProject.cloudResourceId,
+      void Promise.resolve(
+        onProjectChange?.({
+          projectId: `${selectedProject.projectId}`,
+          projectName: selectedProject.projectName,
+          cloudResourceId: selectedProject.cloudResourceId,
+        })
+      ).catch((error: any) => {
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' }));
       });
     }
-  }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
+  }, [intl, onProjectChange, projectOptions, selectedProjectValue, sessionId, skipInitialProjectChange]);
 
   useEffect(() => {
     if (!projectOptions.length) {
@@ -320,7 +336,8 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           <Select
             className={styles.projectSelect}
             showSearch
-            loading={projectsLoading}
+            loading={projectsLoading || projectChangeLoading}
+            disabled={projectChangeLoading}
             value={selectedProjectValue || undefined}
             placeholder={intl.formatMessage({ id: 'projectSpace.selectProject' })}
             showArrow
@@ -330,16 +347,24 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
               value: `${item.projectId}`,
               label: item.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' }),
             }))}
-            onChange={(value) => {
-              setSelectedProjectOverride(`${value}`);
-              updateProjectScopeId(value);
+            onChange={async (value) => {
               const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${value}`);
-              if (selectedProject) {
-                onProjectChange?.({
+              if (!selectedProject) return;
+              setProjectChangeLoading(true);
+              try {
+                await onProjectChange?.({
                   projectId: `${selectedProject.projectId}`,
                   projectName: selectedProject.projectName,
                   cloudResourceId: selectedProject.cloudResourceId,
                 });
+                setSelectedProjectOverride(`${value}`);
+                updateProjectScopeId(value);
+              } catch (error: any) {
+                message.error(
+                  error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' })
+                );
+              } finally {
+                setProjectChangeLoading(false);
               }
             }}
             aria-label={intl.formatMessage({ id: 'projectSpace.selectProject' })}

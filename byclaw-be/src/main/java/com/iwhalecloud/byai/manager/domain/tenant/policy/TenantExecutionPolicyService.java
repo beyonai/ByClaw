@@ -2,7 +2,8 @@ package com.iwhalecloud.byai.manager.domain.tenant.policy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.iwhalecloud.byai.common.quota.SharedQuotaReader;
+import com.iwhalecloud.byai.common.quota.QuotaSnapshot;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -20,33 +21,35 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Authoritative immutable policies; unsupported runtime consumers never imply activation. */
+/** HACU owns commercial rules; read its shared Redis snapshot without a local rule copy. */
 @Service
 public class TenantExecutionPolicyService {
     private static final Set<String> MODES = Set.of("PREPARED", "ENABLED", "READ_ONLY", "SUSPENDED");
     private static final Set<String> LIMITS = Set.of("memberLimit", "groupLimit", "groupMemberLimit",
         "storageBytes", "agentLimit", "parallelTaskLimit");
     private final JdbcTemplate jdbc;
+    private final SharedQuotaReader quotas;
     private final ObjectMapper mapper;
     private final boolean enabled;
     private final Clock clock;
     private final Set<Long> exemptions;
 
     @Autowired
-    public TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper,
+    public TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper, SharedQuotaReader quotas,
         @Value("${byclaw.tenant-policy.enabled:false}") boolean enabled,
         @Value("${byclaw.tenant-policy.exempt-enterprise-ids:}") String exemptions) {
-        this(jdbc, mapper, enabled, Clock.systemUTC(), Arrays.stream(exemptions.split(","))
+        this(jdbc, mapper, quotas, enabled, Clock.systemUTC(), Arrays.stream(exemptions.split(","))
             .map(String::trim).filter(s -> !s.isEmpty()).map(Long::valueOf).collect(Collectors.toUnmodifiableSet()));
     }
 
-    TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper, boolean enabled, Clock clock) {
-        this(jdbc, mapper, enabled, clock, Set.of());
+    TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper, SharedQuotaReader quotas, boolean enabled, Clock clock) {
+        this(jdbc, mapper, quotas, enabled, clock, Set.of());
     }
 
-    TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper, boolean enabled, Clock clock,
+    TenantExecutionPolicyService(JdbcTemplate jdbc, ObjectMapper mapper, SharedQuotaReader quotas, boolean enabled, Clock clock,
         Set<Long> exemptions) {
         this.jdbc = jdbc;
+        this.quotas = java.util.Objects.requireNonNull(quotas);
         this.mapper = mapper;
         this.enabled = enabled;
         this.clock = clock;
@@ -60,12 +63,10 @@ public class TenantExecutionPolicyService {
         JsonNode policy = validate(initialPolicy, 1);
         if (!"PREPARED".equals(policy.path("accessMode").asText())) throw new IllegalArgumentException("initial policy must be PREPARED");
         if (enterpriseId <= 0) throw new IllegalArgumentException("invalid enterprise id");
-        jdbc.update("INSERT INTO byai.tenant_policy_cursor(enterprise_id,desired_revision,generation) VALUES (?,1,'0')", enterpriseId);
-        jdbc.update("INSERT INTO byai.tenant_execution_policy(enterprise_id,revision,payload) VALUES (?,1,?)", enterpriseId, policy.toString());
+        jdbc.update("INSERT INTO byai.tenant_operation_state(enterprise_id,policy_revision,runtime_generation) VALUES (?,1,'0')", enterpriseId);
         // The existing config marker is checked before new policy tables for old-deployment compatibility.
         if (jdbc.queryForObject("SELECT count(*) FROM byai.tenant_config WHERE enterprise_id=? AND params_code='COMMERCIAL_MANAGED' AND params_value='true'", Integer.class, enterpriseId) == 0)
             throw new IllegalStateException("commercial marker must be reserved before policy preparation");
-        bridgeMemberLimit(enterpriseId, policy);
     }
 
     @Transactional
@@ -74,10 +75,19 @@ public class TenantExecutionPolicyService {
         if (expectedRevision < 1 || expectedRevision == Long.MAX_VALUE) throw denied("POLICY_REVISION_CONFLICT");
         JsonNode policy = validate(snapshot, expectedRevision + 1);
         long next = expectedRevision + 1;
-        if (jdbc.update("UPDATE byai.tenant_policy_cursor SET desired_revision=? WHERE enterprise_id=? AND desired_revision=?", next, enterpriseId, expectedRevision) != 1)
+        QuotaSnapshot published = quotas.readRequired(enterpriseId);
+        if (!Long.toString(next).equals(published.revision())) throw unavailable();
+        // 请求只用于确认 HACU 已发布的快照，绝不在 ByClaw 保存或发布商业规则。
+        if (!policy.path("accessMode").asText().equals(published.accessMode())
+            || !sameInstant(text(policy, "effectiveFrom"), published.effectiveFrom())
+            || !sameInstant(text(policy, "effectiveUntil"), published.effectiveTo())
+            || policy.path("limits").path("memberLimit").asInt() != published.memberLimit()
+            || policy.path("limits").path("groupLimit").asInt() != published.groupLimit()
+            || policy.path("limits").path("groupMemberLimit").asInt() != published.groupMemberLimit()
+            || policy.path("limits").path("agentLimit").asInt() != published.agentLimit())
+            throw denied("POLICY_PUBLICATION_CONFLICT");
+        if (jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=? WHERE enterprise_id=? AND policy_revision=?", next, enterpriseId, expectedRevision) != 1)
             throw denied("POLICY_REVISION_CONFLICT");
-        jdbc.update("INSERT INTO byai.tenant_execution_policy(enterprise_id,revision,payload) VALUES (?,?,?)", enterpriseId, next, policy.toString());
-        bridgeMemberLimit(enterpriseId, policy);
         return projection(enterpriseId);
     }
 
@@ -86,7 +96,7 @@ public class TenantExecutionPolicyService {
         requireTransaction();
         if (generation == null || !generation.matches("[1-9][0-9]{0,18}")) throw new IllegalArgumentException("invalid generation");
         // A generation is monotonic; duplicate notifications are harmless and stale ones are rejected.
-        int changed = jdbc.update("UPDATE byai.tenant_policy_cursor SET generation=? WHERE enterprise_id=? AND CAST(generation AS BIGINT)<=?", generation, enterpriseId, Long.parseLong(generation));
+        int changed = jdbc.update("UPDATE byai.tenant_operation_state SET runtime_generation=? WHERE enterprise_id=? AND CAST(runtime_generation AS BIGINT)<=?", generation, enterpriseId, Long.parseLong(generation));
         if (changed != 1) throw denied("POLICY_GENERATION_CONFLICT");
     }
 
@@ -94,10 +104,18 @@ public class TenantExecutionPolicyService {
     public void acknowledge(long enterpriseId, long revision, String generation, String consumerKey) {
         requireTransaction();
         if (!"main-service".equals(consumerKey)) throw denied("POLICY_CAPABILITY_UNSUPPORTED");
-        // This conditional update holds the cursor until ACK insert commits, fencing concurrent generations.
-        if (jdbc.update("UPDATE byai.tenant_policy_cursor SET desired_revision=desired_revision WHERE enterprise_id=? AND desired_revision=? AND generation=?", enterpriseId, revision, generation) != 1)
+        QuotaSnapshot published = quotas.readRequired(enterpriseId);
+        if (!Long.toString(revision).equals(published.revision())) throw denied("POLICY_ACK_STALE");
+        // 这里只保存技术确认的版本，不复制规则正文或有效期。
+        if (jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=? WHERE enterprise_id=? AND runtime_generation=?", revision, enterpriseId, generation) != 1)
             throw denied("POLICY_ACK_STALE");
-        jdbc.update("INSERT INTO byai.tenant_policy_consumer(enterprise_id,policy_revision,consumer_key,generation,applied_at) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", enterpriseId, revision, consumerKey, generation, Timestamp.from(clock.instant()));
+        // 只保留主服务最近一次确认，同一版本/代次重复确认不覆盖首次确认时间。
+        Integer existing = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_operation_state "
+            + "WHERE enterprise_id=? AND applied_rule_revision=? AND applied_runtime_generation=?",
+            Integer.class, enterpriseId, revision, generation);
+        if (existing != null && existing > 0) return;
+        jdbc.update("UPDATE byai.tenant_operation_state SET applied_rule_revision=?,applied_runtime_generation=?,rule_applied_at=? WHERE enterprise_id=?",
+            revision, generation, Timestamp.from(clock.instant()), enterpriseId);
     }
 
     public void requireExecution(long enterpriseId) {
@@ -105,14 +123,16 @@ public class TenantExecutionPolicyService {
         // Deployment exemptions cannot be self-granted by a commercial policy request.
         if (exemptions.contains(enterpriseId)) return;
         if (!enabled && !managed(enterpriseId)) return;
+        requireNotDeleting(enterpriseId);
         PolicyView view = projection(enterpriseId);
         if (view.desiredRevision() == null) throw denied("POLICY_MISSING");
         Instant now = clock.instant();
-        if ((view.effectiveFrom() != null && now.isBefore(Instant.parse(view.effectiveFrom())))
+        if (view.effectiveFrom() == null || view.effectiveUntil() == null
+            || (view.effectiveFrom() != null && now.isBefore(Instant.parse(view.effectiveFrom())))
             || (view.effectiveUntil() != null && !now.isBefore(Instant.parse(view.effectiveUntil()))))
             throw denied("POLICY_NOT_EFFECTIVE");
         if (!"ENABLED".equals(view.accessMode())) throw denied("POLICY_EXECUTION_DISABLED");
-        throw denied("POLICY_CAPABILITY_UNSUPPORTED");
+        // ENABLED and its effective interval decide admission; incomplete quota consumers do not deny all use.
     }
 
     /** SaaS tenant creation must enter the authenticated commercial reservation transaction. */
@@ -130,11 +150,45 @@ public class TenantExecutionPolicyService {
     }
 
     public PolicyView projection(long enterpriseId) {
-        var rows = jdbc.query("SELECT c.desired_revision,c.generation,p.payload FROM byai.tenant_policy_cursor c JOIN byai.tenant_execution_policy p ON p.enterprise_id=c.enterprise_id AND p.revision=c.desired_revision WHERE c.enterprise_id=?",
-            (rs, index) -> new Stored(rs.getLong(1), rs.getString(2), parse(rs.getString(3))), enterpriseId);
-        if (rows.isEmpty()) return new PolicyView(Long.toString(enterpriseId), null, null, null, null, null, false, capabilities());
-        Stored row = rows.get(0);
-        return new PolicyView(Long.toString(enterpriseId), Long.toString(row.revision()), row.generation(), row.policy().path("accessMode").asText(), text(row.policy(), "effectiveFrom"), text(row.policy(), "effectiveUntil"), false, capabilities());
+        QuotaSnapshot snapshot = quotas.readRequired(enterpriseId);
+        var generations = jdbc.query("SELECT runtime_generation FROM byai.tenant_operation_state WHERE enterprise_id=?",
+            (rs, index) -> rs.getString(1), enterpriseId);
+        return new PolicyView(Long.toString(enterpriseId), snapshot.revision(),
+            generations.isEmpty() ? null : generations.getFirst(), snapshot.accessMode(),
+            instant(snapshot.effectiveFrom()), instant(snapshot.effectiveTo()), false, capabilities());
+    }
+
+    /** 技术开通允许 PREPARED；必须等到 HACU 的初始快照实际发布后才能创建资源。 */
+    public void requireProvisioning(long enterpriseId) {
+        requireNotDeleting(enterpriseId);
+        QuotaSnapshot snapshot = quotas.readRequired(enterpriseId);
+        if (!Set.of("PREPARED", "ENABLED").contains(snapshot.accessMode())) throw denied("POLICY_EXECUTION_DISABLED");
+        Instant now = clock.instant();
+        if ((snapshot.effectiveFrom() != null && now.isBefore(snapshot.effectiveFrom().toInstant()))
+            || (snapshot.effectiveTo() != null && !now.isBefore(snapshot.effectiveTo().toInstant())))
+            throw denied("POLICY_NOT_EFFECTIVE");
+        if ("ENABLED".equals(snapshot.accessMode()) && (snapshot.effectiveFrom() == null || snapshot.effectiveTo() == null))
+            throw denied("POLICY_NOT_EFFECTIVE");
+    }
+
+    private void requireNotDeleting(long enterpriseId) {
+        var states = jdbc.query("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code='PROVISION_STATE'",
+            (rs, index) -> rs.getString(1), enterpriseId);
+        if (!states.isEmpty()) {
+            try {
+                if (Set.of("DELETING", "DELETE_FAILED", "DELETED").contains(mapper.readTree(states.getFirst()).path("status").asText()))
+                    throw denied("POLICY_EXECUTION_DISABLED");
+            } catch (PolicyDeniedException denied) { throw denied; }
+            catch (Exception invalid) { throw unavailable(); }
+        }
+    }
+
+    private static String instant(java.time.OffsetDateTime value) { return value == null ? null : value.toInstant().toString(); }
+    private static boolean sameInstant(String requested, java.time.OffsetDateTime published) {
+        return requested == null ? published == null : published != null && Instant.parse(requested).equals(published.toInstant());
+    }
+    private static ResponseStatusException unavailable() {
+        return new SharedQuotaReader.SharedQuotaUnavailableException();
     }
 
     private boolean managed(long enterpriseId) {
@@ -166,27 +220,11 @@ public class TenantExecutionPolicyService {
         });
         if ("ENABLED".equals(policy.path("accessMode").asText())) {
             if (from == null || until == null) throw new IllegalArgumentException("enabled policy needs effective interval");
-            throw denied("POLICY_CAPABILITY_UNSUPPORTED");
+            // Accept the access state independently of the capability report; do not fabricate consumer ACKs.
         }
         return policy.deepCopy();
     }
 
-    private void bridgeMemberLimit(long enterpriseId, JsonNode policy) {
-        JsonNode member = policy.path("limits").get("memberLimit");
-        if (member == null) return;
-        // Serialize policy changes with application-side member admission before reading the snapshot.
-        int changed = jdbc.update("UPDATE byai.tenant_config SET params_version=COALESCE(params_version,0)+1 WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", enterpriseId);
-        if (changed != 1) throw denied("POLICY_PACKAGE_SNAPSHOT_MISSING");
-        String raw = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class, enterpriseId);
-        ObjectNode snapshot = (ObjectNode) parse(raw);
-        snapshot.put("memberLimit", member.asInt());
-        jdbc.update("UPDATE byai.tenant_config SET params_value=? WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", snapshot.toString(), enterpriseId);
-    }
-
-    private JsonNode parse(String raw) {
-        try { return mapper.readTree(raw); }
-        catch (Exception error) { throw denied("POLICY_UNAVAILABLE"); }
-    }
     private static String text(JsonNode node, String key) {
         JsonNode value = node.get(key);
         if (value == null || value.isNull()) return null;
@@ -202,7 +240,6 @@ public class TenantExecutionPolicyService {
             "storageBytes", false, "agentLimit", false, "parallelTaskLimit", false, "nodePolicyConsumer", false);
     }
     private static PolicyDeniedException denied(String code) { return new PolicyDeniedException(code); }
-    private record Stored(long revision, String generation, JsonNode policy) {}
     public record PolicyView(String enterpriseId, String desiredRevision, String generation, String accessMode,
         String effectiveFrom, String effectiveUntil, boolean fullyApplied, Map<String, Boolean> capabilities) {}
     public static class PolicyDeniedException extends ResponseStatusException {

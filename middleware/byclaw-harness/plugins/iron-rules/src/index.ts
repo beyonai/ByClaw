@@ -18,6 +18,7 @@ import z from '@deepseek-ai/schemastery'
 import { applyCheck } from './check.ts'
 import { applyInject } from './inject.ts'
 import { applyRecord } from './record.ts'
+import { localRuleFiles, toolEnvironmentRuleFiles } from './files.ts'
 export type { IronRulesSource } from './inject.ts'
 
 /** Cordis plugin name. */
@@ -53,6 +54,13 @@ export interface Config {
    * deployments that run untrusted checkouts.
    */
   requireApproval?: boolean
+  /**
+   * Read and write rules through the context's tool environment (`ctx.fs` /
+   * `ctx.subprocess`) rather than this process's filesystem; check scripts
+   * already run through `ctx.shell`. A host whose projects live in a separate
+   * tool sandbox (the shared DSH host) sets it.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Defaults chosen for a repository with a handful of rules and a fast check suite. */
@@ -63,6 +71,7 @@ export const Config: z<Config> = z.object({
   checkOutputMaxChars: z.number().default(2_000),
   maxRetries: z.number().default(2),
   requireApproval: z.boolean().default(false),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** A configuration with every default resolved, passed to the internal modules. */
@@ -116,12 +125,13 @@ export function resolveConfig(config: Config): ResolvedConfig {
  */
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
+  const files = config.workspaceOnToolEnvironment === true ? toolEnvironmentRuleFiles(ctx) : localRuleFiles
   // Injection and recording need no executor, so they mount unconditionally.
-  applyInject(ctx, resolved)
-  applyRecord(ctx, resolved)
+  applyInject(ctx, resolved, files)
+  applyRecord(ctx, resolved, files)
   // Enforcement runs check scripts, so it activates only where a shell exists
   // and unwinds with it.
   ctx.inject(['shell'], (shellCtx) => {
-    applyCheck(shellCtx, resolved)
+    applyCheck(shellCtx, resolved, files)
   })
 }

@@ -44,7 +44,7 @@ class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nT
             mock(com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade.class), client,
             mock(com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository.class),
             mock(com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper.class),
-            new com.fasterxml.jackson.databind.ObjectMapper(), "db", "/tmp", "node", "redis", "6379", "0",
+            new com.fasterxml.jackson.databind.ObjectMapper(), "/tmp", "redis", "6379", "0",
             "default", "", "http://be", "", "host");
         var factory = new ProxyFactory(service);
         factory.addAdvice(config.getAdvisor());

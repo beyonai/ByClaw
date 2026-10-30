@@ -89,4 +89,20 @@ public class ByaiSessionMember {
      * 所属企业
      */
     private Long comAcctId;
+
+    /**
+     * api密钥
+     */
+    private String apiKey;
+
+    /**
+     * 更新时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date updateDate;
+
+    /**
+     * 状态：00A有效，00X无效
+     */
+    private String state;
 }

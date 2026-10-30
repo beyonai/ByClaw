@@ -10,7 +10,9 @@ WebSocket 在原连接上发送 `SWITCH_TENANT` 消息，payload 带 `enterprise
 
 组织沿用平台 `po_organization` 层级，通过 `tenant_organization` 挂靠到企业租户；同一组织可挂靠多个租户。`POST /byaiService/admin/tenants/organizations/tree` 返回组织树和挂靠状态，`/members` 预览所选组织及可选下级组织的 ACTIVE 用户，`/attach` 可仅挂靠组织或同时批量加入其用户。所有参数均在 JSON body 中。批量加入在同一事务中检查套餐人数上限，超限时整批回滚。
 
-`TenantCredentialCrypto` 从环境变量 `BYCLAW_TENANT_CREDENTIAL_MASTER_KEY` 读取 64 位十六进制字符（32 字节）的独立随机密钥，通过 HMAC-SHA256 和租户 `enterpriseId` 派生 128 位密钥，生成 SM4-GCM v2 密文信封。信封的 nonce、ciphertext、tag 使用租户 Node 接受的标准带填充 Base64；AAD 绑定 `enterpriseId` 和固定数据库名。新建租户数据库前必须配置此密钥，并在 BE 实例间保持一致。旧 v1 Base64URL 信封仍可解密以便迁移；它们使用仓库历史共享密钥，应尽快轮换。密钥不得写入规格、SQL 或日志。
+`TenantRuntimeIdentity` 基于已有 `BYAI_PLATFORM.app_secret`，使用用途分离的 HMAC-SHA256 固定规则派生凭据主密钥和内部 Token。相同应用身份在重启、多实例中得到相同结果；不新增密钥存储，不需要租户密钥/Token 环境变量。应用身份必须保持稳定，变更前需迁移存量密文并更新 Node 的内部认证。`TenantCredentialCrypto` 再按企业 ID 派生 SM4-GCM 密钥，AAD 绑定企业与数据库名；旧凭据升级只重新封装相同数据库密码，不修改数据库密码。密钥和 Token 不得写入源码、SQL 或日志。
+
+租户数据库与 Node 的镜像及默认档位分别读取 Platform 的 `sandbox_service_spec` / `sandbox_service_profile`；创建时仅冻结技术资源 `profileKey` 和 `nodeProfileKey`，重试沿用快照，商业限额读取 HACU 发布的共享 Redis。Redis 复用公共 Spring Redis 配置；仅 Node 回调 BE 的内网入口需配置 `BYCLAW_TENANT_BE_INTERNAL_URL`。基线使用内置 ZIP，数据库连接使用 Provider 地址，Node 使用 Pod IP 注册。租户开通进度由 HACU 轮询原任务和 runtime，不再发送持久租户事件；通用 best-effort Hook 仍由 hooks 配置管理。
 # 管理端租户创建
 
 平台管理员通过 `POST /byaiService/admin/tenants/create` 提交 `enterpriseName`、`packageId`、`requestId`，通过 `POST /byaiService/admin/tenants/list` 查看租户。创建事务写入企业、所有者成员关系、套餐快照和 `RESERVED` 开通状态；同一个 `requestId` 重试返回原租户。`RESERVED` 不能切换进入业务空间，必须由沙箱与 schema 开通流程推进到 `READY`。
@@ -45,3 +47,23 @@ Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；�
 用户一次 @ 两个及以上不同数字员工仍由系统直接创建 `GROUP_TASK`，交给群组工作助手协调，模型不能降级为 `CHAT`。候选身份、原消息边界、群成员权限和调度范围均由 Node 持久数据回填，客户端不能伪造分类或候选参数。执行中的分类观察复用现有执行表和镜像序号，终态重试与恢复读取已提交状态；不新增数据库迁移或 Redis key。发布需先更新租户 Node，再更新 BE；HACU 的既有卡片协议保持兼容。本次不自动清理升级前已经创建的历史任务卡片。
 
 管理端侧栏的租户管理、租户数据源与沙箱页的租户资源也受此开关控制。关闭时沙箱页使用用户资源，不请求租户列表或显示租户启动入口；开关变化后重新加载对应资源，旧列表请求不得覆盖新空间的结果。HACU 开启多租户时仍保留默认企业 ID `1` 的切换项，默认企业使用普通空间，不携带租户请求头。
+
+## ACS + NAS 租户删除
+
+删除和重建沙箱通过平台统一生命周期接口执行，不再调用 OpenSandbox 专属删除接口。删除租户须确认所有 Node 和数据库沙箱均已消失，再清理存储；规格声明 persistent 卷时调用平台 NAS 租户内容清理接口，等待成功后才删除租户业务关系。清理未完成或失败时保留删除任务并重试，不回退到 BE 本地目录。
+
+平台清理 Pod 只挂载该租户的 NAS 配额子目录，清理不同 UID 的数据库、Node 及业务文件，不跟随符号链接。空配额根目录和 NAS 所有权登记保留用于审计，当前不会回收配额预留。发布时先更新 platform，再更新 BE；无需更新租户镜像或数据库迁移。
+
+### 外部系统托管租户的管理员删除
+
+管理员通过相同删除接口精确确认租户名称后，托管租户使用独立 `DELETE` 持久化命令。受理事务占用租户操作槽、将执行策略置为 `SUSPENDED`、记录管理员 ID，并发布 `tenant.deletion.requested`。重复提交返回同一任务，不重复分配资源或创建策略版本；正在执行或协调中的开通任务暂不允许删除。已暂停的开通任务被置为 `FAILED / TENANT_DELETION_REQUESTED` 并发布原开通失败事件，已成功的开通历史保留。
+
+后台等待 Node、数据库及 NAS 私有内容清理完成，再移除租户成员、组织挂靠和资源配置，提交 `DELETED` 与 `tenant.deleted`。NAS 清理中保留 `DELETING` 并自动重试；其他错误进入 `DELETE_FAILED`，发布 `tenant.deletion.failed`，管理员再次确认可重试原命令。未绑定 provider ID 的资源记录需要先核实资源身份，避免误报清理完成。源系统标识、策略历史和命令回执保留；删除期间和删除后拒绝新的外部成员/策略写入。
+
+外部系统可继续通过租户 runtime 查询当前删除状态及删除命令编号，通过 commands 接口查询命令回执；历史开通成功不会覆盖删除状态。事件按既有 durable outbox 机制交付，消费方须订阅并处理上述删除事件，不能将仅发布事件等同于外部 UI 已完成同步。前端删除失败会在确认框展示本地化错误并允许重试。本地 development 实例不自动领取持久化命令或旧删除重试任务。
+
+本次需发布 BE 和 FE；沿用 ACS/NAS 统一删除接口，不新增 SQL 迁移、租户镜像或 Harness 镜像。
+
+管理员托管租户删除与 `byclaw.integration.enabled` 解耦。该开关关闭或未配置时仍可受理删除；独立定时任务只领取 `DELETE` 命令，外部开通 worker 只领取 `PROVISION`，不会因清理失败租户而重新开启其他开通任务。`MANUAL_REQUIRED / SCHEMA_INIT` 且已绑定沙箱的租户沿用完整资源和 NAS 清理流程。
+
+删除协调器使用显式短事务领取任务和保存结果，须排除全局 Service 的 REQUIRED 事务包装；沙箱删除也不加入外层事务。ACS 已释放的资源状态会先提交，NAS 清理等待只将当前命令置为 `RETRY_WAIT`，不会回滚同批其他租户的删除结果。回归测试同时加载实际全局事务拦截器，覆盖 NAS 等待后恢复完成的路径。

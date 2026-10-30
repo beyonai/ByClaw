@@ -1,0 +1,13 @@
+{
+  "name": "byclaw-release-smoke",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test unit/*.test.mjs",
+    "smoke": "node run.mjs",
+    "install:browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}

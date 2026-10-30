@@ -15,14 +15,23 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/sandbox/shared")
 public class SharedSandboxController {
     private static final Set<String> READ = Set.of("listRecords", "listMembers");
-    private static final Set<String> ADMIN = Set.of("listConfigs", "saveConfig", "deleteConfig", "releaseInstance", "releaseMember");
+    private static final Set<String> ADMIN = Set.of("launchInstance", "listConfigs", "saveConfig", "deleteConfig", "releaseInstance", "releaseMember");
     private final SharedSandboxGateway gateway;
 
     private final UsersMapper users;
+    private final SharedUserStoragePreparation storagePreparation;
 
-    public SharedSandboxController(SharedSandboxGateway gateway, UsersMapper users) {
+    public SharedSandboxController(SharedSandboxGateway gateway, UsersMapper users, SharedUserStoragePreparation storagePreparation) {
         this.gateway = gateway;
         this.users = users;
+        this.storagePreparation = storagePreparation;
+    }
+
+    @PostMapping("/userStorageStatus")
+    public ResponseUtil<?> userStorageStatus() {
+        String user = CurrentUserHolder.getCurrentUserCode();
+        if (user == null || user.isBlank()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        return ResponseUtil.successResponse(storagePreparation.status(user));
     }
 
     @PostMapping("/{operation}")

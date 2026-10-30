@@ -20,15 +20,15 @@ class TenantCommandStoreTest {
         tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
         jdbc.execute("CREATE SCHEMA byai");
         jdbc.execute("""
-            CREATE TABLE byai.internal_command(id bigint primary key,source_system varchar(64),request_id varchar(128),
+            CREATE TABLE byai.tenant_task(id bigint primary key,source_system varchar(64),request_id varchar(128),
             request_hash varchar(64),type varchar(32),enterprise_id bigint,owner_user_id bigint,request_snapshot text,
-            status varchar(32),stage varchar(64),result text,error_code varchar(64),revision bigint default 0,
+            status varchar(32),stage varchar(64),error_code varchar(64),revision bigint default 0,
             lease_owner varchar(128),lease_until timestamp with time zone,fencing_token bigint default 0,
             attempt int default 0,next_attempt_at timestamp with time zone default current_timestamp,
             created_at timestamp with time zone default current_timestamp,updated_at timestamp with time zone default current_timestamp,
             UNIQUE(source_system,request_id))
             """);
-        jdbc.execute("CREATE TABLE byai.tenant_runtime_operation(enterprise_id bigint primary key, active_command_id bigint, generation bigint default 1, state varchar(32), fencing_token bigint default 0, revision bigint default 0)");
+        jdbc.execute("CREATE TABLE byai.tenant_operation_state(enterprise_id bigint PRIMARY KEY,active_command_id bigint,operation_revision bigint NOT NULL DEFAULT 0,policy_revision bigint,runtime_generation varchar(64) NOT NULL DEFAULT '0',applied_rule_revision bigint,applied_runtime_generation varchar(64),rule_applied_at timestamp with time zone)");
         store = new TenantCommandStore(jdbc);
         tx.executeWithoutResult(s -> store.insert(1,"hacu","request-1","hash","PROVISION",2,3,"{}"));
     }
@@ -36,7 +36,7 @@ class TenantCommandStoreTest {
         var first = store.claim(1,"worker-a",Duration.ofMinutes(5));
         assertNotNull(first);
         assertNull(store.claim(1,"worker-b",Duration.ofMinutes(5)));
-        jdbc.update("UPDATE byai.internal_command SET lease_until=DATEADD('SECOND',-1,CURRENT_TIMESTAMP) WHERE id=1");
+        jdbc.update("UPDATE byai.tenant_task SET lease_until=DATEADD('SECOND',-1,CURRENT_TIMESTAMP) WHERE id=1");
         var second = store.claim(1,"worker-b",Duration.ofMinutes(5));
         assertNotNull(second);
         assertTrue(second.fencingToken() > first.fencingToken());
@@ -54,9 +54,24 @@ class TenantCommandStoreTest {
     }
     @Test void unknownOutcomeKeepsBusinessOperationSlot() {
         var lease = store.claim(1,"worker",Duration.ofMinutes(5));
-        jdbc.update("INSERT INTO byai.tenant_runtime_operation(enterprise_id,active_command_id,state) VALUES (2,1,'ACTIVE')");
+        jdbc.update("INSERT INTO byai.tenant_operation_state(enterprise_id,active_command_id) VALUES (2,1)");
         tx.executeWithoutResult(s -> store.finish(lease,"MANUAL_REQUIRED","DB_CREATING","PROVIDER_RESULT_UNKNOWN"));
-        assertEquals(1L, jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_runtime_operation WHERE enterprise_id=2",Long.class));
+        assertEquals(1L, jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=2",Long.class));
         assertNull(store.claim(1,"another",Duration.ofMinutes(5)));
+        assertFalse(store.canRenewTechnicalLease(2));
     }
+    /** 只有原任务真正完成并释放占用，才允许续期租户就绪状态。 */
+    @Test void technicalLeaseRenewalWaitsForOriginalTaskCompletion() {
+        assertFalse(store.canRenewTechnicalLease(2));
+        jdbc.update("INSERT INTO byai.tenant_operation_state(enterprise_id,active_command_id) VALUES (2,1)");
+        jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=3,runtime_generation='2' WHERE enterprise_id=2");
+        var lease = store.claim(1,"worker",Duration.ofMinutes(5));
+        assertFalse(store.canRenewTechnicalLease(2));
+        tx.executeWithoutResult(status -> store.finish(lease,"SUCCEEDED","READY",null));
+        assertTrue(store.canRenewTechnicalLease(2));
+        assertEquals(3L,jdbc.queryForObject("SELECT policy_revision FROM byai.tenant_operation_state WHERE enterprise_id=2",Long.class));
+        assertEquals("2",jdbc.queryForObject("SELECT runtime_generation FROM byai.tenant_operation_state WHERE enterprise_id=2",String.class));
+        assertNull(jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=2",Long.class));
+    }
+
 }

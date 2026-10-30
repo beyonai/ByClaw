@@ -81,6 +81,8 @@ public class SandboxAutoConfiguration {
         com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy sharedPolicy) {
         SandboxProperties.SharedDshHostConfig sharedDshHost = properties.getSharedDshHost();
         String dshType = com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
+        java.util.function.Function<String, String> toolSandbox = SharedDshHostContexts.toolSandboxLookup(
+            () -> systemConfigService.getObject().getDcSystemConfigValueByCode(SharedDshHostContexts.TOOL_SANDBOX_PARAM));
         java.util.function.Function<String, java.util.Map<String, String>> launchEnv = userCode -> {
             com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchContext context = launchContextFactory.getObject()
                 .buildContext(userCode, com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting.DEFAULT_RESOURCE_ID, dshType);
@@ -97,6 +99,8 @@ public class SandboxAutoConfiguration {
                 if (StringUtils.isNotBlank(value)) env.put(key, value);
             }
             env.putIfAbsent("BYAI_WORKER_ID", SharedDshHostContexts.sharedSandboxId(userCode));
+            String toolSandboxKey = toolSandbox.apply(userCode);
+            if (toolSandboxKey != null) env.put(SharedDshHostContexts.TOOL_SANDBOX_ENV, toolSandboxKey);
             return env;
         };
         java.util.concurrent.ExecutorService prewarm = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
@@ -106,7 +110,7 @@ public class SandboxAutoConfiguration {
         });
         return new SharedDshHostContexts(new SharedDshHostClient(sharedDshHost),
             StringUtils.defaultIfBlank(sharedDshHost.getWebBaseUrl(), sharedDshHost.getBaseUrl()),
-            sharedPolicy::eligible, launchEnv, prewarm);
+            sharedPolicy::eligible, launchEnv, prewarm, sharedDshHost.getToolServiceKey());
     }
 
     @Bean

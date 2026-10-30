@@ -105,6 +105,15 @@ public class SandboxService {
      * 该用户的这类沙箱是常驻宿主上的进程内上下文：不建记录、不启动沙箱，直接向宿主要上下文（幂等 PUT）。
      * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
      */
+    /**
+     * Service key of the sandbox carrying the user's browser when it is not the one clients pick by default: a user
+     * on the resident DSH host keeps the browser (desktop, byCLI) in the tool sandbox, whether or not the host
+     * context runs right now. {@code null} for everyone else.
+     */
+    public String browserServiceKey(String userCode) {
+        return sharedHostRoutes(userCode, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE) ? sharedDshHostContexts.toolServiceKey() : null;
+    }
+
     private boolean sharedHostRoutes(String userCode, String sandboxType) {
         return sharedDshHostContexts != null && sharedDshHostContexts.routes(userCode, sandboxType)
             && (sharedSandboxGateway == null || !sharedSandboxGateway.enabled());
@@ -133,6 +142,10 @@ public class SandboxService {
 
     /** 沙箱状态：启动失败 */
     private static final String STATUS_FAILED = "FAILED";
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private SandboxLoginAutoStartService loginAutoStart;
 
     /** 手动释放终止原因前缀。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
@@ -438,7 +451,15 @@ public class SandboxService {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, false);
     }
 
-    /** 对话入口：启动类型与已经解析的目标 Worker 一致，legacy/remote 共用同一路由。 */
+    /** 首次对话仅确保目标沙箱已启动，允许复用登录预热，不销毁正在启动或运行的沙箱。 */
+    public SandboxLaunchData launchSandboxForTargetWithoutWait(String userCode, Long resourceId,
+        String targetAgentType) {
+        SandboxLaunchRouting routing = SandboxTargetRouting.resolve(userCode, targetAgentType,
+            () -> sandboxLaunchContextFactory.resolveRouting(resourceId, userCode));
+        return launchSandboxInternal(userCode, resourceId, routing, null, true);
+    }
+
+    /** 发送失败后的恢复入口：启动类型与已经解析的目标 Worker 一致。 */
     public SandboxLaunchData restartSandboxForTargetWithoutWait(String userCode, Long resourceId,
         String targetAgentType) {
         SandboxLaunchRouting routing = SandboxTargetRouting.resolve(userCode, targetAgentType,
@@ -583,13 +604,23 @@ public class SandboxService {
 
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
         Integer autoRelease) {
+        return launchSandboxInternal(userCode, resourceId, routing, autoRelease, false);
+    }
+
+    private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        Integer autoRelease, boolean verifyExisting) {
         SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
         if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
         if (platformRemote()) {
+            // Reject before creating a STARTING record. The structured preparing response lets
+            // both login orchestration and interactive callers wait for quota provisioning.
+            platformGateway().call("storage", "quota-check", platformGateway().params(
+                "userCode", userCode, "operation", "CHAT", "requestedBytes", 0L));
             Map<String, Object> params = platformGateway().params("userCode", userCode, "resourceId", resourceId,
                 "routing", platformGateway().route(routing));
             if (autoRelease != null) params.put("autoRelease", autoRelease);
+            if (verifyExisting) params.put("verifyExisting", true);
             return platformGateway().convert(platformGateway().service("launch", params), SandboxLaunchData.class);
         }
         String lockKey = buildLaunchLockKey(userCode, routing);
@@ -1455,6 +1486,7 @@ public class SandboxService {
      * 释放指定用户的沙箱；未指定资源时可按沙箱服务类型精确释放。
      */
     public void removeSandbox(String userCode, Long resourceId, String requestedSandboxType) {
+        if (loginAutoStart != null) loginAutoStart.cancel(userCode);
         String requestedType = StringUtils.trimToNull(requestedSandboxType);
         String resolvedType = resourceId == null ? requestedType
             : sandboxLaunchContextFactory.resolveRouting(resourceId, userCode).getSandboxType();

@@ -111,7 +111,7 @@ export async function repairColdAskUserQuestionSession(
   persistence: Pick<SessionPersistence, 'open'>,
   agentSessionId: string,
   interaction: Pick<ByClawInteractionRecord, 'questions' | 'answer'>,
-): Promise<boolean> {
+): Promise<{ toolCallId: string; output: ByClawQuestionAnswer } | false> {
   if (interaction.answer === undefined) return false
   const handle = await persistence.open(agentSessionId as never, 'write')
   try {
@@ -162,7 +162,7 @@ export async function repairColdAskUserQuestionSession(
       { type: 'turn/end', seq: sequence as never, time: last.time, data: { turn: openTurn, reason: { kind: 'interrupted' } } },
     ]
     await handle.append([result, ...closers])
-    return true
+    return { toolCallId: String(call.data.callId), output: interaction.answer }
   } finally {
     await handle.close()
   }

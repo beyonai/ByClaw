@@ -16,15 +16,13 @@ const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 const BaseInfo = ({
   data,
   resourceId,
-  allowKnowledgeBaseDelete,
-  canManage = false,
+  canDelete = false,
   backPath = '/knowledgeCenter',
   backState,
 }: {
   data: any;
   resourceId: string;
-  allowKnowledgeBaseDelete?: boolean;
-  canManage?: boolean;
+  canDelete?: boolean;
   backPath?: string;
   backState?: unknown;
 }) => {
@@ -33,19 +31,16 @@ const BaseInfo = ({
 
   const intl = useIntl();
   const navigate = useNavigate();
-  const disabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
   const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
   const defaultPersonalKnowledgeDeleteTip = intl.formatMessage({
     id: 'resource.personalDefaultKnowledgeDeleteNotAllowed',
   });
   const isDefaultPersonalKnowledge = data?.ownerType === PERSONAL_DEFAULT_OWNER_TYPE;
-  const canDeleteKnowledge = Boolean(allowKnowledgeBaseDelete && canManage && !isDefaultPersonalKnowledge);
+  const canDeleteKnowledge = Boolean(canDelete && !isDefaultPersonalKnowledge);
   let deleteDisabledTip;
-  if (!allowKnowledgeBaseDelete) {
-    deleteDisabledTip = disabledTip;
-  } else if (isDefaultPersonalKnowledge) {
+  if (isDefaultPersonalKnowledge) {
     deleteDisabledTip = defaultPersonalKnowledgeDeleteTip;
-  } else if (!canManage) {
+  } else if (!canDelete) {
     deleteDisabledTip = noPermissionDisabledTip;
   }
 

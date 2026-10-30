@@ -84,6 +84,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.application.service.dataset.OpenClawKnowledgeDocumentService;
+import com.iwhalecloud.byai.state.application.service.upload.GlobalFileUploadValidator;
 import jakarta.validation.Valid;
 
 /**
@@ -107,6 +108,9 @@ public class DatasetController {
 
     @Autowired
     private OpenClawKnowledgeDocumentService openClawKnowledgeDocumentService;
+
+    @Autowired
+    private GlobalFileUploadValidator globalFileUploadValidator;
 
     /**
      * 分页查询资源列表。
@@ -384,13 +388,17 @@ public class DatasetController {
                                                   @RequestPart(value = "extractZip", required = false) String extractZip,
                                                   @RequestPart(value = "metadata", required = false) String metadata) {
         try {
+            // 项目云盘与知识库页面共用此入口，先整批校验，再执行覆盖或导入操作。
+            globalFileUploadValidator.validateKnowledgeUpload(files);
             Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
                 fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
                 Boolean.parseBoolean(skipIfDuplicate), parseOptionalBoolean(extractZip), metadata, headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
-        } catch (Exception e) {
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+                | com.iwhalecloud.byai.state.common.exception.StoragePreparingException e) {throw e;}
+        catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }

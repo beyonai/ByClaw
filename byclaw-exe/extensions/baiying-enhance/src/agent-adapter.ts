@@ -120,6 +120,8 @@ export type AdaptedManagedAgent = {
     sourceFilePath?: string;
     /** Parsed source JSON when the authoritative copy came from Redis instead of disk. */
     sourceJson?: unknown;
+    /** Hash of the authoritative Redis snapshot, before per-user filtering. */
+    sourceSnapshotHash?: string;
     /** Baiying `prologue.modelId`, used to resolve model transport details from Redis. */
     baiyingModelId?: string;
     /** Snapshot of the employee's image model selection; runtime calls re-read Redis. */
@@ -356,6 +358,7 @@ function normalizeAgentListTools(
                   new Set([
                       ...allow,
                       "baiying_call",
+                      "baiying_skills",
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,
@@ -366,6 +369,7 @@ function normalizeAgentListTools(
               alsoAllow: Array.from(
                   new Set([
                       "baiying_call",
+                      "baiying_skills",
                       "image_generate",
                       BYCLAW_CHAT_CONTEXT_TOOL_NAME,
                       UPDATE_TASK_PLAN_TOOL_NAME,

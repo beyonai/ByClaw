@@ -66,7 +66,7 @@ import { primarySandboxEndpoint } from './endpointUtils';
 import styles from './index.module.less';
 
 const { Option } = Select;
-const RELEASABLE_STATUSES = ['STARTING', 'RUNNING'];
+const RELEASABLE_STATUSES = ['STARTING', 'RUNNING', 'FAILED', 'RELEASING'];
 const DEFAULT_SERVICE_TYPE = 'openclaw';
 const PROFILE_ORDER: Record<string, number> = { xs: 1, s: 2, m: 3, l: 4 };
 const RESIZE_STRATEGIES = ['IN_PLACE', 'PREFERRED_ONLY', 'HOT_SWITCH'];

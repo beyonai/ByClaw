@@ -927,6 +927,7 @@ const ConfigForm = (props) => {
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const internalSyncRef = useRef(false);
   const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
+  const canConfigureCommercialResources = canConfigureResources && brandVersion === 'commercial';
 
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
@@ -2764,7 +2765,7 @@ const ConfigForm = (props) => {
                 />
               )}
               {/* 配置知识 */}
-              {canConfigureResources && employeeType !== '005' && (
+              {canConfigureCommercialResources && employeeType !== '005' && (
                 <div className={styles.knowledgeSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2842,7 +2843,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {canConfigureResources && employeeType !== '006' && employeeType !== '005' && (
+              {canConfigureCommercialResources && employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection} hidden={isEmployeeGroup}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>

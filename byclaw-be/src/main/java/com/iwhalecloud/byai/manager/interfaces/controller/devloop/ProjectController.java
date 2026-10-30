@@ -89,6 +89,17 @@ public class ProjectController {
     }
 
     /**
+     * 修改附件上传提前创建、但尚未发送首条问题的会话项目。
+     */
+    @PostMapping("/session/changeDraftProject")
+    public ResponseUtil<Void> changeDraftSessionProject(@RequestBody Map<String, Object> params) {
+        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        projectApplicationService.changeDraftSessionProject(sessionId, projectId);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
      * 查询项目详情
      *
      * @param params 包含 projectId

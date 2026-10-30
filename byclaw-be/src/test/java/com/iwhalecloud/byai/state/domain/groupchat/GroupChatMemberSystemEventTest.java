@@ -97,6 +97,7 @@ class GroupChatMemberSystemEventTest extends I18nTestSupport {
         GroupChatApplicationService target = new GroupChatApplicationService(sessions, sequence, authorization, members,
             mock(ProjectApplicationService.class), mock(ProjectMemberService.class), messages, coordinator, events,
             mock(SessionExtService.class));
+        ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
         ReflectionTestUtils.setField(target, "invitationService", invitations);
         ReflectionTestUtils.setField(target, "tenantUserMembershipService",
             mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class));

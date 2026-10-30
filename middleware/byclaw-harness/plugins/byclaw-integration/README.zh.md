@@ -86,6 +86,8 @@ Skill 同步先读取远端版本；本地 `code + version` 一致时直接复�
 
 数字员工 Skill 按 `baiying-enhance` 的下载语义同步到 `agentTemplateDir/byclaw-skills`。携带凭据的资源目录和 Skill 请求仅访问所配置 `baseUrl` 的同源地址，并禁止自动跟随重定向。插件对原有 Skill 注册表的 `snapshot/list/get` 增加 Agent 作用域视图；DSH 原生 `tool-skill` 仍通过 `skill-catalog` 向上下文注入元数据，并使用标准 `skill` 工具按需加载正文，无需修改 DSH 源码。
 
+开启 `workspaceOnToolEnvironment`（共享 DSH 宿主）时，模型的命令在独立的工具环境中执行，那里看不到本机的 DSH 家目录。因此展示给模型的每个 Hub Skill 目录、以及专家成员的 Skill 副本，会被复制到那里的用户目录（`<byRoot>/.byclaw/skills/<code>`、`<byRoot>/.byclaw/member-skills/...`），并以该路径告知模型；Skill 正文仍由本机提供。复制排在工具环境门面中，等工具环境连上后执行，加载上下文不会因此启动它；副本中的摘要文件使内容未变的目录不再重复复制。成员访问控制把这些路径换回其来源的本机副本再检查。
+
 运行中的数字员工（直达根 Agent、委派模板和 AgentTeams 成员）保留完整的 DSH 原生目录，包括全局、项目、用户、preset 以及插件注册的 bundled Skills，并在其上叠加 **部署内置 Skills + 当前 Redis 关联 Skills**。普通主 Agent 保留原有目录并加入部署内置 Skills。内置目录按 `builtinSkillDir` → `BYCLAW_SKILLS_DIR` → 仓库 `builtin/skills` 解析，只读取一级技能目录中的 `SKILL.md`；Dockerfile 已设置 `/opt/byclaw/builtin/skills`。支持多行 YAML 和标准 invocation 标记。同名时员工关联资源覆盖部署内置资源，部署内置资源覆盖 DSH 原生条目。
 
 Watch 收到员工或关联技能更新后刷新目录并使准备缓存失效，不全量初始化员工。员工 Skill 视图在每次查询时检查当前关联，包括最初没有 Skill、后来新增关联的员工；空 `relSkills` 会撤销关联。新的 Web 根会话重新检查目标定义，不复用旧会话的准备结果。内置 Skill 在插件启动时读取，更新镜像资源后需重启。
@@ -152,7 +154,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 
 分类流程还会检查 `BYCLAW_GROUP_CHAT_DISPOSITION_ENABLED`：仅去掉首尾空格后等于 `0` 时关闭模型判定，未设置、空值及其他值均开启。开关不能替代首次开启会话和 `groupChat.executionId` 条件。关闭判定时仍记录会话首次开启，之后开启开关不会对已开启的会话补判。可同时配置 `BYCLAW_GROUP_CHAT_DISPOSITION_BASE_URL`、`BYCLAW_GROUP_CHAT_DISPOSITION_API_KEY` 和 `BYCLAW_GROUP_CHAT_DISPOSITION_MODEL`，使用独立的 OpenAI 兼容 Chat Completions 接口。URL 是 API 基础地址，例如 `https://api.example.com/v1`，不包含凭据、查询参数或片段。三项均未设置或为空时沿用现有模型解析逻辑。独立连接不读取 Redis 模型记录，也不修改正常会话的模型。配置不完整或无效时记录日志并沿用已有的 `CHAT` 失败兜底，不借用正常模型的凭据。环境变量在分类器安装时读取，修改后需重启 Worker。
 
-模型错误和超时会记录日志，并对已收到的文本使用同样的容错规则；没有可用响应时兜底 `CHAT`。已有状态无效或文件操作失败只记录日志，不打断正常会话，也不覆盖已有文件。首次开启标记防止后续请求自动重复失败的后台尝试。后台工作自行管理插件生命周期内的取消，插件退出时会中止并收尾已接收的任务。路径遵循配置的 `/by` 本地存储映射。插件配置 `groupChatDispositionTimeoutMs` 默认 `30000`，`groupChatDispositionMaxTokens` 默认 `1024`，均为正整数。可运行 `pnpm run verify:group-chat-disposition` 执行无需 API Key 的容错与会话并行回归检查。
+模型错误和超时会记录日志，并对已收到的文本使用同样的容错规则；没有可用响应时兜底 `CHAT`。已有状态无效或文件操作失败只记录日志，不打断正常会话，也不覆盖已有文件。首次开启标记防止后续请求自动重复失败的后台尝试。后台工作自行管理插件生命周期内的取消，插件退出时会中止并收尾已接收的任务。路径遵循配置的 `/by` 本地存储映射。在用户树位于独立工具环境的共享 DSH 宿主上，首次开启标记和分流结果经工具环境的排队文件层写入（记录它们不会拉起工具环境），历史文件则在工具环境中读取。插件配置 `groupChatDispositionTimeoutMs` 默认 `30000`，`groupChatDispositionMaxTokens` 默认 `1024`，均为正整数。可运行 `pnpm run verify:group-chat-disposition` 执行无需 API Key 的容错与会话并行回归检查。
 
 `byclaw/session-setup` 是接收输入前等待完成的串行事件，覆盖新建、恢复、复用会话，以及后台工作期间的前台追问。事件提供显式的 Agent 实例及其作用域、可信 command，以及 BE 地址、当前用户登录请求头和 `/by/` 路径解析等宿主适配方法。类型从 `@byclaw/dsh-integration/session-extensions` 导出。监听器必须支持重复装配，不能启动 Agent；监听器失败会阻止本次输入进入会话。可选插件自行管理配置、启用条件和持久状态，Integration 不依赖这些插件。
 
@@ -363,3 +365,12 @@ Worker 消息分发不再设置任务并发上限，原 `maxConcurrency` 插件�
 构建后运行 `node --import tsx/esm scripts/on-demand-resources-verify.mjs` 和 `node scripts/on-demand-projection-verify.mjs`。测试覆盖只读目录、目标读取范围、同目标并发复用、版本更新、授权撤销及投影期间撤权、专家团依赖、失败时保留已有员工，以及原子保留其他模板和 Skill 视图。56 个授权资源的真实文件投影夹具验证：上线阶段 0 次员工模型解析、0 次专家团运行时请求、0 个员工模板；首次员工准备 1 个模板，未变更的重复使用不再投影。这是本地行为验证，不代表线上登录时延已完成验收。
 
 增量投影不按旧模板文件的 Skill 引用删除磁盘 Skill 缓存，因为运行中的员工可能通过实时关联查询新增了 Skill。关联撤销由每次 registry 查询的授权检查生效；缓存文件随用户上下文/沙箱存储生命周期保留，不能把缓存文件存在视为授权。完整代次投影调用仍保留原清理规则。
+
+## 后端到沙箱的发起链路排查
+
+后端与 Harness 使用统一的 `chat_chain` 单行 JSON 日志，按服务端 `invocationId` 关联一次接收、按 `dispatchId` 区分派发重试，记录阶段耗时及租户与实例。初始化使用 `startupId`，回复使用 `replyEventId` 串联 Redis、后端、WebSocket 与前端实际应用对象。字段语义、三个场景的手工排查示例见 [链路日志规范](CHAT-CHAIN.zh.md)。本地验证：`pnpm verify:chat-chain`。
+### DSH 项目共享工作目录
+
+网关 `header.metadata.project_info.project_id` 绑定项目时，DSH 根会话和子会话的执行 cwd、相对路径文件操作及默认交付目录统一使用 `/by/.shared/project_{projectId}`，默认项目为 `project_-1`。运行端在工具环境中幂等创建目录；未绑定项目时保留原会话 cwd。`.sessions/<sessionId>` 仍作为内部会话路径存在，不再作为项目会话的默认交付目录。
+
+`plugin:system-prompt` 和 `plugin:byclaw-context` 同时声明执行 cwd、项目共享目录、共享根目录及项目身份。旧会话恢复时在持久化读取边界映射会话头，保留原始日志、历史产物和 AgentTeams 状态；不移动旧文件，不允许从一个项目目录切换到另一个项目目录。运行中的旧根会话在下一次普通请求时关闭旧句柄并恢复到新 cwd，正在执行的任务沿用原路径直到结束。本规则仅作用于 DSH。

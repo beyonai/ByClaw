@@ -5,8 +5,6 @@ import { codeToHtml, BundledLanguage } from 'shiki/bundle-web.mjs';
 import styles from './TextHighlight.module.less';
 
 interface TextHighlightProps {
-
-  /** 代码语言 */
   lang?: BundledLanguage;
 
   /** 代码内容 */
@@ -30,16 +28,31 @@ const TextHighlight = React.memo(function TextHighlight(props: TextHighlightProp
   const [attr, setAttr] = useState<{ dangerouslySetInnerHTML?: { __html: string } }>({});
 
   useEffect(() => {
+    let active = true;
+    setAttr({});
     if (content) {
       setLoading(true);
-      codeToHtml(content, { lang, theme: 'one-light' }).then((code) => {
-        setAttr({ dangerouslySetInnerHTML: { __html: DOMPurify.sanitize(code) } });
-        setLoading(false);
-      });
+      codeToHtml(content, { lang, theme: 'one-light' })
+        .then((code) => {
+          if (active) setAttr({ dangerouslySetInnerHTML: { __html: DOMPurify.sanitize(code) } });
+        })
+        .catch(() => {
+          if (active) setAttr({});
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
     }
-  }, [content]);
+    return () => {
+      active = false;
+    };
+  }, [content, lang]);
 
-  return <div className={cn(styles.text, className, { [styles.lineNumber]: lineNumber })} {...attr} />;
+  return (
+    <div className={cn(styles.text, className, { [styles.lineNumber]: lineNumber })} {...attr}>
+      {attr.dangerouslySetInnerHTML ? undefined : <pre>{content}</pre>}
+    </div>
+  );
 });
 
 export default TextHighlight;

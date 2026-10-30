@@ -159,6 +159,110 @@ public class OpenSandboxClient {
         return executeSandboxesList(httpRequest);
     }
 
+    /** Complete recovery inventory: disabled, malformed and unbounded listings are never absence. */
+    public List<SandboxDetail> recoveryInventory(Map<String, String> metadata) {
+        var gateway = platformGateway == null ? null : platformGateway.getIfAvailable();
+        if (gateway != null && gateway.isRemote()) {
+            return remoteRecoveryInventory(gateway, metadata);
+        }
+        var cfg = properties.getOpensandbox();
+        if (!cfg.isListSandboxesBeforeCreate()) throw new OpenSandboxException("PROVIDER_QUERY_DISABLED");
+        String path = cfg.getListSandboxesPath();
+        if (path == null || path.isBlank()) path = "/v1/sandboxes";
+        if (!path.startsWith("/")) path = "/" + path;
+        HttpUrl base = HttpUrl.parse(baseUrl + path);
+        if (base == null) throw new OpenSandboxException("PROVIDER_QUERY_INVALID");
+        List<SandboxDetail> all = new java.util.ArrayList<>();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        Long expectedTotal = null;
+        for (int page = 1; page <= 1000; page++) {
+            var url = base.newBuilder().addQueryParameter("page", Integer.toString(page))
+                .addQueryParameter("pageSize", "100").addQueryParameter("metadata", buildMetadataQuery(metadata)).build();
+            try (Response response = httpClient.newCall(newRequestBuilder(url.toString()).get().build()).execute()) {
+                if (!response.isSuccessful() || response.body() == null) throw new OpenSandboxException("PROVIDER_QUERY_FAILED");
+                JsonNode root = objectMapper.readTree(response.body().string());
+                // The OpenSandbox paginated contract must report its total; bare arrays cannot prove completeness.
+                JsonNode items = root == null ? null : root.get("items");
+                JsonNode pagination = root == null ? null : root.get("pagination");
+                if (items == null || !items.isArray() || pagination == null
+                    || !pagination.path("totalItems").isIntegralNumber()
+                    || !pagination.path("totalItems").canConvertToLong()
+                    || !pagination.path("hasNextPage").isBoolean()) {
+                    throw new OpenSandboxException("PROVIDER_QUERY_INCOMPLETE");
+                }
+                JsonNode observedPage = pagination.has("currentPage") ? pagination.get("currentPage") : pagination.get("page");
+                if (observedPage != null && (!observedPage.isIntegralNumber() || observedPage.asInt() != page)) {
+                    throw new OpenSandboxException("PROVIDER_QUERY_UNSTABLE");
+                }
+                long total = pagination.path("totalItems").asLong();
+                if (total < 0 || total > 100000 || (expectedTotal != null && expectedTotal != total)) {
+                    throw new OpenSandboxException("PROVIDER_QUERY_UNSTABLE");
+                }
+                expectedTotal = total;
+                for (JsonNode item : items) {
+                    SandboxDetail detail = objectMapper.treeToValue(item, SandboxDetail.class);
+                    if (detail.getId() == null || detail.getId().isBlank() || !ids.add(detail.getId())) {
+                        throw new OpenSandboxException("PROVIDER_QUERY_UNSTABLE");
+                    }
+                    all.add(detail);
+                }
+                if (all.size() == total && !pagination.path("hasNextPage").asBoolean()) return List.copyOf(all);
+                if (!pagination.path("hasNextPage").asBoolean()) throw new OpenSandboxException("PROVIDER_QUERY_INCOMPLETE");
+                if (items.isEmpty() || all.size() > total) throw new OpenSandboxException("PROVIDER_QUERY_INCOMPLETE");
+            } catch (IOException failure) {
+                throw new OpenSandboxException("PROVIDER_QUERY_FAILED");
+            }
+        }
+        throw new OpenSandboxException("PROVIDER_QUERY_INCOMPLETE");
+    }
+
+    /**
+     * Query the execution-side provider. A remote failure never reads the BE's local provider, and
+     * the ordinary management API's degraded empty lists cannot be used as non-creation evidence.
+     */
+    private List<SandboxDetail> remoteRecoveryInventory(
+            com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway gateway, Map<String, String> metadata) {
+        JsonNode snapshot;
+        try {
+            snapshot = objectMapper.valueToTree(gateway.call("sandbox", "runtime/recovery-inventory", metadata));
+        } catch (RuntimeException failure) {
+            log.warn("Remote recovery inventory unavailable; exceptionType={}", failure.getClass().getSimpleName());
+            throw new OpenSandboxException("PROVIDER_QUERY_FAILED");
+        }
+        if (snapshot == null || !snapshot.isObject() || !snapshot.path("complete").isBoolean()) {
+            throw new OpenSandboxException("PROVIDER_QUERY_INCOMPLETE");
+        }
+        if (!snapshot.path("complete").asBoolean()) {
+            String reason = snapshot.path("reasonCode").asText();
+            throw new OpenSandboxException(java.util.Set.of("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", "PROVIDER_QUERY_DISABLED",
+                    "PROVIDER_QUERY_INVALID", "PROVIDER_QUERY_FAILED", "PROVIDER_QUERY_INCOMPLETE", "PROVIDER_QUERY_UNSTABLE")
+                    .contains(reason) ? reason : "PROVIDER_QUERY_FAILED");
+        }
+        if (!snapshot.path("provider").isTextual()
+                || !java.util.Set.of("opensandbox", "aliyunAgentSandbox").contains(snapshot.path("provider").asText())
+                || !snapshot.path("items").isArray() || snapshot.path("items").size() > 100000) {
+            throw new OpenSandboxException("PROVIDER_QUERY_INVALID");
+        }
+        List<SandboxDetail> result = new java.util.ArrayList<>();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (JsonNode item : snapshot.path("items")) {
+            if (!item.path("sandboxId").isTextual() || item.path("sandboxId").asText().isBlank()
+                    || !ids.add(item.path("sandboxId").asText()) || !item.path("metadata").isObject()
+                    || !metadata.get("enterpriseId").equals(item.path("metadata").path("enterpriseId").asText())) {
+                throw new OpenSandboxException("PROVIDER_QUERY_INVALID");
+            }
+            for (JsonNode value : item.path("metadata")) {
+                if (!value.isTextual()) { throw new OpenSandboxException("PROVIDER_QUERY_INVALID"); }
+            }
+            var detail = objectMapper.createObjectNode().put("id", item.path("sandboxId").asText());
+            detail.set("metadata", item.path("metadata"));
+            detail.set("status", objectMapper.createObjectNode().put("state", item.path("state").asText("Unknown")));
+            try { result.add(objectMapper.treeToValue(detail, SandboxDetail.class)); }
+            catch (IOException invalid) { throw new OpenSandboxException("PROVIDER_QUERY_INVALID"); }
+        }
+        return List.copyOf(result);
+    }
+
     private static String buildMetadataQuery(Map<String, String> metadata) {
         StringJoiner joiner = new StringJoiner("&");
         addMetadataQueryPart(joiner, metadata, "userCode");

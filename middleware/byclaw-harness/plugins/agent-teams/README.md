@@ -135,3 +135,5 @@ pnpm verify
 ## License
 
 [MIT](./LICENSE)
+
+DSH project workspaces can share an execution cwd while keeping conversation bookkeeping isolated: `TeamStateRuntime.runWithWorkspaceAlias` scopes state resolution to the owning conversation across asynchronous work. Execution paths stay unchanged; legacy state aliases remain effective within that scope.

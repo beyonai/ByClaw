@@ -74,6 +74,7 @@ class GroupChatInvitationTokenTest extends I18nTestSupport {
         mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class);
 
     @BeforeEach void setup() {
+        ReflectionTestUtils.setField(application, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
         ReflectionTestUtils.setField(application, "invitationService", service);
         ReflectionTestUtils.setField(application, "tenantUserMembershipService", tenantMembers);
         LoginInfo login = new LoginInfo();

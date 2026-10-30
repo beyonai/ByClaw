@@ -2,6 +2,18 @@
 
 固定企业、固定代际的租户数据服务。使用 TypeScript、Fastify、TypeORM 的参数化 SQL 适配器及 by-framework Worker；不直接引用 BE/FE 源码，不创建数据库或平台账号，不负责 AI 执行。
 
+## 共享 Redis 群成员额度
+
+Node 复用现有 Redis 连接，只读 `byclaw:shared:quota:v1:{enterpriseId}`，键名不包含环境名。花括号是 Redis hash tag 的实际字符，例如企业 10 使用 `byclaw:shared:quota:v1:{10}`。可通过 `QUOTA_REDIS_KEY_PREFIX` 调整前缀。HASH 的 `revision`、`payloadHash`、`payload` 一次读取，`payloadHash` 是原始 UTF-8 JSON 的 SHA-256 小写十六进制值。JSON 包含 `schemaVersion: 1`、字符串 `enterpriseId/revision`、`mode: LIMITED|UNLIMITED`、`limits: {memberLimit, groupLimit, groupMemberLimit, agentLimit}` 与 RFC3339 `updatedAt`；四项上限均为 0–2147483647 的整数，0 表示不能新增。revision 为规范的正十进制字符串，最大 9223372036854775807，与 Java long 范围保持一致；HASH 与 JSON 的 revision 必须完全一致，Node 通过 BigInt 校验，不转换成 JavaScript Number。
+
+`CREATE_GROUP` 初始成员、`ADD_MEMBERS`、`JOIN_GROUP`，以及群消息自动补入的默认协调员工，都在既有会话事务锁内检查额度后写入。LIMITED 策略在计数前通过 `UPDATE ... SET session_id=session_id ... RETURNING session_id` 取得群会话行的数据库写锁，覆盖计数、写入及提交，避免 Redis 租约过期后暂停进程继续写入造成并发超额；初建群使用同事务内刚插入的会话行，不使用 `SELECT ... FOR UPDATE`。实际用量查询当前租户数据库：USER 单独受 `groupMemberLimit` 限制，AGENT 单独受 `agentLimit` 限制，不将两类人数相加；OWNER 计入 USER，默认协调员工计入 AGENT。批次按类型和 ID 去重计算新增量，已有成员不占新增量；初建群继续沿用原协议的重复成员校验。额度降低不移除现有成员，只限制新增。任一类型超限会回滚整条命令，包括成员、系统消息及命令回执。超限错误为 `GROUP_MEMBER_LIMIT_EXCEEDED` 或 `GROUP_AGENT_LIMIT_EXCEEDED`，HTTP 409。
+
+键不存在或有效 `UNLIMITED` 策略允许新增。Redis 读取失败默认记录 `QUOTA_REDIS_UNAVAILABLE` 警告并按 ALLOW 处理；配置 `QUOTA_REDIS_FAILURE_POLICY=REJECT` 时返回 `QUOTA_UNAVAILABLE`（HTTP 503）。该配置只影响额度投影读取，既有数据库、会话与 Schema 租约仍必须有效。存在但结构错误、HASH 类型错误、摘要或租户不匹配、版本不支持的投影始终返回 503。每次新增重新读取，不缓存旧策略，不使用 Redis 用量计数器。
+
+`memberLimit` 与 `groupLimit` 保留在共享数据中，Node 本次仅执行每群 USER 和 AGENT 上限；租户成员总额由相应用例管理，群数量上限尚不在 Node 执行。商业租户执行门禁现复用共享权益的 ENABLED 和有效期判断，删除商业租户一律拒绝的占位逻辑；无投影、停用、过期仍拒绝写入。首次开通不要求 Node 策略 ACK，新增额度读取能力不代表完整限额覆盖。
+
+回归源码位于 `test/shared-quota.test.ts`、`test/group-quota.test.ts`、`test/config.test.ts`。`test/group-quota-concurrency.test.ts` 复用严格限制地址的 `FORWARD_TEST_PG` 临时数据库与隔离 Redis，覆盖真实事务下 ADD_MEMBERS 与 JOIN_GROUP、自动协调员工插入的最后名额并发竞争，以及超限批次的整体回滚；本次未执行测试、类型检查、构建或迁移，数据库与 Redis 实际联调仍待验证。
+
 本次按「多租户三人并行开发计划」修正 C1–C4。协议细节集中在本文和 `openapi.json`；方案中未给出字节级定义的部分（hash、manifest、KMS HTTP 适配器、业务命令）在下面明确列出，A/B 联调须采用同一约定。
 
 ## 审查顺序
@@ -12,7 +24,7 @@
 | `src/application/connection-manager.ts`      | 固定身份、租约、凭证轮换和提交前校验               |
 | `src/application/runtime.ts`                 | DB、Schema、Worker、服务发现与消费者就绪状态       |
 | `src/application/schema/`                    | 持久受理、逐版执行、恢复、结果回报与清理           |
-| `src/infrastructure/schema/`                 | ZIP/SQL 白名单、catalog 指纹、数据库执行和 BE 回调 |
+| `src/infrastructure/schema/`                 | ZIP/SQL 白名单、对象清单校验、数据库执行和 BE 回调 |
 | `src/application/command-service.ts`         | 命令幂等；业务写入和结果记录同一事务               |
 | `src/infrastructure/persistence/*-writer.ts` | 会话、群成员、任务写入；复用既有表                 |
 | `src/application/history/`                   | 权限、历史、群列表、话题、上下文投影；拆开原长文件 |
@@ -57,11 +69,15 @@ DB_SANDBOX_RECORD_ID DB_CREDENTIAL_VERSION PROVISION_STATE
 
 默认 HTTPS 验证客户端证书链，并将证书 CN 固定为 `BE_CLIENT_IDENTITY`。203 本地联调可显式设置 `INTERNAL_TRANSPORT=http`，此时 BE、KMS、Node 走 HTTP，并用 `INTERNAL_API_TOKEN` 认证：直连可使用 Bearer，经过 OpenSandbox HTTP 代理时使用 `X-Byclaw-Internal-Token`，因为代理不会转发 `Authorization`；`REDIS_TLS=false` 允许连接本地 Redis。除 live 外仍要求 `X-Enterprise-Id`、`X-Tenant-Generation`；业务请求还要求真实用户 `X-Actor-User-Id`。这些内部接口不得直接对浏览器开放。
 
+Node 调用 BE/KMS 时，HTTP 和 HTTPS 均发送 `Authorization: Bearer <INTERNAL_API_TOKEN>`；HTTPS 仍保留证书校验。`INTERNAL_API_TOKEN` 在两种模式下都必须非空，且须与 BE 的 `BYCLAW_TENANT_INTERNAL_TOKEN` 一致；缺失或全空白会在启动时失败。BE 创建 Node 时注入该值；更换 token 后须同步更新 BE 和现有 Node 的启动配置，重新创建容器或重启直接运行的 Node 进程以加载新值。
+
 - `/internal/v1/health/live`：进程存活，无需客户端证书。
 - `/internal/v1/health/db`：受保护；返回最近一次运行时身份/可写探测的状态。
 - `/internal/v1/health/ready`：受保护；`ready` 表示 Schema 已核验、Worker/HTTPS/流组件可供 BE 完成开通验收；`businessReady` 还要求 BE 已发布 `PROVISION_STATE.status=READY`。这样避免「BE 等 Node 就绪、Node 等 BE READY」的循环。
 
 成功连接后注册实际 `TENANT_DATA_<E>` Worker 和同名 ServiceRegistry 服务；metadata 含 enterpriseId、generation、实例 ID、HTTPS endpoint、Schema 版本与 READY/ADMIN_ONLY。失去连接权威后撤销注册，管理态拒绝业务命令。运行时每 5 秒串行对账。
+
+Schema 核验独立于五秒对账节奏：启动、连接池更换、Schema 任务开始或结束后，在下一次非升级中的对账立即核验；核验通过后每 60 秒重新查询 BE 审计版本并检查库内标记、必要字段和索引。首次初始化尚未就绪时保留五秒检查。核验异常立即关闭业务门禁，按 10、20、40、80、160、300 秒退避，之后最多每 300 秒重试；BE 返回 401/403 时直接等待 300 秒，并记录 `SCHEMA_AUTHENTICATION_FAILED`。重试等待期间不沿用成功状态开放业务，连接池或 Schema 任务变化会重置等待。此间隔仅用于运行态就绪检查，Schema 任务执行前仍直接核对 BE 审计版本。
 
 BE 以固定服务名 `TENANT_DATA_<E>` 从 Redis 发现并校验实例，直接使用注册的 host、port 和 pathPrefix，不再从数据库中的 sandbox ID 重建访问地址。Node 的 `ADVERTISE_HOST` 未设置、为空或沿用旧的 `host.containers.internal` 占位值时，默认发布自身容器 hostname；Docker 共享网络须能解析该 hostname，其他部署方式可显式设置可达的 `ADVERTISE_HOST`。容器重建后实例 hostname 可以变化，固定服务名和租户/代际校验保持不变。
 
@@ -95,13 +111,13 @@ manifest 的具体格式：
 }
 ```
 
-objects 是本版允许操作的对象清单（table/index/sequence）；catalogDigest 是**本版执行完成后整个 byai catalog** 的指纹，包含对象及注释、列类型/非空/default/注释、索引定义、约束定义和序列属性。发布制品必须用 `catalog.ts` 相同查询、排序和 canonical JSON 算法生成，不能只用表名/列名摘要。具体 openGauss 版本的 catalog 格式由实库验收固定。
+objects 是本版允许操作的对象清单（table/index/sequence），执行后逐项检查对象及类型存在。运行时不计算或比较整个数据库 catalog 的结构指纹，避免 PostgreSQL 与 OpenGauss 对默认值、日期及序列的目录表示差异阻断已成功提交的 SQL。catalogDigest 为可选兼容元数据，不参与开通、恢复或就绪门禁；ZIP/SQL 摘要、版本链、租户身份、必要业务字段和索引检查仍然生效。
 
 限制：ZIP ≤8 MiB、解压总量 ≤32 MiB、最多 64 条目；拒绝额外文件、重复名、路径穿越、符号链接、加密条目、CRC/摘要不符。SQL 做语句和 AST 白名单；仅允许 byai 清单对象的建表/序列/索引、ALTER、COMMENT，UPDATE 禁止 DROP，禁止事务控制、DML、其他 schema、角色所有权变更和任意函数。Node 专用 Schema 版本注释不可由制品覆盖。
 
 先 fsync 暂存 ZIP 和受理结果，再返回 `202 PENDING`，202 不表示执行成功。同一 auditId/task 返回原记录，改内容返回冲突；正在执行/对账时拒绝另一任务。失败重试由 BE 使用新的 auditId/attemptNo 追加审计。
 
-Schema 独占数据库锁覆盖整条链；每版独立事务，DDL 与 `COMMENT ON SCHEMA byai` 版本标记同时提交。新 INIT 检查 byai/public 及租户账号自有 schema 无对象；UPDATE 在锁内检查 fromVersion、BE 审计与指纹。提交后用新连接核验结构与标记；COMMIT 结果不明或核验失败进入 RECONCILING，恢复先查标记和指纹，避免重复 SQL。
+Schema 独占数据库锁覆盖整条链；每版独立事务，DDL 与 `COMMENT ON SCHEMA byai` 版本标记同时提交。新 INIT 检查 byai/public 及租户账号自有 schema 无对象；UPDATE 在锁内检查 fromVersion、BE 审计与版本标记。提交后用新连接核验结构与标记；COMMIT 结果不明或核验失败进入 RECONCILING，恢复先查版本/SQL 摘要标记和声明对象，避免重复 SQL；历史指纹不一致的 RECONCILING 任务可按此规则继续对账。
 
 Node 使用配置的内部认证方式调用：
 
@@ -258,7 +274,7 @@ pnpm start
 
 正式 baseline/增量 SQL 尚未生成：仓库要求先由用户给出准确迁移版本；本次未修改 deploy/migrations/versions、initdb 或 .applied。制品需包含既有表及方案新增 last_seq、created_seq、storage_version、mirror 序号/ID、clientRequestId/run/answer/command/hash 字段，以及 `readiness.ts` 要求的唯一索引和 seq_any_table。缺结构、索引、catalog 或审计不一致时只进入管理态。
 
-目标 openGauss 的 PostgreSQL 驱动兼容性、advisory lock/ON CONFLICT/catalog 查询、完整 baseline/版本链、COMMIT 故障恢复，以及 BE/KMS/证书/Redis ACL 的实际联调，由实库验收完成。部署约定每租户每代际一个 Node 写入实例；多副本的任务状态共享与协调需另行设计。
+目标 openGauss 的 PostgreSQL 驱动兼容性、Redis 租约互斥/catalog 查询、完整 baseline/版本链、COMMIT 故障恢复，以及 BE/KMS/证书/Redis ACL 的实际联调，由实库验收完成。部署约定每租户每代际一个 Node 写入实例；多副本的任务状态共享与协调需另行设计。
 
 ## D0.5.0 消息命令兼容
 
@@ -306,9 +322,9 @@ BE 的会话资源查询通过节点校验租户会话，不回退查询个人�
 
 ### V0.5.0 租户任务轮次基线修复
 
-租户基线及配套 ZIP/manifest 必须包含 `byai_group_chat_task.current_turn_id`、`current_turn_trace_id` 和 `idx_group_chat_task_running_turn`。就绪检查会拒绝缺少轮次字段的库，避免任务续聊在业务阶段才失败。`tenant/V0.5.0__ddl.sql` 为已有租户的同版本补丁；openGauss 不支持 `ADD COLUMN IF NOT EXISTS`，执行器须在同一事务中检查字段存在性及类型，再执行缺失字段的 ALTER，并更新 schema 的 catalog 指纹。该补丁不回填历史任务状态。
+租户基线及配套 ZIP/manifest 必须包含 `byai_group_chat_task.current_turn_id`、`current_turn_trace_id` 和 `idx_group_chat_task_running_turn`。就绪检查会拒绝缺少轮次字段的库，避免任务续聊在业务阶段才失败。`tenant/V0.5.0__ddl.sql` 为已有租户的同版本补丁；openGauss 不支持 `ADD COLUMN IF NOT EXISTS`，执行器须在同一事务中检查字段存在性及类型，再执行缺失字段的 ALTER，并维护 schema 的版本及 SQL 摘要标记。该补丁不回填历史任务状态。
 
-生成新基线 manifest 时，应在同引擎的临时空库执行完整基线后，使用 Node 的 `catalogDigest` 计算指纹；已有租户的修复指纹按实际 catalog 计算，不可直接覆盖为新建库指纹。修改 SQL 后须同步生成 `baseline/V0.5.0__baseline.zip` 和 manifest；`packaged-baseline.test.ts` 验证发布 ZIP 与迁移源及 manifest 一致。BE 的打包资源包含该 ZIP，部署时需同步更新。
+生成新基线 manifest 时，应在目标引擎临时空库验证完整 SQL 可执行，并验证对象清单、必要字段和索引。修改 SQL 后须同步生成对应版本的 ZIP 和 manifest，保留 SQL/ZIP 摘要完整性校验；无需为已有租户重新计算或修改 catalog 指纹。`packaged-baseline.test.ts` 验证发布 ZIP 与迁移源及 manifest 一致。BE 打包资源包含该 ZIP，SQL 制品变更时需同步更新。
 
 ### 专家团父子会话渲染序号
 
@@ -353,3 +369,24 @@ BE 每 5 分钟核对已开通租户的权威配置，在租约剩余不足 12 �
 Voice INPUT mirrors preserve `metadata: { messageType: "VOICE", voice: { fileId, fileName, mimeType: "audio/mpeg", durationMs? } }` in the message history JSON. The reference uses an owned positive decimal file ID, an MP3 filename of at most 512 UTF-8 bytes, and an optional integer duration from 1 to 300000 milliseconds. Contract validation and the persistence writer reject extra voice fields, audio base64, provider configuration, and signed URLs. The producer hash includes this metadata; consumers do not rewrite the envelope before checking it. Ordinary INPUT events can omit metadata. The backend mirror/outbox producer must use the same allowlist.
 
 群聊转发回归使用 `../byclaw-qa/fixtures/group-chat-forward/` 中的跨端共用夹具，覆盖 ID 规范化、资源名称冻结和同租户成员资格。快照资源引用仅投影公开展示字段，不恢复 `resourceCode`、`extData`；缺少转发来源标识的旧快照附件仅保留名称、类型和大小，已发布的目标文件副本保留预览信息。
+
+
+### ACS + NAS 租户开通
+
+租户数据库与 Node 的服务和资源档位始终读取 `sandbox_service_spec` / `sandbox_service_profile`，由表中 `enabled` 控制，不再依赖 `BYCLAW_SANDBOX_PROFILE_ENABLED`。显式指定的档位不存在或已禁用时，开通失败，不回退到内嵌资源限制。
+
+BE 创建数据库和 Node 时，将经开通流程校验的企业 ID 同时放入 `user_info.enterpriseId`（NAS 归属）与 `metadata.enterpriseId`（恢复对账）。
+
+ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态目录挂到各租户的 NAS 私有空间，由 Provider 的 init container 初始化目录权限；BE 不再为这类卷写旧 NFS 挂载目录。数据库租户镜像内置启动脚本。Node 镜像包含该初始化器需要的 Python 3，状态目录使用镜像自身的 UID/GID 1000。
+
+数据库端口必须返回 VPC 内网 TCP 地址，不能通过 HTTP 网关连接。Node 通过 Downward API 的 `POD_IP` 注册服务，BE 与 Node 需要能访问该 VPC。BE 的租户主密钥须持久保留，切换存储或更新环境时不能重新生成；内部鉴权配置、Redis 与 BE 内网地址同样需要保留。
+
+
+### 2026-10-29 READY 开通兼容
+
+创建工作组时，LIMITED 配额按事务中已包含新工作组的数量与 `groupLimit` 比较，等于上限允许创建，超过上限返回 `GROUP_LIMIT_EXCEEDED`。计数读取原始 SQL 列名 `current_count`，避免将正常计数误判为 `QUOTA_UNAVAILABLE`。此修复需要更新已有租户 Node 的运行程序，仅更新 BE 或 Redis 配额不会生效。
+
+`requireExecutionPolicy` 不再因 COMMERCIAL_MANAGED 一律返回 POLICY_CAPABILITY_UNSUPPORTED，改用现有共享权益读取端口核实企业身份、ENABLED 和有效期。HTTP 业务写入与队列命令复用该入口；鉴权、Schema 就绪和业务授权照常执行。HACU 不等待本 Node 的 ACK；权益异步发布未到达时仍可能暂时拒绝写入。已有沙箱需要更新实际运行的 Node 程序，单独部署 byclaw-be 不会更新现有 Node。已改测试源文件，未执行构建、测试或部署。
+
+
+配额及转发幂等写入使用既有 `Database.transaction` Redis 锁，锁随事务提交/回滚释放，支持续租和提交前所有权检查。配额不再使用 session 自更新作为保护，转发请求预留改为锁后查重再普通 INSERT；生产源码不使用 PostgreSQL `ON CONFLICT`。真实 openGauss、Redis 单机/Cluster、跨实例竞争及提交时丢锁仍需环境验收；模拟测试不代表这些环境已验证。共享工作区的 Java 主库与租户 Node 独立库使用各自的锁域，不构成跨数据库的强一致配额账本。

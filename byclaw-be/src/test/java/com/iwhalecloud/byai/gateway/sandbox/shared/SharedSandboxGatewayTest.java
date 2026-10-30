@@ -123,6 +123,34 @@ class SharedSandboxGatewayTest {
     }
 
     @Test
+    void quotaPendingBlocksAcquisitionBeforeLookup() {
+        var gateway=gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice","byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("lookup"),anyMap())).thenReturn(Map.of("code",0));
+        when(client.call(eq("prepareUserStorage"),anyMap())).thenReturn(Map.of("code",0,"data",
+            Map.of("enabled",true,"ready",false,"state","WAITING_QUOTA")));
+        assertThatThrownBy(()->gateway.tryAcquire("alice","byclaw-dsh"))
+            .isInstanceOfSatisfying(com.iwhalecloud.byai.state.common.exception.BdpRuntimeException.class, error -> {
+                assertThat(error.getErrorService()).isEqualTo("SHARED_USER_NAS_WAITING_QUOTA");
+                assertThat(error.getMessage()).doesNotContain("SHARED_USER_NAS");
+            });
+        verify(client,never()).call(eq("lookup"),anyMap());
+        verify(client,never()).call(eq("acquire"),anyMap());
+    }
+
+    @Test
+    void activeMappingRechecksStorageBeforeReuse() {
+        var gateway=gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice","byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("lookup"),anyMap())).thenReturn(Map.of("code",0,"data",Map.of("sandboxId","existing")));
+        when(client.call(eq("prepareUserStorage"),anyMap())).thenReturn(Map.of("code",0,"data",Map.of("enabled",true,"ready",true)));
+        assertThat(gateway.tryAcquire("alice","byclaw-dsh").getSandboxId()).isEqualTo("existing");
+        verify(client).call(eq("prepareUserStorage"),anyMap());
+    }
+
+    @Test
     void eligibleUserUsesTrustedTenantAndSharedHostSpec() {
         var gateway = gateway();
         when(client.call(eq("lookup"), anyMap())).thenReturn(Collections.singletonMap("code", 0));

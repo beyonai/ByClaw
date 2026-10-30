@@ -4,7 +4,64 @@ set -Eeuo pipefail
 # Tool environment (B) of a split deployment: serve DSH's SSH helper only. The
 # runtime (A) that started this sandbox owns the browser, Web UI and sessions.
 if [[ "${1:-}" == tools ]]; then
-    exec /usr/local/bin/byclaw-tool-env-sshd
+    # B's home may be a persistent per-user volume (credentials, CLI state and
+    # installs survive B being released). Start it from the image's own home and
+    # add defaults a newer image brings, without touching what the user changed.
+    tool_home="${BYCLAW_TOOL_HOME:-/home/byclaw}"
+    tool_home_seed="${BYCLAW_TOOL_HOME_SEED:-/usr/local/share/byclaw-tool-home}"
+    if [[ -d "${tool_home_seed}" ]]; then
+        mkdir -p "${tool_home}"
+        rsync -a --ignore-existing "${tool_home_seed}/" "${tool_home}/"
+        if ((EUID == 0)); then
+            chown byclaw:byclaw "${tool_home}"
+        fi
+    fi
+    tool_env_server="${BYCLAW_TOOL_ENV_SERVER:-/usr/local/bin/byclaw-tool-env-sshd}"
+    # Second stage, run by the browser supervisor below: serve SSH without the
+    # broker secret descriptor or variables (sessions read the secret file instead).
+    if [[ "${2:-}" == --serve ]]; then
+        if [[ "${BYCLAW_BROWSER_SECRET_FD:-}" =~ ^[0-9]+$ ]]; then
+            eval "exec ${BYCLAW_BROWSER_SECRET_FD}<&-"
+        fi
+        unset BYCLAW_BROWSER_SECRET_FD BYCLAW_BROWSER_SECRET BYCLAW_DSH_PREPARED
+        exec "${tool_env_server}"
+    fi
+    # The same browser the user's own sandbox ran: one supervised Chromium with the
+    # byCLI extension and daemon, one desktop (shared noVNC on 8081), started on
+    # first use. The native browser tool attaches to it over the socket.
+    if [[ "${BYCLAW_TOOL_BROWSER:-1}" != 0 ]]; then
+        # The flattened image keeps few ENV lines; the harness image's settings the
+        # supervisor reads (viewer, startup, byCLI, ports) were recorded for SSH
+        # sessions. Values this sandbox was started with win.
+        session_env="${BYCLAW_TOOL_ENV_SESSION_ENV:-/etc/byclaw-tool-env.session-env}"
+        if [[ -r "${session_env}" ]]; then
+            while IFS= read -r assignment; do
+                name="${assignment%%=*}"
+                [[ "${assignment}" == *=* && "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && ! -v "${name}" ]] || continue
+                export "${assignment}"
+            done <"${session_env}"
+        fi
+        browser_run=/run/byclaw-browser
+        export BYCLAW_BROWSER_SOCKET="${browser_run}/browserd.sock"
+        # The profile the user's own sandbox kept in its DSH home, on the user's volume.
+        export BYCLAW_BROWSER_USER_DATA_DIR="${BYCLAW_TOOL_BROWSER_USER_DATA_DIR:-/by/byclaw/.dsh/browser/user-data}"
+        # BE reaches the daemon through the sandbox's `bycli` endpoint.
+        export BYCLI_DAEMON_HOST="${BYCLI_DAEMON_HOST:-0.0.0.0}"
+        if ((EUID == 0)); then
+            install -d -m 0700 -o byclaw -g byclaw \
+                "${browser_run}" "${browser_run}/downloads" \
+                "${browser_run}/screenshots" "${browser_run}/sessions"
+        fi
+        exec "${BYCLAW_TOOL_BROWSER_SUPERVISOR:-/usr/local/bin/byclaw-browser-supervisor}" \
+            --browser-user byclaw \
+            --dsh-user root \
+            --socket-path "${BYCLAW_BROWSER_SOCKET}" \
+            --secret-file "${browser_run}/broker.secret" \
+            --readiness-timeout 60 \
+            --activation-port 19825 \
+            -- "${BASH}" "$0" tools --serve
+    fi
+    exec "${tool_env_server}"
 fi
 
 # Shared DSH host: one process serving many users (scripts/byclaw-multi-host.mjs).
@@ -15,9 +72,9 @@ if [[ "${1:-}" == multi-host ]]; then
     launcher=/workspace/scripts/byclaw-multi-host.mjs
     if ((EUID == 0)); then
         exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
-            env HOME=/home/byclaw node --import tsx/esm "${launcher}" "$@"
+            env HOME=/home/byclaw node "${launcher}" "$@"
     fi
-    exec node --import tsx/esm "${launcher}" "$@"
+    exec node "${launcher}" "$@"
 fi
 
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then

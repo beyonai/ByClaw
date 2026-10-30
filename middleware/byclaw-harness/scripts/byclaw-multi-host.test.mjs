@@ -2,13 +2,62 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
 import test from 'node:test'
+import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as host from './byclaw-multi-host.mjs'
 import {
   webStartupValues, prepareUserProfile,
   authorizeWeb, composeUserOverlays, createHostServer, createUpstreamAuth, currentUserToken, DISABLED_BY_DESIGN, disabledRule,
   downstreamHeaders, gatewayCookie, isSameOriginRequest, isValidUserCode, launchEnvironmentValues, parseCookies,
-  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
+  parseEnsureBody, parseRoute, readHostConfig, readToolEnvBeConfig, renewLaunchEnvironment, renewUserToken, rewriteLocation, toolEnvUserToken, upstreamHeaders,
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
+
+test('shared host imports the installed runtime once from its CLI anchor, independent of cwd', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'shared-host-runtime-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const anchor = join(root, 'package.json')
+  await writeFile(anchor, '{}')
+  for (const name of ['dsh-app-boot', 'dsh-launch-environment']) {
+    const dir = join(root, 'node_modules/@deepseek-ai', name)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module', exports: './compiled.js' }))
+    await writeFile(join(dir, 'compiled.js'), 'export const identity = {}')
+  }
+  const [one, two] = await Promise.all([host.loadHostRuntime(anchor), host.loadHostRuntime(anchor)])
+  assert.equal(one, two, 'all user contexts reuse the runtime modules, not a user context')
+  assert.ok(one.appBoot.identity)
+  assert.ok(one.launchEnvironment.identity)
+  const missing = await mkdtemp(join(tmpdir(), 'missing-host-runtime-'))
+  t.after(() => rm(missing, { recursive: true, force: true }))
+  await assert.rejects(host.loadHostRuntime(join(missing, 'package.json')), /Cannot find module/)
+})
+
+test('shared host entrypoint uses compiled Node runtime without the source alias loader', async () => {
+  const source = await readFile(new URL('../docker-entrypoint.sh', import.meta.url), 'utf8')
+  const shared = source.slice(source.indexOf('if [[ "${1:-}" == multi-host ]]'), source.indexOf('if [[ "${BYCLAW_DSH_PREPARED'))
+  assert.match(shared, /exec node "\$\{launcher\}"/)
+  assert.doesNotMatch(shared, /tsx/)
+})
+
+test('module preloading deduplicates active rows without activating plugins or hiding import failures', async () => {
+  const loaded = []
+  const rows = [
+    { name: 'one' }, { name: 'one' }, { name: 'disabled', disabled: true },
+    { id: 'codegraph-mcp', name: 'host-only' },
+    { name: 'group', config: [{ name: 'two' }, { name: 'missing' }, { name: 'three' }] },
+    { name: 'group', disabled: true, config: [{ name: 'also-disabled' }] },
+  ]
+  const result = await host.preloadConfiguredModules(rows, name => name, async name => {
+    loaded.push(name)
+    if (name === 'missing') throw new Error('fixture import failure')
+    return { apply: () => assert.fail('preload must never activate a plugin') }
+  })
+  assert.deepEqual(loaded, ['one', 'two', 'missing', 'three'])
+  assert.deepEqual(result, { loaded: 3, failed: ['missing'] })
+  assert.equal(rows[0].name, 'one')
+})
 
 const spec = {
   sandboxId: 'sbx-1', env: { BEYOND_TOKEN: 'jwt-u1' }, toolEnvBackend: 'opensandbox',
@@ -66,8 +115,26 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-tool-env'].config.alias, 'byclaw-tool-env-u1')
   assert.equal(byId['byclaw-tool-env'].config.backend, 'opensandbox')
   assert.equal(byId['byclaw-tool-env'].config.byclawBe, undefined)
+  // Processes on B get the environment the user's own sandbox would have had (the PUT env).
+  // The identity is the context's user, whatever the PUT env says, as in the runtime's own launch layer.
+  assert.deepEqual(byId['byclaw-tool-env'].config.launchEnv, { ...spec.env, USER_CODE: 'u1' })
+  const spoofed = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, env: { USER_CODE: 'evil', A: 'b' } })
+  assert.deepEqual(spoofed.find(row => row.id === 'byclaw-tool-env').config.launchEnv, { USER_CODE: 'u1', A: 'b' })
+  // The launch environment goes to B; the host's own environment still reaches commands only through the allowlist.
+  const bash = composeUserOverlays([{ id: 'byclaw-bash-provider', name: '@byclaw/dsh-bash-provider' }], 'u1', '/r/users/u1/dsh-home', spec)[0]
+  assert.deepEqual(bash.config.forwardHostEnvironment, { allow: ['TZ', 'LANG', 'LC_ALL', 'BE_DOMAINNAME', 'BYAI_SERVICE_BASE_URL', 'BYCLAW_DSH_BASE_URL'] })
   // Rows missing from the composition produce no overlay.
   assert.equal(byId['byclaw-dsh'], undefined)
+})
+
+test('every plugin that reads or writes the user tree does so in the tool environment', () => {
+  // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
+  const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
+    'devflow', 'devflow-tool', 'devflow-artifact-gate', 'devflow-agent-gate', 'devflow-worktree', 'devflow-command',
+    'devflow-spec', 'devflow-spec-sentinel', 'devflow-iron-rules', 'dsh-codegraph']
+  const entries = rows.map(id => ({ id, name: `x-${id}`, config: {} }))
+  const overlays = Object.fromEntries(composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', spec).map(row => [row.id, row.config]))
+  for (const id of rows) assert.equal(overlays[id]?.workspaceOnToolEnvironment, true, id)
 })
 
 test('byclaw-be tool environments get the host settings plus the user and the PUT token', () => {
@@ -79,6 +146,11 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)
+  // BE picks a user's tool sandbox spec through the PUT env; blank falls back to the host's.
+  const picked = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' byclaw-dsh-unity ' } })
+  assert.equal(picked[0].config.byclawBe.serviceKey, 'byclaw-dsh-unity')
+  const blank = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_SERVICE_KEY: ' ' } })
+  assert.equal(blank[0].config.byclawBe.serviceKey, 'byclaw-dsh-tools5')
   assert.throws(() => toolEnvUserToken(undefined, 'u1'), /u1/)
   assert.equal(toolEnvUserToken({ BEYOND_TOKEN: ' t ' }, 'u1'), 't')
 })
@@ -115,7 +187,8 @@ test('disabled lists match row ids and package prefixes', () => {
   ]
   // Multi-user plugins (browser-use, devflow, ...) load; only the pending ones stay off.
   const disabled = composeUserOverlays(entries, 'u1', '/h', spec).filter(row => row.disabled).map(row => row.id)
-  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'graph', 'hmr', 'lan'])
+  // CodeGraph itself runs on the tool environment (dsh-codegraph); only the row spawning it on this host stays off.
+  assert.deepEqual(disabled.sort(), ['codegraph-mcp', 'hmr', 'lan'])
   // Shrinking the pending list re-enables the plugin; by-design entries stay.
   const designOnly = composeUserOverlays(entries, 'u1', '/h', spec, { disabled: [DISABLED_BY_DESIGN] })
   assert.deepEqual(designOnly.filter(row => row.disabled).map(row => row.id).sort(), ['hmr', 'lan'])
@@ -334,6 +407,18 @@ test('renewUserToken hands the PUT token to the byclaw-be backend only', () => {
   assert.equal(renewUserToken({ get: () => undefined }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.equal(renewUserToken({ get: () => ({}) }, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: 'jwt-9' }), false)
   assert.deepEqual(renewed, ['jwt-9'])
+})
+
+test('renewLaunchEnvironment hands the PUT environment to the tool environment', () => {
+  const seen = []
+  const ctx = { get: name => (name === 'ssh' ? { setLaunchEnvironment: env => seen.push(env) } : undefined) }
+  assert.equal(renewLaunchEnvironment(ctx, { BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'evil' }, 'u1'), true)
+  assert.deepEqual(seen, [{ BEYOND_TOKEN: 'jwt-9', REDIS_HOST: 'r', USER_CODE: 'u1' }])
+  // A PUT without an environment keeps the last one.
+  assert.equal(renewLaunchEnvironment(ctx, undefined, 'u1'), false)
+  assert.equal(renewLaunchEnvironment(ctx, {}, 'u1'), false)
+  assert.equal(renewLaunchEnvironment({ get: () => ({}) }, { A: 'b' }, 'u1'), false)
+  assert.equal(seen.length, 1)
 })
 
 test('a failed boot marks the user failed and the next ensure retries', async () => {
@@ -660,4 +745,223 @@ test('legacy admin API reports startup overload as retryable 429', async t => {
     assert.equal(response.status, 429)
     assert.match((await response.json()).error, /startup queue/)
   } finally { gate.resolve(); await first }
+})
+
+
+test('managed homes survive host reassignment while profiles and sockets stay host-local', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'shared-context-home-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const user = `ctx_${'a'.repeat(64)}`
+  const config = { managed: true, root: join(root, 'host-a'), userRoot: join(root, 'contexts') }
+  const a = host.userContextPaths(config, user)
+  const b = host.userContextPaths({ ...config, root: join(root, 'host-b') }, user)
+  assert.equal(a.home, b.home)
+  assert.notEqual(a.profile, b.profile)
+  assert.notEqual(a.runtimeDir, b.runtimeDir)
+  assert.ok(a.runtimeDir.startsWith('/tmp/'), 'Unix sockets must not live on NAS')
+  assert.ok(Buffer.byteLength(`${a.runtimeDir}/browserd.sock`) <= 107)
+  assert.notEqual(a.home, host.userContextPaths(config, `ctx_${'b'.repeat(64)}`).home)
+  await mkdir(join(a.home, 'sessions'), { recursive: true })
+  await writeFile(join(a.home, 'sessions', 'session.v1.jsonl'), 'persisted history')
+  await rm(config.root, { recursive: true, force: true })
+  assert.equal(await readFile(join(b.home, 'sessions', 'session.v1.jsonl'), 'utf8'), 'persisted history')
+  const entries = [{ id: 'byclaw-browser-use', name: 'browser' }, { id: 'session-persistence-jsonl', name: 'sessions' }]
+  const first = composeUserOverlays(entries, user, a.home, { ...spec, runtimeDir: a.runtimeDir })
+  const second = composeUserOverlays(entries, user, b.home, { ...spec, runtimeDir: b.runtimeDir })
+  assert.notEqual(first.find(r => r.id === 'byclaw-browser-use').config.runtimeDir, second.find(r => r.id === 'byclaw-browser-use').config.runtimeDir)
+  assert.equal(first.find(r => r.id === 'session-persistence-jsonl').config.root, second.find(r => r.id === 'session-persistence-jsonl').config.root)
+})
+
+test('legacy homes stay unchanged and context path traversal is rejected', () => {
+  assert.equal(host.userContextPaths({ root: '/data/host' }, 'alice').home, '/data/host/users/alice/dsh-home')
+  assert.throws(() => host.userContextPaths({ root: '/data/host', userRoot: '/data/shared', managed: true }, '../alice'))
+})
+
+test('quota context verifies the mounted pool and rejects symlinks before boot', async () => {
+  const key = `ctx_${'a'.repeat(64)}`
+  const binding = { version: 1, mode: 'USER_NAS_QUOTA', contextKey: key, namespace: 'shared',
+    parentSpaceKey: 'b'.repeat(64), spaceKey: 'c'.repeat(64), poolId: 'pool', home: `/data/byclaw-contexts/${key}/dsh-home` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts', storagePoolId: 'pool',
+    storageParentSpaceKey: binding.parentSpaceKey, storageNamespace: 'shared' }
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, directory)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storagePoolId: 'other' }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async () => ({
+    isDirectory: () => false, isSymbolicLink: () => true,
+  })), /unsafe user NAS home/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async () => {
+    throw Object.assign(new Error('missing mount'), { code: 'ENOENT' })
+  }), /NAS mount/)
+})
+
+test('multi-pool home follows immutable user binding across hosts and rejects missing pool', async () => {
+  const key = `ctx_${'c'.repeat(64)}`
+  const parent = 'a'.repeat(64)
+  const binding = { version: 2, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: 'b'.repeat(64),
+    parentSpaceKey: parent, poolId: 'pool-two', namespace: 'shared',
+    home: `/data/byclaw-context-pools/${parent}/${key}/dsh-home` }
+  const mount = { parentSpaceKey: parent, poolId: 'pool-two', namespace: 'shared', mountPath: `/data/byclaw-context-pools/${parent}` }
+  const config = { managed: true, root: '/data/host-one', userRoot: '/data/byclaw-contexts', storageMounts: [mount] }
+  const request = { storageBinding: binding }
+  assert.equal(host.userContextPaths(config, key, request).home, binding.home)
+  assert.equal(host.userContextPaths({ ...config, root: '/data/host-two' }, key, request).home, binding.home)
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, request, directory)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [] }, key, request, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [{ ...mount, poolId: 'wrong' }] }, key, request, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, request, async () => ({ isDirectory: () => true, isSymbolicLink: () => true })), /unsafe/)
+  assert.throws(() => host.userContextPaths(config, key, { storageBinding: { ...binding, home: '/tmp/other' } }), /invalid/)
+})
+
+test('a mounted user pool admits later users without changing the host and rejects an unmounted pool', async () => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const key = `ctx_${'a'.repeat(64)}`, space = 'c'.repeat(64), parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared', mountPath: `/data/byclaw-context-pools/${parent}` }
+  const binding = { version: 3, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: space, parentSpaceKey: parent,
+    poolId: 'pool', namespace: 'shared', home: `${mount.mountPath}/${space}/by/byclaw/.dsh` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts', storageMounts: host.parseStorageMounts(JSON.stringify([mount])) }
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, directory)
+  const laterSpace = 'd'.repeat(64)
+  await host.verifyUserStorageHome(config, key, { storageBinding: { ...binding, spaceKey: laterSpace, home: `${mount.mountPath}/${laterSpace}/by/byclaw/.dsh` } }, directory)
+  const otherParent = userNasPoolKey('new-pool')
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: { ...binding, poolId: 'new-pool', parentSpaceKey: otherParent,
+    home: `/data/byclaw-context-pools/${otherParent}/${space}/by/byclaw/.dsh` } }, directory), /NAS mount/)
+  const { kind, ...legacyProof } = mount
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [legacyProof] }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async path => ({
+    isDirectory: () => true, isSymbolicLink: () => path === binding.home,
+  })), /unsafe/)
+})
+
+test('existing personal root requires an exact mounted overlay and rejects stale or forged coverage', async () => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const key = `ctx_${'a'.repeat(64)}`, space = 'c'.repeat(64), parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared',
+    mountPath: `/data/byclaw-context-pools/${parent}`, spaceKeys: space }
+  const binding = { version: 4, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: space, parentSpaceKey: parent,
+    poolId: 'pool', namespace: 'shared', home: `${mount.mountPath}/${space}/by/byclaw/.dsh` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts', storageMounts: host.parseStorageMounts(JSON.stringify([mount])) }
+  const directory = async () => ({ isDirectory: () => true, isSymbolicLink: () => false })
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, directory)
+  assert.equal(host.userContextPaths(config, key, { storageBinding: binding }).home, binding.home)
+  const { spaceKeys, ...stale } = mount
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [stale] }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, storageMounts: [{ ...mount, spaceKeys: 'd'.repeat(64) }] }, key, { storageBinding: binding }, directory), /NAS mount/)
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: binding }, async path => ({
+    isDirectory: () => true, isSymbolicLink: () => path === `${mount.mountPath}/${space}`,
+  })), /unsafe/)
+  for (const invalid of ['', `${space},${space}`, '../tenant', `${space},`, null]) {
+    assert.throws(() => host.parseStorageMounts(JSON.stringify([{ ...mount, spaceKeys: invalid }])), /invalid/)
+  }
+})
+
+test('exact overlay coverage accepts bounded unique keys without relaxing legacy mount schemas', async () => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared',
+    mountPath: `/data/byclaw-context-pools/${parent}` }
+  const keys = Array.from({ length: 501 }, (_, index) => index.toString(16).padStart(64, '0'))
+  const parse = value => host.parseStorageMounts(JSON.stringify([value]))
+  assert.deepEqual(parse(mount), [mount], 'the original five-field USER_POOL proof remains valid')
+  assert.equal(parse({ ...mount, spaceKeys: keys.slice(0, 64).join(',') })[0].spaceKeys.split(',').length, 64)
+  for (const spaceKeys of [keys.join(','), keys.slice(0, 500).join(','), 'A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), `${keys[0]}\n`, ` ${keys[0]}`,
+    `${keys[0]}, ${keys[1]}`, [keys[0]], 1, true, {}, `${keys[0]},${keys[0]}`, null, '']) {
+    assert.throws(() => parse({ ...mount, spaceKeys }), /invalid/)
+  }
+  const { kind, ...legacy } = mount
+  assert.deepEqual(parse(legacy), [legacy], 'the original SERVICE proof remains valid')
+  assert.throws(() => parse({ ...legacy, spaceKeys: keys[0] }), /invalid/)
+  assert.throws(() => parse({ ...mount, spaceKeys: keys[0], extra: true }), /invalid/)
+  assert.throws(() => host.parseStorageMounts(JSON.stringify([mount, mount])), /invalid/)
+})
+
+test('legacy overlays are capped at 64 across pools while uncovered user pools remain mounted', async () => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const keys = Array.from({ length: 65 }, (_, index) => index.toString(16).padStart(64, '0'))
+  const mount = (poolId, spaceKeys) => ({ kind: 'USER_POOL', poolId, parentSpaceKey: userNasPoolKey(poolId),
+    namespace: 'shared', mountPath: `/data/byclaw-context-pools/${userNasPoolKey(poolId)}`,
+    ...(spaceKeys ? { spaceKeys: spaceKeys.join(',') } : {}) })
+  const first = mount('pool-one', keys.slice(0, 32))
+  const second = mount('pool-two', keys.slice(32, 64))
+  const spare = mount('spare-pool')
+  assert.deepEqual(host.parseStorageMounts(JSON.stringify([first, second, spare])), [first, second, spare])
+  assert.throws(() => host.parseStorageMounts(JSON.stringify([first, mount('pool-two', keys.slice(32)), spare])), /invalid/)
+})
+
+test('v4 requires the overlay before creating a home and refuses every aliased parent', async t => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const root = await mkdtemp(join(tmpdir(), 'personal-overlay-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const key = `ctx_${'a'.repeat(64)}`, space = 'c'.repeat(64), parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared',
+    mountPath: `/data/byclaw-context-pools/${parent}`, spaceKeys: space }
+  const binding = { version: 4, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: space, parentSpaceKey: parent,
+    poolId: 'pool', namespace: 'shared', home: `${mount.mountPath}/${space}/by/byclaw/.dsh` }
+  const config = { managed: true, root: '/tmp/host', userRoot: '/data/byclaw-contexts',
+    storageMounts: host.parseStorageMounts(JSON.stringify([mount])) }
+  // Only the filesystem root is relocated; lstat observes actual missing files and symlinks.
+  const physical = path => join(root, path)
+  const inspect = path => lstat(physical(path))
+  const verify = () => host.verifyUserStorageHome(config, key, { storageBinding: binding }, inspect)
+  const paths = ['/data', '/data/byclaw-context-pools', mount.mountPath, `${mount.mountPath}/${space}`,
+    `${mount.mountPath}/${space}/by`, `${mount.mountPath}/${space}/by/byclaw`, binding.home]
+  for (const [index, path] of paths.entries()) {
+    await mkdir(physical(binding.home), { recursive: true })
+    await verify()
+    await rm(physical(path), { recursive: true })
+    if (index <= 3) await assert.rejects(verify(), /NAS mount/, `must not create missing ${path}`)
+    else await verify() // A real personal overlay may not have been used by DSH yet.
+    await assert.rejects(lstat(physical(path)), { code: 'ENOENT' })
+    await writeFile(physical(path), 'not a directory')
+    await assert.rejects(verify(), /unsafe/)
+    await rm(physical(path))
+    const target = join(root, 'alias-target')
+    await mkdir(target, { recursive: true })
+    await symlink(target, physical(path))
+    await assert.rejects(verify(), /unsafe/)
+    await rm(physical(path))
+  }
+  await mkdir(physical(binding.home), { recursive: true })
+  const other = 'd'.repeat(64)
+  const otherBinding = { ...binding, spaceKey: other, home: `${mount.mountPath}/${other}/by/byclaw/.dsh` }
+  await mkdir(physical(otherBinding.home), { recursive: true })
+  await assert.rejects(host.verifyUserStorageHome(config, key, { storageBinding: otherBinding }, inspect), /NAS mount/,
+    'an existing /users sibling does not prove a mounted legacy /spaces overlay')
+  await assert.rejects(host.verifyUserStorageHome(config, `ctx_${'b'.repeat(64)}`, { storageBinding: binding }, inspect), /invalid/)
+  await assert.rejects(host.verifyUserStorageHome({ ...config, managed: false }, key, { storageBinding: binding }, inspect), /managed/)
+  // v3 retains its lazy creation contract for newly provisioned /users homes.
+  await rm(physical(`${mount.mountPath}/${space}`), { recursive: true })
+  await host.verifyUserStorageHome(config, key, { storageBinding: { ...binding, version: 3 } }, inspect)
+})
+
+test('v4 session paths retain personal state after host removal and isolate another covered user', async t => {
+  const { userNasPoolKey } = await import('./byclaw-managed-host.mjs')
+  const root = await mkdtemp(join(tmpdir(), 'personal-session-path-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const key = `ctx_${'a'.repeat(64)}`, otherKey = `ctx_${'b'.repeat(64)}`
+  const space = 'c'.repeat(64), otherSpace = 'd'.repeat(64), parent = userNasPoolKey('pool')
+  const mount = { kind: 'USER_POOL', parentSpaceKey: parent, poolId: 'pool', namespace: 'shared',
+    mountPath: `/data/byclaw-context-pools/${parent}`, spaceKeys: `${space},${otherSpace}` }
+  const binding = { version: 4, mode: 'USER_NAS_QUOTA', contextKey: key, spaceKey: space, parentSpaceKey: parent,
+    poolId: 'pool', namespace: 'shared', home: `${mount.mountPath}/${space}/by/byclaw/.dsh` }
+  const config = { managed: true, root: join(root, 'host-a'), userRoot: '/data/byclaw-contexts',
+    storageMounts: host.parseStorageMounts(JSON.stringify([mount])) }
+  const first = host.userContextPaths(config, key, { storageBinding: binding })
+  const second = host.userContextPaths({ ...config, root: join(root, 'host-b') }, key, { storageBinding: binding })
+  const physical = path => join(root, 'mounts', path)
+  await mkdir(join(physical(binding.home), 'sessions'), { recursive: true })
+  await writeFile(join(physical(binding.home), 'sessions/history.jsonl'), '{"sessionId":"existing-personal-history"}\n')
+  await host.verifyUserStorageHome(config, key, { storageBinding: binding }, path => lstat(physical(path)))
+  await mkdir(first.profile, { recursive: true })
+  await rm(config.root, { recursive: true })
+  assert.equal(await readFile(join(physical(second.home), 'sessions/history.jsonl'), 'utf8'),
+    '{"sessionId":"existing-personal-history"}\n')
+  assert.notEqual(first.profile, second.profile)
+  assert.notEqual(first.runtimeDir, second.runtimeDir)
+  const other = host.userContextPaths(config, otherKey, { storageBinding: { ...binding,
+    contextKey: otherKey, spaceKey: otherSpace, home: `${mount.mountPath}/${otherSpace}/by/byclaw/.dsh` } })
+  await assert.rejects(readFile(join(physical(other.home), 'sessions/history.jsonl')), { code: 'ENOENT' })
+  const entries = [{ id: 'session-persistence-jsonl', name: 'sessions' }]
+  assert.equal(composeUserOverlays(entries, key, second.home, spec)[0].config.root, `${binding.home}/sessions`)
 })

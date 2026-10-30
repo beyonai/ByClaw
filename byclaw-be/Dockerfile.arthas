@@ -122,11 +122,11 @@ COPY --chown=appuser:appgroup target/*.jar app.jar
 USER appuser
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 8086
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/actuator/health || exit 1
+    CMD curl -fsS "http://localhost:${SERVER_PORT:-${BE_SERVER_PORT:-8086}}${SERVER_SERVLET_CONTEXT_PATH-/byaiService}/actuator/health" || exit 1
 
 # 启动应用
 ENTRYPOINT ["java", "-jar", "app.jar"]

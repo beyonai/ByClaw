@@ -1,14 +1,16 @@
 # Tool environment (B) image of the opt-in split deployment (plugins/dsh-tool-env):
 # the harness (A) image minus what only A's runtime uses, flattened into one
 # layer. B runs the user's commands, so it keeps A's whole toolchain (system
-# packages, Python CLIs, Node CLIs, builtin skills); it drops A's own DSH
-# installation except the SSH helper closure (which A verifies by digest), the
-# Playwright browser (the browser runs on A) and build caches. Build it from the
+# packages, Python CLIs, Node CLIs, builtin skills) and the browser the user's
+# own sandbox ran: the supervisor starts Chromium with the byCLI extension, the
+# byCLI daemon and the shared noVNC desktop on first use, and A's `browser` tool
+# attaches to it over SSH. It drops A's own DSH installation except the SSH
+# helper closure (which A verifies by digest) and build caches. Build it from the
 # very A image it will serve, right after that image:
 #   docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:<tag> .
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools --build-arg HARNESS_IMAGE=byclaw/dsh:<tag> -t byclaw/dsh-tools:<tag> .
 # Build context is the repository root, like the other harness Dockerfiles.
-ARG HARNESS_IMAGE=byclaw/dsh:latest
+ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0
 
 
 # --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---
@@ -22,8 +24,10 @@ RUN set -eux; \
     # A's image environment (PATH, BYCLAW_* settings) for every SSH session on B; see tool-env-sshd.sh.
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
     chmod 0644 /etc/byclaw-tool-env.session-env; \
-    # Runtime-only parts of A.
-    rm -rf /ms-playwright /root/.local /root/.cache /root/.npm /home/byclaw/.cache /home/byclaw/.npm; \
+    # Runtime-only parts of A. The Playwright browser (/ms-playwright) stays: the browser runs here.
+    rm -rf /root/.local /root/.cache /root/.npm /home/byclaw/.cache /home/byclaw/.npm; \
+    # B's home may be a persistent volume; the entrypoint fills it from this copy of the image home.
+    cp -a /home/byclaw /usr/local/share/byclaw-tool-home; \
     # A's DSH installation: keep only the helper's closure, at the same paths.
     rm -rf /workspace; \
     mkdir -p /workspace; \
@@ -43,6 +47,22 @@ RUN set -eux; \
     test -s /tmp/tool-env-resolved-user.txt; \
     test -x /usr/sbin/sshd; \
     python3 -c 'import websockets'; \
+    # The browser of the user's own sandbox: supervisor, Chromium, desktop stack,
+    # noVNC page, byCLI with its extension, and the bridge A's browser tool runs here.
+    test -x /usr/local/bin/byclaw-browser-supervisor; \
+    test -x /usr/local/bin/byclaw-bycli-managed; \
+    /usr/local/bin/byclaw-playwright-chromium --version; \
+    command -v Xvfb x11vnc websockify; \
+    test -f /opt/byclaw/novnc/core/rfb.js; \
+    bycli --version; \
+    test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json; \
+    grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension$' /etc/byclaw-tool-env.session-env; \
+    grep -q '^BYCLAW_BROWSER_VIEWER=shared-novnc$' /etc/byclaw-tool-env.session-env; \
+    browser_lib=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib; \
+    test -f "${browser_lib}/browserd.js"; \
+    test -f "${browser_lib}/tool-environment-bridge.js"; \
+    # Importing resolves playwright-core and the rest of browserd's graph; it does not start browserd.
+    su -s /bin/sh byclaw -c "node --input-type=module -e \"await import('${browser_lib}/owned-runtime.js'); await import('${browser_lib}/browserd.js')\"" </dev/null; \
     rm -rf /tmp/* /var/tmp/* /etc/ssh/ssh_host_*
 
 
@@ -59,5 +79,9 @@ ENV DSH_HOME=/home/byclaw/.dsh \
     PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /by
 # The same entrypoint as A; only its `tools` mode applies here.
+# 22: sshd; 8081: the browser desktop (shared noVNC), instance `vnc`; 19825: the
+# byCLI daemon, instance `bycli` (BE's account login and recorder use it). The browser starts
+# on first use; until then the supervisor holds 19825 and a first request there starts it.
+EXPOSE 22 8081 19825
 ENTRYPOINT ["/usr/local/bin/byclaw-dsh-entrypoint"]
 CMD ["tools"]

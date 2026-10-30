@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { resolveTeamStateRoot } from '@byclaw/dsh-agent-teams'
-import { byClawSessionCwd, isLegacyProjectWorkspaceTransition } from '../lib/session-cwd.js'
-import { installByClawSessionCwdCompatibility } from '../lib/session-cwd-compat.js'
+import { byClawProjectCwd, byClawSessionCwd, isLegacyProjectWorkspaceTransition } from '../lib/session-cwd.js'
+import { installByClawSessionCwdCompatibility, requestByClawProjectWorkspace } from '../lib/session-cwd-compat.js'
 import { ByClawSessionMetadataStore } from '../lib/session-metadata.js'
 import { ByClawSessionWorkspaceRegistry, byClawBoundRootSessionId } from '../lib/session-workspace.js'
 
@@ -172,6 +172,30 @@ try {
   assert.deepEqual(remoteDirectories, [cwd])
   await assert.rejects(readFile(join(cwd, 'missing'), 'utf8'), { code: 'ENOENT' })
   await remote.close()
+  uninstall()
+  uninstall = installByClawSessionCwdCompatibility(backend, metadata, byRoot)
+  const projectCwd = byClawProjectCwd('-1', byRoot)
+  requestByClawProjectWorkspace(metadata, 'conversation', projectCwd)
+  const projectHandle = await backend.open('conversation', 'write')
+  assert.equal(projectHandle.header.cwd, projectCwd)
+  assert.equal(projectHandle.header.createdAt, rootHeader.createdAt)
+  await projectHandle.close()
+  assert.equal((await backend.stat('child')).header.cwd, projectCwd, 'children inherit the project cwd')
+  await metadata.ensureRoot('conversation', { ...rootRequest, cwd: projectCwd }, { byRoot })
+  assert.equal(metadata.get('conversation').identity.cwd, projectCwd)
+  assert.throws(() => requestByClawProjectWorkspace(metadata, 'conversation', byClawProjectCwd('42', byRoot)), /cannot change/)
+  assert.equal(records.get('conversation').header.cwd, oldCwd, 'the original append-only header remains unchanged')
+  const otherHeader = stored('project-other', byClawSessionCwd('project-other', byRoot))
+  await metadata.ensureRoot('project-other', { ...rootRequest, externalSessionId: 'project-other',
+    createdAt: otherHeader.createdAt, cwd: otherHeader.cwd })
+  requestByClawProjectWorkspace(metadata, 'project-other', projectCwd)
+  const otherHandle = await backend.open('project-other', 'write')
+  assert.equal(otherHandle.header.cwd, projectCwd, 'another conversation can use the same project without conflicting state aliases')
+  await otherHandle.close()
+  uninstall()
+  uninstall = installByClawSessionCwdCompatibility(backend, new ByClawSessionMetadataStore(table), byRoot)
+  assert.equal((await backend.stat('conversation')).header.cwd, projectCwd, 'project cwd survives a restart without a pending command')
+
 } finally {
   uninstall()
   await rm(byRoot, { recursive: true, force: true })

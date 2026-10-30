@@ -1,7 +1,7 @@
 import type { SchemaState } from "../../application/schema/types.js";
 import type { ConnectionManager } from "../../application/connection-manager.js";
 import type { BeSchemaClient } from "./be-schema-client.js";
-import { readMarker, verifyCatalog } from "./catalog.js";
+import { readMarker } from "./catalog.js";
 import { DomainError } from "../../domain/errors.js";
 
 const requiredColumns: Record<string, string[]> = {
@@ -93,7 +93,7 @@ const requiredColumns: Record<string, string[]> = {
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
-/** 业务结构门禁：BE 审计、库内标记、完整指纹及运行所需字段/索引都一致才放行。 */
+/** 业务结构门禁：BE 审计、库内标记及运行所需字段/索引都一致才放行。 */
 export class SchemaReadiness {
   state: SchemaState = { observedVersion: null, auditedVersion: null, verified: false };
   constructor(
@@ -101,6 +101,7 @@ export class SchemaReadiness {
     private readonly be: BeSchemaClient,
   ) {}
   async check(): Promise<void> {
+    const revision = this.connection.schemaRevision;
     this.state.verified = false;
     const auditedVersion = await this.be.currentVersion();
     this.state.auditedVersion = auditedVersion;
@@ -112,16 +113,9 @@ export class SchemaReadiness {
         this.connection.setSchemaReady(false);
         return;
       }
-      await verifyCatalog(db, {
-        ...marker,
-        parentVersion: null,
-        engine: "openGauss",
-        nodeProtocol: { min: 1, max: 1 },
-        sqlSha256: marker.scriptDigest,
-        objects: [],
-      });
       await this.checkColumns(db);
       await this.connection.guard(pool);
+      if (revision !== this.connection.schemaRevision) return;
       this.state.verified = true;
       this.connection.setSchemaReady(true);
     });

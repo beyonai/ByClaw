@@ -2,7 +2,7 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.iwhalecloud.byai.common.hook.*;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantSandboxProperties;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -20,18 +20,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Real SQL acceptance across command, existing MyBatis reservation, policy and durable event ownership. */
+/** Real SQL acceptance across command, existing MyBatis reservation, policy and task polling without notification tables. */
 class TenantCommandAcceptanceTest {
     private final ObjectMapper json = new ObjectMapper();
     private JdbcTemplate jdbc;
+    private final com.iwhalecloud.byai.common.quota.TestSharedPolicies shared = new com.iwhalecloud.byai.common.quota.TestSharedPolicies();
     private TenantCommandService service;
     private TenantCommandStore store;
-    private HookProperties hooks;
+    private TenantSandboxProperties sandboxProperties;
+    private TenantManagedDeletionService deletion;
     @BeforeEach void setup() throws Exception {
         var source = new DriverManagerDataSource("jdbc:h2:mem:acceptance" + System.nanoTime()
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000", "sa", "");
@@ -61,14 +62,17 @@ class TenantCommandAcceptanceTest {
             private final AtomicLong next = new AtomicLong(100);
             @Override public Long nextVal() { return next.getAndIncrement(); }
         };
-        hooks = new HookProperties();
-        var subscription = new HookProperties.Subscription(); subscription.setEvent("tenant.created");
-        hooks.getSubscriptions().put("hacu", subscription);
-        var durable = new DurableHookPublisher(source, hooks, List.of(new HookEventSchema("tenant.created", 1,
-            Set.of("enterpriseId", "enterpriseName", "createdBy", "requestId", "provisionState"))));
         store = new TenantCommandStore(jdbc);
-        service = new TenantCommandService(store, jdbc, mapper, ids, json, new HookPublisher(null, durable),
-            new TenantExecutionPolicyService(jdbc, json, false, ""), new DataSourceTransactionManager(source));
+        sandboxProperties = org.mockito.Mockito.mock(TenantSandboxProperties.class);
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("m");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("m");
+        service = new TenantCommandService(store, jdbc, mapper, ids, json,
+            new TenantExecutionPolicyService(jdbc, json, shared.reader, false, ""), new DataSourceTransactionManager(source),
+            sandboxProperties);
+        deletion = new TenantManagedDeletionService(store,jdbc,new DataSourceTransactionManager(source),mapper,
+            org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.class),
+            new TenantExecutionPolicyService(jdbc,json,shared.reader,false,""),ids,json,
+            org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class));
     }
     private ObjectNode body(String requestId) throws Exception {
         return (ObjectNode) json.readTree("""
@@ -81,27 +85,40 @@ class TenantCommandAcceptanceTest {
     }
     private long count(String table) { return jdbc.queryForObject("SELECT COUNT(*) FROM byai." + table, Long.class); }
     private void assertReservations(long expected) {
-        for (String table : List.of("internal_command", "po_enterprise_info", "tenant_user_membership",
-            "tenant_policy_cursor", "tenant_execution_policy", "tenant_runtime_operation", "integration_outbox", "integration_delivery")) {
+        for (String table : List.of("tenant_task", "po_enterprise_info", "tenant_user_membership",
+            "tenant_operation_state")) {
             assertEquals(expected, count(table), table);
         }
         assertEquals(expected * 6, count("tenant_config"));
     }
-    @Test void lostResponseReplayReturnsOriginalReservationAndStableEvent() throws Exception {
+    @Test void lostResponseReplayReturnsOriginalReservationAndStableTask() throws Exception {
         var request = TenantCommandRequest.parse(body("request-lost-response"));
         var first = service.provision(request);
-        String eventId = jdbc.queryForObject("SELECT event_id FROM byai.integration_outbox", String.class);
         // A lost response retry resolves the existing receipt before revalidating mutable base-user state.
         jdbc.update("UPDATE byai.po_users SET is_locked='Y' WHERE user_id=1");
         var replay = service.provision(request);
         assertEquals(first, replay);
         assertReservations(1);
-        assertEquals(eventId, jdbc.queryForObject("SELECT event_id FROM byai.integration_outbox", String.class));
         assertEquals("OWNER", jdbc.queryForObject("SELECT role FROM byai.tenant_user_membership", String.class));
         assertEquals(1L, jdbc.queryForObject("SELECT created_by FROM byai.tenant_user_membership", Long.class));
-        assertEquals("PREPARED", json.readTree(jdbc.queryForObject("SELECT payload FROM byai.tenant_execution_policy", String.class)).path("accessMode").asText());
-        assertEquals(first.commandId(), jdbc.queryForObject("SELECT correlation_id FROM byai.integration_outbox", String.class));
     }
+    /** Policy success confirms the HACU snapshot was published, not that every quota consumer acknowledged it. */
+    @Test void enablingPolicyReturnsSuccessAndStableReceiptWithoutConsumers() throws Exception {
+        var reservation = service.provision(TenantCommandRequest.parse(body("request-enable-policy")));
+        long enterprise = Long.parseLong(reservation.enterpriseId());
+        var enabled = ((ObjectNode) body("unused-policy-body").get("initialPolicy")).deepCopy()
+            .put("revision", "2").put("accessMode", "ENABLED")
+            .put("effectiveFrom", "2026-10-25T00:00:00Z").put("effectiveUntil", "2999-01-01T00:00:00Z");
+        var request = json.createObjectNode().put("requestId", "request-enable-state").put("expectedRevision", "1");
+        request.set("policy", enabled);
+        shared.publish(enterprise, enabled);
+        var receipt = service.policy("HACU", enterprise, request);
+        assertEquals("SUCCEEDED", receipt.status());
+        assertNull(receipt.errorCode());
+        assertEquals(receipt, service.policy("HACU", enterprise, request));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM byai.tenant_operation_state WHERE applied_rule_revision IS NOT NULL", Long.class));
+    }
+
     @Test void differentPayloadConflictsAndSameRequestIdIsScopedBySource() throws Exception {
         var original = body("request-source-scope");
         service.provision(TenantCommandRequest.parse(original));
@@ -123,16 +140,16 @@ class TenantCommandAcceptanceTest {
             assertReservations(0);
         }
     }
-    @Test void failureAfterOutboxInsertRollsBackEveryReservation() throws Exception {
-        jdbc.execute("ALTER TABLE byai.integration_delivery ADD CONSTRAINT reject_delivery CHECK (status='DELIVERED')");
+    @Test void failureAfterReservationRollsBackEveryReservation() throws Exception {
+        jdbc.execute("ALTER TABLE byai.tenant_operation_state ADD CONSTRAINT reject_reservation CHECK (active_command_id IS NULL)");
         var request = TenantCommandRequest.parse(body("request-atomic-failure"));
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> service.provision(request));
         assertReservations(0);
-        jdbc.execute("ALTER TABLE byai.integration_delivery DROP CONSTRAINT reject_delivery");
+        jdbc.execute("ALTER TABLE byai.tenant_operation_state DROP CONSTRAINT reject_reservation");
         service.provision(request);
         assertReservations(1);
     }
-    @Test void concurrentIdenticalRequestHasOneCommandEnterpriseOwnerPolicyAndEvent() throws Exception {
+    @Test void concurrentIdenticalRequestHasOneCommandEnterpriseOwnerPolicy() throws Exception {
         var request = TenantCommandRequest.parse(body("request-concurrent-same"));
         var start = new CountDownLatch(1);
         try (var workers = Executors.newFixedThreadPool(2)) {
@@ -142,5 +159,80 @@ class TenantCommandAcceptanceTest {
             assertEquals(first.get(15, TimeUnit.SECONDS).commandId(), second.get(15, TimeUnit.SECONDS).commandId());
         }
         assertReservations(1);
+    }
+
+    @Test void omittedProfileIsFrozenOnceAndConfigurationChangesApplyOnlyToNewReservations() throws Exception {
+        var original = body("request-default-profile");
+        original.remove("resourceSpec");
+        var first = service.provision(TenantCommandRequest.parse(original));
+        assertEquals("m", frozenProfile(first));
+        String storedRequest = jdbc.queryForObject("SELECT request_snapshot FROM byai.tenant_task WHERE id=?",
+            String.class, Long.parseLong(first.commandId()));
+        assertFalse(json.readTree(storedRequest).has("resourceSpec"));
+
+        // Emulate a new startup setting while replaying the original unmodified business request.
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
+        jdbc.update("UPDATE byai.po_users SET is_locked='Y' WHERE user_id=1");
+        assertEquals(first, service.provision(TenantCommandRequest.parse(original)));
+        assertEquals("m", frozenProfile(first));
+        assertReservations(1);
+
+        jdbc.update("UPDATE byai.po_users SET is_locked='N' WHERE user_id=1");
+        var nextBody = body("request-new-default-profile");
+        nextBody.putObject("resourceSpec");
+        var next = service.provision(TenantCommandRequest.parse(nextBody));
+        assertEquals("l", frozenProfile(next));
+        assertReservations(2);
+    }
+
+    @Test void explicitTrustedProfilesOverrideDeploymentDefaultWithoutBindingVersion() throws Exception {
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
+        for (String profile : new String[]{"s", "m", "l"}) {
+            var value = body("request-explicit-profile-" + profile);
+            value.putObject("resourceSpec").put("profileKey", profile);
+            var accepted = service.provision(TenantCommandRequest.parse(value));
+            assertEquals(profile, frozenProfile(accepted));
+            var snapshot = json.readTree(jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+                + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+                Long.parseLong(accepted.enterpriseId())));
+            assertEquals(profile, snapshot.path("nodeProfileKey").asText());
+            assertEquals(2, snapshot.size(), "only frozen technical resource profiles belong in tenant config");
+        }
+        assertReservations(3);
+    }
+
+    @Test void managedDeletionCommitsExternalCommandReceiptWithDeletionFence() throws Exception {
+        var provision=service.provision(TenantCommandRequest.parse(body("request-delete-task")));
+        long tenant=Long.parseLong(provision.enterpriseId());
+        assertEquals("ACCEPTED",deletion.request(tenant,"Acceptance tenant",1));
+        assertEquals("FAILED",store.find(Long.parseLong(provision.commandId())).status());
+        assertEquals("TENANT_DELETION_REQUESTED",store.find(Long.parseLong(provision.commandId())).errorCode());
+        assertEquals("PENDING",store.latestDeletion(tenant).status());
+        assertEquals("DELETING",json.readTree(jdbc.queryForObject("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code='PROVISION_STATE'",String.class,tenant)).path("status").asText());
+        assertEquals("ACCEPTED",deletion.request(tenant,"Acceptance tenant",1));
+    }
+
+    @Test void deletionStatesRejectNewExternalMutationsWithoutInvokingBusinessAction() throws Exception {
+        var provision=service.provision(TenantCommandRequest.parse(body("request-deletion-guard")));
+        long tenant=Long.parseLong(provision.enterpriseId());
+        var called=new java.util.concurrent.atomic.AtomicBoolean();
+        for(String state:List.of("DELETING","DELETE_FAILED","DELETED")) {
+            jdbc.update("UPDATE byai.tenant_config SET params_value=? WHERE enterprise_id=? AND params_code='PROVISION_STATE'",
+                "{\"status\":\""+state+"\"}",tenant);
+            var request=json.createObjectNode().put("requestId","request-after-"+state);
+            var error=assertThrows(TenantCommandException.class,()->service.mutation("HACU",tenant,"MEMBER_ADD",request,
+                ()->{called.set(true);return null;}));
+            assertEquals("TENANT_DELETION_IN_PROGRESS",error.getMessage());
+        }
+        assertFalse(called.get());assertEquals(1,count("tenant_task"));
+    }
+
+    private String frozenProfile(TenantCommandStore.Command command) throws Exception {
+        String snapshot = jdbc.queryForObject("SELECT params_value FROM byai.tenant_config"
+            + " WHERE enterprise_id=? AND params_code='PACKAGE_CONTENT_SNAPSHOT'", String.class,
+            Long.parseLong(command.enterpriseId()));
+        return json.readTree(snapshot).path("profileKey").asText();
     }
 }

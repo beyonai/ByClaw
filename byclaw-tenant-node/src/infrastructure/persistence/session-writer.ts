@@ -11,6 +11,7 @@ import { first, insert, nextId, camel } from "./sql-utils.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 import { groupNameExists } from "./group-name.js";
 import { workgroupName } from "../../domain/workgroup-name.js";
+import { requireGroupMemberCapacity } from "./group-quota.js";
 
 /** 创建个人或群会话；群成员与默认设置在外层命令事务内一并写入，项目编排由 BE 负责。 */
 export async function createSession(context: CommandContext): Promise<void> {
@@ -99,6 +100,9 @@ async function createMembers(context: CommandContext): Promise<void> {
     )
       throw new DomainError("INVALID_GROUP_MEMBERS");
     seen.add(key);
+  }
+  await requireGroupMemberCapacity(context, members);
+  for (const member of members) {
     await insert(db, "byai_session_member", {
       byai_session_member_id: await nextId(db, command.enterpriseId),
       session_id: command.sessionId,

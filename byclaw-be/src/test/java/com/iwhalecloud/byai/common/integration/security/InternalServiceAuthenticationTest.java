@@ -137,10 +137,21 @@ class InternalServiceAuthenticationTest {
         assertTrue(InternalServiceRoutes.matches("GET", "/internal/v1/commands/by-request"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("PUT", "/internal/v1/tenants/42/enterprise"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/tenants/42/members"));
+        assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/shared-workspaces/999/members"));
+        assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/shared-workspaces/999/members"));
         assertEquals("tenant:read", InternalServiceRoutes.scope("GET", "/internal/v1/tenants/42/members"));
         assertFalse(InternalServiceRoutes.matches("DELETE", "/internal/v1/tenants/42/members"));
         assertFalse(InternalServiceRoutes.matches("POST", "/internal/v1/tenantSchemaTaskReports"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/schema/current"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/runtime/extra"));
     }
+    @Test void recoveryRoutesHaveExactScopeAndUuidBoundaries() {
+        assertEquals("tenant:read",InternalServiceRoutes.scope("GET","/internal/v1/commands/7/recovery"));
+        assertEquals("tenant:provision",InternalServiceRoutes.scope("POST","/internal/v1/commands/7/recoveries"));
+        assertEquals("tenant:read",InternalServiceRoutes.scope("GET","/internal/v1/commands/7/recovery-requests/11111111-1111-4111-8111-111111111111"));
+        assertFalse(InternalServiceRoutes.matches("GET","/internal/v1/commands/7/recovery-requests/not-a-uuid"));
+        assertFalse(InternalServiceRoutes.matches("POST","/internal/v1/commands/7/recovery"));
+        assertFalse(InternalServiceRoutes.matches("GET","/internal/v1/commands/7/recovery/extra"));
+    }
+
 }

@@ -151,7 +151,11 @@ export function deliveredAnswerTextCovers(sessionKey: string | undefined, text: 
     if (entry === normalized) {
       return true;
     }
-    if (entry.length >= MIN_PREFIX_MATCH_CHARS && normalized.startsWith(entry)) {
+    // Child reports must not swallow a parent's distinct answer or a longer follow-up.
+    if (groupKey.startsWith(CHILD_GROUP_KEY_PREFIX)) {
+      continue;
+    }
+    if (entry.includes(normalized) || (entry.length >= MIN_PREFIX_MATCH_CHARS && normalized.startsWith(entry))) {
       return true;
     }
   }

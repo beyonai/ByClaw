@@ -61,6 +61,22 @@ import static org.mockito.Mockito.when;
 
 class SandboxServiceTest extends I18nTestSupport {
 
+    @Test
+    void remoteLaunch_waitsForPersonalQuotaBeforeCreatingSandbox() {
+        PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
+        when(gateway.isRemote()).thenReturn(true);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
+        when(gateways.getObject()).thenReturn(gateway);
+        org.mockito.Mockito.doThrow(new com.iwhalecloud.byai.state.common.exception.StoragePreparingException())
+            .when(gateway).call(eq("storage"), eq("quota-check"), any());
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "platformGatewayProvider", gateways);
+        assertThatThrownBy(() -> service.launchSandboxWithServiceKey("user001", "byclaw-dsh"))
+            .isInstanceOf(com.iwhalecloud.byai.state.common.exception.StoragePreparingException.class);
+        verify(gateway, never()).service(eq("launch"), any());
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1})
     @org.junit.jupiter.params.provider.NullSource
@@ -79,6 +95,7 @@ class SandboxServiceTest extends I18nTestSupport {
         @SuppressWarnings("unchecked")
         ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
         when(gateways.getObject()).thenReturn(gateway);
+        when(client.call(eq("storage"), eq("quota-check"), any())).thenReturn(Map.of("code", 0));
         when(client.call(eq("sandbox"), eq("business/launch"), any()))
             .thenReturn(Map.of("code", 0, "data", Map.of("sandboxId", "remote-sandbox")));
         SandboxService service = new SandboxService();
@@ -1460,6 +1477,22 @@ class SandboxServiceTest extends I18nTestSupport {
         assertThat(sandboxService.restartSandboxForTargetWithoutWait("user001", null, "BYCLAW_DSH_user001").getSandboxId())
             .isEqualTo("byclaw-dsh-user001");
         verify(gateway, never()).service(eq("restart"), any());
+    }
+
+    @Test
+    void residentHost_browserLivesInTheToolSandboxWhetherOrNotTheContextRuns() {
+        SandboxService sandboxService = new SandboxService();
+        SharedDshHostContexts contexts = contexts("user001");
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Not running (released, host restarted): the answer does not depend on the context.
+        SharedDshHostClient.UserContext absent = new SharedDshHostClient.UserContext();
+        absent.setStatus(SharedDshHostClient.UserContext.STATUS_ABSENT);
+        when(((SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client")).getUser(any())).thenReturn(absent);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Everyone else keeps the browser in the sandbox the client already picks.
+        assertThat(sandboxService.browserServiceKey("user002")).isNull();
+        assertThat(new SandboxService().browserServiceKey("user001")).isNull();
     }
 
     @Test

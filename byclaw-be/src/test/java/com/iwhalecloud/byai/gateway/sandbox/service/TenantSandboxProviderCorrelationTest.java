@@ -31,7 +31,7 @@ class TenantSandboxProviderCorrelationTest {
         spec.setResourceLimits(Map.of("cpu", "1", "memory", "1Gi"));
         when(specs.findByServiceKeyAndProfile(anyString(), eq("s"))).thenReturn(Optional.of(spec));
         var service = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class), specs,
-            records, new ObjectMapper(), "db", root.toString(), "node", "localhost", "6379", "0",
+            records, new ObjectMapper(), root.toString(), "localhost", "6379", "0",
             "default", "password", "http://be", "token", "localhost");
         ReflectionTestUtils.setField(service, "tenantPolicyConfigs", mock(TenantAdminTenantMapper.class));
         return service;
@@ -47,6 +47,7 @@ class TenantSandboxProviderCorrelationTest {
         assertEquals("command-41:DB_CREATE", request.getValue().getMetadata().get("providerRequestKey"));
         assertEquals("TENANT", request.getValue().getMetadata().get("ownerScope"));
         assertEquals("12", request.getValue().getMetadata().get("enterpriseId"));
+        assertEquals("12", request.getValue().getUserInfo().get("enterpriseId"));
         assertEquals("5432", request.getValue().getMetadata().get("byclawTcpPort"));
     }
 
@@ -60,6 +61,7 @@ class TenantSandboxProviderCorrelationTest {
         assertEquals("command-41:NODE_CREATE", request.getValue().getMetadata().get("providerRequestKey"));
         assertEquals("TENANT", request.getValue().getMetadata().get("ownerScope"));
         assertEquals("12", request.getValue().getMetadata().get("enterpriseId"));
+        assertEquals("12", request.getValue().getUserInfo().get("enterpriseId"));
     }
 
     @Test void malformedCorrelationIsRejectedBeforeAnyResourceMutation(@TempDir Path root) {

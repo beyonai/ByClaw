@@ -14,9 +14,10 @@ export interface Config extends TenantIdentity {
   kmsUrl: string;
   beClientIdentity: string;
   transport?: "http" | "https";
-  internalToken?: string;
+  internalToken: string;
   tls?: { certFile: string; keyFile: string; caFile: string };
   redis: { host: string; port: number; db: number; username: string; password: string; tls?: {} };
+  quota?: { keyPrefix: string; failurePolicy: "ALLOW" | "REJECT" };
 }
 /** 读取并校验启动配置；租户身份由 BE 创建容器时注入，本地 .env 用于模拟这一过程。 */
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -44,12 +45,16 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     return value.toString().replace(/\/$/, "");
   };
   const enterpriseId = requireId(required("ENTERPRISE_ID"));
+  const quotaFailurePolicy = env.QUOTA_REDIS_FAILURE_POLICY ?? "ALLOW";
+  if (quotaFailurePolicy !== "ALLOW" && quotaFailurePolicy !== "REJECT")
+    throw new Error("Invalid QUOTA_REDIS_FAILURE_POLICY");
+  const quotaKeyPrefix = env.QUOTA_REDIS_KEY_PREFIX ?? "byclaw:shared:quota:v1:";
+  if (!quotaKeyPrefix.trim()) throw new Error("Invalid QUOTA_REDIS_KEY_PREFIX");
   // 方案约定两个环境变量是同一个 enterprise_id，拒绝部署注入错配。
   if (requireId(required("TENANT_ID")) !== enterpriseId) throw new Error("Tenant IDs must match");
   if (env.REDIS_TLS !== "true" && env.REDIS_TLS !== "false")
     throw new Error("REDIS_TLS must be true or false");
-  if (transport === "http" && !env.INTERNAL_API_TOKEN)
-    throw new Error("Missing configuration: INTERNAL_API_TOKEN");
+  if (!env.INTERNAL_API_TOKEN?.trim()) throw new Error("Missing configuration: INTERNAL_API_TOKEN");
   const port = integer("PORT", 3100),
     redisPort = integer("REDIS_PORT", 6379);
   if (!port || !redisPort) throw new Error("Ports must be positive");
@@ -72,7 +77,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     kmsUrl: secureUrl("KMS_DECRYPT_URL"),
     beClientIdentity: transport === "https" ? required("BE_CLIENT_IDENTITY") : "",
     transport,
-    internalToken: transport === "http" ? required("INTERNAL_API_TOKEN") : undefined,
+    internalToken: required("INTERNAL_API_TOKEN"),
     tls:
       transport === "https"
         ? {
@@ -89,5 +94,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       password: required("REDIS_PASSWORD"),
       tls: env.REDIS_TLS === "true" ? {} : undefined,
     },
+    quota: { keyPrefix: quotaKeyPrefix, failurePolicy: quotaFailurePolicy },
   };
 }

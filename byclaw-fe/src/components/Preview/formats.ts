@@ -213,7 +213,7 @@ export const PREVIEW_MIME_TYPES: Record<string, string> = {
 };
 
 export function getPreviewExtension(name: string): string {
-  const fileName = name.split(/[\\/]/).pop() || '';
+  const fileName = name.split(/[?#]/, 1)[0].split(/[\\/]/).pop() || '';
   // 部分图片样本生成器把透明 PNG 写成 .png.alpha，只匹配这个完整复合后缀。
   if (/\.png\.alpha$/i.test(fileName)) return 'png';
   if (/\.tar\.gz$/i.test(fileName)) return 'tgz';
@@ -221,6 +221,162 @@ export function getPreviewExtension(name: string): string {
 }
 
 const normalizeType = (type: string) => (type === 'tar.gz' ? 'tgz' : TYPE_ALIASES[type] || type);
+
+export const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
+
+const TEXT_FILE_NAMES = new Set([
+  '.gitattributes',
+  '.gitignore',
+  '.gitmodules',
+  '.dockerignore',
+  'dockerfile',
+  'makefile',
+  'license',
+  'procfile',
+  'readme',
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  '7z',
+  'bz2',
+  'alpha',
+  'xz',
+  'zst',
+  'bin',
+  'docm',
+  'dot',
+  'dotx',
+  'dotm',
+  'xlsm',
+  'xlsb',
+  'xlt',
+  'xltx',
+  'xltm',
+  'pptm',
+  'pot',
+  'potx',
+  'potm',
+  // 尚无解码器的常见二进制文件必须阻止文本兜底，避免预览乱码。
+  'ai',
+  'amr',
+  '3gp',
+  'db',
+  'dps',
+  'et',
+  'flv',
+  'key',
+  'numbers',
+  'odp',
+  'ods',
+  'rtf',
+  'odt',
+  'pages',
+  'parquet',
+  'psd',
+  'sketch',
+  'sqlite',
+  'sqlite3',
+  'tgz',
+  'wps',
+  'aac',
+  'avif',
+  'heic',
+  'heif',
+  'hif',
+  'jxl',
+  'jfif',
+  'jpe',
+  'jif',
+  'pjp',
+  'pjpeg',
+  // 相机 RAW 和 JPEG 2000 尚无解码器，不能用文本兜底假装支持照片预览。
+  'raw',
+  'dng',
+  'cr2',
+  'cr3',
+  'nef',
+  'nrw',
+  'arw',
+  'srf',
+  'sr2',
+  'raf',
+  'rw2',
+  'orf',
+  'pef',
+  'srw',
+  'jp2',
+  'jpx',
+  'j2k',
+  'jpf',
+  'jpm',
+  'mj2',
+  'heics',
+  'heifs',
+  'm4a',
+  'm4v',
+  'ogg',
+  'oga',
+  'ogv',
+  'opus',
+  'tif',
+  'tiff',
+  'avi',
+  'bmp',
+  'class',
+  'deb',
+  'dmg',
+  'doc',
+  'docx',
+  'dll',
+  'epub',
+  'exe',
+  'flac',
+  'gif',
+  'gz',
+  'ico',
+  'iso',
+  'jar',
+  'jpeg',
+  'jpg',
+  'mkv',
+  'mov',
+  'mp3',
+  'mp4',
+  'otf',
+  'pdf',
+  'png',
+  'ppt',
+  'pptx',
+  'rar',
+  'tar',
+  'so',
+  'ttf',
+  'wav',
+  'wasm',
+  'webp',
+  'webm',
+  'woff',
+  'woff2',
+  'xls',
+  'xlsx',
+  'zip',
+]);
+
+const getLowerFileName = (name: string) => name.split('/').pop()?.toLowerCase() || '';
+
+/** 没有标准扩展名的代码/配置文件按纯文本展示，例如 .gitignore、Dockerfile。 */
+export function isTextFallbackFile(name: string) {
+  const fileName = getLowerFileName(name);
+  if (TEXT_FILE_NAMES.has(fileName)) return true;
+  if (fileName.startsWith('.')) {
+    return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '');
+  }
+  if (!fileName.includes('.')) return !BINARY_EXTENSIONS.has(fileName);
+  return (
+    !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '') &&
+    !PREVIEWABLE_TYPES.includes(normalizeType(getPreviewExtension(fileName)))
+  );
+}
 
 /** 兼容扩展名、MIME 和 image/audio/video 分类；具体扩展名决定渲染分支及 Blob MIME。 */
 export function resolvePreviewType(type?: string, title?: string, mimeType?: string): string {
@@ -236,21 +392,33 @@ export function resolvePreviewType(type?: string, title?: string, mimeType?: str
     'application/x-sqlite3': 'application/vnd.sqlite3',
   };
   const mime = mimeAliases[rawMime] || rawMime;
+  if (rawMime === 'application/x-compressed-tar') return 'tgz';
   const mimeExtension = Object.keys(PREVIEW_MIME_TYPES).find((ext) => PREVIEW_MIME_TYPES[ext].toLowerCase() === mime);
-  if (value === 'gz' && extension === 'tgz') return 'tgz';
-  if (value === 'alpha' && extension === 'png') return 'png';
+  // 文件名决定专用渲染器；泛化/过期的 fileType 不能把 HTML、Office 等降为文本。
+  if (PREVIEWABLE_TYPES.includes(extension)) return extension;
+  if (mimeExtension && !['text/plain', 'application/octet-stream'].includes(mime)) return mimeExtension;
+  if (title && BINARY_EXTENSIONS.has(getPreviewExtension(title))) return getPreviewExtension(title);
+  if (PREVIEWABLE_TYPES.includes(value) && !['image', 'audio', 'video', 'file'].includes(value)) return value;
+  if (title && isTextFallbackFile(title)) return 'txt';
   if (['image', 'audio', 'video', 'file', ''].includes(value) || value.includes('/')) {
-    if (PREVIEWABLE_TYPES.includes(extension)) return extension;
-    if (rawMime === 'application/x-compressed-tar') return 'tgz';
     return mimeExtension || extension || value || 'txt';
   }
   return normalizeType(value);
 }
 
 export function isPreviewableName(name: string): boolean {
-  return PREVIEWABLE_TYPES.includes(normalizeType(getPreviewExtension(name)));
+  return PREVIEWABLE_TYPES.includes(resolvePreviewType(undefined, name));
 }
 
 export function getPreviewMimeType(name: string): string {
   return PREVIEW_MIME_TYPES[normalizeType(getPreviewExtension(name))] || '';
+}
+
+export function isTextPreviewFile(name: string) {
+  const type = resolvePreviewType(undefined, name);
+  return ['md', 'html', 'h5', 'svg', ...TEXT_PREVIEW_TYPES].includes(type);
+}
+
+export function canPreviewName(name: string, size?: number) {
+  return isPreviewableName(name) && (!isTextPreviewFile(name) || size === undefined || size <= MAX_TEXT_PREVIEW_SIZE);
 }

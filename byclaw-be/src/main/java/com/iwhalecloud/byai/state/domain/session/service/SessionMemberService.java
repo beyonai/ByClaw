@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.state.domain.session.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import org.springframework.transaction.annotation.Transactional;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.manager.qo.session.SessionByAgentQo;
@@ -31,15 +33,23 @@ public class SessionMemberService {
     @Autowired
     private ByaiSessionMemberMapper byaiSessionMemberMapper;
 
+    @Autowired
+    private SharedQuotaAdmission quotaAdmission;
+
     /**
      * 保存会话成员
      *
      * @param byaiSessionMember 会话信息
      */
+    @Transactional(rollbackFor = Exception.class)
     public int save(ByaiSessionMember byaiSessionMember) {
+        // All generic and group-specific writers share this final count-and-write boundary.
+        if (!quotaAdmission.admitPersistedGroupMember(byaiSessionMember.getSessionId(),
+            byaiSessionMember.getMemObjType(), byaiSessionMember.getMemObjId())) return 0;
         return byaiSessionMemberMapper.insert(byaiSessionMember);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public int batchSave(List<ByaiSessionMember> newMembers) {
         int i = 0;
         for (ByaiSessionMember byaiSessionMember : newMembers) {
@@ -85,6 +95,7 @@ public class SessionMemberService {
         return byaiSessionMemberMapper.selectList(queryWrapper);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void appendSessionMembers(Long sessionId, List<ByaiSessionMember> byaiSessionMembers) {
 
         for (ByaiSessionMember byaiSessionMember : byaiSessionMembers) {

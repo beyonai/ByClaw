@@ -134,4 +134,22 @@ class SharedDshHostContextsTest {
         assertThat(SharedDshHostContexts.allowsUser("a,a;; b", "a")).isTrue();
         assertThat(SharedDshHostContexts.allowsUser("user11", "user1")).isFalse();
     }
+
+    @Test
+    void toolSandboxLookupMapsListedUsersAndLeavesOthersOnTheDefault() {
+        AtomicReference<String> value = new AtomicReference<>("u1=byclaw-dsh-unity; u2 = x, u3=byclaw-dsh-tools2");
+        var lookup = SharedDshHostContexts.toolSandboxLookup(value::get);
+        assertThat(lookup.apply(" u1 ")).isEqualTo("byclaw-dsh-unity");
+        assertThat(lookup.apply("u3")).isEqualTo("byclaw-dsh-tools2");
+        assertThat(lookup.apply("u2")).isNull();
+        assertThat(lookup.apply("u")).isNull();
+        assertThat(lookup.apply("")).isNull();
+        value.set("u1=byclaw-dsh-tools3");
+        assertThat(lookup.apply("u1")).isEqualTo("byclaw-dsh-tools3");
+        value.set(null);
+        assertThat(lookup.apply("u1")).isNull();
+        assertThat(SharedDshHostContexts.toolSandboxLookup(() -> { throw new IllegalStateException("db"); }).apply("u1")).isNull();
+        assertThat(SharedDshHostContexts.toolSandboxOf("u1=", "u1")).isNull();
+        assertThat(SharedDshHostContexts.toolSandboxOf("=x,u1=a,u1=b", "u1")).isEqualTo("a");
+    }
 }

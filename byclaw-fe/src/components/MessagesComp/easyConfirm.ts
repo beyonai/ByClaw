@@ -1,4 +1,4 @@
-import { IMessageState, SSEMessageType } from '@/constants/message';
+import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
 
@@ -31,6 +31,50 @@ const getFormStatus = (item: IMessageListItem): IFormStatus | undefined => {
     substance?: { formStatus?: IFormStatus };
   };
   return content?.formStatus ?? content?.substance?.formStatus;
+};
+
+const isAskUserQuestionToolCall = (item: IMessageListItem) => {
+  if (`${item.contentType}` !== `${SSEMessageType.toolCall}`) return false;
+  const substance = item.content?.substance;
+  if (!substance || typeof substance !== 'object' || Array.isArray(substance)) return false;
+  const title = `${(substance as { title?: unknown }).title || ''}`.trim().toLowerCase();
+  return title === 'ask_user_question' || title.endsWith('· ask_user_question');
+};
+
+const finishNearestAskUserQuestionToolCall = (message: IMessage, interactionItem: IMessageListItem): IMessage => {
+  const interactionSeq = Number(interactionItem.seq);
+  const candidates = (['thinkList', 'messageList'] as MessageListKey[])
+    .flatMap((listKey, channelIndex) =>
+      (message[listKey] || []).map((item, index) => ({ item, listKey, index, channelIndex }))
+    )
+    .filter(({ item }) => {
+      if (!isAskUserQuestionToolCall(item)) return false;
+      const substance = item.content.substance as { status?: unknown };
+      if (`${substance.status}` === `${SSEEventStatus.done}`) return false;
+      const candidateSeq = Number(item.seq);
+      return !Number.isFinite(interactionSeq) || !Number.isFinite(candidateSeq) || candidateSeq <= interactionSeq;
+    })
+    .sort((left, right) => {
+      const leftSeq = Number(left.item.seq);
+      const rightSeq = Number(right.item.seq);
+      if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq)) return leftSeq - rightSeq;
+      return left.channelIndex - right.channelIndex || left.index - right.index;
+    });
+  const target = candidates.at(-1);
+  if (!target) return message;
+
+  const targetList = [...(message[target.listKey] || [])];
+  const targetItem = targetList[target.index];
+  const substance = targetItem.content.substance as Record<string, unknown>;
+  targetList[target.index] = {
+    ...targetItem,
+    status: SSEEventStatus.done,
+    content: {
+      ...targetItem.content,
+      substance: { ...substance, status: SSEEventStatus.done },
+    },
+  };
+  return { ...message, [target.listKey]: targetList };
 };
 
 /** 判断消息项是否仍需要用户在快捷确认区完成操作。 */
@@ -81,10 +125,16 @@ const createDescriptor = (
         ...nextList[currentIndex],
         content: messageListItemContent,
       };
-      const nextMessage = {
+      let nextMessage = {
         ...message,
         [listKey]: nextList,
       };
+      if (
+        `${item.contentType}` === `${SSEMessageType.askUserQuestions}` &&
+        (messageListItemContent as { formStatus?: IFormStatus })?.formStatus === IFormStatus.FINISH
+      ) {
+        nextMessage = finishNearestAskUserQuestionToolCall(nextMessage, item);
+      }
 
       return updateMessage(nextMessage) || nextMessage;
     },

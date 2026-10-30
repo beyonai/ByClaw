@@ -1,7 +1,4 @@
-import { basename, isAbsolute, normalize, join } from 'node:path/posix'
-
-/** Skill roots DSH discovers at turn start; empty until B is up, like every queued directory. */
-const SKILL_ROOT_SUFFIXES = ['/.dsh/skills', '/.agents/skills']
+import { isAbsolute, normalize, join } from 'node:path/posix'
 
 /**
  * DSH's own home (`DSH_HOME`): the runtime reads instruction files and Skills
@@ -15,9 +12,6 @@ export function defaultAbsentRoots(env: NodeJS.ProcessEnv = process.env): string
   return [dshHome, agentsHome]
 }
 
-/** Instruction files DSH looks for in the session directory's ancestors before the model runs. */
-const INSTRUCTION_FILES = new Set(['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md'])
-
 /** Requests that only end something on the connection they were issued on. */
 const CLEANUP_METHODS = new Set(['process.terminate', 'fs.streamClose'])
 
@@ -27,16 +21,16 @@ export function isCleanupRequest(method: string): boolean {
 }
 
 /**
- * What a turn asks about the user tree before any tool runs, answered without
- * starting B. Path resolution only normalizes. Directories this host has
- * queued for creation on B are empty directories, and nothing exists inside
- * them yet; directories it already created there still exist (B's volume
- * outlives B); `.git` and instruction-file probes (repository and AGENTS.md
- * discovery walking up from the session directory) are absent; Skill roots
- * list as empty; DSH's own homes hold nothing B needs. Cleanup of a process or
- * stream that lived on a connection that is gone has nothing left to do.
- * Everything else, which is what the read, write, edit, list and search tools
- * do, returns `undefined` and starts B.
+ * What this host can answer about the tool environment without it. Path
+ * resolution only normalizes. Directories this host has queued for creation on
+ * B are directories, and so are the ones it already created there (B's volume
+ * outlives B); what is in them is B's to say, since the platform may have
+ * written there (an upload). DSH's own homes hold nothing B needs. Cleanup of a
+ * process or stream that lived on a connection that is gone has nothing left to
+ * do. Everything else returns `undefined` and goes to B, which it starts: what
+ * tools do, and also what a turn reads before the model runs (instruction files
+ * along the session directory, `.git` roots, session Skills, iron rules), which
+ * the user tree alone holds, as current as the last write by anyone.
  */
 export function answerWhileDown(
   method: string,
@@ -56,17 +50,14 @@ export function answerWhileDown(
   const absent = absentRoots.filter(root => isAbsolute(root)).map(trim)
   const queued = (path: string): boolean => pending.includes(trim(path))
   const exists = (path: string): boolean => created.includes(trim(path))
-  const inside = (path: string): boolean => pending.some(directory => trim(path).startsWith(`${directory}/`))
-    || absent.some(root => trim(path).startsWith(`${root}/`))
-  const skillRoot = (path: string): boolean => SKILL_ROOT_SUFFIXES.some(suffix => trim(path).endsWith(suffix))
+  const inside = (path: string): boolean => absent.some(root => trim(path).startsWith(`${root}/`))
   const absolute = (): string | undefined => {
     if (typeof input.path !== 'string') return undefined
     if (isAbsolute(input.path)) return input.path
     return typeof input.cwd === 'string' && isAbsolute(input.cwd) ? join(input.cwd, input.path) : undefined
   }
   const directory = { version: 'pending', type: 'directory' }
-  const probeFile = (path: string): boolean => { const name = basename(trim(path)); return name === '.git' || INSTRUCTION_FILES.has(name) }
-  const probe = (path: string): unknown => queued(path) || exists(path) ? directory : inside(path) || probeFile(path) ? null : undefined
+  const probe = (path: string): unknown => queued(path) || exists(path) ? directory : inside(path) ? null : undefined
   switch (method) {
     case 'fs.resolve': {
       const path = absolute()
@@ -84,7 +75,7 @@ export function answerWhileDown(
     }
     case 'fs.list': {
       const key = input.target?.targetKey
-      return typeof key === 'string' && (queued(key) || inside(key) || skillRoot(key)) ? [] : undefined
+      return typeof key === 'string' && inside(key) ? [] : undefined
     }
     default:
       return undefined

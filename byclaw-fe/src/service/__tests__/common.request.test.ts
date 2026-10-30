@@ -1,3 +1,13 @@
+jest.mock('@/utils/personalStorageReadiness', () => ({
+  requiresPersonalStorage: jest.fn(() => true),
+  waitForPersonalStorage: jest.fn(() => Promise.resolve()),
+}));
+import {
+  approveUseApply,
+  rejectUseApply,
+  queryResourceUseApplyAudit,
+  queryUseApplyList,
+} from '@/pages/manager/service/resources';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 jest.mock('@/utils/auth', () => ({
   clearToken: jest.fn(),
@@ -23,11 +33,18 @@ jest.mock('@umijs/max', () => ({
     replace: jest.fn(),
   },
   getIntl: jest.fn(() => ({
-    formatMessage: jest.fn(({ id }) => (id === 'common.loginExpired' ? 'login expired' : 'Operation failed')),
+    formatMessage: jest.fn(({ id }) =>
+      id === 'common.loginExpired'
+        ? 'login expired'
+        : id === 'common.requestFailed'
+        ? '请求失败，请稍后重试'
+        : 'Operation failed'
+    ),
   })),
 }));
 
 jest.mock('antd', () => ({
+  Modal: { error: jest.fn((config) => config.afterClose()) },
   message: {
     error: jest.fn(() => Promise.resolve()),
   },
@@ -80,7 +97,7 @@ jest.mock('axios', () => {
 });
 
 import axios from 'axios';
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 
 import { EXCEED_LIMITED_LOGIN_NUMBER } from '@/constants/error/errorCode';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
@@ -122,6 +139,44 @@ describe('Service Common Request', () => {
     window.localStorage.removeItem('SESSION');
     (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
   });
+
+  it('shows the quota modal for HTTP 507 without replacing it with a generic error', async () => {
+    const error = {
+      response: {
+        status: 507,
+        data: { code: -1, data: { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024, usedBytes: 2048 } },
+      },
+      config: {},
+    };
+    await expect(rejectWithResponseInterceptor(error)).rejects.toEqual(expect.any(String));
+    expect(Modal.error).toHaveBeenCalledTimes(1);
+    expect(showRequestErrorModal).not.toHaveBeenCalled();
+  });
+
+  it('blocks structured quota business failures even with custom handling enabled', async () => {
+    mockRequest.mockResolvedValueOnce({
+      data: { code: -1, data: { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024 } },
+      config: { url: '/byaiService/fileBrowser/upload' },
+    });
+    await expect(POST('/byaiService/fileBrowser/upload', {}, { responseCfg: { customHandle: true } })).rejects.toEqual(
+      expect.any(String)
+    );
+    expect(Modal.error).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([approveUseApply, rejectUseApply, queryResourceUseApplyAudit, queryUseApplyList])(
+    'rejects approval business failures even when HTTP succeeds',
+    async (api) => {
+      const reason = '当前用户没有资源【dingtalk-sender-report-hub】的授权维护权限';
+      mockRequest.mockResolvedValueOnce({
+        data: { code: 50500, msg: reason },
+        status: 200,
+        config: { url: '/byaiService/auth/privilegeGrant/approveUseApply' },
+      });
+      await expect(api({ resourceId: '900', applyUserId: '42' })).rejects.toBe(reason);
+      expect(showRequestErrorModal).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     '/byaiService/assiman/qryConversations',
@@ -325,8 +380,8 @@ describe('Service Common Request', () => {
       },
     });
 
-    await expect(POST('/api/fail', { id: 1 })).rejects.toBe('boom');
-    expect(showRequestErrorModal).toHaveBeenCalledWith('boom');
+    await expect(POST('/api/fail', { id: 1 })).rejects.toBe('请求失败，请稍后重试');
+    expect(showRequestErrorModal).toHaveBeenCalledWith('请求失败，请稍后重试');
   });
 
   it('suppresses the global error modal for an opted-in credential verification failure', async () => {
@@ -346,7 +401,7 @@ describe('Service Common Request', () => {
         { connectorId: 9, credentials: { clientId: 'client-id', apiKey: 'fake-api-key' } },
         { responseCfg: { hideErrorTips: true } }
       )
-    ).rejects.toBe('fake-api-key-must-not-be-shown');
+    ).rejects.toBe('请求失败，请稍后重试');
     expect(showRequestErrorModal).not.toHaveBeenCalled();
   });
 
@@ -371,7 +426,7 @@ describe('Service Common Request', () => {
         config: { url: '/byaiService/other' },
         response: { data: { msg: 'conflict' }, status: 409, statusText: 'Conflict' },
       })
-    ).rejects.toBe('conflict');
+    ).rejects.toBe('请求失败，请稍后重试');
   });
 
   it('continues to stringify opted-in errors outside HTTP 409', async () => {
@@ -381,7 +436,7 @@ describe('Service Common Request', () => {
         config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
         response: { data: { msg: 'server error' }, status: 500, statusText: 'Internal Server Error' },
       })
-    ).rejects.toBe('server error');
+    ).rejects.toBe('请求失败，请稍后重试');
   });
 
   it('redirects to login when login count exceeds the limit', async () => {
@@ -540,7 +595,7 @@ describe('Service Common Request', () => {
         response: { status, data: { code: -1, msg: 'Favorite unavailable' } },
       })
     );
-    await expect(setResourceFavorite('10', true)).rejects.toBe('Favorite unavailable');
+    await expect(setResourceFavorite('10', true)).rejects.toBe('请求失败，请稍后重试');
     expect(message.error).not.toHaveBeenCalled();
     expect(clearToken).not.toHaveBeenCalled();
     expect(loginRedirect).not.toHaveBeenCalled();
