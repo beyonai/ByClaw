@@ -1,6 +1,6 @@
 ---
 name: bycli
-description: Use when a task opens, reads, searches within, collects from, scrapes, or operates any concrete website, webpage, or URL; when a task has already been routed to byCLI; or when the user explicitly asks for byCLI, Adapter, or browser execution.
+description: Use when a task touches a specific website or URL — reading (open, search within, collect, scrape, extract) or writing (publish, save draft, post, upload, comment, like, follow, fill forms, delete). Applies to every site byCLI has an Adapter for, and per-site coverage is discovered by running `bycli list` — never inferred from platform connectors; do that before declaring a site operation unavailable. Also use when a task is already routed to byCLI, or the user asks for byCLI / Adapter / browser execution.
 allowed-tools: Bash(bycli:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 ---
 
