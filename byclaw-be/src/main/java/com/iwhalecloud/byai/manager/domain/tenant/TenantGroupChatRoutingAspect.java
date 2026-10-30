@@ -66,12 +66,14 @@ public class TenantGroupChatRoutingAspect {
         TenantRequestContext context = TenantRequestContextHolder.get();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
+        // 试用租户没有独立 Node，邀请链接沿用共享库的公共实现。
+        if (context != null && tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method)) {
             context = invitations.resolve(method, args, context);
             if (context == null) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
         }
-        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
+        if (context == null) return call.proceed();
         if ("defaultAssistant".equals(method)) return call.proceed();
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();

@@ -175,6 +175,20 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
+    void trialTenantInvitationUsesSharedControllerInsteadOfNodeCommand() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        TenantRequestContextHolder.set(context);
+        ProceedingJoinPoint invocation = call("createInvitation", 11393965L,
+            mock(jakarta.servlet.http.HttpServletResponse.class));
+        when(invocation.proceed()).thenReturn("shared-invitation");
+
+        assertThat(aspect.route(invocation)).isEqualTo("shared-invitation");
+        verify(invocation).proceed();
+        verifyNoInteractions(node, memberService);
+    }
+
+    @Test
     void developmentTenantCreateUsesLegacyDatabaseController() throws Throwable {
         TenantRequestContextHolder.set(new TenantRequestContext(27L, 11221859L, "MEMBER"));
         GroupChatCreateRequest request = new GroupChatCreateRequest();
@@ -384,6 +398,7 @@ class TenantGroupChatRoutingAspectTest {
             Class<?>[] parameters = switch (method) {
                 case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
+                case "createInvitation" -> new Class<?>[]{Long.class, jakarta.servlet.http.HttpServletResponse.class};
                 case "invite" -> new Class<?>[]{Long.class, GroupChatMemberRequest.class};
                 case "updateSettings" -> new Class<?>[]{Long.class, GroupChatSettingsRequest.class};
                 case "remove" -> new Class<?>[]{Long.class, String.class, Long.class};
