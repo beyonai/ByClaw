@@ -210,6 +210,25 @@
         </where>
     </select>
 
+    <!--
+      附件上传会提前创建会话。新任务切换项目时以一条条件更新完成鉴权与草稿状态校验，
+      避免“先查再改”期间首条消息并发写入后仍被改项目。
+    -->
+    <update id="updateDraftSessionProject">
+        UPDATE byai_session s
+        SET project_id = #{projectId},
+            update_by = #{currentUserId},
+            update_time = CURRENT_TIMESTAMP
+        WHERE s.session_id = #{sessionId}
+          AND s.creator_id = #{currentUserId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM byai_message m
+              WHERE m.session_id = s.session_id
+                AND m.usage = 1
+          )
+    </update>
+
     <resultMap id="ProjectSessionDtoResultMap" type="com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto">
         <id column="session_id" property="sessionId" />
         <result column="parent_session_id" property="parentSessionId" />

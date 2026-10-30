@@ -48,6 +48,8 @@ import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
 import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 import { getLatestDigitalEmployeeMessage } from '@/utils/chatVnc';
+import { changeDraftSessionProject } from '@/service/devloop';
+import { shouldPersistDraftSessionProject } from './draftSessionProject';
 
 type IProps = {
   sessionId: string;
@@ -699,6 +701,15 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))
   );
   const projectSelectorSessionId = preserveNewSessionView && !isBottom ? '' : sessionId;
+  const handleNewTaskProjectChange = useCallback(
+    async (project: { projectId: string; projectName: string; cloudResourceId?: string | number }) => {
+      if (shouldPersistDraftSessionProject({ preserveNewSessionView, isBottom, sessionId })) {
+        await changeDraftSessionProject({ sessionId, projectId: project.projectId });
+      }
+      setSelectedProject(project);
+    },
+    [isBottom, preserveNewSessionView, sessionId]
+  );
 
   return (
     <ChatLayoutCompContext.Provider
@@ -795,7 +806,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     <TaskTemplateEntry
                       projectId={sessionProjectId}
                       sessionId={projectSelectorSessionId}
-                      onProjectChange={setSelectedProject}
+                      onProjectChange={handleNewTaskProjectChange}
                       onApply={() => undefined}
                     />
                   </div>

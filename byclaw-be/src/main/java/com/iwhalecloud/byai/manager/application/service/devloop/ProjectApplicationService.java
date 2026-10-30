@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
+import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
@@ -161,6 +162,9 @@ public class ProjectApplicationService {
 
     @Autowired
     private ProjectSessionService projectSessionService;
+
+    @Autowired
+    private ByaiSessionService byaiSessionService;
 
     @Autowired
     private CommonFilePathResolver commonFilePathResolver;
@@ -785,6 +789,40 @@ public class ProjectApplicationService {
         map.put("projectId", project.getProjectId());
         map.put("projectName", project.getProjectName());
         return map;
+    }
+
+    /**
+     * 修改新任务中由附件上传提前创建的草稿会话项目。
+     * 已经写入用户问题的会话由 Mapper 条件更新拒绝，防止运行中的沙箱工作目录发生变化。
+     */
+    public void changeDraftSessionProject(Long sessionId, Long projectId) {
+        if (sessionId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "session.id.required");
+        }
+        if (projectId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.id.required");
+        }
+
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        Long enterpriseId = currentEnterpriseId();
+        Project project = projectService.findById(projectId);
+        boolean defaultProject = Objects.equals(projectId, -1L);
+        boolean projectUnavailable = project == null
+            || DeleteFlag.DELETED.equals(project.getDeleteFlag())
+            || (!defaultProject && !Objects.equals(project.getEnterpriseId(), enterpriseId));
+        if (projectUnavailable) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+        boolean canUseProject = defaultProject
+            || Objects.equals(project.getCreateBy(), currentUserId)
+            || projectMemberService.isMember(projectId, currentUserId);
+        if (!canUseProject) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.permission.denied");
+        }
+
+        if (!byaiSessionService.changeDraftProject(sessionId, projectId, currentUserId)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "session.project.change.not.allowed");
+        }
     }
 
     /**

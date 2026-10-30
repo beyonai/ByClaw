@@ -19,7 +19,11 @@ interface Props {
   projectId?: number;
   sessionId?: string;
   onApply: (prompt: string) => void;
-  onProjectChange?: (project: { projectId: string; projectName: string; cloudResourceId?: string | number }) => void;
+  onProjectChange?: (project: {
+    projectId: string;
+    projectName: string;
+    cloudResourceId?: string | number;
+  }) => void | Promise<void>;
 }
 
 type RecommendedQuestionTemplate = {
@@ -57,6 +61,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   const [recommendedLoading, setRecommendedLoading] = useState(false);
   const [createdProjectOption, setCreatedProjectOption] = useState<ProjectOption>();
   const [selectedProjectOverride, setSelectedProjectOverride] = useState<string>();
+  const [projectChangeLoading, setProjectChangeLoading] = useState(false);
   const createdProjectNameRef = useRef('');
   // 从会话详情切换到新任务时，父级项目上下文会在同一轮渲染后清空；保留初始显式项目，
   // 避免项目列表请求完成前把侧边栏刚选中的项目作用域重置为列表第一项。
@@ -95,13 +100,17 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
     if (sessionId || !selectedProjectValue) return;
     const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`);
     if (selectedProject) {
-      onProjectChange?.({
-        projectId: `${selectedProject.projectId}`,
-        projectName: selectedProject.projectName,
-        cloudResourceId: selectedProject.cloudResourceId,
+      void Promise.resolve(
+        onProjectChange?.({
+          projectId: `${selectedProject.projectId}`,
+          projectName: selectedProject.projectName,
+          cloudResourceId: selectedProject.cloudResourceId,
+        })
+      ).catch((error: any) => {
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' }));
       });
     }
-  }, [onProjectChange, projectOptions, selectedProjectValue, sessionId]);
+  }, [intl, onProjectChange, projectOptions, selectedProjectValue, sessionId]);
 
   useEffect(() => {
     if (!projectOptions.length) {
@@ -320,7 +329,8 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
           <Select
             className={styles.projectSelect}
             showSearch
-            loading={projectsLoading}
+            loading={projectsLoading || projectChangeLoading}
+            disabled={projectChangeLoading}
             value={selectedProjectValue || undefined}
             placeholder={intl.formatMessage({ id: 'projectSpace.selectProject' })}
             showArrow
@@ -330,16 +340,24 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
               value: `${item.projectId}`,
               label: item.projectName || intl.formatMessage({ id: 'projectSpace.unnamedProject' }),
             }))}
-            onChange={(value) => {
-              setSelectedProjectOverride(`${value}`);
-              updateProjectScopeId(value);
+            onChange={async (value) => {
               const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${value}`);
-              if (selectedProject) {
-                onProjectChange?.({
+              if (!selectedProject) return;
+              setProjectChangeLoading(true);
+              try {
+                await onProjectChange?.({
                   projectId: `${selectedProject.projectId}`,
                   projectName: selectedProject.projectName,
                   cloudResourceId: selectedProject.cloudResourceId,
                 });
+                setSelectedProjectOverride(`${value}`);
+                updateProjectScopeId(value);
+              } catch (error: any) {
+                message.error(
+                  error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' })
+                );
+              } finally {
+                setProjectChangeLoading(false);
               }
             }}
             aria-label={intl.formatMessage({ id: 'projectSpace.selectProject' })}

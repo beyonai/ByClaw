@@ -459,6 +459,9 @@ ALTER TABLE byai.byai_group_chat_pending_publication ADD CONSTRAINT fk_group_cha
 
 CREATE INDEX idx_byai_message_session_message ON byai.byai_message USING btree (session_id, message_id);
 
+CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session
+    ON byai.byai_message (session_id) WHERE usage = 1;
+
 CREATE INDEX idx_byai_message_session_ref ON byai.byai_message USING btree (session_id, message_ref);
 
 CREATE INDEX idx_byai_message_session_topic_time ON byai.byai_message USING btree (session_id, topic_id, create_time DESC, message_id DESC);

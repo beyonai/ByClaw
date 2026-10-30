@@ -135,6 +135,10 @@ CREATE TABLE byai.internal_command_step (
 );
 COMMENT ON COLUMN byai.internal_command.request_snapshot IS 'Canonical immutable JSON text including authenticated-service audit actor; never contains transport credentials';
 
+-- 草稿会话切换项目只需判断是否已经产生用户问题；部分索引避免随消息总量增长而扫描会话消息。
+CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session
+    ON byai.byai_message (session_id) WHERE usage = 1;
+
 -- Policies remain immutable; the cursor is the sole CAS serialization point.
 CREATE TABLE byai.tenant_execution_policy (
     enterprise_id BIGINT NOT NULL,
