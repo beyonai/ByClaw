@@ -103,7 +103,12 @@ describe('TaskTemplateEntry project selector', () => {
 
   it('allows switching the project from the chat input', async () => {
     mockUseProjectScopeId.mockReturnValue(['1', mockUpdateProjectScopeId]);
-    render(<TaskTemplateEntry onApply={jest.fn()} />);
+    const onProjectChange = jest.fn();
+    const { rerender } = render(
+      <TaskTemplateEntry onApply={jest.fn()} onProjectChange={onProjectChange} skipInitialProjectChange />
+    );
+
+    expect(onProjectChange).not.toHaveBeenCalled();
 
     expect(screen.queryByRole('button', { name: '任务模板' })).not.toBeInTheDocument();
 
@@ -113,6 +118,12 @@ describe('TaskTemplateEntry project selector', () => {
     fireEvent.click(await screen.findByText('项目二'));
 
     expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('2');
+    mockUseProjectScopeId.mockReturnValue(['2', mockUpdateProjectScopeId]);
+    rerender(<TaskTemplateEntry onApply={jest.fn()} onProjectChange={onProjectChange} skipInitialProjectChange />);
+
+    await waitFor(() => {
+      expect(onProjectChange).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('opens the new project form in the current chat page', async () => {

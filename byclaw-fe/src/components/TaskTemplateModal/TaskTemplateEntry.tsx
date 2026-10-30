@@ -24,6 +24,7 @@ interface Props {
     projectName: string;
     cloudResourceId?: string | number;
   }) => void | Promise<void>;
+  skipInitialProjectChange?: boolean;
 }
 
 type RecommendedQuestionTemplate = {
@@ -45,7 +46,13 @@ const getSavedProjectId = (response: any) =>
   `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
 
 // 公共会话输入框统一使用该入口，再按当前会话所属项目类型切换对应模板数据。
-const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onProjectChange }) => {
+const TaskTemplateEntry: React.FC<Props> = ({
+  projectId,
+  sessionId,
+  onApply,
+  onProjectChange,
+  skipInitialProjectChange = false,
+}) => {
   const intl = useIntl();
   const PROJECT_TYPE_TITLE: Record<Exclude<ProjectType, 'default'>, string> = {
     // 三类项目统一采用运营项目弹窗的“项目类型 · 选择任务模板”标题格式。
@@ -97,7 +104,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
   }, [projects.length, projectsLoading]);
 
   useEffect(() => {
-    if (sessionId || !selectedProjectValue) return;
+    if (sessionId || skipInitialProjectChange || !selectedProjectValue) return;
     const selectedProject = projectOptions.find((project) => `${project.projectId}` === `${selectedProjectValue}`);
     if (selectedProject) {
       void Promise.resolve(
@@ -110,7 +117,7 @@ const TaskTemplateEntry: React.FC<Props> = ({ projectId, sessionId, onApply, onP
         message.error(error?.message || intl.formatMessage({ id: 'projectSpace.message.updateFailed' }));
       });
     }
-  }, [intl, onProjectChange, projectOptions, selectedProjectValue, sessionId]);
+  }, [intl, onProjectChange, projectOptions, selectedProjectValue, sessionId, skipInitialProjectChange]);
 
   useEffect(() => {
     if (!projectOptions.length) {
