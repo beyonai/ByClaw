@@ -40,6 +40,7 @@ class TenantGroupChatRoutingAspectTest {
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
     private final TenantGroupManagementService management = mock(TenantGroupManagementService.class);
     private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
+    private final TenantGroupInvitationService invitations = mock(TenantGroupInvitationService.class);
     private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
         new ObjectMapper(), memberService, tenantModes);
@@ -52,6 +53,7 @@ class TenantGroupChatRoutingAspectTest {
         System.setProperty("BE_ENV", "production");
         ReflectionTestUtils.setField(aspect, "creation", creation);
         ReflectionTestUtils.setField(aspect, "management", management);
+        ReflectionTestUtils.setField(aspect, "invitations", invitations);
     }
 
     @AfterEach
@@ -185,6 +187,22 @@ class TenantGroupChatRoutingAspectTest {
 
         assertThat(aspect.route(invocation)).isEqualTo("shared-invitation");
         verify(invocation).proceed();
+        verifyNoInteractions(node, memberService);
+    }
+
+    @Test
+    void anonymousTrialTenantInvitationUsesSharedControllerAfterResolvingLink() throws Throwable {
+        TenantRequestContext trialContext = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(invitations.resolve(eq("validateInvitation"), any(), eq(null))).thenReturn(trialContext);
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        ProceedingJoinPoint invocation = call("validateInvitation",
+            mock(com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class),
+            mock(jakarta.servlet.http.HttpServletResponse.class));
+        when(invocation.proceed()).thenReturn("shared-preview");
+
+        assertThat(aspect.route(invocation)).isEqualTo("shared-preview");
+        verify(invocation).proceed();
+        verify(invitations, never()).handle(any(), eq("validateInvitation"), any());
         verifyNoInteractions(node, memberService);
     }
 
@@ -399,6 +417,11 @@ class TenantGroupChatRoutingAspectTest {
                 case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
                 case "createInvitation" -> new Class<?>[]{Long.class, jakarta.servlet.http.HttpServletResponse.class};
+                case "validateInvitation" -> new Class<?>[]{
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class,
+                    jakarta.servlet.http.HttpServletResponse.class};
+                case "joinInvitation" -> new Class<?>[]{
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class};
                 case "invite" -> new Class<?>[]{Long.class, GroupChatMemberRequest.class};
                 case "updateSettings" -> new Class<?>[]{Long.class, GroupChatSettingsRequest.class};
                 case "remove" -> new Class<?>[]{Long.class, String.class, Long.class};
