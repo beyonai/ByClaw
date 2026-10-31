@@ -19,5 +19,8 @@ class TenantModeServiceTest {
         assertFalse(service.isTrialTenant(43L));
         assertFalse(service.isTrialTenant(999L));
         assertFalse(service.isTrialTenant(0L));
+        assertTrue(service.isSharedDataTenant(1L));
+        assertTrue(service.isSharedDataTenant(42L));
+        assertFalse(service.isSharedDataTenant(43L));
     }
 }

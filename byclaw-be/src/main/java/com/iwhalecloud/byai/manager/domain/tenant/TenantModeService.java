@@ -19,4 +19,14 @@ public class TenantModeService {
         }
         return "TRIAL".equals(tenants.selectConfig(enterpriseId, "TENANT_MODE"));
     }
+
+    /**
+     * 判断租户群聊数据是否存放在 ByClaw 公共库。
+     *
+     * 默认企业 1 是历史存量数据，免费试用租户虽然有真实 enterpriseId，
+     * 也沿用公共库，不启动独立 Node；标准租户才需要转发到自己的 Node。
+     */
+    public boolean isSharedDataTenant(long enterpriseId) {
+        return enterpriseId == 1L || isTrialTenant(enterpriseId);
+    }
 }

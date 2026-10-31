@@ -78,6 +78,8 @@ public class TenantGroupChatRoutingAspect {
         TenantRequestContext context = TenantRequestContextHolder.get();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
+        // 跨企业聚合接口自己解析全部成员关系并逐租户查询，不能被当前租户路由器截断。
+        if ("aggregated".equals(method)) return call.proceed();
         // 邀请接口先从 token 解析租户；试用租户没有 Node，直接使用公共库实现。
         if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method)) {
             context = invitations.resolve(method, args, context);
