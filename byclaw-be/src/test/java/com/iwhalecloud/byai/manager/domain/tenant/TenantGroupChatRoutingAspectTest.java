@@ -91,7 +91,7 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void developmentTenantListReadsFromLegacyDatabase() throws Throwable {
+    void developmentTenantListFiltersLegacyDatabaseByValidatedEnterprise() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
         GroupChatListItemResponse group = new GroupChatListItemResponse();
@@ -100,7 +100,7 @@ class TenantGroupChatRoutingAspectTest {
         PageInfo<GroupChatListItemResponse> legacyPage = new PageInfo<>();
         legacyPage.setList(List.of(group));
         legacyPage.setTotal(1);
-        when(legacy.listMyGroups(1, 20)).thenReturn(legacyPage);
+        when(legacy.listMyGroups(1, 20, 11221076L)).thenReturn(legacyPage);
         System.setProperty("BE_ENV", "development");
 
         ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("list", 1, 20, 11221076L));
@@ -109,7 +109,8 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getData()).isSameAs(legacyPage);
         assertThat(legacyPage.getTotal()).isEqualTo(1);
         assertThat(legacyPage.getList()).containsExactly(group);
-        verify(legacy).listMyGroups(1, 20);
+        verify(legacy).listMyGroups(1, 20, 11221076L);
+        verify(legacy, never()).listMyGroups(1, 20);
         verifyNoInteractions(node, memberships);
     }
 

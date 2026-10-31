@@ -141,10 +141,18 @@ describe("workgroup name reuse", () => {
   });
   it("uses the same Chinese-name limit for creation and availability checks", async () => {
     const s = context();
-    s.context.command.payload.sessionName = "中".repeat(100);
+    s.context.command.payload.sessionName = '中'.repeat(50);
     await expect(createSession(s.context)).resolves.toBeUndefined();
     expect(
       database.prepare("SELECT session_name FROM byai.byai_session WHERE session_id='30'").get(),
-    ).toMatchObject({ session_name: "中".repeat(100) });
+    ).toMatchObject({ session_name: '中'.repeat(50) });
+  });
+
+  it('rejects a 51-character group name before writing a session', async () => {
+    const creation = context();
+    creation.context.command.payload.sessionName = '中'.repeat(51);
+    await expect(createSession(creation.context)).rejects.toThrow('INVALID_SESSION_NAME');
+    expect(database.prepare('SELECT COUNT(*) AS total FROM byai.byai_session').get())
+      .toMatchObject({ total: 0 });
   });
 });

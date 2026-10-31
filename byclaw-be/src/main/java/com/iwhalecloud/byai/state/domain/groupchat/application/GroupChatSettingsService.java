@@ -90,7 +90,7 @@ public class GroupChatSettingsService {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.settings.required"));
         }
         if (request.getSessionName() != null) {
-            session.setSessionName(validateName(request.getSessionName()));
+            session.setSessionName(validateName(request.getSessionName(), 50, "workgroup.nameInvalid"));
         }
         if (request.getAllowJoinByLink() != null) {
             putExt(sessionId, LINK_ENABLED, request.getAllowJoinByLink().toString());
@@ -114,7 +114,7 @@ public class GroupChatSettingsService {
         // 仅更新名称，不能把读取到的角色、计数等字段写回覆盖并发更新。
         ByaiSessionMember update = new ByaiSessionMember();
         update.setByaiSessionMemberId(member.getByaiSessionMemberId());
-        update.setMemName(validateName(nickname));
+        update.setMemName(validateName(nickname, 100, "groupchat.nameInvalid"));
         memberService.updateById(update);
         member.setMemName(update.getMemName());
         if (userService != null) {
@@ -185,9 +185,10 @@ public class GroupChatSettingsService {
         return userId;
     }
 
-    private String validateName(String value) {
-        if (value == null || value.trim().isEmpty() || value.length() > 100) {
-            throw new IllegalArgumentException(I18nUtil.get("groupchat.nameInvalid"));
+    /** 工作组名称和个人群昵称分别使用各自的长度约束及国际化提示。 */
+    private String validateName(String value, int maxLength, String messageKey) {
+        if (value == null || value.trim().isEmpty() || value.length() > maxLength) {
+            throw new IllegalArgumentException(I18nUtil.get(messageKey));
         }
         return value.trim();
     }

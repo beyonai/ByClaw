@@ -30,6 +30,7 @@ public class TenantDatasourceService {
     private static final int MAX_ROWS = 500;
     private static final int MAX_PAGE = 10000;
     private static final int QUERY_TIMEOUT_SECONDS = 15;
+    private static final Pattern LOCKING_SQL = Pattern.compile("\\bfor\\s+update\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern DANGEROUS_SQL = Pattern.compile(
         "\\b(delete|drop|truncate|update|insert|alter|create|merge|grant|revoke|call|do|vacuum|reindex|refresh|copy|execute|exec|replace|into)\\b",
         Pattern.CASE_INSENSITIVE);
@@ -103,8 +104,19 @@ public class TenantDatasourceService {
         }
     }
 
+    /**
+     * 执行有界 SQL；连接前统一拒绝行锁查询，危险操作仍须人工确认。
+     * @param enterpriseId 目标企业
+     * @param sql 单条 SQL
+     * @param page 结果页码
+     * @param confirmed 是否已确认危险操作
+     * @return 原有分页结果或影响行数
+     */
     public QueryResult execute(long enterpriseId, String sql, int page, boolean confirmed) {
         String statementSql = singleStatement(sql);
+        if (LOCKING_SQL.matcher(visibleSql(statementSql)).find()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.lockForbidden");
+        }
         if (page < 1 || page > MAX_PAGE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.page.invalid");
         }
@@ -216,6 +228,15 @@ public class TenantDatasourceService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.singleStatement");
         }
         return terminator >= 0 ? value.substring(0, terminator).trim() : value;
+    }
+
+    /**
+     * 供已认证服务桥复用确认判定，避免浏览器绕过写入审计。
+     * @param sql 原 SQL 文本
+     * @return 是否需要人工确认
+     */
+    public static boolean requiresPlatformConfirmation(String sql) {
+        return requiresConfirmation(sql);
     }
 
     static boolean requiresConfirmation(String sql) {

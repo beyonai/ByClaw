@@ -359,6 +359,27 @@ class ProjectApplicationServiceCreateTest extends com.iwhalecloud.byai.common.i1
         assertThat(nonGithub).isNull();
     }
 
+    @Test
+    void projectDetailUsesPersistedEnterpriseForMemberSelection() {
+        Project project = new Project();
+        project.setProjectId(1001L);
+        project.setEnterpriseId(9007199254740993L);
+        project.setDeleteFlag("0");
+        when(projectService.findById(1001L)).thenReturn(project);
+
+        assertThat(service().getProject(1001L)).containsEntry("enterpriseId", "9007199254740993");
+    }
+
+    @Test
+    void projectDetailDoesNotInferEnterpriseFromCurrentLogin() {
+        Project project = new Project();
+        project.setProjectId(1001L);
+        project.setDeleteFlag("0");
+        when(projectService.findById(1001L)).thenReturn(project);
+
+        assertThat(service().getProject(1001L)).containsEntry("enterpriseId", null);
+    }
+
     private void stubCreateCloudResource() {
         SsResource cloudResource = new SsResource();
         cloudResource.setResourceId(9001L);

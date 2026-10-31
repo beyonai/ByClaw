@@ -49,6 +49,9 @@ public class PlatformOperationsService {
     @Autowired
     private MemberGroupRemovalService memberGroupRemoval;
 
+    @Autowired
+    private TenantAdministrationOperations tenantAdministrationOperations;
+
     /** 固定资源与操作集合，操作人和请求号必须由可信 HACU 服务提供。 */
     public JsonNode execute(JsonNode request) {
         if (request == null || !request.isObject()
@@ -60,6 +63,9 @@ public class PlatformOperationsService {
         JsonNode payload = request.path("payload");
         String resource = text(request, "resource", 32);
         String operation = text(request, "operation", 32);
+        if (Set.of("tenant-admin", "tenant-datasource").contains(resource)) {
+            return tenantAdministrationOperations.execute(resource, operation, payload);
+        }
         if ("member-removal".equals(resource)) {
             return memberGroupRemoval.execute(operation, payload, text(request, "actor", 128));
         }

@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 import org.springframework.stereotype.Service;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -177,7 +178,8 @@ public class GroupChatApplicationService {
         // 复用项目创建用例，云盘、工作目录和项目 owner 均使用现有初始化流程。
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
-        projectRequest.setDescription(request.getGoal());
+        // 工作目标选填，缺省及空白统一不设置项目描述。
+        projectRequest.setDescription(StringUtils.trimToNull(request.getGoal()));
         Project project = projectApplicationService.createGroupChatProject(projectRequest);
         projectMemberService.addMembers(project.getProjectId(), new ArrayList<>(userIds), MemberRole.MEMBER);
         ByaiSession session = new ByaiSession();
@@ -552,6 +554,8 @@ public class GroupChatApplicationService {
         ByaiSession group = invitationService.validateForMemberInvitation(sessionId, token);
         ByaiSessionMember existing = memberService.findSessionMember(group.getSessionId(), "USER", CurrentUserHolder.getCurrentUserId());
         if (existing != null) {
+            // 历史群成员可能缺少组织关系；重复接受邀请也需补齐，且不能恢复已停用关系。
+            ensureEnterpriseMembership(group, CurrentUserHolder.getCurrentUserId());
             fillMemberPresentation(existing);
             return existing;
         }
@@ -615,11 +619,8 @@ public class GroupChatApplicationService {
             }
             quotaAdmission.checkGroupMembers(quota, session.getSessionId(), type, 1);
         }
-        Long membershipEnterpriseId = groupBusinessEnterpriseId(session,
-            sessionExtService.findOneByExtParamCode(session.getSessionId(), BUSINESS_ENTERPRISE_EXT));
-        if (MemObjType.USER.name().equals(type) && membershipEnterpriseId != null) {
-            tenantUserMembershipService.add(memberId, membershipEnterpriseId, TenantUserMembershipRole.MEMBER,
-                CurrentUserHolder.getCurrentUserId());
+        if (MemObjType.USER.name().equals(type)) {
+            ensureEnterpriseMembership(session, memberId);
         }
         // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
         if (MemObjType.USER.name().equals(type) && session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), memberId)) {
@@ -656,6 +657,21 @@ public class GroupChatApplicationService {
         memberService.save(member);
         fillMemberPresentation(member);
         return member;
+    }
+
+    /**
+     * 按工作组的服务端归属幂等补齐普通组织成员，个人工作组不建立组织关系。
+     *
+     * @param session 已通过邀请权限校验的工作组
+     * @param memberId 待加入或已有的真人成员标识
+     */
+    private void ensureEnterpriseMembership(ByaiSession session, Long memberId) {
+        Long membershipEnterpriseId = groupBusinessEnterpriseId(session,
+            sessionExtService.findOneByExtParamCode(session.getSessionId(), BUSINESS_ENTERPRISE_EXT));
+        if (membershipEnterpriseId != null) {
+            tenantUserMembershipService.add(memberId, membershipEnterpriseId, TenantUserMembershipRole.MEMBER,
+                CurrentUserHolder.getCurrentUserId());
+        }
     }
 
     /** Use the business tenant instead of the project-storage fallback enterprise. */

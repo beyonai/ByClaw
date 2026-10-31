@@ -41,6 +41,26 @@ class UserProfileControllerTest extends I18nTestSupport {
         assertThat(request.getValue().getUserName()).isEqualTo("张三");
         assertThat(request.getValue().getAvatar()).isNull();
         assertThat(request.getValue().getAvatarFile()).isNull();
+        assertThat(request.getValue().isRemoveAvatar()).isFalse();
+    }
+
+    @Test
+    void updateProfileBindsExplicitAvatarRemovalAndReturnsEmptyAvatar() throws Exception {
+        UserController controller = new UserController();
+        UserProfileApplicationService service = mock(UserProfileApplicationService.class);
+        ReflectionTestUtils.setField(controller, "userProfileApplicationService", service);
+        when(service.updateProfile(any())).thenReturn(new UserProfileResponse("张三", ""));
+
+        MockMvcBuilders.standaloneSetup(controller).build()
+            .perform(multipart("/system/user/updateProfile")
+                .param("userName", "张三").param("removeAvatar", "true"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.avatar").value(""));
+        ArgumentCaptor<UserProfileUpdateRequest> request = ArgumentCaptor.forClass(UserProfileUpdateRequest.class);
+        verify(service).updateProfile(request.capture());
+        assertThat(request.getValue().isRemoveAvatar()).isTrue();
+        assertThat(request.getValue().getAvatar()).isNull();
+        assertThat(request.getValue().getAvatarFile()).isNull();
     }
 
     @Test

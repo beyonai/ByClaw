@@ -23,6 +23,7 @@ class MemberGroupRemovalServiceTest {
     private final ObjectMapper json = new ObjectMapper();
     private MemberGroupRemovalMapper members;
     private TenantNodeClient nodes;
+    private TenantAdminTenantMapper tenants;
     private MemberGroupRemovalService service;
 
     /** 构造当前所有者和真实企业候选人。 */
@@ -32,7 +33,8 @@ class MemberGroupRemovalServiceTest {
         nodes = mock(TenantNodeClient.class);
         service = new MemberGroupRemovalService();
         ReflectionTestUtils.setField(service, "members", members);
-        ReflectionTestUtils.setField(service, "tenants", mock(TenantAdminTenantMapper.class));
+        tenants = mock(TenantAdminTenantMapper.class);
+        ReflectionTestUtils.setField(service, "tenants", tenants);
         ReflectionTestUtils.setField(service, "nodes", nodes);
         ReflectionTestUtils.setField(service, "sessions", mock(SessionService.class));
         ReflectionTestUtils.setField(service, "json", json);
@@ -76,6 +78,58 @@ class MemberGroupRemovalServiceTest {
         assertThat(service.execute("preview", input(), "7").path("transfers").isEmpty()).isTrue();
         when(members.actor(1, 7)).thenReturn(null);
         assertThatThrownBy(() -> service.execute("preview", input(), "7")).isInstanceOf(OperationsFailure.class);
+    }
+
+    /** 免费试用企业无需独立 Node，预检和确认都使用相同的共享工作组范围。 */
+    @Test
+    void publicTrialWithoutDedicatedNodeCanPreviewAndApplyRemoval() {
+        when(tenants.selectConfig(42, "TENANT_MODE")).thenReturn("TRIAL");
+        // 历史遗留 Node 标记也不能让共享试用走独立资源调用。
+        when(tenants.selectConfig(42, "NODE_SANDBOX_RECORD_ID")).thenReturn("123");
+        when(members.actor(42, 7)).thenReturn(Map.of("userId", "7", "name", "试用所有者"));
+        when(members.snapshot(42, 9)).thenReturn(List.of());
+        when(members.candidates(42)).thenReturn(List.of(Map.of("userId", "7", "name", "试用所有者")));
+        ObjectNode trialInput = input().put("enterpriseId", "42");
+        JsonNode plan = service.execute("preview", trialInput, "7");
+        assertThat(plan.path("groupCount").asInt()).isZero();
+        assertThat(plan.path("revision").asText()).matches("[a-f0-9]{64}");
+        trialInput.put("expectedGroupRevision", plan.path("revision").asText());
+        trialInput.put("confirmOwnershipTransfer", true);
+        assertThat(service.execute("apply", trialInput, "7").path("completed").booleanValue()).isTrue();
+        verifyNoInteractions(nodes);
+    }
+
+    /** 试用组织仍扫描共享群主并要求合法接任人，不能把缺少 Node 当作零工作组。 */
+    @Test
+    void publicTrialStillRequiresSharedGroupOwnershipHandover() {
+        when(tenants.selectConfig(42, "TENANT_MODE")).thenReturn("TRIAL");
+        when(members.actor(42, 7)).thenReturn(Map.of("userId", "7", "name", "试用所有者"));
+        when(members.snapshot(42, 9)).thenReturn(List.of(row("9", "OWNER", 1)));
+        when(members.candidates(42)).thenReturn(List.of());
+        assertThatThrownBy(() -> service.execute("preview", input().put("enterpriseId", "42"), "7"))
+            .isInstanceOf(OperationsFailure.class);
+        verifyNoInteractions(nodes);
+    }
+
+    /** 独立租户缺少 Node 仍拒绝预检，不因兼容免费试用而放宽生产路由。 */
+    @Test
+    void dedicatedTenantWithoutNodeStillRejectsRemoval() {
+        String originalEnvironment = System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV", "production");
+            when(tenants.selectConfig(42, "TENANT_MODE")).thenReturn("DEDICATED");
+            when(members.actor(42, 7)).thenReturn(Map.of("userId", "7", "name", "企业所有者"));
+            when(members.snapshot(42, 9)).thenReturn(List.of());
+            assertThatThrownBy(() -> service.execute("preview", input().put("enterpriseId", "42"), "7"))
+                .isInstanceOf(OperationsFailure.class);
+            verifyNoInteractions(nodes);
+        } finally {
+            if (originalEnvironment == null) {
+                System.clearProperty("BE_ENV");
+            } else {
+                System.setProperty("BE_ENV", originalEnvironment);
+            }
+        }
     }
 
     /** @return 服务端当前企业范围 */

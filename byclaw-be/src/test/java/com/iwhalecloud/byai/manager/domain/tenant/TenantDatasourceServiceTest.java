@@ -188,4 +188,15 @@ class TenantDatasourceServiceTest {
         assertThat(page.page()).isEqualTo(2);
         assertThat(page.pageSize()).isEqualTo(500);
     }
+    /** 行锁语句在建立数据库连接前拒绝，包括混合大小写与注释分隔。 */
+    @org.junit.jupiter.api.Test
+    void lockingSqlIsRejectedBeforeDatabaseAccess() {
+        TenantDatasourceService tenantDatasourceService = new TenantDatasourceService(null, null, null, "");
+        for (String sql : java.util.List.of("SELECT 1 FOR UPDATE", "SELECT 1 for /* guard */ update NOWAIT",
+            "WITH example AS (SELECT 1) SELECT 1 FOR UPDATE SKIP LOCKED")) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> tenantDatasourceService.execute(11L, sql, 1, true))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("tenant.datasource.sql.lockForbidden");
+        }
+    }
 }

@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
@@ -268,6 +269,19 @@ class PlatformOperationsServiceTest {
             .put("actor", "operator").put("requestId", "request-1");
         request.putObject("payload").put("id", "9").put("revision", "9:1:RUNNING").put("reason", "维护");
         return request;
+    }
+    /** 租户请求只分发给固定适配器，不能落到沙箱运行操作。 */
+    @Test
+    void tenantResourcesDispatchToOriginalServiceAdapter() {
+        TenantAdministrationOperations tenantAdministrationOperations = mock(TenantAdministrationOperations.class);
+        ReflectionTestUtils.setField(service, "tenantAdministrationOperations", tenantAdministrationOperations);
+        ObjectNode tenantRequest = json.createObjectNode().put("resource", "tenant-admin")
+            .put("operation", "list").put("actor", "platform-admin-7").put("requestId", "request-7");
+        ObjectNode payload = tenantRequest.putObject("payload").put("name", "tenant");
+        when(tenantAdministrationOperations.execute("tenant-admin", "list", payload)).thenReturn(json.createArrayNode());
+        assertThat(service.execute(tenantRequest).isArray()).isTrue();
+        verify(tenantAdministrationOperations).execute("tenant-admin", "list", payload);
+        verify(records, never()).selectDetail(anyLong());
     }
 }
 

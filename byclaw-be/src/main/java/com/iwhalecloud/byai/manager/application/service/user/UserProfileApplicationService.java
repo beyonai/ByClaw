@@ -101,7 +101,7 @@ public class UserProfileApplicationService {
         return lead;
     }
 
-    /** 头像文件优先于地址；省略的扩展字段保留原值，提供的字段在同一事务内保存。 */
+    /** 显式删除头像优先，否则文件优先于地址；省略的扩展字段保留原值，同一事务内保存。 */
     @Transactional(rollbackFor = Exception.class)
     public UserProfileResponse updateProfile(UserProfileUpdateRequest request) throws IOException {
         Users user = currentUser();
@@ -115,7 +115,12 @@ public class UserProfileApplicationService {
             .set(Users::getUserName, request.getUserName())
             .set(Users::getUpdateDate, new Date());
         String avatar = user.getAvatar();
-        if (request.getAvatarFile() != null && !request.getAvatarFile().isEmpty()) {
+        if (request.isRemoveAvatar()) {
+            // 清空已有字段并同步登录快照，使各处头像回退到姓名文字；不删除共享图片资源。
+            avatar = "";
+            update.set(Users::getAvatar, avatar);
+        }
+        else if (request.getAvatarFile() != null && !request.getAvatarFile().isEmpty()) {
             avatar = avatarService.storeAvatar(request.getAvatarFile());
             update.set(Users::getAvatar, avatar);
         }

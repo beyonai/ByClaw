@@ -136,7 +136,7 @@ public class GroupChatController {
         return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 
-    /** 按当前 USER 成员关系返回群列表及未读 mention 状态；enterpriseId 不传或为 1 时不按企业筛选。 */
+    /** 按当前 USER 成员关系返回群列表及未读 mention 状态；指定企业时严格过滤，包括企业 1。 */
     @GetMapping
     public ResponseUtil<PageInfo<GroupChatListItemResponse>> list(
         @RequestParam(defaultValue = "1") Integer pageNum,

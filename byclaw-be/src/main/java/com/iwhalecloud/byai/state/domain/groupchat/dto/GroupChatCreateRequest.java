@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.groupchat.dto;
 
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -12,12 +13,14 @@ import lombok.Data;
 @Data
 public class GroupChatCreateRequest {
     @NotBlank
-    @Size(max = 100)
+    @Size(max = 50, message = "{workgroup.nameInvalid}")
     private String name;
     /** 真人成员名单，创建人自动加入，无需重复传入。 */
     private List<@NotNull @Positive Long> userIds;
     /** 数字员工仅加入群聊，不写入项目成员。 */
     private List<@NotNull @Positive Long> agentIds;
+    /** 工作目标选填；缺省或空白均表示暂不设置目标，保留最大长度约束。 */
+    @Schema(description = "Optional workgroup goal", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     @Size(max = 500)
     private String goal;
     @Positive

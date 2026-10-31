@@ -150,10 +150,10 @@ describe("tenant history use cases", () => {
   });
   it("accepts Chinese names under the BE character limit", async () => {
     const { service } = setup();
-    await expect(service.groupNameCheck("20", "中".repeat(100))).resolves.toEqual({
+    await expect(service.groupNameCheck('20', '中'.repeat(50))).resolves.toEqual({
       exists: false,
     });
-    await expect(service.groupNameCheck("20", "中".repeat(101))).rejects.toThrow();
+    await expect(service.groupNameCheck('20', '中'.repeat(51))).rejects.toThrow('INVALID_SESSION_NAME');
   });
   it("normalizes group names and preserves active-name conflicts", async () => {
     const { repo, service } = setup();

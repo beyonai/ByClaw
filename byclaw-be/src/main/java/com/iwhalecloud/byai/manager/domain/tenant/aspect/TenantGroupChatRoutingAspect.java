@@ -223,7 +223,8 @@ public class TenantGroupChatRoutingAspect {
     /** 查询工作组列表；线上标准租户从 Node 读取，开发环境保留公共库兼容路径。 */
     private Object list(TenantRequestContext context, int pageNum, int pageSize) {
         if (RuntimeEnvironment.isDevelopment()) {
-            return legacy.listMyGroups(pageNum, pageSize);
+            // 开发环境共用数据库，必须按已校验的企业上下文过滤，避免切换后仍返回全部群。
+            return legacy.listMyGroups(pageNum, pageSize, context.enterpriseId());
         }
         return node.request(context, "GET", "/internal/v1/group-chats?pageNum=" + pageNum + "&pageSize=" + pageSize,
             null, new TypeReference<Map<String, Object>>() {});

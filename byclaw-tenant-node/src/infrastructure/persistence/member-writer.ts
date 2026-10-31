@@ -1,6 +1,7 @@
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
+import { workgroupName } from '../../domain/workgroup-name.js';
 import { first, insert, nextId, camel } from "./sql-utils.js";
 
 import { membershipNotice } from "./member-notice.js";
@@ -166,8 +167,8 @@ export async function groupSettings(context: CommandContext): Promise<Record<str
   if (!Object.keys(command.payload).length) throw new DomainError("INVALID_GROUP_SETTINGS");
   for (const [key, value] of Object.entries(command.payload)) {
     if (key === "sessionName") {
-      const name = text(value, 100, true).trim();
-      if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
+      // 创建、改名及名称可用性查询共用同一长度校验。
+      const name = workgroupName(value);
       await db.query(
         "UPDATE byai.byai_session SET session_name=$1,update_time=CURRENT_TIMESTAMP WHERE session_id=$2 AND enterprise_id=$3",
         [name, command.sessionId, command.enterpriseId],
