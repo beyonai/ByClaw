@@ -32,6 +32,7 @@ export default {
 
   'sandboxMgr.shared.storageMode': '存储模式',
   'sandboxMgr.shared.storage.userQuota': '用户独立 NAS 配额',
+  'sandboxMgr.shared.storage.userAgenticFs': '用户独立 AgenticFS 配额',
   'sandboxMgr.shared.storage.logical': '逻辑隔离',
   'sandboxMgr.releaseReason.release.switch-to-shared': '已切换至共享沙箱',
   'sandboxMgr.status.pending': '等待中',

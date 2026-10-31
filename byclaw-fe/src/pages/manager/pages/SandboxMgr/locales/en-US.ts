@@ -33,6 +33,7 @@ export default {
 
   'sandboxMgr.shared.storageMode': 'Storage mode',
   'sandboxMgr.shared.storage.userQuota': 'Per-user NAS quota',
+  'sandboxMgr.shared.storage.userAgenticFs': 'Dedicated user AgenticFS quota',
   'sandboxMgr.shared.storage.logical': 'Logical separation',
   'sandboxMgr.releaseReason.release.switch-to-shared': 'Switched to shared sandbox',
   'sandboxMgr.status.pending': 'Pending',

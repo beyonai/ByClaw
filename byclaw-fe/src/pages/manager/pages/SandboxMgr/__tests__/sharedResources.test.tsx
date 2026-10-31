@@ -308,3 +308,42 @@ test('launch dialog offers both duration and calendar schedules to managers only
   expect(screen.getByLabelText('指定时长')).toBeInTheDocument();
   expect(screen.getByLabelText('指定日期时间')).toBeInTheDocument();
 });
+
+test.each([
+  ['zh-CN', '查看用户', '用户独立 AgenticFS 配额', '用户独立 NAS 配额', '逻辑隔离', '未知'],
+  ['en-US', 'View users', 'Dedicated user AgenticFS quota', 'Per-user NAS quota', 'Logical separation', 'Unknown'],
+])(
+  'shows explicit storage modes and keeps missing or future modes unknown in %s',
+  async (locale, viewUsers, native, nas, logical, unknown) => {
+    mockLocale = locale;
+    (listSharedMembers as jest.Mock).mockResolvedValue({
+      records: [
+        ['native', 'USER_AGENTICFS'],
+        ['nas', 'USER_NAS_QUOTA'],
+        ['logical', 'LOGICAL'],
+        ['missing', undefined],
+        ['future', 'FUTURE_STORAGE_MODE'],
+        ['unknown', 'UNKNOWN'],
+      ].map(([userCode, storageMode], index) => ({
+        id: `storage-${index}`,
+        sandboxRecordId: 's1',
+        userCode,
+        storageMode,
+        generation: index + 1,
+        status: 'ACTIVE',
+      })),
+      total: 6,
+    });
+    render(<SharedResources canManage={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: viewUsers }));
+    await screen.findByText('native');
+    const row = (user: string) => screen.getByText(user).closest('tr')!;
+    expect(row('native')).toHaveTextContent(native);
+    expect(row('nas')).toHaveTextContent(nas);
+    expect(row('logical')).toHaveTextContent(logical);
+    for (const user of ['missing', 'future', 'unknown']) {
+      expect(row(user)).toHaveTextContent(unknown);
+      expect(row(user)).not.toHaveTextContent(logical);
+    }
+  }
+);

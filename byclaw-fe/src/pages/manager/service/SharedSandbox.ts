@@ -34,7 +34,7 @@ export interface SharedRecord {
 }
 
 export interface SharedMember {
-  storageMode?: 'LOGICAL' | 'USER_NAS_QUOTA';
+  storageMode?: 'LOGICAL' | 'USER_NAS_QUOTA' | 'USER_AGENTICFS' | 'UNKNOWN';
   id: string;
   sandboxRecordId: string;
   enterpriseId?: string;
