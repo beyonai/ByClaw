@@ -125,7 +125,7 @@ class InternalServiceAuthenticationTest {
             .build();
         var signed = request("mvc-nonce-12345678");
         var builder = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(signed.getRequestURI())
-            .header("X-Enterprise-Id", "999")
+            .header("X-Enterprise-Id", "42")
             .cookie(new jakarta.servlet.http.Cookie("JSESSIONID", "irrelevant-browser-cookie"));
         for (String suffix : Set.of("Client-Id", "Timestamp", "Nonce", "Signature")) {
             builder.header("X-ByClaw-" + suffix, signed.getHeader("X-ByClaw-" + suffix));

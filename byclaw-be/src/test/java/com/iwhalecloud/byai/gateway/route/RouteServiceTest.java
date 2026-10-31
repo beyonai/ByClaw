@@ -389,7 +389,7 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
                 .thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN));
         }
         var proxy = new org.springframework.aop.aspectj.annotation.AspectJProxyFactory(chat);
-        proxy.addAspect(new com.iwhalecloud.byai.manager.domain.tenant.TenantChatRuntimeRoutingAspect(node, running,
+        proxy.addAspect(new com.iwhalecloud.byai.manager.domain.tenant.aspect.TenantChatRuntimeRoutingAspect(node, running,
             mock(com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService.class),
             mock(com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService.class),
             mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class)));

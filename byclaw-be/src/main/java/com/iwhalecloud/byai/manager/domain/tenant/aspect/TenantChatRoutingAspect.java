@@ -1,4 +1,6 @@
-package com.iwhalecloud.byai.manager.domain.tenant;
+package com.iwhalecloud.byai.manager.domain.tenant.aspect;
+
+import com.iwhalecloud.byai.manager.domain.tenant.*;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
@@ -35,7 +37,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Keeps the public chat API stable while dispatching tenant requests to the owning Node. */
+/**
+ * 普通聊天接口的租户路由器：根据 Controller 方法名把标准租户请求转到所属 Node，
+ * 同时保留个人空间和试用租户的公共库处理链路，并在转发前校验参数和资源归属。
+ */
 @Aspect
 @Component
 public class TenantChatRoutingAspect {
@@ -54,8 +59,13 @@ public class TenantChatRoutingAspect {
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.manage.AssistantManController.*(..))"
         + " || execution(* com.iwhalecloud.byai.manager.interfaces.controller.devloop.ProjectController.listSessionsByProject(..))"
         + " || execution(* com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.getMessageCountAndPosition(..))")
+    /**
+     * 统一路由普通聊天接口：试用租户继续使用公共库，标准租户转发到所属 Node。
+     * 方法名由切点匹配的 Controller 方法决定，具体分支按方法名校验请求并调用 Node。
+     */
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
+        // 没有租户上下文时保持个人空间旧逻辑；试用租户没有独立 Node，也走公共库。
         if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
@@ -65,6 +75,7 @@ public class TenantChatRoutingAspect {
             && isLegacyGroup(context, messageQuery.getSessionId())) return call.proceed();
         switch (method) {
             case "querySessionByAgent": {
+                // 按智能体查询会话：先校验智能体 ID，再调用 Node 的会话查询接口。
                 SessionByAgentQo query = (SessionByAgentQo) args[0];
                 if (query.getObjectId() == null || query.getObjectId() <= 0) throw badRequest();
                 SessionQuery body = new SessionQuery(query.getPageNum() == null ? 1 : query.getPageNum(),
@@ -77,11 +88,13 @@ public class TenantChatRoutingAspect {
                     page.pageSize(), page.pageSize() <= 0 ? 0 : (int) Math.ceil((double) page.total() / page.pageSize())));
             }
             case "updateMessage": {
+                // 更新消息反馈或操作信息，最终统一交给 feedback 方法写入 Node。
                 SessionOpeartorDto request = (SessionOpeartorDto) args[0];
                 return feedback(context, request.getMessageId(), request.getType(), "reaction",
                     request.getFeedback() == null ? null : JSON.toJSONString(request.getFeedback()));
             }
             case "updateMesFeedback": {
+                // 保存消息点赞/点踩反馈，只接受合法消息 ID 和反馈类型。
                 MessageFeedbackDto request = (MessageFeedbackDto) args[0];
                 if (request.getMessageId() == null
                     || PraiseAndTreadEnum.getName(request.getType()) == PraiseAndTreadEnum.TREAD
@@ -90,6 +103,7 @@ public class TenantChatRoutingAspect {
                     JSON.toJSONString(request));
             }
             case "qryConversations": {
+                // 查询会话列表；内部 if 分别校验会话、父会话、分页和类型筛选条件。
                 ByaiSessionQo query = (ByaiSessionQo) args[0];
                 if (query.getSessionId() != null) {
                     if (query.getSessionId() <= 0 || query.getParentSessionId() != null
@@ -133,6 +147,7 @@ public class TenantChatRoutingAspect {
                     page.pageSize(), totalPages));
             }
             case "listSessionsByProject": {
+                // 按项目查询会话，项目 ID 的特殊值遵循原接口契约。
                 ProjectSessionQo query = (ProjectSessionQo) args[0];
                 if (query.getProjectId() == null || query.getProjectId() == 0 || query.getProjectId() < -1
                     || query.getCreateBy() != null || query.getSearchMode() != null) {
@@ -151,6 +166,7 @@ public class TenantChatRoutingAspect {
                     page.pageSize(), totalPages));
             }
             case "getMessages": {
+                // 查询会话消息列表，sessionId 是 Node 路径中的会话主键。
                 MessageQo query = (MessageQo) args[0];
                 if (query.getSessionId() == null || query.getSessionId() <= 0) throw unsupported();
                 query.initPage();
@@ -162,6 +178,7 @@ public class TenantChatRoutingAspect {
                 return ResponseUtil.successResponse(page);
             }
             case "getMessageCountAndPosition": {
+                // 查询消息在会话中的数量和位置，用于前端定位消息。
                 MessageQo query = (MessageQo) args[0];
                 if (query.getSessionId() == null || query.getSessionId() <= 0 || query.getMessageId() == null
                     || query.getMessageId() <= 0) throw badRequest();
@@ -175,6 +192,7 @@ public class TenantChatRoutingAspect {
                     "totalCount", target.totalCount()));
             }
             case "getMessageOutline": {
+                // 查询会话消息大纲，减少打开长会话时的传输量。
                 MessageQo query = (MessageQo) args[0];
                 if (query.getSessionId() == null || query.getSessionId() <= 0) throw unsupported();
                 return ResponseUtil.successResponse(node.request(context, "POST",
@@ -182,6 +200,7 @@ public class TenantChatRoutingAspect {
                     new TypeReference<List<MessageOutline>>() { }));
             }
             case "getForwardMessages": {
+                // 查询转发消息：单个消息 ID 和批量消息 ID 对应两种参数形态。
                 if (args[0] instanceof Long messageId) {
                     if (messageId <= 0) throw unsupported();
                     return ResponseUtil.successResponse(TenantChatHistoryProjection.project(node.request(context, "GET",
@@ -196,6 +215,7 @@ public class TenantChatRoutingAspect {
                     new TypeReference<List<MessageView>>() { })));
             }
             case "updateConversation": {
+                // 更新会话名称或摘要，至少提供一个可更新字段。
                 SessionOpeartorDto request = (SessionOpeartorDto) args[0];
                 if (request.getSessionId() == null || request.getSessionId() <= 0) throw unsupported();
                 if (request.getSessionName() == null && request.getSessionContent() == null) throw unsupported();
@@ -205,6 +225,7 @@ public class TenantChatRoutingAspect {
                     "/internal/v1/sessions/" + sessionId, sessionId, "UPDATE_SESSION", payload));
             }
             case "removeConversation": {
+                // 删除会话前校验会话 ID，再由 Node 删除租户库记录。
                 Long sessionId = (Long) args[0];
                 if (sessionId == null || sessionId <= 0) throw unsupported();
                 node.command(context, "DELETE", "/internal/v1/sessions/" + sessionId,
@@ -212,6 +233,7 @@ public class TenantChatRoutingAspect {
                 return ResponseUtil.success("OK");
             }
             case "deleteMessage": {
+                // 删除消息前确认消息属于指定会话，防止跨会话误删。
                 SessionOpeartorDto request = (SessionOpeartorDto) args[0];
                 String messageId = request.getMessageId();
                 if (messageId == null || !messageId.matches("[1-9][0-9]*")) throw unsupported();
@@ -233,11 +255,13 @@ public class TenantChatRoutingAspect {
         }
     }
 
+    /** 判断指定会话是否仍属于公共库中的历史群组。 */
     private boolean isLegacyGroup(TenantRequestContext context, Long sessionId) {
         return sessionId != null && sessionId > 0 && mentionMapper.isLegacyGroupMember(sessionId,
             context.userId(), context.enterpriseId());
     }
 
+    /** 校验反馈消息归属后，把反馈操作转发给租户 Node。 */
     private Object feedback(TenantRequestContext context, String messageId, String type, String mode, String details) {
         if (messageId == null || !messageId.matches("[1-9][0-9]*") || PraiseAndTreadEnum.getName(type) == null) {
             throw badRequest();
@@ -254,10 +278,12 @@ public class TenantChatRoutingAspect {
         return ResponseUtil.successResponse(I18nUtil.get("chat.message.updated"), result.metadata());
     }
 
+    /** 构造统一的请求参数错误。 */
     private ResponseStatusException badRequest() {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.chat.request.invalid");
     }
 
+    /** 构造统一的“当前租户暂不支持”错误。 */
     private ResponseStatusException unsupported() {
         return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.chat.notReady");
     }

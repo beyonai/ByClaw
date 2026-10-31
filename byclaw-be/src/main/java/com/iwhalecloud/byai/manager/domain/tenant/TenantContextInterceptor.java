@@ -7,6 +7,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal;
+
 /** Validates the tenant selector against current login and membership. */
 @Component
 public class TenantContextInterceptor implements HandlerInterceptor {
@@ -25,26 +27,33 @@ public class TenantContextInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         TenantRequestContextHolder.clear();
-        // Service target authorization is derived from the credential, never browser selector headers.
-        if (request.getAttribute(com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal.ATTRIBUTE)
-            instanceof com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal) return true;
-
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
         String path = request.getRequestURI().substring(request.getContextPath().length());
         String enterpriseId = request.getHeader("X-Enterprise-Id");
-        String contextToken = request.getHeader("X-Tenant-Context");
-        if (enterpriseId == null) {
-            if (contextToken != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.identity.required");
+        InternalServicePrincipal servicePrincipal = (InternalServicePrincipal) request.getAttribute(
+            InternalServicePrincipal.ATTRIBUTE);
+
+        if (request.getHeader("X-Tenant-Context") != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.context.header.removed");
+        }
+
+        // Internal routes use their signed service principal and their own scope/object checks.
+        // A browser selector must never expand that authority; if supplied, it is checked against
+        // the principal's allow-list before the internal controller handles the request.
+        if (servicePrincipal != null) {
+            if (enterpriseId != null) {
+                servicePrincipal.requireTenant(enterpriseId);
             }
             return true;
         }
-        if (contextToken == null || contextToken.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.context.token.required");
+
+        if (enterpriseId == null) {
+            return true;
         }
-        // 云盘存储位于平台，复制按两端资源独立鉴权；租户选择仍须通过正常令牌验证。
+
+        // 云盘存储位于平台，复制按两端资源独立鉴权；工作组租户仍须通过当前用户成员关系验证。
         boolean knowledgeFileCopy = "POST".equalsIgnoreCase(request.getMethod())
             && "/datasetController/copyKnowledgeFile".equals(path);
         if (!path.startsWith("/tenantContext/") && !path.startsWith("/assiman/")
@@ -58,7 +67,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             && !CHAT_ROUTES.contains(path)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.route.notReady");
         }
-        TenantRequestContextHolder.set(tenantContextService.validate(enterpriseId, contextToken));
+        TenantRequestContextHolder.set(tenantContextService.validate(enterpriseId));
         return true;
     }
 
