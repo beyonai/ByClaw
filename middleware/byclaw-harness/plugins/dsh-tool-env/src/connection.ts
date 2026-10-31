@@ -339,6 +339,10 @@ export class ToolEnvConnection extends Service {
  */
 const PRIVATE_ENVIRONMENT = /^BYCLAW_(?:DSH_)?TOOL_ENV(?:_|$)/u
 
+// These configure the trusted host's coordination/providers, not the logged-in
+// user's tool process. Keep the user's own Beyond-Token for authorized CLI calls.
+const HOST_CREDENTIAL_ENVIRONMENT = /^(?:REDIS(?:_|$)|LANGFUSE(?:_|$)|TENCENTCLOUD_(?:SECRET|TOKEN)|(?:ALIYUN|ALIBABA_CLOUD|AWS)_(?:ACCESS_KEY|SECRET_ACCESS_KEY|SECRET_KEY|SECURITY_TOKEN|SESSION_TOKEN)|CLOUD_ACCESS_KEY|PLATFORM_.*(?:KEY|SECRET|TOKEN)|JWT_(?:SECRET|PRIVATE_KEY)|BYCLAW_(?:JEV_API_KEY|DSH_WEB_AUTH_TOKEN)$|TYPESAFE_API_KEY$)/u
+
 /**
  * Before the split, every process the user started inherited the runtime's own
  * environment: the variables BE rendered from the harness spec at launch (user
@@ -365,7 +369,7 @@ export function scrubEnvironment(params: unknown): unknown {
   if (typeof params !== 'object' || params === null || !('env' in params)) return params
   const env = (params as { env?: unknown }).env
   if (typeof env !== 'object' || env === null) return params
-  const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !PRIVATE_ENVIRONMENT.test(key)))
+  const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !PRIVATE_ENVIRONMENT.test(key) && !HOST_CREDENTIAL_ENVIRONMENT.test(key)))
   return { ...params, env: kept }
 }
 
