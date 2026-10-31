@@ -154,7 +154,7 @@ export class ToolEnv extends ToolEnvConnection {
         // DSH's own account of work on A, read from its services when the timer fires.
         dsh: () => isDshBusy(ctx.get('agents') as AgentsView | undefined, ctx.get('jobs') as JobsView | undefined),
         // Processes on B that no stream watches (`cmd &`), asked over the connection's own alias.
-        residual: () => probeResidualProcesses(identity.alias),
+        residual: () => probeResidualProcesses(identity.alias, undefined, helper),
         residualMaxMs: config.busyProcessMaxMs,
       },
     }, backend, identity)

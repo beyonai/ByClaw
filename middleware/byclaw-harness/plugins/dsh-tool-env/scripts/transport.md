@@ -32,3 +32,5 @@ concurrent callers cannot replace keys already published to B. A failed first
 SSH connection still schedules idle cleanup of an allocated B. Active agents,
 jobs, operations and streams postpone cleanup, and failed releases retry without
 replaying the failed tool operation.
+Residual checks receive the connection's exact helper path, so package and
+workspace installations exclude their own helper while keeping user Node jobs busy.

@@ -17,6 +17,22 @@ describe('isDshBusy', () => {
 })
 
 describe('residualProcesses', () => {
+  it('ignores the shipped workspace SSH helper without hiding user Node processes', () => {
+    const output = [
+      '  70 node /usr/local/bin/node /workspace/packages/ssh/ssh/lib/helper.js',
+      '  76 node /usr/local/bin/node --disable-sigusr1 /workspace/packages/ssh/ssh/lib/helper.js',
+      '  77 node /usr/local/bin/node --disable-sigusr1 /by/helper.js',
+      '  71 node /usr/local/bin/node /by/helper.js',
+      '  72 node /usr/local/bin/node /by/app.js /workspace/packages/ssh/ssh/lib/helper.js',
+      '  73 node /usr/local/bin/node /workspace/packages/ssh/ssh/lib/helper.js.user',
+      '  74 node /usr/local/bin/node -e console.log("/workspace/packages/ssh/ssh/lib/helper.js")',
+      '  75 python3 python3 /workspace/packages/ssh/ssh/lib/helper.js',
+    ].join('\n')
+    expect(residualProcesses(output, '/workspace/packages/ssh/ssh/lib/helper.js').map(process => process.pid)).toEqual([77, 71, 72, 73, 74, 75])
+    expect(residualProcesses('80 node node /opt/runtime/helper.js', '/opt/runtime/helper.js')).toEqual([])
+    expect(residualProcesses('81 node node /tmp/helper.js', '/opt/runtime/helper.js').map(process => process.pid)).toEqual([81])
+  })
+
   it('ignores what serves A and the probe itself, keeps what the user left running', () => {
     const output = [
       '   41 sshd            sshd: byclaw@notty',

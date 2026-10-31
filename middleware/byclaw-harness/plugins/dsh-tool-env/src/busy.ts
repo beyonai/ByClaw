@@ -54,7 +54,7 @@ export interface ResidualProcess { pid: number; comm: string; args: string }
  * probe's own shell and `ps`. What remains was started by the user's commands
  * and detached from any stream.
  */
-export function residualProcesses(psOutput: string): ResidualProcess[] {
+export function residualProcesses(psOutput: string, ownedHelperPath?: string): ResidualProcess[] {
   const residual: ResidualProcess[] = []
   for (const raw of psOutput.split('\n')) {
     const line = raw.trim()
@@ -64,6 +64,11 @@ export function residualProcesses(psOutput: string): ResidualProcess[] {
     if (comm === 'sshd' || comm.startsWith('sshd')) continue
     if (comm === 'ps') continue
     if (args.includes(PROBE_MARKER)) continue
+    // Use the same resolved entrypoint as the SSH connection, including workspace installs.
+    // Only Node's script argument may match; a user command mentioning the helper remains residual.
+    const command = /^(\S+)\s+(?:--disable-sigusr1\s+)?(\S+)(?:\s|$)/u.exec(args)
+    if (ownedHelperPath !== undefined && command?.[1]?.split('/').at(-1) === 'node'
+      && command[2] === ownedHelperPath) continue
     if (/dsh-ssh[\\/]|dsh-ptc-runtime|\/process\.js(\s|$)/u.test(args)) continue
     residual.push({ pid, comm, args })
   }
@@ -75,10 +80,10 @@ export function residualProcesses(psOutput: string): ResidualProcess[] {
  * connection uses) which residual processes it runs. A B that cannot be reached
  * has nothing to keep alive: errors and timeouts count as none.
  */
-export async function probeResidualProcesses(alias: string, timeoutMs = 20_000): Promise<ResidualProcess[]> {
+export async function probeResidualProcesses(alias: string, timeoutMs = 20_000, ownedHelperPath?: string): Promise<ResidualProcess[]> {
   try {
     const { stdout } = await run('ssh', ['-o', 'BatchMode=yes', alias, 'sh', '-c', `'${PROBE_SCRIPT}'`], { timeout: timeoutMs, maxBuffer: 1024 * 1024 })
-    return residualProcesses(stdout)
+    return residualProcesses(stdout, ownedHelperPath)
   } catch {
     return []
   }
