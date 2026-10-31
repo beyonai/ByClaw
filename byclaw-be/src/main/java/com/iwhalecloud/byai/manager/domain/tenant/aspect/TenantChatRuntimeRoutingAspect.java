@@ -57,6 +57,7 @@ public class TenantChatRuntimeRoutingAspect {
         Object[] args = call.getArgs();
         switch (method) {
             case "runningStatus": {
+                // runningStatus 批量查询正在运行的会话；单个会话无权限时跳过，避免影响其他会话。
                 RunningChatStatusRequest request = (RunningChatStatusRequest) args[0];
                 List<RunningChatInfo> result = new ArrayList<>();
                 if (request == null || request.getSessionIds() == null) return ResponseUtil.successResponse(result);
@@ -72,6 +73,7 @@ public class TenantChatRuntimeRoutingAspect {
                 return ResponseUtil.successResponse(result);
             }
             case "runningSnapshot": {
+                // runningSnapshot 查询某次回答的实时快照，先确认会话属于当前租户。
                 RunningChatSnapshotRequest request = (RunningChatSnapshotRequest) args[0];
                 if (request == null || request.getSessionId() == null) return ResponseUtil.successResponse(null);
                 session(context, request.getSessionId());
@@ -79,23 +81,28 @@ public class TenantChatRuntimeRoutingAspect {
                     request.getModelAnswerMessageId()));
             }
             case "stopChat": {
+                // stopChat 是停止回答的写操作，必须校验消息和会话归属后才允许执行。
                 StopChatDto request = (StopChatDto) args[1];
                 if (request == null) throw invalid();
                 authorizeStop(context, request.getSessionId(), request.getMessageId());
                 return call.proceed();
             }
             case "getSessionStatus":
+                // getSessionStatus 读取会话状态；session() 负责租户归属校验。
                 session(context, id(args[0]));
                 return call.proceed();
             case "getMessageById":
+                // getMessageById 从租户 Node 读取消息，再转换为前端兼容的展示结构。
                 return ResponseUtil.successResponse(TenantChatHistoryProjection.project(message(context, id(args[0]))));
             case "getTraceIdByMessageId": {
+                // getTraceIdByMessageId 查询消息对应的链路追踪 ID。
                 Map<String, String> trace = node.request(context, "GET",
                     "/internal/v1/messages/" + id(args[0]) + "/trace", null,
                     new TypeReference<Map<String, String>>() { });
                 return ResponseUtil.successResponse(trace.get("traceId"));
             }
             case "updateMessageStructById": {
+                // updateMessageStructById 只允许更新 messageStruct/inferLog 两类展示字段。
                 MessageStructDto request = (MessageStructDto) args[0];
                 if (request == null) throw invalid();
                 if (!List.of("messageStruct", "inferLog").contains(request.getUpdateField())

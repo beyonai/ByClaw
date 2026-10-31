@@ -26,7 +26,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Routes HACU group reads to the tenant Node and prevents unported writes from reaching the personal DB. */
+/**
+ * 群组接口的统一租户路由器。
+ *
+ * <p>这个类本身不保存群组数据，只负责三件事：识别当前 Controller 方法、判断当前租户类型、
+ * 决定调用公共库还是租户 Node。标准租户的数据走 Node，个人空间和试用租户沿用公共库逻辑。</p>
+ */
 @Aspect
 @Component
 public class TenantGroupChatRoutingAspect {
@@ -103,6 +108,7 @@ public class TenantGroupChatRoutingAspect {
             return ResponseUtil.successResponse(management.change(context, method, Long.valueOf(id(args[0])), args));
         switch (method) {
             case "list": {
+                // list 有两种调用形态：分页查群组，或按群组 ID 查话题列表。
                 if (args.length == 3 && args[0] instanceof Integer pageNum && args[1] instanceof Integer pageSize) {
                     if (pageNum < 1 || pageSize < 1 || pageSize > 100) throw unsupported();
                     if (args[2] != null && (!(args[2] instanceof Long enterpriseId)
@@ -114,17 +120,25 @@ public class TenantGroupChatRoutingAspect {
                 }
                 throw unsupported();
             }
-            case "detail": return read(context, requirePath(path));
-            case "invite": return ResponseUtil.successResponse(memberService.invite(context,
+            case "detail":
+                // detail 读取指定群组详情，群组 ID 同时决定 Node 内的资源路径。
+                return read(context, requirePath(path));
+            case "invite":
+                // invite 由成员服务处理，服务内部还会做成员资格和席位限额校验。
+                return ResponseUtil.successResponse(memberService.invite(context,
                 Long.valueOf(sessionId), (GroupChatMemberRequest) args[1]));
             case "remove": {
+                // remove 只允许 USER/AGENT 两种成员类型，其他类型避免误删。
                 if (path == null || args.length != 3 || !(args[1] instanceof String type)
                     || !(args[2] instanceof Long memberId) || memberId <= 0
                     || !("USER".equals(type) || "AGENT".equals(type))) throw unsupported();
                 return ResponseUtil.successResponse(management.change(context, "remove", Long.valueOf(sessionId), args));
             }
-            case "settings": return read(context, requirePath(path) + "/settings");
+            case "settings":
+                // settings 读取群组配置，不在本地公共库拼装。
+                return read(context, requirePath(path) + "/settings");
             case "updateSettings": {
+                // 更新设置前要求请求体至少包含一个可修改字段。
                 GroupChatSettingsRequest request = (GroupChatSettingsRequest) args[1];
                 if (request == null || request.getSessionName() == null
                     && request.getAllowJoinByLink() == null && request.getAllowMemberAddAgent() == null
@@ -137,9 +151,14 @@ public class TenantGroupChatRoutingAspect {
                     new TypeReference<Map<String, Object>>() { });
                 return ResponseUtil.successResponse(detail.get("session"));
             }
-            case "lifecycle": return read(context, requirePath(path) + "/lifecycle");
-            case "tasks": return read(context, requirePath(path) + "/tasks");
+            case "lifecycle":
+                // lifecycle 返回群组生命周期状态。
+                return read(context, requirePath(path) + "/lifecycle");
+            case "tasks":
+                // tasks 返回该群组关联的任务列表。
+                return read(context, requirePath(path) + "/tasks");
             case "context": {
+                // context 按消息边界和字符数读取群聊上下文，参数为空表示请求不合法。
                 GroupChatContextRequest request = (GroupChatContextRequest) args[1];
                 if (request == null) throw unsupported();
                 Map<String, Object> body = new HashMap<>();
@@ -151,16 +170,22 @@ public class TenantGroupChatRoutingAspect {
                 return write(context, requirePath(path) + "/context", body);
             }
             case "searchMessages": {
+                // searchMessages 将搜索条件转为 Node 的查询参数，并丢弃空字段。
                 if (args[1] == null) throw unsupported();
                 Map<String, Object> body = mapper.convertValue(args[1],
                     new TypeReference<Map<String, Object>>() { });
                 body.values().removeIf(java.util.Objects::isNull);
                 return write(context, requirePath(path) + "/messages/search", body);
             }
-            case "messageContext": return read(context, requirePath(path) + "/messages/" + id(args[1]) + "/context");
-            case "messages": return read(context, topicPath(requirePath(path) + "/topics/" + id(args[1])
+            case "messageContext":
+                // messageContext 读取单条消息上下文。
+                return read(context, requirePath(path) + "/messages/" + id(args[1]) + "/context");
+            case "messages":
+                // messages 读取指定话题下的消息，并使用游标分页。
+                return read(context, topicPath(requirePath(path) + "/topics/" + id(args[1])
                 + "/messages", args[2], args[3]));
             case "claimWelcome": {
+                // claimWelcome 领取群组欢迎状态，写入租户 Node 的成员状态。
                 // 欢迎状态属于租户内的成员关系；不得回退到共享库或借用已读游标。
                 var result = node.command(context, "POST", requirePath(path) + "/welcome", sessionId,
                     "CLAIM_WELCOME", new TenantNodeModels.EmptyPayload());
@@ -168,6 +193,7 @@ public class TenantGroupChatRoutingAspect {
                 return ResponseUtil.successResponse(result.data());
             }
             case "markRead": {
+                // markRead 更新当前用户的已读游标，游标必须是正数消息 ID。
                 GroupChatReadStateRequest request = (GroupChatReadStateRequest) args[1];
                 if (request == null || request.getLastReadMessageId() == null || request.getLastReadMessageId() <= 0) {
                     throw unsupported();
