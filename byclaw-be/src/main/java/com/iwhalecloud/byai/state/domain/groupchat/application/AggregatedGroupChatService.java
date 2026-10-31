@@ -17,8 +17,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -71,17 +73,26 @@ public class AggregatedGroupChatService {
         List<AggregatedGroupChatPage.FailedTenant> failed = new ArrayList<>();
         List<Future<TenantResult>> futures = new ArrayList<>();
         List<Source> sources = new ArrayList<>();
+        Set<Long> sharedEnterpriseIds = new HashSet<>();
+        Set<Long> readyNodeEnterpriseIds = new HashSet<>();
         long deadlineNanos = System.nanoTime() + TENANT_TIMEOUT.toNanos();
         // 默认企业、免费试用租户和历史公共群都在同一个库，公共来源只查询一次。
         sources.add(new Source(SHARED_SOURCE_ID, 0L, "公共工作区"));
         for (TenantMembershipRow tenant : tenants) {
             long enterpriseId = Long.parseLong(tenant.getEnterpriseId());
-            if (tenantModes.isSharedDataTenant(enterpriseId)) continue;
+            boolean sharedDataTenant = tenantModes.isSharedDataTenant(enterpriseId);
+            if (sharedDataTenant) {
+                sharedEnterpriseIds.add(enterpriseId);
+            } else if (isReadyNodeTenant(tenant)) {
+                readyNodeEnterpriseIds.add(enterpriseId);
+            }
+            if (sharedDataTenant) continue;
             sources.add(new Source(enterpriseId, enterpriseId, tenant.getEnterpriseName()));
         }
         for (Source source : sources) {
             int offset = offsets.getOrDefault(source.sourceId(), 0);
-            futures.add(executor.submit(() -> loadSource(userId, source, offset, pageSize)));
+            futures.add(executor.submit(() -> loadSource(userId, source, offset, pageSize,
+                sharedEnterpriseIds, readyNodeEnterpriseIds)));
         }
         List<Boolean> tenantHasMore = new ArrayList<>();
         for (int index = 0; index < futures.size(); index++) {
@@ -120,7 +131,8 @@ public class AggregatedGroupChatService {
             hasMore ? encodeCursor(nextOffsets) : null, hasMore, !failed.isEmpty(), failed);
     }
 
-    private TenantResult loadSource(long userId, Source source, int offset, int pageSize) {
+    private TenantResult loadSource(long userId, Source source, int offset, int pageSize,
+        Set<Long> sharedEnterpriseIds, Set<Long> readyNodeEnterpriseIds) {
         try {
             int page = offset / pageSize + 1;
             int skip = offset % pageSize;
@@ -146,7 +158,11 @@ public class AggregatedGroupChatService {
                 visible.forEach(group -> {
                     group.setEnterpriseId(source.enterpriseId());
                     group.setEnterpriseName(source.displayName());
+                    group.setRoutingEnterpriseId(source.enterpriseId());
                 });
+            } else {
+                visible.forEach(group -> group.setRoutingEnterpriseId(sharedRoutingEnterpriseId(
+                    group.getEnterpriseId(), sharedEnterpriseIds, readyNodeEnterpriseIds)));
             }
             return new TenantResult(visible.stream()
                     .map(group -> new Candidate(source.sourceId(), group)).toList(),
@@ -156,6 +172,29 @@ public class AggregatedGroupChatService {
                 error.getClass().getSimpleName());
             return new TenantResult(List.of(), false, new AggregatedGroupChatPage.FailedTenant(
                 source.displayId(), source.displayName(), reason(error)));
+        }
+    }
+
+    /**
+     * 计算公共库群组进入时的租户路由。
+     * 试用租户和默认企业继续使用自己的共享数据上下文；公共库中残留的已删除租户群组则回到默认公共租户。
+     */
+    private Long sharedRoutingEnterpriseId(Long enterpriseId, Set<Long> sharedEnterpriseIds,
+        Set<Long> readyNodeEnterpriseIds) {
+        if (enterpriseId == null || sharedEnterpriseIds.contains(enterpriseId)) {
+            return enterpriseId == null ? 1L : enterpriseId;
+        }
+        return readyNodeEnterpriseIds.contains(enterpriseId) ? enterpriseId : 1L;
+    }
+
+    /** 判断成员关系对应的 Node 是否已经完成开通。 */
+    private boolean isReadyNodeTenant(TenantMembershipRow tenant) {
+        try {
+            var state = mapper.readTree(tenant.getProvisionStateJson());
+            return "READY".equals(state.path("status").asText());
+        } catch (Exception error) {
+            LOG.debug("Unable to read tenant provision state for enterprise {}", tenant.getEnterpriseId(), error);
+            return false;
         }
     }
 

@@ -41,13 +41,13 @@ class TenantChatRoutingAspectTest extends I18nTestSupport {
     @Test
     void trialTenantUsesPublicChatWithoutCallingNode() throws Throwable {
         TenantRequestContextHolder.set(new TenantRequestContext(8L, 456L, "MEMBER"));
-        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
         ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
         Object original = ResponseUtil.successResponse("trial");
         when(call.proceed()).thenReturn(original);
 
         assertThat(aspect.route(call)).isSameAs(original);
-        verify(tenantModes).isTrialTenant(456L);
+        verify(tenantModes).isSharedDataTenant(456L);
         org.mockito.Mockito.verifyNoInteractions(node);
     }
 

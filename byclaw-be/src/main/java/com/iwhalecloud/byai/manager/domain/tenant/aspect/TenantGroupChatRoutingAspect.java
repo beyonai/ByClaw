@@ -85,11 +85,11 @@ public class TenantGroupChatRoutingAspect {
             context = invitations.resolve(method, args, context);
             if (context == null) return call.proceed();
             // 试用租户没有独立 Node；链接解析出试用租户后也沿用共享库公共实现。
-            if (tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
+            if (tenantModes.isSharedDataTenant(context.enterpriseId())) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
         }
         // 无租户上下文表示个人空间；试用租户也没有独立 Node，这两类都保留原始调用。
-        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isSharedDataTenant(context.enterpriseId())) return call.proceed();
         if ("defaultAssistant".equals(method)) return call.proceed();
         // 标准租户创建工作组由 TenantGroupCreationService 编排，并最终调用 Node 写租户库。
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);

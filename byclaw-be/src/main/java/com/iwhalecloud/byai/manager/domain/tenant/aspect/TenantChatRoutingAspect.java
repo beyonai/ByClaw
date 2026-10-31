@@ -66,7 +66,7 @@ public class TenantChatRoutingAspect {
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
         // 没有租户上下文时保持个人空间旧逻辑；试用租户没有独立 Node，也走公共库。
-        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isSharedDataTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         if (mentionMapper != null && args.length > 0 && args[0] instanceof ByaiSessionQo sessionQuery

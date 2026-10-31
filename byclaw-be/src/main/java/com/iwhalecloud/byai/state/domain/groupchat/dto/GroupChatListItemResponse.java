@@ -27,6 +27,14 @@ public class GroupChatListItemResponse {
 
     private String enterpriseName;
 
+    /**
+     * 进入群组时使用的租户 ID。
+     * 公共库里的历史群组仍保留原 enterpriseId 用于展示，但原租户已经删除或没有可用 Node 时，
+     * 需要改走默认公共租户 1，避免点击群组时触发失效租户切换。
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long routingEnterpriseId;
+
     @JsonSerialize(using = ToStringSerializer.class)
     private Long projectId;
 

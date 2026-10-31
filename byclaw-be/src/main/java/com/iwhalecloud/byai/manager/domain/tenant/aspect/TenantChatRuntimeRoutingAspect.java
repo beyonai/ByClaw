@@ -52,7 +52,7 @@ public class TenantChatRuntimeRoutingAspect {
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
         // 个人空间和试用租户没有独立 Node，继续执行原始 Controller 方法。
-        if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
+        if (context == null || tenantModes.isSharedDataTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
         switch (method) {

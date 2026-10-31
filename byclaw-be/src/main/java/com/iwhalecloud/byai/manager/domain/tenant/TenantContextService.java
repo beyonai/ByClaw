@@ -66,7 +66,7 @@ public class TenantContextService {
         if (RuntimeEnvironment.isDevelopment()) {
             return membership;
         }
-        if (!tenantModes.isTrialTenant(enterpriseId) && !"READY".equals(provisionState(membership))) {
+        if (!tenantModes.isSharedDataTenant(enterpriseId) && !"READY".equals(provisionState(membership))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.notReady");
         }
         return membership;

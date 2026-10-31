@@ -97,6 +97,44 @@ class AggregatedGroupChatServiceTest {
             .containsExactly(1003L);
     }
 
+    @Test
+    void sharedHistoricalGroupFallsBackToDefaultPublicRouting() {
+        login(7L);
+        when(memberships.selectAvailableForUser(7L)).thenReturn(List.of(tenant("11389605", "免费试用")));
+        when(modes.isSharedDataTenant(11389605L)).thenReturn(true);
+        GroupChatListItemResponse historical = group(11231123L, "历史群");
+        historical.setEnterpriseId(11227835L);
+        historical.setEnterpriseName("已删除企业");
+        PageInfo<GroupChatListItemResponse> page = new PageInfo<>();
+        page.setList(List.of(historical));
+        when(publicGroups.listMyGroupsInEnterprise(7L, 1, 20, null)).thenReturn(page);
+
+        var result = service.list(20, null);
+
+        assertThat(result.items()).singleElement().satisfies(item -> {
+            assertThat(item.getEnterpriseId()).isEqualTo(11227835L);
+            assertThat(item.getEnterpriseName()).isEqualTo("已删除企业");
+            assertThat(item.getRoutingEnterpriseId()).isEqualTo(1L);
+        });
+    }
+
+    @Test
+    void sharedTrialGroupKeepsTrialRouting() {
+        login(7L);
+        when(memberships.selectAvailableForUser(7L)).thenReturn(List.of(tenant("11389605", "免费试用")));
+        when(modes.isSharedDataTenant(11389605L)).thenReturn(true);
+        GroupChatListItemResponse trial = group(11393965L, "试用群");
+        trial.setEnterpriseId(11389605L);
+        PageInfo<GroupChatListItemResponse> page = new PageInfo<>();
+        page.setList(List.of(trial));
+        when(publicGroups.listMyGroupsInEnterprise(7L, 1, 20, null)).thenReturn(page);
+
+        var result = service.list(20, null);
+
+        assertThat(result.items()).singleElement().extracting(GroupChatListItemResponse::getRoutingEnterpriseId)
+            .isEqualTo(11389605L);
+    }
+
     private static void login(long userId) {
         LoginInfo login = new LoginInfo();
         login.setUserId(userId);

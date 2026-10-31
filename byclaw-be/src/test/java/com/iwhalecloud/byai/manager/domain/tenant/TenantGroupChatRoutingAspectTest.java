@@ -161,7 +161,7 @@ class TenantGroupChatRoutingAspectTest {
     @Test
     void trialTenantCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
-        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
         TenantRequestContextHolder.set(context);
         GroupChatCreateRequest request = new GroupChatCreateRequest();
         request.setName("共享工作组");
@@ -180,7 +180,7 @@ class TenantGroupChatRoutingAspectTest {
     @Test
     void trialTenantInvitationUsesSharedControllerInsteadOfNodeCommand() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
-        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
         TenantRequestContextHolder.set(context);
         ProceedingJoinPoint invocation = call("createInvitation", 11393965L,
             mock(jakarta.servlet.http.HttpServletResponse.class));
@@ -195,7 +195,7 @@ class TenantGroupChatRoutingAspectTest {
     void anonymousTrialTenantInvitationUsesSharedControllerAfterResolvingLink() throws Throwable {
         TenantRequestContext trialContext = new TenantRequestContext(27L, 456L, "MEMBER");
         when(invitations.resolve(eq("validateInvitation"), any(), eq(null))).thenReturn(trialContext);
-        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
         ProceedingJoinPoint invocation = call("validateInvitation",
             mock(com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class),
             mock(jakarta.servlet.http.HttpServletResponse.class));
