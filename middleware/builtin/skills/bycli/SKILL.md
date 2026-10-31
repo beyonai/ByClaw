@@ -93,6 +93,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
+| 登录某站点 / 站点命令报 `AUTH_REQUIRED`（非微信） | `bycli auth` 登录入口 | 下方「非微信站点登录入口」 |
 | 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
 | 知乎搜索、回答/文章读取、草稿、发布或创作数据 | `zhihu` Adapter | [zhihu.md](./references/zhihu.md) |
 | 视频号发布、草稿恢复、状态或账号/视频数据 | `weixin-channels` Adapter 与微信 Runner | [weixin-channels.md](./references/weixin-channels.md) + [weixin.md](./references/weixin.md) |
@@ -231,6 +232,19 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 只使用已经返回的结果：报告错误类型、已知 session name 与已返回 URL；若 URL 未返回，明确说明“URL 未提供”。提示用户亲自完成验证后
 结束本轮，等待其明确确认。微信任务优先遵循 [references/weixin.md](./references/weixin.md) 的专属规则。
 
+### 非微信站点登录入口（`bycli auth`）
+
+`bycli auth sites -f json` 列出有配方的平台（PUBLIC，不需要桥接）；`bycli auth login <platform>` 在指定平台的持久 adapter 租约里
+打开官方登录页（前台窗口）并等待人工完成扫码 / 短信；`bycli auth status <platform>` 用独立页面做一次性只读确认，不打断已保留的
+登录页。`login` / `status` 是 COOKIE 策略，遵守桥接预检与恢复规则。
+
+- `login` 只开页并轮询，不读取、不输入、不提交凭据；扫码、短信与 SSO 跳转属于人。默认等 180 秒（`--timeout` 30–900），超时后登录页**保留**，直接重跑 `login` 会复用该页而不刷新二维码；每个平台各自持有独立租约，互不覆盖。
+- 结果是三态：`logged-in`、`logged-out`、`unknown` + `reason`。`unknown`（`login-in-progress`、`account-model-unavailable`、`probe-unavailable` 等）**不是未登录**：不得据此重跑 `login`、加长 `--timeout`，或改用 `bycli browser` 补查；按 `reason` 报告，等用户指示后再 `status` 重查或请其查看浏览器。
+- `auth sites` 报告 `verification` 为未验证（如 `needs-live-validation`）时：登录页看起来已完成而 `status` 仍报 `logged-out` / `unknown`，按配方未验证上报，不进 AutoFix、不改 adapter、不新增登录命令。
+- 同一平台的发布面和读取面可能各自登录（小红书：`xiaohongshu` 是 www、`xiaohongshu-creator` 是创作中心）。`status` 只代表配方声明的 `surface`；一个面 `logged-in` 不代表另一个面可用，写操作前按对应面的平台名预检。
+- `auth` 的登录页由 adapter 租约持有：不得用 `bycli browser ... state/tab list/get url` 检查、导航、bind 或关闭；继续确认只用 `bycli auth status`。
+- 微信相关登录 / 验证仍走 [references/weixin.md](./references/weixin.md)，不进入 `bycli auth`。
+
 ## 错误处理
 
 | 错误类型 | Agent 行为 |
@@ -239,7 +253,7 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 | Weixin `AUTH_RETRY_EXHAUSTED` | 验证确认预算已耗尽；这是不可重试终态，不得再次提示登录、添加 `--verification-confirmed`、修改参数或创建新 fingerprint |
 | Weixin `COMMAND_TIMEOUT_UNCERTAIN` / `COMMAND_EXEC_UNCERTAIN` | Runner 未取得最终结构化结果；这不是登录状态，不得添加 `--verification-confirmed`。先检查返回的进程诊断和已有本地产物；`download-publish-data` 仅按 `references/weixin.md` 的单次诊断重试规则请求独立授权 |
 | Weixin `OPERATION_ALREADY_FINALIZED` | 同一逻辑操作此前已终结，本次未执行底层命令；读取首次执行时保存的结果或产物，禁止解释成登录失败、修改 `--limit`/日期/输出路径绕过 gate，或声称前次业务结果一定成功 |
-| AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
+| AUTH_REQUIRED (exit 77，非 Weixin) | 该平台在 `bycli auth sites` 里有配方时，按「非微信站点登录入口」处理：`login` 打开官方登录页等人完成，`status` 只读确认；无配方时 STOP，提示用户登录 |
 | BROWSER_CONNECT (exit 69) | 不得因随机 profile 名称推断需要用户操作。未经过 Runner 的通用命令调用 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`；Runner 已返回最终 bridgeCode 时不得再次执行恢复。只有 `BRIDGE_UNAVAILABLE` 才请求用户检查托管 Chromium 与扩展 |
 | CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
