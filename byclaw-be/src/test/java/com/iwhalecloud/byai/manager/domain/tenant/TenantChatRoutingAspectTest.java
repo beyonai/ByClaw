@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 

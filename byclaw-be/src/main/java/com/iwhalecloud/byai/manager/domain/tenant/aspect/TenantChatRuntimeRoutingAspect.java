@@ -1,4 +1,6 @@
-package com.iwhalecloud.byai.manager.domain.tenant;
+package com.iwhalecloud.byai.manager.domain.tenant.aspect;
+
+import com.iwhalecloud.byai.manager.domain.tenant.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,8 +48,10 @@ public class TenantChatRuntimeRoutingAspect {
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.chat.AssistantChatController.*(..))")
+    /** 路由聊天运行状态、快照和消息更新接口，并在转发前校验会话归属。 */
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
+        // 个人空间和试用租户没有独立 Node，继续执行原始 Controller 方法。
         if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
@@ -125,6 +129,7 @@ public class TenantChatRuntimeRoutingAspect {
 
     /** WebSocket STOP_CHAT must use the same tenant authorization as the HTTP endpoint. */
     @Around("execution(* com.iwhalecloud.byai.state.domain.ws.service.ChatService.stopChat(..))")
+    /** 停止聊天任务：先校验租户上下文，再取消 Node 或本地运行中的任务。 */
     public Object stopWebSocket(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
         if (context != null) {
@@ -135,6 +140,7 @@ public class TenantChatRuntimeRoutingAspect {
         return call.proceed();
     }
 
+    /** 校验停止操作中的会话、消息和当前用户归属。 */
     private void authorizeStop(TenantRequestContext context, Long sessionId, Long messageId) {
         session(context, sessionId);
         if (messageId == null) return;
@@ -145,12 +151,14 @@ public class TenantChatRuntimeRoutingAspect {
         }
     }
 
+    /** 校验会话 ID，并确认会话属于当前租户。 */
     private void session(TenantRequestContext context, Long sessionId) {
         if (sessionId == null || sessionId <= 0) throw invalid();
         node.request(context, "GET", "/internal/v1/sessions/" + sessionId, null,
             new TypeReference<SessionView>() { });
     }
 
+    /** 查询并校验消息归属，供运行状态接口复用。 */
     private MessageView message(TenantRequestContext context, Long messageId) {
         if (messageId == null || messageId <= 0) throw invalid();
         List<MessageView> messages = node.request(context, "POST", "/internal/v1/assiman/getMessageByIds",
@@ -161,6 +169,7 @@ public class TenantChatRuntimeRoutingAspect {
         return messages.get(0);
     }
 
+    /** 将切点参数安全转换为正数 ID。 */
     private Long id(Object value) {
         try {
             Long id = value instanceof Long number ? number : Long.valueOf(String.valueOf(value));
@@ -171,6 +180,7 @@ public class TenantChatRuntimeRoutingAspect {
         }
     }
 
+    /** 构造统一的运行时参数错误。 */
     private ResponseStatusException invalid() {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.chat.request.invalid");
     }

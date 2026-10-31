@@ -1,4 +1,6 @@
-package com.iwhalecloud.byai.manager.domain.tenant;
+package com.iwhalecloud.byai.manager.domain.tenant.aspect;
+
+import com.iwhalecloud.byai.manager.domain.tenant.*;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,12 +62,18 @@ public class TenantGroupChatRoutingAspect {
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTopicController.*(..))"
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController.*(..))"
         + " || execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController.*(..))")
+    /**
+     * 统一路由群组 Controller：标准租户调用 Node，试用租户和个人空间执行公共库逻辑。
+     * 分支依据 Controller 类型、方法名和当前租户模式决定，实际数据操作交给对应应用服务。
+     */
     public Object route(ProceedingJoinPoint call) throws Throwable {
         // Forwarding owns its typed, strict routing boundary; generic create/list branches have legacy development exceptions.
+        // 转发 Controller 有独立的严格路由边界，避免被通用群组路由重复处理。
         if (call.getTarget() instanceof com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatForwardController) return call.proceed();
         TenantRequestContext context = TenantRequestContextHolder.get();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
+        // 邀请接口先从 token 解析租户；试用租户没有 Node，直接使用公共库实现。
         if (List.of("createInvitation", "validateInvitation", "joinInvitation").contains(method)) {
             context = invitations.resolve(method, args, context);
             if (context == null) return call.proceed();
@@ -73,8 +81,10 @@ public class TenantGroupChatRoutingAspect {
             if (tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
             return ResponseUtil.successResponse(invitations.handle(context, method, args));
         }
+        // 无租户上下文表示个人空间；试用租户也没有独立 Node，这两类都保留原始调用。
         if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         if ("defaultAssistant".equals(method)) return call.proceed();
+        // 标准租户创建工作组由 TenantGroupCreationService 编排，并最终调用 Node 写租户库。
         if ("create".equals(method)) return create(call, context, (GroupChatCreateRequest) args[0]);
         if (args.length == 0 && !"list".equals(method)) throw unsupported();
         String sessionId = args.length > 0 && args[0] instanceof Long id && id > 0 ? id.toString() : null;
@@ -175,12 +185,14 @@ public class TenantGroupChatRoutingAspect {
         }
     }
 
+    /** 创建标准租户工作组：先执行平台侧准备，再调用 Node 完成租户库写入。 */
     private Object create(ProceedingJoinPoint call, TenantRequestContext context, GroupChatCreateRequest request)
         throws Throwable {
         if (RuntimeEnvironment.isDevelopment()) return call.proceed();
         return ResponseUtil.successResponse(creation.create(context, request));
     }
 
+    /** 查询工作组列表；线上标准租户从 Node 读取，开发环境保留公共库兼容路径。 */
     private Object list(TenantRequestContext context, int pageNum, int pageSize) {
         if (RuntimeEnvironment.isDevelopment()) {
             return legacy.listMyGroups(pageNum, pageSize);
@@ -189,26 +201,31 @@ public class TenantGroupChatRoutingAspect {
             null, new TypeReference<Map<String, Object>>() {});
     }
 
+    /** 读取租户 Node 资源，并统一处理消息展示投影。 */
     private Object read(TenantRequestContext context, String path) {
         Object response = node.request(context, "GET", path, null, new TypeReference<Object>() { });
         return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
+    /** 向租户 Node 写入群组资源。 */
     private Object write(TenantRequestContext context, String path, Object body) {
         Object response = node.request(context, "POST", path, body, new TypeReference<Object>() { });
         return ResponseUtil.successResponse(messageDisplayService == null ? response : messageDisplayService.resolve(response));
     }
 
+    /** 要求路由路径已经成功解析。 */
     private String requirePath(String path) {
         if (path == null) throw unsupported();
         return path;
     }
 
+    /** 将切点参数转换为合法的正数 ID。 */
     private String id(Object value) {
         if (!(value instanceof Long id) || id <= 0) throw unsupported();
         return id.toString();
     }
 
+    /** 构造文件分页路径并校验分页参数。 */
     private String filePath(String path, Object requestedSize, Object cursor) {
         int pageSize = requestedSize == null ? 20 : requestedSize instanceof Integer size ? size : 0;
         if (pageSize < 1 || pageSize > 50) {
@@ -224,6 +241,7 @@ public class TenantGroupChatRoutingAspect {
         return result.toString();
     }
 
+    /** 构造话题消息分页路径并校验游标。 */
     private String topicPath(String path, Object limit, Object cursor) {
         StringBuilder result = new StringBuilder(path).append("?limit=");
         int boundedLimit = limit instanceof Integer count && count > 0 && count <= 100 ? count : 20;
@@ -236,6 +254,7 @@ public class TenantGroupChatRoutingAspect {
         return result.toString();
     }
 
+    /** 构造统一的租户群组暂不支持错误。 */
     private ResponseStatusException unsupported() {
         return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.group.notReady");
     }

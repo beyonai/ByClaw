@@ -1,4 +1,6 @@
-package com.iwhalecloud.byai.manager.domain.tenant;
+package com.iwhalecloud.byai.manager.domain.tenant.aspect;
+
+import com.iwhalecloud.byai.manager.domain.tenant.*;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -39,8 +41,10 @@ public class TenantGroupTaskRoutingAspect {
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTaskController.*(..))")
+    /** 路由群组任务查询、发布和停止操作到任务所属的租户 Node。 */
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
+        // 没有请求上下文时，先尝试从已登记任务恢复并校验当前用户身份。
         Object[] args = call.getArgs();
         if (context == null && args.length > 0 && args[0] instanceof Long registeredTask
             && registeredTask >= 8_000_000_000_000_000_000L && projections != null) {
@@ -53,6 +57,7 @@ public class TenantGroupTaskRoutingAspect {
                 context = contexts.validate(Long.toString(registered.enterpriseId()));
             }
         }
+        // 无法恢复租户上下文时继续公共库旧逻辑，由原 Controller 自己处理。
         if (context == null) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.group.task.invalid");

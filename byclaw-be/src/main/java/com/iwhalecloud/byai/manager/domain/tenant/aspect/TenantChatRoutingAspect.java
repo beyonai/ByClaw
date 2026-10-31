@@ -1,4 +1,6 @@
-package com.iwhalecloud.byai.manager.domain.tenant;
+package com.iwhalecloud.byai.manager.domain.tenant.aspect;
+
+import com.iwhalecloud.byai.manager.domain.tenant.*;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
@@ -54,8 +56,13 @@ public class TenantChatRoutingAspect {
     @Around("execution(* com.iwhalecloud.byai.state.interfaces.controller.manage.AssistantManController.*(..))"
         + " || execution(* com.iwhalecloud.byai.manager.interfaces.controller.devloop.ProjectController.listSessionsByProject(..))"
         + " || execution(* com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.getMessageCountAndPosition(..))")
+    /**
+     * 统一路由普通聊天接口：试用租户继续使用公共库，标准租户转发到所属 Node。
+     * 方法名由切点匹配的 Controller 方法决定，具体分支按方法名校验请求并调用 Node。
+     */
     public Object route(ProceedingJoinPoint call) throws Throwable {
         TenantRequestContext context = TenantRequestContextHolder.get();
+        // 没有租户上下文时保持个人空间旧逻辑；试用租户没有独立 Node，也走公共库。
         if (context == null || tenantModes.isTrialTenant(context.enterpriseId())) return call.proceed();
         String method = ((MethodSignature) call.getSignature()).getMethod().getName();
         Object[] args = call.getArgs();
@@ -233,11 +240,13 @@ public class TenantChatRoutingAspect {
         }
     }
 
+    /** 判断指定会话是否仍属于公共库中的历史群组。 */
     private boolean isLegacyGroup(TenantRequestContext context, Long sessionId) {
         return sessionId != null && sessionId > 0 && mentionMapper.isLegacyGroupMember(sessionId,
             context.userId(), context.enterpriseId());
     }
 
+    /** 校验反馈消息归属后，把反馈操作转发给租户 Node。 */
     private Object feedback(TenantRequestContext context, String messageId, String type, String mode, String details) {
         if (messageId == null || !messageId.matches("[1-9][0-9]*") || PraiseAndTreadEnum.getName(type) == null) {
             throw badRequest();
@@ -254,10 +263,12 @@ public class TenantChatRoutingAspect {
         return ResponseUtil.successResponse(I18nUtil.get("chat.message.updated"), result.metadata());
     }
 
+    /** 构造统一的请求参数错误。 */
     private ResponseStatusException badRequest() {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.chat.request.invalid");
     }
 
+    /** 构造统一的“当前租户暂不支持”错误。 */
     private ResponseStatusException unsupported() {
         return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.chat.notReady");
     }
