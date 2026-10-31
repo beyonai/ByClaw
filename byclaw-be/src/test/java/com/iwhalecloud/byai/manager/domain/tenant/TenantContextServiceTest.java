@@ -9,8 +9,6 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,22 +25,13 @@ class TenantContextServiceTest {
     }
 
     @Test
-    void available_preservesLargeEnterpriseIdsAndHidesInternalProvisionFields() {
+    void availablePreservesLargeEnterpriseIdsAndHidesInternalProvisionFields() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
-        LoginInfo login = new LoginInfo();
-        login.setUserId(12L);
-        CurrentUserHolder.setLoginInfo(login);
-        TenantMembershipRow first = new TenantMembershipRow();
-        first.setEnterpriseId("9007199254740993");
-        first.setEnterpriseName("企业一");
-        first.setRole("OWNER");
+        TenantContextService service = service(mapper);
+        CurrentUserHolder.setLoginInfo(login(12L));
+        TenantMembershipRow first = membership("9007199254740993", "企业一", "OWNER", "READY");
         first.setProvisionStateJson("{\"status\":\"READY\",\"fencingToken\":99}");
-        TenantMembershipRow second = new TenantMembershipRow();
-        second.setEnterpriseId("234");
-        second.setEnterpriseName("企业二");
-        second.setRole("MEMBER");
-        second.setProvisionStateJson("{\"status\":\"PROVISIONING\",\"fencingToken\":100}");
+        TenantMembershipRow second = membership("234", "企业二", "MEMBER", "PROVISIONING");
         when(mapper.selectAvailableForUser(12L)).thenReturn(List.of(first, second));
 
         assertThat(service.available()).containsExactly(
@@ -51,60 +40,41 @@ class TenantContextServiceTest {
     }
 
     @Test
-    void available_requiresAuthenticatedUser() {
-        TenantContextService service = new TenantContextService(mock(TenantMembershipMapper.class),
-            new ObjectMapper(), redis(), mock(TenantModeService.class));
+    void switchOnlyValidatesMembershipAndDoesNotIssueToken() {
+        TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
+        TenantContextService service = service(mapper);
+        CurrentUserHolder.setLoginInfo(login(12L));
+        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership("123", null, "OWNER", "READY"));
 
-        assertThatThrownBy(service::available).isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("401");
+        TenantSwitchView switched = service.switchTo("123");
+
+        assertThat(switched).isEqualTo(new TenantSwitchView("123", "OWNER"));
+        assertThat(service.validate(12L, 123L))
+            .isEqualTo(new TenantRequestContext(12L, 123L, "OWNER"));
     }
 
     @Test
-    void switchAndEachRequestRecheckCurrentUserMembership() {
+    void eachRequestRechecksCurrentUserMembership() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
-        LoginInfo login = new LoginInfo();
-        login.setUserId(12L);
-        login.setSessionId("login-session-1");
-        CurrentUserHolder.setLoginInfo(login);
-        TenantMembershipRow membership = new TenantMembershipRow();
-        membership.setEnterpriseId("123");
-        membership.setRole("OWNER");
-        membership.setProvisionStateJson("{\"status\":\"READY\"}");
-        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership);
-
-        TenantSwitchView switched = service.switchTo("123");
-        assertThat(switched.enterpriseId()).isEqualTo("123");
-        assertThat(switched.role()).isEqualTo("OWNER");
+        TenantContextService service = service(mapper);
+        CurrentUserHolder.setLoginInfo(login(12L));
+        TenantMembershipRow membership = membership("123", null, "OWNER", "READY");
+        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership).thenReturn(null);
 
         assertThat(service.validate("123"))
             .isEqualTo(new TenantRequestContext(12L, 123L, "OWNER"));
-        assertThatThrownBy(() -> service.validate("124"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
-        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(null);
         assertThatThrownBy(() -> service.validate("123"))
             .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
     }
 
     @Test
-    void switchIssuesTabContextTokenWithExpiry() {
+    void explicitUserIdMustMatchAuthenticatedIdentity() {
         TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-        TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
-        LoginInfo login = new LoginInfo();
-        login.setUserId(12L);
-        login.setSessionId("login-session-1");
-        CurrentUserHolder.setLoginInfo(login);
-        TenantMembershipRow membership = new TenantMembershipRow();
-        membership.setEnterpriseId("123");
-        membership.setRole("OWNER");
-        membership.setProvisionStateJson("{\"status\":\"READY\"}");
-        when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership);
+        TenantContextService service = service(mapper);
+        CurrentUserHolder.setLoginInfo(login(12L));
 
-        var view = new ObjectMapper().valueToTree(service.switchTo("123"));
-
-        assertThat(view.path("tenantContextToken").asText()).isNotBlank();
-        assertThat(view.path("expiresAt").asText()).isNotBlank();
-        assertThat(view.path("contextVersion").asInt()).isPositive();
+        assertThatThrownBy(() -> service.validate(13L, 123L))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("401");
     }
 
     @Test
@@ -113,40 +83,39 @@ class TenantContextServiceTest {
         try {
             System.setProperty("BE_ENV", "development");
             TenantMembershipMapper mapper = mock(TenantMembershipMapper.class);
-            TenantContextService service = new TenantContextService(mapper, new ObjectMapper(), redis(), mock(TenantModeService.class));
-            LoginInfo login = new LoginInfo();
-            login.setUserId(12L);
-            login.setSessionId("login-session-1");
-            CurrentUserHolder.setLoginInfo(login);
-            when(mapper.selectActiveMembership(12L, 123L))
-                .thenReturn(membership(123L, "MEMBER", "RESERVED"));
+            TenantContextService service = service(mapper);
+            CurrentUserHolder.setLoginInfo(login(12L));
+            when(mapper.selectActiveMembership(12L, 123L)).thenReturn(membership("123", null, "MEMBER", "RESERVED"));
 
-            TenantSwitchView view = service.switchTo("123");
-
-            assertThat(view.enterpriseId()).isEqualTo("123");
-            assertThat(view.role()).isEqualTo("MEMBER");
-            assertThat(view.tenantContextToken()).isNotBlank();
-            assertThat(service.validate("123")).isEqualTo(new TenantRequestContext(12L, 123L, "MEMBER"));
+            assertThat(service.switchTo("123")).isEqualTo(new TenantSwitchView("123", "MEMBER"));
         }
         finally {
-            if (originalEnvironment == null) System.clearProperty("BE_ENV");
-            else System.setProperty("BE_ENV", originalEnvironment);
+            if (originalEnvironment == null) {
+                System.clearProperty("BE_ENV");
+            }
+            else {
+                System.setProperty("BE_ENV", originalEnvironment);
+            }
         }
     }
 
-    private TenantMembershipRow membership(long enterpriseId, String role, String state) {
+    private TenantContextService service(TenantMembershipMapper mapper) {
+        return new TenantContextService(mapper, new ObjectMapper(), mock(TenantModeService.class));
+    }
+
+    private LoginInfo login(long userId) {
+        LoginInfo login = new LoginInfo();
+        login.setUserId(userId);
+        login.setSessionId("login-session-1");
+        return login;
+    }
+
+    private TenantMembershipRow membership(String enterpriseId, String name, String role, String state) {
         TenantMembershipRow membership = new TenantMembershipRow();
-        membership.setEnterpriseId(Long.toString(enterpriseId));
+        membership.setEnterpriseId(enterpriseId);
+        membership.setEnterpriseName(name);
         membership.setRole(role);
         membership.setProvisionStateJson("{\"status\":\"" + state + "\"}");
         return membership;
-    }
-
-    @SuppressWarnings("unchecked")
-    private StringRedisTemplate redis() {
-        StringRedisTemplate redis = mock(StringRedisTemplate.class);
-        ValueOperations<String, String> values = mock(ValueOperations.class);
-        when(redis.opsForValue()).thenReturn(values);
-        return redis;
     }
 }

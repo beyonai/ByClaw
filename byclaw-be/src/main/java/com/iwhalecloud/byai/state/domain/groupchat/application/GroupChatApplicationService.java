@@ -213,6 +213,7 @@ public class GroupChatApplicationService {
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
+        response.setEnterpriseId(enterpriseId);
         members.forEach(this::fillMemberPresentation);
         response.setMembers(members);
         response.setCoordinatorAgentId(coordinatorId == null ? null : coordinatorId.toString());
@@ -391,6 +392,8 @@ public class GroupChatApplicationService {
         authorizationService.requireCurrentUserMember(sessionId);
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
+        response.setEnterpriseId(groupBusinessEnterpriseId(session,
+            sessionExtService.findOneByExtParamCode(sessionId, BUSINESS_ENTERPRISE_EXT)));
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
         fillMemberPresentations(members);
         response.setMembers(members);

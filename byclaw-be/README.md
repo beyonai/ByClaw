@@ -206,7 +206,7 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 
 ## 群列表消息摘要
 
-租户请求带 `X-Enterprise-Id` 和 `X-Tenant-Context` 时，新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。
+租户请求带 `X-Enterprise-Id` 时，BE 会按当前登录用户的 ACTIVE 成员关系重新校验租户范围；不再使用 `X-Tenant-Context`。新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。群列表和群详情返回归属 `enterpriseId`，调用方切换工作组时以该字段建立聊天上下文。
 
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
