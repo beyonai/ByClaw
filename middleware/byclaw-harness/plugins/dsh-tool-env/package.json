@@ -34,7 +34,8 @@
     "@deepseek-ai/dsh-fs-ssh": "workspace:*",
     "@deepseek-ai/dsh-sandbox-ssh": "workspace:*",
     "@deepseek-ai/dsh-ssh": "workspace:*",
-    "@deepseek-ai/dsh-subprocess-ssh": "workspace:*"
+    "@deepseek-ai/dsh-subprocess-ssh": "workspace:*",
+    "ws": "8.21.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",

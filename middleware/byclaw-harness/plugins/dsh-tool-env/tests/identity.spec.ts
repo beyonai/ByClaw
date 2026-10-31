@@ -47,7 +47,7 @@ describe('ToolEnvIdentity', () => {
     await identity.writeClientConfig({ hostName: 'alb.example.com', port: 80, websocket: 'ws://alb.example.com/kruise/sb/8022/?token=t' })
     const config = await readFile(join(dir, 'state', 'ssh_config'), 'utf8')
     const line = config.split('\n').find(entry => entry.includes('ProxyCommand'))
-    expect(line).toBe(`  ProxyCommand "${process.execPath}" "${join(dir, '..', '..').length > 0 ? line?.split('"')[3] ?? '' : ''}" "ws://alb.example.com/kruise/sb/8022/?token=t"`)
+    expect(line).toBe(`  ProxyCommand "${process.execPath}" "${line?.split('"')[3] ?? ''}" "${join(dir, 'state', 'endpoint.json')}"`)
     expect(line?.split('"')[3]).toMatch(/[/\\]scripts[/\\]ws-proxy\.mjs$/u)
     await access(line?.split('"')[3] ?? '')
     expect(config).toContain('HostKeyAlias byclaw-tool-env')

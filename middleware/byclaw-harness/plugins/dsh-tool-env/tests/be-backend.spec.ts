@@ -15,6 +15,7 @@ class FakeByClawBe {
   readonly records = new Map<string, { sandboxId: string; instanceEndpoints: Record<string, string> }>()
   /** Endpoint map handed to the next created record. */
   nextEndpoints: Record<string, string> = {}
+  endpointHeaders: Record<string, string> | undefined
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
@@ -82,14 +83,14 @@ class FakeByClawBe {
       }
       const primary = Object.values(record.instanceEndpoints)[0] ?? ''
       return { code: 0, msg: 'success', data: {
-        sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
+        endpointHeaders: this.endpointHeaders, sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
         instanceEndpoints: this.launchWithoutInstanceEndpoints ? undefined : record.instanceEndpoints,
       } }
     }
     if (path === '/byaiService/sandbox/getSandboxInfo') {
       const data = [...this.records.entries()]
         .filter(([key]) => key.startsWith(`${user}/`) && (body['sandboxType'] === undefined || key.endsWith(`/${String(body['sandboxType'])}`)))
-        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', instanceEndpoints: record.instanceEndpoints }))
+        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', endpointHeaders: this.endpointHeaders, instanceEndpoints: record.instanceEndpoints }))
       return { code: 0, msg: 'success', data }
     }
     if (path === '/byaiService/sandbox/removeSandbox') {
@@ -254,6 +255,27 @@ describe('ByClawBeBackend', () => {
       expect(logs[0]).toBe('tool environment sb1 from ByClaw BE: bridge ws://127.0.0.1:' + String(bridgePort) + '/kruise/sb1/8022/?…')
     } finally { await new Promise<void>(resolve => bridge.close(() => resolve())) }
   })
+
+  for (const fallback of [false, true]) {
+    it(`preserves private ingress headers from ${fallback ? 'info fallback' : 'launch'}`, async () => {
+      const seen: unknown[] = []
+      const bridge = createServer((request, response) => {
+        seen.push(request.headers['x-ingress-token'])
+        response.writeHead(request.headers['x-ingress-token'] === 'fixture-secret' ? 426 : 403).end()
+      })
+      await new Promise<void>(resolve => bridge.listen(0, '127.0.0.1', resolve))
+      try {
+        const bridgePort = (bridge.address() as { port: number }).port
+        fake.nextEndpoints = { ssh: `http://127.0.0.1:${bridgePort}/` }
+        fake.endpointHeaders = { 'x-ingress-token': 'fixture-secret' }
+        fake.launchWithoutInstanceEndpoints = fallback
+        const backend = new ByClawBeBackend(config, identity, message => logs.push(message))
+        expect(await backend.ensure()).toMatchObject({ headers: fake.endpointHeaders })
+        expect(seen).toEqual(['fixture-secret'])
+        expect(logs.join(' ')).not.toContain('fixture-secret')
+      } finally { await new Promise<void>(resolve => bridge.close(() => resolve())) }
+    })
+  }
 
   it('resolves a BE ingress path for the ssh port against the BE base URL', async () => {
     fake.nextEndpoints = { ssh: '/v1/sandboxes/sb1/proxy/8022?token=abc' }

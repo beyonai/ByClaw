@@ -80,8 +80,8 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
-interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string> }
+interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
 
 /** What `tool-sandbox.json` in the state directory records about the user's last launched B. */
 interface LaunchedRecord { serviceKey?: string; sandboxId?: string }
@@ -308,14 +308,14 @@ export class ByClawBeBackend implements ToolEnvBackend {
     const sandboxType = serviceKey
     if (data?.sandboxId) this.ownsSandbox = true
     let sandboxId = data?.sandboxId
-    let endpoint = this.sshEndpoint(data?.instanceEndpoints)
+    let endpoint = this.sshEndpoint(data?.instanceEndpoints, data?.endpointHeaders)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
       const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === sandboxType)
       const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
       sandboxId ??= entry?.sandboxId
-      endpoint = this.sshEndpoint(entry?.instanceEndpoints)
+      endpoint = this.sshEndpoint(entry?.instanceEndpoints, entry?.endpointHeaders)
     }
     if (endpoint === undefined && this.config.hostTemplate !== '' && sandboxId !== undefined && sandboxId !== '') {
       endpoint = { hostName: this.config.hostTemplate.replaceAll('{id}', sandboxId), port: this.config.port }
@@ -405,9 +405,11 @@ export class ByClawBeBackend implements ToolEnvBackend {
     if (published !== fingerprint) await writeFile(marker, JSON.stringify({ fingerprint, at: new Date().toISOString() }), { mode: 0o600 })
   }
 
-  private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {
+  private sshEndpoint(endpoints: Record<string, string> | undefined, headers?: Record<string, string>): ToolEnvEndpoint | undefined {
     const raw = endpoints?.[this.config.sshInstance]
-    return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
+    const endpoint = typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
+    if (endpoint?.websocket !== undefined && headers !== undefined) endpoint.headers = headers
+    return endpoint
   }
 
   private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST', timeoutMs = this.config.requestTimeoutMs): Promise<unknown> {

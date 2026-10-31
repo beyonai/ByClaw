@@ -6,7 +6,7 @@
  * without trusting first contact, and a recreated B keeps the same identity.
  */
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -61,11 +61,15 @@ export class ToolEnvIdentity {
    */
   async writeClientConfig(endpoint: ToolEnvEndpoint): Promise<void> {
     await this.keys()
+    const endpointFile = join(this.directory, 'endpoint.json')
+    if (endpoint.websocket !== undefined) {
+      await writeAtomic(endpointFile, JSON.stringify({ url: endpoint.websocket, headers: endpoint.headers ?? {} }), 0o600)
+    }
     await writeAtomic(this.clientConfig, [
       `Host ${this.alias}`,
       `  HostName ${endpoint.hostName}`,
       `  Port ${String(endpoint.port)}`,
-      ...(endpoint.websocket === undefined ? [] : [`  ProxyCommand ${quote(process.execPath)} ${quote(WS_PROXY)} ${quote(endpoint.websocket)}`]),
+      ...(endpoint.websocket === undefined ? [] : [`  ProxyCommand ${quote(process.execPath)} ${quote(WS_PROXY)} ${quote(endpointFile)}`]),
       `  User ${this.user}`,
       `  IdentityFile ${this.clientKey}`,
       '  IdentitiesOnly yes',
@@ -76,6 +80,7 @@ export class ToolEnvIdentity {
       '  ConnectTimeout 10',
       '',
     ].join('\n'), 0o600)
+    if (endpoint.websocket === undefined) await rm(endpointFile, { force: true })
     await includeInUserConfig(this.clientConfig)
   }
 }
