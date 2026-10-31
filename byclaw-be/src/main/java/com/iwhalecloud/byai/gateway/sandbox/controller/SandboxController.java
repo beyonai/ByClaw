@@ -256,6 +256,7 @@ public class SandboxController {
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
                     result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("endpointHeaders", sandbox.getEndpointHeaders());
                     result.put("token", sandbox.getGatewayToken());
                     result.put("isShared", shared);
                     result.put("serviceKey", sandbox.getServiceKey());
@@ -404,11 +405,14 @@ public class SandboxController {
                 () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease));
 
             // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
-            // 未对登录开放的规格（enabled=0，例如工具沙箱）只是被按需启动，不是用户的选择，不写入首选。
-            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
+            // Enabled controls execution; lifecycle.autoStart=false keeps on-demand tools out of
+            // login choices and must neither replace nor clear the user's main service preference.
+            boolean loginChoice = finalServiceKey != null
+                && sandboxService.isServiceKeyAutoStartEnabled(finalServiceKey);
+            if (loginChoice && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
                 && sandboxService.isServiceKeyEnabled(finalServiceKey)) {
                 sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
-            } else if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+            } else if (loginChoice && SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
                 sandboxService.removePreferredServiceKey(userCode);
             }
 
@@ -420,6 +424,7 @@ public class SandboxController {
             result.put("sandboxId", data.getSandboxId());
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
+            result.put("endpointHeaders", data.getEndpointHeaders());
             return ResponseUtil.successResponse(result);
         } catch (Exception e) {
             return ResponseUtil.fail("沙箱启动失败: " + e.getMessage());

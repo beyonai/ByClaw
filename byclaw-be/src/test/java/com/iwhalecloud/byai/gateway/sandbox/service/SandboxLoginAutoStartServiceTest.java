@@ -82,6 +82,42 @@ class SandboxLoginAutoStartServiceTest {
     }
 
     @Test
+    void trigger_excludesExplicitOnDemandLifecycleWithoutChangingMissingDefault() {
+        var mapper = mock(SandboxServiceSpecEntityMapper.class);
+        var sandbox = mock(SandboxService.class);
+        var tools = spec("byclaw-dsh-tools");
+        tools.setSpecJson("{\"runtimeOptions\":{\"lifecycle\":{\"autoStart\":\"false\"}}}");
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(tools, spec("byclaw-dsh")));
+        var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run);
+        try {
+            service.trigger("user001");
+            verify(sandbox, never()).launchSandboxWithServiceKey("user001", "byclaw-dsh-tools");
+            verify(sandbox).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void trigger_ignoresStaleOnDemandPreferredButKeepsEligiblePreferredCompatibility() {
+        for (boolean eligible : List.of(false, true)) {
+            var mapper = mock(SandboxServiceSpecEntityMapper.class);
+            var sandbox = mock(SandboxService.class);
+            when(mapper.selectAutoStartSpecs()).thenReturn(List.of(spec("openclaw")));
+            when(sandbox.getPreferredServiceKey("user001")).thenReturn("byclaw-dsh-tools");
+            when(sandbox.isServiceKeyAutoStartEnabled("byclaw-dsh-tools")).thenReturn(eligible);
+            var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run);
+            try {
+                service.trigger("user001");
+                verify(sandbox).launchSandboxWithServiceKey("user001", eligible ? "byclaw-dsh-tools" : "openclaw");
+                verify(sandbox, never()).launchSandboxWithServiceKey("user001", eligible ? "openclaw" : "byclaw-dsh-tools");
+            } finally {
+                service.shutdown();
+            }
+        }
+    }
+
+    @Test
     void trigger_coalescesConcurrentRequestsForSameUser() {
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);

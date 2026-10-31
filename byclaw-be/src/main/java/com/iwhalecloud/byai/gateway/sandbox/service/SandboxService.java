@@ -389,6 +389,19 @@ public class SandboxService {
         return entity != null && entity.getEnabled() != null && entity.getEnabled() == 1;
     }
 
+    /** Explicit on-demand execution is valid, but must not become a login preference. */
+    public boolean isServiceKeyAutoStartEnabled(String serviceKey) {
+        if (StringUtils.isBlank(serviceKey)) {
+            return false;
+        }
+        SandboxLaunchRouting route = new SandboxLaunchRouting(serviceKey, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        // The effective repository rejects disabled specs and resolves profile patches before policy.
+        SandboxServiceSpec spec = resolveEffectiveSpec(route.getSandboxType(), route.getProfileKey());
+        return spec != null && spec.isAutoStartEnabled()
+            && !"TENANT".equals(spec.getOwnerScope()) && !"SHARED".equals(spec.getOwnerScope())
+            && (spec.getRuntimeOptions() == null || !spec.getRuntimeOptions().containsKey("fileService"));
+    }
+
     /**
      * 获取用户首选 serviceKey
      *

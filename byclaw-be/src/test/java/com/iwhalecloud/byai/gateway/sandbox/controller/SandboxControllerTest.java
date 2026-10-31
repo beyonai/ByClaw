@@ -56,6 +56,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
             com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData data =
                 new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
             data.setSandboxId("created-sandbox");
+            data.setEndpointHeaders(Map.of("e2b-traffic-access-token","fixture-private-traffic"));
             when(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected)).thenReturn(data);
             Map<String, Object> params = new java.util.HashMap<>();
             params.put("userCode", " user001 ");
@@ -65,6 +66,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
             ResponseUtil response = controller.launchByUserCode(params);
             assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
             assertThat(((Map<?, ?>) response.getData()).get("sandboxId")).isEqualTo("created-sandbox");
+            assertThat(((Map<?, ?>) response.getData()).get("endpointHeaders")).isEqualTo(data.getEndpointHeaders());
             verify(service).launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected);
 
             params.put("autoRelease", null);
@@ -87,6 +89,55 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         verifyNoInteractions(service);
     }
 
+    @Test
+    void explicitOnDemandLaunchDoesNotWriteOrClearMainServicePreference() {
+        for (String key : List.of("byclaw-dsh-tools", "openclaw")) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            var data = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("tool-fixture");
+            when(service.launchSandboxWithServiceKey("user001", key, null)).thenReturn(data);
+            when(service.isServiceKeyEnabled(key)).thenReturn(true);
+            when(service.isServiceKeyAutoStartEnabled(key)).thenReturn(false);
+
+            assertThat(controller.launchByUserCode(Map.of("userCode", "user001", "serviceKey", key)).getCode())
+                .isEqualTo(ResponseUtil.SUCCESS);
+            verify(service).launchSandboxWithServiceKey("user001", key, null);
+            verify(service, never()).savePreferredServiceKey(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+            verify(service, never()).removePreferredServiceKey(org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Test
+    void regularLaunchKeepsDefaultPreferenceSaveAndClearBehavior() {
+        for (String key : List.of("byclaw-dsh", "openclaw")) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            var data = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("business-fixture");
+            when(service.launchSandboxWithServiceKey("user001", key, null)).thenReturn(data);
+            when(service.isServiceKeyEnabled(key)).thenReturn(true);
+            when(service.isServiceKeyAutoStartEnabled(key)).thenReturn(true);
+
+            assertThat(controller.launchByUserCode(Map.of("userCode", "user001", "serviceKey", key)).getCode())
+                .isEqualTo(ResponseUtil.SUCCESS);
+            if ("openclaw".equals(key)) {
+                verify(service).removePreferredServiceKey("user001");
+            } else {
+                verify(service).savePreferredServiceKey("user001", key);
+            }
+        }
+    }
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
@@ -105,6 +156,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
             .sandboxType("openclaw")
             .endpoints(List.of("http://host/proxy/18789/chat?token=0123456789abcdef0123456789abcdef"))
             .gatewayToken("0123456789abcdef0123456789abcdef")
+            .endpointHeaders(Map.of("e2b-traffic-access-token","fixture-info-traffic"))
             .build()));
 
         // Mock database record to return RUNNING status
@@ -121,6 +173,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         assertThat(data).hasSize(1);
         assertThat(data.get(0))
             .containsEntry("token", "0123456789abcdef0123456789abcdef")
+            .containsEntry("endpointHeaders", Map.of("e2b-traffic-access-token","fixture-info-traffic"))
             .containsEntry("status", "RUNNING")
             .doesNotContainKey("gatewayToken");
     }
