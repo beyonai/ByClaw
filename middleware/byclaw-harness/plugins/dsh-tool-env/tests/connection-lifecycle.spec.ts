@@ -49,6 +49,93 @@ describe('tool environment idle lifecycle', () => {
     vi.useRealTimers()
   })
 
+  it('releases an ensured environment after its first SSH handshake fails', async () => {
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockResolvedValueOnce({
+      connection: { ...inner, ready: Promise.reject(new Error('SSH helper disconnected')) },
+      fiber: { dispose() {} },
+    })
+    await expect(ssh.request('spawn', { argv: ['bash'] }, z.string())).rejects.toThrow('SSH helper disconnected')
+    expect(inner.request).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries cleanup after first connect fails and pause also fails', async () => {
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockRejectedValueOnce(new Error('connect failed'))
+    vi.mocked(backend.pause).mockRejectedValueOnce(new Error('pause failed'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('connect failed')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an unconnected environment while DSH still has an active turn', async () => {
+    let busy = true
+    ;(ssh as unknown as { options: { busy: { dsh(): boolean } } }).options.busy.dsh = () => busy
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockRejectedValueOnce(new Error('connect failed'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('connect failed')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(backend.pause).not.toHaveBeenCalled()
+    busy = false
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for failed-open cleanup before a new operation ensures B again', async () => {
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockRejectedValueOnce(new Error('connect failed'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('connect failed')
+    const pause = Promise.withResolvers<void>()
+    vi.mocked(backend.pause).mockReturnValueOnce(pause.promise)
+    await vi.advanceTimersByTimeAsync(100)
+    const next = ssh.request('spawn', {}, z.string())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(backend.ensure).toHaveBeenCalledTimes(1)
+    pause.resolve()
+    expect(await next).toBe('done')
+    expect(backend.ensure).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(2)
+  })
+
+  it('also cleans up when ensure reports an error after allocating the environment', async () => {
+    vi.mocked(backend.ensure).mockRejectedValueOnce(new Error('readiness timed out'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('readiness timed out')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('closing after first open fails still pauses the owned environment', async () => {
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockRejectedValueOnce(new Error('connect failed'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('connect failed')
+    await (ssh as unknown as { close(): Promise<void> }).close()
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels failed-open idle cleanup when a new command is using the environment', async () => {
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockRejectedValueOnce(new Error('connect failed'))
+    await expect(ssh.request('spawn', {}, z.string())).rejects.toThrow('connect failed')
+    await vi.advanceTimersByTimeAsync(99)
+    const command = Promise.withResolvers<string>()
+    inner.request.mockReturnValueOnce(command.promise)
+    const request = ssh.request('spawn', {}, z.string())
+    await vi.advanceTimersByTimeAsync(300)
+    expect(backend.pause).not.toHaveBeenCalled()
+    command.resolve('finished')
+    expect(await request).toBe('finished')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(backend.pause).toHaveBeenCalledTimes(1)
+    expect(inner.request).toHaveBeenCalledTimes(1)
+  })
+
   it('starts only on a remote operation, releases after idle and recreates on the next operation', async () => {
     await vi.advanceTimersByTimeAsync(500)
     expect(backend.ensure).not.toHaveBeenCalled()

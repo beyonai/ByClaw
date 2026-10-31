@@ -20,3 +20,15 @@ inside the image. Never bake endpoint files or credentials into the image.
 The plugin package also declares the same exact `ws` version for normal workspace
 installation. Local integration tests exercise the actual proxy process and a
 loopback authenticated WebSocket server; production ingress still needs E2E.
+
+On MicroVM guests, reserve the system SSH port for the platform. Set B's existing
+`BYCLAW_TOOL_ENV_PORT=2222` when system SSH already listens on 22; the WebSocket
+bridge still uses `BYCLAW_TOOL_ENV_WS_PORT` and forwards to that tool SSH port.
+Keep strict host-key checking enabled: connecting the bridge to system SSH must
+fail rather than trusting its different key.
+
+Identity initialization shares one pending operation per canonical directory so
+concurrent callers cannot replace keys already published to B. A failed first
+SSH connection still schedules idle cleanup of an allocated B. Active agents,
+jobs, operations and streams postpone cleanup, and failed releases retry without
+replaying the failed tool operation.

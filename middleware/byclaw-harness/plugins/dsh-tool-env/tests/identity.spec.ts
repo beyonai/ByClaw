@@ -3,6 +3,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const keygenGate = vi.hoisted(() => ({ enabled: false, calls: 0, kind: 'client', release: undefined as (() => void) | undefined }))
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>()
+  return { ...actual, execFile: (file: string, args: string[], callback: (...values: unknown[]) => void) => {
+    const start = () => actual.execFile(file, args, callback)
+    if (keygenGate.enabled && file === 'ssh-keygen' && args.some(value => value.includes(`${keygenGate.kind}_ed25519.new-`)) && ++keygenGate.calls === 2) {
+      keygenGate.release = () => { start() }
+      return undefined
+    }
+    return start()
+  } }
+})
+
 const home = { dir: '' }
 vi.mock('node:os', async (original) => {
   const actual = await original<typeof import('node:os')>()
@@ -53,5 +66,62 @@ describe('ToolEnvIdentity', () => {
     expect(config).toContain('HostKeyAlias byclaw-tool-env')
     await identity.writeClientConfig({ hostName: 'sandbox-abc', port: 22 })
     expect(await readFile(join(dir, 'state', 'ssh_config'), 'utf8')).not.toContain('ProxyCommand')
+  })
+})
+
+describe('concurrent identity creation', () => {
+  for (const kind of ['client', 'host']) it(`does not overwrite a published ${kind} key when concurrent keygen finishes late`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tool-env-keygen-race-'))
+    keygenGate.enabled = true
+    keygenGate.calls = 0
+    keygenGate.kind = kind
+    try {
+      const first = new ToolEnvIdentity(join(dir, 'state')).keys()
+      const second = new ToolEnvIdentity(join(dir, 'state')).keys()
+      const published = await first
+      keygenGate.release?.()
+      const late = await second
+      expect(late.authorizedKey === published.authorizedKey).toBe(true)
+      expect(late.hostPrivateKey === published.hostPrivateKey).toBe(true)
+      const current = await new ToolEnvIdentity(join(dir, 'state')).keys()
+      expect(current.authorizedKey === published.authorizedKey && current.hostPrivateKey === published.hostPrivateKey).toBe(true)
+    } finally {
+      keygenGate.enabled = false
+      keygenGate.release = undefined
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps published keys and pins stable while client configs are written concurrently', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tool-env-config-race-'))
+    home.dir = join(dir, 'home')
+    try {
+      const state = join(dir, 'state')
+      const identities = Array.from({ length: 16 }, () => new ToolEnvIdentity(state))
+      const published = await Promise.all(identities.map(async identity => {
+        const keys = await identity.keys()
+        await identity.writeClientConfig({ hostName: '127.0.0.1', port: 22 })
+        return keys
+      }))
+      const final = await identities[0]!.keys()
+      expect(published.every(keys => keys.authorizedKey === final.authorizedKey && keys.hostPrivateKey === final.hostPrivateKey)).toBe(true)
+      expect((await readFile(join(state, 'client_ed25519.pub'), 'utf8')).trim() === final.authorizedKey).toBe(true)
+      expect(await readFile(join(state, 'host_ed25519'), 'utf8') === final.hostPrivateKey).toBe(true)
+      const hostPublic = (await readFile(join(state, 'host_ed25519.pub'), 'utf8')).trim().split(/\s+/).slice(0, 2).join(' ')
+      expect(await readFile(join(state, 'known_hosts'), 'utf8') === `byclaw-tool-env ${hostPublic}\n`).toBe(true)
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+
+  it('publishes the same matching key pair to every caller sharing the state directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tool-env-concurrent-'))
+    try {
+      // Distinct resident contexts can each construct an identity for the same user.
+      const identities = Array.from({ length: 24 }, () => new ToolEnvIdentity(join(dir, 'state')))
+      const keys = await Promise.all(identities.map(identity => identity.keys()))
+      expect(new Set(keys.map(key => key.authorizedKey)).size).toBe(1)
+      expect(new Set(keys.map(key => key.hostPrivateKey)).size).toBe(1)
+      const final = await identities[0]!.keys()
+      expect(keys.every(key => key.authorizedKey === final.authorizedKey && key.hostPrivateKey === final.hostPrivateKey)).toBe(true)
+    } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })

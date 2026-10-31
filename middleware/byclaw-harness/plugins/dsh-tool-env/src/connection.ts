@@ -62,6 +62,8 @@ export class ToolEnvConnection extends Service {
   private readonly streams = new Set<Socket>()
   private idleTimer: NodeJS.Timeout | undefined
   private idleVersion = 0
+  /** ensure() may create B before any SSH lease is available. Cleared only by a confirmed pause. */
+  private backendPending = false
   private closed = false
   private pausing: Promise<void> | undefined
   /** When residual processes on B first postponed a pause; cleared by any operation or a release. */
@@ -203,12 +205,18 @@ export class ToolEnvConnection extends Service {
     // Deferred work runs inside open() and uses this facade itself: it must see the live lease, not wait for open().
     if (this.live !== undefined) return Promise.resolve(this.live)
     const pending = this.current ??= this.open()
-    pending.catch(() => { if (this.current === pending) this.current = undefined })
+    pending.catch(() => {
+      if (this.current === pending) {
+        this.current = undefined
+        this.touch()
+      }
+    })
     return pending
   }
 
   private async open(): Promise<Lease> {
     await this.pausing
+    this.backendPending = true
     const endpoint = await this.backend.ensure()
     await this.identity.writeClientConfig(endpoint)
     const lease = await this.connect()
@@ -251,7 +259,7 @@ export class ToolEnvConnection extends Service {
     this.idleVersion++
     if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
     if (this.closed || this.options.idleMs <= 0 || this.inflight > 0 || this.streams.size > 0) return
-    if (this.live === undefined && this.current === undefined) return
+    if (this.live === undefined && this.current === undefined && !this.backendPending) return
     this.idleTimer = setTimeout(() => { void this.pauseIdle() }, this.options.idleMs)
     this.idleTimer.unref()
   }
@@ -267,6 +275,7 @@ export class ToolEnvConnection extends Service {
     this.pausing = (async () => {
       await this.drop()
       await this.backend.pause()
+      this.backendPending = false
       this.residualSince = undefined
       logger.info(`tool environment idle for ${String(this.options.idleMs)} ms; paused`)
     })().catch((error: unknown) => {
@@ -288,12 +297,14 @@ export class ToolEnvConnection extends Service {
    */
   private async stillBusy(): Promise<boolean> {
     const busy = this.options.busy
-    if (busy === undefined || this.live === undefined) return false
+    if (busy === undefined) return false
     const logger = this.ctx.logger('byclaw-tool-env')
     if (busy.dsh?.() === true) {
       logger.info('tool environment idle on the connection but DSH has an Agent in a turn or a job running; keeping it')
       return true
     }
+    // A failed handshake cannot probe remote processes, but an active turn still owns B.
+    if (this.live === undefined) return false
     const residual = await busy.residual?.() ?? []
     if (residual.length === 0) { this.residualSince = undefined; return false }
     const now = Date.now()
@@ -311,7 +322,7 @@ export class ToolEnvConnection extends Service {
   private async close(): Promise<void> {
     this.closed = true
     if (this.idleTimer !== undefined) clearTimeout(this.idleTimer)
-    const wasLive = this.live !== undefined
+    const wasLive = this.live !== undefined || this.backendPending
     await this.drop()
     // A is going away (e.g. reclaimed while idle): stop paying for B too. The
     // next A resumes it; if this does not finish in time, B's expiry still applies.
