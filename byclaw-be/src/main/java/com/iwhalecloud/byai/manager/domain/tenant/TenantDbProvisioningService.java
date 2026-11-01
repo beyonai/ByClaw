@@ -38,6 +38,8 @@ public class TenantDbProvisioningService {
 
     private static final Logger LOG = LoggerFactory.getLogger(TenantDbProvisioningService.class);
     private static final Duration LOCK_TTL = Duration.ofMinutes(10);
+    // Leave one full renewal window before the MicroVM single-active-run limit (24h).
+    private static final Duration MICROVM_ROTATION_AGE = Duration.ofHours(23);
 
     private final TenantAdminTenantMapper tenantMapper;
     private final TenantSandboxService sandboxService;
@@ -96,6 +98,7 @@ public class TenantDbProvisioningService {
             String key = "tenant:provision:db:" + enterpriseId;
             String token = UUID.randomUUID().toString();
             if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, token, LOCK_TTL))) continue;
+            TechnicalRestart replacement = null;
             try {
                 if (deletionRequested(enterpriseId)) continue;
                 boolean commercial = "true".equals(tenantMapper.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"));
@@ -121,6 +124,9 @@ public class TenantDbProvisioningService {
                 if (!configPublisher.publish(enterpriseId, config)) {
                     throw new IllegalStateException("tenant lease publication was rejected");
                 }
+                if (!commercial && legacyRestartAuthority(state)) {
+                    replacement = technicalRestart(enterpriseId, config.get("PROVISION_STATE"));
+                }
             }
             catch (Exception error) {
                 LOG.warn("Tenant lease renewal deferred for enterprise {}: {}", enterpriseId,
@@ -129,7 +135,60 @@ public class TenantDbProvisioningService {
             finally {
                 releaseLock(key, token);
             }
+            if (replacement != null) {
+                TechnicalRestart selected = replacement;
+                try {
+                    // The task reacquires the same lock; never submit while holding it.
+                    taskExecutor.execute(() -> restart(enterpriseId, selected.sandboxType(),
+                        selected.recordId(), selected));
+                } catch (RuntimeException error) {
+                    LOG.warn("Tenant technical rotation deferred for enterprise {}: {}", enterpriseId,
+                        error.getClass().getSimpleName());
+                }
+            }
         }
+    }
+
+    private record TechnicalRestart(String sandboxType, long recordId, String expectedState,
+                                    Long dbRecordId, Long nodeRecordId) { }
+
+    private boolean legacyRestartAuthority(JsonNode state) {
+        // The existing legacy provisioner writes authority 1/1. Durable commercial command
+        // generations must be maintained by their own coordinator, never reset by this path.
+        return "READY".equals(state.path("status").asText())
+            && state.path("generation").asLong() == 1
+            && state.path("fencingToken").asLong() == 1;
+    }
+
+    private TechnicalRestart technicalRestart(long enterpriseId, String expectedState) {
+        Instant rotateBefore = Instant.now().minus(MICROVM_ROTATION_AGE);
+        TechnicalRestart selected = null;
+        SsSandboxRecord db = sandboxService.latestRecord(enterpriseId, "tenant-opengauss");
+        SsSandboxRecord node = sandboxService.latestRecord(enterpriseId, "tenant-data-node");
+        String[] types = {"tenant-opengauss", "tenant-data-node"};
+        SsSandboxRecord[] records = {db, node};
+        for (int i = 0; i < types.length; i++) {
+            String type = types[i];
+            SsSandboxRecord record = records[i];
+            if (record == null || "RELEASED".equals(record.getStatus())) continue;
+            // A DB replacement also releases its companion Node: mixed engines or an
+            // in-progress companion operation cannot be silently included in maintenance.
+            if (record.getId() == null || record.getSandboxId() == null
+                || !record.getSandboxId().startsWith("microvm--")
+                || !("RUNNING".equals(record.getStatus()) || "FAILED".equals(record.getStatus()))) return null;
+            String provider = sandboxService.providerStatus(record);
+            // DB replacement also retires its Node. Validate both before selecting either.
+            if ("UNKNOWN".equals(provider)) return null;
+            boolean missing = "MISSING".equals(provider) || "STOPPED".equals(provider);
+            boolean aged = "RUNNING".equals(provider) && record.getCreateTime() != null
+                && !record.getCreateTime().toInstant().isAfter(rotateBefore);
+            // UNKNOWN never authorizes destructive replacement, including an old instance.
+            if (selected == null && (missing || aged)) {
+                selected = new TechnicalRestart(type, record.getId(), expectedState,
+                    db == null ? null : db.getId(), node == null ? null : node.getId());
+            }
+        }
+        return selected;
     }
 
     public void request(long enterpriseId) {
@@ -154,11 +213,29 @@ public class TenantDbProvisioningService {
     }
 
     private void restart(long enterpriseId, String sandboxType, long recordId) {
+        restart(enterpriseId, sandboxType, recordId, null);
+    }
+
+    private void restart(long enterpriseId, String sandboxType, long recordId, TechnicalRestart expected) {
         String lockKey = "tenant:provision:db:" + enterpriseId;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL))) return;
         boolean replacing = false;
         try {
+            if (expected != null) {
+                // Recheck after queueing under the original provisioning/deletion lock. A new
+                // generation, deletion, commercial command or provision attempt always wins.
+                if (deletionRequested(enterpriseId)
+                    || "true".equals(tenantMapper.selectConfig(enterpriseId, "COMMERCIAL_MANAGED"))) return;
+                String currentState = readConfig(enterpriseId).get("PROVISION_STATE");
+                if (!expected.expectedState().equals(currentState)
+                    || !legacyRestartAuthority(objectMapper.readTree(currentState))) return;
+                TechnicalRestart current = technicalRestart(enterpriseId, currentState);
+                if (current == null || !sandboxType.equals(current.sandboxType())
+                    || recordId != current.recordId()
+                    || !java.util.Objects.equals(expected.dbRecordId(), current.dbRecordId())
+                    || !java.util.Objects.equals(expected.nodeRecordId(), current.nodeRecordId())) return;
+            }
             SsSandboxRecord latest = sandboxService.latestRecord(enterpriseId, sandboxType);
             if (latest == null || latest.getId() == null || latest.getId() != recordId
                 || !("RUNNING".equals(latest.getStatus()) || "FAILED".equals(latest.getStatus()))) {
