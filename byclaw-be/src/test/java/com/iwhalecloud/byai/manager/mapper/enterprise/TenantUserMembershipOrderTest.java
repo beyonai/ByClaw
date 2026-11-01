@@ -27,11 +27,12 @@ class TenantUserMembershipOrderTest {
                         (50, 'Legacy', 'legacy'), (60, 'Other user', 'other')
                     """);
                 statement.execute("""
-                    INSERT INTO tenant_config VALUES
-                        (20, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-01-01 00:00:00'),
-                        (30, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-03-01 00:00:00'),
-                        (40, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-03-01 00:00:00'),
-                        (60, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-04-01 00:00:00')
+                    INSERT INTO tenant_config (enterprise_id, params_code, created_at, params_value) VALUES
+                        (20, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-01-01 00:00:00', NULL),
+                        (30, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-03-01 00:00:00', NULL),
+                        (40, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-03-01 00:00:00', NULL),
+                        (60, 'PROVISION_REQUEST_ID', TIMESTAMP '2026-04-01 00:00:00', NULL),
+                        (30, 'PROVISION_STATE', TIMESTAMP '2026-03-01 00:00:00', '{"status":"RESERVED"}')
                     """);
                 statement.execute("""
                     INSERT INTO tenant_user_membership VALUES
@@ -47,8 +48,11 @@ class TenantUserMembershipOrderTest {
             assertThat(enterprises).extracting(UserEnterpriseVo::getEnterpriseId)
                 .containsExactly(40L, 30L, 50L, 20L, 1L);
             assertThat(enterprises.get(0).getStatus()).isEqualTo("DISABLED");
+            assertThat(enterprises.get(1).getProvisionState()).isEqualTo("RESERVED");
+            assertThat(enterprises.get(3).getProvisionState()).isEqualTo("UNAVAILABLE");
             assertThat(enterprises.get(4).getRole()).isEqualTo("MEMBER");
             assertThat(enterprises.get(4).getStatus()).isEqualTo("ACTIVE");
+            assertThat(enterprises.get(4).getProvisionState()).isEqualTo("READY");
         }
     }
 
@@ -94,7 +98,7 @@ class TenantUserMembershipOrderTest {
                 """);
             statement.execute("""
                 CREATE TABLE tenant_config (
-                    enterprise_id BIGINT, params_code VARCHAR(64), created_at TIMESTAMP,
+                    enterprise_id BIGINT, params_code VARCHAR(64), created_at TIMESTAMP, params_value VARCHAR(4000),
                     UNIQUE (enterprise_id, params_code))
                 """);
         }

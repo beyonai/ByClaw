@@ -9,6 +9,7 @@
         <result property="comAcctCode" column="com_acct_code"/>
         <result property="role" column="role"/>
         <result property="status" column="status"/>
+        <result property="provisionState" column="provision_state"/>
     </resultMap>
 
     <select id="listUserEnterprises" resultMap="UserEnterpriseVoResultMap">
@@ -17,10 +18,27 @@
             e.com_acct_name,
             e.com_acct_code,
             COALESCE(m.role, 'MEMBER') AS role,
-            COALESCE(m.status, 'ACTIVE') AS status
+            COALESCE(m.status, 'ACTIVE') AS status,
+            CASE
+                WHEN e.enterprise_id = 1 THEN 'READY'
+                WHEN mode.params_value = 'TRIAL' THEN 'READY'
+                WHEN provision.params_value IS NULL THEN 'UNAVAILABLE'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"READY"%' THEN 'READY'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"RESERVED"%' THEN 'RESERVED'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"DB_CREATING"%' THEN 'DB_CREATING'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"ADMIN_ONLY"%' THEN 'ADMIN_ONLY'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"REDIS_PUBLISHED"%' THEN 'REDIS_PUBLISHED'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"FAILED"%' THEN 'FAILED'
+                WHEN REPLACE(provision.params_value, ' ', '') LIKE '%"status":"MANUAL_REQUIRED"%' THEN 'MANUAL_REQUIRED'
+                ELSE 'UNAVAILABLE'
+            END AS provision_state
         FROM po_enterprise_info e
         LEFT JOIN tenant_user_membership m
             ON m.enterprise_id = e.enterprise_id AND m.user_id = #{userId}
+        LEFT JOIN tenant_config provision
+            ON provision.enterprise_id = e.enterprise_id AND provision.params_code = 'PROVISION_STATE'
+        LEFT JOIN tenant_config mode
+            ON mode.enterprise_id = e.enterprise_id AND mode.params_code = 'TENANT_MODE'
         LEFT JOIN tenant_config creation
             ON creation.enterprise_id = e.enterprise_id AND creation.params_code = 'PROVISION_REQUEST_ID'
         LEFT JOIN (
