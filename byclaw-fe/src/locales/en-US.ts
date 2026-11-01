@@ -411,6 +411,7 @@ export default {
   'toolCall.defaultTitle': 'Tool call',
   'chatBI.dragFileHere': 'Drop files here. Common spreadsheet and document formats are supported, up to 100 MB.',
   'common.noPermissionOperation': 'Your current role does not have permission to perform this operation',
+  'resource.import.summary': 'Added {createdCount} and updated {updatedCount} items in this import.',
   'resource.import.finish': 'Finish',
   'common.back': 'Back',
   'resource.import.failedSummary': '{failedCount} items failed. Resolve the failed items and try again.',

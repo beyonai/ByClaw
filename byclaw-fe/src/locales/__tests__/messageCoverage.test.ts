@@ -33,6 +33,17 @@ const collectMessageReferences = (source: string, file: string): Array<{ id: str
   };
   const collectId = (valuePath: any) => {
     const resolved = valuePath.resolve();
+    // `id` 常被写成三元或短路表达式，只判断字面量会漏掉这类分支里的文案键。
+    if (resolved.isConditionalExpression()) {
+      collectId(resolved.get('consequent'));
+      collectId(resolved.get('alternate'));
+      return;
+    }
+    if (resolved.isLogicalExpression()) {
+      collectId(resolved.get('left'));
+      collectId(resolved.get('right'));
+      return;
+    }
     if (resolved.isMemberExpression()) {
       // MODEL_DETAIL_LABELS[key] 仍引用真实文案；按词法作用域解析映射，避免误用同名参数或业务对象。
       const labels = resolved.get('object').resolve();
@@ -131,7 +142,7 @@ it('provides both languages for all directly referenced message IDs in active fr
   // Umi 会合并各页面的 locales，覆盖检查沿用同一范围，不能只判断根语言包。
   for (const locale of Object.keys(messages)) {
     for (const file of files.filter(
-      (file) => file.includes(`${path.sep}locales${path.sep}`) && file.endsWith(`/${locale}.ts`)
+      (file) => file.includes(`${path.sep}locales${path.sep}`) && file.endsWith(`${path.sep}${locale}.ts`)
     )) {
       Object.assign(messages[locale], flattenMessages(require(file).default));
     }
