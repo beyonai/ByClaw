@@ -65,6 +65,27 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
+    void tenantReadBroadcastsActualMonotonicCursorWithinEachRecipientsTenantScope() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        var broadcasts = mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(aspect, "receiptBroadcasts", broadcasts);
+        when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats/70"),
+            eq(null), any())).thenReturn(Map.of("members", List.of(
+                Map.of("memObjType", "USER", "memObjId", "27", "lastReadMessageId", "9007199254740993"),
+                Map.of("memObjType", "USER", "memObjId", "28"))));
+        var request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest();
+        request.setLastReadMessageId(20L);
+        aspect.route(call("markRead", 70L, request));
+        ArgumentCaptor<com.alibaba.fastjson.JSONObject> event = ArgumentCaptor.forClass(com.alibaba.fastjson.JSONObject.class);
+        verify(broadcasts).broadcastTenantRawToUser(eq(new TenantRequestContext(28L, 11221859L, "MEMBER")),
+            event.capture(), eq(null));
+        assertThat(event.getValue().getString("lastReadMessageId")).isEqualTo("9007199254740993");
+        assertThat(event.getValue().getString("userId")).isEqualTo("27");
+        verifyNoInteractions(legacy, memberships);
+    }
+
+    @Test
     void tenantListReadsOnlyItsNodeGroups() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
@@ -417,6 +438,8 @@ class TenantGroupChatRoutingAspectTest {
         when(signature.getMethod()).thenAnswer(invocation -> {
             Class<?>[] parameters = switch (method) {
                 case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
+                case "markRead" -> new Class<?>[]{Long.class,
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
                 case "createInvitation" -> new Class<?>[]{Long.class, jakarta.servlet.http.HttpServletResponse.class};
                 case "validateInvitation" -> new Class<?>[]{

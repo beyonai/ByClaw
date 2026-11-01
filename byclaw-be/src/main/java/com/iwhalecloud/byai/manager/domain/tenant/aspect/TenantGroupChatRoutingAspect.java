@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatFileController;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMemberRequest;
@@ -46,6 +47,8 @@ public class TenantGroupChatRoutingAspect {
     private TenantGroupInvitationService invitations;
     @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupCreationService creation;
+    @org.springframework.beans.factory.annotation.Autowired
+    private MultiDeviceBroadcastService receiptBroadcasts;
     private final TenantNodeClient node;
     private final GroupChatReadService legacy;
     private final ByaiGroupChatMentionMapper mentionMapper;
@@ -202,6 +205,31 @@ public class TenantGroupChatRoutingAspect {
                 }
                 node.command(context, "PATCH", requirePath(path) + "/read-state", sessionId,
                     "READ_STATE", new MessageId(request.getLastReadMessageId().toString()));
+                // 租户节点继续使用原有已读更新接口；此处只补充跨成员的实时回执通知。
+                com.alibaba.fastjson.JSONObject receiptEvent = new com.alibaba.fastjson.JSONObject();
+                receiptEvent.put("type", "GROUP_CHAT_EVENT");
+                receiptEvent.put("event", "READ_RECEIPTS_UPDATED");
+                receiptEvent.put("sessionId", sessionId);
+                // 从既有群详情读取实际保存的已读位置，避免迟到请求把较小的请求值广播出去。
+                Map<String, Object> detail = node.request(context, "GET", requirePath(path), null,
+                    new TypeReference<Map<String, Object>>() { });
+                if (!(detail.get("members") instanceof List<?> members)) throw unsupported();
+                String readerUserId = Long.toString(context.userId());
+                receiptEvent.put("userId", readerUserId);
+                for (Object value : members) {
+                    if (value instanceof Map<?, ?> member && readerUserId.equals(String.valueOf(member.get("memObjId")))) {
+                        receiptEvent.put("lastReadMessageId", member.get("lastReadMessageId"));
+                        break;
+                    }
+                }
+                // 只通知有效真人成员，并保持当前企业的 WebSocket 隔离范围。
+                for (Object value : members) {
+                    if (!(value instanceof Map<?, ?> member) || !"USER".equals(member.get("memObjType"))
+                        || "00X".equals(member.get("state"))) continue;
+                    receiptBroadcasts.broadcastTenantRawToUser(new TenantRequestContext(
+                        Long.parseLong(String.valueOf(member.get("memObjId"))), context.enterpriseId(), context.role()),
+                        receiptEvent, null);
+                }
                 return ResponseUtil.successResponse(java.util.Map.of(
                     "sessionId", sessionId,
                     "lastReadMessageId", request.getLastReadMessageId().toString(),
