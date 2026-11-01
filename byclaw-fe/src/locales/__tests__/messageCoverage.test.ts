@@ -28,23 +28,32 @@ it('provides both languages for all directly referenced message IDs in active fr
   // Umi 会合并各页面的 locales，覆盖检查沿用同一范围，不能只判断根语言包。
   for (const locale of Object.keys(messages)) {
     for (const file of files.filter(
-      (file) => file.includes(`${path.sep}locales${path.sep}`) && file.endsWith(`/${locale}.ts`)
+      (file) => file.includes(`${path.sep}locales${path.sep}`) && file.endsWith(`${path.sep}${locale}.ts`)
     )) {
       Object.assign(messages[locale], flattenMessages(require(file).default));
     }
   }
   const missing: string[] = [];
+  // `id` 常被写成三元或短路表达式，只判断字面量会漏掉这类分支里的文案键。
+  const collectIdLiterals = (node: any): string[] => {
+    if (!node) return [];
+    if (node.type === 'StringLiteral') return node.value.includes('.') ? [node.value] : [];
+    if (node.type === 'ConditionalExpression') {
+      return [...collectIdLiterals(node.consequent), ...collectIdLiterals(node.alternate)];
+    }
+    if (node.type === 'LogicalExpression') {
+      return [...collectIdLiterals(node.left), ...collectIdLiterals(node.right)];
+    }
+    return [];
+  };
   const visit = (node: any, file: string) => {
     if (!node || typeof node !== 'object') return;
-    if (
-      node.type === 'ObjectProperty' &&
-      (node.key.name || node.key.value) === 'id' &&
-      node.value.type === 'StringLiteral' &&
-      node.value.value.includes('.')
-    ) {
-      for (const locale of Object.keys(messages)) {
-        if (!messages[locale][node.value.value]) {
-          missing.push(`${locale}: ${node.value.value} (${path.relative(sourceRoot, file)}:${node.loc.start.line})`);
+    if (node.type === 'ObjectProperty' && (node.key.name || node.key.value) === 'id') {
+      for (const id of collectIdLiterals(node.value)) {
+        for (const locale of Object.keys(messages)) {
+          if (!messages[locale][id]) {
+            missing.push(`${locale}: ${id} (${path.relative(sourceRoot, file)}:${node.loc.start.line})`);
+          }
         }
       }
     }
