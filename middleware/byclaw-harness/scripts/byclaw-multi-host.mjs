@@ -161,6 +161,7 @@ export const USER_ROW_OVERLAYS = {
   'dsh-codegraph': (user, home) => ({ workspaceOnToolEnvironment: true, stateDir: join(home, 'codegraph') }),
   'byclaw-tool-env': (user, home, spec) => ({
     backend: spec.toolEnvBackend ?? 'opensandbox',
+    templates: toolEnvCatalog(spec),
     stateDir: join(home, 'byclaw-tool-env'),
     alias: `byclaw-tool-env-${spec.managed ? spec.contextKey : user}`,
     workspace: '/by',
@@ -173,6 +174,21 @@ export const USER_ROW_OVERLAYS = {
       ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
+}
+
+/** Server-rendered per-user catalog; duplicate service keys would collapse isolation. */
+export function toolEnvCatalog(spec) {
+  const raw = spec.env?.BYCLAW_TOOL_ENV_CATALOG
+  const value = raw === undefined || raw.trim() === '' ? spec.toolEnvCatalog ?? [] : JSON.parse(raw)
+  if (!Array.isArray(value) || value.length > 32) throw new Error('INVALID_TOOL_SANDBOX_CATALOG')
+  const keys = new Set(), services = new Set()
+  return value.map(item => {
+    if (!item || !/^[a-z][a-z0-9-]{0,48}$/.test(item.templateKey) || typeof item.serviceKey !== 'string' || !item.serviceKey
+      || !Array.isArray(item.capabilities) || item.capabilities.some(c => typeof c !== 'string' || !c)
+      || keys.has(item.templateKey) || services.has(item.serviceKey)) throw new Error('INVALID_TOOL_SANDBOX_CATALOG')
+    keys.add(item.templateKey); services.add(item.serviceKey)
+    return { templateKey: item.templateKey, serviceKey: item.serviceKey, capabilities: [...item.capabilities], enabled: item.enabled !== false }
+  })
 }
 
 /** The PUT `env` may pick this user's tool sandbox spec; otherwise the host's BYCLAW_TOOL_ENV_SERVICE_KEY applies. */
@@ -469,6 +485,7 @@ export function readHostConfig(env) {
     installAnchor: env.BYCLAW_DSH_INSTALL_ANCHOR ?? '/workspace/apps/cli/package.json',
     toolEnvBackend,
     toolEnvTemplate,
+    toolEnvCatalog: toolEnvCatalog({ env }),
     toolEnvBe,
     toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
   }
@@ -1392,6 +1409,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     env: request.env,
     toolEnvBackend: config.toolEnvBackend,
     toolEnvTemplate: config.toolEnvTemplate,
+    toolEnvCatalog: config.toolEnvCatalog,
     toolEnvBe: config.toolEnvBe,
     toolEnvIdleMs: config.toolEnvIdleMs,
     publicUrl: userPublicUrl(config.publicBase, user),

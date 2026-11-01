@@ -18,6 +18,45 @@ import org.springframework.web.server.ResponseStatusException;
 
 class GlobalExceptionHandlerTest {
 
+    @org.springframework.web.bind.annotation.RestController
+    static class BusyDownload {
+        @org.springframework.web.bind.annotation.GetMapping("/busy-download")
+        void download(jakarta.servlet.http.HttpServletResponse response) {
+            response.setContentType("image/png");
+            response.setContentLength(12345);
+            response.setHeader("Content-Disposition", "attachment; filename=test.png");
+            response.setHeader("Access-Control-Allow-Origin", "http://example.test");
+            throw new com.iwhalecloud.byai.state.common.exception.StorageBusyException();
+        }
+    }
+
+    @Test
+    void busyDownloadWritesJsonWithoutStaleBinaryHeadersAndPreservesCors() throws Exception {
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new BusyDownload())
+            .setControllerAdvice(handlerWithMessages()).build();
+        var response = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/busy-download"))
+            .andReturn().getResponse();
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getContentType()).startsWith("application/json");
+        assertThat(response.getHeader("Content-Disposition")).isNull();
+        assertThat(response.getHeader("Content-Length")).isNotEqualTo("12345");
+        assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("http://example.test");
+        assertThat(response.getContentAsString()).contains("STORAGE_BUSY");
+    }
+
+    @Test
+    void storageBusyRetainsRetryableCodeWithoutPersonalStorageAdmissionPopup() {
+        for (java.util.Locale locale : java.util.List.of(java.util.Locale.US, java.util.Locale.SIMPLIFIED_CHINESE)) {
+            LocaleContextHolder.setLocale(locale);
+            var response = handlerWithMessages().handleResponseStatusException(
+                new com.iwhalecloud.byai.state.common.exception.StorageBusyException());
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("1");
+            assertThat(response.getBody().getData()).isEqualTo(Map.of("errorType", "STORAGE_BUSY", "retryAfterMs", 1000));
+            assertThat(response.getBody().getMsg()).contains(locale.equals(java.util.Locale.US) ? "busy" : "繁忙");
+        }
+    }
+
     @AfterEach
     void resetLocale() {
         LocaleContextHolder.resetLocaleContext();

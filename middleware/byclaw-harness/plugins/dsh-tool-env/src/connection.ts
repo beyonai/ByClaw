@@ -182,6 +182,23 @@ export class ToolEnvConnection extends Service {
     await this.drop()
   }
 
+  /** Release only this isolated runtime after its final execution lease is returned. */
+  async releaseOwned(): Promise<void> {
+    // The catalog checks active executions before its last lease returns. Closing
+    // this owned connection also closes residual SSH streams; stream teardown
+    // may lag process.wait and must not prevent the final compute release.
+    if (this.inflight > 0) throw new Error('LEASE_BUSY')
+    if (this.pausing !== undefined) return this.pausing
+    if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
+    this.pausing = (async () => {
+      await this.current?.catch(() => {})
+      await this.drop()
+      await this.backend.pause()
+      this.backendPending = false
+    })().finally(() => { this.pausing = undefined })
+    return this.pausing
+  }
+
   private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal): Promise<T> {
     this.inflight++
     this.residualSince = undefined

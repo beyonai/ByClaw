@@ -9,7 +9,11 @@
  */
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
+import { SshSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-ssh'
+import { ToolSandboxManager, type SandboxTemplate, type SandboxResult } from './catalog.ts'
+import { registerCatalogLifecycle, registerCatalogTools } from './catalog-tools.ts'
+import { executeSandboxProcess } from './subprocess-execution.ts'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
@@ -19,6 +23,8 @@ import { isDshBusy, probeResidualProcesses, type AgentsView, type JobsView } fro
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
 
+export { ToolSandboxManager } from './catalog.ts'
+export type { SandboxTemplate, SandboxRuntime, ExecutionLease } from './catalog.ts'
 export { ToolEnvConnection } from './connection.ts'
 export { OpenSandboxBackend, StaticBackend, waitForEndpoint, waitForHttp, waitForPort } from './backend.ts'
 export type { ToolEnvBackend, ToolEnvEndpoint, OpenSandboxBackendConfig, OpenSandboxVolume } from './backend.ts'
@@ -34,6 +40,8 @@ export interface Config {
    * OpenSandbox server; `byclaw-be` asks ByClaw BE for the user's tool sandbox.
    */
   backend: 'static' | 'opensandbox' | 'byclaw-be'
+  /** Authorized self-built purpose templates; each uses an isolated SSH backend. */
+  templates?: SandboxTemplate[]
   /** Directory in A's private DSH home holding keys, the client config and B's id. */
   stateDir: string
   /** OpenSSH host alias; unique per user context when one process serves several users. */
@@ -90,9 +98,13 @@ export const BE_TOKEN_SOURCE = 'byclawBeTokenSource'
 export class ToolEnv extends ToolEnvConnection {
   /** The byclaw-be backend, when that is the configured one; for {@link renewBeToken}. */
   private readonly beBackend: ByClawBeBackend | undefined
+  private readonly catalogRuntimes = new Set<ToolEnv>()
+  private catalogLaunchEnv: Readonly<Record<string, string>> = {}
+  private catalogToken = ''
 
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
+    templates: schema.array(schema.object({ templateKey: schema.string().required(), serviceKey: schema.string().required(), capabilities: schema.array(schema.string()).required(), enabled: schema.boolean().default(true) })).default([]),
     stateDir: schema.string().required(),
     alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
@@ -126,13 +138,15 @@ export class ToolEnv extends ToolEnvConnection {
       sshInstance: schema.string().default('ssh'),
       hostTemplate: schema.string().default('sandbox-{id}'),
       publishKeys: schema.boolean().default(false),
+      requestScopedKeys: schema.boolean().default(false),
+      privateOnly: schema.boolean().default(false),
       readyTimeoutMs: schema.natural().default(180_000),
       // A launch may create B and wait for its endpoints on the BE side.
       requestTimeoutMs: schema.natural().default(180_000),
     }).default({} as Config['byclawBe']),
   }) as schema<Config>
 
-  constructor(ctx: Context, config: Config) {
+  constructor(ctx: Context, config: Config, registerCatalog = true) {
     const identity = new ToolEnvIdentity(config.stateDir, config.alias)
     const backend = backendFor(ctx, config, identity)
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
@@ -159,6 +173,41 @@ export class ToolEnv extends ToolEnvConnection {
       },
     }, backend, identity)
     this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
+    this.catalogLaunchEnv = config.launchEnv
+    this.catalogToken = config.byclawBe.token
+    if (registerCatalog && config.templates?.length) this.installCatalog(ctx, config)
+  }
+
+  private installCatalog(ctx: Context, config: Config): void {
+    if (config.backend !== 'byclaw-be') throw new Error('CATALOG_REQUIRES_BYCLAW_BACKEND')
+    const manager = new ToolSandboxManager(config.templates ?? [], async template => {
+      const started = Promise.withResolvers<{ ssh: ToolEnv; subprocess: SshSubprocessRuntime }>()
+      const workspace = '/by' // Purpose images mount this user's authorized AgenticFS root here.
+      const innerConfig: Config = { ...config, workspace, idleMs: 0, templates: [], launchEnv: { ...this.catalogLaunchEnv },
+        stateDir: join(config.stateDir, 'catalog', template.templateKey), alias: `${config.alias}-${template.templateKey}`,
+        byclawBe: { ...config.byclawBe, token: this.catalogToken, serviceKey: template.serviceKey, publishKeys: false, requestScopedKeys: true, privateOnly: true, hostTemplate: '' },
+      }
+      const fiber = ctx.isolate('ssh').isolate('subprocess').plugin({ name: `tool-catalog-${template.templateKey}`, apply: (inner: Context) => {
+        try { started.resolve({ ssh: new ToolEnv(inner, innerConfig, false), subprocess: new SshSubprocessRuntime(inner) }) } catch (error) { started.reject(error) }
+      } })
+      const runtime = await started.promise.catch(error => { fiber.dispose(); throw error })
+      this.catalogRuntimes.add(runtime.ssh)
+      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal): Promise<SandboxResult> => {
+        const root = posix.resolve(workspace), target = posix.resolve(cwd)
+        if (target !== root && !target.startsWith(`${root}/`)) throw new Error('WORKSPACE_FORBIDDEN')
+        const process = runtime.subprocess.spawn({ argv, cwd: target, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
+        return executeSandboxProcess(process, signal)
+      }
+      return {
+        identity: () => ({ workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
+        handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
+        execute,
+        release: async () => { await runtime.ssh.releaseOwned(); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
+      }
+    }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`))
+    registerCatalogLifecycle(ctx, manager)
+    ctx.effect(() => () => manager.dispose())
+    ctx.inject(['tools'], inner => { registerCatalogTools(inner, manager) })
   }
 
   /**
@@ -167,8 +216,19 @@ export class ToolEnv extends ToolEnvConnection {
    * calls this with the token of every PUT BE sends for the user, so B can still
    * be launched after the first token expired. Other backends ignore it.
    */
+  /** Current provider resource, exposed without ingress credentials for lifecycle correlation. */
+  get sandboxId(): string | undefined { return this.beBackend?.sandboxId }
+
   renewBeToken(token: string): void {
+    this.catalogToken = token
     this.beBackend?.renewToken(token)
+    for (const runtime of this.catalogRuntimes) runtime.renewBeToken(token)
+  }
+
+  override setLaunchEnvironment(env: Readonly<Record<string, string>>): void {
+    this.catalogLaunchEnv = { ...env }
+    super.setLaunchEnvironment(env)
+    for (const runtime of this.catalogRuntimes) runtime.setLaunchEnvironment(env)
   }
 }
 

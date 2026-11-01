@@ -349,13 +349,22 @@ public class SandboxService {
 
     /** autoRelease 只覆盖新建独占沙箱；复用记录和共享上下文保持原策略。 */
     public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey, Integer autoRelease) {
+        return launchSandboxWithServiceKey(userCode, serviceKey, autoRelease, Map.of());
+    }
+
+    public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey, Integer autoRelease,
+        Map<String, String> toolEnvironmentKeys) {
         if (autoRelease != null && autoRelease != 0 && autoRelease != 1) {
             throw new IllegalArgumentException("autoRelease must be 0 or 1");
         }
         SandboxLaunchRouting routing = StringUtils.isBlank(serviceKey)
             ? sandboxLaunchContextFactory.resolveRouting(null, userCode)
             : new SandboxLaunchRouting(serviceKey, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        return launchSandboxInternal(userCode, null, routing, autoRelease);
+        if (!toolEnvironmentKeys.isEmpty() && (StringUtils.isBlank(serviceKey)
+            || !isServiceKeyEnabled(serviceKey) || isServiceKeyAutoStartEnabled(serviceKey))) {
+            throw new IllegalArgumentException("SSH bootstrap requires an enabled on-demand tool template");
+        }
+        return launchSandboxInternal(userCode, null, routing, autoRelease, false, toolEnvironmentKeys);
     }
 
     /**
@@ -622,6 +631,11 @@ public class SandboxService {
 
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
         Integer autoRelease, boolean verifyExisting) {
+        return launchSandboxInternal(userCode, resourceId, routing, autoRelease, verifyExisting, Map.of());
+    }
+
+    private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        Integer autoRelease, boolean verifyExisting, Map<String, String> toolEnvironmentKeys) {
         SandboxLaunchData sharedLaunch = managedSharedLaunch(userCode, routing.getSandboxType());
         if (sharedLaunch != null) return sharedLaunch;
         if (sharedHostRoutes(userCode, routing.getSandboxType())) return sharedDshHostContexts.ensure(userCode);
@@ -634,7 +648,11 @@ public class SandboxService {
                 "routing", platformGateway().route(routing));
             if (autoRelease != null) params.put("autoRelease", autoRelease);
             if (verifyExisting) params.put("verifyExisting", true);
+            if (!toolEnvironmentKeys.isEmpty()) params.put("toolEnvironmentKeys", toolEnvironmentKeys);
             return platformGateway().convert(platformGateway().service("launch", params), SandboxLaunchData.class);
+        }
+        if (!toolEnvironmentKeys.isEmpty()) {
+            throw new IllegalStateException("Request-scoped tool bootstrap requires Platform execution");
         }
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -1493,6 +1511,24 @@ public class SandboxService {
      */
     public void removeSandbox(String userCode, Long resourceId) {
         removeSandbox(userCode, resourceId, null);
+    }
+
+    /** Exact tool leases require the platform's confirmed remote-absence result. */
+    public Object removeSandbox(String userCode, Long resourceId, String requestedSandboxType,
+            String expectedSandboxId) {
+        String exactId = StringUtils.trimToNull(expectedSandboxId);
+        if (exactId == null) {
+            throw new IllegalArgumentException("expectedSandboxId is required for exact sandbox release");
+        }
+        if (StringUtils.isBlank(requestedSandboxType)) {
+            throw new IllegalArgumentException("sandboxType is required for exact sandbox release");
+        }
+        if (!platformRemote()) {
+            throw new IllegalStateException("Exact sandbox release requires a platform remote-absence confirmation");
+        }
+        return platformGateway().service("remove", platformGateway().params("userCode", userCode,
+            "resourceId", resourceId, "sandboxType", requestedSandboxType,
+            "expectedSandboxId", exactId));
     }
 
     /**

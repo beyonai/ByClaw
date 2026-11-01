@@ -20,6 +20,8 @@ class FakeByClawBe {
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
   removeFailure: string | undefined
+  removeSkipped = false
+  releaseConfirmation: Record<string, unknown> | undefined
   /** The user's private parameters, as BE stores them: values never read back whole. */
   readonly privateParams = new Map<string, { paramId: number; value: string }>()
   /** When set, any other `beyond-token` gets BE's JWT filter answer: HTTP 401 with its own envelope. */
@@ -95,8 +97,10 @@ class FakeByClawBe {
     }
     if (path === '/byaiService/sandbox/removeSandbox') {
       if (this.removeFailure !== undefined) return { code: -1, msg: this.removeFailure, data: null }
-      this.records.delete(`${user}/${String(body['sandboxType'])}`)
-      return { code: 0, msg: 'success', data: null }
+      const key = `${user}/${String(body['sandboxType'])}`
+      if (body['expectedSandboxId'] !== undefined && this.records.get(key)?.sandboxId !== body['expectedSandboxId']) return { code: -1, msg: 'SANDBOX_TARGET_CHANGED', data: null }
+      if (!this.removeSkipped) this.records.delete(key)
+      return { code: 0, msg: 'success', data: this.releaseConfirmation ?? (this.removeSkipped || body['expectedSandboxId'] === undefined ? null : { releaseConfirmed: true, remoteAbsentConfirmed: true, sandboxId: body['expectedSandboxId'] }) }
     }
     return { code: -1, msg: `unknown path ${path}`, data: null }
   }
@@ -132,6 +136,25 @@ describe('ByClawBeBackend', () => {
     await fake.stop()
     await new Promise<void>(resolve => sshd.close(() => resolve()))
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('binds catalog SSH keys only to the launch request without changing user parameters', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    const keys = await identity.keys()
+    expect(fake.calls).toHaveLength(1)
+    expect(fake.calls[0]?.body['toolEnvironmentKeys']).toEqual({ authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') })
+    expect(fake.privateParams.size).toBe(0)
+    await backend.dispose()
+  })
+
+  it('catalog backends reject a public or raw SSH fallback and still release owned compute', async () => {
+    const backend = new ByClawBeBackend({ ...config, privateOnly: true, requestScopedKeys: true }, identity, () => {})
+    await expect(backend.ensure()).rejects.toThrow('PRIVATE_SSH_REQUIRED')
+    expect(backend.sandboxId).toBe('sb1')
+    await backend.dispose()
+    expect(fake.calls.find(call => call.path.endsWith('/sandbox/removeSandbox'))?.body['expectedSandboxId']).toBe('sb1')
+    expect(fake.records.size).toBe(0)
   })
 
   it('launches B through BE as the user and returns the tcp endpoint', async () => {
@@ -487,6 +510,46 @@ describe('ByClawBeBackend', () => {
     expect(fake.records.size).toBe(0)
   })
 
+  it('catalog pause retains exact ownership when BE reports success but the record still runs', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    fake.removeSkipped = true
+    await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+    expect(backend.sandboxId).toBe('sb1')
+    expect(JSON.parse(await readFile(join(dir, 'state', 'tool-sandbox.json'), 'utf8')).sandboxId).toBe('sb1')
+    expect(fake.calls.find(call => call.path.endsWith('/removeSandbox'))?.body).toEqual({ userCode: 'u1', sandboxType: config.serviceKey, expectedSandboxId: 'sb1' })
+    fake.removeSkipped = false
+    await backend.pause()
+    expect(backend.sandboxId).toBeUndefined()
+    expect(fake.records.size).toBe(0)
+  })
+
+  it('an old catalog owner never releases a replacement sandbox of the same purpose', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    fake.records.set(`u1/${config.serviceKey}`, { sandboxId: 'replacement', instanceEndpoints: {} })
+    await expect(backend.pause()).rejects.toThrow('SANDBOX_TARGET_CHANGED')
+    expect(backend.sandboxId).toBe('sb1')
+    expect(fake.records.get(`u1/${config.serviceKey}`)?.sandboxId).toBe('replacement')
+  })
+
+  it('catalog release rejects ambiguous or mismatched receipts even if the active record is absent', async () => {
+    for (const confirmation of [
+      { releaseConfirmed: true, remoteAbsentConfirmed: true, sandboxId: 'other-b' },
+      { releaseConfirmed: 'true', remoteAbsentConfirmed: true, sandboxId: 'sb1' },
+      { releaseConfirmed: true, remoteAbsentConfirmed: false, sandboxId: 'sb1' },
+    ]) {
+      const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+      fake.records.set(`u1/${config.serviceKey}`, { sandboxId: 'sb1', instanceEndpoints: fake.nextEndpoints })
+      await backend.ensure()
+      fake.releaseConfirmation = confirmation
+      await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      expect(fake.records.size).toBe(0)
+      expect(backend.sandboxId).toBe('sb1')
+      expect(JSON.parse(await readFile(join(dir, 'state', 'tool-sandbox.json'), 'utf8')).sandboxId).toBe('sb1')
+    }
+  })
+
   it('does not create or release a tool environment before the first runtime use', async () => {
     const backend = new ByClawBeBackend(config, identity, () => {})
     await backend.pause()
@@ -521,6 +584,24 @@ describe('ByClawBeBackend', () => {
       expect(fake.records.has('u1/byclaw-dsh-tools')).toBe(false)
       expect(logs).toContain('released tool environment old-1 of type byclaw-dsh-tools: this user\'s tool sandbox is now byclaw-dsh-unity')
       expect(JSON.parse(await readFile(recordFile(), 'utf8'))).toMatchObject({ serviceKey: 'byclaw-dsh-unity' })
+    })
+
+    it('catalog service changes retain the old exact allocation until its cleanup receipt is confirmed', async () => {
+      await leaveBehind('old-purpose', 'old-1')
+      fake.removeSkipped = true
+      let now = 0
+      const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true, serviceKey: 'new-purpose' }, identity, () => {}, { now: () => now })
+      await expect(backend.ensure()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      expect(fake.calls.some(call => call.path.endsWith('/launchByUserCode'))).toBe(false)
+      expect(fake.calls[0]?.body).toEqual({ userCode: 'u1', sandboxType: 'old-purpose', expectedSandboxId: 'old-1' })
+      expect(JSON.parse(await readFile(recordFile(), 'utf8')).sandboxId).toBe('old-1')
+      await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      fake.removeSkipped = false
+      await backend.pause()
+      await expect(access(recordFile())).rejects.toThrow()
+      now = 2000
+      await backend.ensure()
+      expect(backend.sandboxId).toBe('sb1')
     })
 
     it('is kept when the user still has the same service', async () => {

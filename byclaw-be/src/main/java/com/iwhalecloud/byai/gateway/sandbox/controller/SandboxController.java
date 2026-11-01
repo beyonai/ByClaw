@@ -359,6 +359,25 @@ public class SandboxController {
             }
         }
 
+        if (params.containsKey("expectedSandboxId")) {
+            if (!(params.get("expectedSandboxId") instanceof String)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expectedSandboxId must be a nonempty string");
+            }
+            String expectedSandboxId = ((String) params.get("expectedSandboxId")).trim();
+            if (expectedSandboxId.isEmpty() || sandboxType == null || sandboxType.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "sandboxType and expectedSandboxId are required for exact release");
+            }
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Exact sandbox release requires the sandbox owner or a platform operator");
+            }
+            Long exactResourceId = resourceId;
+            return ResponseUtil.successResponse(sandboxUserContextRunner.callAsUser(userCode,
+                () -> sandboxService.removeSandbox(userCode, exactResourceId, sandboxType, expectedSandboxId)));
+        }
         sandboxService.removeSandbox(userCode, resourceId, sandboxType);
         return ResponseUtil.successResponse();
     }
@@ -382,6 +401,18 @@ public class SandboxController {
         }
         String userCode = userCodeObj.toString().trim();
 
+        // Check the authenticated caller before callAsUser replaces its identity.
+        if (params.get("toolEnvironmentKeys") != null) {
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            }
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Request-scoped tool keys require the sandbox owner or a platform operator");
+            }
+        }
+
         Object serviceKeyObj = params.get("serviceKey");
         String serviceKey = serviceKeyObj != null ? serviceKeyObj.toString().trim() : null;
         if (serviceKey != null && serviceKey.isEmpty()) {
@@ -401,8 +432,12 @@ public class SandboxController {
         try {
             String finalServiceKey = serviceKey;
             Integer finalAutoRelease = autoRelease;
+            Map<String, String> toolKeys = com.iwhalecloud.byai.gateway.sandbox.service.ToolEnvironmentBootstrapKeys.parse(
+                params.get("toolEnvironmentKeys"));
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
-                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease));
+                () -> toolKeys.isEmpty()
+                    ? sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease)
+                    : sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease, toolKeys));
 
             // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
             // Enabled controls execution; lifecycle.autoStart=false keeps on-demand tools out of

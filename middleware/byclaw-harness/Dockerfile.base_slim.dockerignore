@@ -1,2 +1,6 @@
-# The base clones pinned upstream source; it needs no local files.
+# Repository-root context: only the domestic package defaults helper is needed.
 **
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh

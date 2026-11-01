@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Build from the exact Dockerfile.slim image that this sandbox will serve.
 ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -37,7 +36,8 @@ ARG ALIYUN_CLI_ARM64_SHA256=b0b6f6f7545f9472b697fc27915c8956e5a3320a6160729dcc5b
 ARG RTK_VERSION=0.47.0
 ARG RTK_AMD64_SHA256=7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7
 ARG RTK_ARM64_SHA256=960ceb5f1f5f0b0939b32b5b1d41dec6d9a7113137b0703c68dca0d169a260fc
-ARG RTK_DOWNLOAD_BASE=https://github.com/rtk-ai/rtk/releases/download
+ARG RTK_DOWNLOAD_BASE
+RUN : "${RTK_DOWNLOAD_BASE:?Provide verified domestic RTK artifact source; no overseas fallback}"
 ARG UV_VERSION=0.12.7
 ARG ALIBABACLOUD_MCP_PROXY_VERSION=0.2.17
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
@@ -47,6 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openjdk-21-jdk-headless psmisc ripgrep sqlite3 tree websockify xauth x11vnc xvfb zip \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /usr/local/bin/byclaw-configure-cn-sources
+RUN bash /usr/local/bin/byclaw-configure-cn-sources
 RUN npm install --global "playwright@${PLAYWRIGHT_VERSION}" \
     && playwright install --with-deps chromium \
     && npm cache clean --force && rm -rf /var/lib/apt/lists/* \

@@ -1984,6 +1984,7 @@ export default {
   'workspaceSider.voiceMessage': 'Voice message',
   'workspaceSider.newSession': 'New Session',
   'workspaceSider.newTask': 'New',
+  'workspaceSider.toolSandboxMarket': 'Tool sandbox market',
   'workspaceSider.scheduledTasks': 'Schedule',
   'workspaceSider.digitalEmployee': 'Employees',
   'workspaceSider.resourceCenter': 'Resource',

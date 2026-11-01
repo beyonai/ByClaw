@@ -26,7 +26,8 @@ else
 fi
 node scripts/docker-plugin-layout.mjs bundles plugins | grep -E '/plugins/dsh-browser-use/package.json$'
 
-grep -F 'FROM python:3.12-slim-trixie AS dsh-base' Dockerfile.base >/dev/null
+grep -Fx 'ARG PYTHON_IMAGE' Dockerfile.base >/dev/null
+grep -Fx 'FROM ${PYTHON_IMAGE} AS dsh-base' Dockerfile.base >/dev/null
 grep -F 'ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn' Dockerfile.base >/dev/null
 grep -F 'Acquire::Retries "5";' Dockerfile.base >/dev/null
 grep -F 'Acquire::http::Timeout "30";' Dockerfile.base >/dev/null

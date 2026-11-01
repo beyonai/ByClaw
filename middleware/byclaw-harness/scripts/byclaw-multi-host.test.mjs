@@ -1012,3 +1012,15 @@ test('v4 session paths retain personal state after host removal and isolate anot
   const entries = [{ id: 'session-persistence-jsonl', name: 'sessions' }]
   assert.equal(composeUserOverlays(entries, key, second.home, spec)[0].config.root, `${binding.home}/sessions`)
 })
+
+test('purpose marketplace templates come from the trusted user launch environment and remain distinct', () => {
+  const templates = [
+    { templateKey: 'browser', serviceKey: 'byclaw-tools-browser', capabilities: ['browser.automation'], enabled: true },
+    { templateKey: 'media', serviceKey: 'byclaw-tools-media', capabilities: ['media.render'], enabled: true },
+  ]
+  const entries = [{ id: 'byclaw-tool-env', name: '@byclaw/dsh-tool-env' }]
+  const configured = { ...beSpec, env: { ...beSpec.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify(templates) } }
+  const [row] = composeUserOverlays(entries, 'u1', '/r/u1', configured)
+  assert.deepEqual(row.config.templates, templates)
+  assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
+})

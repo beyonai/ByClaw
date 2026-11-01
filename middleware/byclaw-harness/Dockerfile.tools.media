@@ -1,0 +1,36 @@
+# Purpose layers add dependencies without replacing the SSH/helper/PTC core.
+ARG TOOLS_IMAGE
+FROM ${TOOLS_IMAGE}
+USER root
+ARG HYPERFRAMES_VERSION=0.8.226
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node/ \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    HYPERFRAMES_BROWSER_PATH=/usr/local/bin/byclaw-playwright-chromium \
+    HYPERFRAMES_FFMPEG_PATH=/usr/bin/ffmpeg \
+    HYPERFRAMES_FFPROBE_PATH=/usr/bin/ffprobe
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN bash /tmp/configure-cn-sources.sh && rm /tmp/configure-cn-sources.sh
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
+    && npm install --global --loglevel=http --registry=https://registry.npmmirror.com "hyperframes@${HYPERFRAMES_VERSION}" gsap@3.14.2 \
+    && mkdir -p /usr/local/share/byclaw-tool-sandbox \
+    && cp "$(npm root --global)/gsap/dist/gsap.min.js" /usr/local/share/byclaw-tool-sandbox/gsap.min.js \
+    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    && ffmpeg -version >/dev/null \
+    && ffprobe -version >/dev/null \
+    && hyperframes --version
+COPY middleware/byclaw-harness/tool-sandbox/media.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+RUN test -x /usr/local/bin/byclaw-tool-env-sshd \
+    && node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="media") process.exit(1)'
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="media"

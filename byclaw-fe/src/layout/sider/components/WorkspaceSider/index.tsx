@@ -7,6 +7,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   AuditOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
@@ -892,6 +893,10 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
           <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
           <ModelHealthMenuBadge className={styles.approvalBadge} />
+        </button>
+        <button type="button" className={styles.primaryItem} onClick={() => navigate('/sandbox/market')}>
+          <ToolOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.toolSandboxMarket' })}</span>
         </button>
         <button
           type="button"

@@ -1894,6 +1894,7 @@ export default {
   'workspaceSider.voiceMessage': '语音消息',
   'workspaceSider.newSession': '新建会话',
   'workspaceSider.newTask': '新建任务',
+  'workspaceSider.toolSandboxMarket': '工具沙箱市场',
   'workspaceSider.scheduledTasks': '定时任务',
   'workspaceSider.digitalEmployee': '数字员工·员工组',
   'workspaceSider.resourceCenter': '资源中心',

@@ -1,0 +1,10 @@
+{
+  "contract": "byclaw.tool-sandbox/v1",
+  "runtimeVersion": "D0.6.0-media",
+  "purpose": "media",
+  "os": "linux",
+  "operations": { "protocol": "ssh", "exposure": "private" },
+  "capabilities": ["process.exec", "filesystem", "media.render"],
+  "display": { "available": false, "defaultExposure": "public", "auth": "byclaw-session" },
+  "storageModes": ["agenticfs-subpath"]
+}

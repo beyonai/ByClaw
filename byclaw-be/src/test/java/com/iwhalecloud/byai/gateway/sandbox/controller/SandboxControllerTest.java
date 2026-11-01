@@ -654,6 +654,95 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void removeSandbox_exactTargetReturnsRemoteAbsenceConfirmation() {
+        SandboxController controller = controllerWithInventory();
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        prepareExactReleaseCaller(controller, "user001", UserType.ORD_USER);
+        Map<String, Object> confirmation = Map.of("sandboxId", "old-b", "releaseConfirmed", true,
+            "remoteAbsentConfirmed", true);
+        when(service.removeSandbox("user001", null, "byclaw-tools-media", "old-b")).thenReturn(confirmation);
+        ResponseUtil response = controller.removeSandbox(Map.of("userCode", "user001",
+            "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b"));
+        assertThat(response.getData()).isEqualTo(confirmation);
+        verify(service, never()).removeSandbox("user001", null, "byclaw-tools-media");
+    }
+
+    @Test
+    void removeSandbox_exactTargetDoesNotFallBackAfterTargetChanged() {
+        SandboxController controller = controllerWithInventory();
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        prepareExactReleaseCaller(controller, "user001", UserType.ORD_USER);
+        when(service.removeSandbox("user001", null, "byclaw-tools-media", "old-b"))
+            .thenThrow(new IllegalStateException("SANDBOX_TARGET_CHANGED"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(Map.of(
+            "userCode", "user001", "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b")))
+            .hasMessage("SANDBOX_TARGET_CHANGED");
+        verify(service, never()).removeSandbox("user001", null, "byclaw-tools-media");
+    }
+
+    private void prepareExactReleaseCaller(SandboxController controller, String caller, String role) {
+        UsersOrganization organization = new UsersOrganization();
+        organization.setUserType(role);
+        LoginInfo info = new LoginInfo();
+        info.setUserCode(caller);
+        info.setUsersOrganizations(List.of(organization));
+        CurrentUserHolder.setLoginInfo(info);
+        ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+            new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+    }
+
+    @Test
+    void removeSandbox_exactTargetAuthorizesBeforeSwitchingIdentity() {
+        for (String role : List.of(UserType.ORD_USER, UserType.ORG_MAN, UserType.PLAT_MAN, UserType.PLAT_DEVOPS)) {
+            SandboxController controller = controllerWithInventory();
+            SandboxService service = mock(SandboxService.class);
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            prepareExactReleaseCaller(controller, "another-user", role);
+            Map<String, Object> params = Map.of("userCode", "user001", "sandboxType", "byclaw-tools-media",
+                "expectedSandboxId", "old-b");
+            if (role.equals(UserType.PLAT_MAN) || role.equals(UserType.PLAT_DEVOPS)) {
+                controller.removeSandbox(params);
+                verify(service).removeSandbox("user001", null, "byclaw-tools-media", "old-b");
+            } else {
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(params))
+                    .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                    .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                        .getStatusCode().value()).isEqualTo(403));
+                verifyNoInteractions(service);
+            }
+            assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("another-user");
+        }
+        SandboxController anonymous = controllerWithInventory();
+        CurrentUserHolder.clearLoginInfo();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> anonymous.removeSandbox(Map.of(
+            "userCode", "user001", "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b")))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                .getStatusCode().value()).isEqualTo(401));
+    }
+
+    @Test
+    void removeSandbox_invalidExactTargetNeverFallsBackToLegacy() {
+        for (Object value : java.util.Arrays.asList(null, "", "  ", 123L, Map.of("id", "old-b"))) {
+            SandboxController controller = controllerWithInventory();
+            SandboxService service = mock(SandboxService.class);
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            Map<String, Object> params = new java.util.HashMap<>();
+            params.put("userCode", "user001");
+            params.put("sandboxType", "byclaw-tools-media");
+            params.put("expectedSandboxId", value);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(params))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                    .getStatusCode().value()).isEqualTo(400));
+            verifyNoInteractions(service);
+        }
+    }
+
+    @Test
     void navigateBrowser_logsUnexpectedFailureWithRequestContextAndStackTrace() {
         SandboxController controller = controllerWithInventory();
         SandboxBrowserNavigationService navigationService = mock(SandboxBrowserNavigationService.class);
