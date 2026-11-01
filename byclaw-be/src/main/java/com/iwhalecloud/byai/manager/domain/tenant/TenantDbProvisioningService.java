@@ -515,6 +515,8 @@ public class TenantDbProvisioningService {
         if (!configPublisher.publish(enterpriseId, readySnapshot)) {
             throw new IllegalStateException("tenant READY snapshot rejected by fencing check");
         }
+        // Redis READY unlocks Node consumers; durable READY requires their actual readiness.
+        schemaService.awaitBusinessReady(enterpriseId, 1, sandbox.recordId(), node);
         setState(enterpriseId, "READY");
     }
 
