@@ -79,12 +79,12 @@ class SharedQuotaAdmissionTest {
         });
     }
 
-    @Test void disabledMembersDoNotConsumeSeatsAndOwnersStillDo() {
+    @Test void disabledMembersStillConsumeSeatsAndOwnersStillDo() {
         jdbc.update("INSERT INTO byai.tenant_user_membership VALUES(2,42,2,'DISABLED')");
         tx.executeWithoutResult(status -> {
             var snapshot = admission.beginEnterprise(42L);
-            assertDoesNotThrow(() -> admission.checkMembers(snapshot, 1));
-            assertThrows(ResponseStatusException.class, () -> admission.checkMembers(snapshot, 2));
+            assertThrows(ResponseStatusException.class, () -> admission.checkMembers(snapshot, 1));
+            assertDoesNotThrow(() -> admission.checkMembers(snapshot, 0));
         });
     }
 

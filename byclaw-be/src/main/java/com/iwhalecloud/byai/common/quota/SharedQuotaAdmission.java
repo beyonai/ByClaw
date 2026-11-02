@@ -99,7 +99,7 @@ public class SharedQuotaAdmission {
     public void checkMembers(Optional<QuotaSnapshot> snapshot, int additions) {
         if (snapshot.isEmpty() || additions == 0) return;
         QuotaSnapshot value = snapshot.orElseThrow();
-        Long current = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status='ACTIVE'",
+        Long current = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status IN ('ACTIVE','DISABLED')",
             Long.class, value.enterpriseId());
         check(current, additions, value.memberLimit(), "tenant.member.limit.reached");
     }
