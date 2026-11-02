@@ -52,7 +52,14 @@ export const withTenantAdminMenu = (menus: any[], allowed: boolean): any[] => {
   const filtered = menus.filter(
     (item) => item.path !== TENANT_ADMIN_MENU.path && item.path !== TENANT_DATASOURCE_MENU.path
   );
-  return allowed ? [...filtered, TENANT_ADMIN_MENU, TENANT_DATASOURCE_MENU] : filtered;
+  // 暂时隐藏租户模块入口；保留菜单定义和权限分支，便于恢复，同时过滤后台配置中的同名入口。
+  return allowed
+    ? [
+        ...filtered,
+        // TENANT_ADMIN_MENU,
+        // TENANT_DATASOURCE_MENU,
+      ]
+    : filtered;
 };
 
 /**
