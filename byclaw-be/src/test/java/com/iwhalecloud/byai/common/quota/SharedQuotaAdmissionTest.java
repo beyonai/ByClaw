@@ -74,7 +74,7 @@ class SharedQuotaAdmissionTest {
             var snapshot = admission.beginGroup(42L, 9L);
             admission.checkGroupMembers(snapshot, 9L, "USER", 0);
             admission.checkGroupMembers(snapshot, 9L, "AGENT", 1);
-            assertThrows(ResponseStatusException.class, () -> admission.checkGroupMembers(snapshot, 9L, "USER", 1));
+            assertDoesNotThrow(() -> admission.checkGroupMembers(snapshot, 9L, "USER", 1));
             assertThrows(ResponseStatusException.class, () -> admission.checkGroupMembers(snapshot, 9L, "AGENT", 2));
         });
     }
@@ -98,7 +98,7 @@ class SharedQuotaAdmissionTest {
     }
 
     @Test void initialGroupCountsUseIndependentHumanAndAgentCapacities() {
-        assertThrows(ResponseStatusException.class, () -> admission.checkInitialGroup(Optional.of(quota), 4, 0));
+        assertDoesNotThrow(() -> admission.checkInitialGroup(Optional.of(quota), 4, 0));
         assertThrows(ResponseStatusException.class, () -> admission.checkInitialGroup(Optional.of(quota), 1, 3));
         assertDoesNotThrow(() -> admission.checkInitialGroup(Optional.of(quota), 3, 2));
     }

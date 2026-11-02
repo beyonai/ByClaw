@@ -62,10 +62,7 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)(
           ),
         ),
       );
-      expect(outcomes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-      expect(outcomes.find((result) => result.status === "rejected")).toMatchObject({
-        reason: { code: "GROUP_MEMBER_LIMIT_EXCEEDED" },
-      });
+      expect(outcomes.filter((result) => result.status === "fulfilled")).toHaveLength(2);
       expect(
         await fixture.sql(
           "SELECT mem_obj_id::text AS id FROM byai.byai_session_member WHERE session_id=20 AND mem_obj_type='USER' ORDER BY mem_obj_id",
@@ -116,7 +113,7 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)(
         await fixture.sql(
           "SELECT mem_obj_id FROM byai.byai_session_member WHERE session_id=20 AND mem_obj_type='USER'",
         ),
-      ).toHaveLength(3);
+      ).toHaveLength(4);
     });
 
     it("shares the last AGENT slot with automatic coordinator insertion", async () => {
@@ -178,13 +175,13 @@ describe.skipIf(!process.env.FORWARD_TEST_PG)(
             tenantMemberUserIds: ["31", "40", "41"],
             payload: {
               members: [
-                { memObjType: "USER", memObjId: "40" },
-                { memObjType: "USER", memObjId: "41" },
+                { memObjType: "AGENT", memObjId: "40" },
+                { memObjType: "AGENT", memObjId: "41" },
               ],
             },
           }),
         ),
-      ).rejects.toMatchObject({ code: "GROUP_MEMBER_LIMIT_EXCEEDED" });
+      ).rejects.toMatchObject({ code: "GROUP_AGENT_LIMIT_EXCEEDED" });
       expect(
         await fixture.sql(
           "SELECT mem_obj_id FROM byai.byai_session_member WHERE session_id=20 AND mem_obj_type='USER'",

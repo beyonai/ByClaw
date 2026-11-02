@@ -62,8 +62,7 @@ export async function requireGroupMemberCapacity(
     return BigInt(count);
   };
   // A reduced limit restricts only new identities; retries and existing memberships remain valid.
-  if (users.size && current("USER") + BigInt(users.size) > BigInt(quota.limits.groupMemberLimit))
-    throw new DomainError("GROUP_MEMBER_LIMIT_EXCEEDED");
+  // 暂停单群真人数量限制，保留 groupMemberLimit 数据；企业席位和机器人限额仍独立执行。
   if (agents.size && current("AGENT") + BigInt(agents.size) > BigInt(quota.limits.agentLimit))
     throw new DomainError("GROUP_AGENT_LIMIT_EXCEEDED");
 }
