@@ -48,11 +48,9 @@ class SessionMemberServiceQuotaTest {
     }
 
     @Test void genericAgentAndHumanSaveCannotBypassSeparateGroupCaps() {
-        for (String type : java.util.List.of("USER", "AGENT")) {
-            assertThrows(ResponseStatusException.class, () -> tx.executeWithoutResult(status -> members.save(row(3, 9, type, 200))));
-        }
-        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM byai.byai_session_member WHERE session_id=9", Integer.class));
-        verify(mapper, never()).insert(any(ByaiSessionMember.class));
+        assertThrows(ResponseStatusException.class, () -> tx.executeWithoutResult(status -> members.save(row(3, 9, "AGENT", 200))));
+        tx.executeWithoutResult(status -> members.save(row(3, 9, "USER", 200)));
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM byai.byai_session_member WHERE session_id=9", Integer.class));
     }
 
     @Test void hAsPrivateSessionAndMarkedPersonalGroupNeverReadCommercialQuota() {

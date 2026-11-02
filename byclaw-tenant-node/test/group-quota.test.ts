@@ -136,7 +136,7 @@ describe("tenant group membership quota", () => {
     expect(effects).not.toContain("count");
   });
 
-  it("applies a lower limit published while waiting for the Redis lock", async () => {
+  it("allows users even when a lower per-group limit is published while waiting", async () => {
     const { context, query, reader } = fixture();
     let current: SharedQuota | null = quota;
     const read = vi.spyOn(reader, "read").mockImplementation(async () => current);
@@ -145,7 +145,7 @@ describe("tenant group membership quota", () => {
     await wait.entered;
     current = { ...quota, revision: "2", limits: { ...quota.limits, groupMemberLimit: 1 } };
     wait.release();
-    await expect(pending).rejects.toMatchObject({ code: "GROUP_MEMBER_LIMIT_EXCEEDED" });
+    await expect(pending).resolves.toBeUndefined();
     expect(read).toHaveBeenCalledTimes(2);
   });
 
@@ -174,9 +174,7 @@ describe("tenant group membership quota", () => {
     await expect(
       requireGroupMemberCapacity(context, [user("20"), user("20"), agent("90")]),
     ).resolves.toBeUndefined();
-    await expect(requireGroupMemberCapacity(context, [user("21")])).rejects.toMatchObject({
-      code: "GROUP_MEMBER_LIMIT_EXCEEDED",
-    });
+    await expect(requireGroupMemberCapacity(context, [user("21")])).resolves.toBeUndefined();
     const other = fixture();
     await expect(
       requireGroupMemberCapacity(other.context, [user("21"), user("21")]),
@@ -268,7 +266,7 @@ describe("tenant group membership quota", () => {
     expect(effects).not.toContain("insert-member");
   });
 
-  it("enforces USER capacity for a link join", async () => {
+  it("allows a link join beyond the retained USER limit", async () => {
     const { db, reader, effects } = fixture({
       ...quota,
       limits: { ...quota.limits, groupMemberLimit: 1 },
@@ -286,8 +284,8 @@ describe("tenant group membership quota", () => {
       }),
       reader,
     );
-    await expect(joinGroup(context)).rejects.toMatchObject({ code: "GROUP_MEMBER_LIMIT_EXCEEDED" });
-    expect(effects).not.toContain("insert-member");
+    await expect(joinGroup(context)).resolves.toBeDefined();
+    expect(effects).toContain("insert-member");
   });
 
   it("guards coordinator restoration while sending a group message", async () => {
