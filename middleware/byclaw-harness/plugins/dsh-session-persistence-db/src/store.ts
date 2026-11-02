@@ -9,7 +9,11 @@ export interface Queryable {
 
 /** The part of a `pg` pool this store uses. */
 export interface SqlPool extends Queryable {
-  connect(): Promise<Queryable & { release(error?: Error): void }>
+  connect(): Promise<Queryable & {
+    release(error?: Error): void
+    on?(event: 'error', listener: (error: Error) => void): unknown
+    off?(event: 'error', listener: (error: Error) => void): unknown
+  }>
   end(): Promise<void>
 }
 
@@ -171,6 +175,10 @@ export class SessionSqlStore {
   private async transaction(body: (tx: Queryable) => Promise<void>): Promise<void> {
     const client = await this.pool.connect()
     let broken: Error | undefined
+    // The pool stops listening once a client is checked out. Unhandled, a dropped
+    // connection would throw from the socket and kill the host and every user on it.
+    const onError = (error: Error): void => { broken = error }
+    client.on?.('error', onError)
     try {
       await client.query('BEGIN')
       await body(client)
@@ -183,6 +191,7 @@ export class SessionSqlStore {
       }
       throw error
     } finally {
+      client.off?.('error', onError)
       client.release(broken)
     }
   }

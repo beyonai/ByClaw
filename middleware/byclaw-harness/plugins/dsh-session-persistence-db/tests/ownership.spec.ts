@@ -1,4 +1,5 @@
 /** What the file backend cannot do: survive two hosts, a lost commit reply, and stay inside one user. */
+import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId, SessionSeq, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
@@ -113,6 +114,46 @@ describe('session-persistence-db ownership', () => {
     await expect(ctx.sessionPersistence.list()).rejects.toThrow('connection refused')
     down = false
     expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
+  it('a connection dropped inside a transaction fails that append instead of throwing from the socket', async () => {
+    const database = await createTestDatabase()
+    const healthy = database.pool()
+    let drop = false
+    const released: (Error | undefined)[] = []
+    const flaky: typeof healthy = {
+      ...healthy,
+      async connect() {
+        const inner = await healthy.connect()
+        const socket = new EventEmitter()
+        return {
+          on: (event: 'error', listener: (error: Error) => void) => socket.on(event, listener),
+          off: (event: 'error', listener: (error: Error) => void) => socket.off(event, listener),
+          release: (error?: Error) => { released.push(error); inner.release() },
+          query: async (text: string, values?: unknown[]) => {
+            if (drop && text.startsWith('INSERT')) {
+              drop = false
+              socket.emit('error', new Error('Connection terminated unexpectedly'))
+              throw new Error('Connection terminated unexpectedly')
+            }
+            return inner.query(text, values)
+          },
+        }
+      },
+    }
+    const config = Config({ connectionString: `pglite://drop-${++databases}`, userCode: 'u1' })
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin({ name: 'db-under-test', apply: (inner: Context) => mount(inner, config, () => flaky) })
+    const handle = await ctx.sessionPersistence.create(header('s'))
+    await handle.append([event(0)])
+
+    drop = true
+    await expect(handle.append([event(1)])).rejects.toThrow('Connection terminated')
+    expect(released.at(-1)?.message).toBe('Connection terminated unexpectedly')
+    await handle.append([event(1)])
+    expect((await handle.read()).events.map(item => item.seq)).toEqual([0, 1])
   })
 
   it('stores text a jsonb column refuses', async () => {
