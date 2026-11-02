@@ -581,7 +581,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(copy).isNotSameAs(sourceExt);
         assertThat(copy.getResourceId()).isEqualTo(7101L);
         assertThat(sourceExt.getResourceId()).isEqualTo(7001L);
-        assertThat(copy.getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/7101/personal-skill.zip");
+        assertThat(copy.getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/7101/" + target.getResourceName() + ".zip");
         assertThat(copy.getVersion()).isEqualTo("v0.3");
         byte[] uploaded = assertPublishedPackageName(target.getResourceName());
         assertThat(copy.getSkillPackageSize()).isEqualTo((long)uploaded.length);
@@ -589,7 +589,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(sourceExt.getSkillUrl()).isEqualTo("/byclaw/resource/skill/user002-hub/personal-skill.zip");
         assertThat(sourceExt.getSkillPackageHash()).isEqualTo("source-hash");
         assertThat(sourceExt.getSkillPackageSize()).isEqualTo(123L);
-        assertThat(copy.getSkillOriginalFilename()).isEqualTo("personal-skill.zip");
+        assertThat(copy.getSkillOriginalFilename()).isEqualTo(target.getResourceName() + ".zip");
         assertThat(copy.getSyncStatus()).isEqualTo("SUCCESS");
         var json = com.alibaba.fastjson2.JSON.parseObject(copy.getTargetContent());
         assertThat(json.getString("sourceResourceId")).isEqualTo("7001");
@@ -598,8 +598,22 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(json.getString("skillUrl")).endsWith("skillId=7101");
         verify(ssResourceArtifactService).upsertArtifact(eq(7101L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.IMPORT_ZIP.name()), eq("minio"),
-            eq("skill/org-hub/7101/personal-skill.zip"), any());
+            eq("skill/org-hub/7101/" + target.getResourceName() + ".zip"), any());
         verify(resourceArtifactStorageService).readWithinResourceRoot("skill/user002-hub/personal-skill.zip");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Skill/path", "Skill\\path"})
+    void publishEnterpriseRejectsPathSeparatorsInPackageName(String sourceName) throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName(sourceName);
+
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("byclaw.skill.zip.file.invalid");
+
+        verify(ssResourceService, never()).saveResource(any());
+        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
+        verify(publications, never()).submit(any(), any());
     }
 
     @Test
@@ -1037,6 +1051,7 @@ class ByClawSkillResourceApplicationServiceTest {
         CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
         prepareEnterpriseCopy();
         SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        String publishedFilename = target.getResourceName() + ".zip";
         // 本用例覆盖审核通过后的企业副本更新，不允许审核中快照被导入覆盖。
         target.setResourceStatus(2);
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
@@ -1055,6 +1070,8 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(ext.getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/7101/updated.zip");
         assertThat(com.alibaba.fastjson2.JSON.parseObject(ext.getTargetContent()).getString("sourceResourceId"))
             .isEqualTo("7001");
+        verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class),
+            eq("skill/org-hub/7101"), eq(publishedFilename), eq("application/zip"));
         verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class),
             eq("skill/org-hub/7101"), eq("updated.zip"), eq("application/zip"));
         verify(ssResourceService, never()).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
@@ -1080,7 +1097,9 @@ class ByClawSkillResourceApplicationServiceTest {
     private byte[] assertPublishedPackageName(String expectedName) {
         ArgumentCaptor<byte[]> uploaded = ArgumentCaptor.forClass(byte[].class);
         verify(resourceArtifactStorageService).uploadToSubdirectory(uploaded.capture(), eq("skill/org-hub/7101"),
-            any(String.class), eq("application/zip"));
+            eq(expectedName + ".zip"), eq("application/zip"));
+        service.inspectSkillPackage(new MockMultipartFile("file", expectedName + ".zip", "application/zip",
+            uploaded.getValue()));
         String document = new String(service.readCenterSkillDocument(uploaded.getValue()), StandardCharsets.UTF_8);
         assertThat(document).contains("name: " + com.alibaba.fastjson2.JSON.toJSONString(expectedName) + "\n");
         return uploaded.getValue();

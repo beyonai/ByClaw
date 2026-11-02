@@ -695,7 +695,7 @@ public class ByClawSkillResourceApplicationService {
 
     /**
      * 一次性复制个人技能快照。锁定源资源直到事务结束，重复请求复用已有副本；
-     * 企业副本拥有独立资源 ID 和编码，文件沿用源引用；先进入审核中，通过后才上架。
+     * 企业副本拥有独立资源 ID、编码和技能包；先进入审核中，通过后才上架。
      */
     @Transactional(rollbackFor = Exception.class)
     public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId) {
@@ -753,8 +753,12 @@ public class ByClawSkillResourceApplicationService {
         String document = ByClawSkillDocParser.withSkillName(
             new String(readCenterSkillDocument(sourcePackage), StandardCharsets.UTF_8), JSON.toJSONString(targetName));
         byte[] targetPackage = replaceCenterSkillDocument(sourcePackage, document.getBytes(StandardCharsets.UTF_8));
-        String packageFilename = StringUtils.defaultIfBlank(
-            sourceExt == null ? null : sourceExt.getSkillOriginalFilename(), targetCode + ".zip");
+        // ZIP 文件名与 SKILL.md 的 name 保持一致，不能沿用个人原包文件名。
+        String packageFilename = targetName + ".zip";
+        if (!packageFilename.equals(lastPathSegment(packageFilename))) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.file.invalid"));
+        }
+        inspectSkillPackage(new ByteArrayMultipartFile(packageFilename, targetPackage, PACKAGE_CONTENT_TYPE));
         SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
             source.getResourceDesc(), packageFilename, targetPackage.length);
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
