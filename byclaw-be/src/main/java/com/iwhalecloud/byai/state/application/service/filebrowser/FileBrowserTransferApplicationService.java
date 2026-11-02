@@ -49,11 +49,21 @@ public class FileBrowserTransferApplicationService {
     public Map<String, Object> capabilities() {
         if (!enabled()) return Map.of("resumable", false);
         var policy = effectivePolicy();
+        if (policy == null) return Map.of("resumable", false);
         return Map.of("resumable", true, "maxSize", policy.maxSize(), "chunkSize", policy.chunkSize());
     }
 
     private com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy effectivePolicy() {
-        Object value = gateway.data(gateway.safe(() -> clients.getObject().uploadCapabilities()));
+        Object value = gateway.data(gateway.safe(() -> {
+            try {
+                return clients.getObject().uploadCapabilities();
+            } catch (feign.FeignException failure) {
+                // Older platforms expose only the existing multipart storage API.
+                if (failure.status() == 404) return Map.of("code", 0, "data", Map.of("resumable", false));
+                throw failure;
+            }
+        }));
+        if (value instanceof Map<?, ?> details && Boolean.FALSE.equals(details.get("resumable"))) return null;
         if (!(value instanceof Map<?, ?> details) || !(details.get("maxSize") instanceof Number max)
                 || max.longValue() <= 0 || !(details.get("chunkSize") instanceof Number chunk)) {
             throw new IllegalStateException("Invalid platform upload capability response");
@@ -88,6 +98,7 @@ public class FileBrowserTransferApplicationService {
             } else {
                 if (!"NOT_FOUND".equals(priorState)) throw new IllegalStateException("Invalid upload status response");
                 var policy = effectivePolicy();
+                if (policy == null) throw new IllegalStateException("Platform resumable uploads are unavailable");
                 validator.validateSize(request.totalSize());
                 if (request.totalSize() > policy.maxSize()) throw new IllegalArgumentException("Upload exceeds current system maximum");
                 gateway.checkPersonalQuota("UPLOAD", request.totalSize());

@@ -119,4 +119,36 @@ class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.com
         verifyNoInteractions(clients);
     }
 
+    @Test void olderPlatformWithoutUploadApiUsesExistingMultipartTransport() {
+        var client = mock(PlatformStorageClient.class);
+        when(clients.getObject()).thenReturn(client);
+        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
+        when(gateway.data(any())).thenAnswer(call -> ((Map<?, ?>) call.getArgument(0)).get("data"));
+        var missing = mock(feign.FeignException.class);
+        when(missing.status()).thenReturn(404);
+        when(client.uploadCapabilities()).thenThrow(missing);
+        assertEquals(Map.of("resumable", false), service.capabilities());
+        verifyNoInteractions(validator);
+    }
+
+    @Test void explicitlyDisabledPlatformUploadsUseExistingMultipartTransport() {
+        var client = mock(PlatformStorageClient.class);
+        when(clients.getObject()).thenReturn(client);
+        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
+        when(gateway.data(any())).thenAnswer(call -> ((Map<?, ?>) call.getArgument(0)).get("data"));
+        when(client.uploadCapabilities()).thenReturn(Map.of("code", 0, "data", Map.of("resumable", false)));
+        assertEquals(Map.of("resumable", false), service.capabilities());
+        verifyNoInteractions(validator);
+    }
+
+    @Test void unavailablePlatformDoesNotPretendResumableUploadsAreDisabled() {
+        var client = mock(PlatformStorageClient.class);
+        when(clients.getObject()).thenReturn(client);
+        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
+        var unavailable = mock(feign.FeignException.class);
+        when(unavailable.status()).thenReturn(503);
+        when(client.uploadCapabilities()).thenThrow(unavailable);
+        assertSame(unavailable, assertThrows(feign.FeignException.class, service::capabilities));
+    }
+
 }
