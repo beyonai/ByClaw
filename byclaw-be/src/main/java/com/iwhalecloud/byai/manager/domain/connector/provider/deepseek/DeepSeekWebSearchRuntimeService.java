@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.deepseek;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorConnectionStateService;
@@ -57,11 +59,11 @@ public class DeepSeekWebSearchRuntimeService {
     public DeepSeekWebSearchResult search(Long userId, List<String> requestedQueries, Integer requestedMaxResults) {
         List<String> queries = normalizeQueries(requestedQueries);
         if (userId == null) {
-            throw new IllegalArgumentException("DeepSeek web search request is invalid");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.request.invalid"));
         }
         int maxResults = requestedMaxResults == null ? 10 : requestedMaxResults;
         if (maxResults < 1 || maxResults > MAX_RESULTS) {
-            throw new IllegalArgumentException("maxResults must be between 1 and " + MAX_RESULTS);
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.max.results.invalid", MAX_RESULTS));
         }
         ConnectorInfo connector = connectorInfoService.findByCode(CONNECTOR_CODE);
         requireConnectorEnabled(connector);
@@ -104,16 +106,16 @@ public class DeepSeekWebSearchRuntimeService {
 
     private List<String> normalizeQueries(List<String> requestedQueries) {
         if (requestedQueries == null || requestedQueries.isEmpty()) {
-            throw new IllegalArgumentException("queries must contain at least one query");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.queries.required"));
         }
         if (requestedQueries.size() > MAX_QUERIES) {
-            throw new IllegalArgumentException("queries must contain at most " + MAX_QUERIES + " queries");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.queries.limit", MAX_QUERIES));
         }
         LinkedHashSet<String> queries = new LinkedHashSet<>();
         for (String query : requestedQueries) {
             String normalized = query == null ? "" : query.trim();
             if (normalized.isEmpty() || normalized.length() > MAX_QUERY_LENGTH) {
-                throw new IllegalArgumentException("each query must be a non-empty string up to 2000 characters");
+                throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.query.invalid"));
             }
             queries.add(normalized);
         }
@@ -217,12 +219,12 @@ public class DeepSeekWebSearchRuntimeService {
 
     private DeepSeekWebSearchException authorizationRequired() {
         return new DeepSeekWebSearchException(
-            "CONNECTOR_NOT_AUTHORIZED", "Configure DeepSeek Web Search in connector settings");
+            "CONNECTOR_NOT_AUTHORIZED", I18nUtil.get("connector.deepseek.search.authorization.required"));
     }
 
     private void requireConnectorEnabled(ConnectorInfo connector) {
         if (connector == null || connector.getConnectorId() == null || !"00A".equals(connector.getStatusCd())) {
-            throw new DeepSeekWebSearchException("CONNECTOR_NOT_ENABLED", "DeepSeek Web Search is disabled");
+            throw new DeepSeekWebSearchException("CONNECTOR_NOT_ENABLED", I18nUtil.get("connector.deepseek.search.disabled"));
         }
     }
 }

@@ -70,6 +70,8 @@ export interface IResourceCardItem {
   hasManagePermission?: boolean;
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
+  canViewBasicInfo?: boolean;
+  hasViewPermission?: boolean;
   canEdit?: boolean;
   officialPublication?: boolean;
   canPublishEmployee?: boolean;
@@ -184,7 +186,7 @@ export type ResourceCardProps = {
   metaNode?: React.ReactNode;
   hoverExtra?: React.ReactNode;
   className?: string;
-  variant?: 'default' | 'skillPoster';
+  variant?: 'default' | 'skillPoster' | 'employeeManagement' | 'employeeRow';
   digitalEmployeeActionMode?: boolean;
   enableFavorites?: boolean;
 };
@@ -885,11 +887,15 @@ const RenderContent = (props: ResourceCardProps) => {
     publishToEnterpriseLock.current = true;
     setOpeningPublication(true);
     const messageKey = `employee-publication-open-${resource.resourceId || resource.id || resource.agentId}`;
-    message.loading({ key: messageKey, content: '正在准备发布申请，请稍候…', duration: 0 });
+    message.loading({
+      key: messageKey,
+      content: intl.formatMessage({ id: 'employeePublication.preparing' }),
+      duration: 0,
+    });
     const timer = setTimeout(() => {
       message.loading({
         key: messageKey,
-        content: '仍在准备发布配置，关联资源较多时可能需要更久，请勿重复点击。',
+        content: intl.formatMessage({ id: 'employeePublication.preparingSlow' }),
         duration: 0,
       });
     }, 8000);
@@ -906,14 +912,14 @@ const RenderContent = (props: ResourceCardProps) => {
         await openEmployeePublication(resourceId);
       }
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, '无法发起发布申请'));
+      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.prepareFailed' })));
     } finally {
       clearFeedback();
       publicationFeedbackCleanup.current = undefined;
       publishToEnterpriseLock.current = false;
       setOpeningPublication(false);
     }
-  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus]);
+  }, [resource.resourceId, resource.id, resource.agentId, resource.employeePublicationStatus, intl]);
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canDelete, canOnShelf, canOffShelf, canRestore } =
@@ -1166,10 +1172,17 @@ const RenderContent = (props: ResourceCardProps) => {
       if (resource.employeePublicationStatus === 'PUBLISHED') {
         items.push({
           key: 'viewEmployeePublication',
-          label: <BuildMenuLabel icon="icon-a-Uploadshangchuan" text="查看发布记录" />,
+          label: (
+            <BuildMenuLabel
+              icon="icon-a-Uploadshangchuan"
+              text={intl.formatMessage({ id: 'resource.publication.viewHistory' })}
+            />
+          ),
           onClick: () =>
             openEmployeePublication(String(resource.resourceId || resource.id || resource.agentId)).catch((error) =>
-              message.error(publicationErrorMessage(error, '无法查看发布记录'))
+              message.error(
+                publicationErrorMessage(error, intl.formatMessage({ id: 'resource.publication.historyFailed' }))
+              )
             ),
         });
       }
@@ -1560,6 +1573,108 @@ const RenderContent = (props: ResourceCardProps) => {
     }
   };
 
+  if (variant === 'employeeRow') {
+    const isEnterpriseRow = actionConfig?.scene === 'enterprise';
+    const currentUserId = String(userInfo?.userId ?? userInfo?.id ?? '');
+    const employeeCreatorId = String(resource.creatorId ?? resource.createBy ?? resource.createdBy ?? '');
+    const isCreatedByCurrentUser =
+      currentUserId !== '' && employeeCreatorId !== '' && currentUserId === employeeCreatorId;
+    let ownershipLabel = intl.formatMessage({ id: 'common.none' });
+    if (isCreatedByCurrentUser) {
+      ownershipLabel = intl.formatMessage({ id: 'myEmployees.createdByMe' });
+    } else if (isTruthyFlag(resource.hasManagePermission)) {
+      ownershipLabel = intl.formatMessage({ id: 'myEmployees.managedByMe' });
+    }
+    // 仅将编辑放在固定操作位；其余操作保留原菜单的权限、加载态和确认流程。
+    const editItem = effectiveMenuItems.find((item) => item?.key === 'edit');
+    const rowMenuItems = effectiveMenuItems.filter((item) => item?.key !== 'edit');
+
+    return (
+      <>
+        <td>
+          <div className={styles.employeeRowName}>
+            <span className={styles.employeeRowAvatar} aria-hidden="true">
+              {avatarNode}
+            </span>
+            <div className={styles.employeeRowIdentity}>
+              <button
+                type="button"
+                className={styles.employeeRowTitle}
+                title={displayTitle}
+                disabled={isCancelledResource || isCardClickDisabled || !effectiveCardClick}
+                onClick={() => effectiveCardClick?.(resource)}
+              >
+                {displayTitle}
+              </button>
+              {isDefaultDigitalEmployee && (
+                <span className={styles.employeeRowDefault}>
+                  {intl.formatMessage({ id: 'resource.defaultDigitalEmployee' })}
+                </span>
+              )}
+            </div>
+          </div>
+        </td>
+        <td>
+          <div className={styles.employeeRowDescription}>{displayDescription}</div>
+        </td>
+        <td>
+          <div className={styles.employeeRowDescription} title={creatorName}>
+            {creatorName}
+          </div>
+        </td>
+        <td>
+          <span className={classnames(styles.employeeRowType, { [styles.employeeRowGroup]: isDigitalEmployeeGroup })}>
+            {intl.formatMessage({ id: isDigitalEmployeeGroup ? 'myEmployees.group' : 'myEmployees.employee' })}
+          </span>
+        </td>
+        {isEnterpriseRow && (
+          <>
+            <td>{ownershipLabel}</td>
+            <td>
+              <span className={classnames(styles.tag, styles.digitalEmployeeStatusTag, styles[statusTagClass])}>
+                <span className={styles.tagText}>{effectiveTopRightTag}</span>
+              </span>
+            </td>
+          </>
+        )}
+        <td>
+          <div className={styles.employeeRowActions}>
+            {editItem && (
+              <Button
+                className={styles.employeeRowEditAction}
+                type="link"
+                size="small"
+                disabled={'disabled' in editItem && editItem.disabled}
+                onClick={() => onEdit()}
+              >
+                {intl.formatMessage({ id: 'common.edit' })}
+              </Button>
+            )}
+            {rowMenuItems.length > 0 && (
+              <Dropdown
+                menu={{ items: rowMenuItems }}
+                placement="bottomRight"
+                trigger={['click']}
+                open={digitalEmployeeMenuOpen}
+                onOpenChange={setDigitalEmployeeMenuOpen}
+              >
+                <Button
+                  className={styles.employeeRowMoreAction}
+                  type="link"
+                  size="small"
+                  aria-label={intl.formatMessage({ id: 'myEmployees.moreActions' })}
+                >
+                  {intl.formatMessage({ id: 'myEmployees.moreActions' })}
+                </Button>
+              </Dropdown>
+            )}
+            {!editItem && rowMenuItems.length === 0 && <span>-</span>}
+          </div>
+        </td>
+      </>
+    );
+  }
+
   if (isSkillPosterResource) {
     return (
       <div
@@ -1725,7 +1840,22 @@ const RenderContent = (props: ResourceCardProps) => {
                 className={classnames(styles.resourceName, 'ub-f1')}
                 ellipsis={{ rows: 1, tooltip: `${displayTitle}` }}
               >
-                {displayTitle}
+                {variant === 'employeeManagement' ? (
+                  <button
+                    type="button"
+                    className={styles.employeeCardTitle}
+                    title={displayTitle}
+                    disabled={isCancelledResource || isCardClickDisabled || !effectiveCardClick}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      effectiveCardClick?.(resource);
+                    }}
+                  >
+                    {displayTitle}
+                  </button>
+                ) : (
+                  displayTitle
+                )}
               </Paragraph>
               {effectiveTopRightTag ? (
                 <span
@@ -1870,16 +2000,27 @@ function ResourceCard(props: ResourceCardProps) {
     ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES.includes(displayResource.resourceBizType || props.resourceType || '');
   // 知识详情包含实际内容，必须取得使用权限；统一传递禁用状态，保持鼠标样式与点击拦截一致。
   const isCardClickDisabled =
-    (isKnowledgeResource && !isTruthyFlag(displayResource.hasUsePermission)) ||
+    (isKnowledgeResource &&
+      !isTruthyFlag(displayResource.hasUsePermission) &&
+      !isTruthyFlag(displayResource.canViewBasicInfo)) ||
     (typeof props.cardClickDisabled === 'function'
       ? props.cardClickDisabled(displayResource)
       : !!props.cardClickDisabled);
+
+  if (variant === 'employeeRow') {
+    return (
+      <tr className={styles.employeeRow}>
+        <RenderContent {...props} resource={displayResource} cardClickDisabled={isCardClickDisabled} />
+      </tr>
+    );
+  }
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        [styles.digitalEmployeeCard]: variant === 'default' && isDigitalEmployeeResource,
+        [styles.digitalEmployeeCard]: ['default', 'employeeManagement'].includes(variant) && isDigitalEmployeeResource,
+        [styles.employeeManagementCard]: variant === 'employeeManagement',
         [styles.knowledgeCard]: variant === 'default' && isKnowledgeResource,
         pointer:
           (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,

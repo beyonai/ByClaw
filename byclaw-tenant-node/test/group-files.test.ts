@@ -250,3 +250,24 @@ describe("group file pagination", () => {
     }
   });
 });
+
+it("keeps ordinary SINGLE target files but never flattens SINGLE selected-card inner files", async () => {
+  const { stored, service } = setup();
+  stored.push({
+    ...row("100", "88"),
+    metadata: {
+      kind: "FORWARD_SINGLE",
+      forward: { mode: "SINGLE", resourceMode: "SNAPSHOT_ONLY" },
+    },
+  });
+  stored.push({
+    ...row("90"),
+    metadata: {
+      kind: "FORWARD_MERGED",
+      forward: { mode: "SINGLE", resourceMode: "SNAPSHOT_ONLY" },
+      items: [{ attachments: [{ fileId: "89", fileName: "inner" }] }],
+    },
+  });
+  const page = await service.files("20", "30", 20);
+  expect(page.files.map((file) => file.attachment.fileId)).toEqual(["88"]);
+});

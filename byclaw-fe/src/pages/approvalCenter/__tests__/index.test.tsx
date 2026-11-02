@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render as renderComponent, screen, within } fr
 import { ConfigProvider, message } from 'antd';
 import ApprovalCenter from '..';
 import useEmployeePublicationCapabilities from '@/hooks/useEmployeePublicationCapabilities';
-import { approveUseApply, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
+import { approveUseApply, rejectUseApply, queryResourceUseApplyAudit } from '@/pages/manager/service/resources';
 
 jest.mock('antd', () => {
   const actual = jest.requireActual('antd');
@@ -92,6 +92,7 @@ describe('approval center', () => {
     jest.clearAllMocks();
     // 入口测试检查审核结果及计数回调，提示内容另行断言，省去全局消息根的渲染和计时器。
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
+    jest.spyOn(message, 'error').mockImplementation(jest.fn());
     window.history.replaceState({}, '', '/approvalCenter');
     (useEmployeePublicationCapabilities as jest.Mock).mockReturnValue({ enabled: true, administrator: true });
     // 故意混入所有业务类型，验证入口切换和表格的二次隔离规则。
@@ -174,6 +175,37 @@ describe('approval center', () => {
     expect(approveUseApply).toHaveBeenCalledWith({ resourceId: 'SKILL', applyUserId: 'applicant' });
     expect(message.success).toHaveBeenCalledWith('resourceCenter.approve');
     expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['approve', '没有该申请的审核权限'],
+    ['reject', '申请已被处理，请刷新'],
+    ['approve', new Error('关联资源暂不可用')],
+    ['reject', { msg: '审核权限已撤销' }],
+  ])('shows the backend reason for a failed %s without removing the row', async (action, error) => {
+    const api = action === 'approve' ? approveUseApply : rejectUseApply;
+    (api as jest.Mock).mockRejectedValueOnce(error);
+    await render(<ApprovalCenter />);
+    const row = screen.getByText('pending-DIG_EMPLOYEE').closest('tr')!;
+    await act(async () => {
+      fireEvent.click(within(row).getByRole('button', { name: `resourceCenter.${action}`, hidden: true }));
+    });
+    const label = action === 'approve' ? 'resourceCenter.confirmApprove' : 'resourceCenter.confirmReject';
+    const confirmation = (await screen.findByText(label)).closest('.ant-popover')!;
+    await act(async () => {
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'common.confirm', hidden: true }));
+    });
+    const reason = typeof error === 'string' ? error : error instanceof Error ? error.message : error.msg;
+    expect(message.error).toHaveBeenCalledWith(reason);
+    expect(screen.getByText('pending-DIG_EMPLOYEE')).toBeInTheDocument();
+    expect(message.success).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it('shows the backend reason when the pending list request fails', async () => {
+    (queryResourceUseApplyAudit as jest.Mock).mockRejectedValueOnce('当前企业不可用');
+    await render(<ApprovalCenter />);
+    expect(message.error).toHaveBeenCalledWith('当前企业不可用');
   });
 
   it('clears the prior history view when switching resource types', async () => {

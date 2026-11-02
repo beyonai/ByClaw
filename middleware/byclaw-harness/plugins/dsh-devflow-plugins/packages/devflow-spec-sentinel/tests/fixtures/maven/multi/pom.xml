@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <parent>
+    <groupId>org.example</groupId>
+    <artifactId>parent-pom</artifactId>
+    <version>1</version>
+  </parent>
+  <groupId>org.example</groupId>
+  <artifactId>aggregator</artifactId>
+  <packaging>pom</packaging>
+  <modules>
+    <module>mod-a</module>
+    <module>mod-b</module>
+    <module>missing</module>
+    <module>../escape</module>
+    <module>/absolute</module>
+    <module>file-module</module>
+    <module> </module>
+    <!-- <module>commented-out</module> -->
+  </modules>
+  <profiles>
+    <profile>
+      <modules>
+        <module>profile-only</module>
+      </modules>
+    </profile>
+  </profiles>
+</project>

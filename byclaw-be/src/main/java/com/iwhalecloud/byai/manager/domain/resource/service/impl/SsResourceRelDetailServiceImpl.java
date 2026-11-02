@@ -49,6 +49,9 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
     private SsResourceRelDetailMapper ssResourceRelDetailMapper;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourceBindingSourceService resourceBindingSourceService;
+
+    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
@@ -107,6 +110,7 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
         queryWrapper.eq(SsResourceRelDetail::getResourceId, resourceId).or().eq(SsResourceRelDetail::getRelResourceId,
             resourceId);
         ssResourceRelDetailMapper.delete(queryWrapper);
+        resourceBindingSourceService.clearForDeletedResource(resourceId);
     }
 
     /**

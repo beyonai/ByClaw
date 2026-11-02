@@ -3271,6 +3271,9 @@ CREATE INDEX IF NOT EXISTS idx_group_chat_mention_user_group_message
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_message
     ON byai.byai_message (session_id, message_id);
 
+CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session
+    ON byai.byai_message (session_id) WHERE usage = 1;
+
 CREATE INDEX IF NOT EXISTS idx_byai_message_session_ref
     ON byai.byai_message (session_id, message_ref);
 

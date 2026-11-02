@@ -47,7 +47,7 @@ import {
   RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
+import { getIntl, useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import { queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import {
@@ -106,7 +106,7 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
 import { queryAuthDoc as listAccessibleKnowledgeBases } from '@/service/knowledgeCenter';
-import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
+import { getBrowserServiceKey, getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import MarkdownField from './components/MarkdownField';
@@ -178,6 +178,7 @@ import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
+import { browserSandboxServiceKey } from './operation/accountUtils';
 
 type SourceType = 'dingtalk' | 'dingtalk_todo' | 'github_issue';
 
@@ -440,7 +441,7 @@ const normalizeOperationAccounts = (detail?: OperationProjectDetailData | null):
         item.accountName ||
         item.name ||
         (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
-          ? '自定义链接'
+          ? getIntl().formatMessage({ id: 'projectSpace.operation.accountForm.field.customUrl' })
           : ''),
       // 新接口的 accountId 是系统主键，平台侧标识优先读取 accountCode，避免卡片误展示数字主键。
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
@@ -1956,7 +1957,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchOperationAccounts, handleCloseOperationAccountRemoteDesktop, intl, operationAccountLoginTarget?.id]
   );
 
-  // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
+  // 优先复用采集流程已经启动的沙箱；尚无带远程桌面的沙箱时拉起承载该用户浏览器的沙箱（常驻宿主用户为工具沙箱，其他用户为 openclaw）。
   const resolveOperationAccountSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
     const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
@@ -1970,7 +1971,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
     useAppStore.setState({ sandboxesInfo: currentSandboxes });
 
     if (!userInfo?.userCode) throw new Error('missing_user_code');
-    const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
+    const launchedSandbox = await launchSandboxByUserCode({
+      userCode: userInfo.userCode,
+      serviceKey: browserSandboxServiceKey(await getBrowserServiceKey().catch(() => null)),
+    });
     const sandboxInfo: ISandboxesInfo = {
       ...launchedSandbox,
       userCode: userInfo.userCode,
@@ -2424,7 +2428,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSharedFiles(
         sortFileBrowserItems(
           (res || []).map((item: any) => ({
-            name: item.fileName || item.name || '文件',
+            name: item.fileName || item.name || intl.formatMessage({ id: 'sider.files' }),
             path: `${(item.directoryPath || '/').replace(/\/$/, '')}/${item.fileName || item.name}`,
             isDir: item.type === 'directory',
           }))
@@ -2437,7 +2441,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     } finally {
       setSharedFilesLoading(false);
     }
-  }, [intl.locale, projectCloudResourceId, t]);
+  }, [intl.locale, projectCloudResourceId, t, intl]);
 
   // 代码变更按当前会话(任务)拉取:远程分支相对基线的文件 diff。切换会话时重取。
   const fetchTaskChanges = useCallback(async (sessionId?: string | number | null) => {
@@ -6973,18 +6977,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
         agentOptionsOnly
         knowledgeOptions={boundProjectKnowledgeBases}
         knowledgeOptionsOnly
-        applyText="确定"
+        applyText={intl.formatMessage({ id: 'sandbox.restart.confirm.ok' })}
         onCancel={() => setOperationTaskTemplateTarget(null)}
         onApply={async (result: TaskTemplateApplyResult) => {
           const task = operationTaskTemplateTarget;
           const taskId = Number(task?.taskId || task?.sessionId);
           const selectedAgentId = Number(result.values.agentId);
           if (!Number.isFinite(taskId) || taskId <= 0) {
-            message.error('任务缺少有效编号，无法执行');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.executeInvalidId' }));
             return;
           }
           if (!Number.isFinite(selectedAgentId) || selectedAgentId <= 0) {
-            message.error('请选择当前项目绑定的数字员工');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.agentRequired' }));
             return;
           }
           // 先由后端保存模板配置并启动任务，待事务提交后再进入真实会话，避免跳转到空白会话。
@@ -7002,7 +7006,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           });
           const sessionId = executeResult?.sessionId || task?.sessionId || task?.taskId;
           if (!sessionId) {
-            message.error('任务执行后未返回会话，无法打开聊天');
+            message.error(intl.formatMessage({ id: 'projectSpace.tasks.executeSessionMissing' }));
             return;
           }
           setOperationTaskTemplateTarget(null);

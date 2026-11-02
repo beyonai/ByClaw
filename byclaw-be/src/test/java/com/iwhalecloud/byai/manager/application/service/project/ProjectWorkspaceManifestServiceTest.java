@@ -18,7 +18,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 
-class ProjectWorkspaceManifestServiceTest {
+class ProjectWorkspaceManifestServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @TempDir
     Path tempDir;

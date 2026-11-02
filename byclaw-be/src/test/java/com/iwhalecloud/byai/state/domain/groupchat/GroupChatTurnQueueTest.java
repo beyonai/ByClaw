@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -50,7 +51,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 /** Tests queue outcomes across polls with retained rows; Gateway and DB transport stay outside this unit boundary. */
-class GroupChatTurnQueueTest {
+class GroupChatTurnQueueTest extends I18nTestSupport {
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper anchors = mock(ByaiGroupChatExecutionMapper.class);
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
@@ -95,7 +96,7 @@ class GroupChatTurnQueueTest {
         when(turns.selectFirstQueued(anyLong())).thenAnswer(call -> rows.stream()
             .filter(row -> row.getCandidateSessionId().equals(call.getArgument(0)) && "QUEUED".equals(row.getStatus()))
             .min(Comparator.comparing(ByaiGroupChatTurn::getExecutionId)).orElse(null));
-        when(turns.selectForUpdateById(anyLong())).thenAnswer(call -> find(call.getArgument(0)));
+        when(turns.selectCurrentById(anyLong())).thenAnswer(call -> find(call.getArgument(0)));
         when(turns.claim(anyLong(), any())).thenAnswer(call -> {
             ByaiGroupChatTurn row = find(call.getArgument(0));
             if (!"QUEUED".equals(row.getStatus())) { return 0; }
@@ -122,7 +123,7 @@ class GroupChatTurnQueueTest {
         coordinator.poll();
         assertThat(sent).containsExactly(11L, 13L);
         assertThat(later.getStatus()).isEqualTo("QUEUED");
-        verify(anchors, times(2)).selectForUpdateByCandidateSessionId(60L);
+        verify(anchors, times(2)).selectCurrentByCandidateSessionId(60L);
         first.setStatus("SUCCEEDED");
         coordinator.poll();
         assertThat(sent).containsExactly(11L, 13L, 12L);

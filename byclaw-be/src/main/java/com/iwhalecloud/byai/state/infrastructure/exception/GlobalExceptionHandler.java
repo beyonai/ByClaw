@@ -11,6 +11,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.MessageSource;
+import org.springframework.context.MessageSourceAware;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -26,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
@@ -41,13 +45,34 @@ import jakarta.validation.ConstraintViolationException;
 @RestControllerAdvice(annotations = {
     RestController.class, Controller.class
 })
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler implements MessageSourceAware {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    private MessageSource messageSource;
+
+    @Override
+    public void setMessageSource(MessageSource messageSource) {
+        this.messageSource = messageSource;
+    }
 
     public static final int NO_FOUND_ERROR_CODE = 404;
 
     @Value("${exception.log.sysCode:}")
     private String sysCode;
+
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.class)
+    public ResponseEntity<ResponseUtil<Object>> quotaExceeded(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException failure,HttpServletResponse response) {
+        if(response.isCommitted())return null;
+        ResponseUtil<Object> body=ResponseUtil.fail(failure.getMessage());body.setData(failure.details());
+        return ResponseEntity.status(507).body(body);
+    }
+
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StoragePreparingException.class)
+    public ResponseEntity<ResponseUtil<Object>> storagePreparing(com.iwhalecloud.byai.state.common.exception.StoragePreparingException failure,HttpServletResponse response) {
+        if(response.isCommitted())return null;
+        ResponseUtil<Object> body=ResponseUtil.fail(failure.getMessage());body.setData(failure.details());
+        return ResponseEntity.status(409).body(body);
+    }
 
     @ExceptionHandler(value = BaseRuntimeException.class)
     public void baseExceptionHandler(HttpServletResponse response, BaseRuntimeException baseRuntimeException)
@@ -93,16 +118,42 @@ public class GlobalExceptionHandler {
                 new String(wrapper.getContentAsByteArray(), Charset.forName(wrapper.getCharacterEncoding())));
         }
 
-        String msg = dealMessage(e.getMessage());
+        String msg = e instanceof BaseException ? dealMessage(e.getMessage()) : unexpectedMessage(e.getMessage());
         HttpStatus httpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
         return new ResponseEntity<>(ResponseUtil.fail(msg), httpStatus);
+    }
+
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StorageBusyException.class)
+    public ResponseEntity<ResponseUtil<Object>> storageBusy(
+        com.iwhalecloud.byai.state.common.exception.StorageBusyException failure, HttpServletResponse response) {
+        if (response.isCommitted()) return null;
+        // A preview may have selected binary headers before opening the storage stream.
+        response.setHeader("Content-Disposition", null);
+        response.setHeader("Content-Length", null);
+        response.setHeader("Content-Range", null);
+        response.setContentType(org.springframework.http.MediaType.APPLICATION_JSON_VALUE);
+        return handleResponseStatusException(failure);
     }
 
     /** 保留领域服务显式声明的 4xx/5xx，避免把协议错误统一伪装成 500。 */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
+        if (e instanceof com.iwhalecloud.byai.state.common.exception.StorageBusyException busy) {
+            ResponseUtil<Object> body = ResponseUtil.fail(busy.publicMessage());
+            body.setData(busy.details());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON).header("Retry-After", "1").body(body);
+        }
         logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
-        String msg = dealMessage(StringUtils.defaultIfBlank(e.getReason(), e.getMessage()));
+        String reason = StringUtils.defaultIfBlank(e.getReason(), e.getMessage());
+        String translated = messageSource == null ? null
+            : messageSource.getMessage(reason, null, null, LocaleContextHolder.getLocale());
+        // Localized catalog messages may legitimately contain foreign names and technical identifiers.
+        // Only unrecognized raw exception reasons use the language fallback.
+        boolean rawEnglish = reason.matches("(?s).*[A-Za-z]{3,}.*") && !reason.matches("(?s).*\\p{IsHan}.*");
+        String msg = dealMessage(translated != null ? translated
+            : "zh".equals(LocaleContextHolder.getLocale().getLanguage()) && rawEnglish
+                ? unexpectedMessage(reason) : reason);
         ResponseUtil<Object> body = ResponseUtil.fail(msg);
         if (e.getStatusCode().value() == HttpStatus.FORBIDDEN.value()) {
             body.setData(Map.of("errorType", "PERMISSION_DENIED"));
@@ -167,11 +218,20 @@ public class GlobalExceptionHandler {
         }
         if (message.indexOf("MySQLSyntaxErrorException") > -1 || message.indexOf("SQLSyntaxErrorException") > -1
             || message.indexOf("PersistenceException") > -1 || message.indexOf("MysqlDataTruncation") > -1) {
-            message = "SQL exception, please check the log.";
+            message = I18nUtil.get("i18n.error.sql.generic");
         }
         else if (message.indexOf("UNKNOW") > -1 && message.indexOf("Observable onError") > -1) {
             message = message + ", " + I18nUtil.get("ZmessageExceptionAop_observableOnError");
         }
         return message;
+    }
+
+    private String unexpectedMessage(String detail) {
+        String key = detail != null && (detail.contains("MySQLSyntaxErrorException")
+            || detail.contains("SQLSyntaxErrorException") || detail.contains("PersistenceException")
+            || detail.contains("MysqlDataTruncation"))
+                ? "i18n.error.sql.generic" : "i18n.error.system.unexpected";
+        return messageSource == null ? ResponseUtil.failI18n(key).getMsg()
+            : messageSource.getMessage(key, null, LocaleContextHolder.getLocale());
     }
 }

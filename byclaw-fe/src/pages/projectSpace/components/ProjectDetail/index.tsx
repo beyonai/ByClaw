@@ -69,6 +69,10 @@ const ProjectDetail: React.FC<Props> = ({
   const [resourceReferenceHandler, setResourceReferenceHandler] = useState<(resource: any) => void>(
     () => () => undefined
   );
+  // 注册函数必须稳定，避免编辑器 effect 写回父组件后反复清理、注册并打断光标选择。
+  const handleResourceReferenceChange = useCallback((handler: (resource: any) => void) => {
+    setResourceReferenceHandler(() => handler);
+  }, []);
   const isOperationProject = project?.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project?.projectType);
   const currentUserId = userInfo.userId ?? userInfo.id;
@@ -344,7 +348,7 @@ const ProjectDetail: React.FC<Props> = ({
                 setEditingScheduleTask(undefined);
                 setScheduleRefreshVersion((version) => version + 1);
               }}
-              onResourceReferenceChange={(handler) => setResourceReferenceHandler(() => handler)}
+              onResourceReferenceChange={handleResourceReferenceChange}
             />
           ) : (
             renderSectionContent('tasks')

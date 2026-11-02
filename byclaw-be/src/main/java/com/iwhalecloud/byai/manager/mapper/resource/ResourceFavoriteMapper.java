@@ -8,9 +8,15 @@ public interface ResourceFavoriteMapper {
 
     SsResource selectResource(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId);
 
-    int ensureCount(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId);
+    int insertCount(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId,
+                    @Param("favoriteCount") long favoriteCount);
 
-    long lockCount(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId);
+    Long selectCount(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId);
+
+    long countFavorites(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId);
+
+    int countUserFavorite(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId,
+                          @Param("userId") Long userId);
 
     int insertFavorite(@Param("resourceId") Long resourceId, @Param("tenantId") Long tenantId,
                        @Param("userId") Long userId);

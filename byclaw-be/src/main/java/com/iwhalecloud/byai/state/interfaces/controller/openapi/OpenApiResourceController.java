@@ -177,6 +177,8 @@ public class OpenApiResourceController {
                 agentId);
             return ResponseUtil.success(uploadResult);
         }
+        catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+                | com.iwhalecloud.byai.state.common.exception.StoragePreparingException e) {throw e;}
         catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());

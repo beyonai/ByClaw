@@ -7,6 +7,7 @@ import type { JsDocxPreview } from '@js-preview/docx';
 import type { JsExcelPreview } from '@js-preview/excel';
 import ss from './Office.module.less';
 import { preparePptxPreview } from './preparePptxPreview';
+import LegacyOffice from './LegacyOffice';
 
 type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
 type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
@@ -27,6 +28,7 @@ interface OfficeProps {
   type?: string;
   loading?: boolean;
   fileName?: string;
+  onPreviewError?: () => void;
 }
 
 type DocxProps = Omit<OfficeProps, 'type' | 'fileName'>;
@@ -72,6 +74,9 @@ const blobToArrayBuffer = (blob: Blob) => {
 export const Office: Offices = (props: any) => {
   const { type, data, fileName, ...rest } = props;
 
+  if (type === 'doc' || type === 'ppt') {
+    return <LegacyOffice data={data} type={type} fileName={fileName} />;
+  }
   if (type === 'pdf' || fileName?.endsWith('.pdf')) {
     return <Office.Pdf data={data} {...rest} />;
   }
@@ -93,6 +98,8 @@ function OfficeExcel(props: OfficeProps) {
   const { data, loading: spinning, type } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const [inited, setInited] = useState(false);
+  const intl = useIntl();
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<string | ArrayBuffer>();
 
@@ -101,10 +108,18 @@ function OfficeExcel(props: OfficeProps) {
 
     if (data instanceof Blob) {
       setLoading(true);
+      setPreviewFailed(false);
+      setPreviewData(undefined);
       blobToArrayBuffer(data)
         .then((buffer) => {
           if (!disposed) {
             setPreviewData(buffer);
+          }
+        })
+        .catch(() => {
+          if (!disposed) {
+            setPreviewFailed(true);
+            props.onPreviewError?.();
           }
         })
         .finally(() => {
@@ -123,6 +138,7 @@ function OfficeExcel(props: OfficeProps) {
 
   useLayoutEffect(() => {
     let viewer: ExcelPreviewer | undefined;
+    let disposed = false;
     const root = rootRef.current;
     const task1 = new Promise<typeof jsPreviewExcel | undefined>((resolve) => {
       if (libs.jsPreviewExcel) {
@@ -137,13 +153,13 @@ function OfficeExcel(props: OfficeProps) {
         .catch(() => resolve(libs.jsPreviewExcel));
     });
     const task2 = new Promise<void>((resolve) => {
-      if (libs.pdfCss) {
+      if (libs.excelCss) {
         resolve();
         return;
       }
       import('@js-preview/excel/lib/index.css')
         .then(() => {
-          libs.pdfCss = true;
+          libs.excelCss = true;
           resolve();
         })
         .catch(() => resolve());
@@ -153,22 +169,28 @@ function OfficeExcel(props: OfficeProps) {
       // 保证资源都加载完
       const task = Promise.all([task1, task2])
         .then(([lib]) => {
+          if (disposed) return null;
+          if (!lib) throw new Error('Excel preview library unavailable');
           if (root && lib) {
             root?.firstElementChild?.remove();
             // 已安装的预览库通过 xls 选项转换旧版工作簿；XLSX 保留原初始化参数。
             const options: Parameters<typeof lib.init>[1] & { xls: boolean } = { xls: true };
             return type === 'xls' ? lib.init(root, options) : lib.init(root);
           }
-          return null;
+          throw new Error('Excel viewer unavailable');
         })
         .finally(() => {
-          setInited(true);
+          if (!disposed) setInited(true);
         });
 
       // 加载预览
       setLoading(true);
       task
         .then((preview) => {
+          if (disposed) {
+            preview?.destroy();
+            return;
+          }
           if (preview) {
             viewer = preview;
           }
@@ -178,16 +200,30 @@ function OfficeExcel(props: OfficeProps) {
           }
           return viewer?.preview(previewData) || Promise.resolve();
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (!disposed) {
+            setPreviewFailed(true);
+            props.onPreviewError?.();
+          }
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
     }
     return () => {
+      disposed = true;
       viewer?.destroy();
     };
   }, [previewData, type]);
 
   return (
     <section className={ss.office}>
-      {(spinning || !inited || loading) && (
+      {previewFailed && (
+        <div className={ss.error}>
+          <Alert type="error" showIcon message={intl.formatMessage({ id: 'fileBrowser.preview.failed' })} />
+        </div>
+      )}
+      {!previewFailed && (spinning || !inited || loading) && (
         <div className={ss.loading}>
           <Spin spinning />
         </div>
@@ -202,19 +238,34 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
   const scp = useRef({ count: 0, total: 0 });
   const [size, setSize] = useState<[w: number, h: number]>([0, 0]);
   const [previewer, initPreviewer] = useState<JsPdfPreview>();
+  const intl = useIntl();
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [buffer, setBuffer] = useState<ArrayBuffer>();
 
   useEffect(() => {
+    let disposed = false;
+    setBuffer(undefined);
+    setPreviewFailed(false);
     if (data instanceof Blob) {
       setLoading(true);
       data
         .arrayBuffer()
         .then((buffer) => {
-          setBuffer(buffer);
+          if (!disposed) setBuffer(buffer);
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (!disposed) setPreviewFailed(true);
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
+    } else if (data instanceof ArrayBuffer) {
+      setBuffer(data);
     }
+    return () => {
+      disposed = true;
+    };
   }, [data]);
 
   useLayoutEffect(() => {
@@ -223,6 +274,7 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
     });
 
     let temp: any;
+    let disposed = false;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
 
     let loadLib = Promise.resolve(libs.jsPreviewPdf!);
@@ -233,18 +285,22 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
       });
     }
 
-    loadLib.then((pdfInit) => {
-      if (ref.current) {
-        temp = pdfInit(ref.current, {
-          onRendered: () => {
-            if (scp.current.total) return;
-            scp.current.count = temp.visibleItems;
-            scp.current.total = temp.totalItems;
-          },
-        });
-        initPreviewer(temp);
-      }
-    });
+    loadLib
+      .then((pdfInit) => {
+        if (!disposed && ref.current) {
+          temp = pdfInit(ref.current, {
+            onRendered: () => {
+              if (scp.current.total) return;
+              scp.current.count = temp.visibleItems;
+              scp.current.total = temp.totalItems;
+            },
+          });
+          initPreviewer(temp);
+        }
+      })
+      .catch(() => {
+        if (!disposed) setPreviewFailed(true);
+      });
 
     const scroll = (e: Event) => {
       if (scp.current.count === scp.current.total) return;
@@ -261,6 +317,7 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
 
     ref.current?.addEventListener('scroll', scroll);
     return () => {
+      disposed = true;
       obs.disconnect();
       temp?.destroy();
       initPreviewer(undefined);
@@ -270,12 +327,29 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
 
   useLayoutEffect(() => {
     if (buffer && previewer) {
-      previewer.preview(buffer);
+      let active = true;
+      setLoading(true);
+      Promise.resolve()
+        .then(() => previewer.preview(buffer))
+        .catch(() => {
+          if (active) setPreviewFailed(true);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+      return () => {
+        active = false;
+      };
     }
   }, [buffer, previewer]);
 
   return (
     <section className={ss.office}>
+      {previewFailed && (
+        <div className={ss.error}>
+          <Alert type="error" showIcon message={intl.formatMessage({ id: 'fileBrowser.preview.failed' })} />
+        </div>
+      )}
       {(spinning || loading) && (
         <div className={ss.loading}>
           <Spin spinning />
@@ -286,23 +360,41 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
   );
 }
 
-function OfficeDocx({ data, loading: spinning }: DocxProps) {
+function OfficeDocx({ data, loading: spinning, onPreviewError }: DocxProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<[w: number, h: number]>([0, 0]);
   const [previewer, initPreviewer] = useState<JsDocxPreview>();
+  const intl = useIntl();
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [buffer, setBuffer] = useState<ArrayBuffer>();
 
   useEffect(() => {
+    let disposed = false;
+    setBuffer(undefined);
+    setPreviewFailed(false);
     if (data instanceof Blob) {
       setLoading(true);
       data
         .arrayBuffer()
         .then((buffer) => {
-          setBuffer(buffer);
+          if (!disposed) setBuffer(buffer);
         })
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (!disposed) {
+            setPreviewFailed(true);
+            onPreviewError?.();
+          }
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
+    } else if (data instanceof ArrayBuffer) {
+      setBuffer(data);
     }
+    return () => {
+      disposed = true;
+    };
   }, [data]);
 
   useLayoutEffect(() => {
@@ -311,6 +403,7 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
     });
 
     let temp: any;
+    let disposed = false;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
 
     let loadLib = Promise.resolve(libs.jsPreviewDocx!);
@@ -321,14 +414,22 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
       });
     }
 
-    loadLib.then((docxInit) => {
-      if (ref.current) {
-        temp = docxInit(ref.current, {});
-        initPreviewer(temp);
-      }
-    });
+    loadLib
+      .then((docxInit) => {
+        if (!disposed && ref.current) {
+          temp = docxInit(ref.current, {});
+          initPreviewer(temp);
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setPreviewFailed(true);
+          onPreviewError?.();
+        }
+      });
 
     return () => {
+      disposed = true;
       obs.disconnect();
       temp?.destroy();
       initPreviewer(undefined);
@@ -336,13 +437,38 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
   }, [ref]);
 
   useLayoutEffect(() => {
+    let active = true;
     if (buffer && previewer) {
-      previewer.preview(buffer);
+      setLoading(true);
+      Promise.resolve()
+        .then(() => {
+          if (active) return previewer.preview(buffer);
+        })
+        .catch(() => {
+          if (active) {
+            setPreviewFailed(true);
+            onPreviewError?.();
+          }
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+      return () => {
+        active = false;
+      };
     }
+    return () => {
+      active = false;
+    };
   }, [buffer, previewer]);
 
   return (
     <section className={ss.office}>
+      {previewFailed && (
+        <div className={ss.error}>
+          <Alert type="error" showIcon message={intl.formatMessage({ id: 'fileBrowser.preview.failed' })} />
+        </div>
+      )}
       {(spinning || loading) && (
         <div className={ss.loading}>
           <Spin spinning />
@@ -436,13 +562,14 @@ function OfficePptx({ data, loading: spinning }: DocxProps) {
     Promise.all([loadLib, preparePptxPreview(buffer)])
       .then(async ([pptxInit, previewBuffer]) => {
         if (disposed) return undefined;
-        previewer = pptxInit(root, {
+        const viewer: PptxPreviewer = pptxInit(root, {
           width: size[0],
           height: size[1],
         });
-        await previewer.preview(previewBuffer);
+        previewer = viewer;
+        await viewer.preview(previewBuffer);
         // 渲染库会吞掉部分解析异常，零页结果需要明确报错，避免只留下黑色背景。
-        if (!disposed && previewer.slideCount === 0) {
+        if (!disposed && viewer.slideCount === 0) {
           throw new Error('PPTX preview contains no slides');
         }
       })

@@ -37,6 +37,8 @@ import com.iwhalecloud.byai.common.login.bean.UserManageOrg;
  */
 public interface PrivilegeGrantMapper extends BaseMapper<PrivilegeGrant> {
 
+    int insertBatch(@Param("grants") List<PrivilegeGrant> grants, @Param("dbType") String dbType);
+
     /**
      * 查询权限对象
      *

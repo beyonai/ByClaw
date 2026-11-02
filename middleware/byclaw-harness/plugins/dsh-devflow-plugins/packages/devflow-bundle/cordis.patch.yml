@@ -1,0 +1,174 @@
+# The devflow bundle patch: the `dsh.bundle.patch` layer of this package.
+#
+# `dsh plugin --profile <name> add @zhchxiao123/dsh-devflow-bundle` forwards to
+# pnpm, then reconciles `dsh.profile.bundles` against what got installed. A
+# dependency whose manifest declares `dsh.bundle` joins the layer stack, so
+# installing this package is what mounts the rows below — no profile editing.
+#
+# A patch replaces the targeted row's whole `config` rather than merging into
+# it, so a profile's own cordis.patch.yml overrides any row here by addressing
+# the same id, last write winning.
+#
+# Rows are ordered by dependency, not by importance: the seam's provider comes
+# first because everything else injects `devflow`.
+#
+# A package is mounted here XOR it carries its own `cordis.patch.yml`, never
+# both: profile layers are applied by appending each layer's `insert` rows with
+# no deduplication, so a profile holding this bundle and a package that also
+# patches itself composes two rows of one id, and the Loader refuses the whole
+# composition with `duplicate loader entry id`. Adopting a package into this
+# list therefore means deleting its own patch, and `tests/bundle-row-ids.spec.ts`
+# is what holds the rule.
+#
+# Which packages are worth that trade is decided by mounting cost and by
+# whether the standalone path has a current owner. `devflow-midscene` and
+# `devflow-deploy` stay out on mounting cost: midscene needs Node 24,
+# Playwright, a chromium, and a vision-model endpoint, none of which this
+# package can install, and deploy's `host` / `remoteWebRoot` /
+# `remoteReleasesRoot` / `baseUrl` have no fallback default, which is why its
+# own patch ships the row `disabled: true`. `devflow-testenv` stays out on the
+# second test: its runbook bootstraps an e2e environment and names no card, so
+# a profile that never mounts a board still wants it, and adopting it would buy
+# discoverability by deleting a path that works.
+- insert:
+    # The store. `root` is left unset on purpose — omitted, each caller's own
+    # workspace resolves it (`<session cwd>/.devflow`), which is what makes one
+    # harness serve many projects. Set it in your profile patch to pin one root.
+    - id: devflow
+      name: '@zhchxiao123/dsh-devflow-filesystem'
+
+    # The model-facing plane: devflow_list / show / create / take / transition /
+    # attach_artifact.
+    - id: devflow-tool
+      name: '@zhchxiao123/dsh-devflow-tool'
+
+    # The guidance layer over that plane: the bundled devflow-workflow skill
+    # (catalog by default, loaded on demand) and the devflow-board runtime
+    # context (a capped per-step snapshot of the caller workspace's board;
+    # nothing rendered where no board exists). Enabled because both layers
+    # change no enforcement; a deployment overrides the skill body by a
+    # same-layer, lower-ranked provider of the same name rather than by config.
+    - id: devflow-guidance
+      name: '@zhchxiao123/dsh-devflow-guidance'
+
+    # Worktree-per-card development: the bundled devflow-worktree-runbook skill
+    # and the fence holding a dispatched card to its own worktree. Enabled
+    # because a card carrying no `worktree` dispatch artifact is untouched —
+    # mounting the row changes nothing until a card is actually dispatched —
+    # and because leaving it out is what keeps most deployments from knowing
+    # the capability exists, while it is the answer to the one limitation
+    # `devflow-review-gate` records about itself. This row is the package's
+    # only mount: its runbook teaches a devflow card ceremony end to end, so a
+    # profile without a board had nothing to do with the standalone patch it
+    # used to ship, and that patch is gone.
+    #
+    # Its position is a decision, not an accident. The fence listens on
+    # `devflow/transition`, where mount order is decision order, so this row
+    # sits ahead of the four policy rows below: when the card is not even in
+    # the checkout allowed to write it, running a structure check, a checker,
+    # or a test suite first spends work on a move that cannot be admitted.
+    # Moving this row past them silently reverses that.
+    - id: devflow-worktree
+      name: '@zhchxiao123/dsh-devflow-worktree'
+
+    # The human intervention plane: /devflow board, show, move, takeover, archive.
+    - id: devflow-command
+      name: '@zhchxiao123/dsh-devflow-command'
+
+    # Keeps the store the only write path over card history: the agent's file
+    # tools are denied every mutation under the protected state directories.
+    - id: devflow-fs-guard
+      name: '@zhchxiao123/dsh-devflow-fs-guard'
+
+    # The architecture-document seam: documents whose claims are tied to the
+    # code by anchors the store re-evaluates on every read. Provider first, then
+    # its tools. Enabled because a workspace with no `.devflow/spec/` has no
+    # documents and the seam simply reports an empty set — while the card tools
+    # and `/devflow spec` both read it opportunistically, so leaving it out is
+    # what silently removes a capability rather than what adds one.
+    - id: devflow-spec
+      name: '@zhchxiao123/dsh-devflow-spec-filesystem'
+
+    # devflow_write_spec / devflow_read_spec: the only write path to those
+    # documents, and the only way a model reads one back with its verdicts.
+    - id: devflow-spec-tool
+      name: '@zhchxiao123/dsh-devflow-spec-tool'
+
+    # The session-hosted spec lifecycle over that seam: one forced continuation
+    # step when a turn's edits leave an anchored document stale (the same
+    # document never interrupts a session twice), the per-session
+    # `devflow-spec-map` index of the documents claiming the files a session
+    # touches, and the `devflowSpecWorkspace` layout service the census reads.
+    # Enabled because zero configuration is meaningful — without the seam above
+    # or a `.devflow/spec/` it is inert. A deployment that wants no steering at
+    # all disables this row with one `disabled: true` in its profile patch.
+    - id: devflow-spec-sentinel
+      name: '@zhchxiao123/dsh-devflow-spec-sentinel'
+
+    # Repository-carried iron rules: resident rule bodies, check scripts at the
+    # end of any turn that touched files, and the devflowIronRules recording
+    # seam. Enabled because a workspace with no `.devflow/iron-rules/` makes it
+    # inert — but note that mounting it means rules a repository carries WILL
+    # execute their check scripts; a deployment running untrusted checkouts
+    # should disable this row in its profile patch.
+    - id: devflow-iron-rules
+      name: '@zhchxiao123/dsh-devflow-iron-rules'
+
+    # The four transition policies, in the waterfall order the deployment
+    # sample in docs/devflow.md relies on — mechanical structure check, agent
+    # admission, command gates and approvals, completion — so the cheap and
+    # deterministic layers veto before the expensive and human ones are paid.
+    # Listener order on the waterfall is mount order; enabling a row keeps it.
+
+    # Mechanical artifact contract per edge, plus `devflowArtifactStructures` for
+    # producers and `devflowArtifactContract` for proactive inspection.
+    # Disabled by default: an empty spec set gates nothing, and which kinds
+    # guard which edge is a project decision, not a default.
+    - id: devflow-artifact-gate
+      name: '@zhchxiao123/dsh-devflow-artifact-gate'
+      disabled: true
+
+    # LLM admission checks per edge. Disabled by default because it spends
+    # model budget on every checked move — an edge set is a deliberate choice
+    # about what is worth paying a checker for, not a default. Its reports and
+    # verdict cache need no configuration: both live under the moving card's
+    # own devflow root, where devflow-fs-guard already protects them.
+    - id: devflow-agent-gate
+      name: '@zhchxiao123/dsh-devflow-agent-gate'
+      disabled: true
+
+    # Per-edge command gates and one-shot human approvals. Disabled by default:
+    # an empty gate set is a plugin that vetoes nothing, and which commands
+    # guard which edge is a project decision, not a default. Enable it in your
+    # profile patch with the `edges` / `approvals` config the README shows.
+    - id: devflow-gates
+      name: '@zhchxiao123/dsh-devflow-gates'
+      disabled: true
+
+    # Per-edge code review through open-code-review's delegate mode. Disabled
+    # by default because it requires the external `ocr` binary, which this line
+    # neither ships nor can install. A deployment that wants it installs `ocr`,
+    # then enables this row with the `edges` config the README shows; its
+    # reports and verdict cache need no configuration, living under the moving
+    # card's own devflow root where devflow-fs-guard already protects them.
+    - id: devflow-review-gate
+      name: '@zhchxiao123/dsh-devflow-review-gate'
+      disabled: true
+
+    # Completion policy for decomposed requirements. No config: the rule is the
+    # relation, not a setting.
+    - id: devflow-parent-gate
+      name: '@zhchxiao123/dsh-devflow-parent-gate'
+
+    # The browser channel's host half: a read-only JSON route plus the change
+    # stream. It is mounted ahead of the board that reads it, so the board
+    # arrives as one added row rather than a new channel.
+    - id: devflow-web
+      name: '@zhchxiao123/dsh-devflow-web'
+
+    # The board. Its browser bundle ships in the package as `lib/client.js`,
+    # which is not optional: a package declaring `dsh.client` without that file
+    # is a fatal composition error, and the harness refuses to boot rather than
+    # starting without it.
+    - id: devflow-ui
+      name: '@zhchxiao123/dsh-devflow-ui'

@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // Step 4 · 排序候选 —— rank 输出 RankCandidate[],候选卡列表 + 选定 + A 样本 trace 图
 import { Button, Card, Col, Empty, Row, Typography } from 'antd';
 import CandidateCard from '../components/CandidateCard';
@@ -17,16 +18,18 @@ interface Props {
 }
 
 export default function RankStep({ loading, candidates, selectedId, sampleA, sampleB, onRank, onSelect }: Props) {
+  const intl = useIntl();
   const ranked = !!candidates?.length;
   return (
-    <Card title="排序候选 endpoint" variant="borderless">
+    <Card title={intl.formatMessage({ id: 'adapterRecorder.rank.title' })} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.6 }}>
-        读取会话内已冻结的 A/B 样本,内部执行 normalize/rank/diff,输出候选 endpoint(含得分、置信度、风险与得分解释)。
-        选定一个候选后即可生成 adapter 草稿。
+        {intl.formatMessage({ id: 'adapterRecorder.rank.description' })}
       </Paragraph>
 
       <Button type="primary" loading={loading} disabled={ranked} onClick={onRank} style={{ marginBottom: 16 }}>
-        {ranked ? '已排序' : '执行排序'}
+        {ranked
+          ? intl.formatMessage({ id: 'adapterRecorder.rank.ranked' })
+          : intl.formatMessage({ id: 'adapterRecorder.rank.run' })}
       </Button>
 
       {ranked ? (
@@ -41,13 +44,18 @@ export default function RankStep({ loading, candidates, selectedId, sampleA, sam
             </Row>
           </Col>
           <Col xs={24} lg={10}>
-            <Card size="small" title="A/B 样本差异与候选关联">
+            <Card size="small" title={intl.formatMessage({ id: 'adapterRecorder.rank.comparison' })}>
               <TraceChart sampleA={sampleA} sampleB={sampleB} candidates={candidates} selectedId={selectedId} />
             </Card>
           </Col>
         </Row>
       ) : (
-        !loading && <Empty description="尚未排序" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        !loading && (
+          <Empty
+            description={intl.formatMessage({ id: 'adapterRecorder.rank.pending' })}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        )
       )}
     </Card>
   );

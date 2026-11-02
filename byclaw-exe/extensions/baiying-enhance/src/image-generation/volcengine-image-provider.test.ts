@@ -156,6 +156,17 @@ describe("Volcengine image provider", () => {
     expect(result.images[0]?.mimeType).toBe("image/png");
   });
 
+  it.each(["doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-flash-260915"])(
+    "omits unsupported streaming and group generation for %s", async (model) => {
+      await provider().generateImage(request({ model, count: 1 }) as never);
+      expect(captured.body?.model).toBe(model);
+      expect(captured.body).not.toHaveProperty("stream");
+      expect(captured.body).not.toHaveProperty("sequential_image_generation");
+      expect(captured.body).not.toHaveProperty("sequential_image_generation_options");
+      await expect(provider().generateImage(request({ model, count: 2 }) as never)).rejects.toThrow("one image");
+    },
+  );
+
   it("rejects upstream errors without including the API token", async () => {
     responder = (_req, res) => {
       res.writeHead(401, { "content-type": "application/json" });

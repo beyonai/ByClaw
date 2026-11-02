@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { useState } from 'react';
 import styles from './CredentialHelpCard.module.less';
 
@@ -14,7 +15,7 @@ interface HelpSection {
 
 const SECTION_HEADING_PATTERN = /^([^：:\n]{1,20})[：:]\s*(.*)$/;
 const STEP_PATTERN = /^\d+[.、]\s*(.+)$/;
-const WARNING_HEADING_PATTERN = /安全|注意|警告/;
+const WARNING_HEADING_PATTERN = /安全|注意|警告|safety|security|caution|warning/i;
 
 const parseHelpSections = (helpText: string): HelpSection[] =>
   helpText
@@ -49,6 +50,7 @@ const parseHelpSections = (helpText: string): HelpSection[] =>
     });
 
 const CredentialHelpCard = ({ helpText }: CredentialHelpCardProps) => {
+  const intl = useIntl();
   const sections = parseHelpSections(helpText);
   const hasStructuredSection = sections.some((section) => section.title);
   const [expandedStepSections, setExpandedStepSections] = useState<Set<number>>(() => new Set());
@@ -64,14 +66,20 @@ const CredentialHelpCard = ({ helpText }: CredentialHelpCardProps) => {
 
   if (!hasStructuredSection) {
     return (
-      <section aria-label="凭据获取说明" className={styles.credentialHelpCard}>
+      <section
+        aria-label={intl.formatMessage({ id: 'connector.credential.helpLabel' })}
+        className={styles.credentialHelpCard}
+      >
         <p className={styles.fallbackText}>{helpText.trim()}</p>
       </section>
     );
   }
 
   return (
-    <section aria-label="凭据获取说明" className={styles.credentialHelpCard}>
+    <section
+      aria-label={intl.formatMessage({ id: 'connector.credential.helpLabel' })}
+      className={styles.credentialHelpCard}
+    >
       {sections.map((section, index) => (
         <div
           className={`${styles.helpSection}${section.warning ? ` ${styles.warningSection}` : ''}`}

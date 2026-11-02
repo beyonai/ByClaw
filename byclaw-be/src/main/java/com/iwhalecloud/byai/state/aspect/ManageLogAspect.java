@@ -7,10 +7,10 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.manager.entity.log.ManageLog;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.util.IpUtil;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigValidationException;
 import com.iwhalecloud.byai.state.domain.log.service.ManageLogService;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -66,6 +66,10 @@ public class ManageLogAspect {
 
         catch (Throwable e) {
             logger.error(e.getMessage(), e);
+            // 保留机器人校验异常类型，让控制器按请求语言输出业务提示及已绑定的数字员工名称。
+            if (e instanceof DingtalkRobotConfigValidationException validationException) {
+                throw validationException;
+            }
             throw new BaseRuntimeException(e.getMessage());
         }
         finally {
@@ -117,11 +121,11 @@ public class ManageLogAspect {
 
         // 入参记录
         if (args != null && args.length > 0) {
-            manageLog.setOperatorParam(JSON.toJSONString(this.filter(args)));
+            manageLog.setOperatorParam(AuditLogSanitizer.serialize(this.filter(args)));
         }
         // 出参记录
         if (reposeParameters != null) {
-            manageLog.setOperatorResponse(JSON.toJSONString(reposeParameters));
+            manageLog.setOperatorResponse(AuditLogSanitizer.serialize(reposeParameters));
         }
 
         // 保存日志

@@ -35,6 +35,9 @@ import jakarta.servlet.http.HttpSession;
  */
 @Component
 public class SignAntiReplayFilter extends OncePerRequestFilter {
+    @org.springframework.beans.factory.annotation.Value("${byclaw.platform.execution-mode:legacy}")
+    private String platformExecutionMode;
+
 
     private static final Logger log = LoggerFactory.getLogger(SignAntiReplayFilter.class);
 
@@ -89,6 +92,13 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
         throws ServletException, IOException {
         log.debug("SignAntiReplayFilter start");
+        // Service identity has already verified the complete request with shared replay protection.
+        if (request.getAttribute(com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal.ATTRIBUTE)
+            instanceof com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // This read-only skill uses the caller's Beyond-Token plus its own server-side allowlist.
         if (this.isExactPostRequestPath(request, ConversationSearchConstants.QUERY_PATH)) {
             filterChain.doFilter(request, response);
@@ -99,6 +109,10 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             log.debug("SignAntiReplayFilter disable");
             filterChain.doFilter(request, response);
             return;
+        }
+        // 平台桥接由 BYAI_PLATFORM JWT 认证，不使用门户请求签名；后续认证拦截器仍必经。
+        if (com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBridgePaths.remoteAlert(request.getServletPath(), platformExecutionMode)) {
+            filterChain.doFilter(request,response);return;
         }
         // 匿名手机号授权尚无 USER_CODE，不能用依赖已登录会话的通用签名；
         // 仅放行精确 POST 路径，后续由微信一次性 code 校验和共享限流负责入口保护。

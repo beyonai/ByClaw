@@ -1,0 +1,27 @@
+# @byclaw/dsh-iron-rules bundle patch: mounts the iron-rules plugin into the
+# host composition of a dsh profile. The plugin discovers `<git-root>/.iron-rules`
+# per session, injects every rule body into the model context, and runs each
+# rule's `check.sh` when a turn that touched files is about to stop.
+#
+# The plugin is inert in a repository with no `.iron-rules` directory, so it is
+# safe to install ahead of authoring any rules.
+#
+# Install: `dsh plugin --profile <name> add <this package>` (local path or npm),
+# then restart the profile.
+- insert:
+    - id: iron-rules
+      # Node-resolvable package name — must stay in sync with package.json
+      # `name`. Quoted because `@` is a reserved indicator in YAML.
+      name: '@byclaw/dsh-iron-rules'
+      config:
+        # Rule directory, resolved against the project root (nearest ancestor
+        # holding `.git`, else the session cwd).
+        rulesDir: .iron-rules
+        # Byte ceiling for the injected rule bodies. Recording a rule that would
+        # exceed it fails loud rather than silently truncating.
+        maxBytes: 32768
+        # Per-`check.sh` timeout.
+        checkTimeoutMs: 120000
+        # Consecutive forced continuations before the plugin gives up and hands
+        # the decision back to the user.
+        maxRetries: 2

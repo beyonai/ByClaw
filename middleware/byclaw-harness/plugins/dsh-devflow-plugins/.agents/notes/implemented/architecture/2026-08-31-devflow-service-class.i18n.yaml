@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-31-devflow-service-class.md
+2026-08-31-devflow-service-class.md: 56a581e3591ffd030ed5addb2fe4588c61b9242d
+2026-08-31-devflow-service-class.zh.md: 6af4381e31e892d6bfa47399c8fe5b7eed2be7e3

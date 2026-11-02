@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write plugins/byclaw-integration/README.md
+README.md: b74dec3c4eb8939103212b9bde1984b47e278955
+README.zh.md: de23b0436a7437e55bb6320c8d6a8f048e51ae60

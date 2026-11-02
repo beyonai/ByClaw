@@ -1,3 +1,9 @@
+jest.mock('@umijs/max', () => ({
+  useSelector: () => null,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
+
 import { render, screen } from '@testing-library/react';
 
 import VncFrame from './VncFrame';

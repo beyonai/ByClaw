@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Button, message, Tooltip } from 'antd';
-
-// @ts-ignore
 import { useIntl } from '@umijs/max';
 
 import AntdIcon from '@/components/AntdIcon';
+import { isUploadFileCountExceeded, isUploadFileSizeExceeded } from '@/components/QueryInput/utils/fileUpload';
 import UploadConfirmModal from '@/components/UploadConfirmModal';
-import { checkUploadFileConflicts, uploadFiles } from '@/service/knowledgeCenter';
 import { useFileTookit } from '@/hooks/useFileTookit';
+import useGlobal from '@/hooks/useGlobal';
+import { checkUploadFileConflicts, uploadFiles } from '@/service/knowledgeCenter';
 
 interface IProps {
   baseInfo: any;
@@ -19,10 +19,11 @@ interface IProps {
   directoryPath: string;
 }
 
-const UploadFile = (props: IProps) => {
+function UploadFile(props: IProps) {
   const { baseInfo, uploadLoading, setUploadLoading, reload, directoryPath } = props;
 
   const { pick, message: uploadMessage } = useFileTookit();
+  const { uploadFileConfig } = useGlobal();
 
   const intl = useIntl();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -32,13 +33,22 @@ const UploadFile = (props: IProps) => {
   const uploadDirectory = directoryPath || '/';
   const hasUploadConflicts = uploadConflicts.length > 0;
 
+  function validateFiles(files: File[]) {
+    // 数量与单文件大小均使用全局配置；0 或缺省不限，不截断用户选择的文件。
+    if (isUploadFileCountExceeded(uploadFileConfig, files.length)) {
+      message.error(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig?.maxFileCount }));
+      return false;
+    }
+    if (files.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
+      message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
+      return false;
+    }
+    return true;
+  }
+
   const handlePick = async () => {
-    const files = await pick({
-      count: 10, // 最多选择10个文件
-      multiple: true,
-      totalSize: 1024 * 1024 * 200, // 总共不能超过200MB
-    });
-    if (!files) return;
+    const files = await pick({ multiple: true });
+    if (!files?.length || !validateFiles(files)) return;
 
     try {
       setConflictChecking(true);
@@ -59,6 +69,9 @@ const UploadFile = (props: IProps) => {
 
   const handleUpload = async (processFrontMatter: boolean) => {
     if (!pendingFiles.length) return;
+
+    // 确认弹窗打开后配置可能刷新，发送上传请求前再次检查当前上限。
+    if (!validateFiles(pendingFiles)) return;
 
     const formData = new FormData();
     pendingFiles.forEach((file) => {
@@ -143,6 +156,6 @@ const UploadFile = (props: IProps) => {
       />
     </>
   );
-};
+}
 
 export default UploadFile;

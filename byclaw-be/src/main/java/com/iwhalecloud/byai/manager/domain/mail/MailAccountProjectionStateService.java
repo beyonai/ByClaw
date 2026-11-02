@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.net.IDN;
 import java.util.Date;
@@ -174,7 +176,7 @@ public class MailAccountProjectionStateService implements MailConnectorLookup {
             account.setStatus(status);
             account.setUpdateTime(new Date());
             if (!privateParamStore.updateCheck(account, observedStatus, observedTime)) {
-                throw new IllegalStateException("邮箱配置已发生变化，请重试投影");
+                throw new IllegalStateException(I18nUtil.get("mail.account.projectionChanged"));
             }
         }
         return affected;

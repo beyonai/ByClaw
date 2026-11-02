@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.connector;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.connector.provider.deepseek.DeepSeekWebSearchResult;
 import com.iwhalecloud.byai.manager.domain.connector.provider.deepseek.DeepSeekWebSearchRuntimeService;
@@ -23,7 +25,7 @@ public class DeepSeekWebSearchRuntimeController {
     public ResponseUtil<DeepSeekWebSearchResult> search(
             @RequestBody(required = false) DeepSeekWebSearchRequest request) {
         if (request == null) {
-            throw new IllegalArgumentException("request body is required");
+            throw new IllegalArgumentException(I18nUtil.get("connector.deepseek.search.body.required"));
         }
         java.util.List<String> queries = request.queries() == null
             ? (request.query() == null ? null : java.util.List.of(request.query()))

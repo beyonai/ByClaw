@@ -1,9 +1,11 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -20,10 +22,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-class WorkgroupNameServiceTest {
+class WorkgroupNameServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiSessionMapper sessions = mock(ByaiSessionMapper.class);
-    private final WorkgroupNameService service = new WorkgroupNameService(node, sessions);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
+    private final WorkgroupNameService service = new WorkgroupNameService(node, sessions, tenantModes);
     private String originalEnvironment;
 
     @BeforeEach
@@ -40,6 +43,20 @@ class WorkgroupNameServiceTest {
         TenantRequestContextHolder.clear();
         if (originalEnvironment == null) System.clearProperty("BE_ENV");
         else System.setProperty("BE_ENV", originalEnvironment);
+    }
+
+    @Test
+    void trialTenantChecksSharedStorageWithinItsOwnEnterprise() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(sessions.selectCount(any())).thenReturn(1L);
+
+        assertThat(service.exists("Team", 88L, 456L)).isTrue();
+        ArgumentCaptor<LambdaQueryWrapper<ByaiSession>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(sessions).selectCount(query.capture());
+        assertThat(query.getValue().getSqlSegment()).contains("enterprise_id =");
+        assertThat(query.getValue().getParamNameValuePairs()).containsValue(456L);
+        verifyNoInteractions(node);
     }
 
     @Test
@@ -90,6 +107,31 @@ class WorkgroupNameServiceTest {
         verifyNoInteractions(node);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0L, 1L})
+    void trialTenantChecksPublicGroupNamesWithoutCallingNode(long count) {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(sessions.selectCount(any())).thenReturn(count);
+
+        assertThat(service.exists("Team", 88L, 456L)).isEqualTo(count > 0);
+
+        LambdaQueryWrapper<ByaiSession> query = query();
+        assertThat(query.getSqlSegment()).contains("enterprise_id =", "creator_id =", "state <>")
+            .doesNotContain("enterprise_id IS NULL");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(88L, "Team", "hs_as", 456L, "GROUP_DISSOLVED");
+        verifyNoInteractions(node);
+    }
+
+    @Test
+    void trialTenantStillRejectsAnotherUserOrEnterpriseScope() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        assertThatThrownBy(() -> service.exists("Team", 89L, 456L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.exists("Team", 88L, 10L)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(node, sessions);
+    }
+
     @Test
     void developmentUsesTheSameTenantScopeInTheLegacyDatabase() {
         TenantRequestContextHolder.set(new TenantRequestContext(88L, 10L, "OWNER"));
@@ -106,5 +148,17 @@ class WorkgroupNameServiceTest {
         ArgumentCaptor<LambdaQueryWrapper<ByaiSession>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(sessions).selectCount(query.capture());
         return query.getValue();
+    }
+
+    @Test
+    void scopeMismatchIsLocalizedBeforeCallingTheTenantNode() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 10L, "OWNER"));
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.exists("Team", 99L, 10L))
+            .hasMessage("Workgroup name scope does not match tenant context");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> service.exists("Team", 99L, 10L))
+            .hasMessage("工作组名称查询范围与租户上下文不匹配");
+        verifyNoInteractions(node, sessions);
     }
 }

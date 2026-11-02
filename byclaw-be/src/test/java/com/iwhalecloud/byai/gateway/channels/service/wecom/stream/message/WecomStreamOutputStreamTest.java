@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 20000-byte cap (marker included). Also verifies the answerDelta JSON block
  * parsing (event property + choices[0].delta.content).
  */
-class WecomStreamOutputStreamTest {
+class WecomStreamOutputStreamTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private ScheduledExecutorService scheduler;

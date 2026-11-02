@@ -279,7 +279,7 @@ public class WorkspaceInitService {
         if (System.currentTimeMillis() - startedMs >= INIT_TIMEOUT_MS) {
             // 留在 initialized 只清会话：工作区已经由第一段建好了，这里只是聊天没聊完，重发聊天即可，不必重跑克隆。
             // 会话清成 0 后本轮不再被捞，前端也从「在聊」回到可点「去跟架构聊天」。
-            applyInitResult(project, INIT_STATUS_INITIALIZED, "架构数字员工初始化超时未完成，请重新发起「去跟架构聊天」");
+            applyInitResult(project, INIT_STATUS_INITIALIZED, I18nUtil.get("devloop.workspace.architectTimeout"));
         }
     }
 

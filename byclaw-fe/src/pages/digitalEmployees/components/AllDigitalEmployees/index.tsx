@@ -29,6 +29,7 @@ import useEmployeeRowRefresh, {
 } from '@/hooks/useEmployeeRowRefresh';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
+import EmployeeOrganizationMeta from './components/EmployeeOrganizationMeta';
 
 import { IAgentCache, IAgent } from '@/typescript/agent';
 import styles from './index.module.less';
@@ -689,6 +690,9 @@ function AllDigitalEmployees(
     <ResourceCard
       key={employee.agentId}
       resource={employee}
+      metaNode={
+        source === 'official' ? <EmployeeOrganizationMeta organizations={employee.audienceOrganizations} /> : undefined
+      }
       resourceType="DIG_EMPLOYEE"
       enableFavorites={favoriteMode}
       avatarNode={<div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>}

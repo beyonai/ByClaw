@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,7 +46,7 @@ public class GroupWorkAssistantService {
     public Long resolveDefaultCoordinatorId() {
         List<GroupWorkAssistantResponse> assistants = getDefaultAssistants();
         if (assistants.size() != 1) {
-            throw new GroupChatMessageRejectedException("Configure exactly one group work assistant");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.singleAssistantRequired"));
         }
         return Long.valueOf(assistants.getFirst().resourceId());
     }
@@ -54,7 +55,7 @@ public class GroupWorkAssistantService {
         ByaiSessionExt ext = sessionExtService.findOneByExtParamCode(groupSessionId, COORDINATOR_EXT);
         Long id = ext == null ? resolveDefaultCoordinatorId() : Long.valueOf(ext.getExtParamValue());
         if (memberService.findSessionMember(groupSessionId, "AGENT", id) == null) {
-            throw new GroupChatMessageRejectedException("Group work assistant is not a group member");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.assistantNotMember"));
         }
         if (ext == null) bindCoordinator(groupSessionId, id);
         return id;

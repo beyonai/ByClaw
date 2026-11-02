@@ -1,7 +1,9 @@
 package com.iwhalecloud.byai.state.interfaces.controller.personalmodel;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.aimodel.GptProxyChatCompletionsStreamApplicationService;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugImageGenerationApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelIdRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
@@ -43,6 +45,9 @@ public class PersonalModelController {
     private GptProxyChatCompletionsStreamApplicationService gptProxyChatCompletionsStreamApplicationService;
 
     @Autowired
+    private ModelDebugImageGenerationApplicationService modelDebugImageGenerationApplicationService;
+
+    @Autowired
     private LangfuseUsageService langfuseUsageService;
 
     @Autowired
@@ -63,7 +68,7 @@ public class PersonalModelController {
     public ResponseUtil<ModelListResponse> listPublic(@RequestBody ModelListRequest request) {
         request.setOwnerType("PUBLIC");
         request.setCreateBy(null);
-        request.setStatus("ENABLED");
+        if (!CurrentUserHolder.isAdminVip()) request.setStatus("ENABLED");
         ModelListResponse data = modelManagementApplicationService.getModelListByPage(request);
         return ResponseUtil.success(data);
     }
@@ -144,5 +149,22 @@ public class PersonalModelController {
     @PostMapping(value = "/debug", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter debug(@RequestBody Map<String, Object> body) {
         return gptProxyChatCompletionsStreamApplicationService.startChatCompletionsStreamTest(body);
+    }
+
+    /** 图片使用独立 JSON 接口，保留既有文本模型 SSE 调试契约。 */
+    @ApiOperation("个人图片模型调试")
+    @PostMapping(value = "/debugImageGeneration", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<Object> debugImageGeneration(@RequestBody Map<String, Object> body) {
+        Long modelId = modelManagementApplicationService.parseModelIdFromBody(body);
+        modelManagementApplicationService.validatePersonalImageDebugAccess(modelId, CurrentUserHolder.getCurrentUserId());
+        try {
+            Object result = modelDebugImageGenerationApplicationService.startImageGenerationDebug(body);
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, true);
+            return ResponseUtil.success(result);
+        }
+        catch (BaseException e) {
+            modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
+            throw e;
+        }
     }
 }

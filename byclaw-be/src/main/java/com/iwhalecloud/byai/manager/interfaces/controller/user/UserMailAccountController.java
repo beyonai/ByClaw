@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserMailAccountApplicationService;
@@ -28,22 +30,22 @@ public class UserMailAccountController {
 
     @GetMapping("/list")
     public ResponseUtil<List<UserMailAccountVO>> list() {
-        return ResponseUtil.successResponse("邮箱账号查询成功", userMailAccountApplicationService.list());
+        return ResponseUtil.successResponse(I18nUtil.get("mail.account.querySuccess"), userMailAccountApplicationService.list());
     }
 
     @GetMapping("/providers")
     public ResponseUtil<List<MailProviderVO>> providers() {
-        return ResponseUtil.successResponse("邮箱服务商查询成功", userMailAccountApplicationService.providers());
+        return ResponseUtil.successResponse(I18nUtil.get("mail.providers.loaded"), userMailAccountApplicationService.providers());
     }
 
     @PostMapping("/save")
     public ResponseUtil<UserMailAccountVO> save(@RequestBody UserMailAccountDTO request) {
-        return ResponseUtil.successResponse("邮箱账号保存成功", userMailAccountApplicationService.save(request));
+        return ResponseUtil.successResponse(I18nUtil.get("mail.account.saveSuccess"), userMailAccountApplicationService.save(request));
     }
 
     @PostMapping("/delete")
     public ResponseUtil<Boolean> delete(@RequestBody UserMailAccountDTO request) {
-        return ResponseUtil.successResponse("邮箱账号删除成功", userMailAccountApplicationService.delete(request));
+        return ResponseUtil.successResponse(I18nUtil.get("mail.account.deleteSuccess"), userMailAccountApplicationService.delete(request));
     }
 
 }

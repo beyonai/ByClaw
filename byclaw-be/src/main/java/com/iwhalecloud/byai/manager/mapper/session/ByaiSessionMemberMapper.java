@@ -16,6 +16,9 @@ import java.util.Map;
  */
 public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
 
+    /** 只读取当前用户在原始群聊中的有效成员凭据，不将密钥加入公开成员响应。 */
+    String findActiveUserApiKey(@Param("groupSessionId") Long groupSessionId, @Param("userId") Long userId);
+
     /** 按群主、管理员、普通成员、数字员工排序，同类使用主键稳定排序。 */
     List<ByaiSessionMember> findOrderedGroupMembers(@Param("sessionId") Long sessionId);
 
@@ -45,6 +48,10 @@ public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
     /** 仅当新游标更大时推进群成员的已读位置。 */
     int advanceReadCursor(@Param("memberId") Long memberId, @Param("messageId") Long messageId,
         @Param("readTime") java.util.Date readTime);
+
+    /** 条件更新本次成员关系，跨浏览器只能成功一次，不修改消息已读状态。 */
+    int claimWelcome(@Param("memberId") Long memberId, @Param("sessionId") Long sessionId,
+        @Param("userId") Long userId, @Param("handledAt") java.util.Date handledAt);
 
     /**
      * 根据成员对象ID和时间范围查询会话成员列表

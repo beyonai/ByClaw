@@ -24,7 +24,7 @@ import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
 @ExtendWith(MockitoExtension.class)
-class MinioFileBrowserProviderTest {
+class MinioFileBrowserProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private ObjectStorage objectStorage;

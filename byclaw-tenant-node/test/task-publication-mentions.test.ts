@@ -29,7 +29,7 @@ describe("task publication mentions", () => {
       return [];
     });
     const context = new CommandContext(
-      { query },
+      { query, lock: async () => {} },
       command({
         operation: "PUBLISH_TASK",
         payload: {

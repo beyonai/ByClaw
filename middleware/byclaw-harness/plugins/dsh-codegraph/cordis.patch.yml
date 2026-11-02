@@ -1,0 +1,15 @@
+- insert:
+    - id: codegraph-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: codegraph
+        transport: stdio
+        command: !!js process.env.CODEGRAPH_COMMAND || 'codegraph'
+        args: ['serve', '--mcp']
+        cwd: !!js process.env.CODEGRAPH_MCP_CWD || process.cwd()
+        env:
+          CODEGRAPH_MCP_TOOLS: explore
+        toolCallTimeoutMs: 60000
+        failOnStartupError: true
+    - id: dsh-codegraph
+      name: '@byclaw/dsh-codegraph'

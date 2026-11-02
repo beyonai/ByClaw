@@ -32,6 +32,7 @@ import ResourceEdit from './components/ResourceEdit';
 import ResourceImport from './components/ResourceImport';
 import SkillGroupCreateModal from './components/SkillGroupCreateModal';
 import ResourceDetail from './components/ResourceDetail';
+import ResourceBasicInfoDrawer from './components/ResourceBasicInfoDrawer';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
@@ -73,6 +74,8 @@ interface IResourceItem {
   hasManagePermission?: boolean;
   hasUsePermission?: boolean;
   canViewDetail?: boolean;
+  canViewBasicInfo?: boolean;
+  hasViewPermission?: boolean;
   canEdit?: boolean;
   canManageAuth?: boolean;
   canDelete?: boolean;
@@ -464,6 +467,20 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
+      if (item.canViewBasicInfo && !item.canViewDetail) {
+        const renderBasicInfo = (onClose: () => void) => (
+          <ResourceBasicInfoDrawer resourceId={resourceId} onClose={onClose} />
+        );
+        if (openTemporaryDetailPanel) {
+          openTemporaryDetailPanel(renderBasicInfo, { width: 420 });
+        } else {
+          setDetailPanel?.(
+            renderBasicInfo(() => clearDetailPanel?.()),
+            { width: 420 }
+          );
+        }
+        return;
+      }
 
       if (resourceBizType === 'SKILL') {
         if (resourceId) {
@@ -1173,23 +1190,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           setCurrentItem(null);
         }}
         onSave={async (values: any) => {
-          // 保存编辑逻辑
-          console.log('保存编辑:', values);
-          try {
-            // 调用编辑接口
-            await updateResource(values);
-            message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
-            refreshList();
-            notifySiderResourceListReload();
-          } catch (error: any) {
-            console.error('保存失败:', error);
-            // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案
-            const beMsg = error?.msg || error?.message || (typeof error === 'string' ? error : '');
-            message.error(beMsg || intl.formatMessage({ id: 'common.saveFailed' }));
-          } finally {
-            setEditModalOpen(false);
-            setCurrentItem(null);
-          }
+          await updateResource(values);
+          message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
+          refreshList();
+          notifySiderResourceListReload();
+          setEditModalOpen(false);
+          setCurrentItem(null);
         }}
       />
       {authDrawerOpen && (

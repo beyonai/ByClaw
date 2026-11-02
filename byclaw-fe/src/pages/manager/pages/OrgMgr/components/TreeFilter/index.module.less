@@ -39,6 +39,37 @@
     .selectedItem {
       color: #165dff;
     }
+
+    .fittingPreview {
+      position: relative;
+      min-width: 0;
+
+      .previewMeasure {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .previewItems {
+        display: flex;
+        width: max-content;
+        gap: 2px;
+
+        .item {
+          flex: 0 0 auto;
+          max-width: none;
+          cursor: pointer;
+        }
+      }
+
+      > .previewItems {
+        width: auto;
+        flex-wrap: wrap;
+      }
+    }
   }
 }
 

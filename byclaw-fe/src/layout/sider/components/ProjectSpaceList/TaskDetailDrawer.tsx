@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Drawer, Empty, Spin, Tag } from 'antd';
 import { MessageOutlined, PauseCircleOutlined, RollbackOutlined } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { getIntl, useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { getTaskPhases, type DevloopTaskState } from '@/service/devloop';
 import { getAgentChatAvatar } from '@/utils/agent';
@@ -98,12 +98,17 @@ const formatOperationSchedule = (config: Record<string, any>) => {
 
   const runMode = `${config.runMode || config.mode || ''}`.toLowerCase();
   if (runMode === 'once') {
-    return config.onceTime ? `单次执行 · ${formatDateTimeText(config.onceTime)}` : '单次执行';
+    return config.onceTime
+      ? getIntl().formatMessage({ id: 'taskTemplate.schedule.once' }, { v0: formatDateTimeText(config.onceTime) })
+      : getIntl().formatMessage({ id: 'taskTemplate.run.once' });
   }
   if (runMode === 'interval') {
-    return config.intervalHours ? `按间隔执行 · 每 ${config.intervalHours} 小时` : '按间隔执行';
+    return config.intervalHours
+      ? getIntl().formatMessage({ id: 'taskTemplate.schedule.interval' }, { v0: config.intervalHours })
+      : getIntl().formatMessage({ id: 'taskTemplate.run.interval' });
   }
-  if (runMode === 'period' || runMode === 'periodic') return '按周期执行';
+  if (runMode === 'period' || runMode === 'periodic')
+    return getIntl().formatMessage({ id: 'taskTemplate.run.periodic' });
   return '-';
 };
 
@@ -265,10 +270,10 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     operationConfig.platformName ||
     task?.platformName;
   const platformNameMap: Record<string, string> = {
-    WeChatAccount: '微信公众号',
-    Xiaohongshu: '小红书',
-    WeChatChannels: '微信视频号',
-    Douyin: '抖音',
+    WeChatAccount: intl.formatMessage({ id: 'projectSpace.operation.platform.wechat' }),
+    Xiaohongshu: intl.formatMessage({ id: 'projectSpace.operation.platform.xiaohongshu' }),
+    WeChatChannels: intl.formatMessage({ id: 'taskTemplate.platform.channels' }),
+    Douyin: intl.formatMessage({ id: 'projectSpace.operation.platform.douyin' }),
   };
   const operationPlatform = platformNameMap[`${platformCode || ''}`] || platformCode;
   const operationAccount =
@@ -279,96 +284,149 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     operationConfig.publishAccountId ||
     operationConfig.accountId;
   const operationSchedule = formatOperationSchedule(operationConfig);
-  const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const weekdayLabels = [
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.1' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.2' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.3' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.4' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.5' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.6' }),
+    intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.weekday.7' }),
+  ];
   const formatWeekdays = (value: unknown) =>
     Array.isArray(value)
       ? value.map((weekday) => weekdayLabels[Number(weekday) - 1] || `${weekday}`).join('、')
       : value;
   const sourceModeLabelMap: Record<string, string> = {
-    knowledge: '知识库采集',
-    connector: '连接器采集',
-    internet: '互联网采集',
+    knowledge: intl.formatMessage({ id: 'taskTemplate.source.knowledge' }),
+    connector: intl.formatMessage({ id: 'taskTemplate.source.connector' }),
+    internet: intl.formatMessage({ id: 'taskTemplate.source.internet' }),
   };
   const storageModeLabelMap: Record<string, string> = {
-    knowledge: '知识库',
+    knowledge: intl.formatMessage({ id: 'projectSpace.resources.knowledge' }),
   };
-  const executorTypeLabelMap: Record<string, string> = { agent: '数字员工', group: '员工组' };
+  const executorTypeLabelMap: Record<string, string> = {
+    agent: intl.formatMessage({ id: 'projectTaskDetail.simple.agent' }),
+    group: intl.formatMessage({ id: 'taskTemplate.employeeGroup' }),
+  };
   const runModeLabelMap: Record<string, string> = {
-    once: '单次执行',
-    periodic: '按周期执行',
-    period: '按周期执行',
-    interval: '按间隔执行',
+    once: intl.formatMessage({ id: 'taskTemplate.run.once' }),
+    periodic: intl.formatMessage({ id: 'taskTemplate.run.periodic' }),
+    period: intl.formatMessage({ id: 'taskTemplate.run.periodic' }),
+    interval: intl.formatMessage({ id: 'taskTemplate.run.interval' }),
   };
   const periodTypeLabelMap: Record<string, string> = {
-    daily: '每天',
-    weekly: '每周',
-    biweekly: '每双周',
-    monthly: '每月',
-    yearly: '每年',
+    daily: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.daily' }),
+    weekly: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.weekly' }),
+    biweekly: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.biweekly' }),
+    monthly: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.monthly' }),
+    yearly: intl.formatMessage({ id: 'projectSpace.operation.taskForm.collect.period.yearly' }),
   };
   // 任务基础字段与任务模板结构化字段统一展开；只显示有值项，兼容历史字段别名。
   // 抽屉关闭时父组件会先清空 task，字段计算必须兼容这个短暂的空值状态。
   const operationDetailFields = [
-    { label: '负责成员', value: task?.assigneeName || task?.assignee },
+    { label: intl.formatMessage({ id: 'taskTemplate.assignee' }), value: task?.assigneeName || task?.assignee },
     {
-      label: '完成时间',
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.dueTime' }),
       value: task?.dueTime ? formatDateTimeText(task.dueTime) : task?.dueTime,
     },
     {
-      label: '创建时间',
+      label: intl.formatMessage({ id: 'projectTaskDetail.simple.createdAt' }),
       value:
         task?.createTime && dayjs(task.createTime).isValid()
           ? dayjs(task.createTime).format('YYYY-MM-DD HH:mm')
           : task?.createTime,
     },
-    { label: '任务模板', value: operationConfig.templateName || task?.templateName },
-    { label: '素材来源', value: operationConfig.materialSource },
     {
-      label: '采集方式',
+      label: intl.formatMessage({ id: 'taskTemplate.template' }),
+      value: operationConfig.templateName || task?.templateName,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.materialSource' }), value: operationConfig.materialSource },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectMode' }),
       value:
         sourceModeLabelMap[operationConfig.sourceMode] || operationConfig.collectMethod || operationConfig.sourceMode,
     },
-    { label: '来源知识库', value: operationConfig.sourceKnowledgeName || operationConfig.sourceKnowledge },
-    { label: '连接器', value: operationConfig.connectorName || operationConfig.connector },
-    { label: '互联网范围', value: operationConfig.internetScope },
     {
-      label: '入库方式',
+      label: intl.formatMessage({ id: 'taskTemplate.sourceKnowledge' }),
+      value: operationConfig.sourceKnowledgeName || operationConfig.sourceKnowledge,
+    },
+    {
+      label: intl.formatMessage({ id: 'queryInput.tools.connector' }),
+      value: operationConfig.connectorName || operationConfig.connector,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.internetScope' }), value: operationConfig.internetScope },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.storageMode' }),
       value: storageModeLabelMap[operationConfig.storageMode] || operationConfig.storageMode,
     },
-    { label: '目标知识库', value: operationConfig.targetKnowledgeName || operationConfig.targetKnowledge },
-    { label: '内容类型', value: operationConfig.contentType },
-    { label: '目标受众', value: operationConfig.audience },
     {
-      label: '发布平台',
+      label: intl.formatMessage({ id: 'ui.task.targetKnowledge' }),
+      value: operationConfig.targetKnowledgeName || operationConfig.targetKnowledge,
+    },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.contentType' }),
+      value: operationConfig.contentType,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.audience' }), value: operationConfig.audience },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.platform' }),
       value: operationTaskType === 'content' ? operationConfig.platform || operationPlatform : undefined,
     },
-    { label: '发布账号', value: operationTaskType === 'content' ? operationAccount : undefined },
-    { label: '发布安排', value: operationConfig.publishSchedule },
-    { label: '分析范围', value: operationConfig.analysisScope || operationConfig.scope },
-    { label: '时间范围', value: operationConfig.range },
     {
-      label: '执行主体',
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishAccount' }),
+      value: operationTaskType === 'content' ? operationAccount : undefined,
+    },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.publishSchedule' }),
+      value: operationConfig.publishSchedule,
+    },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.analysisScope' }),
+      value: operationConfig.analysisScope || operationConfig.scope,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.timeRange' }), value: operationConfig.range },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.executor' }),
       value: executorTypeLabelMap[operationConfig.executorType] || operationConfig.executorType,
     },
     {
-      label: '数字员工',
+      label: intl.formatMessage({ id: 'projectTaskDetail.simple.agent' }),
       value:
         task?.agentName || operationConfig.agentName || operationConfig.executorAgentName || operationConfig.agentId,
     },
-    { label: '员工组', value: operationConfig.agentGroupName || operationConfig.agentGroupId },
-    { label: '执行方式', value: runModeLabelMap[operationConfig.runMode] || operationConfig.runMode },
-    { label: '执行时间', value: operationConfig.onceTime },
-    { label: '周期类型', value: periodTypeLabelMap[operationConfig.periodType] || operationConfig.periodType },
-    { label: '执行时分', value: operationConfig.periodTime },
-    { label: '执行日', value: formatWeekdays(operationConfig.periodWeekdays) },
-    { label: '执行日期', value: operationConfig.periodMonthDays },
-    { label: '年度执行时间', value: operationConfig.periodYearDateTime },
-    { label: '间隔小时', value: operationConfig.intervalHours },
-    { label: '间隔执行日', value: formatWeekdays(operationConfig.intervalWeekdays) },
-    { label: '生效日期区间', value: operationConfig.effectiveDateRange },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.employeeGroup' }),
+      value: operationConfig.agentGroupName || operationConfig.agentGroupId,
+    },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.detail.integration.run.mode' }),
+      value: runModeLabelMap[operationConfig.runMode] || operationConfig.runMode,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.runTime' }), value: operationConfig.onceTime },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectPeriodType' }),
+      value: periodTypeLabelMap[operationConfig.periodType] || operationConfig.periodType,
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.timeOfDay' }), value: operationConfig.periodTime },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.runDays' }),
+      value: formatWeekdays(operationConfig.periodWeekdays),
+    },
+    { label: intl.formatMessage({ id: 'taskTemplate.runDates' }), value: operationConfig.periodMonthDays },
+    { label: intl.formatMessage({ id: 'taskTemplate.yearlyTime' }), value: operationConfig.periodYearDateTime },
+    { label: intl.formatMessage({ id: 'taskTemplate.intervalHours' }), value: operationConfig.intervalHours },
+    {
+      label: intl.formatMessage({ id: 'taskTemplate.intervalDays' }),
+      value: formatWeekdays(operationConfig.intervalWeekdays),
+    },
+    {
+      label: intl.formatMessage({ id: 'projectSpace.operation.taskForm.field.collectEffectiveDateRange' }),
+      value: operationConfig.effectiveDateRange,
+    },
     // 历史任务只有拼接后的调度文案时继续展示，避免执行配置完全缺失。
     {
-      label: '执行安排',
+      label: intl.formatMessage({ id: 'taskTemplate.schedule' }),
       value:
         !operationConfig.publishSchedule && !operationConfig.collectSchedule && operationSchedule !== '-'
           ? operationSchedule

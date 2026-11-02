@@ -1,12 +1,15 @@
 import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Button, Input, Segmented, Space, Spin, Table } from 'antd';
+import { Button, Image, Input, message, Segmented, Space, Spin, Table, Upload } from 'antd';
 import React, { useState, useMemo } from 'react';
 import { debounce } from 'lodash';
 import { useIntl } from '@umijs/max';
+import { uploadFiles } from '@/service/file';
 import type { DebugInputMode } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
+import { getVolcengineImagePreviews } from './volcengineImageConfig';
 
 type Props = {
+  currentModelType?: string;
   debugInputMode: DebugInputMode;
   debugInput: string;
   setDebugInput: (value: string) => void;
@@ -19,9 +22,11 @@ type Props = {
   rerankView: 'table' | 'json';
   setRerankView: (value: 'table' | 'json') => void;
   rerankTableData: any[];
+  showImagePreview?: boolean;
 };
 
 const ModelDebugPanel: React.FC<Props> = ({
+  currentModelType,
   debugInputMode,
   debugInput,
   setDebugInput,
@@ -34,9 +39,16 @@ const ModelDebugPanel: React.FC<Props> = ({
   rerankView,
   setRerankView,
   rerankTableData,
+  showImagePreview = false,
 }) => {
   const intl = useIntl();
   const [isRunning, setIsRunning] = useState(false);
+  const imagePreviews = useMemo(
+    () => (showImagePreview ? getVolcengineImagePreviews(debugOutput) : []),
+    [debugOutput, showImagePreview]
+  );
+  const [uploading, setUploading] = useState(false);
+  const [audioFileName, setAudioFileName] = useState('');
 
   const debouncedRunDebug = useMemo(
     () =>
@@ -81,6 +93,47 @@ const ModelDebugPanel: React.FC<Props> = ({
           <div className={styles.codePanelHeader}>
             <span>{intl.formatMessage({ id: 'modelMgr.modal.input' })}</span>
             <Space size={8}>
+              {currentModelType === 'ASR' && (
+                <Upload
+                  accept=".mp3,audio/mpeg"
+                  showUploadList={false}
+                  beforeUpload={async (file) => {
+                    setUploading(true);
+                    try {
+                      const data = new FormData();
+                      data.append('files', file);
+                      data.append('sessionType', 'AGENT');
+                      const result = await uploadFiles(data);
+                      const audio = (result.rebuildFileList || result.uploadItems || [])[0];
+                      if (!audio?.fileId)
+                        throw new Error(intl.formatMessage({ id: 'modelMgr.modal.audioUploadMissing' }));
+                      let previous = {};
+                      try {
+                        previous = JSON.parse(debugInput || '{}');
+                      } catch {
+                        previous = {};
+                      }
+                      setDebugInput(
+                        JSON.stringify({ ...previous, fileId: audio.fileId, sessionId: result.sessionId }, null, 2)
+                      );
+                      setAudioFileName(file.name);
+                    } catch (error) {
+                      message.error(
+                        typeof error === 'string'
+                          ? error
+                          : intl.formatMessage({ id: 'modelMgr.modal.audioUploadFailed' })
+                      );
+                    } finally {
+                      setUploading(false);
+                    }
+                    return Upload.LIST_IGNORE;
+                  }}
+                >
+                  <Button size="small" loading={uploading} title={audioFileName}>
+                    {intl.formatMessage({ id: 'modelMgr.modal.uploadMp3' })}
+                  </Button>
+                </Upload>
+              )}
               <Button
                 size="small"
                 icon={<CopyOutlined />}
@@ -92,7 +145,7 @@ const ModelDebugPanel: React.FC<Props> = ({
                 size="small"
                 type="primary"
                 onClick={debouncedRunDebug}
-                disabled={isRunning || debugOutputLoading}
+                disabled={uploading || isRunning || debugOutputLoading}
               >
                 {intl.formatMessage({ id: 'modelMgr.modal.run' })}
               </Button>
@@ -135,6 +188,20 @@ const ModelDebugPanel: React.FC<Props> = ({
             </Space>
           </div>
           <div className={styles.codeAreaRelative}>
+            {imagePreviews.length ? (
+              <Space wrap>
+                <Image.PreviewGroup>
+                  {imagePreviews.map((src, index) => (
+                    <Image
+                      key={`${index}-${src.slice(0, 80)}`}
+                      src={src}
+                      width={160}
+                      alt={intl.formatMessage({ id: 'modelMgr.modal.generatedImage' }, { index: index + 1 })}
+                    />
+                  ))}
+                </Image.PreviewGroup>
+              </Space>
+            ) : null}
             {debugOutputLoading ? (
               <div className={styles.outputLoading}>
                 <Spin tip={intl.formatMessage({ id: 'modelMgr.modal.debugLoading' })} />

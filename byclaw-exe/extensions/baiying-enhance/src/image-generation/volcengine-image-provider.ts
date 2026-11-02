@@ -109,12 +109,15 @@ function buildRequestBody(req: ImageGenerationRequest, config: Record<string, un
   const callOptions = record(req.providerOptions?.volcengine);
   const options = { ...config, ...callOptions };
   const count = Math.max(1, Math.min(15, Math.floor(req.count ?? 1)));
+  // 新版 Pro/Flash 不支持旧版组图和 SSE 参数，保留旧型号原有请求方式。
+  const singleOnly = req.model === "doubao-seedream-5-0-pro-260628"
+    || req.model === "doubao-seedream-5-0-flash-260915";
+  if (singleOnly && count !== 1) throw new Error("Seedream Pro/Flash supports one image per request");
   const body: Record<string, unknown> = {
     model: req.model || DEFAULT_MODEL,
     prompt: req.prompt,
     response_format: "b64_json",
-    stream: false,
-    sequential_image_generation: count > 1 ? "auto" : "disabled",
+    ...(singleOnly ? {} : { stream: false, sequential_image_generation: count > 1 ? "auto" : "disabled" }),
   };
   if (count > 1) body.sequential_image_generation_options = { max_images: count };
   const size = text(req.size) || text(req.resolution);

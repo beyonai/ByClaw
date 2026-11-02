@@ -62,7 +62,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Locale;
 
-class ByClawSkillResourceApplicationServiceTest {
+class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SsResourceService ssResourceService;
     private SsResExtSkillService ssResExtSkillService;
@@ -1069,6 +1069,11 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(result.getSuccess()).isEqualTo(1);
         assertThat(result.getCreatedCount()).isEqualTo(1);
 
+        InOrder lockOrder = inOrder(ssResourceService);
+        lockOrder.verify(ssResourceService).lockSkillImport("enterprise-skill");
+        lockOrder.verify(ssResourceService).getResourceListByCode(List.of("enterprise-skill"));
+        lockOrder.verify(ssResourceService).saveResource(any(SsResource.class));
+
         ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
         verify(ssResourceService).saveResource(resourceCaptor.capture());
         assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("enterprise");
@@ -1085,6 +1090,22 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7101L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7101.json"),
             eq("chat-upload-skill-json"));
+    }
+
+    @Test
+    void importSkillZipLockFailureStopsBeforeReadingOrWritingResources() {
+        MockMultipartFile upload = new MockMultipartFile("file", "demo.zip", "application/zip", skillZipBytes("demo"));
+        doThrow(new org.springframework.dao.CannotAcquireLockException("lock unavailable"))
+            .when(ssResourceService).lockSkillImport("demo");
+
+        assertThatThrownBy(() -> service.importSkillZip(upload, 10L, "personal", "SKILL_MANAGE_IMPORT"))
+            .isInstanceOf(org.springframework.dao.CannotAcquireLockException.class);
+
+        verify(ssResourceService, never()).getResourceListByCode(any());
+        verify(ssResourceService, never()).saveResource(any());
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
+        org.mockito.Mockito.verifyNoInteractions(resourceArtifactStorageService);
     }
 
     @Test
@@ -1579,6 +1600,53 @@ class ByClawSkillResourceApplicationServiceTest {
             serviceLogger.detachAppender(appender);
             appender.stop();
         }
+    }
+
+    @Test
+    void enterpriseSyncUsesStableCodeAndDefersAssociationAndPublication() {
+        String url = "https://example.invalid/skill.zip";
+        byte[] bytes = skillZipBytes("zip-inner-name");
+        var syncing = spy(service);
+        doReturn(bytes).when(syncing).downloadThirdPartySkillPackage(url);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(call -> {
+            SsResource created = call.getArgument(0); created.setResourceId(7301L); return created;
+        });
+        var root = com.alibaba.fastjson.JSON.parseObject("{\"systemCode\":\"WHALE_AGENT\",\"resourceCode\":\"stable-business-code\",\"resourceName\":\"技能介绍\",\"downloadUrl\":\"" + url + "\"}");
+        var result = syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(result).containsEntry("resourceId", "7301").containsEntry("updated", false);
+        var capture = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(capture.capture());
+        assertThat(capture.getValue().getResourceCode()).isEqualTo("stable-business-code");
+        assertThat(capture.getValue().getOwnerType()).isEqualTo("enterprise");
+        // 第三方同步包必须按资源和内容隔离，事务回滚时不能覆盖已发布的技能包。
+        verify(resourceArtifactStorageService).uploadToSubdirectory(eq(bytes),
+            eq("skill/org-hub/directory-sync/7301/" + DigestUtils.sha256Hex(bytes)),
+            eq("skill.zip"), eq("application/zip"));
+        verify(ssResourceRelDetailService, never()).save(any());
+        verify(resourceArtifactStorageService, never()).publishResourceJson(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void enterpriseSyncKeepsOffShelfLifecycleAndPackageVersionForIdenticalBytes() {
+        String url = "https://example.invalid/rotated-signature.zip";
+        byte[] bytes = skillZipBytes("demo");
+        var syncing = spy(service);
+        doReturn(bytes).when(syncing).downloadThirdPartySkillPackage(url);
+        SsResource resource = new SsResource(); resource.setResourceId(7301L); resource.setOwnerType("enterprise");
+        resource.setResourceBizType("SKILL"); resource.setResourceStatus(3); resource.setResourceCode("stable-code");
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", "stable-code")).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(resource)).thenReturn(resource);
+        SsResExtSkill ext = new SsResExtSkill(); ext.setResourceId(7301L); ext.setVersion("7");
+        ext.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        when(ssResExtSkillService.findById(7301L)).thenReturn(ext);
+        var root = com.alibaba.fastjson.JSON.parseObject("{\"systemCode\":\"WHALE_AGENT\",\"resourceCode\":\"stable-code\",\"resourceName\":\"新介绍\",\"downloadUrl\":\"" + url + "\"}");
+        var result = syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(result).containsEntry("updated", true).containsEntry("packageChanged", false);
+        assertThat(resource.getResourceStatus()).isEqualTo(3);
+        assertThat(ext.getVersion()).isEqualTo("7");
+        verify(ssResExtSkillService, never()).nextVersion(any());
     }
 
     @Test

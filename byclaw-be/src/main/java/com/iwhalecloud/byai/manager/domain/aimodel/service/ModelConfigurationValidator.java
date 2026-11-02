@@ -2,13 +2,21 @@ package com.iwhalecloud.byai.manager.domain.aimodel.service;
 
 import java.net.URI;
 
+import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/** Validate runtime connection settings without including credentials in errors. */
+/**
+ * Validate runtime connection settings without including credentials in errors.
+ */
 public final class ModelConfigurationValidator {
+
+    private static final Logger logger = LoggerFactory.getLogger(ModelConfigurationValidator.class);
+
 
     private ModelConfigurationValidator() {
     }
@@ -17,6 +25,7 @@ public final class ModelConfigurationValidator {
         if (model == null || missing(model.getUrl()) || missing(model.getAuthToken())
             || missing(model.getModelCode()) || !httpEndpoint(model.getUrl())
             || model.getAuthToken().chars().anyMatch(c -> c < 33 || c > 126)) {
+            logger.error("当前校验模型信息错误, modelId={}", JSON.toJSON(model));
             throw new InvalidModelConfigurationException();
         }
     }
@@ -30,8 +39,8 @@ public final class ModelConfigurationValidator {
             URI uri = URI.create(value);
             return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                 && StringUtils.isNotBlank(uri.getHost());
-        }
-        catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
+            logger.error(e.getMessage(), e);
             return false;
         }
     }

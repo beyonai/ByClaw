@@ -70,6 +70,8 @@ class IndexApplicationServiceV2Test {
         ReflectionTestUtils.setField(service, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(service, "ssResourceCatalogService", ssResourceCatalogService);
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
+        ReflectionTestUtils.setField(service, "employeeAudienceDisplayService",
+            mock(com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeAudienceDisplayService.class));
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

@@ -88,12 +88,14 @@ class StandardSandboxLifecycleServiceTest {
         request.setUserCode("user001");
         request.setSandboxType("openclaw");
 
+        request.setMetadata(Map.of("providerRequestKey", "command-41:NODE_CREATE"));
         var response = service.launchSandbox(request);
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getData().getEndpoint()).isEqualTo("http://created");
         assertThat(response.getData().getSandboxId()).isEqualTo("sb-2");
         assertThat(response.getData().getGatewayToken()).isEqualTo("persisted-token");
+        assertThat(createRequest.getMetadata()).containsEntry("providerRequestKey", "command-41:NODE_CREATE");
         verify(runtimeProvider).create(any(), any(), any(), any(), any());
     }
 

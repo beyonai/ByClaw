@@ -14,12 +14,8 @@ export function isUploadFileCountExceeded(config: Partial<IAgentFileUploadConf> 
   return maxFileCount > 0 && fileCount > maxFileCount;
 }
 
-/**
- * 文件大小由后端负责校验，前端不做大小拦截。
- * 保留该函数是为了兼容现有上传流程及配置接口。
- */
+/** 上传前按后端相同的字节口径拦截超限文件；0 或未配置时不限，恰好达到上限允许上传。 */
 export function isUploadFileSizeExceeded(config: Partial<IAgentFileUploadConf> | null | undefined, fileSize: number) {
-  void config;
-  void fileSize;
-  return false;
+  const maxFileSize = config?.maxFileSize ?? 0;
+  return maxFileSize > 0 && fileSize > maxFileSize * 1024 * 1024;
 }

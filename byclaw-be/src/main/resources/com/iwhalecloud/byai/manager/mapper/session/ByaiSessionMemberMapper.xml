@@ -2,6 +2,16 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper">
 
+    <!-- 子会话使用归属群 ID；凭据只按已认证用户和有效状态读取。 -->
+    <select id="findActiveUserApiKey" resultType="java.lang.String">
+        SELECT api_key
+        FROM byai.byai_session_member
+        WHERE session_id = #{groupSessionId}
+          AND mem_obj_type = 'USER'
+          AND mem_obj_id = #{userId}
+          AND state = '00A'
+    </select>
+
     <!-- 通用查询映射结果 -->
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember">
         <id column="byai_session_member_id" property="byaiSessionMemberId" />
@@ -16,6 +26,9 @@
         <result column="last_read_message_id" property="lastReadMessageId" />
         <result column="last_read_time" property="lastReadTime" />
         <result column="com_acct_id" property="comAcctId" />
+        <result column="api_key" property="apiKey" />
+        <result column="update_date" property="updateDate" />
+        <result column="state" property="state" />
     </resultMap>
 
     <resultMap id="GroupMemberSummaryMap"
@@ -100,7 +113,10 @@
             request_count,
             last_read_message_id,
             last_read_time,
-            com_acct_id
+            com_acct_id,
+            api_key,
+            update_date,
+            state
         from byai_session_member
         where session_id = #{sessionId}
           and mem_obj_type = #{memObjType}
@@ -139,6 +155,15 @@
             <if test="comAcctId != null">
                 com_acct_id = #{comAcctId},
             </if>
+            <if test="apiKey != null and apiKey != ''">
+                api_key = #{apiKey},
+            </if>
+            <if test="updateDate != null">
+                update_date = #{updateDate},
+            </if>
+            <if test="state != null and state != ''">
+                state = #{state},
+            </if>
         </set>
         where byai_session_member_id = #{byaiSessionMemberId}
     </update>
@@ -149,6 +174,24 @@
             last_read_time = #{readTime}
         WHERE byai_session_member_id = #{memberId}
           AND (last_read_message_id IS NULL OR last_read_message_id &lt; #{messageId})
+    </update>
+
+    <!-- 欢迎资格由此条件更新独占维护，不加入通用成员读写映射，避免被普通成员保存覆盖。 -->
+    <!-- 按当前成员主键更新，退群后的旧请求不能影响重入的新记录。 -->
+    <update id="claimWelcome">
+        UPDATE byai_session_member
+        SET welcome_handled_at = #{handledAt}
+        WHERE byai_session_member_id = #{memberId}
+          AND session_id = #{sessionId}
+          AND mem_obj_type = 'USER'
+          AND mem_obj_id = #{userId}
+          AND welcome_handled_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM byai_session
+              WHERE session_id = #{sessionId}
+                AND session_type = 'hs_as'
+                AND COALESCE(state, 'ACTIVE') NOT IN ('GROUP_DISSOLVED', 'CLOSED')
+          )
     </update>
 
     <!-- 根据成员对象ID和时间范围查询会话成员列表 -->
@@ -163,7 +206,10 @@
             creator_id,
             mem_name,
             request_count,
-            com_acct_id
+            com_acct_id,
+            api_key,
+            update_date,
+            state
         from byai_session_member
         where mem_obj_id = #{memObjId}
           and mem_obj_type = 'AGENT'

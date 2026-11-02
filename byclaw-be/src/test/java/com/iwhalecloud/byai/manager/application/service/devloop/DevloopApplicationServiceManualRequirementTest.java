@@ -32,7 +32,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 
 @ExtendWith(MockitoExtension.class)
-class DevloopApplicationServiceManualRequirementTest {
+class DevloopApplicationServiceManualRequirementTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private ScanSourceService scanSourceService;

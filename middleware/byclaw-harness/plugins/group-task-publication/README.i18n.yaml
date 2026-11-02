@@ -1,0 +1,3 @@
+# Git blob hashes of the matching English and Chinese README revisions.
+README.md: 6afcbd4098691ae61f0a24104c9f6f2edca1996b
+README.zh.md: 29c79acd1bbbbd92353d33486a71825e37fa929e

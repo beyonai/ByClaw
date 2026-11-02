@@ -241,7 +241,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     stages: IntegrationStage[];
     testAccounts: TestAccount[];
   }>({
-    name: '阿里云集成测试环境',
+    name: intl.formatMessage({ id: 'ui.integration.defaultEnvironment' }),
     address: 'https://it-integration.internal:8443',
     connProtocol: 'ssh',
     connHost: '10.0.12.34',
@@ -256,7 +256,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     stages: [
       {
         id: 'checkout',
-        name: '拉取分支代码',
+        name: intl.formatMessage({ id: 'ui.integration.stage.checkout' }),
         interpreter: 'bash',
         source: 'inline',
         script:
@@ -267,7 +267,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
       },
       {
         id: 'build',
-        name: '构建前后端镜像',
+        name: intl.formatMessage({ id: 'ui.integration.stage.build' }),
         interpreter: 'bash',
         source: 'inline',
         script:
@@ -278,7 +278,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
       },
       {
         id: 'deploy',
-        name: '部署并拉起服务',
+        name: intl.formatMessage({ id: 'ui.integration.stage.deploy' }),
         interpreter: 'bash',
         source: 'inline',
         script: 'set -e\ncd "$WORKDIR/byclaw-middleware"\nsh deploy.sh update',
@@ -288,7 +288,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
       },
       {
         id: 'db-migrate',
-        name: '清库 + 执行增量脚本',
+        name: intl.formatMessage({ id: 'ui.integration.stage.migrate' }),
         interpreter: 'bash',
         source: 'path',
         script: 'deploy/db/incremental/run-all.sh',
@@ -298,7 +298,7 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
       },
       {
         id: 'health-check',
-        name: '健康检查(退出码0视为就绪)',
+        name: intl.formatMessage({ id: 'ui.integration.stage.health' }),
         interpreter: 'python',
         source: 'inline',
         script:
@@ -311,14 +311,14 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
     testAccounts: [
       {
         id: 'acc-admin',
-        role: '管理员',
+        role: intl.formatMessage({ id: 'ui.integration.role.admin' }),
         envPrefix: 'E2E_ADMIN',
         username: 'qa_admin',
         credentialRef: '',
       },
       {
         id: 'acc-user',
-        role: '普通用户',
+        role: intl.formatMessage({ id: 'ui.integration.role.user' }),
         envPrefix: 'E2E_USER',
         username: 'qa_user01',
         credentialRef: '',
@@ -685,14 +685,19 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
 
   // 研发闭环环节:E2E 集成测试插在 tester 之后、pr 之前,失败则打回 coder。用于概览可视化本次任务当前所处环节。
   const integrationFlowPhases = [
-    { key: 'issue', label: '需求来源', state: 'done' as const },
-    { key: 'req', label: '需求分析', state: 'done' as const },
-    { key: 'design', label: '方案设计', state: 'done' as const },
-    { key: 'coder', label: '编码', state: 'done' as const },
-    { key: 'reviewer', label: '代码审查', state: 'done' as const },
-    { key: 'tester', label: '本机自测', state: 'done' as const },
-    { key: 'e2e', label: '端到端集成测试', state: 'active' as const, isNew: true },
-    { key: 'pr', label: '提交 PR', state: 'pending' as const },
+    { key: 'issue', label: intl.formatMessage({ id: 'projectTaskDetail.phase.issue' }), state: 'done' as const },
+    { key: 'req', label: intl.formatMessage({ id: 'projectTaskDetail.phase.req' }), state: 'done' as const },
+    { key: 'design', label: intl.formatMessage({ id: 'projectTaskDetail.phase.design' }), state: 'done' as const },
+    { key: 'coder', label: intl.formatMessage({ id: 'projectTaskDetail.phase.coder' }), state: 'done' as const },
+    { key: 'reviewer', label: intl.formatMessage({ id: 'projectTaskDetail.phase.reviewer' }), state: 'done' as const },
+    { key: 'tester', label: intl.formatMessage({ id: 'ui.integration.phase.localTest' }), state: 'done' as const },
+    {
+      key: 'e2e',
+      label: intl.formatMessage({ id: 'ui.integration.phase.integrationTest' }),
+      state: 'active' as const,
+      isNew: true,
+    },
+    { key: 'pr', label: intl.formatMessage({ id: 'ui.integration.phase.pr' }), state: 'pending' as const },
   ];
 
   // 需求级集成看板数据由后端 listRequirementIntegrations 聚合(见 requirementIntegrationList state)。
@@ -725,7 +730,10 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
 
   // 定时批量触发的下次运行时间(演示态)。真实实现由 cron 解析,这里跟着配置的可读标签走;关掉定时则显示手动。
   const integrationNextRunAt = testerConfig.enabled
-    ? `明日 ${testerConfig.schedule.cronLabel.replace(/^每日\s*/, '')}`
+    ? intl.formatMessage(
+      { id: 'ui.integration.schedule.tomorrow' },
+      { v0: testerConfig.schedule.cronLabel.replace(/^每日\s*/, '') }
+    )
     : t('tester.manualTrigger');
 
   // 看板顶部统计概览:一眼看清「多少需求、几个要处理、在跑、已通过、总体通过率」,对标对比分析型仪表盘。
@@ -1603,7 +1611,6 @@ const Integration: React.FC<IntegrationProps> = ({ active, projectId, embedded =
           />
         </div>
       </div>
-
     </div>
   );
   // 右侧集成测试配置面板:环境信息 + 测试用例集,空间充足可容纳复杂配置。

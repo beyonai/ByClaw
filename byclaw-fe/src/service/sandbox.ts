@@ -1,4 +1,4 @@
-import { POST } from './common/request';
+import { GET, POST } from './common/request';
 import { ISandboxesInfo } from '@/models/common/useAppStore';
 
 export interface LaunchSandboxResult {
@@ -37,6 +37,13 @@ export async function getSandboxInfo(params: {
 }
 
 /**
+ * 查询承载当前用户浏览器的沙箱规格：常驻 DSH 宿主上的用户是其工具沙箱，其他用户为空（沿用默认沙箱）。
+ */
+export async function getBrowserServiceKey(): Promise<string | null> {
+  return GET('/byaiService/sandbox/browserServiceKey', {}, silentErrorConfig);
+}
+
+/**
  * 释放沙箱
  */
 export async function removeSandbox(params: {
@@ -69,4 +76,17 @@ export async function sandboxHeartbeat(params: { resourceId?: number }): Promise
  */
 export async function renewSandbox(params: { userCode?: string; resourceId?: number }): Promise<ISandboxesInfo> {
   return POST('/byaiService/sandbox/renewSandbox', params);
+}
+
+export interface SharedUserStorageStatus {
+  enabled: boolean;
+  ready: boolean;
+  state: 'LOGICAL' | 'PREPARING_STORAGE' | 'WAITING_QUOTA' | 'READY_TO_ADMIT' | 'MIGRATION_REQUIRED' | 'FAILED';
+  quotaGiB?: number;
+  confirmedGiB?: number;
+  usedBytes?: number;
+}
+
+export async function getSharedUserStorageStatus(): Promise<SharedUserStorageStatus> {
+  return POST('/byaiService/sandbox/shared/userStorageStatus', {}, silentErrorConfig);
 }

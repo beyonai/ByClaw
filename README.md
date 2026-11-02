@@ -127,11 +127,9 @@ flowchart TB
     fe --> be["byclaw-be<br/>核心 API / 认证授权 / 资源治理 / 网关路由"]
     be --> ws["WebSocket / SSE<br/>流式会话"]
     be --> qa["byclaw-qa<br/>知识库管理 / 检索 API"]
-    be --> super["byclaw-super<br/>多智能体主管 / 授权委派 / 持久运行"]
     be --> exe["byclaw-exe<br/>Skills / Extensions"]
     be --> sandbox["OpenSandbox<br/>隔离执行环境"]
-    sandbox --> sandboxRuntime["沙箱容器<br/>byclaw-openclaw / Agent Runtime"]
-    super --> sandboxRuntime
+    sandbox --> sandboxRuntime["沙箱容器<br/>Harness / DSH / OpenClaw"]
     exe --> sandboxRuntime
     qa --> infra["Redis / OpenGauss / MinIO"]
     be --> infra
@@ -142,9 +140,8 @@ flowchart TB
 | 1 | `byclaw-fe` | Web 门户与管理控制台 | 对话、知识中心、数字员工、工作中心、工具中心、沙箱页面、移动端适配 |
 | 2 | `byclaw-be` | 核心业务后端与统一网关 | 认证授权、会话管理、资源管理、数字员工管理、文件管理、Feign 调用、WebSocket |
 | 3 | `byclaw-qa` | 知识库与问答服务 | 知识导入、索引构建、检索问答、知识资源映射 |
-| 4 | `byclaw-super` | 多智能体主管与持久运行服务 | 任务规划、授权委派、用户交互、Run 状态、SSE、恢复与故障接管 |
-| 5 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
-| 6 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
+| 4 | `byclaw-exe` | 扩展插件与技能脚本 | Skills、Extensions、业务脚本、能力扩展 |
+| 5 | `middleware` | 基础运行组件 | Redis、MinIO、OpenGauss、OpenSandbox 等运行依赖 |
 
 同步链路以 REST、WebSocket、SSE 和 Feign 为主，异步链路以 Redis Pub/Sub、Redis Stream、Worker 消费和后台任务为主。控制流由后端统一编排，数据流按资源类型进入数据库、对象存储、缓存、沙箱或外部业务系统。
 
@@ -359,13 +356,15 @@ ByClaw/
 ├── byclaw-fe/          # Web 前端（React, Umi Max, TypeScript）
 ├── byclaw-be/          # 后端服务（Spring Boot 3.4, Java 21）
 ├── byclaw-qa/          # QA 与 Agent 服务（Python 3.12, uv）
-├── byclaw-super/       # 多智能体主管与持久运行服务（TypeScript, pnpm）
 ├── byclaw-exe/         # 扩展插件与技能脚本
 ├── deploy/             # Docker Compose 部署配置
 ├── docs/               # 项目文档
 ├── scripts/            # 开发自动化脚本（start/stop/deploy）
 └── .github/            # CI/CD 工作流与模板
 ```
+
+原 `byclaw-super` 源码已迁至 [独立存档仓库](https://github.com/beyonai/byclaw-super)。
+BE 默认使用 Harness/DSH 承接 `BY_SUPER` 请求，兼容开关见 [BE 配置说明](byclaw-be/README.md#super-运行时兼容)。
 
 ---
 

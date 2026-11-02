@@ -158,3 +158,31 @@ B 沿用现有标准技能 JSON 生成能力；返回企业技能 ID 后，发�
 2026-10-08 关联资源展示与技能路径兼容：相关 119 项后端测试通过；完整 `mvn -o -B -f byclaw-be/pom.xml verify` 共 3788 项测试，23 项跳过，零失败、零错误。覆盖跨企业技能按权限保留名称和类型、旧申请只读回显且不改变配置/状态/修订号、无法查看或查询失败时不补出资源信息、被排除资源不进入企业员工配置、已登记资源路径读取及方法 A 校验、无效路径不读取资源目录外文件。完整验证在允许本机临时端口及 Mockito 初始化的环境下运行，未修改测试或构建配置以跳过检查。
 
 同步远端 `fa182fde6` 后，本地发布修复恢复时无合并冲突；完整 `mvn -o -B -f byclaw-be/pom.xml clean verify` 通过，共 3833 项测试，25 项跳过，零失败、零错误。发布资源及申请服务相关 119 项测试继续通过。
+
+## 技能导入锁的数据库兼容性
+
+资源中心 ZIP 导入在解析技能编码后、查询同编码资源之前调用 `SsResourceService.lockSkillImport`。
+该入口委托 `SkillImportLockService`，使用已有 Redis 连接与 Spring Integration `RedisLockRegistry`，
+不再执行 `hashtextextended` 或 `pg_advisory_xact_lock`。无需修改数据库结构或初始化 SQL。
+后续合入曾遗漏 ZIP 导入入口的调用，本次恢复该调用，并验证取锁顺序与取锁失败时不读写资源。
+
+锁注册表前缀为 `BYAI:SKILL:IMPORT`，同技能编码串行、不同编码可并发；同事务重复取得同编码锁只释放一次。
+等待取锁最多 30 秒，租约 60 秒且自动续租。提交前再次验证并续租，提交或回滚完成后释放；
+Redis 不可用、超时、等待被中断或提交前失去租约时，操作失败或事务回滚，不退化为无锁写入。
+ZIP 导入继续使用原有个人/企业归属、管理权限、同名覆盖和运行文件同步规则；
+审核及资源生命周期操作沿用既有资源 ID 锁，不改变审核或授权状态。
+
+真实 Redis 集成测试只连接本机 `127.0.0.1`，使用随机测试前缀与独立 H2 数据库。
+启动独立测试 Redis 后，在仓库根目录执行（端口使用该测试实例的端口）：
+
+```bash
+BYCLAW_TEST_REDIS_PORT=<测试端口> mvn -B -f byclaw-be/pom.xml \
+  -Dtest=SkillImportLockServiceTest,SkillImportRedisLockIntegrationTest,SsResourceServiceTest,ByClawSkillResourceApplicationServiceTest test
+```
+
+覆盖同编码互斥、不同编码并发、事务提交/回滚释放、跨实例超过初始租约仍互斥，以及丢失 Redis 租约后数据库回滚。
+未设置测试端口时，真实 Redis 集成测试会跳过；普通单元测试通过不代表生产 Redis 或实际技能包导入验收通过。
+
+升级时应暂停技能导入及关联审核，等在途事务结束后统一更新后端实例，再恢复入口。
+这尤其适用于仍运行数据库锁旧实现的环境，避免旧实例和 Redis 锁实例使用不同的锁机制。
+旧工作区的 Java SHA-256 加数据库 advisory lock 说明已被本节替代，不应作为当前部署方案。

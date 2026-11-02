@@ -1,13 +1,45 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatRecallUndoRequest;
 import org.junit.jupiter.api.Test;
 
-class TenantGroupManagementRecallTest {
+class TenantGroupManagementRecallTest extends I18nTestSupport {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"true,false", "false,false", "true,true"})
+    void undoUsesTenantCommandAndOnlyBroadcastsAChangedState(boolean changed, boolean offline) throws Exception {
+        var mapper = new ObjectMapper();
+        var data = mock(TenantGroupData.class);
+        var events = mock(GroupChatEventPublisher.class);
+        var tasks = mock(TenantGroupTaskStopService.class);
+        var service = new TenantGroupManagementService(data, mapper, events, tasks,
+            mock(com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipMapper.class));
+        var tenant = new TenantRequestContext(77L, 10L, "MEMBER");
+        when(data.read(eq(tenant), anyString())).thenReturn(mapper.readTree("{\"members\":[]}"));
+        var result = mock(TenantNodeModels.CommandResult.class);
+        when(result.data()).thenReturn(mapper.readTree("{\"messageId\":\"90\",\"recalled\":false,\"recall\":null,\"changed\":" + changed + "}"));
+        when(data.write(eq(tenant), eq("POST"), eq("/messages/90/recall/undo"), eq("30"),
+            eq("UNDO_RECALL_MESSAGE"), eq(java.util.Map.of("messageId", "90", "recalledAt", 1000L))))
+            .thenReturn(result);
+        if (offline) when(events.publishTenantMembers(eq(tenant), any(), anyList()))
+            .thenThrow(new IllegalStateException("offline"));
+        var request = new GroupChatRecallUndoRequest();
+        request.setRecalledAt(1000L);
+        var response = (JSONObject) service.change(tenant, "undoRecall", 30L, new Object[]{30L, 90L, request});
+        assertThat(response.getBoolean("recalled")).isFalse();
+        assertThat(response.getString("event")).isEqualTo("MESSAGE_RECALL_UNDONE");
+        assertThat(response).doesNotContainKeys("changed", "content", "tasks");
+        if (changed) verify(events).publishTenantMembers(eq(tenant), eq(response), anyList());
+        else verifyNoInteractions(events);
+        verifyNoInteractions(tasks);
+    }
+
     @Test
     void forwardsRecallIdentityAndContentToTheResponseAndOnlineMembers() throws Exception {
         var mapper = new ObjectMapper();

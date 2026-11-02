@@ -20,10 +20,6 @@ type Props = {
   onCompleteConfig: () => void;
   completeLoading?: boolean;
   activeFilterCount: number;
-  total: number;
-  enabledCount: number;
-  testingCount: number;
-  disabledCount: number;
 };
 
 const ModelHeroPanel: React.FC<Props> = ({
@@ -36,18 +32,11 @@ const ModelHeroPanel: React.FC<Props> = ({
   onCompleteConfig,
   completeLoading,
   activeFilterCount,
-  total,
-  enabledCount,
-  testingCount,
-  disabledCount,
 }) => {
   return (
     <div className={styles.heroPanel}>
       <div className={styles.heroHeader}>
-        <div>
-          <div className={styles.heroTitle}>{intl.formatMessage({ id: 'modelMgr.title' })}</div>
-          <div className={styles.heroDesc}>{intl.formatMessage({ id: 'modelMgr.heroDesc' })}</div>
-        </div>
+        <div className={styles.heroTitle}>{intl.formatMessage({ id: 'modelMgr.title' })}</div>
 
         <div className={styles.heroActions}>
           <Space size={12}>
@@ -65,38 +54,21 @@ const ModelHeroPanel: React.FC<Props> = ({
             <Button type="primary" icon={<AntdIcon type="icon-a-People-plustianjiarenqun" />} onClick={onAdd}>
               {intl.formatMessage({ id: 'modelMgr.addNew' })}
             </Button>
+            {/* 完善参数与添加模型共用横向操作栏，保持在添加按钮右侧。 */}
+            <Tooltip title={intl.formatMessage({ id: 'modelMgr.completeAllTooltip' })}>
+              <Button
+                className={styles.completeConfigButton}
+                icon={<ThunderboltOutlined />}
+                loading={completeLoading}
+                onClick={onCompleteConfig}
+              >
+                {intl.formatMessage({ id: 'modelMgr.completeAllButton' })}
+              </Button>
+            </Tooltip>
           </Space>
-          <Tooltip title={intl.formatMessage({ id: 'modelMgr.completeAllTooltip' })}>
-            <Button
-              className={styles.completeConfigButton}
-              icon={<ThunderboltOutlined />}
-              loading={completeLoading}
-              onClick={onCompleteConfig}
-            >
-              {intl.formatMessage({ id: 'modelMgr.completeAllButton' })}
-            </Button>
-          </Tooltip>
         </div>
       </div>
 
-      <div className={styles.statsRow}>
-        <div className={styles.statCard}>
-          <div className={styles.statLabel}>{intl.formatMessage({ id: 'modelMgr.statsTotal' })}</div>
-          <div className={styles.statValue}>{total || 0}</div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={styles.statLabel}>{intl.formatMessage({ id: 'modelMgr.statusEnabled' })}</div>
-          <div className={styles.statValue}>{enabledCount}</div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={styles.statLabel}>{intl.formatMessage({ id: 'modelMgr.statusTesting' })}</div>
-          <div className={styles.statValue}>{testingCount}</div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={styles.statLabel}>{intl.formatMessage({ id: 'modelMgr.statusDisabled' })}</div>
-          <div className={styles.statValue}>{disabledCount}</div>
-        </div>
-      </div>
     </div>
   );
 };

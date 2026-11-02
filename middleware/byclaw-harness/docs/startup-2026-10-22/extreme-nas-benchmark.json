@@ -1,0 +1,578 @@
+[
+  {
+    "trial": 1,
+    "mode": "control",
+    "phases": {
+      "managed-links": 0.92,
+      "cli": 1.004,
+      "integration-start": 7.761,
+      "session-metadata": 8.364,
+      "builtin-skills": 8.49,
+      "projection-stage-ready": 8.592,
+      "projection-groups-ready": 8.965,
+      "projection-models-ready": 8.995,
+      "projection-skill-index-ready": 8.996,
+      "projection-templates-prepared": 9.26,
+      "projection-published": 9.262,
+      "resources": 9.29,
+      "worker": 9.41,
+      "web": 9.798
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 7766,
+          "ms": 92.6391349999947
+        },
+        "image:readFileSync": {
+          "count": 4011,
+          "ms": 108.65698000000856
+        },
+        "NAS:readFileSync": {
+          "count": 5,
+          "ms": 43.77820500000013
+        },
+        "NAS:existsSync": {
+          "count": 22,
+          "ms": 128.40790399999992
+        },
+        "image:existsSync": {
+          "count": 1688,
+          "ms": 13.252189999999814
+        },
+        "NAS:realpathSync": {
+          "count": 331,
+          "ms": 2040.3934349999931
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 7.067166000000043
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 16.936374000000114
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.113921000000687
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 0.819635999998809
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 3.60403000000008
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 7.236289999999258
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.36954199999991033
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 0.8882549999999583
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.07395800000006147
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.277291000000332
+        }
+      }
+    },
+    "readySeconds": 9.798,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 6.757
+  },
+  {
+    "trial": 1,
+    "mode": "candidate",
+    "phases": {
+      "managed-links": 0.928,
+      "cli": 0.996,
+      "integration-start": 5.602,
+      "session-metadata": 5.959,
+      "builtin-skills": 6.096,
+      "projection-stage-ready": 6.194,
+      "projection-groups-ready": 6.506,
+      "projection-models-ready": 6.554,
+      "projection-skill-index-ready": 6.555,
+      "projection-templates-prepared": 6.798,
+      "projection-published": 6.799,
+      "resources": 6.846,
+      "worker": 6.941,
+      "web": 7.494
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 8085,
+          "ms": 164.90148900001503
+        },
+        "image:readFileSync": {
+          "count": 4012,
+          "ms": 152.14491700000167
+        },
+        "NAS:lstatSync": {
+          "count": 2,
+          "ms": 13.126040999999987
+        },
+        "NAS:realpathSync": {
+          "count": 28,
+          "ms": 163.7953189999997
+        },
+        "NAS:readFileSync": {
+          "count": 7,
+          "ms": 39.38332800000032
+        },
+        "NAS:existsSync": {
+          "count": 23,
+          "ms": 130.9138180000001
+        },
+        "image:existsSync": {
+          "count": 2512,
+          "ms": 18.689642000006188
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 5.779291999999941
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 16.366247999999928
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.08512100000155
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 0.8522510000003649
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 16.32197000000133
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 7.777514000000451
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.5385830000000169
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 1.1012929999999415
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.14066600000001017
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.906374000000142
+        }
+      }
+    },
+    "readySeconds": 7.494,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 4.606
+  },
+  {
+    "trial": 1,
+    "mode": "control",
+    "phases": {
+      "managed-links": 0.948,
+      "cli": 1.034,
+      "integration-start": 7.638,
+      "session-metadata": 8.204,
+      "builtin-skills": 8.315,
+      "projection-stage-ready": 8.416,
+      "projection-groups-ready": 8.812,
+      "projection-models-ready": 8.828,
+      "projection-skill-index-ready": 8.829,
+      "projection-templates-prepared": 9.029,
+      "projection-published": 9.031,
+      "resources": 9.106,
+      "worker": 9.202,
+      "web": 9.624
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 7766,
+          "ms": 70.71572200001279
+        },
+        "image:readFileSync": {
+          "count": 4011,
+          "ms": 176.55255600000254
+        },
+        "NAS:readFileSync": {
+          "count": 5,
+          "ms": 30.175581999999963
+        },
+        "NAS:existsSync": {
+          "count": 22,
+          "ms": 124.18057399999987
+        },
+        "image:existsSync": {
+          "count": 1688,
+          "ms": 13.48482599999818
+        },
+        "NAS:realpathSync": {
+          "count": 331,
+          "ms": 2006.6414219999967
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 6.535958000000051
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 15.902873
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.1782409999995025
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 1.0039210000009007
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 4.289660999997523
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 7.002406000000974
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.37437500000010004
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 1.0782929999982116
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.08275000000003274
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.526749999999993
+        }
+      }
+    },
+    "readySeconds": 9.624,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 6.604
+  },
+  {
+    "trial": 1,
+    "mode": "candidate",
+    "phases": {
+      "managed-links": 0.94,
+      "cli": 1.009,
+      "integration-start": 6.211,
+      "session-metadata": 6.594,
+      "builtin-skills": 6.707,
+      "projection-stage-ready": 6.821,
+      "projection-groups-ready": 7.265,
+      "projection-models-ready": 7.3,
+      "projection-skill-index-ready": 7.302,
+      "projection-templates-prepared": 7.762,
+      "projection-published": 7.764,
+      "resources": 7.798,
+      "worker": 7.913,
+      "web": 8.306
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 8085,
+          "ms": 145.80047199999143
+        },
+        "image:readFileSync": {
+          "count": 4012,
+          "ms": 92.52440399998872
+        },
+        "NAS:lstatSync": {
+          "count": 2,
+          "ms": 13.311980000000005
+        },
+        "NAS:realpathSync": {
+          "count": 28,
+          "ms": 161.400520000001
+        },
+        "NAS:readFileSync": {
+          "count": 7,
+          "ms": 44.507739999999416
+        },
+        "NAS:existsSync": {
+          "count": 23,
+          "ms": 132.2888840000005
+        },
+        "image:existsSync": {
+          "count": 2512,
+          "ms": 35.46512599999767
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 5.923467999999957
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 16.69544499999995
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.971358000001487
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 37.546856000001185
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 4.035046000003376
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 9.8340490000013
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.5455430000000661
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 0.9872529999979633
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.08979099999987739
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.708343000000241
+        }
+      }
+    },
+    "readySeconds": 8.306,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 5.202
+  },
+  {
+    "trial": 1,
+    "mode": "control",
+    "phases": {
+      "managed-links": 0.972,
+      "cli": 1.06,
+      "integration-start": 7.889,
+      "session-metadata": 8.438,
+      "builtin-skills": 8.549,
+      "projection-stage-ready": 8.649,
+      "projection-groups-ready": 8.985,
+      "projection-models-ready": 9.04,
+      "projection-skill-index-ready": 9.042,
+      "projection-templates-prepared": 9.295,
+      "projection-published": 9.327,
+      "resources": 9.342,
+      "worker": 9.44,
+      "web": 9.982
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 7766,
+          "ms": 94.37330500001968
+        },
+        "image:readFileSync": {
+          "count": 4011,
+          "ms": 107.6369720000178
+        },
+        "NAS:readFileSync": {
+          "count": 5,
+          "ms": 34.64926500000007
+        },
+        "NAS:existsSync": {
+          "count": 22,
+          "ms": 128.36571399999974
+        },
+        "image:existsSync": {
+          "count": 1688,
+          "ms": 13.3521210000074
+        },
+        "NAS:realpathSync": {
+          "count": 331,
+          "ms": 2049.8056789999982
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 6.000760000000014
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 17.492985999999974
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.735308000000259
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 0.9986240000005182
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 3.8794059999967203
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 7.926556999999889
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.5190010000000029
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 1.0233800000021347
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.08283300000005056
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.316508999999314
+        }
+      }
+    },
+    "readySeconds": 9.982,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 6.829
+  },
+  {
+    "trial": 1,
+    "mode": "candidate",
+    "phases": {
+      "managed-links": 0.9,
+      "cli": 0.965,
+      "integration-start": 5.67,
+      "session-metadata": 6.066,
+      "builtin-skills": 6.178,
+      "projection-stage-ready": 6.285,
+      "projection-groups-ready": 6.671,
+      "projection-models-ready": 6.689,
+      "projection-skill-index-ready": 6.69,
+      "projection-templates-prepared": 7.149,
+      "projection-published": 7.165,
+      "resources": 7.179,
+      "worker": 7.298,
+      "web": 7.771
+    },
+    "filesystemProfile": {
+      "counts": {
+        "image:realpathSync": {
+          "count": 8085,
+          "ms": 173.1739610000015
+        },
+        "image:readFileSync": {
+          "count": 4012,
+          "ms": 110.10294599998554
+        },
+        "NAS:lstatSync": {
+          "count": 2,
+          "ms": 12.662770999999992
+        },
+        "NAS:realpathSync": {
+          "count": 28,
+          "ms": 165.17064399999967
+        },
+        "NAS:readFileSync": {
+          "count": 7,
+          "ms": 44.54515799999987
+        },
+        "NAS:existsSync": {
+          "count": 23,
+          "ms": 134.2405950000002
+        },
+        "image:existsSync": {
+          "count": 2512,
+          "ms": 20.354911000007746
+        },
+        "NAS:writeFileSync": {
+          "count": 1,
+          "ms": 7.318136999999979
+        },
+        "NAS:mkdirSync": {
+          "count": 3,
+          "ms": 18.38057200000003
+        },
+        "image:lstatSync": {
+          "count": 776,
+          "ms": 6.799008000000526
+        },
+        "image:readlinkSync": {
+          "count": 281,
+          "ms": 0.916464000000019
+        },
+        "image:mkdirSync": {
+          "count": 679,
+          "ms": 3.8066240000009657
+        },
+        "image:symlinkSync": {
+          "count": 582,
+          "ms": 8.096313000001146
+        },
+        "image:readdirSync": {
+          "count": 1,
+          "ms": 0.3475419999999758
+        },
+        "image:statSync": {
+          "count": 58,
+          "ms": 0.8275389999996605
+        },
+        "image:writeFileSync": {
+          "count": 1,
+          "ms": 0.08104199999979755
+        },
+        "NAS:readdirSync": {
+          "count": 1,
+          "ms": 5.430800999999974
+        }
+      }
+    },
+    "readySeconds": 7.771,
+    "httpResponded": true,
+    "httpStatus": "200",
+    "resourceSyncFailed": false,
+    "skillSyncErrors": 0,
+    "cliToIntegrationSeconds": 4.705
+  }
+]

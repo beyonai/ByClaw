@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 @Data
 public class GroupChatFileListResponse {
     private List<FileItem> files = new ArrayList<>();
+    /** 首屏统计全部有效上传附件，续页不重复扫描，客户端保留首屏总数。 */
+    private Long total;
     private int pageSize;
     private boolean hasMore;
     private String nextCursor;

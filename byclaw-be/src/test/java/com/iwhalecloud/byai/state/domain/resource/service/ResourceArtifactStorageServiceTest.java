@@ -35,6 +35,9 @@ class ResourceArtifactStorageServiceTest {
     @Mock
     private ResourceArtifactPathResolver pathResolver;
 
+    @Mock
+    private ResourceJsonCacheService cache;
+
     @Test
     void uploadToSubdirectory_writesToResourceFsDirectory() {
         ResourceArtifactStorageService service = service();
@@ -140,7 +143,7 @@ class ResourceArtifactStorageServiceTest {
         when(pathResolver.buildResourceJsonFileName("toolkit", 1L)).thenReturn("TOOLKIT_1.json");
         when(pathResolver.normalizeRelativePath("toolkit")).thenReturn("toolkit");
 
-        service.syncResourceJsonByBizType("{}", "toolkit", 1L);
+        service.publishResourceJson("{}", "toolkit", 1L);
 
         verify(resourceFS).write(any(MultipartFile.class), eq("/resource/toolkit/"));
     }
@@ -149,6 +152,8 @@ class ResourceArtifactStorageServiceTest {
         ResourceArtifactStorageService service = new ResourceArtifactStorageService();
         ReflectionTestUtils.setField(service, "resourceFS", resourceFS);
         ReflectionTestUtils.setField(service, "resourceArtifactPathResolver", pathResolver);
+        ReflectionTestUtils.setField(service, "resourceJsonCacheService", cache);
+        ReflectionTestUtils.setField(service, "ioDelegate", service);
         return service;
     }
 }

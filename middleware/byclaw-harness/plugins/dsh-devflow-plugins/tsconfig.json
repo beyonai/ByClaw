@@ -1,0 +1,71 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/devflow"
+    },
+    {
+      "path": "./packages/devflow-agent-gate"
+    },
+    {
+      "path": "./packages/devflow-artifact-gate"
+    },
+    {
+      "path": "./packages/devflow-bundle"
+    },
+    {
+      "path": "./packages/devflow-business"
+    },
+    {
+      "path": "./packages/devflow-command"
+    },
+    {
+      "path": "./packages/devflow-filesystem"
+    },
+    {
+      "path": "./packages/devflow-fs-guard"
+    },
+    {
+      "path": "./packages/devflow-gates"
+    },
+    {
+      "path": "./packages/devflow-guidance"
+    },
+    {
+      "path": "./packages/devflow-iron-rules"
+    },
+    {
+      "path": "./packages/devflow-review-gate"
+    },
+    {
+      "path": "./packages/devflow-parent-gate"
+    },
+    {
+      "path": "./packages/devflow-spec"
+    },
+    {
+      "path": "./packages/devflow-spec-filesystem"
+    },
+    {
+      "path": "./packages/devflow-spec-sentinel"
+    },
+    {
+      "path": "./packages/devflow-spec-tool"
+    },
+    {
+      "path": "./packages/devflow-testenv"
+    },
+    {
+      "path": "./packages/devflow-tool"
+    },
+    {
+      "path": "./packages/devflow-ui"
+    },
+    {
+      "path": "./packages/devflow-web"
+    },
+    {
+      "path": "./packages/devflow-worktree"
+    }
+  ]
+}

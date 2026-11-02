@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class ProjectWorkspaceGitServiceTest {
+class ProjectWorkspaceGitServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @TempDir
     Path tempDir;

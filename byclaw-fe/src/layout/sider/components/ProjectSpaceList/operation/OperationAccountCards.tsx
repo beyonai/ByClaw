@@ -233,7 +233,7 @@ const OperationAccountCards = ({
                       }`}
                       icon={<MoreOutlined />}
                       loading={`${deletingAccountId ?? ''}` === `${account.id}`}
-                      aria-label="账号操作"
+                      aria-label={intl.formatMessage({ id: 'projectSpace.operation.accountActions' })}
                       onClick={(event) => event.stopPropagation()}
                     />
                   </Dropdown>

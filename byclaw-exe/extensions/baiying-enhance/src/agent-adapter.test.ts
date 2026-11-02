@@ -42,6 +42,7 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.tools).toEqual({
             alsoAllow: [
                 "baiying_call",
+                "baiying_skills",
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",
@@ -76,6 +77,7 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.tools).toEqual({
             alsoAllow: [
                 "baiying_call",
+                "baiying_skills",
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",
@@ -429,6 +431,7 @@ describe("adaptAgentJson", () => {
                 "read",
                 "write",
                 "baiying_call",
+                "baiying_skills",
                 "image_generate",
                 "byclaw_chat_context",
                 "updateTaskPlan",

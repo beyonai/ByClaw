@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { AnswerState, MirrorEnvelope } from "../../domain/mirror.js";
 import { first, insert, nextId } from "./sql-utils.js";
@@ -15,11 +16,10 @@ export async function projectGroupTaskAnswer(
   answer: AnswerState,
 ): Promise<void> {
   if (await projectGroupCandidateAnswer(db, enterpriseId, event, answer)) return;
-  const task = await first(
-    db,
-    "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1 FOR UPDATE",
-    [event.sessionId],
-  );
+  await lockBusiness(db, `task:${event.sessionId}`);
+  const task = await first(db, "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1", [
+    event.sessionId,
+  ]);
   if (!task || task.status !== "ACTIVE" || task.turnStatus !== "RUNNING" || task.publishMessageId)
     return;
   const marker = await first(

@@ -88,4 +88,62 @@ describe('SandboxStatusIndicator', () => {
       );
     });
   });
+
+  it('shows shared resources and reconnects only the selected user context', async () => {
+    (useSandboxStatus as jest.Mock).mockReturnValue({
+      status: 'running',
+      sandboxes: [
+        {
+          userCode: 'user001',
+          sandboxType: 'custom-assistant',
+          serviceKey: 'shared-chat',
+          sandboxId: 'shared-host-1',
+          isShared: true,
+          status: 'RUNNING',
+          workerOnline: true,
+          workerLastSeen: 1_700_000_000_000,
+        },
+      ],
+      refetch: jest.fn(),
+      restartSandbox: mockRestartSandbox.mockResolvedValue(undefined),
+    });
+    render(<SandboxStatusIndicator userCode="user001" />);
+    expect(screen.getByText('sandbox.shared.resource:shared-chat')).toBeInTheDocument();
+    expect(screen.getByText('sandbox.worker.online')).toBeInTheDocument();
+    expect(screen.getByText('sandbox.action.reconnect')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /shared-chat/ }));
+    expect(screen.getByText('sandbox.shared.reconnect.content:shared-chat')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'sandbox.shared.reconnect.ok' }));
+    await waitFor(() =>
+      expect(mockRestartSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ sandboxType: 'custom-assistant', isShared: true })
+      )
+    );
+  });
+});
+
+it('shows quota preparation without offering a release action for a pending allocation', () => {
+  (useSandboxStatus as jest.Mock).mockReturnValue({
+    status: 'transitioning',
+    storage: { enabled: true, ready: false, state: 'WAITING_QUOTA' },
+    sandboxes: [],
+    refetch: jest.fn(),
+    restartSandbox: mockRestartSandbox,
+  });
+  render(<SandboxStatusIndicator userCode="alice" />);
+  expect(screen.getByText('sandbox.storage.preparing')).toBeDisabled();
+  expect(screen.queryByText('sandbox.action.reconnect')).not.toBeInTheDocument();
+});
+
+it('explains that history migration requires intervention rather than ordinary quota waiting', () => {
+  (useSandboxStatus as jest.Mock).mockReturnValue({
+    status: 'transitioning',
+    storage: { enabled: true, ready: false, state: 'MIGRATION_REQUIRED' },
+    sandboxes: [],
+    refetch: jest.fn(),
+    restartSandbox: mockRestartSandbox,
+  });
+  render(<SandboxStatusIndicator userCode="alice" />);
+  expect(screen.getByText('sandbox.storage.migration')).toBeDisabled();
+  expect(screen.queryByText('sandbox.storage.preparing')).not.toBeInTheDocument();
 });

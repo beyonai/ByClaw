@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Tooltip, message } from 'antd';
 import { FundProjectionScreenOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import { getProject, getTaskDetail } from '@/service/devloop';
 import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
 import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
@@ -16,6 +16,7 @@ type ProjectSessionActionsProps = {
 const getResponseData = (response: any) => response?.data ?? response;
 
 const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId, sessionId, sessionName }) => {
+  const intl = useIntl();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [project, setProject] = useState<any>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
@@ -57,7 +58,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
     setTaskProgressTooltipOpen(false);
     const numericSessionId = Number(sessionId);
     if (!Number.isFinite(numericSessionId) || numericSessionId <= 0) {
-      message.warning('未找到任务会话');
+      message.warning(intl.formatMessage({ id: 'ui.task.sessionMissing' }));
       return;
     }
 
@@ -66,7 +67,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
       const response = await getTaskDetail(numericSessionId);
       const task = getResponseData(response);
       if (!task || task?.success === false) {
-        message.warning('当前会话暂无关联任务');
+        message.warning(intl.formatMessage({ id: 'ui.task.noLinkedTask' }));
         return;
       }
 
@@ -75,15 +76,15 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
         ...task,
         projectId: task.projectId ?? projectId,
         sessionId: task.sessionId || numericSessionId,
-        title: task.title || task.taskName || sessionName || '任务详情',
+        title: task.title || task.taskName || sessionName || intl.formatMessage({ id: 'projectTaskDetail.title' }),
       });
     } catch (error) {
       console.error('Failed to load task progress:', error);
-      message.error('任务进度加载失败');
+      message.error(intl.formatMessage({ id: 'ui.task.progressFailed' }));
     } finally {
       setTaskLoading(false);
     }
-  }, [projectId, sessionId, sessionName]);
+  }, [intl, projectId, sessionId, sessionName]);
 
   const handleTaskProgressTooltipOpenChange = (open: boolean) => {
     // 任务详情已打开时不再展示提示，防止鼠标仍停留在按钮上导致 Tooltip 重新出现。
@@ -98,7 +99,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
       <span className={styles.projectSessionActions}>
         {isDevelopmentProject && (
           <Tooltip
-            title="任务进度"
+            title={intl.formatMessage({ id: 'ui.task.progress' })}
             placement="bottom"
             open={taskProgressTooltipOpen}
             onOpenChange={handleTaskProgressTooltipOpenChange}

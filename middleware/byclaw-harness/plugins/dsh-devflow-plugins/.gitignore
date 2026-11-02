@@ -1,0 +1,8 @@
+node_modules/
+lib/
+*.tsbuildinfo
+coverage/
+.pnpm-store/
+.DS_Store
+.tools-build/
+.local-tarballs/

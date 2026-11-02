@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Tree, Input, Button, Checkbox, Dropdown, Modal, message } from 'antd';
-import { DeleteOutlined, EllipsisOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, EllipsisOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { useIntl, useDispatch } from '@umijs/max';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
@@ -55,6 +55,7 @@ const OrganizationTree: React.FC<Props> = ({
   const dispatch = useDispatch();
   const intl = useIntl();
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [editing, setEditing] = useState(false);
 
   const treeNodes = useMemo(() => {
     const tree = arrayToTree(treeData || [], { sortKey: 'orgIndex' });
@@ -102,6 +103,15 @@ const OrganizationTree: React.FC<Props> = ({
 
   const dropdownItems = [
     {
+      key: 'edit',
+      disabled: editing,
+      label: (
+        <>
+          <EditOutlined /> {intl.formatMessage({ id: 'orgTree.editOrg' })}
+        </>
+      ),
+    },
+    {
       key: 'delete',
       label: (
         <div className={styles.deleteBtn}>
@@ -111,52 +121,75 @@ const OrganizationTree: React.FC<Props> = ({
     },
   ];
 
-  const titleRender = useCallback(
-    (node: any) => {
-      const isActive = String(selectedOrg?.orgId) === String(node.key);
-      return (
-        <div className={isActive ? styles.nodeActive : styles.node}>
-          <div className={styles.nodeMain}>
-            <AntdIcon type="icon-zuzhitubiao" className={styles.nodeIcon} />
-            <span className={isActive ? styles.nodeTextActive : styles.nodeText}>{node.title}</span>
-          </div>
-          {isActive && (
-            <Dropdown
-              menu={{
-                items: dropdownItems,
-                onClick: ({ key }) => {
-                  if (key === 'delete') {
-                    Modal.confirm({
-                      title: intl.formatMessage({ id: 'orgTree.deleteOrg' }),
-                      content: intl.formatMessage({
-                        id: 'orgTree.deleteConfirm',
-                      }),
-                      onOk: () => {
-                        handleConfirm();
-                      },
-                    });
-                  } else if (key === 'dataPermission') {
-                    // TODO: 处理数据权限设置逻辑
-                    console.log('数据权限设置', selectedOrg);
-                  }
-                },
+  const titleRender = (node: any) => {
+    const isActive = String(selectedOrg?.orgId) === String(node.key);
+    return (
+      <div className={isActive ? styles.nodeActive : styles.node}>
+        <div className={styles.nodeMain}>
+          <AntdIcon type="icon-zuzhitubiao" className={styles.nodeIcon} />
+          <span className={isActive ? styles.nodeTextActive : styles.nodeText}>{node.title}</span>
+        </div>
+        {isActive && canEdit && (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: dropdownItems,
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
+                if (key === 'edit' && !editing) {
+                  setEditing(true);
+                  dispatch({
+                    type: 'orgMgr/searchOrg',
+                    payload: { orgId: node.data.orgId },
+                    success: (res: any) => {
+                      setEditing(false);
+                      if (!res?.data) {
+                        message.error(intl.formatMessage({ id: 'orgMgr.administrators.loadFailed' }));
+                        return;
+                      }
+                      setInfo(res.data);
+                      setType('edit');
+                      setVisible(true);
+                    },
+                    fail: (res: any) => {
+                      setEditing(false);
+                      message.error(res?.msg || intl.formatMessage({ id: 'orgMgr.administrators.loadFailed' }));
+                    },
+                  });
+                } else if (key === 'delete') {
+                  Modal.confirm({
+                    title: intl.formatMessage({ id: 'orgTree.deleteOrg' }),
+                    content: intl.formatMessage({
+                      id: 'orgTree.deleteConfirm',
+                    }),
+                    onOk: () => {
+                      handleConfirm();
+                    },
+                  });
+                } else if (key === 'dataPermission') {
+                  // TODO: 处理数据权限设置逻辑
+                  console.log('数据权限设置', selectedOrg);
+                }
+              },
+            }}
+          >
+            <Button
+              type="text"
+              size="small"
+              aria-label={intl.formatMessage({ id: 'orgTree.actions' })}
+              onClick={(event) => event.stopPropagation()}
+              className={styles.actionIcon}
+              style={{
+                visibility: String(node.key) === String(selectedOrg?.orgId) ? 'visible' : 'hidden',
               }}
             >
-              <div
-                className={styles.actionIcon}
-                style={{
-                  visibility: String(node.key) === String(selectedOrg?.orgId) ? 'visible' : 'hidden',
-                }}
-              >
-                <EllipsisOutlined />
-              </div>
-            </Dropdown>
-          )}
-        </div>
-      );
-    },
-    [selectedOrg?.orgId]
-  );
+              <EllipsisOutlined />
+            </Button>
+          </Dropdown>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className={styles.wrap}>

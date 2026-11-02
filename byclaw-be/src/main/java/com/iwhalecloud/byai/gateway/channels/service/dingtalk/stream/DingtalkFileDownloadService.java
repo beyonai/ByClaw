@@ -39,7 +39,7 @@ public class DingtalkFileDownloadService {
 
     private final ObjectMapper objectMapper;
 
-    private final OkHttpClient okHttpClient = new OkHttpClient();
+    private final OkHttpClient okHttpClient;
 
     @Autowired
     private DingtalkTokenService dingtalkTokenService;
@@ -47,8 +47,9 @@ public class DingtalkFileDownloadService {
     @Autowired
     private com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService assistantChatApplicationService;
 
-    public DingtalkFileDownloadService(ObjectMapper objectMapper) {
+    public DingtalkFileDownloadService(ObjectMapper objectMapper, DingtalkHttpClientFactory httpClientFactory) {
         this.objectMapper = objectMapper;
+        this.okHttpClient = httpClientFactory.fileClient();
     }
 
     public DingtalkMessageFileDownloadResult downloadMessageFile(String accessToken, String robotCode,

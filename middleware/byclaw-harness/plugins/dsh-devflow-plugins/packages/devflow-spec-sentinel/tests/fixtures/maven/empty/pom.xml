@@ -1,0 +1,5 @@
+<project>
+  <parent>
+    <artifactId>p</artifactId>
+  </parent>
+</project>

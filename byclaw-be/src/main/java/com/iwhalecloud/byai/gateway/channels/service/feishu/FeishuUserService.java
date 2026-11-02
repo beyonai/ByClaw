@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.channels.service.feishu;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
@@ -121,12 +123,12 @@ public class FeishuUserService {
                     unionId, stableUserId, userInfo.getUserId(), userDetail);
             if (!bindingMatches) {
                 CurrentUserHolder.clearLoginInfo();
-                sendTextReply(message, "账号绑定发生冲突，请重新发送消息。");
+                sendTextReply(message, I18nUtil.get("channel.account.bindingConflict"));
                 return null;
             }
             if (extractSelectedUserCode(message.getTextContent()) != null) {
                 CurrentUserHolder.clearLoginInfo();
-                sendTextReply(message, "账号绑定成功，请重新发送您的问题。");
+                sendTextReply(message, I18nUtil.get("channel.account.bound"));
                 return null;
             }
         }
@@ -137,7 +139,7 @@ public class FeishuUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable Feishu bound user. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            sendTextReply(message, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);
@@ -151,9 +153,7 @@ public class FeishuUserService {
         logger.warn("Unable to fetch Feishu user detail. appId={}, messageId={}, eventExternalIds={}",
                 message.getAppId(), message.getMessageId(), eventExternalIds, cause);
         sendTextReply(message,
-                "无法获取您的飞书用户信息，请联系管理员确认应用已开通通讯录用户信息权限，"
-                        + "且您在应用可用范围/通讯录权限范围内。"
-                        + "如果您是外部成员，需要先维护飞书账号与系统账号的绑定。");
+                I18nUtil.get("channel.feishu.profileUnavailable"));
     }
 
     private FeishuUserDetail fetchUserDetail(FeishuCallbackMessage message) {
@@ -273,7 +273,7 @@ public class FeishuUserService {
     ) throws IOException {
         List<Users> users = findUsersByUserDetail(userDetail);
         if (users == null || users.isEmpty()) {
-            sendTextReply(message, "未找到匹配的系统用户，请联系管理员创建账号后再试。");
+            sendTextReply(message, I18nUtil.get("channel.user.missing"));
             return null;
         }
 
@@ -281,7 +281,7 @@ public class FeishuUserService {
         if (selectedUserCode != null) {
             users = filterUsersBySelectedUserCode(users, selectedUserCode);
             if (users.isEmpty()) {
-                sendTextReply(message, "未找到 userCode=" + selectedUserCode + " 对应用户，请从候选列表中选择。");
+                sendTextReply(message, I18nUtil.get("channel.feishu.userCodeMissing", selectedUserCode));
                 return null;
             }
         }
@@ -295,7 +295,7 @@ public class FeishuUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable Feishu user before binding. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            sendTextReply(message, "系统账号已停用或锁定，请联系管理员。");
+            sendTextReply(message, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);
@@ -549,13 +549,10 @@ public class FeishuUserService {
 
     private String buildMultipleUsersPrompt(String senderName, List<Users> users) {
         StringBuilder builder = new StringBuilder();
-        builder.append("检测到");
-        if (StringUtils.hasText(senderName)) {
-            builder.append("飞书用户「").append(senderName).append("」");
-        } else {
-            builder.append("当前飞书用户");
-        }
-        builder.append("匹配到多个系统用户，请回复 user code: 用户编码 完成绑定。\n");
+        String userLabel = StringUtils.hasText(senderName)
+                ? I18nUtil.get("channel.feishu.namedUser", senderName)
+                : I18nUtil.get("channel.feishu.currentUser");
+        builder.append(I18nUtil.get("channel.feishu.ambiguousUser", userLabel));
         for (Users user : users) {
             builder.append("- ")
                     .append(user.getUserName())

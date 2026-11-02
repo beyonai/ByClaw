@@ -85,7 +85,7 @@ class PrivilegeGrantMapperSqlTest {
                         String sql = boundSql.getSql().replaceAll("\\s+", " ");
                         // 绑定候选始终限定本人创建或有效授权，管理员角色也不能扩大范围。
                         assertThat(sql).contains("a.resource_status = 2")
-                            .contains("and (k.black_count = 0 or k.black_count is null)")
+                            .contains("coalesce(k.black_count, 0) = 0")
                             .contains("and ( k.red_count > 0 or a.create_by = ? )")
                             .contains("and a.owner_type = ?")
                             .contains("and a.resource_biz_type in ( ? )")
@@ -199,7 +199,7 @@ class PrivilegeGrantMapperSqlTest {
                 .contains("and pg.status_cd in ('X', 'R')")
                 .contains("pg.grant_type = 'SKILL_PUBLICATION'")
                 .contains("end as auditType")
-                .contains("pg.grant_type = 'AVAILABLE_USE'")
+                .contains("pg.grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')")
                 .contains("resourceBizTypeList")
                 .contains("r.resource_biz_type in");
         }

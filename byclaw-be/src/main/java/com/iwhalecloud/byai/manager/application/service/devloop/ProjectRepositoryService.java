@@ -42,6 +42,10 @@ import org.springframework.web.multipart.MultipartFile;
 @Slf4j
 @Service
 public class ProjectRepositoryService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformFileSystemRouting platformFileSystem;
+
+
 
     @Autowired
     private ProjectService projectService;
@@ -179,37 +183,55 @@ public class ProjectRepositoryService {
             currentUserToken());
     }
 
+    /** 普通存储入口使用纯路径解析，不能借Git初始化在remote侧先落BE盘。 */
+    private Path prepareProjectSpaceRoot(Long projectId) {
+        if (!platformFileSystem.isRemote()) {
+            return projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        }
+        Path root = projectInitService.resolveProjectWorkspace(projectId).toAbsolutePath().normalize();
+        try {
+            platformFileSystem.createDirectories(root);
+            return root;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(com.iwhalecloud.byai.common.i18n.I18nUtil.get(
+                "project.init.workspaceFailed", String.valueOf(root)), e);
+        }
+    }
+
     /** 查询项目空间根目录或指定目录的直接子节点。 */
     public List<ProjectSpaceTreeNodeDTO> listProjectSpaceTree(Long projectId, String path) {
         requireProject(projectId);
-        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path projectRoot = prepareProjectSpaceRoot(projectId);
         String normalizedPath = normalizeSpacePath(path);
         Path directory = projectRoot.resolve(normalizedPath).normalize();
-        if (!directory.startsWith(projectRoot) || !Files.isDirectory(directory)) {
+        if (!directory.startsWith(projectRoot) || !platformFileSystem.isDirectory(directory)) {
             throw new BaseException(50500, "project.space.path.not.found");
         }
         Map<Path, ProjectRepo> reposByPath = new HashMap<>();
         projectWorkspaceGitService.resolveRepositories(projectId).forEach(resolved ->
             reposByPath.put(resolved.path().toAbsolutePath().normalize(), resolved.repo()));
         List<ProjectSpaceTreeNodeDTO> nodes = new ArrayList<>();
-        try (java.util.stream.Stream<Path> children = Files.list(directory)) {
+        try (java.util.stream.Stream<Path> children = platformFileSystem.list(directory)) {
             children.filter(child -> !".git".equals(child.getFileName().toString()))
-                .sorted(Comparator.comparing((Path child) -> !Files.isDirectory(child))
+                .sorted(Comparator.comparing((Path child) -> !platformFileSystem.isDirectory(child))
                     .thenComparing(child -> child.getFileName().toString(), String.CASE_INSENSITIVE_ORDER))
                 .forEach(child -> {
                     ProjectSpaceTreeNodeDTO node = new ProjectSpaceTreeNodeDTO();
                     Path relative = projectRoot.relativize(child);
                     node.setName(child.getFileName().toString());
                     node.setPath(relative.toString().replace('\\', '/'));
-                    boolean directoryNode = Files.isDirectory(child);
+                    boolean directoryNode = platformFileSystem.isDirectory(child);
                     node.setType(directoryNode ? "directory" : "file");
                     node.setHasChildren(directoryNode);
                     if (!directoryNode) {
                         try {
-                            BasicFileAttributes attrs = Files.readAttributes(child, BasicFileAttributes.class);
+                            com.iwhalecloud.byai.gateway.sandbox.platform.PlatformFileSystemRouting.Attributes attrs = platformFileSystem.readAttributes(child);
                             node.setSize(attrs.size());
                             node.setLastModified(attrs.lastModifiedTime().toInstant().toString());
                         } catch (Exception ignored) {
+                            if (ignored instanceof com.iwhalecloud.byai.gateway.sandbox.platform.PlatformFileSystemRouting.RemoteFailure) {
+                                throw (com.iwhalecloud.byai.gateway.sandbox.platform.PlatformFileSystemRouting.RemoteFailure) ignored;
+                            }
                             // 文件在扫描期间消失时仍返回节点，下一次刷新会重新同步。
                         }
                     } else {
@@ -259,13 +281,13 @@ public class ProjectRepositoryService {
         if (normalizedPath.isBlank()) {
             throw new BaseException(50500, "project.space.folder.name.required");
         }
-        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path projectRoot = prepareProjectSpaceRoot(projectId);
         Path folder = projectRoot.resolve(normalizedPath).normalize();
         if (!folder.startsWith(projectRoot)) {
             throw new BaseException(50500, "project.space.path.invalid");
         }
         try {
-            Files.createDirectories(folder);
+            platformFileSystem.createDirectories(folder);
         } catch (java.io.IOException e) {
             throw new BaseException(50500, "project.space.folder.create.failed", e);
         }
@@ -275,9 +297,9 @@ public class ProjectRepositoryService {
     public void uploadProjectSpaceFiles(Long projectId, String path, MultipartFile[] files) {
         requireProject(projectId);
         String normalizedPath = normalizeSpacePath(path);
-        Path projectRoot = projectInitService.initProjectWorkspace(projectId).toAbsolutePath().normalize();
+        Path projectRoot = prepareProjectSpaceRoot(projectId);
         Path targetDirectory = projectRoot.resolve(normalizedPath).normalize();
-        if (!targetDirectory.startsWith(projectRoot) || !Files.isDirectory(targetDirectory)) {
+        if (!targetDirectory.startsWith(projectRoot) || !platformFileSystem.isDirectory(targetDirectory)) {
             throw new BaseException(50500, "project.space.path.not.found");
         }
         if (files == null) return;
@@ -288,7 +310,7 @@ public class ProjectRepositoryService {
                 if (!target.startsWith(projectRoot) || !target.getParent().equals(targetDirectory)) {
                     throw new BaseException(50500, "project.space.path.invalid");
                 }
-                Files.copy(file.getInputStream(), target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                platformFileSystem.copyReplace(file.getInputStream(), target, file.getSize());
             }
         } catch (java.io.IOException e) {
             throw new BaseException(50500, "project.space.file.upload.failed", e);

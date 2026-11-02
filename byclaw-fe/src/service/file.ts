@@ -1,3 +1,4 @@
+import { getLocale } from '@umijs/max';
 import { GET, POST } from '@/service/common/request';
 import type { IQueryFile } from '@/typescript/file';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
@@ -95,7 +96,7 @@ export const downloadResourceFileForPreview = (params: DownloadDatasetFileParams
     {
       resourceId: params.resourceId,
       directoryPath: normalizeDatasetDirectoryPath(params.directoryPath),
-      language: params.language || 'zh-CN',
+      language: params.language || getLocale() || 'zh-CN',
     },
     { responseType: 'blob' }
   );

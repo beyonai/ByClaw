@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -176,6 +177,16 @@ public class ScriptService extends AbstractChatProcess {
 
         resolveRunningTraceState(ctx);
 
+        // 先沿用普通聊天准入，再替换任务轮次；被拒绝的新输入不能覆盖仍在执行的旧轮次。
+        // 群内派发及 CHAT_CONTINUATION 已有服务端 turn，继续使用原独立路径。
+        if (ctx.tenantContext == null && ctx.existingUserMessage == null && groupChatTaskGuardProvider != null) {
+            GroupChatTaskChatGuard taskGuard = groupChatTaskGuardProvider.getIfAvailable();
+            if (taskGuard != null) {
+                ctx.assistantChatDto.setGroupTaskTurnId(taskGuard.beforeTurn(ctx.sessionId,
+                    ctx.assistantChatDto.getAgentId(), ctx.assistantChatDto.getTraceId()));
+            }
+        }
+
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
@@ -266,6 +277,13 @@ public class ScriptService extends AbstractChatProcess {
             saveTroubleshootSessionExt(ctx);
         }
 
+        if (!ctx.continueRunningTrace && ctx.assistantChatDto.getExtParams() != null
+            && ctx.assistantChatDto.getExtParams().get("voice") instanceof Map<?, ?> voice) {
+            JSONObject metadata = new JSONObject();
+            metadata.put("voice", voice);
+            metadata.put("messageType", "VOICE");
+            ctx.askMsg.setMetadata(metadata.toJSONString());
+        }
         // 多端广播：将用户发送的消息推送到用户的其他设备
         if (!ctx.continueRunningTrace) {
             broadcastUserMessage(ctx);
@@ -358,7 +376,7 @@ public class ScriptService extends AbstractChatProcess {
             return;
         }
         if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
-            throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
+            throw new BdpRuntimeException(I18nUtil.get("chat.session.running"));
         }
 
         ctx.sendByFrameworkMsgOnly = true;
@@ -541,6 +559,10 @@ public class ScriptService extends AbstractChatProcess {
         }
         else if (ctx.recoveryOnly || ctx.res == null) {
             ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+            if (ctx.streamRecoveryToRequester && ctx.res != null) {
+                CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.appStreamResponse,
+                    JSON.toJSONString(ctx.chatResponse), ctx.sessionId);
+            }
             broadcastAppStreamResponse(ctx);
         }
         else {
@@ -808,8 +830,10 @@ public class ScriptService extends AbstractChatProcess {
         }
         try {
             if (ctx.chatResponse != null) {
+                JSONObject response = JSON.parseObject(JSON.toJSONString(ctx.chatResponse));
+                ChatReplyLog.attach(response, ctx, ctx.traceId);
                 multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
-                    SseResponseEventEnum.appStreamResponse, JSON.toJSONString(ctx.chatResponse), ctx.senderChannel);
+                    SseResponseEventEnum.appStreamResponse, response.toJSONString(), ctx.senderChannel);
             }
         }
         catch (Exception e) {
@@ -1193,7 +1217,8 @@ public class ScriptService extends AbstractChatProcess {
                 .filter(params -> params.containsKey("beyondTaskId"))
                 .ifPresent(params -> messageContext.setTaskId(MapParamUtil.getLongValue(params, "beyondTaskId"))); // 保存LLM应答的信息
             systemReponse = ctx.recoveryOnly
-                ? memoryMessageService.saveOrUpdate(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto)
+                ? memoryMessageService.saveOrAppendRecovery(ctx, sessionId, SYSTEM_RESPONSE.getCode(), messageContext,
+                    assistantChatDto)
                 : memoryMessageService.save(sessionId, SYSTEM_RESPONSE.getCode(), messageContext, assistantChatDto);
         }
 

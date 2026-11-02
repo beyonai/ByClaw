@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.auth;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -30,7 +32,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationService;
 
-class ProjectCloudReadPermissionTest {
+class ProjectCloudReadPermissionTest extends I18nTestSupport {
     private final ProjectService projects = mock(ProjectService.class);
     private final ProjectMemberService members = mock(ProjectMemberService.class);
     private final TenantProjectCloudAccessService tenantCloud = mock(TenantProjectCloudAccessService.class);

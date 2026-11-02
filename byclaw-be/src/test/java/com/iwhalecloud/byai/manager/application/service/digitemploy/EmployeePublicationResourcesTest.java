@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
@@ -23,7 +24,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class EmployeePublicationResourcesTest {
+class EmployeePublicationResourcesTest extends I18nTestSupport {
     SsResourceService resources = mock(SsResourceService.class);
     SsResExtSkillService skills = mock(SsResExtSkillService.class);
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);
@@ -56,6 +57,23 @@ class EmployeePublicationResourcesTest {
         CurrentUserHolder.clearLoginInfo();
         org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
     }
+    @Test void scopedPublicationRestrictsVisibilityAndUseWithoutACompanyRootGrant() {
+        var sequence = mock(com.iwhalecloud.byai.state.domain.sys.service.SequenceService.class);
+        when(sequence.nextVal()).thenReturn(100L, 101L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sequence", sequence);
+        resource.setOwnerType("enterprise");
+        service.grantAudience(resource, 1L, List.of(10L));
+        verify(resources).updateResourceEntity(argThat(r -> Boolean.TRUE.equals(r.getViewAuthControlled())));
+        var inserted = org.mockito.ArgumentCaptor.forClass(PrivilegeGrant.class);
+        verify(grants, times(2)).insert(inserted.capture());
+        assertThat(inserted.getAllValues()).extracting(PrivilegeGrant::getGrantType).containsExactly("ALLOW_VIEW", "FORCE_USE");
+        assertThat(inserted.getAllValues()).allSatisfy(grant -> {
+            assertThat(grant.getGrantToObjId()).isEqualTo(10L);
+            assertThat(grant.getGrantToObjType()).isEqualTo("ORG");
+        });
+        verify(auth, never()).handleAuth(any());
+    }
+
     @Test void audienceUsesTheSourceAndLoginTenantWithoutInferringADefaultEnterprise() {
         assertThat(service.audienceRoots(1L)).containsExactly(1L);
         CurrentUserHolder.getLoginInfo().setEnterpriseId(37L);
@@ -157,7 +175,7 @@ class EmployeePublicationResourcesTest {
         byte[] bytes = EmployeePublicationSkillServiceTest.zip(Map.of("tax-policy/SKILL.md", "# tax-policy",
             "tax-policy/references/resourceMate.json", "{\"resources\":[{\"resourceId\":\"30\",\"resourceType\":\"KNOWLEDGE_BASE\"},{\"resourceId\":\"40\",\"resourceType\":\"TOOL\"}]}"));
         when(storage.readWithinResourceRoot(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(bytes));
-        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null);
+        var checker = new EmployeePublicationSkillService(resources, null, null, null, null, null, null, null, null, null);
         when(bridge.check(any(), any(), any(), any())).thenAnswer(invocation -> checker.check(
             invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), invocation.getArgument(3)));
         var captured = service.capture(dto, 7L, 1L, 100L);
@@ -343,4 +361,17 @@ class EmployeePublicationResourcesTest {
         assertThat(description.reason()).contains("无法随员工发布");
         assertThat(description.impact()).contains("不会出现", "原个人员工保持不变");
     }
+
+    @Test
+    void personalDependencyReasonUsesCurrentLanguageWithoutChangingItsClassification() {
+        var issue = new EmployeePublicationSkillBridge.Issue("9007199254740993", "TOOL", "查询工具",
+            EmployeePublicationSkillBridge.Issue.PERSONAL_RESOURCE_REASON);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(issue.displayReason()).isEqualTo(
+            "The skill depends on the personal tool \"查询工具\" and will not be included in this employee publication");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThat(issue.displayReason()).isEqualTo("技能依赖了个人工具「查询工具」，因此本次不会随员工发布");
+        assertThat(issue.reason()).isEqualTo(EmployeePublicationSkillBridge.Issue.PERSONAL_RESOURCE_REASON);
+    }
+
 }

@@ -178,7 +178,7 @@ describe('manager resources service', () => {
     queryUseApplyList(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/auth/privilegeGrant/queryUseApplyList', payload, {
       responseCfg: {
-        customHandle: true,
+        hideErrorTips: true,
       },
     });
   });
@@ -191,7 +191,7 @@ describe('manager resources service', () => {
       expect(mockPOST).toHaveBeenCalledWith(
         '/byaiService/auth/privilegeGrant/queryDigitalEmployeeUseApplyAudit',
         payload,
-        { responseCfg: { customHandle: true } }
+        { responseCfg: { hideErrorTips: true } }
       );
     }
   );
@@ -201,7 +201,7 @@ describe('manager resources service', () => {
     approveUseApply(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/auth/privilegeGrant/approveUseApply', payload, {
       responseCfg: {
-        customHandle: true,
+        hideErrorTips: true,
       },
     });
   });

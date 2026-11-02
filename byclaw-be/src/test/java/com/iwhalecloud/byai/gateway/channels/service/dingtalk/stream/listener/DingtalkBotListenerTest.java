@@ -12,7 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class DingtalkBotListenerTest {
+class DingtalkBotListenerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void awaitStreamCompletionShouldFinalizeAccumulatedContentAfterIdleTimeout() throws Exception {

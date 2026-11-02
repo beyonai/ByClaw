@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.iwhalecloud.byai.manager.dto.connector.CompleteSkillAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.RevokeConnectorAuthorizationRequest;
 
-class ConnectorControllerContractTest {
+class ConnectorControllerContractTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void exposesFrontendConnectionAndAuthorizationEndpoints() {

@@ -48,3 +48,66 @@ describe("packaged V0.5.0 tenant baseline", () => {
     });
   });
 });
+
+describe("candidate V0.6.0 tenant bundles", () => {
+  it.each(["baseline", "update"] as const)(
+    "ships exact %s SQL, complete catalog and honest capture provenance",
+    async (kind) => {
+      const directory = kind === "baseline" ? "baseline" : "updates";
+      const stem = `V0.6.0__${kind}`;
+      const bytes = await readFile(new URL(`../${directory}/${stem}.zip`, import.meta.url));
+      const source = await readFile(
+        new URL(
+          `../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0${kind === "baseline" ? "__baseline" : ""}__ddl.sql`,
+          import.meta.url,
+        ),
+      );
+      const manifest = JSON.parse(
+        await readFile(new URL(`../${directory}/${stem}__manifest.json`, import.meta.url), "utf8"),
+      );
+      const provenance = JSON.parse(
+        await readFile(
+          new URL(`../${directory}/${stem}__provenance.json`, import.meta.url),
+          "utf8",
+        ),
+      );
+      const prefix = kind === "baseline" ? "baseline" : "versions";
+      const parent = kind === "baseline" ? null : provenance.parentMarker.version;
+      const validated = await validateBundle(
+        task({
+          operationType: kind === "baseline" ? "INIT" : "UPDATE",
+          fromVersion: parent,
+          targetVersion: "V0.6.0",
+          bundleDigest: sha256(bytes),
+          scripts: [
+            {
+              version: "V0.6.0",
+              parentVersion: parent,
+              path: `${prefix}/V0.6.0/__ddl.sql`,
+              sha256: sha256(source),
+            },
+          ],
+        }),
+        bytes,
+      );
+      expect(validated[0].manifest).toEqual(manifest);
+      expect((await unzipBundle(bytes)).get(`${prefix}/V0.6.0/__ddl.sql`)).toEqual(source);
+      expect(manifest.objects).toEqual(
+        expect.arrayContaining(
+          [
+            "byai_session",
+            "byai_message",
+            "byai_group_chat_forward_request",
+            "byai_group_chat_forward_target",
+            "byai_group_chat_forward_item",
+          ].map((name) => ({ name, kind: "table" })),
+        ),
+      );
+      expect(provenance.captureEngine.name).toBe("PostgreSQL");
+      expect(provenance.captureEngine.version).toMatch(/^17\./);
+      expect(provenance.targetEngineVerified).toBe(false);
+      expect(provenance.bundleSha256).toBe(sha256(bytes));
+      expect(provenance.sqlSha256).toBe(sha256(source));
+    },
+  );
+});

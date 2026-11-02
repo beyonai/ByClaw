@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 /**
@@ -26,6 +27,19 @@ public class SandboxServiceSpec {
      * Container image (CreateSandboxRequest.image.uri).
      */
     private String image;
+
+    /** Provider/lifecycle options retain the nested string-map wire format used by Platform. */
+    private Map<String, Map<String, String>> runtimeOptions;
+
+    /** Login participation is independent of enabled execution; absence preserves legacy startup.
+     * Lifecycle options retain the existing nested string-map JSON contract.
+     */
+    @JsonIgnore
+    public boolean isAutoStartEnabled() {
+        Map<String, String> lifecycle = runtimeOptions == null ? null : runtimeOptions.get("lifecycle");
+        String value = lifecycle == null ? null : lifecycle.get("autoStart");
+        return value == null || Boolean.parseBoolean(value.trim());
+    }
 
     /**
      * Startup instructions (CreateSandboxRequest.entrypoint).

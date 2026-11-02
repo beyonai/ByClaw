@@ -20,7 +20,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatIntern
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.interfaces.controller.chat.AssistantChatController;
 
-class GroupChatInternalSessionAccessTest {
+class GroupChatInternalSessionAccessTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     @Test
     void internalHistoryIsRejectedBeforeReadingMessages() {
         SessionService sessions = mock(SessionService.class);

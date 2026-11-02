@@ -4,6 +4,8 @@ import { getIntl } from '@umijs/max';
 import {
   debugModelEmbedding,
   debugModelImageGeneration,
+  debugModelAsr,
+  debugModelTts,
   debugModelNonStream,
   debugModelStream,
   completeAllModelConfig,
@@ -155,11 +157,8 @@ export default {
     *debugModel({ payload, success, fail }, { call }) {
       try {
         const response = unwrapResponse(yield call(debugModelStream, payload));
-        if (response.code === 0 || response.code === 50010) {
+        if (response.code === 0 && response.success !== false) {
           success?.(response.data ?? response);
-          if (response.code !== 0) {
-            fail?.(response || {});
-          }
         } else {
           message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});
@@ -228,6 +227,24 @@ export default {
           message.error(err.msg);
         }
         fail?.(err);
+      }
+    },
+    *debugModelAsr({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(debugModelAsr, payload));
+        if (response.code === 0) success?.({ output: JSON.stringify(response.data ?? response, null, 2) });
+        else fail?.(response);
+      } catch (error) {
+        fail?.({ msg: getErrorText(error) });
+      }
+    },
+    *debugModelTts({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(debugModelTts, payload));
+        if (response.code === 0) success?.({ output: JSON.stringify(response.data ?? response, null, 2) });
+        else fail?.(response);
+      } catch (error) {
+        fail?.({ msg: getErrorText(error) });
       }
     },
     *testModel({ payload, success, fail }, { call }) {

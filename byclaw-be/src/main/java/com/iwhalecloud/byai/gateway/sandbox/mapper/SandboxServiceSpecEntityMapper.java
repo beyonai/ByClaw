@@ -70,6 +70,7 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
         FROM sandbox_service_spec
         WHERE COALESCE(enabled, 1) = 1
           AND owner_scope = 'USER'
+          AND (spec_json::jsonb->'runtimeOptions'->'fileService') IS NULL
         ORDER BY service_key ASC
         """)
     List<SandboxServiceSpecEntity> selectAutoStartSpecs();

@@ -20,14 +20,16 @@ public record AuthorizationStatusResult(
     Date lastVerifiedAt,
     Map<String, String> accountAttributes
 ) {
-    private static final Set<String> ALLOWED_ACCOUNT_ATTRIBUTES = Set.of("username", "principalName");
+    private static final Set<String> ALLOWED_ACCOUNT_ATTRIBUTES = Set.of(
+        "username", "principalName", "mediaModelConfig");
 
     public AuthorizationStatusResult {
         Map<String, String> sanitized = new LinkedHashMap<>();
         if (accountAttributes != null) {
             accountAttributes.forEach((key, value) -> {
+                int maximumLength = "mediaModelConfig".equals(key) ? 64 * 1024 : 512;
                 if (ALLOWED_ACCOUNT_ATTRIBUTES.contains(key)
-                        && value != null && !value.isBlank() && value.length() <= 512) {
+                        && value != null && !value.isBlank() && value.length() <= maximumLength) {
                     sanitized.put(key, value);
                 }
             });

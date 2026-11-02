@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 
 import { Office } from './Office';
 
@@ -9,6 +9,14 @@ const mockInit = jest.fn();
 const mockPrepare = jest.fn();
 const mockExcelInit = jest.fn();
 const mockRenderExcel = jest.fn();
+const mockLegacyRender = jest.fn();
+const mockDocxInit = jest.fn();
+const mockDocxPreview = jest.fn();
+
+jest.mock('./LegacyOffice', () => (props: any) => {
+  mockLegacyRender(props);
+  return <div data-testid="legacy-preview" />;
+});
 
 jest.mock('./preparePptxPreview', () => ({
   preparePptxPreview: (source: ArrayBuffer) => mockPrepare(source),
@@ -29,6 +37,10 @@ jest.mock('@js-preview/excel', () => ({
   default: { init: (...args: unknown[]) => mockExcelInit(...args) },
 }));
 jest.mock('@js-preview/excel/lib/index.css', () => ({}));
+jest.mock('@js-preview/docx', () => ({
+  __esModule: true,
+  default: { init: (...args: unknown[]) => mockDocxInit(...args) },
+}));
 
 class MockResizeObserver {
   private readonly callback: ResizeObserverCallback;
@@ -124,6 +136,18 @@ describe('Office PPTX preview', () => {
   });
 });
 
+describe('Office legacy document routing', () => {
+  it.each(['doc', 'ppt'])('uses conversion for %s without the PPTX renderer', (type) => {
+    jest.clearAllMocks();
+    const source = new Blob(['original']);
+    render(<Office data={source} type={type} fileName={`report.${type}`} />);
+    expect(screen.getByTestId('legacy-preview')).toBeVisible();
+    expect(mockLegacyRender).toHaveBeenCalledWith({ data: source, type, fileName: `report.${type}` });
+    expect(mockInit).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
+  });
+});
+
 describe('Office legacy Excel preview', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -149,5 +173,55 @@ describe('Office legacy Excel preview', () => {
       expect(mockExcelInit).toHaveBeenCalledWith(expect.any(HTMLElement));
       expect(mockRenderExcel).toHaveBeenCalledWith(source);
     });
+  });
+  it('reports workbook rendering failures to the variant panel', async () => {
+    mockRenderExcel.mockRejectedValueOnce(new Error('corrupt workbook'));
+    const onPreviewError = jest.fn();
+    render(<Office data={new ArrayBuffer(8)} type="xlsx" onPreviewError={onPreviewError} />);
+    await waitFor(() => expect(onPreviewError).toHaveBeenCalled());
+  });
+  it('ignores a workbook renderer failure after unmounting', async () => {
+    let reject!: (error: Error) => void;
+    mockRenderExcel.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        })
+    );
+    const onPreviewError = jest.fn();
+    const { unmount } = render(<Office data={new ArrayBuffer(8)} type="xlsx" onPreviewError={onPreviewError} />);
+    await waitFor(() => expect(mockRenderExcel).toHaveBeenCalled());
+    unmount();
+    await act(async () => reject(new Error('late renderer failure')));
+    expect(onPreviewError).not.toHaveBeenCalled();
+    expect(mockDestroy).toHaveBeenCalled();
+  });
+});
+
+describe('Office document errors', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Object.defineProperty(global, 'ResizeObserver', { configurable: true, value: MockResizeObserver });
+    mockDocxInit.mockReturnValue({ preview: mockDocxPreview, destroy: mockDestroy });
+    mockDocxPreview.mockRejectedValue(new Error('corrupt document'));
+  });
+  it('reports document rendering failures to the variant panel', async () => {
+    const onPreviewError = jest.fn();
+    const data = new Blob(['document']);
+    Object.defineProperty(data, 'arrayBuffer', { value: async () => new ArrayBuffer(8) });
+    render(<Office data={data} type="docx" onPreviewError={onPreviewError} />);
+    await waitFor(() => expect(onPreviewError).toHaveBeenCalled());
+  });
+  it('reports document read failures without invoking the renderer', async () => {
+    const onPreviewError = jest.fn();
+    const data = new Blob(['document']);
+    Object.defineProperty(data, 'arrayBuffer', {
+      value: async () => {
+        throw new Error('read failed');
+      },
+    });
+    render(<Office data={data} type="docx" onPreviewError={onPreviewError} />);
+    await waitFor(() => expect(onPreviewError).toHaveBeenCalled());
+    expect(mockDocxPreview).not.toHaveBeenCalled();
   });
 });

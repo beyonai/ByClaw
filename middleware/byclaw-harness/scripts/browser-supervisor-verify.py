@@ -1,0 +1,1094 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import getpass
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+
+ROOT = Path(__file__).resolve().parent.parent
+SUPERVISOR = Path(
+    os.environ.get(
+        "BYCLAW_TEST_SUPERVISOR",
+        str(ROOT / "scripts" / "byclaw-browser-supervisor.py"),
+    )
+)
+
+
+FAKE_BROWSERD = r"""#!/usr/bin/env python3
+import hashlib, json, os, signal, socket, sys, time
+fd_name = "BYCLAW_BROWSER_SECRET_FD"
+fd = int(os.environ.pop(fd_name))
+secret = os.read(fd, 512)
+os.close(fd)
+assert secret
+assert secret.decode() not in "\0".join(os.environ.values())
+assert secret.decode() not in "\0".join(sys.argv)
+record = {
+    "digest": hashlib.sha256(secret).hexdigest(),
+    "uid": os.getuid(),
+    "gid": os.getgid(),
+    "home": os.environ.get("HOME"),
+    "downloadRoot": os.environ.get("BYCLAW_BROWSER_DOWNLOAD_ROOT"),
+    "screenshotRoot": os.environ.get("BYCLAW_BROWSER_SCREENSHOT_ROOT"),
+    "socketMode": os.environ.get("BYCLAW_BROWSER_SOCKET_MODE"),
+    "headless": os.environ.get("BYCLAW_BROWSER_HEADLESS"),
+    "viewer": os.environ.get("BYCLAW_BROWSER_VIEWER"),
+    "display": os.environ.get("DISPLAY"),
+    "fdEnvRemoved": fd_name not in os.environ,
+    "generationFile": os.environ.get("BYCLAW_BROWSER_GENERATION_FILE"),
+    "profileExclusive": os.environ.get("BYCLAW_BROWSER_PROFILE_EXCLUSIVE"),
+}
+open(os.environ["FAKE_BROWSER_RECORD"], "w").write(json.dumps(record))
+generation_path = os.environ.get("BYCLAW_BROWSER_GENERATION_FILE")
+if generation_path:
+    open(generation_path, "w").write(json.dumps({"generation": 1, "pid": os.getpid()}))
+def stop_without_socket(signum, _frame):
+    with open(os.environ["FAKE_BROWSER_SIGNAL"], "w") as output:
+        output.write(str(signum))
+    raise SystemExit(0)
+if os.environ.get("FAKE_BROWSER_MODE") == "no-socket":
+    signal.signal(signal.SIGTERM, stop_without_socket)
+    signal.signal(signal.SIGINT, stop_without_socket)
+    while True: time.sleep(.05)
+if os.environ.get("BYCLAW_BROWSER_LISTEN_FD"):
+    sock = socket.socket(fileno=int(os.environ["BYCLAW_BROWSER_LISTEN_FD"]))
+else:
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(os.environ["BYCLAW_BROWSER_SOCKET"])
+    sock.listen(4)
+if os.environ.get("BYCLAW_BROWSER_READY_FILE"):
+    open(os.environ["BYCLAW_BROWSER_READY_FILE"], "w").close()
+def stop(signum, _frame):
+    with open(os.environ["FAKE_BROWSER_SIGNAL"], "w") as output:
+        output.write(str(signum))
+    sock.close()
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+if os.environ.get("FAKE_BROWSER_MODE") == "exit23":
+    deadline = time.monotonic() + 3
+    while not os.path.exists(os.environ["FAKE_DSH_RECORD"]):
+        if time.monotonic() >= deadline: raise RuntimeError("dsh-not-ready")
+        time.sleep(.01)
+    raise SystemExit(23)
+if os.environ.get("FAKE_BROWSER_MODE") == "restart-generation":
+    deadline = time.monotonic() + 3
+    while not os.path.exists(os.environ["FAKE_DSH_RECORD"]):
+        if time.monotonic() >= deadline: raise RuntimeError("dsh-not-ready")
+        time.sleep(.01)
+    time.sleep(.05)
+    open(generation_path, "w").write(json.dumps({"generation": 2, "pid": os.getpid() + 1}))
+while True:
+    try:
+        connection, _ = sock.accept()
+        connection.close()
+    except InterruptedError:
+        pass
+"""
+
+
+FAKE_DSH = r"""#!/usr/bin/env python3
+import hashlib, json, os, signal, sys, time
+def silence_stdio():
+    null = os.open(os.devnull, os.O_RDWR)
+    for descriptor in (0, 1, 2): os.dup2(null, descriptor)
+    if null > 2: os.close(null)
+fd_name = "BYCLAW_BROWSER_SECRET_FD"
+fd = int(os.environ.pop(fd_name))
+secret = os.read(fd, 512)
+os.close(fd)
+assert secret
+assert secret.decode() not in "\0".join(os.environ.values())
+assert secret.decode() not in "\0".join(sys.argv)
+record = {
+    "digest": hashlib.sha256(secret).hexdigest(),
+    "uid": os.getuid(),
+    "gid": os.getgid(),
+    "home": os.environ.get("HOME"),
+    "argv": sys.argv[1:],
+    "ownsRuntime": os.environ.get("BYCLAW_BROWSER_OWNS_RUNTIME"),
+    "display": os.environ.get("DISPLAY"),
+    "fdEnvRemoved": fd_name not in os.environ,
+    "extensionVerifiedAtStart": os.path.exists(os.environ["FAKE_BYCLI_DOCTOR_VERIFIED"]),
+}
+def stop(signum, _frame):
+    with open(os.environ["FAKE_DSH_SIGNAL"], "w") as output:
+        output.write(str(signum))
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+open(os.environ["FAKE_DSH_RECORD"], "w").write(json.dumps(record))
+if os.environ.get("FAKE_DSH_MODE") == "exit7":
+    raise SystemExit(7)
+if os.environ.get("FAKE_DSH_MODE") == "orphan":
+    child = os.fork()
+    if child == 0:
+        os.setsid()
+        def stop_orphan(signum, _frame):
+            with open(os.environ["FAKE_DSH_ORPHAN_SIGNAL"], "w") as output:
+                output.write(str(signum))
+            raise SystemExit(0)
+        signal.signal(signal.SIGTERM, stop_orphan)
+        signal.signal(signal.SIGINT, stop_orphan)
+        open(os.environ["FAKE_DSH_ORPHAN_READY"], "w").write(str(os.getpid()))
+        while True: time.sleep(.05)
+    deadline = time.monotonic() + 2
+    while not os.path.exists(os.environ["FAKE_DSH_ORPHAN_READY"]):
+        if time.monotonic() >= deadline: raise RuntimeError("orphan-not-ready")
+        time.sleep(.01)
+    raise SystemExit(7)
+if os.environ.get("FAKE_DSH_MODE") == "nested-orphan":
+    orphan_parent = os.fork()
+    if orphan_parent == 0:
+        os.setsid()
+        silence_stdio()
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        orphan_child = os.fork()
+        if orphan_child == 0:
+            os.setsid()
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            while True: time.sleep(.05)
+        open(os.environ["FAKE_DSH_NESTED_READY"], "w").write(
+            json.dumps({"parent": os.getpid(), "child": orphan_child})
+        )
+        while True: time.sleep(.05)
+    deadline = time.monotonic() + 2
+    while not os.path.exists(os.environ["FAKE_DSH_NESTED_READY"]):
+        if time.monotonic() >= deadline: raise RuntimeError("nested-orphan-not-ready")
+        time.sleep(.01)
+    raise SystemExit(7)
+while True: time.sleep(.05)
+"""
+
+
+FAKE_DESKTOP = r"""#!/usr/bin/env python3
+import json, os, signal, time
+with open(os.environ["FAKE_DESKTOP_RECORD"], "w") as output:
+    json.dump({"display": os.environ.get("DISPLAY"), "viewer": os.environ.get("BYCLAW_BROWSER_VIEWER")}, output)
+open(os.environ["BYCLAW_BROWSER_DESKTOP_READY_FILE"], "w").close()
+def stop(signum, _frame):
+    with open(os.environ["FAKE_DESKTOP_SIGNAL"], "w") as output:
+        output.write(str(signum))
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+while True: time.sleep(.05)
+"""
+
+
+FAKE_BYCLI_DAEMON = r"""#!/usr/bin/env python3
+import json, os, time
+path = os.environ["FAKE_BYCLI_RECORD"]
+calls = 0
+if os.path.exists(path): calls = json.loads(open(path).read()).get("calls", 0)
+with open(os.environ["FAKE_BYCLI_RECORD"], "w") as output:
+    json.dump({"uid": os.getuid(), "gid": os.getgid(), "home": os.environ.get("HOME"), "calls": calls + 1}, output)
+# Like the real daemon, serve HTTP on the byCLI port in the background (binding fails
+# while anything else still holds the port).
+port = os.environ.get("FAKE_BYCLI_PORT")
+if port:
+    import socket, subprocess, sys
+    server = socket.create_server(("0.0.0.0", int(port)))
+    serve = "import os,socket,sys\ns=socket.socket(fileno=3)\nwhile True:\n c,_=s.accept(); c.recv(65536); c.sendall(b'HTTP/1.0 200 OK\\r\\n\\r\\nbycli-daemon'); c.close()"
+    daemon = subprocess.Popen([sys.executable, "-c", serve], pass_fds=(server.fileno(),), start_new_session=True,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              preexec_fn=lambda: os.dup2(server.fileno(), 3))
+    open(os.environ["FAKE_BYCLI_DAEMON_PID"], "w").write(str(daemon.pid))
+# Keep restart in progress after publishing the invocation count.
+if calls > 0:
+    time.sleep(float(os.environ["FAKE_BYCLI_RECOVERY_DELAY"]))
+"""
+
+
+FAKE_BYCLI_STATUS = r"""#!/usr/bin/env python3
+import json, os, time
+path = os.environ["FAKE_BYCLI_STATUS_RECORD"]
+calls = int(open(path).read()) if os.path.exists(path) else 0
+open(path, "w").write(str(calls + 1))
+states = os.environ.get("FAKE_BYCLI_STATUS_SEQUENCE", "ready").split(",")
+state = states[min(calls, len(states) - 1)]
+# A status invocation is not a completed readiness check. Make that gap visible.
+if calls > 0 and state == "ready":
+    time.sleep(float(os.environ["FAKE_BYCLI_RECOVERY_DELAY"]))
+if state == "malformed":
+    print("not-json")
+else:
+    ready = state == "ready"
+    print(json.dumps({
+        "ok": True,
+        "state": "ready" if ready else "extension_disconnected",
+        "daemon": {"state": "running", "stale": False},
+        "extension": {"state": "connected" if ready else "disconnected"},
+    }))
+"""
+
+
+FAKE_BYCLI_DOCTOR = r"""#!/usr/bin/env python3
+import json, os, sys, time
+path = os.environ["FAKE_BYCLI_DOCTOR_RECORD"]
+calls = int(open(path).read()) if os.path.exists(path) else 0
+open(path, "w").write(str(calls + 1))
+states = os.environ.get("FAKE_BYCLI_DOCTOR_SEQUENCE", "ready").split(",")
+state = states[min(calls, len(states) - 1)]
+report = {
+    "daemonRunning": True, "extensionConnected": True, "daemonStale": False,
+    "connectivity": {"ok": True}, "extensionBuildVerified": True, "uploadReady": True,
+    "extensionCapabilities": ["file-input-shadow-v1", "dialog-policy-v1"],
+}
+if state == "mismatch": report["extensionBuildVerified"] = False
+if state == "unverified": report.pop("extensionBuildVerified")
+if state == "no-upload": report["uploadReady"] = False
+if state == "no-dialog": report["extensionCapabilities"] = ["file-input-shadow-v1"]
+if state == "bad-capabilities": report["extensionCapabilities"] = "dialog-policy-v1"
+if state == "disconnected": report["extensionConnected"] = False
+if state == "stale": report["daemonStale"] = True
+if state == "connectivity-failed": report["connectivity"] = {"ok": False}
+if state == "slow": time.sleep(5)
+if state == "failed": raise SystemExit(1)
+if state == "ready": open(os.environ["FAKE_BYCLI_DOCTOR_VERIFIED"], "w").close()
+print("not-json" if state == "malformed" else "[]" if state == "nonobject" else json.dumps(report))
+"""
+
+
+FAKE_PREPARE = r"""#!/usr/bin/env python3
+import json, os, signal, time
+assert os.environ.get("BYCLAW_DSH_PREPARE_ONLY") == "1"
+assert "BYCLAW_BROWSER_SECRET" not in os.environ
+assert "BYCLAW_BROWSER_SECRET_FD" not in os.environ
+assert not os.path.exists(os.environ["FAKE_BROWSER_RECORD"])
+def stop(signum, _frame):
+    with open(os.environ["FAKE_PREPARE_SIGNAL"], "w") as output:
+        output.write(str(signum))
+    raise SystemExit(0)
+if os.environ.get("FAKE_PREPARE_MODE") == "wait":
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+with open(os.environ["FAKE_PREPARE_RECORD"], "w") as output:
+    json.dump({"uid": os.getuid(), "gid": os.getgid()}, output)
+if os.environ.get("FAKE_PREPARE_MODE") == "wait":
+    while True: time.sleep(.05)
+"""
+
+
+def wait_for(path: Path, process: subprocess.Popen[str], timeout: float = 3) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        if process.poll() is not None:
+            raise AssertionError(f"supervisor exited early: {process.returncode}")
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {path}")
+
+
+def fixture(
+    directory: Path,
+    *,
+    dsh_mode: str = "",
+    browser_mode: str = "",
+    viewer: str = "none",
+    prepare: bool = False,
+    bycli: bool = False,
+    readiness_timeout: float = 2,
+    prepare_mode: str = "",
+    bycli_status_sequence: str = "ready",
+    bycli_health_interval: float = 0.1,
+    bycli_recovery_delay: float = 0,
+    bycli_doctor_sequence: str = "ready",
+    browser_profile: Path | None = None,
+):
+    browser = directory / "fake-browserd.py"
+    dsh = directory / "fake-dsh.py"
+    desktop = directory / "fake-desktop.py"
+    prepare_command = directory / "fake-prepare.py"
+    bycli_daemon = directory / "fake-bycli-daemon.py"
+    bycli_status = directory / "fake-bycli-status.py"
+    bycli_doctor = directory / "fake-bycli-doctor.py"
+    browser.write_text(FAKE_BROWSERD)
+    dsh.write_text(FAKE_DSH)
+    desktop.write_text(FAKE_DESKTOP)
+    prepare_command.write_text(FAKE_PREPARE)
+    bycli_daemon.write_text(FAKE_BYCLI_DAEMON)
+    bycli_status.write_text(FAKE_BYCLI_STATUS)
+    bycli_doctor.write_text(FAKE_BYCLI_DOCTOR)
+    browser.chmod(0o755)
+    dsh.chmod(0o755)
+    desktop.chmod(0o755)
+    prepare_command.chmod(0o755)
+    bycli_daemon.chmod(0o755)
+    bycli_status.chmod(0o755)
+    bycli_doctor.chmod(0o755)
+    socket_path = directory / "browserd.sock"
+    browser_record = directory / "browser.json"
+    dsh_record = directory / "dsh.json"
+    env = {
+        **os.environ,
+        # Eager fixtures must not inherit the production image's on-demand default.
+        # The dedicated lazy tests below opt in explicitly.
+        "BYCLAW_BROWSER_STARTUP": "eager",
+        "FAKE_BROWSER_RECORD": str(browser_record),
+        "FAKE_BROWSER_SIGNAL": str(directory / "browser.signal"),
+        "FAKE_DSH_RECORD": str(dsh_record),
+        "FAKE_DSH_SIGNAL": str(directory / "dsh.signal"),
+        "FAKE_DSH_ORPHAN_READY": str(directory / "dsh-orphan.ready"),
+        "FAKE_DSH_ORPHAN_SIGNAL": str(directory / "dsh-orphan.signal"),
+        "FAKE_DSH_NESTED_READY": str(directory / "dsh-nested.ready"),
+        "FAKE_DSH_MODE": dsh_mode,
+        "FAKE_BROWSER_MODE": browser_mode,
+        "FAKE_DESKTOP_RECORD": str(directory / "desktop.json"),
+        "FAKE_DESKTOP_SIGNAL": str(directory / "desktop.signal"),
+        "FAKE_PREPARE_RECORD": str(directory / "prepare.json"),
+        "FAKE_PREPARE_SIGNAL": str(directory / "prepare.signal"),
+        "FAKE_PREPARE_MODE": prepare_mode,
+        "FAKE_BYCLI_RECORD": str(directory / "bycli.json"),
+        "FAKE_BYCLI_DAEMON_PID": str(directory / "bycli-daemon.pid"),
+        "FAKE_BYCLI_STATUS_RECORD": str(directory / "bycli-status-count"),
+        "FAKE_BYCLI_STATUS_SEQUENCE": bycli_status_sequence,
+        "FAKE_BYCLI_RECOVERY_DELAY": str(bycli_recovery_delay),
+        "FAKE_BYCLI_DOCTOR_RECORD": str(directory / "bycli-doctor-count"),
+        "FAKE_BYCLI_DOCTOR_SEQUENCE": bycli_doctor_sequence,
+        "FAKE_BYCLI_DOCTOR_VERIFIED": str(directory / "bycli-doctor-verified"),
+        "BYCLAW_BYCLI_ENABLED": "true" if bycli else "false",
+        "BYCLAW_BROWSER_VIEWER": viewer,
+        **({"BYCLAW_BROWSER_USER_DATA_DIR": str(browser_profile)} if browser_profile else {}),
+    }
+    user = getpass.getuser()
+    command = [
+        sys.executable,
+        str(SUPERVISOR),
+        "--browser-user",
+        user,
+        "--dsh-user",
+        user,
+        "--socket-path",
+        str(socket_path),
+        "--readiness-timeout",
+        str(readiness_timeout),
+        "--browserd-command",
+        str(browser),
+    ]
+    if bycli:
+        command.extend([
+            "--bycli-daemon-command", str(bycli_daemon),
+            "--bycli-status-command", str(bycli_status),
+            "--bycli-doctor-command", str(bycli_doctor),
+            "--bycli-health-interval", str(bycli_health_interval),
+        ])
+    if prepare:
+        command.extend(["--prepare-command", str(prepare_command)])
+    command.extend(["--", str(dsh), "web", "--port", "8080", "--no-open"])
+    return command, env, socket_path, browser_record, dsh_record
+
+
+def run_exit_propagation(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(root, dsh_mode="exit7")
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    browser = json.loads(browser_record.read_text())
+    dsh = json.loads(dsh_record.read_text())
+    assert browser["digest"] == dsh["digest"]
+    assert browser["fdEnvRemoved"] and dsh["fdEnvRemoved"]
+    assert browser["headless"] == "true"
+    assert dsh["ownsRuntime"] == "false"
+    assert dsh["display"] is None
+    assert dsh["argv"] == ["web", "--port", "8080", "--no-open"]
+    assert browser["uid"] == os.getuid() == dsh["uid"]
+    assert browser["gid"] == os.getgid() == dsh["gid"]
+    assert browser["home"] == dsh["home"]
+    assert browser["downloadRoot"].endswith("/downloads")
+    assert browser["screenshotRoot"].endswith("/screenshots")
+    assert browser["socketMode"] == "0600"
+    assert browser["digest"] not in result.stdout + result.stderr
+    wait_for(root / "browser.signal", subprocess.Popen(["true"]))
+    assert (root / "browser.signal").read_text() == str(int(signal.SIGTERM))
+
+
+def run_signal_forwarding(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(root)
+    process = subprocess.Popen(
+        command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    wait_for(browser_record, process)
+    wait_for(dsh_record, process)
+    process.send_signal(signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 128 + signal.SIGTERM, (
+        process.returncode,
+        stdout,
+        stderr,
+    )
+    wait_for(root / "browser.signal", subprocess.Popen(["true"]))
+    wait_for(root / "dsh.signal", subprocess.Popen(["true"]))
+    assert (root / "browser.signal").read_text() == str(int(signal.SIGTERM))
+    assert (root / "dsh.signal").read_text() == str(int(signal.SIGTERM))
+
+
+def run_profile_exclusive_lock(root: Path) -> None:
+    profile = root / "shared-profile"
+    first_root = root / "first"
+    second_root = root / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_command, first_env, _socket, first_browser, first_dsh = fixture(
+        first_root,
+        browser_profile=profile,
+    )
+    first = subprocess.Popen(
+        first_command,
+        env=first_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        wait_for(first_browser, first)
+        wait_for(first_dsh, first)
+        first_record = json.loads(first_browser.read_text())
+        assert first_record["profileExclusive"] == "true"
+
+        second_command, second_env, _socket, second_browser, _dsh = fixture(
+            second_root,
+            browser_profile=profile,
+        )
+        second = subprocess.run(
+            second_command,
+            env=second_env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        assert second.returncode == 1, second
+        assert "browser-supervisor-profile-in-use" in second.stderr
+        assert not second_browser.exists()
+    finally:
+        first.send_signal(signal.SIGTERM)
+        first.communicate(timeout=5)
+
+
+def run_browser_failure(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root, browser_mode="exit23"
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 23, result
+    assert browser_record.exists() and dsh_record.exists()
+    wait_for(root / "dsh.signal", subprocess.Popen(["true"]))
+
+
+def run_viewer_mode(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root, dsh_mode="exit7", viewer="novnc"
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    browser = json.loads(browser_record.read_text())
+    dsh = json.loads(dsh_record.read_text())
+    assert browser["headless"] == "true"
+    assert browser["viewer"] == "novnc"
+    assert browser["display"] is None
+    assert dsh["display"] is None
+    assert not (root / "desktop.json").exists()
+    assert not (root / "desktop.signal").exists()
+
+
+def run_shared_viewer_mode(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root, dsh_mode="exit7", viewer="shared-novnc"
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    browser = json.loads(browser_record.read_text())
+    dsh = json.loads(dsh_record.read_text())
+    assert browser["headless"] == "false"
+    assert browser["viewer"] == "shared-novnc"
+    assert browser["display"] is None
+    assert dsh["display"] is None
+
+
+def run_prepare_before_secret(root: Path) -> None:
+    command, env, _socket, _browser_record, _dsh_record = fixture(
+        root, dsh_mode="exit7", prepare=True
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    prepared = json.loads((root / "prepare.json").read_text())
+    assert prepared == {"uid": os.getuid(), "gid": os.getgid()}
+
+
+def run_bycli_daemon_lifecycle(root: Path) -> None:
+    command, env, _socket, _browser_record, _dsh_record = fixture(
+        root, dsh_mode="exit7", bycli=True
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    daemon = json.loads((root / "bycli.json").read_text())
+    assert daemon["uid"] == os.getuid()
+    assert daemon["gid"] == os.getgid()
+    assert daemon["home"] == os.path.expanduser("~")
+
+
+def run_bycli_connected_status(root: Path) -> None:
+    command, env, _socket, _browser_record, _dsh_record = fixture(
+        root, dsh_mode="exit7", viewer="shared-novnc", bycli=True
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert "byCLI Browser Bridge connected" in result.stderr
+    assert "local extension verified" in result.stderr
+    assert int((root / "bycli-doctor-count").read_text()) == 1
+    assert json.loads((root / "dsh.json").read_text())["extensionVerifiedAtStart"] is True
+
+
+def run_bycli_extension_verification(root: Path) -> None:
+    for state in ["mismatch", "unverified", "no-upload", "no-dialog", "bad-capabilities",
+                  "disconnected", "stale", "connectivity-failed", "malformed", "nonobject", "failed", "slow"]:
+        directory = root / state
+        directory.mkdir()
+        command, env, _socket, browser_record, dsh_record = fixture(
+            directory, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
+            bycli_doctor_sequence=state,
+        )
+        result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+        assert result.returncode == 1, (state, result)
+        assert "browser-supervisor-bycli-extension-verification-timeout" in result.stderr, (state, result)
+        assert browser_record.exists()
+        assert not dsh_record.exists(), (state, "DSH started with an unverified extension")
+        assert json.loads((directory / "bycli.json").read_text())["calls"] == 1
+        if state == "mismatch": assert "extensionBuildVerified" in result.stderr
+        if state == "no-dialog": assert "dialog-policy-v1" in result.stderr
+
+
+def run_bycli_extension_wait(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, dsh_mode="exit7",
+        bycli_doctor_sequence="mismatch,ready",
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert dsh_record.exists()
+    assert int((root / "bycli-doctor-count").read_text()) == 2
+    assert "local extension verified" in result.stderr
+    assert json.loads(dsh_record.read_text())["extensionVerifiedAtStart"] is True
+
+
+def run_bycli_startup_gate(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root,
+        viewer="shared-novnc",
+        bycli=True,
+        readiness_timeout=0.8,
+        bycli_status_sequence="disconnected",
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert "browser-supervisor-bycli-readiness-timeout" in result.stderr
+    assert browser_record.exists()
+    assert not dsh_record.exists()
+
+
+def wait_for_bycli_reconnected(
+    root: Path, command: list[str], env: dict[str, str], dsh_record: Path
+) -> str:
+    # Invocation counters are written before the daemon/status commands finish.
+    # Wait for the supervisor's acknowledgement before sending shutdown signals.
+    log_path = root / "supervisor.stderr"
+    with log_path.open("w") as log:
+        process = subprocess.Popen(
+            command, env=env, text=True, stdout=subprocess.DEVNULL, stderr=log
+        )
+        try:
+            try:
+                wait_for(dsh_record, process)
+            except AssertionError as error:
+                raise AssertionError(f"{error}\n{log_path.read_text()}") from error
+            deadline = time.monotonic() + 5
+            while True:
+                stderr = log_path.read_text()
+                if "byCLI Browser Bridge reconnected" in stderr:
+                    break
+                if process.poll() is not None:
+                    raise AssertionError(
+                        f"supervisor exited before reconnect: {process.returncode}\n{stderr}"
+                    )
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"timed out waiting for byCLI reconnect\n{stderr}")
+                time.sleep(0.02)
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+                raise
+    stderr = log_path.read_text()
+    assert process.returncode == 128 + signal.SIGTERM, stderr
+    return stderr
+
+
+def run_bycli_watchdog_recovery(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root,
+        viewer="shared-novnc",
+        bycli=True,
+        # Successful recovery includes delayed fixture subprocesses on slow builders.
+        readiness_timeout=2,
+        bycli_status_sequence="ready,disconnected,disconnected,ready",
+        bycli_recovery_delay=0.15,
+        bycli_health_interval=0.05,
+    )
+    stderr = wait_for_bycli_reconnected(root, command, env, dsh_record)
+    assert json.loads((root / "bycli.json").read_text())["calls"] == 2
+    assert "byCLI Browser Bridge disconnected" in stderr
+    assert "byCLI Browser Bridge reconnected" in stderr
+
+
+def run_bycli_watchdog_tolerates_transient_disconnect(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root,
+        viewer="shared-novnc",
+        bycli=True,
+        # Successful recovery includes delayed fixture subprocesses on slow builders.
+        readiness_timeout=2,
+        bycli_status_sequence="ready,disconnected,ready",
+        bycli_recovery_delay=0.15,
+        bycli_health_interval=0.05,
+    )
+    stderr = wait_for_bycli_reconnected(root, command, env, dsh_record)
+    assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+    assert "byCLI Browser Bridge disconnected" in stderr
+    assert "byCLI Browser Bridge reconnected" in stderr
+
+
+def run_bycli_browser_generation_recovery(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root,
+        browser_mode="restart-generation",
+        viewer="shared-novnc",
+        bycli=True,
+        # Successful recovery includes delayed fixture subprocesses on slow builders.
+        readiness_timeout=2,
+        bycli_status_sequence="ready,disconnected,ready",
+        bycli_recovery_delay=0.15,
+        bycli_health_interval=30,
+    )
+    stderr = wait_for_bycli_reconnected(root, command, env, dsh_record)
+    assert json.loads((root / "bycli.json").read_text())["calls"] == 2
+    assert "browser generation changed from 1 to 2" in stderr
+    assert "byCLI Browser Bridge reconnected" in stderr
+    assert int((root / "bycli-doctor-count").read_text()) == 2
+    browser = json.loads(browser_record.read_text())
+    assert browser["generationFile"].endswith("/browser-generation.json")
+
+
+def run_bycli_reconnect_wait_rejects_failure(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
+        bycli_status_sequence="ready,disconnected", bycli_health_interval=0.05,
+    )
+    try:
+        wait_for_bycli_reconnected(root, command, env, dsh_record)
+    except AssertionError as error:
+        assert "supervisor exited before reconnect: 1" in str(error), str(error)
+        assert "browser-supervisor-bycli-bridge-unrecoverable" in str(error), str(error)
+    else:
+        raise AssertionError("failed bridge recovery was accepted as ready")
+
+
+def run_bycli_generation_rechecks_extension(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, browser_mode="restart-generation",
+        readiness_timeout=0.8, bycli_doctor_sequence="ready,mismatch", bycli_health_interval=30,
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert dsh_record.exists(), "initial verified startup failed"
+    assert "browser generation changed from 1 to 2" in result.stderr
+    assert "extension-verification-timeout" in result.stderr, result.stderr
+    assert "extensionBuildVerified" in result.stderr, result.stderr
+    assert "byCLI Browser Bridge reconnected" not in result.stderr
+    assert int((root / "bycli-doctor-count").read_text()) >= 2
+
+
+def run_bycli_watchdog_failure(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root,
+        viewer="shared-novnc",
+        bycli=True,
+        readiness_timeout=0.8,
+        bycli_status_sequence="ready,disconnected",
+        bycli_health_interval=0.05,
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert dsh_record.exists()
+    assert "browser-supervisor-bycli-bridge-unrecoverable" in result.stderr
+    assert json.loads((root / "bycli.json").read_text())["calls"] == 2
+    assert (root / "dsh.signal").read_text() == str(int(signal.SIGTERM))
+
+
+def run_bycli_malformed_status(root: Path) -> None:
+    command, env, _socket, _browser_record, dsh_record = fixture(
+        root,
+        viewer="shared-novnc",
+        bycli=True,
+        readiness_timeout=0.8,
+        bycli_status_sequence="malformed",
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert "browser-supervisor-bycli-readiness-timeout" in result.stderr, result.stderr
+    assert not dsh_record.exists()
+
+
+def run_readiness_timeout(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(
+        root, browser_mode="no-socket", readiness_timeout=1.0
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 1, result
+    assert "browser-supervisor-browserd-readiness-timeout" in result.stderr
+    assert browser_record.exists()
+    assert not dsh_record.exists()
+    assert (root / "browser.signal").read_text() == str(int(signal.SIGTERM))
+
+
+def run_prepare_signal(root: Path) -> None:
+    command, env, _socket, browser_record, _dsh_record = fixture(
+        root, prepare=True, prepare_mode="wait"
+    )
+    process = subprocess.Popen(
+        command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    wait_for(root / "prepare.json", process)
+    process.send_signal(signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 128 + signal.SIGTERM, (
+        process.returncode,
+        stdout,
+        stderr,
+    )
+    assert (root / "prepare.signal").read_text() == str(int(signal.SIGTERM))
+    assert not browser_record.exists()
+
+
+def run_orphan_cleanup(root: Path) -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    command, env, _socket, _browser_record, _dsh_record = fixture(
+        root, dsh_mode="orphan"
+    )
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=8)
+    assert result.returncode == 7, result
+    orphan_pid = int((root / "dsh-orphan.ready").read_text())
+    assert (root / "dsh-orphan.signal").read_text() == str(int(signal.SIGTERM))
+    assert not Path(f"/proc/{orphan_pid}").exists(), "adopted descendant was not reaped"
+
+
+def run_nested_orphan_cleanup(root: Path) -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    command, env, _socket, _browser_record, _dsh_record = fixture(
+        root, dsh_mode="nested-orphan"
+    )
+    process_ids: list[int] = []
+    try:
+        result = subprocess.run(
+            command, env=env, text=True, capture_output=True, timeout=10
+        )
+        assert result.returncode == 7, result
+        nested = json.loads((root / "dsh-nested.ready").read_text())
+        process_ids = [nested["parent"], nested["child"]]
+        assert all(
+            not Path(f"/proc/{pid}").exists() for pid in process_ids
+        ), "newly adopted descendant survived the SIGKILL/reap window"
+    finally:
+        ready = root / "dsh-nested.ready"
+        if not process_ids and ready.exists():
+            nested = json.loads(ready.read_text())
+            process_ids = [nested["parent"], nested["child"]]
+        for pid in process_ids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+
+def run_lazy_activation(root: Path) -> None:
+    profile = root / "lazy-profile"
+    command, env, path, browser_record, dsh_record = fixture(
+        root, bycli=True, viewer="shared-novnc", browser_profile=profile
+    )
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not profile.exists(), "browser profile was accessed before first use"
+        assert not browser_record.exists(), "browser started before the first browser request"
+        assert not (root / "bycli.json").exists(), "byCLI started before first use"
+        assert path.stat().st_mode & 0o777 == 0o600
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+            # The original connection must survive activation, without reconnecting.
+            assert client.recv(1) == b""
+        wait_for(browser_record, process)
+        wait_for(Path(str(path) + ".activated"), process)
+        assert json.loads(browser_record.read_text())["digest"] == json.loads(dsh_record.read_text())["digest"]
+        assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+        assert int((root / "bycli-doctor-count").read_text()) == 1
+        assert json.loads(dsh_record.read_text())["extensionVerifiedAtStart"] is False
+        assert profile.is_dir()
+        assert json.loads(browser_record.read_text())["profileExclusive"] == "true"
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+    assert not path.exists()
+    assert not Path(str(path) + ".activated").exists()
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def http_get(port: int) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        client.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        answer = b""
+        while chunk := client.recv(65536):
+            answer += chunk
+        return answer
+
+
+def stop_fake_bycli_daemon(root: Path) -> None:
+    pid_file = root / "bycli-daemon.pid"
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def lazy_port_fixture(root: Path, port: int):
+    command, env, path, browser_record, dsh_record = fixture(root, bycli=True, viewer="shared-novnc")
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    env["FAKE_BYCLI_PORT"] = str(port)
+    command[command.index("--"):command.index("--")] = ["--activation-port", str(port)]
+    return command, env, path, browser_record, dsh_record
+
+
+def run_lazy_port_activation(root: Path) -> None:
+    # BE reaches byCLI over HTTP (account login, recorder): its first request starts
+    # the browser, and is answered by the daemon once that is up.
+    port = free_port()
+    command, env, path, browser_record, dsh_record = lazy_port_fixture(root, port)
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not browser_record.exists(), "browser started before the first browser request"
+        assert http_get(port).endswith(b"bycli-daemon"), "the first request was not answered by byCLI"
+        wait_for(Path(str(path) + ".activated"), process)
+        assert browser_record.exists()
+        assert json.loads((root / "bycli.json").read_text())["calls"] == 1
+        # Later requests go to the daemon itself.
+        assert http_get(port).endswith(b"bycli-daemon")
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+        stop_fake_bycli_daemon(root)
+
+
+def run_lazy_socket_activation_frees_port(root: Path) -> None:
+    # Activated through the browser socket instead, the port is handed to byCLI as well.
+    port = free_port()
+    command, env, path, _browser_record, dsh_record = lazy_port_fixture(root, port)
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+        wait_for(Path(str(path) + ".activated"), process)
+        assert http_get(port).endswith(b"bycli-daemon")
+    finally:
+        process.terminate()
+        _, stderr = process.communicate(timeout=5)
+        stop_fake_bycli_daemon(root)
+    assert "bycli-exited" not in stderr, stderr
+
+
+def run_lazy_extension_verification_failure(root: Path) -> None:
+    command, env, path, _browser_record, dsh_record = fixture(
+        root, viewer="shared-novnc", bycli=True, readiness_timeout=0.8,
+        bycli_doctor_sequence="mismatch",
+    )
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        wait_for(dsh_record, process)
+        assert not (root / "bycli-doctor-count").exists()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(str(path))
+        _, stderr = process.communicate(timeout=5)
+        assert process.returncode == 1, stderr
+        assert "extension-verification-timeout" in stderr, stderr
+        assert "extensionBuildVerified" in stderr, stderr
+        assert not Path(str(path) + ".activated").exists()
+        assert (root / "dsh.signal").exists(), "DSH survived failed first-use verification"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.communicate(timeout=5)
+
+
+def run_lazy_profile_conflict(root: Path) -> None:
+    profile = root / "shared-profile"
+    first_root, second_root = root / "first", root / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_command, first_env, _, first_browser, first_dsh = fixture(
+        first_root, browser_profile=profile,
+    )
+    first = subprocess.Popen(
+        first_command, env=first_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    second = None
+    try:
+        wait_for(first_browser, first)
+        wait_for(first_dsh, first)
+        command, env, path, browser_record, dsh_record = fixture(
+            second_root, bycli=True, viewer="shared-novnc", browser_profile=profile,
+        )
+        env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+        second = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        wait_for(dsh_record, second)
+        assert not browser_record.exists()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+            try:
+                assert client.recv(1) == b""
+            except ConnectionResetError:
+                pass
+        _, stderr = second.communicate(timeout=5)
+        assert second.returncode == 1, stderr
+        assert "browser-supervisor-profile-in-use" in stderr
+        assert not browser_record.exists(), "conflicting profile must not start another browser"
+        assert not (second_root / "bycli.json").exists(), "lock must precede daemon restart"
+        assert first.poll() is None, "the profile owner must remain running"
+    finally:
+        for process in [second, first]:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=5)
+
+
+def run_secret_file(root: Path) -> None:
+    # A tool sandbox serves the browser over SSH sessions, which cannot inherit
+    # the anonymous descriptor: the supervisor also leaves the secret in a file
+    # only the browser user can read.
+    import hashlib
+    secret_file = root / "broker.secret"
+    command, env, _socket, browser_record, _dsh = fixture(root, dsh_mode="exit7")
+    at = command.index("--readiness-timeout")
+    command[at:at] = ["--secret-file", str(secret_file)]
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    browser = json.loads(browser_record.read_text())
+    assert hashlib.sha256(secret_file.read_bytes()).hexdigest() == browser["digest"]
+    assert secret_file.stat().st_mode & 0o777 == 0o400
+    assert secret_file.stat().st_uid == os.getuid()
+    assert secret_file.read_text() not in result.stdout + result.stderr
+
+
+def run_lazy_secret_file(root: Path) -> None:
+    # On demand, the file exists before the first client triggers the browser.
+    secret_file = root / "broker.secret"
+    command, env, path, browser_record, _ = fixture(root, dsh_mode="exit7")
+    at = command.index("--readiness-timeout")
+    command[at:at] = ["--secret-file", str(secret_file)]
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert not browser_record.exists()
+    assert len(secret_file.read_text()) >= 32
+
+
+def run_lazy_unused_exit(root: Path) -> None:
+    profile = root / "unused-profile"
+    command, env, path, browser_record, _ = fixture(
+        root, dsh_mode="exit7", bycli=True, browser_profile=profile
+    )
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert not browser_record.exists()
+    assert not (root / "bycli.json").exists()
+    assert not profile.exists(), "unused browser must not create a persistent profile"
+    assert not path.exists()
+    timings = {}
+    for line in result.stderr.splitlines():
+        for phase in ["prepared", "cli-spawned"]:
+            marker = f"startup phase={phase}; elapsedMs="
+            if marker in line:
+                timings[phase] = int(line.split(marker, 1)[1])
+    assert 0 <= timings["prepared"] <= timings["cli-spawned"], result.stderr
+
+def main() -> None:
+    # macOS has a short AF_UNIX path limit; keep the fixture root compact.
+    with tempfile.TemporaryDirectory(prefix="bsv-", dir="/tmp") as temporary:
+        base = Path(temporary)
+        for name, check in [
+            ("lazy-activation", run_lazy_activation),
+            ("lazy-extension-verification-failure", run_lazy_extension_verification_failure),
+            ("lazy-unused-exit", run_lazy_unused_exit),
+            ("lazy-port-activation", run_lazy_port_activation),
+            ("lazy-socket-activation-frees-port", run_lazy_socket_activation_frees_port),
+            ("secret-file", run_secret_file),
+            ("lazy-secret-file", run_lazy_secret_file),
+            ("lazy-profile-conflict", run_lazy_profile_conflict),
+            ("exit", run_exit_propagation),
+            ("signal", run_signal_forwarding),
+            ("profile-exclusive-lock", run_profile_exclusive_lock),
+            ("broker-failure", run_browser_failure),
+            ("viewer", run_viewer_mode),
+            ("shared-viewer", run_shared_viewer_mode),
+            ("prepare", run_prepare_before_secret),
+            ("bycli-daemon", run_bycli_daemon_lifecycle),
+            ("bycli-connected-status", run_bycli_connected_status),
+            ("bycli-extension-verification", run_bycli_extension_verification),
+            ("bycli-extension-wait", run_bycli_extension_wait),
+            ("bycli-startup-gate", run_bycli_startup_gate),
+            ("bycli-watchdog-recovery", run_bycli_watchdog_recovery),
+            ("bycli-watchdog-transient", run_bycli_watchdog_tolerates_transient_disconnect),
+            ("bycli-browser-generation", run_bycli_browser_generation_recovery),
+            ("bycli-generation-rechecks-extension", run_bycli_generation_rechecks_extension),
+            ("bycli-reconnect-wait-failure", run_bycli_reconnect_wait_rejects_failure),
+            ("bycli-watchdog-failure", run_bycli_watchdog_failure),
+            ("bycli-malformed-status", run_bycli_malformed_status),
+            ("timeout", run_readiness_timeout),
+            ("prepare-signal", run_prepare_signal),
+            ("orphan-cleanup", run_orphan_cleanup),
+            ("nested-orphan-cleanup", run_nested_orphan_cleanup),
+        ]:
+            directory = base / name
+            directory.mkdir()
+            check(directory)
+    print("browser supervisor verification passed")
+
+
+if __name__ == "__main__":
+    main()

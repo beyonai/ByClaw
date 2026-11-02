@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.mapper.message;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -31,7 +33,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
 /** 执行真实查询 SQL，覆盖历史纯附件消息及分页计数，而非模拟 Mapper 返回值。 */
-class GroupChatAttachmentMapperTest {
+class GroupChatAttachmentMapperTest extends I18nTestSupport {
     @TempDir Path directory;
 
     @Test

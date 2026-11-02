@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority.
+2026-09-08-devflow-official-right-sidebar.md: f52fa55c0d51746bc31f1af696be0ffffbf52064
+2026-09-08-devflow-official-right-sidebar.zh.md: 868538ca263bfae19a1295dee1a73d0f299ac61d

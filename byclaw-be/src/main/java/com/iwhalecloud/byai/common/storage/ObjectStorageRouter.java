@@ -20,7 +20,6 @@ import jakarta.annotation.Resource;
 /**
  * Routes atomic object storage operations to the configured backend.
  */
-@Primary
 @Component
 public class ObjectStorageRouter implements ObjectStorage {
 

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -122,12 +124,12 @@ public class SandboxBrowserNavigationService {
     private SandboxInfo findOwnedSandbox(String userCode, String sandboxId) {
         List<SandboxInfo> sandboxes = sandboxService.sandboxInfo(userCode);
         if (sandboxes == null) {
-            throw new IllegalStateException("No running sandbox found");
+            throw new IllegalStateException(I18nUtil.get("sandbox.browser.notRunning"));
         }
         return sandboxes.stream()
             .filter(item -> item != null && StringUtils.equals(item.getSandboxId(), sandboxId))
             .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Sandbox does not belong to current user"));
+            .orElseThrow(() -> new IllegalStateException(I18nUtil.get("sandbox.browser.notOwned")));
     }
 
     private URI buildEndpoint(SandboxInfo sandbox, String path) {
@@ -145,7 +147,7 @@ public class SandboxBrowserNavigationService {
             endpoint = StringUtils.trimToNull(sandbox.getEndpoints().getFirst());
         }
         if (endpoint == null) {
-            throw new IllegalStateException("Sandbox browser endpoint is unavailable");
+            throw new IllegalStateException(I18nUtil.get("sandbox.browser.endpointMissing"));
         }
         HttpUrl target = runtimeResolver.resolve().buildTargetUrl(endpoint, path, null);
         return target.uri();
@@ -153,14 +155,14 @@ public class SandboxBrowserNavigationService {
 
     private void validateRequest(String userCode, String sandboxId, String targetUrl, String sessionKey) {
         if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxId) || StringUtils.isBlank(sessionKey)) {
-            throw new IllegalArgumentException("Sandbox navigation parameters are required");
+            throw new IllegalArgumentException(I18nUtil.get("sandbox.browser.paramsRequired"));
         }
         URI target = URI.create(targetUrl);
         // CustomLink 支持公网、内网与 localhost，仅限制为浏览器可安全导航的 HTTP(S) 协议。
         boolean supportedScheme = "http".equalsIgnoreCase(target.getScheme())
             || "https".equalsIgnoreCase(target.getScheme());
         if (!supportedScheme || StringUtils.isBlank(target.getHost())) {
-            throw new IllegalArgumentException("Unsupported operation account login URL");
+            throw new IllegalArgumentException(I18nUtil.get("sandbox.browser.urlUnsupported"));
         }
     }
 

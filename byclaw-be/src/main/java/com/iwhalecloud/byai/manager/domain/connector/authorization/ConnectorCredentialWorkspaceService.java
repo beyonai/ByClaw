@@ -21,6 +21,9 @@ import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingSer
 
 @Service
 public class ConnectorCredentialWorkspaceService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting platformPrivateFiles;
+
 
     private static final Pattern PROVIDER_CODE_PATTERN = Pattern.compile("[a-z0-9-]+");
     private static final Pattern BUCKET_PATTERN = Pattern.compile("[a-z0-9][a-z0-9-]{1,61}[a-z0-9]");
@@ -77,6 +80,15 @@ public class ConnectorCredentialWorkspaceService {
 
     /** Resolves a manifest-declared sandbox projection path into the user's private host bucket. */
     public Path resolveProjectionFile(Long userId, String projectionPath) {
+        return resolveProjectionFile(userId, projectionPath, platformPrivateFiles.isRemote());
+    }
+
+    /** 邮件/本地命令锁链使用；不读取远程模式、不依赖平台。 */
+    public Path resolveLocalProjectionFile(Long userId, String projectionPath) {
+        return resolveProjectionFile(userId, projectionPath, false);
+    }
+
+    private Path resolveProjectionFile(Long userId, String projectionPath, boolean remoteIo) {
         validateUserId(userId);
         final Path sandboxPath;
         try {
@@ -90,20 +102,20 @@ public class ConnectorCredentialWorkspaceService {
         }
 
         try {
-            Path trustedRoot = trustedStorageRoot();
-            Path bucketDirectory = secureDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId);
-            Path byDirectory = secureDirectory(bucketDirectory, "by", trustedRoot, userId);
-            Path authDirectory = secureDirectory(byDirectory, ".connector-auth", trustedRoot, userId, true);
+            Path trustedRoot = projectionRoot(remoteIo);
+            Path bucketDirectory = projectionDirectory(trustedRoot, resolveBucket(userId), trustedRoot, userId, false, remoteIo);
+            Path byDirectory = projectionDirectory(bucketDirectory, "by", trustedRoot, userId, false, remoteIo);
+            Path authDirectory = projectionDirectory(byDirectory, ".connector-auth", trustedRoot, userId, true, remoteIo);
             Path relative = SANDBOX_CONNECTOR_AUTH_ROOT.relativize(sandboxPath);
-            applyPrivatePermissions(authDirectory);
+            projectionPermissions(authDirectory, remoteIo);
             Path parent = authDirectory;
             for (int index = 0; index < relative.getNameCount() - 1; index++) {
                 String segment = relative.getName(index).toString();
                 if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
                     throw new IllegalArgumentException("projectionPath contains an invalid directory segment");
                 }
-                parent = secureDirectory(parent, segment, trustedRoot, userId, true);
-                applyPrivatePermissions(parent);
+                parent = projectionDirectory(parent, segment, trustedRoot, userId, true, remoteIo);
+                projectionPermissions(parent, remoteIo);
             }
             Path file = parent.resolve(relative.getFileName().toString()).normalize();
             if (!file.getParent().equals(parent) || !file.startsWith(trustedRoot)) {
@@ -113,6 +125,25 @@ public class ConnectorCredentialWorkspaceService {
         } catch (IOException | SecurityException e) {
             throw new IllegalStateException("Unable to resolve credential projection for userId " + userId, e);
         }
+    }
+
+    private Path projectionRoot(boolean remoteIo) throws IOException {
+        return remoteIo ? platformPrivateFiles.trustedRoot() : trustedStorageRoot();
+    }
+
+    private Path projectionDirectory(Path parent, String segment, Path trustedRoot, Long userId,
+            boolean privateDirectory, boolean remoteIo) throws IOException {
+        if (!remoteIo) return secureDirectory(parent, segment, trustedRoot, userId, privateDirectory);
+        Path directory = parent.resolve(segment).normalize();
+        if (!directory.startsWith(trustedRoot)) {
+            throw new IllegalStateException("Credential workspace escapes storage root for userId " + userId);
+        }
+        return platformPrivateFiles.prepareDirectory(directory, privateDirectory);
+    }
+
+    private void projectionPermissions(Path directory, boolean remoteIo) throws IOException {
+        if (remoteIo) platformPrivateFiles.chmodDirectory(directory);
+        else applyPrivatePermissions(directory);
     }
 
     private Path trustedStorageRoot() throws IOException {

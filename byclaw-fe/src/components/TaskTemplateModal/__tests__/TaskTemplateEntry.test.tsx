@@ -12,16 +12,8 @@ const mockEventEmitter = {
 };
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
-  useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) =>
-      ({
-        'projectSpace.createProject': '新建项目',
-        'projectSpace.selectProject': '请选择项目',
-        'projectSpace.unnamedProject': '未命名项目',
-        'projectSpace.message.createSuccess': '项目空间创建成功',
-        'projectSpace.message.createFailed': '项目空间创建失败',
-      }[id] || id),
-  }),
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
   useNavigate: () => jest.fn(),
 }));
 
@@ -111,7 +103,12 @@ describe('TaskTemplateEntry project selector', () => {
 
   it('allows switching the project from the chat input', async () => {
     mockUseProjectScopeId.mockReturnValue(['1', mockUpdateProjectScopeId]);
-    render(<TaskTemplateEntry onApply={jest.fn()} />);
+    const onProjectChange = jest.fn();
+    const { rerender } = render(
+      <TaskTemplateEntry onApply={jest.fn()} onProjectChange={onProjectChange} skipInitialProjectChange />
+    );
+
+    expect(onProjectChange).not.toHaveBeenCalled();
 
     expect(screen.queryByRole('button', { name: '任务模板' })).not.toBeInTheDocument();
 
@@ -120,7 +117,13 @@ describe('TaskTemplateEntry project selector', () => {
     fireEvent.change(projectSelect, { target: { value: '项目二' } });
     fireEvent.click(await screen.findByText('项目二'));
 
-    expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('2');
+    await waitFor(() => expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('2'));
+    mockUseProjectScopeId.mockReturnValue(['2', mockUpdateProjectScopeId]);
+    rerender(<TaskTemplateEntry onApply={jest.fn()} onProjectChange={onProjectChange} skipInitialProjectChange />);
+
+    await waitFor(() => {
+      expect(onProjectChange).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('opens the new project form in the current chat page', async () => {

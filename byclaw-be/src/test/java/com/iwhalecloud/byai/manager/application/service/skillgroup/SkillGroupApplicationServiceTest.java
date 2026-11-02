@@ -62,7 +62,7 @@ import org.mockito.InOrder;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
-class SkillGroupApplicationServiceTest {
+class SkillGroupApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Long USER_ID = 101L;
     private static final Long TENANT_ID = 201L;

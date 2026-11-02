@@ -10,31 +10,118 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
 
-class ToolManControllerTest {
+class ToolManControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"COMPLETED,true,effective", "PENDING,false,processing",
+        "RUNNING,false,processing", "PARTIAL,false,incomplete", "COMPLETED,false,incomplete"})
+    void importMessageDistinguishesAcceptanceFromRuntimeReadiness(String state, boolean effective, String suffix) {
+        var controller = new ToolManController();
+        var imports = org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.resource.service.ToolManService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "toolManService", imports);
+        org.mockito.Mockito.when(imports.addToolFromThird("{}")).thenReturn(java.util.Map.of("association",
+            java.util.Map.of("status", state, "effective", effective)));
+        try (var messages = org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.i18n.I18nUtil.class)) {
+            String key = "tool.resource.sync." + suffix;
+            messages.when(() -> com.iwhalecloud.byai.common.i18n.I18nUtil.get(key)).thenReturn(key);
+            var response = controller.addToolFromThird("{}");
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getMsg()).isEqualTo(key);
+        }
+    }
+
+
+    @Test
+    void runtimeUseCheckUsesAuthoritativeGrantPolicyForSynchronizedAndOrdinaryResources() {
+        var login = new LoginInfo(); login.setUserId(3L); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        var resources = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var grant = new com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant();
+        grant.setGrantObjId(10L); grant.setGrantObjType("AGENT"); grant.setGrantType("FORCE_USE");
+        grant.setGrantToObjType("USER"); grant.setGrantToObjId(3L); grant.setGrantToType("RED"); grant.setStatusCd("A");
+        var grants = new java.util.ArrayList<>(java.util.List.of(grant));
+        var auth = new com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService() {
+            @Override public java.util.List<com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant> listAuthPrivilegeGrant(
+                String type, java.util.List<String> types, String subject, Long user, java.util.List<String> privileges) {
+                return grants;
+            }
+        };
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(10L); resource.setOwnerType("enterprise"); resource.setResourceStatus(2);
+        resource.setSystemCode("BYAI"); resource.setResourceCode("external"); resource.setThirdSyncRevision(1L);
+        resource.setUseAuthControlled(true); resource.setViewAuthControlled(true);
+        org.mockito.Mockito.when(resources.findById(10L)).thenReturn(resource);
+        var controller = new ToolManController();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "authApplicationService", auth);
+        for (String type : java.util.List.of("AGENT", "TOOLKIT", "MCP", "SKILL")) {
+            resource.setResourceBizType(type); grant.setGrantObjType(type);
+            for (Long tenant : java.util.Arrays.asList(null, 1L, 2L)) {
+                resource.setComAcctId(tenant);
+                assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData())
+                    .containsEntry("controlled", true).containsEntry("allowed", java.util.Objects.equals(tenant, 1L));
+            }
+            grant.setGrantType("ALLOW_VIEW");
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+            grant.setGrantType("FORCE_USE"); grants.clear();
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+            grants.add(grant);
+        }
+        resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", false);
+    }
+
+    @Test
+    void resourceSyncJobRequiresAuthenticatedTenantIdentity() {
+        var controller = new ToolManController();
+        var sync = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService.class);
+        var jobs = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "enterpriseResourceSyncService", sync);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "resourceSyncJobMapper", jobs);
+        var login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        var job = new com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob();
+        job.setSyncJobId(100L); job.setResourceId(10L); job.setSyncRevision(2L);
+        job.setComAcctId(1L); job.setStatus("COMPLETED"); job.setRetryCount(0);
+        org.mockito.Mockito.when(jobs.selectById(100L)).thenReturn(job);
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isZero();
+        job.setComAcctId(2L);
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isEqualTo(-1);
+        job.setComAcctId(1L);
+        job.setStatus("PARTIAL_V2");
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getData())
+            .containsEntry("status", "PARTIAL").containsEntry("effective", false);
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "101")).getCode()).isEqualTo(-1);
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("unauthorized")).when(sync).requireSyncPrincipal();
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isEqualTo(-1);
+    }
 
     @Test
     void workspaceCenterEndpointsReturnStatusAndSeparateCleanupFailureFromSaveFailure() {
-        var controller = new ToolManController();
-        var service = org.mockito.Mockito.mock(
-            com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "workspaceSkillCenterApplicationService", service);
-        var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo();
-        request.setResourceId(10L);
-        request.setSkillPath("/workspace/skills/demo");
-        request.setRevision("revision");
-        var status = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
-            .Status("UPDATE", "enterprise", 20L, "revision");
-        var result = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
-            .Result(20L, "UPDATE", false);
-        org.mockito.Mockito.when(service.preview(request)).thenReturn(status);
-        org.mockito.Mockito.when(service.sync(request)).thenReturn(result);
-        assertThat(controller.queryWorkspaceSkillCenterStatus(request).getData()).isEqualTo(status);
-        var response = controller.syncWorkspaceSkillToCenter(request);
-        assertThat(response.getCode()).isZero();
-        assertThat(response.getData().sourceDeleted()).isFalse();
-        org.mockito.Mockito.when(service.sync(request)).thenThrow(new IllegalArgumentException("changed"));
-        assertThat(controller.syncWorkspaceSkillToCenter(request).getCode()).isEqualTo(-1);
-        assertThat(controller.syncWorkspaceSkillToCenter(request).getMsg()).isEqualTo("changed");
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.US)) {
+            var controller = new ToolManController();
+            var service = org.mockito.Mockito.mock(
+                com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "workspaceSkillCenterApplicationService", service);
+            var request = new com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillCenterQo();
+            request.setResourceId(10L);
+            request.setSkillPath("/workspace/skills/demo");
+            request.setRevision("revision");
+            var status = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
+                .Status("UPDATE", "enterprise", 20L, "revision");
+            var result = new com.iwhalecloud.byai.state.application.service.session.WorkspaceSkillCenterApplicationService
+                .Result(20L, "UPDATE", false);
+            org.mockito.Mockito.when(service.preview(request)).thenReturn(status);
+            org.mockito.Mockito.when(service.sync(request)).thenReturn(result);
+            assertThat(controller.queryWorkspaceSkillCenterStatus(request).getData()).isEqualTo(status);
+            var response = controller.syncWorkspaceSkillToCenter(request);
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getData().sourceDeleted()).isFalse();
+            org.mockito.Mockito.when(service.sync(request)).thenThrow(new IllegalArgumentException("changed"));
+            assertThat(controller.syncWorkspaceSkillToCenter(request).getCode()).isEqualTo(-1);
+            assertThat(controller.syncWorkspaceSkillToCenter(request).getMsg()).isEqualTo("changed");
+        }
     }
 
     @Test
@@ -87,24 +174,26 @@ class ToolManControllerTest {
 
     @Test
     void enterprisePublicationReturnsCopyAndPropagatesPermissionDenial() {
-        ToolManController controller = new ToolManController();
-        var service = org.mockito.Mockito.mock(
-            com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
-        var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
-        request.setResourceId(10L);
-        var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
-        target.setResourceId(11L);
-        var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
-            .EnterpriseSkillPublishResult(target, false);
-        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
-        var response = controller.publishSkillToEnterprise(request);
-        assertThat(response.getCode()).isZero();
-        assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
-        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
-            .thenThrow(new IllegalArgumentException("Permission denied"));
-        assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
-        assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+        try (var messages = new com.iwhalecloud.byai.common.i18n.I18nTestScope(java.util.Locale.US)) {
+            ToolManController controller = new ToolManController();
+            var service = org.mockito.Mockito.mock(
+                com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
+            var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
+            request.setResourceId(10L);
+            var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+            target.setResourceId(11L);
+            var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
+                .EnterpriseSkillPublishResult(target, false);
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
+            var response = controller.publishSkillToEnterprise(request);
+            assertThat(response.getCode()).isZero();
+            assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
+                .thenThrow(new IllegalArgumentException("Permission denied"));
+            assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
+            assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
+        }
     }
 
     @Test

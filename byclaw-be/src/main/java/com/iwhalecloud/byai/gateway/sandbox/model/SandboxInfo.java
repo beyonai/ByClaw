@@ -18,6 +18,16 @@ public class SandboxInfo {
 
     private String sandboxId;
 
+    /** True for a platform-managed shared context rather than an exclusive instance. */
+    private Boolean isShared;
+
+    private String mappingId;
+
+    private String serviceKey;
+
+    /** Exact context/generation route; shared users never borrow another worker's lease. */
+    private String workerAgentType;
+
     private String userCode;
 
     private String sandboxType;

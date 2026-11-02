@@ -1,0 +1,73 @@
+{
+  "actor": {
+    "userId": "20",
+    "enterpriseId": "10"
+  },
+  "input": {
+    "clientRequestId": "shared-v1",
+    "mode": "SINGLE",
+    "messageIds": [
+      "1002",
+      "1001"
+    ],
+    "targetSessionIds": [
+      "2002",
+      "2001"
+    ]
+  },
+  "canonicalHash": "a7ab474e44c2908860ccccffca2eedd5ca6b906ba632b35ef39138817416e8de",
+  "messages": [
+    {
+      "id": "9007199254740993",
+      "timelineOrdinal": 0,
+      "content": "{{KG_DOC_FILE_xxx}} {{HUMAN_20}} {{text}}",
+      "speaker": {
+        "type": "USER",
+        "id": "20",
+        "name": "张三"
+      },
+      "createdAt": "2026-10-16T00:00:00Z",
+      "resourceList": [
+        {
+          "id": "KG_DOC_FILE_xxx",
+          "resourceId": "xxx",
+          "resourceName": "预算$\\终稿",
+          "resourceType": "KG_DOC_FILE",
+          "resourceCode": "fixture-dataset"
+        },
+        {
+          "id": "HUMAN_20",
+          "resourceId": "20",
+          "resourceName": "旧名字",
+          "resourceType": "HUMAN"
+        }
+      ],
+      "relatedResources": {},
+      "metadata": {},
+      "mergedItems": []
+    },
+    {
+      "id": "9007199254740994",
+      "timelineOrdinal": 1,
+      "content": "{{KG_DOC_FILE_xxx}}",
+      "speaker": {
+        "type": "USER",
+        "id": "20",
+        "name": "张三"
+      },
+      "createdAt": "2026-10-16T00:00:00Z",
+      "resourceList": [
+        {
+          "id": "KG_DOC_FILE_xxx",
+          "resourceId": "xxx",
+          "resourceName": "另一条名称",
+          "resourceType": "KG_DOC_FILE",
+          "resourceCode": "fixture-dataset"
+        }
+      ],
+      "relatedResources": {},
+      "metadata": {},
+      "mergedItems": []
+    }
+  ]
+}

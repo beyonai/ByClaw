@@ -23,7 +23,8 @@ import com.aliyun.dingtalkcard_1_0.models.UpdateCardRequest;
 import com.aliyun.tea.TeaConverter;
 import com.aliyun.tea.TeaException;
 import com.aliyun.tea.TeaPair;
-import com.aliyun.teaopenapi.models.Config;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkHttpClientFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
@@ -62,11 +63,14 @@ public class DingtalkCardService {
     private final ObjectMapper objectMapper;
     private final DingtalkTokenService dingtalkTokenService;
     private final DingtalkRobotConfigService dingtalkRobotConfigService;
+    private final DingtalkHttpClientFactory httpClientFactory;
 
-    public DingtalkCardService(ObjectMapper objectMapper, DingtalkTokenService dingtalkTokenService, DingtalkRobotConfigService dingtalkRobotConfigService) {
+    public DingtalkCardService(ObjectMapper objectMapper, DingtalkTokenService dingtalkTokenService,
+        DingtalkRobotConfigService dingtalkRobotConfigService, DingtalkHttpClientFactory httpClientFactory) {
         this.objectMapper = objectMapper;
         this.dingtalkTokenService = dingtalkTokenService;
         this.dingtalkRobotConfigService = dingtalkRobotConfigService;
+        this.httpClientFactory = httpClientFactory;
     }
 
     /**
@@ -107,11 +111,11 @@ public class DingtalkCardService {
                 cardParamMap
         );
 
-        Client client = createClient();
+        Client client = httpClientFactory.cardClient();
         client.createAndDeliverWithOptions(
                 request,
                 headers,
-                new com.aliyun.teautil.models.RuntimeOptions()
+                httpClientFactory.cardRuntimeOptions()
         );
         return new DingtalkCardStreamSession(client, accessToken, outTrackId);
     }
@@ -167,7 +171,7 @@ public class DingtalkCardService {
     Map<String, String> buildAssistantReplyCardParamMap(String agentName) {
         Map<String, Object> rawCardData = new LinkedHashMap<>();
         rawCardData.put("lastMessage", buildCardLastMessage(agentName));
-        rawCardData.put("content", buildCardLastMessage(agentName));
+        rawCardData.put("content", I18nUtil.get("channel.message.thinking"));
         rawCardData.put(CARDPARAMMAP_COPYCONTENT_KEY, "");
         rawCardData.put("resources", Collections.emptyList());
         rawCardData.put("users", Collections.emptyList());
@@ -328,7 +332,7 @@ public class DingtalkCardService {
                         .setUpdateCardDataByKey(true));
         UpdateCardHeaders headers = new UpdateCardHeaders()
                 .setXAcsDingtalkAccessToken(session.getAccessToken());
-        com.aliyun.teautil.models.RuntimeOptions runtimeOptions = new com.aliyun.teautil.models.RuntimeOptions();
+        com.aliyun.teautil.models.RuntimeOptions runtimeOptions = httpClientFactory.cardRuntimeOptions();
         runtimeOptions.setKeepAlive(true);
 
         try {
@@ -373,7 +377,7 @@ public class DingtalkCardService {
                 isFinalize
         );
         StreamingUpdateHeaders headers = new StreamingUpdateHeaders().setXAcsDingtalkAccessToken(session.getAccessToken());
-        com.aliyun.teautil.models.RuntimeOptions runtimeOptions = new com.aliyun.teautil.models.RuntimeOptions();
+        com.aliyun.teautil.models.RuntimeOptions runtimeOptions = httpClientFactory.cardRuntimeOptions();
         runtimeOptions.setKeepAlive(true);
 
         try {
@@ -439,10 +443,4 @@ public class DingtalkCardService {
         return robotCode + "-" + senderStaffId + "-" + channelType + "-assistantReply-" + System.currentTimeMillis();
     }
 
-    private Client createClient() throws Exception {
-        Config config = new Config();
-        config.protocol = "https";
-        config.regionId = "central";
-        return new Client(config);
-    }
 }

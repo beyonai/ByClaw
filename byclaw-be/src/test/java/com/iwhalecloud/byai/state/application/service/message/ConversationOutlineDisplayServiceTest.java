@@ -15,7 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class ConversationOutlineDisplayServiceTest {
+class ConversationOutlineDisplayServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SsResourceService ssResourceService;
 

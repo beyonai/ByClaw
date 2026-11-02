@@ -1,0 +1,7 @@
+# Packed tarballs produced by `npm run package` for profile installation.
+*.tgz
+
+# npm lockfile: this plugin's only real dependencies are typescript and
+# @types/node, and sibling plugins here use pnpm. Committing an npm lockfile
+# into a pnpm repository invites the wrong install command.
+package-lock.json

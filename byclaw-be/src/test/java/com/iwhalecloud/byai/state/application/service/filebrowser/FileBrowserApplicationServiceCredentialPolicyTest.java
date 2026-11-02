@@ -19,7 +19,7 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
-class FileBrowserApplicationServiceCredentialPolicyTest {
+class FileBrowserApplicationServiceCredentialPolicyTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private FileBrowserProvider provider;
     private FileBrowserApplicationService service;
@@ -31,6 +31,15 @@ class FileBrowserApplicationServiceCredentialPolicyTest {
         when(providerFactory.getProvider()).thenReturn(provider);
         service = new FileBrowserApplicationService(providerFactory,
             mock(ByClawSkillResourceApplicationService.class), mock(UserFS.class), mock(ObjectMapper.class));
+    }
+
+    @Test
+    void credentialAccessIsRejectedInEnglishBeforeAnyProviderCall() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.download("user", 10L, "/by/.connector-auth/.github/credential.json"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Access to the system credential directory is prohibited");
+        org.mockito.Mockito.verifyNoInteractions(provider);
     }
 
     @Test

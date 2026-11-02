@@ -10,7 +10,7 @@ deploy/
 ├── config/              # 共享配置（nginx.conf, application.properties, logback.xml）
 │   └── nginx-standalone.conf.tpl  # 拆分模式 nginx 模板（端口从 .env 读取）
 ├── middleware/           # 中间件：Redis、MinIO、OpenGauss、OpenSandbox
-└── standalone/          # 拆分模式：fe、be、super、qa、data 各自独立镜像
+└── standalone/          # 拆分模式：fe、be、qa、data 各自独立镜像
 ```
 
 ## 前置条件
@@ -144,12 +144,10 @@ sh start-all.sh
 
 # 或单独启停
 sh start-be.sh              # 后端
-sh start-super.sh           # Super
 sh start-fe.sh              # 前端（会自动从模板生成 nginx 配置）
 sh start-qa-manager.sh      # QA Manager
 
 sh stop-be.sh
-sh stop-super.sh
 sh stop-fe.sh
 sh stop-qa-manager.sh
 ```
@@ -159,8 +157,8 @@ sh stop-qa-manager.sh
 在 `.env` 中设置 `STANDALONE_MODULES` 可以只启动指定的服务：
 
 ```bash
-# 只启动前端、后端和 Super
-STANDALONE_MODULES=fe,be,super
+# 只启动前端和后端
+STANDALONE_MODULES=fe,be
 
 # 不设置或留空 = 启动全部
 # STANDALONE_MODULES=
@@ -170,7 +168,6 @@ STANDALONE_MODULES=fe,be,super
 |------|--------|---------|---------|
 | 前端 (fe) | `fe` | 8080 / 8443 | `NGINX_PORT` / `NGINX_HTTPS_PORT` |
 | 后端 (be) | `be` | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
-| Super | `super` | 3000 | `BYCLAW_SUPER_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
 
 ### Nginx 配置模板
@@ -183,3 +180,16 @@ STANDALONE_MODULES=fe,be,super
 `start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。
 
 旧版本升级：需单独停止并删除旧 `qa-worker` 容器，或 K3s 中的旧 Worker Deployment 及专用 ConfigMap；更新部署清单不会自动删除旧实例。QA Manager 及数据卷保留。
+
+## 部署环境检查
+
+Shell 入口 `sh deploy.sh init` / `update` 和 `sh deploy/start-standalone.sh` 启动结束时自动检查环境，启动失败也会输出检查结果。需本机 Python 3；检查默认等待 120 秒，可通过 `DEPLOY_CHECK_TIMEOUT` 设置。单独检查：
+
+```bash
+sh deploy.sh check
+sh deploy.sh check --deep
+```
+
+基础检查验证所选容器、数据库初始化查询、Redis PING、HTTP 就绪、FE 到 BE 代理和沙箱引擎中的 OpenClaw 镜像。检查默认创建 120 秒过期的临时沙箱，验证 execd/启动脚本注入并删除，不启动真实数字员工；使用 `.env` 的 `DB_HOST/DB_PORT/DB_DATABASE/DB_SCHEMA/DB_USER/DB_PASS` 直接读取 OpenGauss 中启用的默认 LLM 和所有启用的 `EMBEDDING` 类型模型（Embedding 不要求默认标签），并解密 Token（不依赖 BE、QA 或 Redis），从执行检查的本机对每个选中模型发起一次请求（LLM 最多 128 输出 token），可能产生少量费用。`--deep` 仅为兼容旧命令，与普通检查行为相同。
+
+检查在启动流程结束后执行，检查失败或 Python 报错不会停止或回滚已启动容器，但启动脚本返回非零退出码。失败返回非零；“未验证”不会被当作业务成功。QA 容器具备 Python/psycopg/redis 时，还会从应用网络检查数据库必要字段、Redis 认证，并核对数据库 OpenClaw 镜像规格。该探测不支持 Redis Cluster；缺少运行环境时显示“未验证”。模型检查支持 OpenAI 兼容接口，验证实际回答及向量维度。检查不会打印 Token 或原始日志，不自动拉镜像、改模型或重启服务。此入口面向本机 Docker/Podman，PowerShell、K3s 和远程引擎暂未接入。

@@ -1,0 +1,5 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record.
+2026-09-02-agpl-clean-room-boundary.md: bb2e326d1b163be2fc8e952900f20f2241dd512d
+2026-09-02-agpl-clean-room-boundary.zh.md: 13000ea717ab821a4d323e0d6db3c73d252a612e

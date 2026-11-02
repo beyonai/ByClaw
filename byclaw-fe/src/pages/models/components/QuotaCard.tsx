@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Progress, Tooltip } from 'antd';
 import { useIntl } from '@umijs/max';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import styles from './QuotaCard.module.less';
 
 type ModelUsage = {
@@ -23,6 +24,21 @@ type QuotaProps = {
 
 const QuotaCard: React.FC<QuotaProps> = ({ quota }) => {
   const intl = useIntl();
+  const [showQuotaOverview, setShowQuotaOverview] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((config: any) => {
+        if (active) setShowQuotaOverview(config?.paramValue !== 'commercial');
+      })
+      .catch(() => {
+        if (active) setShowQuotaOverview(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!quota) return null;
 
@@ -39,33 +55,37 @@ const QuotaCard: React.FC<QuotaProps> = ({ quota }) => {
 
   return (
     <Card className={styles.card} size="small">
-      <div className={styles.header}>
-        <span className={styles.title}>{intl.formatMessage({ id: 'personalModel.quota.title' })}</span>
-      </div>
-
-      {quotaLimit > 0 && (
-        <div className={styles.quotaSection}>
-          <div className={styles.quotaLabel}>
-            <span>{intl.formatMessage({ id: 'personalModel.quota.monthlyUsed' })}</span>
-            <span>
-              {formatTokens(quotaUsed)} / {formatTokens(quotaLimit)}
-            </span>
+      {showQuotaOverview && (
+        <>
+          <div className={styles.header}>
+            <span className={styles.title}>{intl.formatMessage({ id: 'personalModel.quota.title' })}</span>
           </div>
-          <Progress
-            percent={percent}
-            size="small"
-            strokeColor={exceeded ? '#ff4d4f' : percent > 80 ? '#faad14' : '#1677ff'}
-            showInfo={false}
-          />
-          {exceeded && (
-            <div className={styles.exceededTip}>
-              {intl.formatMessage({ id: 'personalModel.quota.exceeded' })}
-              {quota.resetDate &&
-                ` (${intl.formatMessage({ id: 'personalModel.quota.resetTip' })}: ${quota.resetDate})`}
+
+          {quotaLimit > 0 && (
+            <div className={styles.quotaSection}>
+              <div className={styles.quotaLabel}>
+                <span>{intl.formatMessage({ id: 'personalModel.quota.monthlyUsed' })}</span>
+                <span>
+                  {formatTokens(quotaUsed)} / {formatTokens(quotaLimit)}
+                </span>
+              </div>
+              <Progress
+                percent={percent}
+                size="small"
+                strokeColor={exceeded ? '#ff4d4f' : percent > 80 ? '#faad14' : '#1677ff'}
+                showInfo={false}
+              />
+              {exceeded && (
+                <div className={styles.exceededTip}>
+                  {intl.formatMessage({ id: 'personalModel.quota.exceeded' })}
+                  {quota.resetDate &&
+                    ` (${intl.formatMessage({ id: 'personalModel.quota.resetTip' })}: ${quota.resetDate})`}
+                </div>
+              )}
+              <div className={styles.quotaDesc}>{intl.formatMessage({ id: 'personalModel.quota.desc' })}</div>
             </div>
           )}
-          <div className={styles.quotaDesc}>{intl.formatMessage({ id: 'personalModel.quota.desc' })}</div>
-        </div>
+        </>
       )}
 
       <div className={styles.statsRow}>

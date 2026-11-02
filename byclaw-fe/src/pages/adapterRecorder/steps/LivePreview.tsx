@@ -1,3 +1,4 @@
+import { getIntl, useIntl } from '@umijs/max';
 /* eslint-disable lines-around-comment */
 // 一体化录制投屏(Phase 1+2):录制中显示目标页画面 + 在画面上直接操作。
 // Phase 1:轮询 client.screenshot() 拿 base64 jpeg 刷新 <img>(目标页始终在扩展真 tab,这里只投屏)。
@@ -26,6 +27,7 @@ function keyEventParams(e: React.KeyboardEvent, type: 'keyDown' | 'keyUp'): Reco
 }
 
 export default function LivePreview() {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const client = useRef(getRecorderClient()).current;
   const imgRef = useRef<HTMLImageElement>(null);
@@ -56,7 +58,7 @@ export default function LivePreview() {
         setSrc(`data:image/jpeg;base64,${res.data.data}`);
         setErr('');
       } else if (!res.ok) {
-        setErr(res.error?.message || '截图失败');
+        setErr(res.error?.message || getIntl().formatMessage({ id: 'adapterRecorder.preview.captureFailed' }));
       }
       const next = Date.now() < activeUntil.current ? ACTIVE_POLL_MS : POLL_MS;
       timer = setTimeout(tick, next);
@@ -110,7 +112,13 @@ export default function LivePreview() {
           clickCount: 1,
         })
         .then((r) => {
-          if (!r.ok) setErr(`输入失败:${r.error?.message || r.error?.code || '未知'}`);
+          if (!r.ok)
+            setErr(
+              getIntl().formatMessage(
+                { id: 'adapterRecorder.preview.inputFailed' },
+                { v0: r.error?.message || r.error?.code || getIntl().formatMessage({ id: 'adapterRecorder.unknown' }) }
+              )
+            );
         });
     },
     [client, interactive, toPageCoords, bumpActive]
@@ -150,7 +158,13 @@ export default function LivePreview() {
           speed: 3000,
         })
         .then((r) => {
-          if (!r.ok) setErr(`滚动失败:${r.error?.message || r.error?.code || '未知'}`);
+          if (!r.ok)
+            setErr(
+              getIntl().formatMessage(
+                { id: 'adapterRecorder.preview.scrollFailed' },
+                { v0: r.error?.message || r.error?.code || getIntl().formatMessage({ id: 'adapterRecorder.unknown' }) }
+              )
+            );
         });
     };
     const handler = (e: WheelEvent) => {
@@ -191,14 +205,19 @@ export default function LivePreview() {
     <div style={{ display: 'flex', minHeight: 0, height: '100%', flex: 1, flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          目标页投屏{interactive ? '·可操作' : '·只读'}
+          {intl.formatMessage({ id: 'adapterRecorder.preview.title' })}
+          {interactive
+            ? intl.formatMessage({ id: 'adapterRecorder.preview.interactive' })
+            : intl.formatMessage({ id: 'adapterRecorder.preview.readOnly' })}
           {lastCoord ? ` · ${lastCoord}` : ''}
         </Text>
         <Text
           style={{ fontSize: 12, cursor: 'pointer', color: interactive ? token.colorWarning : token.colorPrimary }}
           onClick={() => setInteractive((v) => !v)}
         >
-          {interactive ? '■ 关闭操作' : '▶ 在画面上操作'}
+          {interactive
+            ? intl.formatMessage({ id: 'adapterRecorder.preview.disable' })
+            : intl.formatMessage({ id: 'adapterRecorder.preview.enable' })}
         </Text>
       </div>
       <div
@@ -222,7 +241,7 @@ export default function LivePreview() {
           <img
             ref={imgRef}
             src={src}
-            alt="目标页投屏"
+            alt={intl.formatMessage({ id: 'adapterRecorder.preview.title' })}
             draggable={false}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             onMouseDown={(e) => {
@@ -241,12 +260,16 @@ export default function LivePreview() {
           <div
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}
           >
-            {err ? `投屏不可用:${err}` : '加载画面…'}
+            {err
+              ? intl.formatMessage({ id: 'adapterRecorder.preview.unavailable' }, { v0: err })
+              : intl.formatMessage({ id: 'adapterRecorder.preview.loading' })}
           </div>
         )}
       </div>
       <Text type="secondary" style={{ fontSize: 11 }}>
-        画面每 {POLL_MS}ms 刷新一帧;复杂操作可切到 byCLI 标签页(录制在真 tab 正常进行)。
+        {intl.formatMessage({ id: 'adapterRecorder.preview.intervalBefore' })}
+        {POLL_MS}
+        {intl.formatMessage({ id: 'adapterRecorder.preview.intervalAfter' })}
       </Text>
     </div>
   );

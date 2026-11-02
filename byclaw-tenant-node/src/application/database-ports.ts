@@ -2,9 +2,11 @@ import type { AuthorityVersion, TenantSnapshot } from "../domain/tenant.js";
 
 export type SqlRow = Record<string, any>;
 export interface SqlSession {
+  /** Present only for a write transaction; held through commit/rollback. */
+  lock?(key: string): Promise<void>;
   query(sql: string, parameters?: unknown[]): Promise<SqlRow[]>;
 }
-/** 数据库端口：业务共享 Schema 锁，升级独占锁；fresh 用于提交后的独立连接核验。 */
+/** 数据库端口：Redis 协调业务读租约与 Schema 独占租约；fresh 用于提交后的独立连接核验。 */
 export interface TenantDatabase extends SqlSession {
   transaction<T>(
     work: (session: SqlSession) => Promise<T>,

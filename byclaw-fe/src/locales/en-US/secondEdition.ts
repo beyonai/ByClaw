@@ -137,6 +137,11 @@ export default {
   'settings.userAgreement': 'User Agreement',
   'settings.privacyPolicy': 'Privacy Policy',
   'settings.changePassword': 'Change Password',
+  'settings.voiceAutoPlay': 'Automatically play voice replies',
+  'settings.voiceAutoPlayHint': 'Play voice segments in new replies in order. History stays silent.',
+  'settings.voiceAutoTranscribe': 'Automatically transcribe voice messages',
+  'settings.voiceAutoTranscribeHint':
+    'Show text for newly sent voice messages. Manual transcription remains available.',
   'settings.general': 'General',
   'settings.personalParams': 'Personal Parameters',
   'settings.params.descriptionText': 'Manage your private runtime parameters for tool, MCP, and exec injection.',
@@ -249,6 +254,7 @@ export default {
   // 文件上传相关
   'upload.maxFilesLimit': 'You can upload up to {count} files',
   'upload.fileSizeLimit': 'File size cannot exceed {size}M',
+  'upload.failed': 'Attachment upload failed. Please try again.',
   'upload.fileNotUploaded': 'File upload not complete, please try again later',
   'upload.fileUploadIncomplete': 'File upload incomplete',
   'upload.duplicateFile': 'Cannot upload duplicate files',
@@ -347,6 +353,8 @@ export default {
   'fileBrowser.move.success': 'Moved successfully',
   'fileBrowser.move.failed': 'Move failed',
   'fileBrowser.preview.failed': 'Preview failed',
+  'fileBrowser.preview.empty': 'The file is empty and cannot be previewed',
+  'fileBrowser.preview.notFound': 'File not found',
   'fileBrowser.preview.unavailable': 'This file cannot be previewed online. Please download it to view.',
   'fileBrowser.createFolder.prompt': 'Enter folder name',
   'fileBrowser.createFolder.duplicateName': 'A folder with this name already exists in the current folder',

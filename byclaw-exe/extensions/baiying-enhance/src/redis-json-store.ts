@@ -38,6 +38,8 @@ export type BaiyingRedisJsonStore = {
         resourceBizType: string;
         resourceId: string;
     }) => Promise<RedisJsonPayload | null>;
+    /** Runtime acknowledgements only; callers must scope keys by user and employee. */
+    setExpiringHashJson?: (key: string, field: string, value: unknown, ttlSeconds: number) => Promise<void>;
     close: () => Promise<void>;
 };
 
@@ -273,6 +275,13 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
     };
 
     return {
+        setExpiringHashJson: async (key, field, value, ttlSeconds) => {
+            const client = await connect();
+            if (!client) throw new Error("runtime receipt Redis unavailable");
+            const results = await client.multi().hset(key, field, JSON.stringify(value))
+                .expire(key, ttlSeconds).exec();
+            if (!results || results.some(([error]) => error)) throw new Error("runtime receipt write failed");
+        },
         getJsonByKey,
         getJsonByKeyStrict,
         getStringByKey,

@@ -1,0 +1,1270 @@
+/* Sidebar page: fills the pane owned by Harness's official right Sidebar. */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  --dsh-devflow-ongoing: var(--dsw-static-deepseek-450);
+}
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.pageBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.pageState {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.retryButton {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-static-deepseek-450);
+  font: inherit;
+  cursor: pointer;
+}
+
+.retryButton:hover,
+.retryButton:focus-visible {
+  border-color: var(--dsw-static-deepseek-450);
+}
+
+.pageSplit {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.pageSplit > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.pageSplit > * + * {
+  border-left: 1px solid var(--dsw-alias-border-l2);
+}
+
+.pageToolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.pageStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.pageStats span[data-tone='warning'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* Scope selects which cards the board is about; view selects how they read. */
+.scopeToggle {
+  margin-left: auto;
+}
+
+.viewToggle,
+.scopeToggle {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: var(--dsw-alias-fill-l2);
+}
+
+.viewToggle button,
+.scopeToggle button {
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.viewToggle button:hover,
+.viewToggle button:focus-visible,
+.scopeToggle button:hover,
+.scopeToggle button:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.viewToggle button[aria-pressed='true'],
+.scopeToggle button[aria-pressed='true'] {
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.viewToggle button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.viewToggle button:disabled[aria-pressed='true'] {
+  box-shadow: none;
+}
+
+/* Why the view switch is inert here, stated rather than left to be guessed. */
+.viewDisabledReason {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.kanbanViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.kanbanStageTabs {
+  display: none;
+}
+
+.kanbanCanvas {
+  min-width: 1120px;
+  padding: 10px;
+}
+
+.kanbanColumnHeaders,
+.kanbanLaneGrid,
+.doneControlGrid {
+  display: grid;
+  grid-template-columns: var(--devflow-stage-grid, repeat(7, minmax(148px, 1fr)));
+  gap: 8px;
+}
+
+.kanbanColumnHeaders {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-bottom: 8px;
+  background: var(--dsw-specific-menu);
+}
+
+.kanbanColumnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--dsw-alias-border-l2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.kanbanColumnHeader[data-stage='developing'],
+.kanbanColumnHeader[data-stage='reviewing'],
+.kanbanColumnHeader[data-stage='testing'] {
+  border-bottom-color: var(--dsh-devflow-ongoing);
+}
+
+.kanbanColumnHeader[data-stage='done'] {
+  border-bottom-color: var(--dsw-alias-state-success-primary);
+}
+
+.kanbanColumnCount {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--dsw-alias-fill-l2);
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.swimlane {
+  margin-bottom: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--dsw-specific-menu) 96%, transparent);
+}
+
+.independentHeader,
+.swimlaneHeader {
+  min-height: 34px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-fill-l1);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.swimlaneHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swimlaneParent {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.swimlaneParent:hover .swimlaneTitle,
+.swimlaneParent:focus-visible .swimlaneTitle {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+}
+
+.swimlaneTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swimlaneStage {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-fill-l2);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.swimlaneDistribution {
+  display: flex;
+  min-width: 0;
+  margin-left: auto;
+  gap: 8px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.kanbanLaneGrid {
+  padding: 8px;
+}
+
+.kanbanCell {
+  display: grid;
+  min-width: 0;
+  min-height: 48px;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  align-content: start;
+  gap: 7px;
+  padding: 1px;
+}
+
+.kanbanCell[data-stage='done'] {
+  opacity: 0.76;
+}
+
+/*
+ * The bordered box. It is a plain element, not a button: the actions below live
+ * inside this border, and a button nested in a button is invalid markup whose
+ * inner click the browser hands to the outer one.
+ */
+.kanbanCard {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv1);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Opening the card: the whole content area, so the target stays card-sized. */
+.kanbanCardOpener {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Focus lands on the opener; the ring belongs to the box a reader sees. */
+.kanbanCard:hover,
+.kanbanCard:focus-within {
+  border-color: var(--dsw-static-deepseek-450);
+  box-shadow: var(--dsw-shadow-lv2);
+}
+
+.kanbanCard[data-blocked] {
+  border-left: 3px solid var(--dsw-alias-state-warn-primary);
+}
+
+.kanbanCard[data-settled] {
+  box-shadow: none;
+}
+
+.kanbanCardHead {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.kanbanCardDot {
+  flex: none;
+  margin-top: 3px;
+}
+
+.kanbanCardTitle {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.blockedBadge {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+}
+
+.kanbanCardMeta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.kanbanCardId {
+  flex: 1 1 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanbanUnresolved {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 8px 8px;
+  padding: 8px;
+  border: 1px dashed var(--dsw-alias-state-warn-primary);
+  border-radius: 8px;
+}
+
+.kanbanUnresolvedLabel {
+  flex: none;
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.kanbanUnresolvedCards {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+}
+
+.doneControlGrid {
+  padding: 0 8px 8px;
+}
+
+.doneControl {
+  grid-column: 7;
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.doneControl:hover,
+.doneControl:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+@container (max-width: 760px) {
+  .pageToolbar {
+    align-items: flex-start;
+  }
+
+  .pageStats {
+    gap: 4px 10px;
+  }
+
+  .kanbanStageTabs {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    display: flex;
+    gap: 5px;
+    padding: 8px 10px 4px;
+    overflow-x: auto;
+    background: var(--dsw-specific-menu);
+  }
+
+  .stageTab {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--dsw-alias-border-l2);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--dsw-alias-label-secondary);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .stageTab[aria-pressed='true'] {
+    border-color: var(--dsw-static-deepseek-450);
+    color: var(--dsw-static-deepseek-450);
+  }
+
+  .stageTab span {
+    font-family: var(--dsw-font-mono, monospace);
+    color: var(--dsw-alias-label-tertiary);
+  }
+
+  .kanbanCanvas {
+    min-width: 0;
+  }
+
+  .kanbanColumnHeaders,
+  .kanbanLaneGrid,
+  .doneControlGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kanbanColumnHeader:not([data-selected]),
+  .kanbanCell:not([data-selected]),
+  .doneControlGrid:not([data-selected]) {
+    display: none;
+  }
+
+  .doneControl {
+    grid-column: 1;
+  }
+
+  .swimlane[data-lane-kind="independent"][data-selected-empty] {
+    display: none;
+  }
+
+  .swimlaneHeader {
+    flex-wrap: wrap;
+  }
+
+  .swimlaneDistribution {
+    order: 2;
+    width: 100%;
+    margin-left: 30px;
+  }
+}
+
+.detailRequirement {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 8px;
+}
+
+.detailSectionSummary {
+  cursor: pointer;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.panelTitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.panelCollapse {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.panelCollapse:hover,
+.panelCollapse:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.list {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.row {
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/*
+ * One row's own box, holding the opener and the card's actions. The actions are
+ * buttons, so this cannot be one: a button nested in a button is invalid markup
+ * whose inner click the browser hands to the outer one.
+ */
+.rowCard {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  border-radius: 8px;
+}
+
+/* Focus lands on a child; the highlight belongs to the row a reader sees. */
+.rowCard:hover,
+.rowCard:focus-within {
+  background: var(--dsw-alias-fill-l2);
+}
+
+.rowButton {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row + .row {
+  margin-top: 2px;
+}
+
+.rowGroup {
+  display: flex;
+  align-items: center;
+}
+
+.rowToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.rowToggle:hover,
+.rowToggle:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.rowToggle svg {
+  transition: transform 120ms ease;
+}
+
+.rowToggleCollapsed {
+  transform: rotate(-90deg);
+}
+
+.rowNested {
+  margin-left: 18px;
+}
+
+.childSummary {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.childSummary[data-blocked] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.rowSettled {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rowDot {
+  flex: none;
+}
+
+.id {
+  flex: none;
+  font-family: var(--dsw-font-mono, monospace);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.stage {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stage[data-tone='ongoing'] {
+  color: var(--dsh-devflow-ongoing);
+}
+
+.stage[data-tone='warning'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.stage[data-tone='done'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.revision {
+  flex: none;
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.serviceClass {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.detailBack {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.detailBack:hover,
+.detailBack:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.detailScroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 14px 12px;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detailTitle {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.detailMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pipelineStage {
+  flex: 1 1 0;
+  padding: 3px 0 5px;
+  border-top: 4px solid var(--dsw-alias-fill-l2);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pipelineStage[data-tone='ongoing'] {
+  border-top-color: var(--dsw-static-deepseek-450);
+}
+
+.pipelineStage[data-tone='warning'] {
+  border-top-color: var(--dsw-alias-state-warn-primary);
+}
+
+.pipelineStage[data-tone='done'] {
+  border-top-color: var(--dsw-alias-state-success-primary);
+}
+
+.pipelineStage[data-current] {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.detailBody {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.detailSectionTitle {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailArtifacts {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 8px;
+}
+
+.detailRelations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 8px;
+}
+
+.relationList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relationLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.relationLink:hover,
+.relationLink:focus-visible {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+}
+
+.artifactList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.artifactRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.artifactPath {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* An artifact path that opens its file: a link, not a button-looking control. */
+.artifactOpen {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-static-deepseek-450);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.artifactOpen:hover,
+.artifactOpen:focus-visible {
+  text-decoration: underline;
+}
+
+.artifactMeta {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.artifactKind {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+}
+
+.artifactKindNone {
+  flex: none;
+  font-style: italic;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.artifactLatest {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--dsw-alias-fill-l2);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailEmpty {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailPath {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 8px;
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.detailTimeline {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 8px;
+}
+
+.timelineSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timelineEntry {
+  padding-left: 10px;
+  border-left: 2px solid var(--dsw-alias-fill-l2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.timelineHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.timelineLabel {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--dsh-space-1, 4px);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.timelineActor {
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--dsw-font-mono, monospace);
+}
+
+.sessionLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 11px;
+  color: var(--dsw-static-deepseek-450);
+  cursor: pointer;
+}
+
+.sessionLink:hover,
+.sessionLink:focus-visible {
+  text-decoration: underline;
+}
+
+.timelineMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.timelineNote {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.blockedReason {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* The archive is the whole body of its own scope, not an appendix to a board,
+   so it carries no separator and no dimming of its own. */
+.archiveSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dsh-space-3, 12px);
+}
+
+/* What a reader can act on, before any of the rows. */
+.archiveNote {
+  margin: 0;
+  font-size: var(--dsh-font-size-xs, 11px);
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+}
+
+.archiveGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dsh-space-1, 4px);
+}
+
+/*
+ * The month lists are siblings, so they neither flex against one another nor
+ * scroll on their own: the page body is the one scroller, and a scroller per
+ * month would trap a reader inside whichever one they landed in.
+ */
+.archiveGroup .list {
+  flex: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.archiveGroup .row + .row {
+  margin-top: var(--dsh-space-1, 4px);
+}
+
+.archiveFamily + .archiveFamily {
+  margin-top: var(--dsh-space-1, 4px);
+}
+
+/* A requirement's slices, indented under it so the family reads as one thing. */
+.archiveSlices {
+  margin: var(--dsh-space-1, 4px) 0 0;
+  padding: 0 0 0 var(--dsh-space-4, 16px);
+  list-style: none;
+}
+
+.archiveSlices > li + li {
+  margin-top: var(--dsh-space-1, 4px);
+}
+
+/* Whose slice this is, for one the loaded pages cannot place under its head. */
+.archiveOf {
+  flex: none;
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+}
+
+/* The month heads its run of cards; no row repeats it. */
+.archiveMonth {
+  margin: 0;
+  font-size: var(--dsh-font-size-xs, 11px);
+  font-weight: 600;
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A filed card reads as a discrete object, not a line of text. The border is
+ * lighter than the kanban card's and carries no shadow: this work is settled,
+ * and a box identical to an active card's would imply it can still move.
+ */
+.archiveRow {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-menu);
+}
+
+.archiveRow:hover,
+.archiveRow:focus-within {
+  border-color: var(--dsw-alias-border-l1, var(--dsw-static-deepseek-450));
+}
+
+.archiveRowButton {
+  gap: var(--dsh-space-1, 4px);
+  padding: 8px 10px;
+}
+
+/* The title owns its own line, so nothing competes with it for width. */
+.archiveRowHead {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--dsh-space-2, 8px);
+}
+
+.archiveRowButton .title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archiveRowMeta {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--dsh-space-2, 8px);
+}
+
+.archiveRowId {
+  flex: none;
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+}
+
+/*
+ * Why the work stopped, given the rest of its own line and up to two of them.
+ * A reason clipped to a few words is one nobody can act on, and showing it
+ * without a click is the whole point of carrying it here.
+ */
+.archiveReason {
+  display: -webkit-box;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+  overflow-wrap: anywhere;
+}
+
+
+.archiveBadge {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--dsh-font-size-xs, 11px);
+  color: var(--dsh-color-text-tertiary, rgb(0 0 0 / 45%));
+}
+
+.archiveBadge[data-tone='warning'] {
+  color: var(--dsh-color-text-warning, rgb(180 83 9));
+}
+
+.archiveToggle {
+  flex: none;
+  padding: 2px 8px;
+  font-size: var(--dsh-font-size-xs, 11px);
+  color: var(--dsh-color-text-secondary, rgb(0 0 0 / 55%));
+  background: transparent;
+  border: 1px solid var(--dsh-color-border-secondary, rgb(0 0 0 / 12%));
+  border-radius: var(--dsh-radius-sm, 4px);
+  cursor: pointer;
+}
+
+.archiveToggle[aria-pressed='true'] {
+  color: var(--dsh-color-text-primary, rgb(0 0 0 / 88%));
+  background: var(--dsh-color-fill-secondary, rgb(0 0 0 / 4%));
+}
+
+/* Card actions sit beside the opener, never inside it: a button nested in a
+   button is invalid, and the click would go to the outer one. */
+.rowActions {
+  display: flex;
+  flex: none;
+  gap: var(--dsh-space-1, 4px);
+  align-items: center;
+  padding-right: var(--dsh-space-2, 8px);
+}
+
+.rowAction {
+  padding: 2px 8px;
+  font-size: var(--dsh-font-size-xs, 11px);
+  color: var(--dsh-color-text-secondary, rgb(0 0 0 / 55%));
+  background: transparent;
+  border: 1px solid var(--dsh-color-border-secondary, rgb(0 0 0 / 12%));
+  border-radius: var(--dsh-radius-sm, 4px);
+  cursor: pointer;
+}
+
+.rowAction:hover,
+.rowAction:focus-visible {
+  color: var(--dsh-color-text-primary, rgb(0 0 0 / 88%));
+  background: var(--dsh-color-fill-secondary, rgb(0 0 0 / 4%));
+}
+
+.rowActionRisk:hover,
+.rowActionRisk:focus-visible {
+  color: var(--dsh-color-text-danger, rgb(185 28 28));
+  border-color: var(--dsh-color-border-danger, rgb(185 28 28 / 40%));
+}
+
+/* The kanban card and its actions share one column so the actions do not
+   overlap the card's own click target. */
+.kanbanCard .rowActions {
+  justify-content: flex-end;
+  padding: 0 9px 9px;
+}
+
+.promptBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dsh-space-2, 8px);
+}
+
+.promptCard {
+  font-size: var(--dsh-font-size-sm, 12px);
+  color: var(--dsh-color-text-secondary, rgb(0 0 0 / 55%));
+}
+
+.promptActions {
+  display: flex;
+  gap: var(--dsh-space-2, 8px);
+  justify-content: flex-end;
+}
+
+.promptConfirm {
+  padding: 4px 12px;
+  color: var(--dsh-color-text-on-danger, rgb(255 255 255));
+  background: var(--dsh-color-fill-danger, rgb(185 28 28));
+  border: none;
+  border-radius: var(--dsh-radius-sm, 4px);
+  cursor: pointer;
+}
+
+.promptConfirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* A refused write reports where the reader is looking, and leaves the board
+   they were reading in place. */
+.writeRefusal {
+  padding: var(--dsh-space-2, 8px);
+  font-size: var(--dsh-font-size-sm, 12px);
+  color: var(--dsh-color-text-warning, rgb(180 83 9));
+  background: var(--dsh-color-fill-warning, rgb(180 83 9 / 8%));
+  border-radius: var(--dsh-radius-sm, 4px);
+}

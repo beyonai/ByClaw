@@ -1,17 +1,9 @@
-import { CheckOutlined, CloseOutlined, LoadingOutlined } from '@ant-design/icons';
-import { Button, Modal } from 'antd';
+import { useIntl } from '@umijs/max';
+import { CheckOutlined, CloseOutlined, LoadingOutlined, PauseCircleOutlined } from '@ant-design/icons';
+import { Alert, Button, Modal } from 'antd';
 import type { TenantItem } from '../../service/TenantMgr';
 import { tenantProvisionSteps } from './provisionStatus';
 import styles from './TenantProvisionProgress.module.less';
-
-const stages = [
-  { title: '创建企业与成员身份', description: '企业记录及首位 OWNER 已建立' },
-  { title: '准备独立数据库', description: '数据库沙箱已分配并通过连接检查' },
-  { title: '启动企业专属服务', description: '正在验证连接与服务就绪状态' },
-  { title: '初始化业务数据结构', description: '完成校验后，企业状态将变为可进入' },
-];
-
-const labels = { done: '已完成', active: '进行中', pending: '待开始', failed: '失败' };
 
 export default function TenantProvisionProgress({
   tenant,
@@ -24,15 +16,47 @@ export default function TenantProvisionProgress({
   onRetry: () => void;
   retrying: boolean;
 }) {
+  const intl = useIntl();
+  const stages = [
+    {
+      title: intl.formatMessage({ id: 'tenant.progress.identity' }),
+      description: intl.formatMessage({ id: 'tenant.progress.identityDescription' }),
+    },
+    {
+      title: intl.formatMessage({ id: 'tenant.progress.database' }),
+      description: intl.formatMessage({ id: 'tenant.progress.databaseDescription' }),
+    },
+    {
+      title: intl.formatMessage({ id: 'tenant.progress.service' }),
+      description: intl.formatMessage({ id: 'tenant.progress.serviceDescription' }),
+    },
+    {
+      title: intl.formatMessage({ id: 'tenant.progress.schema' }),
+      description: intl.formatMessage({ id: 'tenant.progress.schemaDescription' }),
+    },
+  ];
+
+  const labels = {
+    done: intl.formatMessage({ id: 'tenant.progress.done' }),
+    active: intl.formatMessage({ id: 'tenant.progress.active' }),
+    pending: intl.formatMessage({ id: 'tenant.progress.pending' }),
+    failed: intl.formatMessage({ id: 'tenant.progress.failed' }),
+    paused: intl.formatMessage({ id: 'tenant.progress.paused' }),
+  };
+
   const steps = tenantProvisionSteps(tenant?.provisionState || '', tenant?.provisionStage);
   return (
     <Modal
-      title={tenant ? `${tenant.enterpriseName} · 开通进度` : '开通进度'}
+      title={
+        tenant
+          ? intl.formatMessage({ id: 'tenant.progressTitle' }, { name: tenant.enterpriseName })
+          : intl.formatMessage({ id: 'tenant.progress.title' })
+      }
       open={!!tenant}
       footer={
         tenant?.provisionState === 'FAILED' ? (
           <Button loading={retrying} onClick={onRetry}>
-            重试开通
+            {intl.formatMessage({ id: 'tenant.progress.retry' })}
           </Button>
         ) : null
       }
@@ -41,9 +65,17 @@ export default function TenantProvisionProgress({
       destroyOnHidden
     >
       <div className={styles.summary}>
-        <span>企业 ID：{tenant?.enterpriseId}</span>
-        <span>套餐：{tenant?.packageName}</span>
+        <span>{intl.formatMessage({ id: 'tenant.enterpriseSummary' }, { id: tenant?.enterpriseId })}</span>
+        <span>{intl.formatMessage({ id: 'tenant.packageSummary' }, { name: tenant?.packageName })}</span>
       </div>
+      {tenant?.provisionState === 'MANUAL_REQUIRED' && (
+        <Alert
+          type="warning"
+          showIcon
+          className={styles.notice}
+          message={intl.formatMessage({ id: 'tenant.progress.manualRequired' })}
+        />
+      )}
       <ol className={styles.timeline}>
         {stages.map((stage, index) => {
           const status = steps[index];
@@ -51,7 +83,15 @@ export default function TenantProvisionProgress({
             <li className={`${styles.step} ${styles[status]}`} key={stage.title}>
               <div className={styles.rail}>
                 <span className={styles.circle} aria-hidden="true">
-                  {status === 'done' ? <CheckOutlined /> : status === 'failed' ? <CloseOutlined /> : index + 1}
+                  {status === 'done' ? (
+                    <CheckOutlined />
+                  ) : status === 'failed' ? (
+                    <CloseOutlined />
+                  ) : status === 'paused' ? (
+                    <PauseCircleOutlined />
+                  ) : (
+                    index + 1
+                  )}
                 </span>
               </div>
               <div className={styles.content}>
@@ -63,7 +103,7 @@ export default function TenantProvisionProgress({
                   </span>
                 </div>
                 <p>{stage.description}</p>
-                {status === 'failed' && tenant?.failureReason && (
+                {(status === 'failed' || status === 'paused') && tenant?.failureReason && (
                   <p className={styles.failure}>{tenant.failureReason}</p>
                 )}
               </div>

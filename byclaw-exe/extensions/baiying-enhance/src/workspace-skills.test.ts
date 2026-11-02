@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -149,6 +149,7 @@ describe("workspace-skills", () => {
             "notice",
             "project-cloud-knowledge",
             "project-task-status-update",
+            "byclaw-cron-schedule",
             "json-skill",
             "extra-filter-name",
             "missing-extra",
@@ -205,10 +206,44 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update", "inner-filter-name"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update", "byclaw-cron-schedule", "inner-filter-name"],
         },
       },
     ]);
+  });
+
+  it("maps only each agent's declared hub codes and refreshes names and revoked associations", async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-hub-names-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const workspace = path.join(stateDir, "workspace-agent");
+    const code = "860573083592709";
+    const skillDir = path.join(stateDir, "skills", code);
+    const api = {
+      runtime: { config: { loadConfig: () => ({ agents: { list: [{ id: "agent", workspace }] } }) } },
+    } as any;
+    const merge = (skills: string[]) => mergeWorkspaceSkillsIntoManagedAgents({
+      api,
+      managed: [{ agentId: "agent", listEntry: { id: "agent", skills } }],
+      includeMainShared: false,
+      mainParentAgentId: "main",
+    });
+    try {
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(path.join(skillDir, "SKILL.md"), "---\nname: baozheng-skills\n---\n");
+      await mkdir(path.join(stateDir, "skills", "unrelated"), { recursive: true });
+      await writeFile(path.join(stateDir, "skills", "unrelated", "SKILL.md"), "---\nname: unrelated-skill\n---\n");
+      const enabled = (await merge([code]))[0].listEntry.skills;
+      expect(enabled).toContain("baozheng-skills");
+      expect(enabled).not.toContain(code);
+      expect(enabled).not.toContain("unrelated-skill");
+      await writeFile(path.join(skillDir, "SKILL.md"), "---\nname: renamed-skill\n---\n");
+      const updated = (await merge([code]))[0].listEntry.skills;
+      expect(updated).toContain("renamed-skill");
+      expect(updated).not.toContain("baozheng-skills");
+      expect((await merge([]))[0].listEntry.skills).not.toContain("renamed-skill");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("enables core bundled skills without copying them into agent workspace", async () => {
@@ -231,7 +266,7 @@ describe("workspace-skills", () => {
     ).resolves.toMatchObject([
       {
         listEntry: {
-          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update"],
+          skills: ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update", "byclaw-cron-schedule"],
         },
       },
     ]);

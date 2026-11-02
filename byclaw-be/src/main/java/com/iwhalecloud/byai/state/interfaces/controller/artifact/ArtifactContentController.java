@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.artifact;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactApplicationService.ArtifactContent;
 import com.iwhalecloud.byai.state.domain.artifact.service.ArtifactMediaTypeResolver;
@@ -136,18 +138,18 @@ public class ArtifactContentController {
 
     private ByteRange parseRange(String header, long totalSize) {
         if (totalSize < 0) {
-            throw new IllegalArgumentException("文件大小无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.range.sizeInvalid"));
         }
         if (StringUtils.isBlank(header)) {
             return new ByteRange(0L, Math.max(0L, totalSize - 1L), false, totalSize);
         }
         if (!header.startsWith("bytes=") || header.contains(",") || totalSize == 0) {
-            throw new IllegalArgumentException("仅支持单个bytes区间");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.range.singleOnly"));
         }
         String value = header.substring("bytes=".length()).trim();
         int separator = value.indexOf('-');
         if (separator < 0) {
-            throw new IllegalArgumentException("Range格式无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.range.invalid"));
         }
         String startValue = value.substring(0, separator).trim();
         String endValue = value.substring(separator + 1).trim();
@@ -157,7 +159,7 @@ public class ArtifactContentController {
             if (startValue.isBlank()) {
                 long suffixLength = Long.parseLong(endValue);
                 if (suffixLength <= 0) {
-                    throw new IllegalArgumentException("Range格式无效");
+                    throw new IllegalArgumentException(I18nUtil.get("artifact.range.invalid"));
                 }
                 start = Math.max(0L, totalSize - suffixLength);
                 end = totalSize - 1L;
@@ -168,10 +170,10 @@ public class ArtifactContentController {
             }
         }
         catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Range格式无效", e);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.range.invalid"), e);
         }
         if (start < 0 || start >= totalSize || end < start) {
-            throw new IllegalArgumentException("Range超出文件范围");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.range.outOfBounds"));
         }
         end = Math.min(end, totalSize - 1L);
         return new ByteRange(start, end, true, end - start + 1L);

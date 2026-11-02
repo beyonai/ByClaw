@@ -19,6 +19,9 @@ public class DefaultArtifactStorage implements ArtifactStoragePort {
 
     private static final String NAMESPACE = "artifact";
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting platformRouting;
+
     private final List<AbstractObjectStorageService<?>> storageServices;
 
     public DefaultArtifactStorage(List<AbstractObjectStorageService<?>> storageServices) {
@@ -56,12 +59,13 @@ public class DefaultArtifactStorage implements ArtifactStoragePort {
         resolve(storageType).deletePrefix(StoragePrefix.of(NAMESPACE, storageRoot, objectPrefix));
     }
 
-    private AbstractObjectStorageService<?> resolve(String storageType) {
-        return storageServices.stream()
+    private com.iwhalecloud.byai.common.storage.ObjectStorage resolve(String storageType) {
+        AbstractObjectStorageService<?> backend = storageServices.stream()
             .filter(service -> StorageType.matches(storageType, service.getStorageType()))
             .findFirst()
             .orElseThrow(() -> new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 "未找到Artifact存储类型对应的实现: " + storageType));
+        return platformRouting == null ? backend : platformRouting.object(backend, storageType);
     }
 
     private StorageLocation location(String storageRoot, String objectKey) {

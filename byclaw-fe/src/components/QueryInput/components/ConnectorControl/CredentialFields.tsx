@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { Form, Input } from 'antd';
 import type { ConnectorCredentialField } from '@/service/connector';
 import styles from './index.module.less';
@@ -8,29 +9,83 @@ interface Props {
 }
 
 export default function CredentialFields({ fields, customImap = false }: Props) {
+  const intl = useIntl();
+  const input = (field: ConnectorCredentialField) => {
+    if (field.inputType === 'password') {
+      return (
+        <Input.Password autoComplete="off" maxLength={field.maxLength} placeholder={field.placeholder ?? undefined} />
+      );
+    }
+    if (field.inputType === 'textarea') {
+      return (
+        <Input.TextArea
+          autoComplete="off"
+          maxLength={field.maxLength}
+          placeholder={field.placeholder ?? undefined}
+          rows={4}
+        />
+      );
+    }
+    return (
+      <Input
+        autoComplete="off"
+        maxLength={field.maxLength}
+        placeholder={field.placeholder ?? undefined}
+        type={field.inputType === 'number' ? 'number' : 'text'}
+      />
+    );
+  };
+
   const renderField = (field: ConnectorCredentialField) => (
     <Form.Item
       className={styles.credentialField}
       key={field.key}
       label={field.label}
       name={field.key}
-      rules={[{ required: true, whitespace: true, message: `请输入${field.label}` }]}
+      initialValue={field.defaultValue ?? undefined}
+      extra={field.description ?? undefined}
+      rules={[
+        {
+          required: true,
+          whitespace: true,
+          message: intl.formatMessage({ id: 'connector.credentials.required' }, { label: field.label }),
+        },
+      ]}
       style={{ gridColumn: /^(imap|smtp)(Port|Encryption)$/.test(field.key) ? undefined : '1 / -1' }}
     >
-      {field.inputType === 'password' ? (
-        <Input.Password autoComplete="off" maxLength={field.maxLength} />
-      ) : (
-        <Input autoComplete="off" maxLength={field.maxLength} />
-      )}
+      {input(field)}
     </Form.Item>
   );
 
-  if (!customImap) return <>{fields.map(renderField)}</>;
+  if (!customImap) {
+    const basicFields = fields.filter((field) => !field.advanced);
+    const advancedFields = fields.filter((field) => field.advanced);
+    return (
+      <>
+        {basicFields.map(renderField)}
+        {advancedFields.length > 0 && (
+          <details className={styles.credentialAdvanced}>
+            <summary>{intl.formatMessage({ id: 'connector.credentials.advanced' })}</summary>
+            <div className={styles.credentialAdvancedFields}>{advancedFields.map(renderField)}</div>
+          </details>
+        )}
+      </>
+    );
+  }
 
   const groups = [
-    { title: '账号信息', fields: fields.filter((field) => !/^(imap|smtp)/.test(field.key)) },
-    { title: 'IMAP 收信服务器', fields: fields.filter((field) => field.key.startsWith('imap')) },
-    { title: 'SMTP 发信服务器', fields: fields.filter((field) => field.key.startsWith('smtp')) },
+    {
+      title: intl.formatMessage({ id: 'connector.credentials.account' }),
+      fields: fields.filter((field) => !/^(imap|smtp)/.test(field.key)),
+    },
+    {
+      title: intl.formatMessage({ id: 'connector.credentials.imap' }),
+      fields: fields.filter((field) => field.key.startsWith('imap')),
+    },
+    {
+      title: intl.formatMessage({ id: 'connector.credentials.smtp' }),
+      fields: fields.filter((field) => field.key.startsWith('smtp')),
+    },
   ];
   return (
     <>

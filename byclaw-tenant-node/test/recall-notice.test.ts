@@ -53,3 +53,28 @@ it("returns a named recall notice and preserves its first operator on retries", 
   expect(JSON.stringify(projection)).not.toContain("secret");
   expect(JSON.stringify(projection)).not.toContain("hidden");
 });
+
+it("assigns a new millisecond version when recalling immediately after undo", async () => {
+  let version = 0;
+  const query = vi.fn(async (sql: string, args: any[] = []) => {
+    if (sql.includes("SELECT creator_id"))
+      return [
+        {
+          creator_id: "20",
+          usage: 1,
+          metadata: JSON.stringify({ recallUndo: { operatorId: "20", recalledAt: 1800000000000 } }),
+        },
+      ];
+    if (sql.includes("SET recalled_at=")) version = args[5] instanceof Date ? args[5].getTime() : 0;
+    if (sql.startsWith("SELECT recalled_at"))
+      return [{ recalled_at: new Date(version), recalled_by: "20", metadata: "{}" }];
+    return [];
+  });
+  const context = new CommandContext(
+    { query },
+    command({ operation: "RECALL_MESSAGE", payload: { messageId: "90" } }),
+  );
+  vi.spyOn(context, "member").mockResolvedValue({ memName: "张三" });
+  await recallMessage(context);
+  expect(version).toBe(1800000000001);
+});

@@ -15,11 +15,11 @@ import lombok.Setter;
 @Setter
 public class KnowledgeItemsMoveRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
-    @NotEmpty(message = "移动源路径不能为空")
-    private List<@NotBlank(message = "移动源路径不能为空") String> sourcePath = new ArrayList<>();
+    @NotEmpty(message = "{knowledge.move.sourceRequired}")
+    private List<@NotBlank(message = "{knowledge.move.sourceRequired}") String> sourcePath = new ArrayList<>();
 
     private String targetDirectoryPath;
 

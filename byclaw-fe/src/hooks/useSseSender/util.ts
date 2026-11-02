@@ -6,6 +6,9 @@ import { isTextContentType } from '@/utils/messgae';
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessageListItem, IResComIdsListItem } from '@/typescript/message';
 import { isJSON } from '@/utils/json';
+import { isDshRuntime } from '@/utils/chatRuntime';
+
+const DSH_RESUME_ACKNOWLEDGEMENT = 'RESUMED';
 
 const setOrderId = (sseDataObj: any, payload: any) => {
   const orderId = get(sseDataObj, 'orderId') || '';
@@ -125,7 +128,7 @@ const approvalFormHandler = (sseDataObj: any) => {
 };
 
 const askUserQuestionsHandler = (sseDataObj: any) => {
-  const sourceAgentType = get(sseDataObj, 'agentId');
+  const sourceAgentType = get(sseDataObj, 'sourceAgentType') || get(sseDataObj, 'agentId');
   const metadata = get(sseDataObj, 'metadata');
 
   const content = get(sseDataObj, 'choices.0.delta.content', '');
@@ -362,6 +365,11 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
   setOrderId(sseDataObj, res);
   setResumeMessageId(sseDataObj, res.message);
 
+  const runtimeType = get(sseDataObj, 'runtimeType');
+  if (runtimeType && isPlainObject(get(res, 'message.content'))) {
+    set(res, 'message.content.runtimeType', runtimeType);
+  }
+
   return res;
 };
 
@@ -370,6 +378,19 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
 
   const contentType = get(mySseDataObj, 'contentType');
   if (!contentType) {
+    return {};
+  }
+
+  const content = get(mySseDataObj, 'choices.0.delta.content', '');
+  const sourceAgentType = `${get(mySseDataObj, 'sourceAgentType', '')}`;
+  // GatewayWorker emits RESUMED as an internal resume acknowledgement. It is
+  // neither model reasoning nor user-facing content, but it shares the
+  // reasoningLogDelta/thinkTitle transport used by real thinking titles.
+  if (
+    `${contentType}` === `${SSEMessageType.thinkTitle}` &&
+    `${content}`.trim() === DSH_RESUME_ACKNOWLEDGEMENT &&
+    isDshRuntime({ sourceAgentType })
+  ) {
     return {};
   }
 
@@ -397,7 +418,6 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   let isDone = false;
   // 特殊处理json
   if (isTextContentType(contentType)) {
-    const content = get(mySseDataObj, 'choices.0.delta.content', '');
     isDone = isJSON(content);
   }
 

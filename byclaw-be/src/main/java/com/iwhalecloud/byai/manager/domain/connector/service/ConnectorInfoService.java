@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
 @Service
 public class ConnectorInfoService {
 
-    private static final int MAX_CREDENTIAL_FIELDS = 8;
+    private static final int MAX_CREDENTIAL_FIELDS = 16;
 
     private static final int MAX_HELP_TEXT_LENGTH = 500;
 
@@ -183,10 +183,11 @@ public class ConnectorInfoService {
         String inputType = field.getString("inputType");
         Integer maxLength = field.getInteger("maxLength");
         boolean validKey = key != null && CREDENTIAL_FIELD_KEY.matcher(key).matches();
-        boolean validType = "text".equals(inputType) || "password".equals(inputType);
+        boolean validType = "text".equals(inputType) || "password".equals(inputType)
+                || "number".equals(inputType) || "textarea".equals(inputType);
         String sanitizedLabel = label == null ? null : label.trim();
         boolean validLabel = sanitizedLabel != null && !sanitizedLabel.isEmpty() && sanitizedLabel.length() <= 100;
-        boolean validMaxLength = maxLength != null && maxLength > 0 && maxLength <= 2048;
+        boolean validMaxLength = maxLength != null && maxLength > 0 && maxLength <= 8192;
         if (!validKey || !validType || !validLabel || !validMaxLength) {
             return null;
         }
@@ -195,7 +196,39 @@ public class ConnectorInfoService {
         result.setLabel(sanitizedLabel);
         result.setInputType(inputType);
         result.setMaxLength(maxLength);
+        result.setDefaultValue(sanitizeDefaultValue(field, inputType, maxLength));
+        result.setPlaceholder(sanitizeOptionalFieldText(field, "placeholder", 2048));
+        result.setDescription(sanitizeOptionalFieldText(field, "description", 500));
+        result.setAdvanced(Boolean.TRUE.equals(field.getBoolean("advanced")));
         return result;
+    }
+
+    private static String sanitizeDefaultValue(JSONObject field, String inputType, int maxLength) {
+        if ("password".equals(inputType) || !field.containsKey("defaultValue")) {
+            return null;
+        }
+        Object configured = field.get("defaultValue");
+        if (!(configured instanceof String value) || value.length() > maxLength
+                || value.chars().anyMatch(Character::isISOControl)) {
+            return null;
+        }
+        return value;
+    }
+
+    private static String sanitizeOptionalFieldText(JSONObject field, String key, int maxLength) {
+        if (!field.containsKey(key)) {
+            return null;
+        }
+        Object configured = field.get(key);
+        if (!(configured instanceof String value)) {
+            return null;
+        }
+        String sanitized = value.trim();
+        if (sanitized.isEmpty() || sanitized.length() > maxLength
+                || sanitized.chars().anyMatch(Character::isISOControl)) {
+            return null;
+        }
+        return sanitized;
     }
 
     private static boolean isSafeHelpUrl(String value) {

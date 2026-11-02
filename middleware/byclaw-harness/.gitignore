@@ -1,0 +1,31 @@
+.env
+.DS_Store
+node_modules
+lib/
+coverage/
+*.tsbuildinfo
+.agent-teams/
+.codex-work/
+outputs/
+.idea
+.worktrees/
+
+# Local development tools
+/.codegraph/
+/.cursor/
+/.idea/
+
+# Python CLI development and build artifacts
+/builtin/python-clis/*/.venv/
+/builtin/python-clis/*/build/
+/builtin/python-clis/*/dist/
+/builtin/python-clis/**/*.egg-info/
+/builtin/python-clis/**/__pycache__/
+/builtin/python-clis/**/*.pyc
+
+# AOCI cognition index
+aoci.txt
+.aoci/
+
+# CodeGraph index
+.codegraph/

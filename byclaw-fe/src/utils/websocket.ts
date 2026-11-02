@@ -2,9 +2,15 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
-import { isChatTerminal, recordChatChain, flushChatChainLogs, recordChatConnection } from '@/utils/chatChainLog';
+import {
+  isChatCheckpoint,
+  isChatTerminal,
+  recordChatChain,
+  flushChatChainLogs,
+  recordChatConnection,
+} from '@/utils/chatChainLog';
 import { clearToken, getToken, loginRedirect } from './auth';
-import { getLocale } from '@umijs/max';
+import { getIntl, getLocale } from '@umijs/max';
 
 import { debugLog } from './debugLog';
 
@@ -229,7 +235,8 @@ class WebSocketManager {
         }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          if (isChatTerminal(message)) recordChatChain('fe.final_received', message);
+          if (isChatCheckpoint(message))
+            recordChatChain(isChatTerminal(message) ? 'fe.final_received' : 'fe.reply_received', message);
           this.handleMessage(message);
         } catch (error) {
           console.error('WebSocket 消息解析失败:', error);
@@ -255,12 +262,12 @@ class WebSocketManager {
         console.error('WebSocket 连接错误:', error);
         this.isConnecting = false;
         this.stopHeartbeat();
-        this.rejectConnectWaiters(new Error('WebSocket connection error'));
+        this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.connectionError' })));
       };
     } catch (error) {
       console.error('WebSocket 初始化失败:', error);
       this.isConnecting = false;
-      this.rejectConnectWaiters(error instanceof Error ? error : new Error('WebSocket init failed'));
+      this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.initFailed' })));
       this.scheduleReconnect();
     }
   }
@@ -330,7 +337,7 @@ class WebSocketManager {
       return Promise.resolve();
     }
     if (!this.getConnectionToken()) {
-      return Promise.reject(new Error('WebSocket token unavailable'));
+      return Promise.reject(new Error(getIntl().formatMessage({ id: 'websocket.tokenUnavailable' })));
     }
     this.init();
     return new Promise((resolve, reject) => {
@@ -346,7 +353,7 @@ class WebSocketManager {
       timer = setTimeout(() => {
         this.connectResolvers = this.connectResolvers.filter((item) => item !== onResolve);
         this.connectRejecters = this.connectRejecters.filter((item) => item !== onReject);
-        reject(new Error('WebSocket connection timeout'));
+        reject(new Error(getIntl().formatMessage({ id: 'websocket.connectionTimeout' })));
       }, timeout);
 
       this.connectResolvers.push(onResolve);
@@ -354,8 +361,22 @@ class WebSocketManager {
     });
   }
 
-  public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
+  public async requiresCloudStorage(): Promise<boolean> {
+    await this.desktopChatConfigReady;
+    return !this.desktopChatWsUrl;
+  }
+
+  public async sendMessageWhenReady(
+    message: WebSocketMessage,
+    signal?: AbortSignal,
+    isCurrent: () => boolean = () => true
+  ): Promise<void> {
+    const token = getToken();
+    const scope = this.scopedSessionId;
+    const current = () => !signal?.aborted && token === getToken() && scope === this.scopedSessionId && isCurrent();
+    if (!current()) throw new DOMException('Cancelled', 'AbortError');
     await this.waitUntilConnected();
+    if (!current()) throw new DOMException('Cancelled', 'AbortError');
     this.sendMessage(message);
   }
 
@@ -380,6 +401,10 @@ class WebSocketManager {
   /**
    * 注册消息处理器
    */
+  public getScopedSessionId(): string {
+    return this.scopedSessionId;
+  }
+
   public onMessage(type: string, handler: MessageHandler): void {
     if (!this.messageHandlers.has(type)) {
       this.messageHandlers.set(type, []);
@@ -493,7 +518,7 @@ class WebSocketManager {
     this.redirectedForExpiredToken = true;
     this.manuallyDisconnected = true;
     this.connectionToken = null;
-    this.rejectConnectWaiters(new Error('Token expiration'));
+    this.rejectConnectWaiters(new Error(getIntl().formatMessage({ id: 'websocket.tokenExpired' })));
     clearToken();
     loginRedirect({ openLoginModal: '1' });
   }

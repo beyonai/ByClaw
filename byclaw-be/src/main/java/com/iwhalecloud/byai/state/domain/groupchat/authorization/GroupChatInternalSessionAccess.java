@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.authorization;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -16,7 +18,7 @@ public final class GroupChatInternalSessionAccess {
 
     public static void requirePublic(ByaiSession session) {
         if (isInternal(session)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("groupchat.session.notFound"));
         }
     }
 }

@@ -95,9 +95,9 @@ public class WordToPdfConverter implements FileConverterStrategy {
             if (!processed) {
                 try {
                     inputStream.reset();
-                    HWPFDocument doc = new HWPFDocument(inputStream);
-                    processDocDocument(doc, pdfDocument);
-                    doc.close();
+                    try (HWPFDocument doc = new HWPFDocument(inputStream)) {
+                        processDocDocument(doc, pdfDocument);
+                    }
                     processed = true;
                     logger.debug("Successfully processed DOC document with formatting");
                 } catch (Exception e) {
@@ -309,32 +309,90 @@ public class WordToPdfConverter implements FileConverterStrategy {
 
     private void processDocDocument(HWPFDocument doc, Document pdfDocument) throws Exception {
         Range range = doc.getRange();
-        
-        // 处理普通文本
-        String text = range.text();
-        if (text != null && !text.trim().isEmpty()) {
-            String[] paragraphs = text.split("\\r?\\n");
-            for (String para : paragraphs) {
-                if (!para.trim().isEmpty()) {
-                    Paragraph paragraph = new Paragraph(para.trim(), defaultFont);
-                    pdfDocument.add(paragraph);
+        // 按 Word 段落和表格顺序生成预览，不能按换行拆全文，否则表格会混入正文。
+        int index = 0;
+        while (index < range.numParagraphs()) {
+            org.apache.poi.hwpf.usermodel.Paragraph paragraph = range.getParagraph(index);
+            if (paragraph.isInTable()) {
+                org.apache.poi.hwpf.usermodel.Table table = range.getTable(paragraph);
+                processDocTable(doc, table, pdfDocument);
+                while (index < range.numParagraphs()
+                    && range.getParagraph(index).getStartOffset() < table.getEndOffset()) {
+                    index++;
                 }
             }
+            else {
+                pdfDocument.add(createDocParagraph(doc, paragraph, 480));
+                index++;
+            }
         }
-        
-        // 处理表格 - DOC格式的表格处理比较复杂，暂时简化处理
-        try {
-            // DOC格式的表格处理需要更复杂的逻辑，这里先简化处理
-            // 如果需要完整的DOC表格支持，可以后续增强
-            logger.debug("DOC table processing is simplified in current version");
-        } catch (Exception e) {
-            logger.debug("Failed to process DOC tables: {}", e.getMessage());
+        // 空白 Word 也生成一页有效 PDF，避免 PDF writer 因零页而报错。
+        if (range.numParagraphs() == 0) {
+            pdfDocument.add(new Paragraph(" ", defaultFont));
         }
     }
 
-    // DOC表格处理方法暂时移除，因为API复杂性
-    // 如果需要完整的DOC表格支持，可以后续实现
-    // private void processDocTable(Table table, Document pdfDocument) throws Exception { ... }
+    private Paragraph createDocParagraph(HWPFDocument doc, org.apache.poi.hwpf.usermodel.Paragraph source,
+        float availableWidth) throws Exception {
+        Paragraph result = new Paragraph();
+        result.setLeading(0, 1.2f);
+        result.setAlignment(switch (source.getJustification()) {
+            case 1 -> Element.ALIGN_CENTER;
+            case 2 -> Element.ALIGN_RIGHT;
+            case 3 -> Element.ALIGN_JUSTIFIED;
+            default -> Element.ALIGN_LEFT;
+        });
+        for (int index = 0; index < source.numCharacterRuns(); index++) {
+            org.apache.poi.hwpf.usermodel.CharacterRun run = source.getCharacterRun(index);
+            if (doc.getPicturesTable().hasPicture(run)) {
+                org.apache.poi.hwpf.usermodel.Picture picture = doc.getPicturesTable().extractPicture(run, true);
+                com.lowagie.text.Image image = com.lowagie.text.Image.getInstance(picture.getContent());
+                image.scaleToFit(availableWidth, 650);
+                result.add(new Chunk(image, 0, 0, true));
+            }
+            else {
+                // 去除 Word 段落、单元格等控制字符，保留用户输入的换行与制表符。
+                String text = run.text().replace((char) 11, '\n').replaceAll("[\\x00-\\x08\\x0B-\\x1F]", "");
+                int style = (run.isBold() ? Font.BOLD : Font.NORMAL) | (run.isItalic() ? Font.ITALIC : Font.NORMAL);
+                float size = run.getFontSize() > 0 ? run.getFontSize() / 2f : 12;
+                result.add(new Chunk(text, new Font(defaultFont.getBaseFont(), size, style)));
+            }
+        }
+        if (result.isEmpty() || result.getContent().isEmpty()) {
+            result.add(new Chunk(" ", defaultFont));
+        }
+        return result;
+    }
+
+    private void processDocTable(HWPFDocument doc, org.apache.poi.hwpf.usermodel.Table source,
+        Document pdfDocument) throws Exception {
+        int columns = 0;
+        for (int row = 0; row < source.numRows(); row++) {
+            columns = Math.max(columns, source.getRow(row).numCells());
+        }
+        if (columns == 0) {
+            return;
+        }
+        PdfPTable table = new PdfPTable(columns);
+        table.setWidthPercentage(100);
+        table.setSpacingBefore(4);
+        table.setSpacingAfter(4);
+        for (int rowIndex = 0; rowIndex < source.numRows(); rowIndex++) {
+            org.apache.poi.hwpf.usermodel.TableRow row = source.getRow(rowIndex);
+            for (int column = 0; column < columns; column++) {
+                PdfPCell cell = new PdfPCell();
+                cell.setPadding(4);
+                if (column < row.numCells()) {
+                    org.apache.poi.hwpf.usermodel.TableCell sourceCell = row.getCell(column);
+                    for (int paragraph = 0; paragraph < sourceCell.numParagraphs(); paragraph++) {
+                        cell.addElement(createDocParagraph(doc, sourceCell.getParagraph(paragraph), 480f / columns));
+                    }
+                }
+                table.addCell(cell);
+            }
+        }
+        pdfDocument.add(table);
+    }
 
     private void closeResource(AutoCloseable resource, String resourceName) {
         if (resource != null) {

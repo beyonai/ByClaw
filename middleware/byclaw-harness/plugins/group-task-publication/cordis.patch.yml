@@ -1,0 +1,3 @@
+- insert:
+    - id: group-task-publication
+      name: '@byclaw/dsh-group-task-publication'

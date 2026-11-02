@@ -21,14 +21,33 @@ This is the canonical contract for automated agents working in this repository:
 | `byclaw-be/` | Java backend (Maven) |
 | `byclaw-exe/` | Python CLIs and tooling (`pyproject.toml` when initialized) |
 | `byclaw-qa/` | Cross-cutting QA, e2e, performance |
+| `middleware/builtin/` | Shared skills, scripts, Python CLIs, runtime tools, and skill registry for OpenClaw and Harness |
+| `middleware/openclaw/` | OpenClaw image definitions and runtime-specific integration |
+| `middleware/byclaw-harness/` | Harness image definitions, plugins, and runtime-specific integration |
 | `docs/` | Top-level docs: `architecture/`, `api/`, `quick-start/` |
 | `examples/` | Standalone examples, decoupled from production config |
-| `tests/` | Repo-wide test layout: `unit/`, `integration/`, `auto-gen/` (reviewed only) |
 | `scripts/` | Repo automation; optional LLM-assisted checks (secrets via env/CI only) |
 | `.github/` | CI, templates, Dependabot |
 
 Human-oriented workflow and governance: [CONTRIBUTING.md](CONTRIBUTING.md).
 Claude-specific notes: [CLAUDE.md](CLAUDE.md).
+
+## OpenClaw and Harness shared resources
+
+- **Maintain shared resources only in [`middleware/builtin/`](middleware/builtin/).** This is the canonical location for `skills/`, `python-clis/`, `runtime-tools/`, `cli/`, and `skills-registry.json`, used by both OpenClaw and Harness. The shared baseline comes from Harness; preserve OpenClaw-only skills and scripts when synchronizing upstream changes.
+- `middleware/byclaw-harness/builtin` and the corresponding legacy resource paths under `middleware/openclaw/` are compatibility symlinks. Preserve these links; do not replace them with copied directories or maintain separate resource versions. Keep runtime-specific plugins, startup scripts, and image configuration in their respective modules.
+- Resolve shared script resources relative to the script file (`import.meta.url` or `__file__`), not the caller's working directory. Do not hardcode resource locations such as `/app/skills`, `/opt/byclaw/builtin`, or developer-machine paths. Use runtime environment configuration for data, credentials, sessions, and workspace directories; retain existing access boundaries when changing path handling.
+- Build the business images from the **ByClaw repository root**. Dockerfiles must COPY shared resources directly from `middleware/builtin/`, rather than relying on compatibility symlinks. Check both Harness Dockerfiles (`Dockerfile` and `Dockerfile.extensions`), all affected OpenClaw variants, Docker ignore rules, and CI path filters when moving shared resources. Preserve each image's container destinations, ownership, installation steps, and startup behavior unless the task explicitly changes them.
+- Changes to shared resources affect both runtimes. Check that neither runtime loses required skills or scripts, and run the relevant resource tests plus the following checks from the repository root:
+
+  ```bash
+  python3 -m unittest discover -s middleware/tests -p 'test_shared_builtin.py'
+  node --test middleware/tests/shared-builtin-portability.test.mjs
+  ```
+
+  For Harness Dockerfile changes, also run `bash middleware/byclaw-harness/scripts/docker-browser-layout-verify.sh --dockerfile Dockerfile` and the same command with `--dockerfile Dockerfile.extensions`. Static checks do not establish that an image builds or starts; report any unverified container build or runtime behavior.
+
+See [shared resource conventions](middleware/builtin/README.md) and [Harness build instructions](middleware/byclaw-harness/INTEGRATION.md).
 
 ## Frontend lint conventions
 
@@ -111,6 +130,7 @@ SQL files under `deploy/middleware/initdb/`.
 4. **Do not recreate a `.ai/` directory.** Agent rules live here and in [CLAUDE.md](CLAUDE.md).
 5. **Confirm before committing documentation.** Before staging or committing any file under `docs/`, obtain the user's explicit approval for that documentation change.
 6. **Design documents are uncommitted by default.** Write requested design documents to the agreed project location, but do not stage or commit them and do not ask whether to commit them unless the user explicitly requests a commit.
+7. **Do not use `SELECT ... FOR UPDATE`.** SELECT queries must not include a `FOR UPDATE` clause, whether written directly in SQL or generated through an ORM or query builder.
 
 ## Pull requests
 
@@ -118,3 +138,12 @@ Align with [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md):
 Commits: [Conventional Commits](https://www.conventionalcommits.org/) as described in [.github/commit-convention.md](.github/commit-convention.md).
 
 @RTK.md
+
+## Redis 单机与集群兼容（业务代码强制约定）
+
+- 新增或修改任何使用 Redis 的业务功能，必须同时支持 Redis 单机和 Redis Cluster；不得以当前部署为单机为由省略集群兼容。
+- 优先复用项目已有 Redis 客户端和协调抽象，禁止新增只适配单机的连接或执行旁路。按现有客户端约定管理连接：独占连接正确归还，共享或集群句柄不得擅自关闭。
+- 多键命令、事务和 Lua 脚本必须检查 Cluster 哈希槽约束。跨槽业务应拆分操作或采用现有协调设计；必须原子操作的相关键使用经设计的同槽键方案。不得为规避 CROSSSLOT 擅自修改已有业务键、哈希标签、前缀、序列化、TTL 或 Stream 语义。
+- Lua 脚本访问的 Redis 键必须通过 KEYS 显式传入，不能把隐藏键放在 ARGV 中或在脚本内拼接访问其他槽。锁的续期、释放和 CAS 操作仍须校验持有者身份。
+- 不依赖 SELECT 切换逻辑数据库、单节点 KEYS/SCAN 结果或单节点连接语义实现集群业务；扫描、批处理、管道和错误重试必须使用客户端提供的集群兼容能力，明确部分失败与幂等处理。
+- 涉及 Redis 的行为变更应覆盖单机和真实 Cluster 的相关集成验证，重点检查 CROSSSLOT、锁/CAS、TTL、并发与失败重试。模拟测试不能替代集群验证；未验证的环境必须在交付中明确说明，不得声称已经兼容。

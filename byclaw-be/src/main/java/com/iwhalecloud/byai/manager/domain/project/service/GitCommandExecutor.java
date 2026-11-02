@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.project.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
@@ -143,25 +145,25 @@ public class GitCommandExecutor {
             boolean completed = process.waitFor(getDefaultTimeout(), TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                throw new BaseException(50500, "Git command timeout: " + String.join(" ", command));
+                throw new BaseException(50500, I18nUtil.get("git.command.timeout", String.join(" ", command)));
             }
             stdoutReader.join(5000);
             stderrReader.join(5000);
             if (process.exitValue() != 0) {
                 String error = new String(stderr.toByteArray(), StandardCharsets.UTF_8);
-                throw new BaseException(50500, "Git command failed: " + sanitizeGitCredentials(error));
+                throw new BaseException(50500, I18nUtil.get("git.command.failed", sanitizeGitCredentials(error)));
             }
             return stdout.toByteArray();
         }
         catch (IOException e) {
-            throw new BaseException(50500, "Failed to execute Git command: " + e.getMessage(), e);
+            throw new BaseException(50500, I18nUtil.get("git.command.executeFailed", e.getMessage()), e);
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (process != null) {
                 process.destroyForcibly();
             }
-            throw new BaseException(50500, "Git command interrupted: " + String.join(" ", command), e);
+            throw new BaseException(50500, I18nUtil.get("git.command.interrupted", String.join(" ", command)), e);
         }
     }
 
@@ -215,14 +217,14 @@ public class GitCommandExecutor {
 
         } catch (IOException e) {
             throw new BaseException(50500,
-                "Failed to execute Git command: " + e.getMessage(), e);
+                I18nUtil.get("git.command.executeFailed", e.getMessage()), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (process != null) {
                 process.destroyForcibly();
             }
             throw new BaseException(50500,
-                "Git command interrupted: " + String.join(" ", command), e);
+                I18nUtil.get("git.command.interrupted", String.join(" ", command)), e);
         }
     }
 

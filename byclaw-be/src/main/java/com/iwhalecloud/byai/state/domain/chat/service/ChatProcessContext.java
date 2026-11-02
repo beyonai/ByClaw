@@ -31,6 +31,9 @@ import io.netty.channel.Channel;
 @Getter
 @Setter
 public class ChatProcessContext {
+    /** Bounded, process-local output ownership snapshots. Never used to make routing decisions. */
+    public final java.util.Map<String, com.alibaba.fastjson.JSONObject> replyDiagnosticsByTrace =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 停止会话哨兵事件类型。stopChat 同 pod + HTTP SSE 场景下，向 {@link #gatewayEventQueue}
@@ -69,6 +72,9 @@ public class ChatProcessContext {
 
     /** 会话ID */
     public Long sessionId;
+
+    /** 经群聊出站装饰器校验的归属群 ID；仅进程内传递，不接受客户端请求赋值。 */
+    public Long groupSessionId;
 
     /** 推荐问题异步任务 */
     public SuggestionQuestionVo suggestionQuestion;
@@ -165,6 +171,9 @@ public class ChatProcessContext {
      */
     public boolean recoveryOnly = false;
 
+    /** Cold RESUME rebound a fresh requester channel; persist as recovery, but stream new events to that requester. */
+    public boolean streamRecoveryToRequester = false;
+
     /**
      * 恢复 / 历史批次续聚合时的水位线：快照已聚合到的最后一条 Stream 消息 ID。
      * stream_id &lt;= 该值的事件已计入快照，续聚合时应跳过，避免重复拼接。
@@ -231,6 +240,9 @@ public class ChatProcessContext {
 
     /** Explicit tenant identity copied from the ingress thread for asynchronous stream completion. */
     public TenantRequestContext tenantContext;
+
+    /** Request language copied from the ingress thread for asynchronous stream events. */
+    public String language;
 
     /**
      * 当前用户ID，用于多端广播时查找用户的所有 WebSocket Channel

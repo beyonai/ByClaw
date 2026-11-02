@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +43,7 @@ import com.alibaba.fastjson.JSONArray;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantGroupCoordinationServiceTest {
+class TenantGroupCoordinationServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final GroupWorkAssistantService assistants = mock(GroupWorkAssistantService.class);
     private final SsResourceService resources = mock(SsResourceService.class);
@@ -60,6 +61,8 @@ class TenantGroupCoordinationServiceTest {
         when(memberRouting.withRoutes(any(), any())).thenAnswer(call -> call.getArgument(0));
         org.springframework.test.util.ReflectionTestUtils.setField(service, "memberRouting", memberRouting);
         service.configureHistory(files, new GroupChatDispatchPromptBuilder(), users);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "messageDisplayService",
+            new TenantGroupMessageDisplayService(users));
         Users user = new Users(); user.setUserId(20L); user.setUserCode("user-20");
         when(users.findById(20L)).thenReturn(user);
         MessageView input = new MessageView(); input.setMessageId("60"); input.setSessionId("50"); input.setUsage(1); input.setCreatorId("20");
@@ -75,6 +78,27 @@ class TenantGroupCoordinationServiceTest {
 
     @AfterEach
     void clear() { TenantRequestContextHolder.clear(); }
+
+    @Test
+    void agentSnapshotCompletesCurrentUserNamesBeforeConvertingTheNodeResponse() {
+        stored(scope("COORDINATED"), "90");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        Users sender = new Users();
+        sender.setUserId(9007199254740993L);
+        sender.setUserName("当前用户名");
+        when(users.findByIds(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(List.of(sender));
+        when(node.request(eq(tenant), eq("POST"), eq("/internal/v1/group-chats/30/context"), any(), any()))
+            .thenReturn(Map.of("conversationKey", "30", "messages", List.of(Map.of(
+                "messageId", "8000000010000000200", "creatorId", "9007199254740993", "creatorName", "9007199254740993",
+                "usage", 1, "speaker", Map.of("type", "user", "userCode", "9007199254740993")))));
+
+        service.decorate(executionContext(request(90L)), "继续任务", new HashMap<>());
+
+        ArgumentCaptor<GroupChatContextResponse> snapshot = ArgumentCaptor.forClass(GroupChatContextResponse.class);
+        verify(files).prepareGroupSnapshot(eq("user-20"), any(), any(), any(), snapshot.capture());
+        assertThat(snapshot.getValue().getMessages().get(0).getSpeaker().getDisplayName()).isEqualTo("当前用户名");
+        verify(users).findByIds(org.mockito.ArgumentMatchers.anyCollection());
+    }
 
     @Test
     void replacesClientScopeWithStoredScope() {
@@ -191,7 +215,7 @@ class TenantGroupCoordinationServiceTest {
 
         String result = service.decorate(executionContext(request), "hello", new HashMap<>()).toString();
 
-        assertThat(result).contains("TASK 还是 CHAT", "\"dispatchId\":\"70\"", "只有判定为 TASK 时才适用", "group-members.json")
+        assertThat(result).contains("[群聊协议]", "group_request_assistance", "只有判定为 TASK 时才适用", "group-members.json")
             .doesNotContain("平台确定为 GROUP_TASK", "处理自己的任务", "\"dispatchId\":\"999\"");
         assertThat(request.getExtParams()).containsEntry("tenantGroupCandidate", true)
             .containsEntry("groupDispatch", candidate(target));
@@ -218,7 +242,9 @@ class TenantGroupCoordinationServiceTest {
         AssistantChatDto request = request(43L);
         request.setExtParams(Map.of("tenantGroupCandidate", true));
 
-        String result = service.decorate(executionContext(request), "继续", new HashMap<>()).toString();
+        ChatProcessContext context = executionContext(request);
+        String result = service.decorate(context, "继续", new HashMap<>()).toString();
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
 
         assertThat(request.getExtParams()).doesNotContainKey("tenantGroupCandidate");
         assertThat(result).contains("task-delivery.json").doesNotContain("群聊判定协议");
@@ -261,6 +287,7 @@ class TenantGroupCoordinationServiceTest {
         ChatProcessContext context = executionContext(request);
         Map<String, Object> gateway = new HashMap<>();
         Object result = service.decorate(context, "协作制作视频", gateway);
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
         assertThat(result.toString()).contains("GROUP_TASK", "不要重新判断", "请先读取", "group-members.json");
         assertThat(request.getExtParams()).doesNotContainKeys("groupChat", "groupContextSnapshot");
         assertThat(((Map<?, ?>) gateway.get("groupChat")).get("beforeMessageId")).isEqualTo("8000000010000000201");
@@ -335,9 +362,11 @@ class TenantGroupCoordinationServiceTest {
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
             .thenReturn(Map.of("state", "GROUP_TASK_CANDIDATE", "groupDispatch", candidate(42)));
 
-        String result = service.decorate(executionContext(request(42L)), "hello", new HashMap<>()).toString();
+        ChatProcessContext context = executionContext(request(42L));
+        String result = service.decorate(context, "hello", new HashMap<>()).toString();
+        assertThat(context.getGroupSessionId()).isEqualTo(30L);
 
-        assertThat(result).contains("group-members.json", "\"dispatchId\":\"70\"")
+        assertThat(result).contains("group-members.json", "[群聊协议]", "group_request_assistance")
             .doesNotContain("群内昵称", "文案员工", "检索员工", "未选员工", "HUMAN_20");
         ArgumentCaptor<List<GroupMember>> roster = ArgumentCaptor.forClass(List.class);
         verify(files).prepareGroupMemberSnapshot(eq("user-20"), any(), eq("trace-60"), eq(60L), any(), roster.capture());

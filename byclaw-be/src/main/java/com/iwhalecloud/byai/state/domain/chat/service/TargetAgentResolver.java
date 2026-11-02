@@ -31,8 +31,20 @@ public class TargetAgentResolver {
     @Autowired
     private SystemParamTargetAgentResolver systemParamTargetAgentResolver;
 
-    @Value("${byclaw.route-by-super-to-user-sandbox:false}")
-    private boolean routeBySuperToUserSandbox;
+    @Autowired(required = false)
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway sharedSandboxGateway;
+
+    @Value("${byclaw.super-enabled:false}")
+    private boolean superEnabled;
+
+    /** 将服务端最终路由转换为前端可消费的运行时类型。 */
+    public String resolveRuntimeType(String targetAgentType) {
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.BYCLAW_DSH.getCode())
+                || StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+            return "dsh";
+        }
+        return StringUtils.isBlank(targetAgentType) ? "unknown" : "openclaw";
+    }
 
     /**
      * 根据基础 workerAgentType、agentId、sourceAgentType 与 userCode 计算最终 targetAgentType。
@@ -46,25 +58,37 @@ public class TargetAgentResolver {
     public String resolveAgentType(String workerAgentType, Long agentId, String resumeAgentType, String userCode) {
         String targetAgentType = workerAgentType;
 
-        if (routeBySuperToUserSandbox && agentId != null
-                && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            targetAgentType = buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode);
-        }
-        else if (agentId == null && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
-            // agentId 为空代表公共超级助手入口；不能被旧会话透传的 BYCLAW_EXE sourceAgentType 覆盖。
-            targetAgentType = WorkerAgentType.BY_SUPER.getCode();
-        }
-        else if (StringUtils.isNotBlank(targetAgentType)
+        if (StringUtils.isNotBlank(targetAgentType)
                 && targetAgentType.startsWith(WorkerAgentType.DEBUG.getCode())) {
             targetAgentType = WorkerAgentType.DEBUG.getCode() + "_" + agentId;
         }
 
         targetAgentType = resolveUserSandboxAgentType(targetAgentType, userCode);
         if (StringUtils.isNotBlank(resumeAgentType)) {
-            return resumeAgentType;
+            targetAgentType = resumeAgentType;
         }
-        targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
-        return resolveRuntimeAgentType(targetAgentType, userCode);
+        else {
+            targetAgentType = systemParamTargetAgentResolver.resolve(targetAgentType, agentId, userCode);
+        }
+        // 在所有覆盖规则之后执行，防止历史 Resume 或资源配置绕过 Super 兼容开关。
+        if (!superEnabled && WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)) {
+            targetAgentType = buildUserAgentType(WorkerAgentType.HARNESS, userCode);
+        }
+        targetAgentType = resolveRuntimeAgentType(targetAgentType, userCode);
+        if (sharedSandboxGateway != null && StringUtils.startsWith(targetAgentType, "BYCLAW_DSH")) {
+            var shared = sharedSandboxGateway.tryAcquire(userCode, "byclaw-dsh");
+            if (shared != null) {
+                if (StringUtils.isBlank(shared.getWorkerAgentType())) {
+                    throw new IllegalStateException("共享沙箱映射缺少 Worker 路由");
+                }
+                return shared.getWorkerAgentType();
+            }
+            // 客户端不能用旧映射的 resume target 绕过当前用户路由。
+            if (targetAgentType.startsWith("BYCLAW_DSH_SHARED_")) {
+                return buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode);
+            }
+        }
+        return targetAgentType;
     }
 
     /**
@@ -109,7 +133,9 @@ public class TargetAgentResolver {
     }
 
     public boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
-        return StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
+        return (sharedSandboxGateway != null && StringUtils.startsWith(targetAgentType, "BYCLAW_DSH_SHARED_")
+                && targetAgentType.equals(sharedSandboxGateway.currentWorkerTarget(userCode)))
+            || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_EXE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.BYCLAW_CODE, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType, buildUserAgentType(WorkerAgentType.HARNESS, userCode))
             || StringUtils.equalsIgnoreCase(targetAgentType,
@@ -134,7 +160,8 @@ public class TargetAgentResolver {
 
     private String resolveRuntimeAgentType(String targetAgentType, String userCode) {
         // HARNESS 是数据库中的稳定逻辑类型；当前运行时使用 DeepSeek Harness（DSH），后续可替换为其他实现。
-        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())) {
+        if (StringUtils.startsWith(targetAgentType, WorkerAgentType.HARNESS.getCode())
+                || StringUtils.equals(targetAgentType, WorkerAgentType.BYCLAW_DSH.getCode())) {
             return buildUserAgentType(WorkerAgentType.BYCLAW_DSH, userCode);
         }
         return targetAgentType;

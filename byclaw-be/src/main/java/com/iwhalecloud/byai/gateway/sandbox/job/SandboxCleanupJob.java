@@ -17,6 +17,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "sandbox.cleanup", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SandboxCleanupJob {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxCleanupJob.class);
 
     @Autowired
@@ -29,6 +32,7 @@ public class SandboxCleanupJob {
         initialDelayString = "${sandbox.cleanup.initial-delay:35000}",
         scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void cleanupExpiredSandboxes() {
+        if (!platformExecution.isLegacyExecutor()) return;
         LOGGER.debug("开始执行沙箱清理任务");
         try {
             SandboxLifecycleJobReport report = sandboxService.cleanupExpiredSandboxes();
@@ -38,6 +42,15 @@ public class SandboxCleanupJob {
         }
         catch (Exception e) {
             LOGGER.error("沙箱清理任务执行异常", e);
+        }
+        try {
+            SandboxLifecycleJobReport report = sandboxService.releaseSilentDshSandboxes();
+            LOGGER.debug("DSH 静默释放检查完成，候选 {} 个，释放 {} 个，跳过 {} 个，失败 {} 个，释放记录：{}，失败记录：{}",
+                report.getTotalCandidates(), report.getAffectedCount(), report.getSkippedCount(),
+                report.getFailedCount(), report.getAffectedSandboxes(), report.getFailedSandboxes());
+        }
+        catch (Exception e) {
+            LOGGER.error("DSH 静默释放检查执行异常", e);
         }
     }
 }

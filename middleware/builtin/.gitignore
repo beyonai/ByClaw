@@ -1,0 +1,6 @@
+python-clis/*/build/
+python-clis/*/dist/
+python-clis/*/release/
+python-clis/**/*.egg-info/
+**/__pycache__/
+**/*.pyc

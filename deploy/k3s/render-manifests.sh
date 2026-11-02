@@ -72,7 +72,6 @@ OPENSANDBOX_REPLICAS="${OPENSANDBOX_REPLICAS:-2}"
 OPENSANDBOX_HPA_MIN="${OPENSANDBOX_HPA_MIN:-$OPENSANDBOX_REPLICAS}"
 BYCLAW_BE_REPLICAS="${BYCLAW_BE_REPLICAS:-1}"
 BYCLAW_FE_REPLICAS="${BYCLAW_FE_REPLICAS:-1}"
-BYCLAW_SUPER_REPLICAS="${BYCLAW_SUPER_REPLICAS:-1}"
 BYCLAW_QA_REPLICAS="${BYCLAW_QA_REPLICAS:-1}"
 BYCLAW_DEMO_REPLICAS="${BYCLAW_DEMO_REPLICAS:-1}"
 BYCLAW_DEPLOY_CONFIG_DIR="${BYCLAW_DEPLOY_CONFIG_DIR:-$SCRIPT_DIR/../config}"
@@ -83,7 +82,6 @@ KUBE_DNS_SERVICE_IP="${KUBE_DNS_SERVICE_IP:-10.43.0.10}"
 
 IMAGE_FE="${IMAGE_FE:-ghcr.io/beyonai/byclaw/byclaw-fe:main}"
 IMAGE_BE="${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}"
-IMAGE_SUPER="${IMAGE_SUPER:-ghcr.io/beyonai/byclaw/byclaw-super:main}"
 IMAGE_QA="${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}"
 IMAGE_DEMO="${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}"
 IMAGE_REDIS="${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
@@ -108,10 +106,6 @@ QA_DOMAINNAME="${QA_DOMAINNAME:-byclaw-qa-manager}"
 HOST="${HOST:-byclaw-be.${NS_SERVICE}.svc.cluster.local}"
 BE_SERVER_PORT="${BE_SERVER_PORT:-8086}"
 BE_WS_PORT="${BE_WS_PORT:-8082}"
-BYCLAW_SUPER_PORT="${BYCLAW_SUPER_PORT:-3000}"
-BYCLAW_SUPER_DB_SSL="${BYCLAW_SUPER_DB_SSL:-false}"
-BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED="${BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED:-false}"
-BYCLAW_SUPER_BE_BASE_URL="${BYCLAW_SUPER_BE_BASE_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
 BYCLAW_QA_PORT="${BYCLAW_QA_PORT:-8000}"
 APIDEMO_PORT="${APIDEMO_PORT:-8999}"
 BE_DOMAINNAME_URL="${BE_DOMAINNAME_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
@@ -373,14 +367,6 @@ write_byclaw_runtime_env_files() {
         render_env_line "HOST" "byclaw-be.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "$BE_DOMAINNAME"
     } > "$dir/.byclaw-be-runtime.env"
-    {
-        render_env_line "HOST" "0.0.0.0"
-        render_env_line "PORT" "$BYCLAW_SUPER_PORT"
-        render_env_line "DB_SSL" "$BYCLAW_SUPER_DB_SSL"
-        render_env_line "DB_EVENT_LISTEN_ENABLED" "$BYCLAW_SUPER_DB_EVENT_LISTEN_ENABLED"
-        render_env_line "DB_MIGRATE_ON_START" "false"
-        render_env_line "BYCLAW_BE_BASE_URL" "$BYCLAW_SUPER_BE_BASE_URL"
-    } > "$dir/.byclaw-super-runtime.env"
     {
         render_env_line "HOST" "${QA_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local"
         render_env_line "SERVICE_NAME" "$QA_DOMAINNAME"
@@ -1514,82 +1500,6 @@ spec:
       targetPort: ws
 EOF
 } > "$OUT_DIR/40-service/byclaw-be.yaml"
-
-cat > "$OUT_DIR/40-service/byclaw-super.yaml" <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: byclaw-super
-  namespace: ${NS_SERVICE}
-spec:
-  replicas: ${BYCLAW_SUPER_REPLICAS}
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: byclaw-super
-  template:
-    metadata:
-      labels:
-        app: byclaw-super
-      annotations:
-        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-      containers:
-        - name: super
-          image: ${IMAGE_SUPER}
-          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
-          ports:
-            - name: http
-              containerPort: ${BYCLAW_SUPER_PORT}
-          envFrom:
-            - configMapRef:
-                name: byclaw-runtime-env
-            - configMapRef:
-                name: byclaw-super-runtime-env
-            - secretRef:
-                name: byclaw-runtime-secret
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 20
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 6
-          resources:
-            requests:
-              cpu: "${BYCLAW_SUPER_CPU_REQUEST:-250m}"
-              memory: "${BYCLAW_SUPER_MEMORY_REQUEST:-512Mi}"
-            limits:
-              cpu: "${BYCLAW_SUPER_CPU_LIMIT:-1}"
-              memory: "${BYCLAW_SUPER_MEMORY_LIMIT:-2Gi}"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: byclaw-super
-  namespace: ${NS_SERVICE}
-spec:
-  selector:
-    app: byclaw-super
-  ports:
-    - name: http
-      port: ${BYCLAW_SUPER_PORT}
-      targetPort: http
-EOF
 
 BYCLAW_FE_NGINX_CHECKSUM="$(render_byclaw_fe_nginx_conf | compute_sha256)"
 

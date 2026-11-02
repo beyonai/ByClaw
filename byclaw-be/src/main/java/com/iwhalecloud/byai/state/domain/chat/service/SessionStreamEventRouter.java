@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContext;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -26,6 +28,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import java.util.List;
 import java.util.UUID;
 
@@ -83,6 +86,16 @@ public class SessionStreamEventRouter {
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
     public StreamDispatchResult dispatchChildBatch(Long sessionId, List<JSONObject> events) {
+        long started = System.nanoTime();
+        for (JSONObject event : events) ChatReplyLog.log("be.reply_child", event, null, "running", "phase", "start");
+        StreamDispatchResult result = dispatchChildBatchInternal(sessionId, events);
+        for (JSONObject event : events) ChatReplyLog.log("be.reply_child", event, null,
+            result.shouldAcknowledge() ? "handled" : "failed", "phase", "end",
+            "durationMs", (System.nanoTime() - started) / 1_000_000);
+        return result;
+    }
+
+    private StreamDispatchResult dispatchChildBatchInternal(Long sessionId, List<JSONObject> events) {
         try {
             if (tenantScopedSessionEventService != null && tenantScopedSessionEventService.handleChildBatch(sessionId, events))
                 return StreamDispatchResult.HANDLED;
@@ -153,6 +166,9 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.MISSING_CONTEXT;
         }
         ctx.currentStreamId = dataJson.getString("stream_id");
+        ChatReplyLog.bind(ctx, dataJson);
+        ChatReplyLog.log("be.reply_route", dataJson, ctx, "ok",
+            "actualContextClientRequestId", ctx.clientRequestId);
 
         if (!ChatTransport.WEBSOCKET.equals(ctx.transport)) {
             if (ctx.gatewayEventQueue != null) {
@@ -171,11 +187,18 @@ public class SessionStreamEventRouter {
             return StreamDispatchResult.HANDLED;
         }
 
-        WebSocketRouteResult routeResult = routeWebSocketEvent(ctx, dataJson);
-        if (routeResult.shouldBroadcast) {
-            broadcastToOtherDevices(ctx, dataJson);
+        LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();
+        try {
+            WebSocketI18nSupport.applyLocale(ctx.language, ctx.loginInfo);
+            WebSocketRouteResult routeResult = routeWebSocketEvent(ctx, dataJson);
+            if (routeResult.shouldBroadcast) {
+                broadcastToOtherDevices(ctx, dataJson);
+            }
+            return routeResult.dispatchResult;
         }
-        return routeResult.dispatchResult;
+        finally {
+            LocaleContextHolder.setLocaleContext(previousLocaleContext);
+        }
     }
 
     private StreamDispatchResult handleMissingParent(Long sessionId, List<JSONObject> events) {
@@ -195,14 +218,17 @@ public class SessionStreamEventRouter {
 
     private WebSocketRouteResult routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
         if (gatewayStreamEventProcessor.handleHistoryEventIfNecessary(ctx, dataJson)) {
+            ChatReplyLog.log("be.reply_route", dataJson, ctx, "history");
             return WebSocketRouteResult.ignored();
         }
 
         String eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
         if (gatewayStreamEventProcessor.shouldIgnoreEvent(ctx, eventType, dataJson)) {
+            ChatReplyLog.log("be.reply_route", dataJson, ctx, "ignored", "reason", "source_or_resume_ack");
             return WebSocketRouteResult.ignored();
         }
         if (StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId)) {
+            ChatReplyLog.log("be.reply_route", dataJson, ctx, "replay", "reason", "watermark");
             return handleWatermarkedReplay(ctx, eventType);
         }
         JSONObject metadata = dataJson.getJSONObject("metadata");
@@ -228,7 +254,7 @@ public class SessionStreamEventRouter {
         if (messageContext != null) {
             messageContext.setRecordedStreamEventData(null);
         }
-        if (ctx.recoveryOnly) {
+        if (ctx.recoveryOnly && !ctx.streamRecoveryToRequester) {
             boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
             if (!alreadyHydrated) {
                 pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);
@@ -313,6 +339,7 @@ public class SessionStreamEventRouter {
 
     private boolean handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
+        errorMsg = gatewayStreamEventProcessor.presentErrorMessage(metadata, errorMsg);
         if (ctx.recoveryOnly) {
             ctx.gatewayError = true;
             return true;
@@ -321,6 +348,9 @@ public class SessionStreamEventRouter {
         errorPayload.put("message", errorMsg);
         errorPayload.put("traceback", errorMsg);
         errorPayload.put("sessionId", String.valueOf(ctx.sessionId));
+        gatewayStreamEventProcessor.enrichQuotaError(ctx,metadata,errorPayload);
+        JSONObject diagnostics = ChatReplyLog.envelope(dataJson);
+        if (diagnostics != null) errorPayload.put("chatChain", diagnostics);
         gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString(),
             ctx.sessionId);
@@ -379,6 +409,7 @@ public class SessionStreamEventRouter {
             return null;
         }
         JSONObject broadcastJson = new JSONObject(dataJson);
+        ChatReplyLog.attach(broadcastJson, ctx, dataJson.getString("trace_id"));
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata == null) {
             metadata = new JSONObject();

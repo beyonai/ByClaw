@@ -25,7 +25,6 @@ def _write_fake_uv(fake_bin: Path, exec_log: Path, env_log: Path) -> None:
             printf 'REDIS_KEY_SCHEMA_VERSION=%s\\n' "${{REDIS_KEY_SCHEMA_VERSION-}}" >> {env_log}
             printf 'BY_QA_STORAGE_PROVIDER=%s\\n' "${{BY_QA_STORAGE_PROVIDER-}}" >> {env_log}
             printf 'BY_QA_EVENT_PUBLISHER_PROVIDER=%s\\n' "${{BY_QA_EVENT_PUBLISHER_PROVIDER-}}" >> {env_log}
-            printf 'BYAI_LANGFUSE_ENABLED=%s\\n' "${{BYAI_LANGFUSE_ENABLED-}}" >> {env_log}
             exit 0
             """
         )
@@ -145,7 +144,6 @@ def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:
         "REDIS_KEY_SCHEMA_VERSION=",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -214,7 +212,6 @@ def test_start_accepts_redis_cluster_source_env(tmp_path: Path) -> None:
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -258,7 +255,6 @@ def test_start_accepts_redis_cluster_source_env_without_redis_database(tmp_path:
         "REDIS_KEY_SCHEMA_VERSION=v2",
         "BY_QA_STORAGE_PROVIDER=byclaw_knowledge_storage:build_byclaw_knowledge_storage_provider",
         "BY_QA_EVENT_PUBLISHER_PROVIDER=byclaw_knowledge_event_publisher:build_byclaw_knowledge_event_publisher",
-        "BYAI_LANGFUSE_ENABLED=",
     ]
 
 
@@ -286,67 +282,6 @@ def test_start_rejects_redis_cluster_without_v2_key_schema(tmp_path: Path) -> No
 
     assert result.returncode != 0
     assert "REDIS_KEY_SCHEMA_VERSION must be v2" in result.stderr
-
-
-def test_start_ignores_removed_byai_qa_langfuse_alias(tmp_path: Path) -> None:
-    qa_dir = tmp_path / "byclaw-qa"
-    qa_dir.mkdir()
-    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
-
-    values = _complete_source_env()
-    values["BYAI_QA_LANGFUSE_ENABLED"] = "true"
-    _write_env(qa_dir / ".env", values)
-
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    exec_log = tmp_path / "exec.log"
-    env_log = tmp_path / "env.log"
-    _write_fake_uv(fake_bin, exec_log, env_log)
-
-    result = subprocess.run(
-        ["bash", str(qa_dir / "start.sh"), "api"],
-        cwd=qa_dir,
-        env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "BYAI_LANGFUSE_ENABLED=" in env_log.read_text().splitlines()
-
-
-def test_start_preserves_explicit_byai_langfuse_enabled(tmp_path: Path) -> None:
-    qa_dir = tmp_path / "byclaw-qa"
-    qa_dir.mkdir()
-    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
-
-    values = _complete_source_env()
-    values["BYAI_QA_LANGFUSE_ENABLED"] = "true"
-    _write_env(qa_dir / ".env", values)
-
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    exec_log = tmp_path / "exec.log"
-    env_log = tmp_path / "env.log"
-    _write_fake_uv(fake_bin, exec_log, env_log)
-
-    result = subprocess.run(
-        ["bash", str(qa_dir / "start.sh"), "api"],
-        cwd=qa_dir,
-        env={
-            "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
-            "BYAI_LANGFUSE_ENABLED": "false",
-        },
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "BYAI_LANGFUSE_ENABLED=false" in env_log.read_text().splitlines()
 
 
 def test_manual_worker_start_still_requires_worker_id(tmp_path: Path) -> None:

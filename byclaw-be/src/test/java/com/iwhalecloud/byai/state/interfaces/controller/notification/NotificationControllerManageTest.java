@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-class NotificationControllerManageTest {
+class NotificationControllerManageTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void exposesNotificationManageEndpoints() throws Exception {

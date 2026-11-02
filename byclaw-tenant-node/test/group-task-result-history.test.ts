@@ -13,6 +13,7 @@ it("recognizes legacy automatic group replies as results without rewriting store
     metadata: JSON.stringify({ scene: "GROUP_CHAT", taskId: "50", targetAgentId: "42" }),
   };
   const repository = {
+    members: vi.fn(async () => []),
     messages: vi.fn(async () => [
       { sessionId: "30", messageId: "40", usage: 1, creatorId: "7", messageContent: "你好" },
     ]),

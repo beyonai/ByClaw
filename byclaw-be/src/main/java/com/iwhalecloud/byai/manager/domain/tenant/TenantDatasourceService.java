@@ -11,9 +11,11 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -28,6 +30,7 @@ public class TenantDatasourceService {
     private static final int MAX_ROWS = 500;
     private static final int MAX_PAGE = 10000;
     private static final int QUERY_TIMEOUT_SECONDS = 15;
+    private static final Pattern LOCKING_SQL = Pattern.compile("\\bfor\\s+update\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern DANGEROUS_SQL = Pattern.compile(
         "\\b(delete|drop|truncate|update|insert|alter|create|merge|grant|revoke|call|do|vacuum|reindex|refresh|copy|execute|exec|replace|into)\\b",
         Pattern.CASE_INSENSITIVE);
@@ -37,9 +40,18 @@ public class TenantDatasourceService {
     private final TenantCredentialCrypto credentialCrypto;
     private final String dbProbeHost;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantSandboxService sandboxService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
+                                   TenantCredentialCrypto credentialCrypto) {
+        this(tenantMapper, sandboxMapper, credentialCrypto, "");
+    }
+
     public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
                                    TenantCredentialCrypto credentialCrypto,
-                                   @Value("${BYCLAW_TENANT_DB_PROBE_HOST:}") String dbProbeHost) {
+                                   String dbProbeHost) {
         this.tenantMapper = tenantMapper;
         this.sandboxMapper = sandboxMapper;
         this.credentialCrypto = credentialCrypto;
@@ -68,7 +80,7 @@ public class TenantDatasourceService {
     public QueryResult browse(long enterpriseId, String schema, String table, int page) {
         if (!"byai".equals(schema) || table == null || table.length() > 128
             || page < 1 || page > MAX_PAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid table selection");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.table.invalid");
         }
         try (Connection connection = connect(enterpriseId)) {
             try (PreparedStatement check = connection.prepareStatement(
@@ -76,7 +88,7 @@ public class TenantDatasourceService {
                 check.setString(1, schema);
                 check.setString(2, table);
                 if (!check.executeQuery().next()) {
-                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "table not found");
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.datasource.table.notFound");
                 }
             }
             String sql = "SELECT * FROM " + quoteIdentifier(schema) + "." + quoteIdentifier(table)
@@ -92,18 +104,29 @@ public class TenantDatasourceService {
         }
     }
 
+    /**
+     * 执行有界 SQL；连接前统一拒绝行锁查询，危险操作仍须人工确认。
+     * @param enterpriseId 目标企业
+     * @param sql 单条 SQL
+     * @param page 结果页码
+     * @param confirmed 是否已确认危险操作
+     * @return 原有分页结果或影响行数
+     */
     public QueryResult execute(long enterpriseId, String sql, int page, boolean confirmed) {
         String statementSql = singleStatement(sql);
+        if (LOCKING_SQL.matcher(visibleSql(statementSql)).find()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.lockForbidden");
+        }
         if (page < 1 || page > MAX_PAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid page");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.page.invalid");
         }
         boolean dangerous = requiresConfirmation(statementSql);
         if (dangerous && !confirmed) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SQL requires confirmation");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.confirmation");
         }
         boolean pageable = !dangerous && pageableQuery(statementSql);
         if (page > 1 && !pageable) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "this SQL result cannot be paged");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.notPageable");
         }
         String pagedSql = pageable ? pagedQuery(statementSql, page) : statementSql;
         try (Connection connection = connect(enterpriseId);
@@ -125,10 +148,10 @@ public class TenantDatasourceService {
 
     private Connection connect(long enterpriseId) {
         if (!CurrentUserHolder.isPlatformManager()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "platform administrator required");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.admin.required");
         }
         if (enterpriseId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         }
         String dbName = tenantMapper.selectConfig(enterpriseId, "DB_NAME");
         String dbUser = tenantMapper.selectConfig(enterpriseId, "DB_USER");
@@ -137,7 +160,7 @@ public class TenantDatasourceService {
         if (!("byclaw_t_" + enterpriseId).equals(dbName)
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
             || envelope == null || recordId == null || !recordId.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database is not provisioned");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.datasource.notProvisioned");
         }
         SsSandboxRecord record = sandboxMapper.selectById(Long.parseLong(recordId));
         if (record == null || !Long.valueOf(enterpriseId).equals(record.getEnterpriseId())
@@ -145,16 +168,22 @@ public class TenantDatasourceService {
             || !"tenant-opengauss".equals(record.getSandboxType())
             || !"RUNNING".equals(record.getStatus())
             || record.getEndpoint() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database sandbox is not running");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.datasource.notRunning");
         }
         TenantDbProvisioningService.HostPort endpoint = databaseEndpoint(record);
         String host = dbProbeHost == null || dbProbeHost.isBlank() ? endpoint.host() : dbProbeHost;
         String url = "jdbc:postgresql://" + host + ":" + endpoint.port() + "/" + dbName
             + "?connectTimeout=5&socketTimeout=20";
         try {
-            return DriverManager.getConnection(url, dbUser,
-                credentialCrypto.decrypt(enterpriseId, dbName, envelope));
-        } catch (GeneralSecurityException | SQLException e) {
+            Properties credentials = new Properties();
+            credentials.setProperty("user", dbUser);
+            credentials.setProperty("password", credentialCrypto.decrypt(enterpriseId, dbName, envelope));
+            if (record.getSandboxId() != null && record.getSandboxId().startsWith("microvm--")) {
+                PrivateDatabaseSocketFactory.configure(credentials,
+                    sandboxService.privateTransport(enterpriseId, "tenant-opengauss"));
+            }
+            return DriverManager.getConnection(url, credentials);
+        } catch (GeneralSecurityException | SQLException | IllegalArgumentException e) {
             throw databaseUnavailable(e);
         }
     }
@@ -163,7 +192,7 @@ public class TenantDatasourceService {
         try {
             return TenantDbProvisioningService.parseEndpoint(record.getEndpoint(), record.getSandboxId());
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database endpoint is invalid");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.datasource.endpoint.invalid");
         }
     }
 
@@ -174,7 +203,7 @@ public class TenantDatasourceService {
     /** Allow one SQL statement, including a trailing semicolon; quoted text is not a delimiter. */
     static String singleStatement(String sql) {
         if (sql == null || sql.isBlank() || sql.length() > 20000) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SQL must be between 1 and 20000 characters");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.length");
         }
         String value = sql.trim();
         boolean single = false;
@@ -190,15 +219,24 @@ public class TenantDatasourceService {
                 else doubleQuoted = !doubleQuoted;
             } else if (c == ';' && !single && !doubleQuoted) {
                 if (terminator >= 0) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run one SQL statement at a time");
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.singleStatement");
                 }
                 terminator = i;
             }
         }
         if (single || doubleQuoted || (terminator >= 0 && !value.substring(terminator + 1).isBlank())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run one SQL statement at a time");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.singleStatement");
         }
         return terminator >= 0 ? value.substring(0, terminator).trim() : value;
+    }
+
+    /**
+     * 供已认证服务桥复用确认判定，避免浏览器绕过写入审计。
+     * @param sql 原 SQL 文本
+     * @return 是否需要人工确认
+     */
+    public static boolean requiresPlatformConfirmation(String sql) {
+        return requiresConfirmation(sql);
     }
 
     static boolean requiresConfirmation(String sql) {
@@ -301,7 +339,7 @@ public class TenantDatasourceService {
     }
 
     private static ResponseStatusException databaseUnavailable(Exception cause) {
-        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant database query failed", cause);
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.datasource.query.failed", cause);
     }
 
     public record TableInfo(String schema, String name, String type) {}

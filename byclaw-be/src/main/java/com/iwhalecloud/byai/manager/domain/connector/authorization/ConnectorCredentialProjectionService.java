@@ -47,6 +47,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class ConnectorCredentialProjectionService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting platformPrivateFiles;
+
+
 
     private static final long MAX_CREDENTIAL_FILE_BYTES = 64 * 1024L;
     private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -158,6 +162,7 @@ public class ConnectorCredentialProjectionService {
 
     private void delete(Long userId, CredentialProjectionSpec projection) {
         Path credentialFile = workspaceService.resolveProjectionFile(userId, projection.projectionPath());
+        if (platformPrivateFiles.isRemote()) { platformPrivateFiles.delete(credentialFile); return; }
         try {
             Files.deleteIfExists(credentialFile);
         } catch (IOException | SecurityException e) {
@@ -173,7 +178,8 @@ public class ConnectorCredentialProjectionService {
             CredentialProjectionSpec projection) {
         Path credentialFile = workspaceService.resolveProjectionFile(userId, projection.projectionPath());
         Path directory = credentialFile.getParent();
-        if (Files.isSymbolicLink(credentialFile)) {
+        if (platformPrivateFiles.isRemote()) platformPrivateFiles.rejectSymbolicLink(credentialFile);
+        if (!platformPrivateFiles.isRemote() && Files.isSymbolicLink(credentialFile)) {
             throw new IllegalStateException("Connector credential projection must not be a symbolic link");
         }
         if (projectionMatches(credentialFile, connector, secret)) {
@@ -182,6 +188,11 @@ public class ConnectorCredentialProjectionService {
             } catch (IOException e) {
                 throw new IllegalStateException("Unable to secure connector credential projection", e);
             }
+            return;
+        }
+        if (platformPrivateFiles.isRemote()) {
+            platformPrivateFiles.writeAtomic(credentialFile,
+                credentialJson(connector, authorization, secret).getBytes(StandardCharsets.UTF_8), ".credential-");
             return;
         }
         Path temporary = null;
@@ -241,6 +252,15 @@ public class ConnectorCredentialProjectionService {
     private boolean projectionMatches(
             Path credentialFile, ConnectorInfo connector, ConnectorCredentialSecret secret) {
         try {
+            if (platformPrivateFiles.isRemote()) {
+                byte[] bytes = platformPrivateFiles.readCandidate(credentialFile, MAX_CREDENTIAL_FILE_BYTES);
+                if (bytes == null) return false;
+                JsonNode current = objectMapper.readTree(bytes);
+                return current != null
+                    && connector.getConnectorCode().equals(current.path("connectorCode").asText())
+                    && secret.credentialReference().equals(current.path("credentialReference").asText())
+                    && secret.accessToken().equals(current.path("accessToken").asText());
+            }
             if (!Files.isRegularFile(credentialFile, LinkOption.NOFOLLOW_LINKS)
                     || Files.size(credentialFile) > MAX_CREDENTIAL_FILE_BYTES) {
                 return false;
@@ -251,6 +271,8 @@ public class ConnectorCredentialProjectionService {
                 && secret.credentialReference().equals(current.path("credentialReference").asText())
                 && secret.accessToken().equals(current.path("accessToken").asText());
         } catch (IOException | RuntimeException e) {
+            if (e instanceof com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting.RemoteFailure)
+                throw (com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting.RemoteFailure) e;
             return false;
         }
     }
@@ -310,6 +332,7 @@ public class ConnectorCredentialProjectionService {
     }
 
     private void applyPrivatePermissions(Path file) throws IOException {
+        if (platformPrivateFiles.isRemote()) { platformPrivateFiles.chmodFile(file); return; }
         PosixFileAttributeView view = Files.getFileAttributeView(
             file, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
         if (view != null) {

@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomWsClient;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatcher;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomWsFrame;
@@ -63,7 +64,7 @@ public class WecomStreamOutputStream extends ByteArrayOutputStream {
 
     /** WeCom stream.content byte cap (~20480). Leave headroom for multibyte. */
     private static final int MAX_CONTENT_BYTES = 20000;
-    private static final String TRUNCATION_MARKER = "\n\n[内容较长已截断]";
+    private static final String TRUNCATION_MARKER_KEY = "channel.message.truncated";
     private static final long DEFAULT_MIN_UPDATE_INTERVAL_MILLIS = 2_000L;
 
     private final ObjectMapper objectMapper;
@@ -399,7 +400,7 @@ public class WecomStreamOutputStream extends ByteArrayOutputStream {
         }
         // Over the cap: append only the prefix that fits WHILE leaving room for
         // the truncation marker, so the final content never exceeds the cap.
-        int markerBytes = TRUNCATION_MARKER.getBytes(StandardCharsets.UTF_8).length;
+        int markerBytes = I18nUtil.get(TRUNCATION_MARKER_KEY).getBytes(StandardCharsets.UTF_8).length;
         int budget = MAX_CONTENT_BYTES - currentBytes - markerBytes;
         if (budget > 0) {
             int fitChars = 0;
@@ -417,7 +418,7 @@ public class WecomStreamOutputStream extends ByteArrayOutputStream {
             }
         }
         truncated = true;
-        answerBuffer.append(TRUNCATION_MARKER);
+        answerBuffer.append(I18nUtil.get(TRUNCATION_MARKER_KEY));
         logger.info("WeCom stream content hit byte cap, truncated. reqId={}", reqId);
     }
 

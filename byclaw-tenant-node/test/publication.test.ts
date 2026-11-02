@@ -22,7 +22,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     return [];
   });
   const ctx = new CommandContext(
-    { query },
+    { query, lock: async () => {} },
     command({
       operation: "PUBLISH_TASK",
       payload: { taskSessionId: "40", id: "200", messageId: "201", text: "result", files: [] },

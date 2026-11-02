@@ -12,6 +12,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -66,9 +68,10 @@ class DigitalEmployeeRuntimeRefreshServiceTest {
     void scheduleSkillRuntimeRefreshAfterCommit_doesNotPublishWhenRedisSyncFails() {
         when(postCommitRefreshExecutor.refresh(42L, null)).thenReturn(false);
 
-        service.scheduleSkillRuntimeRefreshAfterCommit(List.of(42L));
+        assertThatThrownBy(() -> service.scheduleSkillRuntimeRefreshAfterCommit(List.of(42L)))
+            .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class).hasMessageContaining("配置已保存");
 
-        verify(postCommitRefreshExecutor).refresh(42L, null);
+        verify(postCommitRefreshExecutor, times(3)).refresh(42L, null);
         verify(digEmployeeChangeEventPublisher, never()).publishNowQuietly(
             DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED, 42L, "skill-runtime-refresh");
     }
@@ -122,25 +125,69 @@ class DigitalEmployeeRuntimeRefreshServiceTest {
     }
 
     @Test
-    void scheduleDigitalEmployeeUpdateRefreshAfterCommit_preservesUpdatedEventWhenRedisSyncFails() {
+    void scheduleDigitalEmployeeUpdateRefreshAfterCommit_reportsFailureWithoutPublishingStaleSnapshot() {
         DigitalEmployeeDTO inputDto = new DigitalEmployeeDTO();
         when(postCommitRefreshExecutor.refresh(42L, inputDto)).thenReturn(false);
 
-        service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, inputDto);
+        assertThatThrownBy(() -> service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, inputDto))
+            .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class).hasMessageContaining("请重试保存");
 
-        verify(digEmployeeChangeEventPublisher).publishNowQuietly(
-            DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, 42L, "manager-api");
+        verify(postCommitRefreshExecutor, times(3)).refresh(42L, inputDto);
+        verifyNoInteractions(digEmployeeChangeEventPublisher);
     }
 
     @Test
     void scheduleSkillRuntimeRefreshAfterCommit_skipsEventWhenExecutorThrows() {
         doThrow(new IllegalStateException("boom")).when(postCommitRefreshExecutor).refresh(42L, null);
 
-        service.scheduleSkillRuntimeRefreshAfterCommit(List.of(42L));
+        assertThatThrownBy(() -> service.scheduleSkillRuntimeRefreshAfterCommit(List.of(42L)))
+            .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class).hasMessageContaining("配置已保存");
 
-        verify(postCommitRefreshExecutor).refresh(42L, null);
+        verify(postCommitRefreshExecutor, times(3)).refresh(42L, null);
         verify(digEmployeeChangeEventPublisher, never()).publishNowQuietly(
             DigEmployeeChangeEventType.DIG_EMPLOYEE_SKILLS_SYNCED, 42L, "skill-runtime-refresh");
+    }
+
+    @Test
+    void committedRefreshFailureRemainsVisibleInTheApiErrorResponse() {
+        var failure = org.assertj.core.api.Assertions.catchThrowableOfType(
+            () -> service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, null),
+            com.iwhalecloud.byai.common.exception.BaseException.class);
+        var handler = new com.iwhalecloud.byai.state.infrastructure.exception.GlobalExceptionHandler();
+        handler.setMessageSource(new org.springframework.context.support.StaticMessageSource());
+        org.assertj.core.api.Assertions.assertThat(handler.exception(null, failure).getBody().getMsg())
+            .contains("配置已保存", "运行配置同步失败", "请重试保存");
+    }
+
+    @Test
+    void transientFailureRetriesTheSameInputBeforePublishing() {
+        DigitalEmployeeDTO inputDto = new DigitalEmployeeDTO();
+        when(postCommitRefreshExecutor.refresh(42L, inputDto)).thenReturn(false).thenThrow(new IllegalStateException("redis"))
+            .thenReturn(true);
+        service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, inputDto);
+        InOrder order = inOrder(postCommitRefreshExecutor, digEmployeeChangeEventPublisher);
+        order.verify(postCommitRefreshExecutor, times(3)).refresh(42L, inputDto);
+        order.verify(digEmployeeChangeEventPublisher).publishNowQuietly(
+            DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, 42L, "manager-api");
+    }
+
+    @Test
+    void oneFailedEmployeeDoesNotPreventOtherCommittedEmployeesFromRefreshing() {
+        when(postCommitRefreshExecutor.refresh(43L, null)).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(42L, null);
+        service.scheduleDigitalEmployeeUpdateRefreshAfterCommit(43L, null);
+        var synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        try {
+            assertThatThrownBy(() -> synchronizations.forEach(TransactionSynchronization::afterCommit))
+                .isInstanceOf(com.iwhalecloud.byai.common.exception.BaseException.class);
+            verify(postCommitRefreshExecutor, times(3)).refresh(42L, null);
+            verify(postCommitRefreshExecutor).refresh(43L, null);
+            verify(digEmployeeChangeEventPublisher).publishNowQuietly(
+                DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED, 43L, "manager-api");
+        } finally {
+            synchronizations.forEach(item -> item.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+        }
     }
 
     @Test

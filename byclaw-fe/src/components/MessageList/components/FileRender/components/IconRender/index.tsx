@@ -2,6 +2,8 @@ import classnames from 'classnames';
 import React, { useMemo } from 'react';
 
 import AntdIcon from '@/components/AntdIcon';
+import { getFileIconType } from '@/constants/icon';
+import { ARCHIVE_PREVIEW_TYPES, resolvePreviewType } from '@/components/Preview/formats';
 
 import styles from './index.module.less';
 
@@ -9,23 +11,27 @@ function IconRender(props: { fileType: string; style?: React.CSSProperties }) {
   const { fileType, style = {} } = props;
   const fileTypeIcon = useMemo(() => {
     if (!fileType) return 'icon-jishiben';
+    if (ARCHIVE_PREVIEW_TYPES.includes(resolvePreviewType(fileType))) return 'icon-a-Data-fileshujuwenjian';
 
     if (['html'].includes(fileType)) {
       return 'icon-html';
     }
-    if (['xls', 'xlsx'].includes(fileType)) {
+    if (['xls', 'xlsx', 'ods', 'xlsm', 'xltx'].includes(fileType.toLowerCase())) {
       return 'icon-Excel';
     }
-    if (['doc', 'docs'].includes(fileType)) {
+    if (['doc', 'docs', 'rtf', 'epub', 'odt', 'docm', 'dotx'].includes(fileType.toLowerCase())) {
       return 'icon-Word';
     }
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'ico', 'svg'].includes(fileType)) {
+    if (['db', 'sqlite', 'sqlite3'].includes(fileType.toLowerCase())) return 'icon-sql1';
+    if (fileType.toLowerCase() === 'ipynb') return 'icon-a-Codedaima';
+    // 照片与文件列表共用图标识别，避免新格式仍显示成文本附件。
+    if (getFileIconType(fileType) === 'Image') {
       return 'icon-Image';
     }
     if (['pdf'].includes(fileType)) {
       return 'icon-PDF';
     }
-    if (['ppt', 'pptx', 'pptm'].includes(fileType)) {
+    if (['ppt', 'pptx', 'pptm', 'odp', 'ppsx', 'potx'].includes(fileType.toLowerCase())) {
       return 'icon-PPT';
     }
     if (['csv'].includes(fileType)) {

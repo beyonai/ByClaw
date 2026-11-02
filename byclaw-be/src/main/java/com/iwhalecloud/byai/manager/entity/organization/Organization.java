@@ -26,6 +26,8 @@ import lombok.Setter;
     Add.class, Mod.class
 })
 public class Organization {
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private java.util.List<Long> administratorIds;
 
     @TableId(value = "org_id", type = IdType.INPUT)
     @NotNull(groups = Mod.class, message = "{organization.orgid.notnull}")

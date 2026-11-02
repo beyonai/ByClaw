@@ -1,5 +1,4 @@
-import { resolvePreviewType, TEXT_PREVIEW_TYPES } from '@/components/Preview/formats';
-import { isPreviewable } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
+import { canPreviewName, resolvePreviewType } from '@/components/Preview/formats';
 import { getFileIconType } from '@/constants/icon';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -18,97 +17,7 @@ import {
   type FileCopyTargetType,
 } from './constants';
 
-/** 在线按文本读取的最大文件大小，避免浏览器一次性加载过大的源码/配置文件。 */
-export const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
-
-const TEXT_FILE_NAMES = new Set([
-  '.gitattributes',
-  '.gitignore',
-  '.gitmodules',
-  '.dockerignore',
-  'dockerfile',
-  'makefile',
-  'license',
-  'procfile',
-  'readme',
-]);
-
-const BINARY_EXTENSIONS = new Set([
-  '7z',
-  'aac',
-  'avif',
-  'heic',
-  'heif',
-  'm4a',
-  'm4v',
-  'ogg',
-  'oga',
-  'ogv',
-  'opus',
-  'tif',
-  'tiff',
-  'avi',
-  'bmp',
-  'class',
-  'deb',
-  'dmg',
-  'doc',
-  'docx',
-  'dll',
-  'epub',
-  'exe',
-  'flac',
-  'gif',
-  'gz',
-  'ico',
-  'iso',
-  'jar',
-  'jpeg',
-  'jpg',
-  'mkv',
-  'mov',
-  'mp3',
-  'mp4',
-  'otf',
-  'pdf',
-  'png',
-  'ppt',
-  'pptx',
-  'rar',
-  'tar',
-  'so',
-  'ttf',
-  'wav',
-  'wasm',
-  'webp',
-  'webm',
-  'woff',
-  'woff2',
-  'xls',
-  'xlsx',
-  'zip',
-]);
-
-const getLowerFileName = (name: string) => name.split('/').pop()?.toLowerCase() || '';
-
-/** 没有标准扩展名的代码/配置文件按纯文本展示，例如 .gitignore、Dockerfile。 */
-export function isTextFallbackFile(name: string) {
-  const fileName = getLowerFileName(name);
-  if (TEXT_FILE_NAMES.has(fileName)) return true;
-  if (fileName.startsWith('.')) {
-    return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '');
-  }
-  if (!fileName.includes('.')) return !BINARY_EXTENSIONS.has(fileName);
-  return !BINARY_EXTENSIONS.has(fileName.split('.').pop() || '') && !isPreviewable(fileName);
-}
-
-export function isTextPreviewFile(name: string) {
-  const extension = getLowerFileName(name).split('.').pop() || '';
-  return (
-    isTextFallbackFile(name) ||
-    ['md', 'markdown', 'html', 'htm', 'h5', 'svg', ...TEXT_PREVIEW_TYPES].includes(extension)
-  );
-}
+export { MAX_TEXT_PREVIEW_SIZE, isTextFallbackFile, isTextPreviewFile } from '@/components/Preview/formats';
 
 export function getIconType(name: string, isDir: boolean): string {
   return getFileIconType(name, {
@@ -122,11 +31,7 @@ export function isDirectory(item: FileBrowserItem) {
 }
 
 export function canPreviewFile(item: FileBrowserItem) {
-  if (isDirectory(item)) return false;
-  if (isTextPreviewFile(item.name)) {
-    return item.size === undefined || item.size <= MAX_TEXT_PREVIEW_SIZE;
-  }
-  return isPreviewable(item.name);
+  return !isDirectory(item) && canPreviewName(item.name, item.size);
 }
 
 export function unwrapListResponse<T>(res: any): T[] {
@@ -175,7 +80,7 @@ export function getFileType(name: string): string {
 }
 
 export function getPreviewFileType(name: string) {
-  return isTextFallbackFile(name) ? 'txt' : getFileType(name);
+  return getFileType(name);
 }
 
 export function getNormalizedSessionId(sessionId?: string) {
@@ -185,6 +90,12 @@ export function getNormalizedSessionId(sessionId?: string) {
 export function getSessionFilePath(sessionId?: string) {
   const normalizedSessionId = getNormalizedSessionId(sessionId);
   return normalizedSessionId ? `${SESSION_FILE_PATH}${normalizedSessionId}/` : SESSION_FILE_PATH;
+}
+
+export function getProjectSharedFilePath(projectId?: string | number) {
+  const normalizedProjectId = `${projectId ?? ''}`.trim();
+  if (!normalizedProjectId || !/^[A-Za-z0-9_-]+$/.test(normalizedProjectId)) return SHARED_FILE_PATH;
+  return `${SHARED_FILE_PATH}project_${normalizedProjectId}/`;
 }
 
 export function getDefaultFileCategoryKey(sessionId?: string): FileCategoryKey {

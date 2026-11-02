@@ -2,7 +2,7 @@ import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hasImageGenerationPrompt, normalizeModelType } from './modelFormUtils';
 import { copyTextToClipboard } from '@/pages/manager/utils/copy';
-import { supportsManagerImageDebug } from './imageGenerationProviders';
+import { resolveImageGenerationProviderName, supportsManagerImageDebug } from './imageGenerationProviders';
 
 type IntlShape = {
   formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
@@ -12,12 +12,15 @@ type Params = {
   intl: IntlShape;
   open: boolean;
   currentModelType?: any;
+  currentModelName?: string;
   currentProviderName?: any;
+  currentModelProtocol?: any;
   getCurrentModelId: () => string | number | undefined;
   allowRerankTable?: boolean;
   formatDebugError?: (error: any) => string | undefined;
   runDebugRequest: (params: {
     modelId: string | number;
+    modelName?: string;
     input: string;
     modelType?: any;
     signal: AbortSignal;
@@ -31,7 +34,9 @@ const useModelDebug = ({
   intl,
   open,
   currentModelType,
+  currentModelName,
   currentProviderName,
+  currentModelProtocol,
   getCurrentModelId,
   allowRerankTable = true,
   formatDebugError,
@@ -145,7 +150,14 @@ const useModelDebug = ({
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.imagePromptRequired' }));
       return;
     }
-    if (currentType === 'IMAGE_GENERATION' && !supportsManagerImageDebug(currentProviderName)) {
+    if (
+      currentType === 'IMAGE_GENERATION' &&
+      !resolveImageGenerationProviderName(currentProviderName, currentModelProtocol)
+    ) {
+      message.warning(intl.formatMessage({ id: 'modelMgr.modal.imageProviderRequired' }));
+      return;
+    }
+    if (currentType === 'IMAGE_GENERATION' && !supportsManagerImageDebug(currentProviderName, currentModelProtocol)) {
       message.warning(intl.formatMessage({ id: 'modelMgr.modal.imageDebugViaOpenClaw' }));
       return;
     }
@@ -164,6 +176,7 @@ const useModelDebug = ({
     setDebugOutputLoading(true);
     runDebugRequest({
       modelId: `${currentModelId}`,
+      modelName: currentModelName,
       input: `${debugInput}`,
       modelType: currentModelType,
       signal: abortRef.current.signal,
@@ -240,7 +253,7 @@ const useModelDebug = ({
         }
 
         const text = `${res?.output ?? ''}`;
-        if (currentType === 'IMAGE_GENERATION') {
+        if (['IMAGE_GENERATION', 'ASR', 'TTS'].includes(currentType)) {
           streamDoneRef.current = true;
           setDebugOutput(text);
           return;
@@ -261,7 +274,9 @@ const useModelDebug = ({
   }, [
     abortDebug,
     currentModelType,
+    currentModelName,
     currentProviderName,
+    currentModelProtocol,
     debugInput,
     ensureTyping,
     formatDebugError,

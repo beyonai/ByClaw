@@ -1,7 +1,9 @@
 package com.iwhalecloud.byai.manager.application.service.enterprise;
 
+import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
+import org.springframework.beans.factory.ObjectProvider;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
-import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -27,7 +29,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,6 +36,21 @@ import java.util.List;
  */
 @Service
 public class EnterpriseInfoApplicationService {
+
+    private ObjectProvider<TenantExecutionPolicyService> tenantExecutionPolicies;
+
+    @Autowired(required = false)
+    public void setTenantExecutionPolicies(
+        ObjectProvider<TenantExecutionPolicyService> policies) {
+        this.tenantExecutionPolicies = policies;
+    }
+
+    private void requireLegacyCreationAllowed() {
+        if (tenantExecutionPolicies != null) {
+            var policy = tenantExecutionPolicies.getIfAvailable();
+            if (policy != null) policy.requireLegacyCreationAllowed();
+        }
+    }
 
     /** 系统预置默认企业，不允许删除 */
     private static final Long DEFAULT_ENTERPRISE_ID = 1L;
@@ -46,6 +62,9 @@ public class EnterpriseInfoApplicationService {
 
     @Autowired
     private TenantUserMembershipService tenantUserMembershipService;
+
+    @Autowired
+    private TenantContextService tenantContextService;
 
     @Autowired
     private LoginApplicationService loginApplicationService;
@@ -68,37 +87,23 @@ public class EnterpriseInfoApplicationService {
     /**
      * 查询当前登录用户关联的企业列表。系统预置默认企业始终可进入，不依赖租户成员关系。
      *
-     * @return 企业简要信息列表（企业标识、名称、编码、角色、成员状态）
+     * @return 按企业创建时间倒序排列的企业简要信息列表
      */
     public List<UserEnterpriseVo> listUserEnterprises() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        List<UserEnterpriseVo> enterprises = new ArrayList<>(tenantUserMembershipService.listUserEnterprises(userId));
-        boolean containsDefaultEnterprise = enterprises.stream()
-            .anyMatch(enterprise -> enterprise != null
-                && DEFAULT_ENTERPRISE_ID.equals(enterprise.getEnterpriseId()));
-        if (!containsDefaultEnterprise) {
-            EnterpriseInfo defaultEnterprise = enterpriseInfoService.findById(DEFAULT_ENTERPRISE_ID);
-            if (defaultEnterprise != null) {
-                UserEnterpriseVo defaultEnterpriseVo = new UserEnterpriseVo();
-                defaultEnterpriseVo.setEnterpriseId(defaultEnterprise.getEnterpriseId());
-                defaultEnterpriseVo.setComAcctName(defaultEnterprise.getComAcctName());
-                defaultEnterpriseVo.setComAcctCode(defaultEnterprise.getComAcctCode());
-                defaultEnterpriseVo.setRole(TenantUserMembershipRole.MEMBER);
-                defaultEnterpriseVo.setStatus(TenantUserMembershipStatus.ACTIVE);
-                enterprises.add(0, defaultEnterpriseVo);
-            }
-        }
-        return enterprises;
+        // 查询统一包含系统默认企业，避免应用层插到首位破坏创建时间排序。
+        return tenantUserMembershipService.listUserEnterprises(userId);
     }
 
     /**
-     * 新增企业信息；任意登录用户可创建，创建成功后将当前用户设为该企业 OWNER。
+     * 新增企业信息；传统部署允许登录用户创建并设为 OWNER，SaaS 部署统一通过商业开通接口预留。
      *
      * @param enterpriseInfoDTO 新增入参
      * @return 新建企业标识
      */
     @Transactional(rollbackFor = Exception.class)
     public Long create(EnterpriseInfoDTO enterpriseInfoDTO) {
+        requireLegacyCreationAllowed();
         assertComAcctCodeUnique(enterpriseInfoDTO.getComAcctCode(), null);
 
         EnterpriseInfo enterpriseInfo = buildEnterpriseForCreate(enterpriseInfoDTO);
@@ -167,10 +172,9 @@ public class EnterpriseInfoApplicationService {
         requireEnterprise(enterpriseId);
 
         Long userId = CurrentUserHolder.getCurrentUserId();
-        if (!DEFAULT_ENTERPRISE_ID.equals(enterpriseId)
-            && tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(userId, enterpriseId) == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("enterprise.membership.required"));
+        // 管理企业切换统一在此完成成员关系和 READY 校验，前端不再先调用 tenantContext/switch。
+        if (!DEFAULT_ENTERPRISE_ID.equals(enterpriseId)) {
+            tenantContextService.validate(userId, enterpriseId);
         }
 
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import java.util.List;
@@ -22,14 +23,14 @@ public interface EmployeePublicationSkillBridge {
 
         /** 明确提示被排除的是技能，并指出它声明依赖的个人资源类型与名称。 */
         String displayReason() {
-            String resourceName = StringUtils.defaultIfBlank(name, StringUtils.defaultIfBlank(resourceId, "未命名资源"));
+            String resourceName = StringUtils.defaultIfBlank(name, StringUtils.defaultIfBlank(resourceId, I18nUtil.get("employee.publication.unnamedResource")));
             if (PERSONAL_RESOURCE_REASON.equals(reason)) {
                 String type = switch (StringUtils.defaultString(resourceType)) {
-                    case "KNOWLEDGE_BASE" -> "知识库";
-                    case "TOOL" -> "工具";
-                    default -> "资源";
+                    case "KNOWLEDGE_BASE" -> I18nUtil.get("employee.publication.typeKnowledge");
+                    case "TOOL" -> I18nUtil.get("employee.publication.typeTool");
+                    default -> I18nUtil.get("employee.publication.typeResource");
                 };
-                return "技能依赖了个人" + type + "「" + resourceName + "」，因此本次不会随员工发布";
+                return I18nUtil.get("employee.publication.personalDependency", type, resourceName);
             }
             return resourceName + "：" + reason;
         }

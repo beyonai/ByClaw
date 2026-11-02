@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,21 +40,21 @@ public class TenantGroupPublicationService {
         JsonNode task = data.read(tenant, "group-chat/tasks/" + taskId);
         Long pendingId = request == null ? null : request.getPendingPublicationId();
         if (pendingId != null && (request.getText() != null || request.getFiles() != null && !request.getFiles().isEmpty()))
-            throw new IllegalArgumentException("Confirm pending publication without overriding text/files");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.publication.noOverride"));
         JsonNode existing = data.read(tenant, "group-chat/tasks/" + taskId + "/publication");
         if (existing != null && !existing.isNull()) {
-            if (pendingId != null && pendingId != existing.path("pendingPublicationId").asLong()) throw new IllegalArgumentException("Pending publication is outdated");
+            if (pendingId != null && pendingId != existing.path("pendingPublicationId").asLong()) throw new IllegalArgumentException(I18nUtil.get("tenant.publication.outdated"));
             return existing;
         }
         if (!"ACTIVE".equals(task.path("status").asText()) || "RUNNING".equals(task.path("turnStatus").asText()))
-            throw new IllegalArgumentException("Task is not ready for publication");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.publication.notReady"));
         String groupId = task.path("groupSessionId").asText();
         JsonNode group = data.read(tenant, "group-chats/" + groupId);
         List<GroupChatTaskFile> files = request == null || request.getFiles() == null ? List.of() : request.getFiles();
         String text = request == null || request.getText() == null ? "" : request.getText().trim();
         if (pendingId != null) {
             JsonNode pending = data.read(tenant, "group-chat/tasks/" + taskId + "/pending-publication");
-            if (pending == null || pending.path("pendingPublicationId").asLong() != pendingId) throw new IllegalArgumentException("Pending publication is outdated");
+            if (pending == null || pending.path("pendingPublicationId").asLong() != pendingId) throw new IllegalArgumentException(I18nUtil.get("tenant.publication.outdated"));
             text = pending.path("text").asText("");
             if (!pending.path("sourcePaths").isEmpty()) files = upload(tenant, taskId, groupId, group, pending);
         }

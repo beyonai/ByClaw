@@ -6,7 +6,6 @@ import { agentTypeMap } from '@/constants/agent';
 import { chatModeMap, IChatModeType } from '@/constants/query';
 import useGlobal from '@/hooks/useGlobal';
 
-import useAppStore from '@/models/common/useAppStore';
 import useContextUsed from '@/hooks/useContextUsed';
 
 const ChatQueryInput = lazy(() => import('@/components/QueryInput/Chat'));
@@ -25,7 +24,6 @@ function QueryInput(props: IProps) {
 
   const onQueryInputCompMountedCallback = useRef<() => void>(undefined);
 
-  const { ENV } = useAppStore();
   const [chatMode, setChatMode] = React.useState<IChatModeType>(() => {
     return chatModeMap.expert;
   });
@@ -119,7 +117,7 @@ function QueryInput(props: IProps) {
         {...rest}
         // 三种会话输入框共用外部的新会话项目选择入口配置。
         enableTaskTemplate={enableTaskTemplate}
-        cannotSTT={cannotSTT || !!ENV?.includes?.('asr')}
+        cannotSTT={cannotSTT}
         myAgentType={myAgentType}
         chatMode={chatMode}
         getMessageList={getMessageList}

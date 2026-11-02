@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationEnv;
 import com.iwhalecloud.byai.manager.entity.devloop.IntegrationRun;
@@ -67,11 +69,11 @@ public class IntegrationRunService {
                                    String executorModeOverride) {
         IntegrationSuite suite = integrationSuiteService.findById(suiteId);
         if (suite == null || "1".equals(suite.getDeleteFlag())) {
-            throw new IllegalArgumentException("测试用例集不存在: " + suiteId);
+            throw new IllegalArgumentException(I18nUtil.get("devloop.integration.suiteMissing", String.valueOf(suiteId)));
         }
         IntegrationEnv env = integrationEnvService.findById(envId);
         if (env == null || "1".equals(env.getDeleteFlag())) {
-            throw new IllegalArgumentException("集成测试环境不存在: " + envId);
+            throw new IllegalArgumentException(I18nUtil.get("devloop.integration.envMissing", String.valueOf(envId)));
         }
 
         IntegrationRun run = new IntegrationRun();
@@ -131,15 +133,15 @@ public class IntegrationRunService {
     public IntegrationRunExecutor.ReportContent getRunReport(Long runId) {
         IntegrationRun run = integrationRunMapper.selectById(runId);
         if (run == null || "1".equals(run.getDeleteFlag())) {
-            return IntegrationRunExecutor.ReportContent.error("执行记录不存在: " + runId);
+            return IntegrationRunExecutor.ReportContent.error(I18nUtil.get("devloop.integration.runMissing", String.valueOf(runId)));
         }
         IntegrationSuite suite = integrationSuiteService.findById(run.getSuiteId());
         if (suite == null) {
-            return IntegrationRunExecutor.ReportContent.error("测试用例集已删除,无法定位报告路径");
+            return IntegrationRunExecutor.ReportContent.error(I18nUtil.get("devloop.integration.suiteDeleted"));
         }
         IntegrationEnv env = integrationEnvService.findById(run.getEnvId());
         if (env == null) {
-            return IntegrationRunExecutor.ReportContent.error("集成测试环境已删除,无法连接环境机读取报告");
+            return IntegrationRunExecutor.ReportContent.error(I18nUtil.get("devloop.integration.environmentDeleted"));
         }
         return integrationRunExecutor.readSuiteReport(run, env, suite);
     }

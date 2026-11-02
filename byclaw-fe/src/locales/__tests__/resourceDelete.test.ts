@@ -21,8 +21,8 @@ describe('resource delete messages', () => {
     expect(enUSManager[id as keyof typeof enUSManager]).toBe(english);
   });
 
-  it('names the model in its delete action', () => {
-    expect(zhCNModels['personalModel.delete']).toBe('删除模型');
-    expect(enUSModels['personalModel.delete']).toBe('Delete model');
+  it('uses concise wording for the model delete action', () => {
+    expect(zhCNModels['personalModel.delete']).toBe('删除');
+    expect(enUSModels['personalModel.delete']).toBe('Delete');
   });
 });

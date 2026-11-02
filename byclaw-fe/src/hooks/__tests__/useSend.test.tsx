@@ -1,3 +1,4 @@
+jest.mock('@/utils/personalStorageReadiness', () => ({ waitForPersonalStorage: jest.fn(() => Promise.resolve()) }));
 jest.mock('dompurify', () => ({
   sanitize: jest.fn((value: string) => `safe:${value}`),
 }));
@@ -10,6 +11,8 @@ jest.mock('@umijs/max', () => ({
 jest.mock('@/utils/websocket', () => ({
   __esModule: true,
   default: {
+    requiresCloudStorage: jest.fn(() => Promise.resolve(true)),
+    getScopedSessionId: jest.fn(() => ''),
     onMessage: jest.fn(),
     offMessage: jest.fn(),
     sendMessageWhenReady: jest.fn(() => Promise.resolve()),
@@ -65,7 +68,9 @@ describe('hooks/useSseSender/useSend', () => {
         sessionId: 'session-1',
         chatId: 'session-1',
         foo: 'bar',
-      })
+      }),
+      expect.any(AbortSignal),
+      expect.any(Function)
     );
     expect(DOMPurify.sanitize).toHaveBeenCalledWith('<b>hello</b>');
     expect(mockWebSocketManager.onMessage).not.toHaveBeenCalledWith('CHAT_STREAM', expect.any(Function));
@@ -101,7 +106,21 @@ describe('hooks/useSseSender/useSend', () => {
         extParams: {
           clientId: 'client-1',
         },
-      })
+      }),
+      expect.any(AbortSignal),
+      expect.any(Function)
     );
   });
+});
+
+it('local desktop chat does not call cloud readiness', async () => {
+  (webSocketManager.requiresCloudStorage as jest.Mock).mockResolvedValueOnce(false);
+  const { waitForPersonalStorage } = require('@/utils/personalStorageReadiness');
+  waitForPersonalStorage.mockClear();
+  const { result } = renderHook(() => useSend({ sessionId: 'local-session' }));
+  await act(async () => {
+    await result.current.send('local question', {}).promise;
+  });
+  expect(waitForPersonalStorage).not.toHaveBeenCalled();
+  expect(webSocketManager.sendMessageWhenReady).toHaveBeenCalled();
 });

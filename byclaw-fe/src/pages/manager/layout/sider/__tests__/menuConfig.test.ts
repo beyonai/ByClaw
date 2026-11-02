@@ -3,9 +3,12 @@ jest.mock('@/pages/manager/service/session', () => ({
 }));
 
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { RobotOutlined } from '@ant-design/icons';
 import { filterRoutesByBlockedPaths } from '@/pages/manager/utils/menu';
 import {
   FILE_MANAGEMENT_MENU,
+  TENANT_ADMIN_MENU,
+  TENANT_DATASOURCE_MENU,
   fallbackMenuConfig,
   filterMenusByAdminVip,
   filterMenusByMenuDisplay,
@@ -13,6 +16,7 @@ import {
   getManagerMenuLabel,
   normalizeManagerMenuConfig,
   resetManagerMenuConfigCache,
+  withTenantAdminMenu,
 } from '../menuConfig';
 
 // 源服务文件关闭了类型检查，测试按实际接口响应结构声明 mock，避免被推断成 Promise<undefined>。
@@ -24,6 +28,23 @@ describe('manager/layout/sider/menuConfig', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetManagerMenuConfigCache();
+  });
+
+  it.each([false, true])('hides tenant entries while preserving other menus when allowed is %s', (allowed) => {
+    const menus = [FILE_MANAGEMENT_MENU, TENANT_ADMIN_MENU, TENANT_DATASOURCE_MENU];
+
+    expect(withTenantAdminMenu([], allowed)).toEqual([]);
+    expect(withTenantAdminMenu(menus, allowed)).toEqual([FILE_MANAGEMENT_MENU]);
+    expect(menus).toEqual([FILE_MANAGEMENT_MENU, TENANT_ADMIN_MENU, TENANT_DATASOURCE_MENU]);
+  });
+
+  it('uses the robot icon for both configured and fallback model menus', () => {
+    const path = '/manager/systemParams/modal';
+    const [configuredMenu] = normalizeManagerMenuConfig([{ path, menuCode: 'menu_model_config' }]);
+    const fallbackMenu = fallbackMenuConfig.find((item) => item.path === path);
+
+    expect(configuredMenu.icon).toBe(RobotOutlined);
+    expect(fallbackMenu?.icon).toBe(RobotOutlined);
   });
 
   it.each([

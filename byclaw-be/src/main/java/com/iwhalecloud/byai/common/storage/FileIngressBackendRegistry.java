@@ -15,6 +15,9 @@ import com.iwhalecloud.byai.common.storage.constants.StorageType;
 @Component
 public class FileIngressBackendRegistry {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting platformRouting;
+
     private final List<FileIngressBackend> backends;
 
     private final ObjectStorageConfiguration objectStorageConfiguration;
@@ -32,7 +35,7 @@ public class FileIngressBackendRegistry {
     public FileIngressBackend getBackend(String storageType) {
         for (FileIngressBackend backend : backends) {
             if (StorageType.matches(storageType, backend.getStorageType())) {
-                return backend;
+                return platformRouting == null ? backend : platformRouting.ingress(backend);
             }
         }
         throw new BaseException(CommonErrorCode.ERROR_CODE_50500,

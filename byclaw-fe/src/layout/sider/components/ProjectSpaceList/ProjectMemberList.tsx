@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Tooltip, message } from 'antd';
-import { DeleteOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { dataItemTypeMap } from '@/pages/manager/components/PersonnelModel';
-import { bindMemberAgent, listProjectMembers, saveProjectMembers } from '@/service/devloop';
-import { POST } from '@/service/common/request';
-import { getAgentChatAvatar } from '@/utils/agent';
+import { listProjectMembers, saveProjectMembers } from '@/service/devloop';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
@@ -20,8 +18,6 @@ interface ProjectMemberListProps {
 
 // 成员接口当前一次返回项目成员，左侧窄面板按固定数量分段渲染并在触底时继续展示。
 const MEMBER_PAGE_SIZE = 20;
-// 绑定数字员工接口按 10 条一页请求，弹窗滚动到底部时继续加载下一页。
-const AGENT_PAGE_SIZE = 10;
 
 const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
 
@@ -58,18 +54,8 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
   const [hoveredMemberKey, setHoveredMemberKey] = useState<string>();
   const [openActionMemberKey, setOpenActionMemberKey] = useState<string>();
 
-  const [showAgentModal, setShowAgentModal] = useState(false);
-  const [bindingMember, setBindingMember] = useState<any>(null);
-  const [agentKeyword, setAgentKeyword] = useState('');
-  const [agentList, setAgentList] = useState<any[]>([]);
-  const [agentSearching, setAgentSearching] = useState(false);
-  const [agentPage, setAgentPage] = useState(1);
-  const [hasMoreAgents, setHasMoreAgents] = useState(false);
   const memberSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const memberQueryVersionRef = useRef(0);
-  const agentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const agentQueryVersionRef = useRef(0);
-  const agentLoadingMoreRef = useRef(false);
   // 使用同步标记拦截状态更新前的连续点击，避免重复提交成员保存请求。
   const authMemberSavingRef = useRef(false);
   // 创建者才可维护项目成员；历史项目缺少 createBy 时以成员 owner 角色兜底识别。
@@ -346,165 +332,6 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
     });
   };
 
-  const clearAgentSearchTimer = useCallback(() => {
-    if (agentSearchTimerRef.current) {
-      clearTimeout(agentSearchTimerRef.current);
-      agentSearchTimerRef.current = null;
-    }
-  }, []);
-
-  const handleSearchAgent = useCallback(async (page = 1, keyword = '', append = false) => {
-    if (append && agentLoadingMoreRef.current) return;
-
-    // 新查询递增版本号，避免前一次搜索或上一页请求覆盖当前关键字的结果。
-    const queryVersion = append ? agentQueryVersionRef.current : agentQueryVersionRef.current + 1;
-    if (append) {
-      agentLoadingMoreRef.current = true;
-    } else {
-      agentQueryVersionRef.current = queryVersion;
-      agentLoadingMoreRef.current = false;
-    }
-
-    setAgentSearching(true);
-    try {
-      const res = await POST<any>('/byaiService/api/v2/digitEmploy/discover', {
-        keyword: keyword.trim(),
-        pageNum: page,
-        pageSize: AGENT_PAGE_SIZE,
-      });
-      if (queryVersion !== agentQueryVersionRef.current) return;
-
-      const list = res?.data?.list || res?.list || res?.data || [];
-      const nextPageList = Array.isArray(list) ? list : [];
-      const rawTotal = res?.data?.total ?? res?.total;
-      const total = Number(rawTotal);
-      const hasValidTotal = rawTotal !== undefined && rawTotal !== null && rawTotal !== '' && Number.isFinite(total);
-
-      setAgentList((currentList) => {
-        if (!append) return nextPageList;
-
-        // 触底追加时按数字员工 ID 去重，避免数据更新时相邻页出现重复项。
-        const agentIds = new Set(
-          currentList.map((agent) => `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`)
-        );
-        return currentList.concat(
-          nextPageList.filter((agent) => {
-            const agentId = `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`;
-            if (!agentId || !agentIds.has(agentId)) {
-              if (agentId) agentIds.add(agentId);
-              return true;
-            }
-            return false;
-          })
-        );
-      });
-      setAgentPage(page);
-      setHasMoreAgents(
-        nextPageList.length > 0 &&
-          (hasValidTotal ? page * AGENT_PAGE_SIZE < total : nextPageList.length === AGENT_PAGE_SIZE)
-      );
-    } catch {
-      if (queryVersion === agentQueryVersionRef.current) {
-        if (!append) setAgentList([]);
-        setHasMoreAgents(false);
-      }
-    } finally {
-      if (append && queryVersion === agentQueryVersionRef.current) {
-        agentLoadingMoreRef.current = false;
-      }
-      if (queryVersion === agentQueryVersionRef.current) {
-        setAgentSearching(false);
-      }
-    }
-  }, []);
-
-  const handleAgentKeywordChange = useCallback(
-    (keyword: string) => {
-      setAgentKeyword(keyword);
-      clearAgentSearchTimer();
-      agentQueryVersionRef.current += 1;
-      agentLoadingMoreRef.current = false;
-      setAgentSearching(false);
-      setHasMoreAgents(false);
-
-      // 输入停止 300ms 后再请求，减少模糊搜索时的接口调用频次。
-      agentSearchTimerRef.current = setTimeout(() => {
-        agentSearchTimerRef.current = null;
-        void handleSearchAgent(1, keyword);
-      }, 300);
-    },
-    [clearAgentSearchTimer, handleSearchAgent]
-  );
-
-  const handleAgentSearchSubmit = useCallback(
-    (keyword: string) => {
-      clearAgentSearchTimer();
-      setAgentKeyword(keyword);
-      void handleSearchAgent(1, keyword);
-    },
-    [clearAgentSearchTimer, handleSearchAgent]
-  );
-
-  const handleAgentListScroll = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      if (!hasMoreAgents || agentSearching || agentLoadingMoreRef.current) return;
-
-      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-      if (scrollHeight - scrollTop - clientHeight > 80) return;
-
-      // 接近列表底部时追加下一页，替代原来的页码切换。
-      void handleSearchAgent(agentPage + 1, agentKeyword, true);
-    },
-    [agentKeyword, agentPage, agentSearching, handleSearchAgent, hasMoreAgents]
-  );
-
-  const handleCloseAgentModal = useCallback(() => {
-    clearAgentSearchTimer();
-    // 关闭弹窗后使未完成请求失效，避免下次打开时写入旧数据。
-    agentQueryVersionRef.current += 1;
-    agentLoadingMoreRef.current = false;
-    setShowAgentModal(false);
-    setBindingMember(null);
-  }, [clearAgentSearchTimer]);
-
-  useEffect(
-    () => () => {
-      clearAgentSearchTimer();
-      agentQueryVersionRef.current += 1;
-      agentLoadingMoreRef.current = false;
-    },
-    [clearAgentSearchTimer]
-  );
-
-  const handleOpenAgentModal = (member: any) => {
-    clearAgentSearchTimer();
-    agentQueryVersionRef.current += 1;
-    agentLoadingMoreRef.current = false;
-    setBindingMember(member);
-    setAgentKeyword('');
-    setAgentList([]);
-    setAgentPage(1);
-    setHasMoreAgents(false);
-    setAgentSearching(false);
-    setShowAgentModal(true);
-    void handleSearchAgent(1, '');
-  };
-
-  const handleBindAgent = async (agent: any) => {
-    if (!bindingMember) return;
-    try {
-      await bindMemberAgent({
-        memberId: bindingMember.memberId,
-        agentId: agent.resourceId || agent.agentId || agent.id,
-      });
-      message.success(t('bindSuccess', { name: `${agent.resourceName || agent.name || agent.agentName}` }));
-      void refreshMembersAfterMutation();
-      handleCloseAgentModal();
-    } catch {
-      message.error(t('bindFailed'));
-    }
-  };
-
   const getMemberKey = (member: any) => `${member.memberId || member.userId || member.userCode || ''}`;
 
   const getMemberAvatarText = (member: any) => {
@@ -512,11 +339,9 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
     return getDisplayUserNameInChat(`${member.userName || member.userId || ''}`.trim()) || '?';
   };
 
-  const getAgentAvatar = (agent: any) => agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl;
-
   const renderMemberActionMenu = (member: any) => {
-    // 创建者可管理全部成员；普通成员仅可维护自己的数字员工绑定，退出入口统一放在项目菜单。
-    const canOperateMember = isCurrentUserProjectCreator || isCurrentUserMember(member);
+    // 仅创建者可移除其他成员；项目创建者不提供移除入口。
+    const canOperateMember = isCurrentUserProjectCreator && !isProjectOwnerMember(member, creatorId);
     if (!canOperateMember) return null;
 
     const memberKey = getMemberKey(member);
@@ -529,32 +354,9 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
         trigger={['hover']}
         placement="bottomRight"
         menu={{
-          items: [
-            {
-              key: 'bind',
-              icon: <RobotOutlined />,
-              label: member.agentId ? t('changeAgent') : t('bindAgent'),
-            },
-            // 普通成员不能在成员列表中直接移除自己，避免与项目菜单“退出项目”入口重复。
-            ...(isCurrentUserProjectCreator && !isProjectOwnerMember(member, creatorId)
-              ? [
-                {
-                  key: 'remove',
-                  danger: true,
-                  icon: <DeleteOutlined />,
-                  label: t('remove'),
-                },
-              ]
-              : []),
-          ],
+          items: [{ key: 'remove', danger: true, icon: <DeleteOutlined />, label: t('remove') }],
           onClick: ({ key }) => {
-            if (key === 'bind') {
-              handleOpenAgentModal(member);
-              return;
-            }
-            if (key === 'remove') {
-              handleRemove(member);
-            }
+            if (key === 'remove') handleRemove(member);
           },
         }}
         onOpenChange={(open) => setOpenActionMemberKey(open ? memberKey : undefined)}
@@ -652,7 +454,6 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
                               </Tag>
                             )}
                           </div>
-                          <span>{member.agentName || t('unboundAgent')}</span>
                         </div>
                         {renderMemberActionMenu(member)}
                       </div>
@@ -681,58 +482,6 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
           onOk={handleAddAuthMembers}
         />
       )}
-
-      <Modal
-        title={t('bindAgentTitle', { name: bindingMember?.userName || '' })}
-        open={showAgentModal}
-        onCancel={handleCloseAgentModal}
-        footer={null}
-        width={520}
-      >
-        {/* 查询加载态统一由下方列表展示，避免搜索框和列表同时转圈。 */}
-        <Input.Search
-          placeholder={t('searchAgent')}
-          value={agentKeyword}
-          onChange={(event) => handleAgentKeywordChange(event.target.value)}
-          onSearch={handleAgentSearchSubmit}
-          enterButton={<SearchOutlined />}
-          className={styles.agentSearchInput}
-        />
-        <Spin spinning={agentSearching}>
-          <div className={styles.agentList} onScroll={handleAgentListScroll}>
-            {agentList.length === 0 ? (
-              <Empty description={t('emptyAgents')} />
-            ) : (
-              <List
-                dataSource={agentList}
-                renderItem={(agent: any) => (
-                  <List.Item
-                    actions={[
-                      <Button key="select" type="link" size="small" onClick={() => handleBindAgent(agent)}>
-                        {t('select')}
-                      </Button>,
-                    ]}
-                  >
-                    {/* 数字员工发现接口的标准描述字段为 resourceDesc，兼容历史 description/desc。 */}
-                    <List.Item.Meta
-                      avatar={<div className={styles.agentListAvatar}>{getAgentChatAvatar(getAgentAvatar(agent))}</div>}
-                      title={agent.resourceName || agent.name || agent.agentName}
-                      description={
-                        <span
-                          className={styles.agentListDescription}
-                          title={agent.resourceDesc || agent.description || agent.desc || ''}
-                        >
-                          {agent.resourceDesc || agent.description || agent.desc || ''}
-                        </span>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-          </div>
-        </Spin>
-      </Modal>
     </div>
   );
 };

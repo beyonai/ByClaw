@@ -18,4 +18,6 @@ public class EmployeePublicationRequest {
     private Long revision;
     private String comment;
     private DigitalEmployeeDTO employee;
+    /** -1 means the whole company. Null retains the saved audience. */
+    private java.util.List<Long> targetOrgIds;
 }

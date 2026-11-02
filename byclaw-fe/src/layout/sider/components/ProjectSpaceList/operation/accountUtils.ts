@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import type { OperationAccount, OperationAccountFormValues } from './types';
 
 const normalizeLoginStatus = (account: Record<string, any>): OperationAccount['loginStatus'] => {
@@ -20,7 +21,7 @@ export const normalizeOperationAccounts = (source: unknown): OperationAccount[] 
         item.accountName ||
         item.name ||
         (`${item.platformId ?? item.platformCode ?? item.platform ?? item.channelId ?? ''}` === 'CustomLink'
-          ? '自定义链接'
+          ? getIntl().formatMessage({ id: 'projectSpace.operation.accountForm.field.customUrl' })
           : ''),
       accountId: `${item.accountCode ?? item.platformAccountId ?? item.platformAccountCode ?? item.accountId ?? ''}`,
       avatar: item.avatar,
@@ -41,3 +42,10 @@ export const buildGlobalOperationAccountPayload = (values: OperationAccountFormV
     ...(isCustomLink ? { customUrl: values.customUrl || '' } : {}),
   };
 };
+
+/**
+ * 账号登录需要远程桌面时要拉起的沙箱规格：常驻 DSH 宿主上的用户，浏览器在其工具沙箱里（BE 返回其规格）；
+ * 其他用户沿用默认的 openclaw 沙箱。
+ */
+export const browserSandboxServiceKey = (browserServiceKey: string | null | undefined): string =>
+  browserServiceKey || 'openclaw';

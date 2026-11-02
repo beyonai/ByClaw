@@ -84,6 +84,7 @@ describe('publication approval in the audit list', () => {
     (listPublications as jest.Mock).mockResolvedValue({ list: [pending], total: 1 });
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
+    jest.spyOn(message, 'info').mockImplementation(jest.fn());
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -91,6 +92,45 @@ describe('publication approval in the audit list', () => {
     (listPublications as jest.Mock).mockResolvedValue({ list: [{ ...pending, status: 'PUBLISHED' }], total: 1 });
     render(<PublicationAuditList />);
     expect(await screen.findByText('本次申请已发布到企业。')).toBeInTheDocument();
+  });
+
+  it('shows the organization result as published even while the overall request is pending', async () => {
+    const published: Publication = {
+      ...pending,
+      officialId: '90',
+      canReview: false,
+      targets: [{ orgId: '10', orgName: '研发中心', status: 'APPROVED' }],
+    };
+    jest
+      .mocked(useEmployeePublicationCapabilities)
+      .mockReturnValue({ enabled: true, administrator: false, reviewer: true, canCreateEnterprise: false });
+    jest.mocked(listPublications).mockResolvedValue({ list: [published], total: 1 });
+    render(<PublicationAuditList initialReview />);
+    await screen.findByText('本组织【研发中心】内发布成功');
+    const row = screen.getByRole('button', { name: pending.employeeName }).closest('tr')!;
+    expect(within(row).getByText('已发布')).toBeInTheDocument();
+    expect(within(row).queryByText('待审核')).not.toBeInTheDocument();
+    expect(within(row).queryByText('等待审核')).not.toBeInTheDocument();
+  });
+
+  it('reports scoped approval as successful instead of treating another organization pending as a failure', async () => {
+    const published: Publication = {
+      ...pending,
+      officialId: '90',
+      canReview: false,
+      targets: [{ orgId: '10', orgName: '研发中心', status: 'APPROVED' }],
+    };
+    jest
+      .mocked(listPublications)
+      .mockResolvedValueOnce({ list: [pending], total: 1 })
+      .mockResolvedValue({ list: [published], total: 1 });
+    jest.mocked(publicationAction).mockResolvedValue({ publication: published, employee: {}, dependencies: [] } as any);
+    render(<PublicationAuditList initialReview />);
+    const dialog = await openApprovalConfirmation();
+    await continuePublication(dialog);
+    await waitFor(() => expect(message.success).toHaveBeenCalledWith('本组织【研发中心】内发布成功'));
+    expect(message.error).not.toHaveBeenCalled();
+    expect(await screen.findByText('本组织【研发中心】内发布成功')).toBeInTheDocument();
   });
 
   it('keeps the approval kind switch alongside publication filters', async () => {
@@ -107,7 +147,9 @@ describe('publication approval in the audit list', () => {
     (getPublication as jest.Mock).mockResolvedValue({ publication: pending, employee: { resourceId: '10' } });
     (publicationUrl as jest.Mock).mockReturnValue('/digitalEmployeesCreate?publicationId=100');
     render(<PublicationAuditList initialReview />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看 / 编辑' }));
+    const openButton = (await screen.findByText('查看 / 编辑')).closest('button')!;
+    await waitFor(() => expect(openButton).toBeEnabled());
+    fireEvent.click(openButton);
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/digitalEmployeesCreate?publicationId=100'));
     expect(listPublications).toHaveBeenCalledWith(true, 1);
     expect(sessionStorage.getItem('EmployeeDetail_prevRoute')).toBe('/approvalCenter?tab=employee');

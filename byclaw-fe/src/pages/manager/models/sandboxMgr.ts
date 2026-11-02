@@ -35,7 +35,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || 'Failed to fetch sandbox list');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.list' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -50,7 +50,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to remove sandbox');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.remove' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -65,7 +65,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to update sandbox');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.update' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -81,7 +81,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || []);
         } else {
-          message.error(response?.msg || 'Failed to fetch service spec list');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.specList' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -96,7 +96,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to fetch service spec');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.spec' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -112,7 +112,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.config.saveSuccess' }));
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to save service spec');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.specSave' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -128,7 +128,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.config.deleteSuccess' }));
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to delete service spec');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.specDelete' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -143,7 +143,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to launch sandbox');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.launch' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -158,7 +158,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to resize sandbox');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.resize' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -173,7 +173,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || []);
         } else {
-          message.error(response?.msg || 'Failed to fetch resize records');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.resizeRecords' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -188,7 +188,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || []);
         } else {
-          message.error(response?.msg || 'Failed to fetch service profiles');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.profiles' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -204,7 +204,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.profile.saveSuccess' }));
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to save service profile');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.profileSave' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -220,7 +220,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.profile.deleteSuccess' }));
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to delete service profile');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.profileDelete' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -235,7 +235,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || 'Failed to fetch sandbox health switch');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.healthSwitch' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -251,7 +251,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.switchSaveSuccess' }));
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || 'Failed to save sandbox health switch');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.healthSwitchSave' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -266,7 +266,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || []);
         } else {
-          message.error(response?.msg || 'Failed to fetch watermark models');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.watermarkModels' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -282,7 +282,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.modelSaveSuccess' }));
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || 'Failed to save watermark model');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.watermarkSave' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -298,7 +298,7 @@ export default {
           message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.modelDeleteSuccess' }));
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to delete watermark model');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.watermarkDelete' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -313,7 +313,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || 'Failed to update watermark model');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.watermarkUpdate' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -328,7 +328,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || 'Failed to preview watermark model');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'sandboxMgr.error.watermarkPreview' }));
           fail?.(response || {});
         }
       } catch (error) {

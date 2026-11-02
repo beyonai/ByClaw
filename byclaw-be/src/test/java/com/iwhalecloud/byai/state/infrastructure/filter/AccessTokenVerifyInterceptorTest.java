@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.infrastructure.filter;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +23,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class AccessTokenVerifyInterceptorTest {
+class AccessTokenVerifyInterceptorTest extends I18nTestSupport {
 
     @Test
     void conversationSearchRequiresTokenEvenWithCookieAnonymousPatternOrSpoofedUserHeader() {

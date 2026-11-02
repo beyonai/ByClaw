@@ -20,6 +20,7 @@ import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
+import { isChatCheckpoint, recordChatChain } from '@/utils/chatChainLog';
 import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFileTypeByName } from '@/utils/file';
@@ -42,6 +43,9 @@ import {
   applyProjectedRootState,
   flushRestoredChatStreamBuffer,
   getRestoredStreamKey,
+  hasChatStreamContext,
+  rebindChatStreamAnswerMessage,
+  refreshChatStreamAnswerMessage,
   registerPendingChatContext,
   registerSessionChatContext,
   startRestoringChatStream,
@@ -123,6 +127,9 @@ export type ISendProps = {
   /** 输入框展示给用户的文本，包含数字员工名称；queryQuestion 仍保留后端识别所需的占位符。 */
   displayText?: string;
   inheritQryMsgId?: IMessage['msgId'];
+
+  /** Cold resume 时由交互组件提供的最新回答消息，避免读取到尚未刷新的 messageListRef。 */
+  resumeAnswerMsg?: IMessage;
   payload?: Record<string, unknown>;
   msgOpt?: {
     queryMsg?: Record<string, unknown>;
@@ -146,6 +153,28 @@ function getAnswerClientMsgId(clientRequestId: string) {
 function getQueryClientMsgId(clientRequestId: string) {
   return clientRequestId.split('_')[0];
 }
+
+const isMatchingResumeAnswer = (
+  answer: IMessage | undefined,
+  expected: { sessionId?: string; messageId?: unknown; queryMsgId?: IMessage['msgId'] }
+) => {
+  const actualSessionId = `${answer?.sessionId ?? ''}`.trim();
+  const actualMessageId = `${answer?.messageId ?? ''}`.trim();
+  const actualQueryMsgId = `${answer?.queryMsgId ?? ''}`.trim();
+  const expectedSessionId = `${expected.sessionId ?? ''}`.trim();
+  const expectedMessageId = `${expected.messageId ?? ''}`.trim();
+  const expectedQueryMsgId = `${expected.queryMsgId ?? ''}`.trim();
+  return Boolean(
+    answer?.fromBeyond &&
+      actualSessionId &&
+      actualMessageId &&
+      expectedSessionId &&
+      expectedMessageId &&
+      actualSessionId === expectedSessionId &&
+      actualMessageId === expectedMessageId &&
+      (!actualQueryMsgId || !expectedQueryMsgId || actualQueryMsgId === expectedQueryMsgId)
+  );
+};
 
 const getPositiveNumber = (value: unknown) => {
   const numberValue = Number(value);
@@ -173,11 +202,20 @@ const getDigitalEmployeeResources = (resourceList?: RichInputResourceList) => {
   const uniqueMap = new Map<string, RichInputResourceList[number]>();
   (resourceList || []).forEach((item) => {
     if (`${item.resourceType}` !== ResourceTypeMap.digitalEmployee) return;
+    if (item.isInactiveAgentSelection) return;
     const resourceId = `${item.resourceId || item.resourceCode || item.id || ''}`;
     if (!resourceId || uniqueMap.has(resourceId)) return;
     uniqueMap.set(resourceId, item);
   });
-  return Array.from(uniqueMap.values());
+  return Array.from(uniqueMap.values()).slice(-1);
+};
+
+const limitToLatestDigitalEmployee = (resourceList?: RichInputResourceList) => {
+  if (!resourceList) return resourceList;
+  const [selectedEmployee] = getDigitalEmployeeResources(resourceList);
+  return resourceList.filter(
+    (item) => `${item.resourceType}` !== ResourceTypeMap.digitalEmployee || item === selectedEmployee
+  );
 };
 
 const getAgentLaneIdentity = (resource: RichInputResourceList[number]) => {
@@ -604,7 +642,7 @@ function useChat(props: IProps) {
       });
   });
 
-  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string) => {
+  const applyScopedChildProjection = usePersistFn(async (projection: any, envelopeStreamId?: string, frame?: any) => {
     const projectionSessionId = `${projection?.sessionId || ''}`;
     if (!projectionSessionId || projectionSessionId !== `${sessionId}`) return false;
 
@@ -635,6 +673,15 @@ function useChat(props: IProps) {
     } else {
       updateMessage(message, { isAssign: true, allowCreateSession: false });
       commitScopedStream(scopedChildWatermarksRef.current, projectionSessionId, streamId);
+    }
+    if (isChatCheckpoint(frame || projection)) {
+      recordChatChain('fe.reply_applied', {
+        ...(frame || projection),
+        streamId,
+        appliedSessionId: projectionSessionId,
+        appliedMessageId: message.messageId,
+        appliedTraceId: message.traceId,
+      });
     }
     scopedProjectionBasesRef.current.set(projectionKey, {
       projection: cloneDeep({ ...projection, sessionId: projectionSessionId }),
@@ -752,7 +799,7 @@ function useChat(props: IProps) {
       if (
         (isCurrentExternalChildSession || isScopedChildProjection(data)) &&
         `${messageSessionId}` === `${sessionId}` &&
-        (await applyScopedChildProjection(data, get(message, 'streamId')))
+        (await applyScopedChildProjection(data, get(message, 'streamId'), message))
       ) {
         return;
       }
@@ -824,7 +871,7 @@ function useChat(props: IProps) {
         await reconcileScopedChildProjection();
         return;
       }
-      await applyScopedChildProjection(next.projection, next.streamId);
+      await applyScopedChildProjection(next.projection, next.streamId, message);
     };
 
     webSocketManager.onMessage('SCOPED_MESSAGE_DELTA', handler);
@@ -882,6 +929,7 @@ function useChat(props: IProps) {
               `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
             );
           });
+          const hasPersistedAnswer = Boolean(answerMsg);
 
           if (!answerMsg) {
             answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
@@ -889,7 +937,13 @@ function useChat(props: IProps) {
           answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
           chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
           restoreAnswerState(answerMsg);
-          answerMsg = updateMessage(answerMsg, { isAssign: true });
+          // runningStatus is a Redis lease, not proof that a visible answer exists. A worker
+          // failure can leave the lease behind without a snapshot or persisted answer. Keep
+          // the synthetic object only as the target for a later real stream event; publishing
+          // it here would render an empty default-assistant message after page refresh.
+          if (hasPersistedAnswer) {
+            answerMsg = updateMessage(answerMsg, { isAssign: true });
+          }
 
           const runtimeInfo =
             chatSessionRuntimeManager.getByClientRequest(runningInfo.clientRequestId) ||
@@ -1028,11 +1082,32 @@ function useChat(props: IProps) {
         if (!traceId) {
           return false;
         }
-        isContinuingRunningTrace = true;
+        isContinuingRunningTrace = hasChatStreamContext({ sessionId, traceId });
         if (!payload.traceId) {
           set(payload, 'traceId', traceId);
         }
       }
+    }
+    if (isResumeChat) {
+      if (!payload.traceId) {
+        return false;
+      }
+    }
+    let isColdResume = isResumeChat && !isContinuingRunningTrace;
+    if (isResumeChat) {
+      console.info(
+        '[ASK_USER_QUESTION_RESUME_TRACE]',
+        JSON.stringify({
+          stage: 'resume_classified',
+          sessionId,
+          traceId: payload.traceId,
+          llmMessageId: payload.llmMessageId,
+          sessionRunning: chatSessionRuntimeManager.isSessionRunning(sessionId),
+          hasStreamContext: hasChatStreamContext({ sessionId, traceId: payload.traceId }),
+          isContinuingRunningTrace,
+          isColdResume,
+        })
+      );
     }
 
     await checkSessionStateBeforeSendQuery();
@@ -1063,6 +1138,50 @@ function useChat(props: IProps) {
     let _queryQuestion = queryQuestion;
     let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
+    let resumeTargetAnswer: IMessage | undefined;
+    let hasFreshResumeTarget = false;
+    const llmMessageId = get(restPayload, 'llmMessageId');
+
+    const persistedResumeAnswer = isResumeChat && llmMessageId
+      ? messageListRef.current.find(
+        (item) =>
+          item.fromBeyond &&
+            `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
+            (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
+      )
+      : undefined;
+
+    hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
+      sessionId,
+      messageId: llmMessageId,
+      queryMsgId: inheritQryMsgId,
+    });
+    // 历史消息刷新后，交互组件拿到的消息对象可能没有 sessionId。此时不能把它当成新回答，
+    // 应用服务端 messageId 找回列表中的原回答，并保留其 msgId / 数字员工身份。
+    if (
+      !hasFreshResumeTarget &&
+      persistedResumeAnswer &&
+      sendProps.resumeAnswerMsg?.fromBeyond &&
+      `${sendProps.resumeAnswerMsg.messageId ?? ''}` === `${llmMessageId ?? ''}`
+    ) {
+      hasFreshResumeTarget = true;
+      resumeTargetAnswer = {
+        ...persistedResumeAnswer,
+        ...sendProps.resumeAnswerMsg,
+        msgId: persistedResumeAnswer.msgId,
+        sessionId: persistedResumeAnswer.sessionId || sessionId,
+        queryMsgId: persistedResumeAnswer.queryMsgId || inheritQryMsgId,
+        agentId: persistedResumeAnswer.agentId || sendProps.resumeAnswerMsg.agentId,
+        agentCode: persistedResumeAnswer.agentCode || sendProps.resumeAnswerMsg.agentCode,
+        agentName: persistedResumeAnswer.agentName || sendProps.resumeAnswerMsg.agentName,
+      };
+    }
+    if (hasFreshResumeTarget) {
+      resumeTargetAnswer ||= sendProps.resumeAnswerMsg;
+      if (resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+        resumeTargetAnswer.traceId = `${payload.traceId}`;
+      }
+    }
 
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
@@ -1094,8 +1213,54 @@ function useChat(props: IProps) {
           // extParams参数里面的文件，每个数字员工的参数格式都不一样，做不了统一处理
         }
       }
+      if (isContinuingRunningTrace && hasFreshResumeTarget && resumeTargetAnswer) {
+        const refreshed = refreshChatStreamAnswerMessage(
+          { sessionId, traceId: payload.traceId },
+          resumeTargetAnswer
+        );
+        const rebound = rebindChatStreamAnswerMessage(
+          { sessionId, traceId: payload.traceId },
+          resumeTargetAnswer
+        ) || refreshed;
+        if (!rebound) {
+          isContinuingRunningTrace = false;
+          isColdResume = true;
+        }
+      }
+      if (isColdResume) {
+        resumeTargetAnswer = hasFreshResumeTarget
+          ? resumeTargetAnswer
+          : messageListRef.current.find(
+            (item) =>
+              item.fromBeyond &&
+                item.queryMsgId === inheritQryMsgId &&
+                (!llmMessageId || `${item.messageId}` === `${llmMessageId}`)
+          );
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_target_resolved',
+            sessionId,
+            traceId: payload.traceId,
+            inheritQryMsgId,
+            llmMessageId,
+            found: Boolean(resumeTargetAnswer),
+            answerMsgId: resumeTargetAnswer?.msgId,
+            answerMessageId: resumeTargetAnswer?.messageId,
+          })
+        );
+      }
     }
 
+    if (isResumeChat && resumeTargetAnswer && payload.traceId && !resumeTargetAnswer.traceId) {
+      resumeTargetAnswer.traceId = `${payload.traceId}`;
+    }
+
+    if (isResumeChat && resumeTargetAnswer?.agentId) {
+      _agentId = `${resumeTargetAnswer.agentId}`;
+    }
+
+    resourceList = limitToLatestDigitalEmployee(resourceList);
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
@@ -1120,7 +1285,7 @@ function useChat(props: IProps) {
       ...get(msgOpt, 'queryMsg', {}),
     });
 
-    if (!onlyQuery) {
+    if (!onlyQuery && !isContinuingRunningTrace) {
       newQueryMsg = updateMessage(newQueryMsg, { isAssign: true });
     }
 
@@ -1183,26 +1348,28 @@ function useChat(props: IProps) {
         })
         : [
           (() => {
-            const answerMsg = createMessage({
-              text: '',
-              fromBeyond: true,
-              messageState: IMessageState.Query,
-              queryMsgId: newQueryMsg.msgId,
-              agentId: _agentId,
-              sessionId,
-              agentType: _agentType,
-              agentCode: singleInlineAgent?.agentCode || undefined,
-              agentName: singleInlineAgent?.agentName || undefined,
-              resourceList: singleInlineAgent ? digitalEmployeeResources : undefined,
-              metadata: _agentId
-                ? JSON.stringify({
+            const answerMsg =
+                resumeTargetAnswer ||
+                createMessage({
+                  text: '',
+                  fromBeyond: true,
+                  messageState: IMessageState.Query,
+                  queryMsgId: newQueryMsg.msgId,
                   agentId: _agentId,
+                  sessionId,
+                  agentType: _agentType,
                   agentCode: singleInlineAgent?.agentCode || undefined,
                   agentName: singleInlineAgent?.agentName || undefined,
-                })
-                : '',
-              ...get(msgOpt, 'answerMsg', {}),
-            });
+                  resourceList: singleInlineAgent ? digitalEmployeeResources : undefined,
+                  metadata: _agentId
+                    ? JSON.stringify({
+                      agentId: _agentId,
+                      agentCode: singleInlineAgent?.agentCode || undefined,
+                      agentName: singleInlineAgent?.agentName || undefined,
+                    })
+                    : '',
+                  ...get(msgOpt, 'answerMsg', {}),
+                });
             return {
               answerMsg,
               lane: {
@@ -1338,6 +1505,17 @@ function useChat(props: IProps) {
       sendResult.cancel();
     };
 
+    void sendResult.promise?.then((outcome) => {
+      if (!('failed' in outcome) || !outcome.failed) return;
+      laneEntries.forEach((entry) => {
+        set(entry.answerMsg, 'messageState', IMessageState.Cancel);
+        updateMessage(entry.answerMsg);
+        chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
+        unregisterPendingChatContext(entry.lane.clientRequestId);
+        unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
+      });
+    });
+
     if (isContinuingRunningTrace) {
       return { cancel };
     }
@@ -1377,7 +1555,8 @@ function useChat(props: IProps) {
 
     // 更新回答消息
     laneEntries.forEach((entry) => {
-      const nextAnswerMsg = updateMessage(entry.answerMsg, { isAssign: true });
+      const nextAnswerMsg =
+        isColdResume && !hasFreshResumeTarget ? entry.answerMsg : updateMessage(entry.answerMsg, { isAssign: true });
       entry.answerMsg = nextAnswerMsg;
       registerPendingChatContext({
         clientRequestId: entry.lane.clientRequestId,
@@ -1390,6 +1569,25 @@ function useChat(props: IProps) {
         flowHandler,
         updateMessage,
       });
+      if (isResumeChat) {
+        console.info(
+          '[ASK_USER_QUESTION_RESUME_TRACE]',
+          JSON.stringify({
+            stage: 'resume_context_registered',
+            sessionId,
+            traceId: payload.traceId,
+            clientRequestId: entry.lane.clientRequestId,
+            answerMsgId: nextAnswerMsg.msgId,
+            answerMessageId: nextAnswerMsg.messageId,
+            isColdResume,
+            contextFoundAfterRegister: hasChatStreamContext({
+              clientRequestId: entry.lane.clientRequestId,
+              sessionId,
+              traceId: payload.traceId,
+            }),
+          })
+        );
+      }
     });
 
     return { cancel };

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.discovery;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +53,21 @@ class ApplicationServiceEndpointTest {
         when(serviceRegistry.getCurrentInstance()).thenReturn(instance);
 
         assertThat(serviceEndpoint.getBaseUrl()).isEqualTo("http://192.168.0.83:8086/byaiService");
+    }
+
+    @Test
+    void explicitBusinessGatewayPreservesProxyPathWithoutARegisteredInstance() {
+        ReflectionTestUtils.setField(serviceEndpoint, "businessBaseUrl", "https://gateway.example/local-test/byaiService/");
+        assertThat(serviceEndpoint.getBaseUrl()).isEqualTo("https://gateway.example/local-test/byaiService");
+    }
+
+    @Test
+    void businessGatewayRejectsCredentialsQueriesAndNonHttpSchemes() {
+        for (String value : new String[] {"http://user:pass@gateway.example", "http://gateway.example/?token=x",
+            "http://gateway.example/#fragment", "file:///tmp/app", "/relative"}) {
+            ReflectionTestUtils.setField(serviceEndpoint, "businessBaseUrl", value);
+            assertThatThrownBy(serviceEndpoint::getBaseUrl).isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

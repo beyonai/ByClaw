@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ProjectDataSources from '@/components/ProjectDataSources';
+import { useProjectDataSourcesEnabled } from '@/components/ProjectDataSources/useProjectDataSourcesEnabled';
 import { useIntl, useSelector } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import AntdIcon from '@/components/AntdIcon';
@@ -116,6 +117,7 @@ const ProjectResources: React.FC<Props> = ({
     (id) => id !== undefined && `${id}` === `${project.createBy}`
   );
   const [dataSourceRefreshKey, setDataSourceRefreshKey] = useState(0);
+  const dataSourcesEnabled = useProjectDataSourcesEnabled();
   const siderContentContext = useContext(SiderContentContext);
   const [files, setFiles] = useState<DevloopProjectSpaceFile[]>([]);
   const [cloudPath, setCloudPath] = useState('/');
@@ -162,7 +164,7 @@ const ProjectResources: React.FC<Props> = ({
   const isOperationProject = project.projectType === 'operation';
   const repositoryProject = supportsProjectRepositories(project.projectType);
   // 资源分类始终在同一行等宽铺满：研发 2 类、运营 5 类，默认和普通项目仅展示共享文件。
-  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + 1;
+  const resourceCategoryCount = getProjectResourceCategoryCount(project.projectType) + Number(dataSourcesEnabled);
 
   const loadFiles = useCallback(async () => {
     const cloudResourceId = project.cloudResourceId;
@@ -529,10 +531,10 @@ const ProjectResources: React.FC<Props> = ({
         );
       } catch (error: any) {
         setFilePreviewContent(null);
-        message.error(error?.message || '文件内容加载失败');
+        message.error(error?.message || intl.formatMessage({ id: 'projectSpace.file.loadFailed' }));
       }
     },
-    [detailRepo, selectedBranch]
+    [detailRepo, selectedBranch, intl]
   );
 
   const changeBranch = useCallback(
@@ -587,7 +589,11 @@ const ProjectResources: React.FC<Props> = ({
           size="small"
           className={styles.resourceCardExpandButton}
           icon={expandedCard === cardKey ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-          aria-label={expandedCard === cardKey ? '收起' : '展开'}
+          aria-label={
+            expandedCard === cardKey
+              ? intl.formatMessage({ id: 'fileChanges.collapse' })
+              : intl.formatMessage({ id: 'common.expand' })
+          }
           onClick={() => setExpandedCard((current) => (current === cardKey ? null : cardKey))}
         />
       </div>
@@ -707,9 +713,13 @@ const ProjectResources: React.FC<Props> = ({
           trigger={['click']}
           menu={{
             items: [
-              { key: 'reference', label: '引用' },
-              { key: 'rename', label: '重命名' },
-              { key: 'delete', label: '删除', danger: true },
+              { key: 'reference', label: intl.formatMessage({ id: 'common.quote' }) },
+              { key: 'rename', label: intl.formatMessage({ id: 'projectSpace.detail.codeChanges.status.renamed' }) },
+              {
+                key: 'delete',
+                label: intl.formatMessage({ id: 'projectSpace.detail.manualRequirement.action.delete' }),
+                danger: true,
+              },
             ],
             onClick: async ({ key, domEvent }) => {
               domEvent.stopPropagation();
@@ -727,7 +737,7 @@ const ProjectResources: React.FC<Props> = ({
                 else await removeFile({ resourceId: String(cloudResourceId), directoryPath: path });
                 await loadFiles();
               }
-              if (key === 'rename') message.info('请使用知识库目录管理中的重命名功能');
+              if (key === 'rename') message.info(intl.formatMessage({ id: 'projectSpace.file.renameHint' }));
             },
           }}
         >
@@ -882,9 +892,13 @@ const ProjectResources: React.FC<Props> = ({
                       trigger={['hover']}
                       menu={{
                         items: [
-                          { key: 'run', label: '立即执行' },
-                          { key: 'edit', label: '编辑' },
-                          { key: 'delete', label: '删除', danger: true },
+                          { key: 'run', label: intl.formatMessage({ id: 'common.runNow' }) },
+                          { key: 'edit', label: intl.formatMessage({ id: 'markdownField.edit' }) },
+                          {
+                            key: 'delete',
+                            label: intl.formatMessage({ id: 'projectSpace.detail.manualRequirement.action.delete' }),
+                            danger: true,
+                          },
                         ],
                         onClick: async ({ key }) => {
                           if (key === 'run') {
@@ -927,21 +941,23 @@ const ProjectResources: React.FC<Props> = ({
           </div>
         </section>
 
-        <section
-          className={`${styles.resourceCategoryCard} ${
-            expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
-          }`}
-        >
-          <ProjectDataSources
-            key={project.projectId}
-            projectId={Number(project.projectId)}
-            canManage={canManageDataSources}
-            renderHeader={(actions) =>
-              renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
-            }
-            refreshKey={dataSourceRefreshKey}
-          />
-        </section>
+        {dataSourcesEnabled && (
+          <section
+            className={`${styles.resourceCategoryCard} ${
+              expandedCard === 'dataSources' ? styles.resourceCategoryCardExpanded : ''
+            }`}
+          >
+            <ProjectDataSources
+              key={project.projectId}
+              projectId={Number(project.projectId)}
+              canManage={canManageDataSources}
+              renderHeader={(actions) =>
+                renderCardHeader(intl.formatMessage({ id: 'dataSource.title' }), 'dataSources', undefined, actions)
+              }
+              refreshKey={dataSourceRefreshKey}
+            />
+          </section>
+        )}
 
         {repositoryProject && (
           <section

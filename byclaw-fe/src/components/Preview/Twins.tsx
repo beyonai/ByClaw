@@ -9,6 +9,16 @@ import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
 import {
   AUDIO_PREVIEW_TYPES,
+  ARCHIVE_PREVIEW_TYPES,
+  DECODED_IMAGE_PREVIEW_TYPES,
+  DELIMITED_PREVIEW_TYPES,
+  DOCUMENT_DATA_PREVIEW_TYPES,
+  OPEN_DOCUMENT_PREVIEW_TYPES,
+  NOTEBOOK_PREVIEW_TYPES,
+  OFFICE_VARIANT_PREVIEW_TYPES,
+  EMAIL_PREVIEW_TYPES,
+  EBOOK_PREVIEW_TYPES,
+  DATABASE_PREVIEW_TYPES,
   HTML_PREVIEW_TYPES,
   IMAGE_PREVIEW_TYPES,
   OFFICE_PREVIEW_TYPES,
@@ -16,11 +26,13 @@ import {
   TEXT_PREVIEW_TYPES,
   VIDEO_PREVIEW_TYPES,
   resolvePreviewType,
+  MAX_TEXT_PREVIEW_SIZE,
 } from './formats';
 import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
 import type { MarkdownImageResolver } from './Md';
+import type { OfficeVariantType } from './officeVariantTypes';
 
 const HtmlRenderComponent = React.lazy(() =>
   import('@/components/Preview/Html').then((module) => ({ default: module.HtmlRender }))
@@ -39,6 +51,17 @@ const OfficeComponent = React.lazy(() =>
 );
 
 const MediaPreviewComponent = React.lazy(() => import('@/components/Preview/Media'));
+const DelimitedPreviewComponent = React.lazy(() => import('@/components/Preview/Delimited'));
+const DecodedImageComponent = React.lazy(() => import('@/components/Preview/DecodedImage'));
+const ArchiveComponent = React.lazy(() => import('@/components/Preview/Archive'));
+const RtfComponent = React.lazy(() => import('@/components/Preview/Rtf'));
+const OdsComponent = React.lazy(() => import('@/components/Preview/Ods'));
+const EpubComponent = React.lazy(() => import('@/components/Preview/Epub'));
+const SqliteComponent = React.lazy(() => import('@/components/Preview/Sqlite'));
+const OpenDocumentComponent = React.lazy(() => import('@/components/Preview/OpenDocument'));
+const NotebookComponent = React.lazy(() => import('@/components/Preview/Notebook'));
+const OfficeVariantComponent = React.lazy(() => import('@/components/Preview/OfficeVariant'));
+const EmlComponent = React.lazy(() => import('@/components/Preview/Eml'));
 
 // 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
 // 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
@@ -74,7 +97,7 @@ const langMap: Record<string, BundledLanguage> = {
   yml: 'yaml',
 };
 
-// SVG 同时提供图片预览和 XML 源码；CSV/TSV 等数据文本沿用可复制的源码预览。
+// SVG、CSV/TSV 同时提供可视化预览和可复制的源码。
 const isTextLike = (type: string) => TEXT_PREVIEW_TYPES.includes(type);
 const canReadSource = (type: string) => isTextLike(type) || ['md', 'svg', ...HTML_PREVIEW_TYPES].includes(type);
 const officeTypes = OFFICE_PREVIEW_TYPES;
@@ -83,9 +106,19 @@ const visualTypes = [
   'pdf',
   ...HTML_PREVIEW_TYPES,
   ...IMAGE_PREVIEW_TYPES,
+  ...DECODED_IMAGE_PREVIEW_TYPES,
+  ...ARCHIVE_PREVIEW_TYPES,
   ...VIDEO_PREVIEW_TYPES,
   ...AUDIO_PREVIEW_TYPES,
   ...officeTypes,
+  ...DELIMITED_PREVIEW_TYPES,
+  ...DOCUMENT_DATA_PREVIEW_TYPES,
+  ...OPEN_DOCUMENT_PREVIEW_TYPES,
+  ...NOTEBOOK_PREVIEW_TYPES,
+  ...OFFICE_VARIANT_PREVIEW_TYPES,
+  ...EMAIL_PREVIEW_TYPES,
+  ...EBOOK_PREVIEW_TYPES,
+  ...DATABASE_PREVIEW_TYPES,
 ];
 
 const createPreviewBlob = (blob: Blob, type: string, title?: string) => {
@@ -103,7 +136,9 @@ export interface TwinsProps {
   onHtmlLinkClick?: (href: string) => void;
 }
 
-export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
+type PreviewFileProps = TwinsProps & { extra?: React.ReactNode; className?: string };
+
+export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElement => {
   const {
     data,
     type: providedType,
@@ -116,6 +151,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
   } = props;
   const intl = useIntl();
   const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
+  const usePdfCanvas = type === 'pdf' && /MicroMessenger|DingTalk/i.test(window.navigator.userAgent);
   const [tab, setTab] = useState<'source' | 'preview'>();
 
   /** 资源链接 - 用于预览 */
@@ -124,6 +160,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
   /** 内容 - 用于展示源代码 */
   const [content, setContent] = useState<[ext: string, data: string]>();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
   const canDownload = !!uri || (data instanceof Blob && officeTypes.includes(type));
 
   const onDownload = () => {
@@ -157,35 +194,52 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
     setUri(undefined);
     setContent(undefined);
     setLoading(false);
+    setError(undefined);
 
     if (data instanceof Blob && !officeTypes.includes(type)) {
       if (canReadSource(type)) {
-        setLoading(true);
-        data
-          .text()
-          .then((source) => {
-            if (disposed) return;
-            let text = source;
-            if (type === 'json') {
-              try {
-                text = JSON.stringify(JSON.parse(source), null, 2);
-              } catch {
-                // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
+        if (data.size > MAX_TEXT_PREVIEW_SIZE) {
+          setError('preview.tooLarge');
+        } else {
+          setLoading(true);
+          data
+            .text()
+            .then((source) => {
+              if (disposed) return;
+              if (
+                /[\u0000-\u0008\u000b\u000e-\u001f]/.test(source) ||
+                source.startsWith('PK\u0003\u0004') ||
+                source.startsWith('%PDF-')
+              ) {
+                setError('preview.binaryText');
+                return;
               }
-            }
-            setContent([langMap[type], text]);
-          })
-          .catch(() => {
-            if (!disposed) setContent(undefined);
-          })
-          .finally(() => {
-            if (!disposed) setLoading(false);
-          });
+              let text = source;
+              if (type === 'json') {
+                try {
+                  text = JSON.stringify(JSON.parse(source), null, 2);
+                } catch {
+                  // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
+                }
+              }
+              setContent([langMap[type], text]);
+            })
+            .catch(() => {
+              if (!disposed) setError('fileRender.previewUnavailable');
+            })
+            .finally(() => {
+              if (!disposed) setLoading(false);
+            });
+        }
       }
+      if (!data.size) setError('preview.empty');
       objectUrl = URL.createObjectURL(createPreviewBlob(data, type, title));
       setUri(objectUrl);
     } else if (typeof data === 'string') {
-      if (canReadSource(type)) setContent([langMap[type], data]);
+      if (canReadSource(type)) {
+        if (new Blob([data]).size > MAX_TEXT_PREVIEW_SIZE) setError('preview.tooLarge');
+        else setContent([langMap[type], data]);
+      }
       if (type === 'svg' || HTML_PREVIEW_TYPES.includes(type)) {
         objectUrl = URL.createObjectURL(createPreviewBlob(new Blob([data]), type, title));
         setUri(objectUrl);
@@ -201,12 +255,19 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
     };
   }, [data, type, title]);
 
+  const previewLabel = intl.formatMessage({ id: 'common.preview' });
+  const sourceLabel = intl.formatMessage({ id: 'preview.source' });
   const tabs = useMemo(() => {
     const options = [];
-    if (visualTypes.includes(type)) options.push({ value: 'preview', icon: <EyeOutlined /> });
-    if (content) options.push({ value: 'source', icon: <FileDoneOutlined /> });
+    if (visualTypes.includes(type)) options.push({ value: 'preview', label: previewLabel, icon: <EyeOutlined /> });
+    if (content)
+      options.push({
+        value: 'source',
+        label: sourceLabel,
+        icon: <FileDoneOutlined />,
+      });
     return options;
-  }, [type, content]);
+  }, [type, content, previewLabel, sourceLabel]);
 
   useEffect(() => {
     setTab(tabs[0]?.value as 'source' | 'preview' | undefined);
@@ -235,7 +296,9 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
         </span>
         {extra}
       </nav>
-      <div className={ss.twins}>
+      {error && <Alert type="warning" showIcon message={intl.formatMessage({ id: error })} />}
+      {isTextLike(type) && !visualTypes.includes(type) && <span>{intl.formatMessage({ id: 'preview.textMode' })}</span>}
+      <div className={ss.twins} style={{ display: error ? 'none' : undefined }}>
         {!loading && !visualTypes.includes(type) && !isTextLike(type) && (
           <Alert type="info" showIcon message={intl.formatMessage({ id: 'fileRender.formatUnsupported' })} />
         )}
@@ -250,12 +313,20 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           </Suspense>
         </div>
         <div
-          style={{ display: !!uri && tab === 'preview' && ['h5', 'html', 'pdf'].includes(type) ? 'block' : 'none' }}
+          style={{
+            display:
+              !!uri && tab === 'preview' && (HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas))
+                ? 'block'
+                : 'none',
+          }}
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
             {/* PDF 必须保留二进制 URL 交给浏览器预览，避免被 HTML 资源解析分支读取为文本而显示乱码。 */}
-            {(HTML_PREVIEW_TYPES.includes(type) || type === 'pdf') &&
+            {!error &&
+              !!uri &&
+              tab === 'preview' &&
+              (HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas)) &&
               (type !== 'pdf' && resolveHtmlResource ? (
                 <HtmlRenderComponent
                   content={content?.[1]}
@@ -268,6 +339,13 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
               ))}
           </Suspense>
         </div>
+        {usePdfCanvas && data instanceof Blob && tab === 'preview' && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OfficeComponent data={data} type="pdf" fileName={title} />
+            </Suspense>
+          </div>
+        )}
         <div
           style={{
             display: !!uri && tab === 'preview' && IMAGE_PREVIEW_TYPES.includes(type) ? 'block' : 'none',
@@ -275,7 +353,9 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            {IMAGE_PREVIEW_TYPES.includes(type) && <ImagePreviewComponent url={uri} title={title} />}
+            {!error && !!uri && tab === 'preview' && IMAGE_PREVIEW_TYPES.includes(type) && (
+              <ImagePreviewComponent url={uri} title={title} />
+            )}
           </Suspense>
         </div>
         <div
@@ -303,7 +383,21 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            <MdPreviewComponent content={content?.[1]} resolveImage={resolveMarkdownImage} />
+            {content && tab === 'preview' && type === 'md' && (
+              <MdPreviewComponent content={content[1]} resolveImage={resolveMarkdownImage} />
+            )}
+          </Suspense>
+        </div>
+        <div
+          style={{
+            display: !!content && tab === 'preview' && DELIMITED_PREVIEW_TYPES.includes(type) ? 'block' : 'none',
+          }}
+          className="full-width full-height"
+        >
+          <Suspense fallback={<Spin />}>
+            {content && DELIMITED_PREVIEW_TYPES.includes(type) && (
+              <DelimitedPreviewComponent content={content[1]} type={type as 'csv' | 'tsv'} />
+            )}
           </Suspense>
         </div>
         <div
@@ -311,9 +405,77 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>
-            <OfficeComponent data={data} type={type} />
+            {officeTypes.includes(type) && <OfficeComponent data={data} type={type} fileName={title} />}
           </Suspense>
         </div>
+        {!error && DECODED_IMAGE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <DecodedImageComponent data={data} type={type} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {!error && DOCUMENT_DATA_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              {type === 'rtf' ? <RtfComponent data={data} title={title} /> : <OdsComponent data={data} />}
+            </Suspense>
+          </div>
+        )}
+        {!error && OFFICE_VARIANT_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OfficeVariantComponent data={data} type={type as OfficeVariantType} />
+            </Suspense>
+          </div>
+        )}
+        {!error && EMAIL_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <EmlComponent data={data} type={type as 'eml' | 'msg'} />
+            </Suspense>
+          </div>
+        )}
+        {!error && OPEN_DOCUMENT_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <OpenDocumentComponent data={data} type={type as 'odt' | 'odp'} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {!error && NOTEBOOK_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <NotebookComponent data={data} />
+            </Suspense>
+          </div>
+        )}
+        {!error && EBOOK_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <EpubComponent data={data} title={title} />
+            </Suspense>
+          </div>
+        )}
+        {!error && DATABASE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <SqliteComponent data={data} />
+            </Suspense>
+          </div>
+        )}
+        {!error && ARCHIVE_PREVIEW_TYPES.includes(type) && (
+          <div className="full-width full-height">
+            <Suspense fallback={<Spin />}>
+              <ArchiveComponent
+                data={data}
+                type={type as 'zip' | 'rar' | '7z' | 'tar' | 'gz' | 'tgz'}
+                fileName={title}
+                renderFile={(file, name) => <PreViewFile data={file} title={name} />}
+              />
+            </Suspense>
+          </div>
+        )}
       </div>
     </section>
   );

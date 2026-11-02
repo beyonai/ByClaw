@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.groupchat;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import java.util.List;
 import java.util.Date;
 
@@ -47,8 +48,10 @@ public interface ByaiGroupChatTurnMapper extends BaseMapper<ByaiGroupChatTurn> {
     ByaiGroupChatTurn selectFirstQueued(@Param("sessionId") Long sessionId);
     ByaiGroupChatTurn selectByTriggerAndAgent(@Param("triggerId") Long triggerId, @Param("agentId") Long agentId);
     ByaiGroupChatTurn selectByPublicMessage(@Param("messageId") Long messageId);
+    @RedisTransactionLock(value = "session", parameters = {"groupId"})
     Long lockGroup(@Param("groupId") Long groupId);
     ByaiGroupChatExecution selectAnchor(@Param("rootId") Long rootId, @Param("agentId") Long agentId,
         @Param("userId") Long userId);
-    ByaiGroupChatTurn selectForUpdateById(@Param("turnId") Long turnId);
+    /** Refreshes the query snapshot; the caller owns coordination and mutation CAS checks. */
+    ByaiGroupChatTurn selectCurrentById(@Param("turnId") Long turnId);
 }

@@ -191,10 +191,10 @@ public final class TenantNodeModels {
     public record GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                       List<MessageFileDto> files, String replyToMessageId,
                                       String creatorName, String coordinatorAgentId,
-                                      String coordinatorName, Boolean coordinatorAuthorized) implements CommandPayload {
+                                      String coordinatorName, Boolean coordinatorAuthorized, Boolean mentionAllUsers) implements CommandPayload {
         public GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                    List<MessageFileDto> files, String replyToMessageId, String creatorName) {
-            this(chatContent, resourceList, files, replyToMessageId, creatorName, null, null, null);
+            this(chatContent, resourceList, files, replyToMessageId, creatorName, null, null, null, null);
         }
     }
 
@@ -210,7 +210,18 @@ public final class TenantNodeModels {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record MirrorInputPayload(String id, String userId, String creatorName,
-                                     String messageContent) implements MirrorPayload {
+                                     String messageContent, MirrorVoiceMetadata metadata) implements MirrorPayload {
+        public MirrorInputPayload(String id, String userId, String creatorName, String messageContent) {
+            this(id, userId, creatorName, messageContent, null);
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record MirrorVoiceMetadata(String messageType, MirrorVoice voice) {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record MirrorVoice(String fileId, String fileName, String mimeType, Long durationMs) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -4,6 +4,8 @@ import { getModelState } from '@/utils';
 import { answerDeltaHandler, reasoningLogHandler } from '@/hooks/useSseSender/util';
 import { substanceHandler } from '@/hooks/useChat/util';
 import { supportsInPlaceUpdate, updateExistingMessage } from '@/utils/messageItemUpdate';
+import { getVoiceMessage } from '@/utils/voice';
+import { getFinalContent } from '@/utils/finalAnswer';
 
 import { IMessage, IMessageListItem } from '@/typescript/message';
 import { IMessageState, SSEMessageType, SSEEventStatus } from '@/constants/message';
@@ -44,6 +46,7 @@ export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
   }
   return (
     hasSubstance(message.text) ||
+    Boolean(getFinalContent(message.finalContent)) ||
     Boolean(message.messageList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
     Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
@@ -72,7 +75,7 @@ export const initQueryMessage = (param: Partial<IMessage>): IMessage => {
     text: get(param, 'text', ''),
     fromBeyond: false,
     messageState: IMessageState.Done,
-    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime']),
+    ...pick(param, ['msgId', 'messageId', 'agentType', 'agentId', 'sessionId', 'createTime', 'voice', 'metadata']),
   });
 };
 
@@ -102,6 +105,7 @@ export const initAnswerMessage = (param: Partial<IMessage>): IMessage => {
       'queryMsgId',
       'createTime',
       'answerMsgId',
+      'finalContent',
       // initMessage 时须保留流式已写入的 metadata（如 LangGraph checkpoint），否则会落回默认空串
       'metadata',
     ]),
@@ -144,6 +148,7 @@ export const fetchMessageHandler = (item: any) => {
   const {
     usage,
     messageContent,
+    finalContent,
     messageId = '',
     inferLog,
     metadata,
@@ -159,18 +164,19 @@ export const fetchMessageHandler = (item: any) => {
     taskPlan,
   } = item;
 
+  let metadataObject: Record<string, any> = {};
+  try {
+    metadataObject = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : metadata || {};
+  } catch (e) {
+    // Invalid metadata remains on the legacy history parsing path.
+  }
+
   // usage： 1-用户 2-大模型 3-追问 4-转发消息 5-交互消息
   const isMyMessage = `${creatorId}` === `${userId}` && ['1', '4'].includes(`${usage}`);
   const fromOtherUser = `${creatorId}` !== `${userId}` && ['1', '4'].includes(`${usage}`);
   const isSystemMessage = ['5', '3'].includes(`${usage}`);
   const fromBeyond = !isMyMessage && !fromOtherUser;
-  let isV2Message = false;
-  try {
-    const metadataObject = typeof metadata === 'string' ? JSON.parse(metadata || '{}') : metadata || {};
-    isV2Message = metadataObject.messageRenderVersion === 'v2';
-  } catch (e) {
-    // Invalid metadata remains on the legacy history parsing path.
-  }
+  const isV2Message = metadataObject.messageRenderVersion === 'v2';
 
   const myMessage: IMessage & { text: string } = {
     creatorId,
@@ -180,6 +186,7 @@ export const fetchMessageHandler = (item: any) => {
     fromOtherUser,
     usage,
     text: '',
+    finalContent: fromBeyond ? getFinalContent(finalContent) : undefined,
     messageId: `${messageId}`,
     msgId: `${messageId}`,
     sessionId: sessionId ? `${sessionId}` : undefined,
@@ -193,6 +200,17 @@ export const fetchMessageHandler = (item: any) => {
     imageList: [],
     taskPlan: taskPlan || undefined,
   };
+
+  if (fromBeyond) {
+    myMessage.agentId = `${metadataObject.agentId || metadataObject.resourceId || ''}` || undefined;
+    myMessage.agentCode = metadataObject.agentCode || metadataObject.resourceCode || undefined;
+    myMessage.agentName = metadataObject.agentName || metadataObject.resourceName || undefined;
+    myMessage.agentType = metadataObject.agentType || undefined;
+  }
+
+  if (fromBeyond && metadataObject.session_scope === 'child' && metadataObject.child_name) {
+    myMessage.agentName = metadataObject.child_name;
+  }
 
   // 用户消息
   if (!fromBeyond) {
@@ -370,6 +388,8 @@ export const fetchMessageHandler = (item: any) => {
       text: messageContent,
     });
   }
+
+  myMessage.voice = getVoiceMessage(myMessage);
 
   return myMessage;
 };

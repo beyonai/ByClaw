@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,7 +56,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class GroupChatQueuedGatewayTest {
+class GroupChatQueuedGatewayTest extends I18nTestSupport {
     private static final String CURRENT_MESSAGE = "已整理资料，请分析。";
 
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
@@ -130,7 +131,7 @@ class GroupChatQueuedGatewayTest {
         session.setProjectId(11L);
         when(sessions.findById(60L)).thenReturn(session);
         when(turns.bindRuntime(eq(52L), any())).thenReturn(1);
-        when(turns.selectForUpdateById(52L)).thenReturn(turn);
+        when(turns.selectCurrentById(52L)).thenReturn(turn);
     }
 
     @Test
@@ -140,7 +141,7 @@ class GroupChatQueuedGatewayTest {
         ArgumentCaptor<AssistantChatDto> request = ArgumentCaptor.forClass(AssistantChatDto.class);
         ArgumentCaptor<ByaiMessageHotDtoDto> existing = ArgumentCaptor.forClass(ByaiMessageHotDtoDto.class);
         InOrder order = Mockito.inOrder(messages, turns, script);
-        order.verify(turns).selectForUpdateById(52L);
+        order.verify(turns).selectCurrentById(52L);
         order.verify(messages).selectByMessageId(71L);
         order.verify(messages).insert(persisted.capture());
         order.verify(turns).bindRuntime(52L, ScriptService.getTraceId(71L, 72L));
@@ -232,7 +233,9 @@ class GroupChatQueuedGatewayTest {
         when(turns.selectByTrace(ctx.traceId)).thenReturn(turn);
         Map<String, Object> params = new HashMap<>();
         String content = (String) executor.decorate(ctx, CURRENT_MESSAGE, params);
-        assertThat(content).contains("\"dispatchId\":\"52\"");
+        assertThat(content).contains("[群聊协议]", "group_request_assistance")
+            .doesNotContain("group-chat-disposition.json");
+        assertThat(((Map<?, ?>) params.get("groupChat")).get("beforeMessageId")).isEqualTo("68");
         verify(tokens).issue(10L, 60L, 30L, 40L, 68L);
         turn.setPhase("CHAT_CONTINUATION");
         assertThat((String) executor.decorate(ctx, CURRENT_MESSAGE, params))
@@ -345,4 +348,21 @@ class GroupChatQueuedGatewayTest {
         ctx.traceId = turn.getTraceId();
         return ctx;
     }
+
+    @Test
+    void queuedSnapshotInputNeverRestoresFilesOrSelectors() throws Exception {
+        turn.setSenderType("USER");
+        var input = JSON.parseObject(turn.getInputContent()); input.put("本次消息", "{{opaque}}"); turn.setInputContent(input.toJSONString());
+        String metadata = "{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceType\":\"COMMON_FILE\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求说明\",\"resourceCode\":\"secret\"}]}";
+        turn.setInputMetadata(metadata);
+        ByaiMessage source = new ByaiMessage(); source.setSessionId(10L); source.setMessageContent("{{opaque}}"); source.setMetadata(metadata);
+        source.setRelatedResources("{\"files\":[{\"fileId\":\"88\",\"fileName\":\"需求.pdf\",\"fileUrl\":\"/download\"}]}");
+        when(messages.selectByMessageId(69L)).thenReturn(source);
+        executor.executeTurn(turn);
+        var request = ArgumentCaptor.forClass(AssistantChatDto.class); verify(script).startExistingMessageTurn(request.capture(), any());
+        assertThat(request.getValue().getResourceList()).isNullOrEmpty();
+        assertThat(request.getValue().getFiles()).isNullOrEmpty();
+        assertThat(request.getValue().getChatContent()).isEqualTo("需求说明");
+    }
+
 }

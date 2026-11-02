@@ -28,7 +28,7 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
  * 下游会按 project_id = 0 过滤，渠道列表整体查不出数据。
  * 2. onlyMine 缺省必须是 false，项目渠道页才能继续看到全项目的渠道。
  */
-class DevloopControllerScanSourceScopeTest {
+class DevloopControllerScanSourceScopeTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private DevloopApplicationService applicationService;
 

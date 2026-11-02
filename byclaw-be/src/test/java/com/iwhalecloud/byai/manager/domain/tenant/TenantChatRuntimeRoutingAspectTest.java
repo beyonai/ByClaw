@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 class TenantChatRuntimeRoutingAspectTest {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
     private final RunningChatSnapshotService snapshots = mock(RunningChatSnapshotService.class);
     private final AssistantChatApplicationService chat = mock(AssistantChatApplicationService.class);
@@ -41,7 +43,7 @@ class TenantChatRuntimeRoutingAspectTest {
         ReflectionTestUtils.setField(target, "runningChatSnapshotService", snapshots);
         ReflectionTestUtils.setField(target, "assistantChatApplicationService", chat);
         AspectJProxyFactory factory = new AspectJProxyFactory(target);
-        factory.addAspect(new TenantChatRuntimeRoutingAspect(node, running, snapshots, chat));
+        factory.addAspect(new TenantChatRuntimeRoutingAspect(node, running, snapshots, chat, tenantModes));
         return factory.getProxy();
     }
 

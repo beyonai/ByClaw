@@ -16,10 +16,17 @@ import {
     createAgentWatchdog as createAgentWatchdogBase,
     loadManagedAgentsFromRedis,
 } from "./agent-watchdog.js";
+import { discoverBackendBaseUrl } from "./backend-service-discovery.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
+
+// These tests provide an in-memory Redis store; do not load the optional ioredis runtime.
+vi.mock("./redis-json-store.js", () => ({ getSharedRedisJsonStore: vi.fn() }));
+vi.mock("./backend-service-discovery.js", () => ({ discoverBackendBaseUrl: vi.fn() }));
+
+const CORE_SKILLS = ["project-context", "notice", "project-cloud-knowledge", "project-task-status-update", "byclaw-cron-schedule"];
 
 const execFileAsync = promisify(execFile);
 
@@ -196,6 +203,31 @@ describe("createAgentWatchdog", () => {
             "10863049",
             "10863050",
         ]);
+        expect(loaded[0]?.contentHash).toBe(entries.get("10863047")?.hash);
+    });
+
+    it("filters shared employee resources before adapting and changes the hash when user use rights change", async () => {
+        vi.stubEnv("USER_CODE", "scope-user");
+        const content = JSON.stringify({
+            resourceId: "10863047", resourceName: "Shared employee",
+            controlledResources: [{ resourceId: "10", resourceCode: "private-skill", resourceBizType: "SKILL", createBy: "1" }],
+            relSkills: [{ resourceId: "10", skillCode: "private-skill", skillUrl: "private.zip" }],
+            relTools: ["native-tool"],
+            relResourceList: [{ resourceId: "10", targetContent: "private definition" }],
+        });
+        const store = createMemoryRedisJsonStore(new Map([["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", content)]]));
+        store.getStringByKey = vi.fn(async () => "2");
+        store.getHashByKey = vi.fn(async () => ({}));
+        const params = { redisJsonStore: store, authorizedSourceKeys: new Set(["10863047"]),
+            embedApiKeysFromJson: true, log: { warn: vi.fn() } };
+        const denied = await loadManagedAgentsFromRedis(params);
+        expect(denied[0]?.sourceJson).toMatchObject({ relSkills: [], relResourceList: [], relTools: ["native-tool"] });
+        store.getHashByKey = vi.fn(async () => ({ "10": "SKILL" }));
+        const allowed = await loadManagedAgentsFromRedis(params);
+        expect(allowed[0]?.sourceJson).toMatchObject({ relSkills: [{ resourceId: "10", skillCode: "private-skill" }] });
+        expect(allowed[0]?.contentHash).not.toBe(denied[0]?.contentHash);
+        expect(store.getStringByKey).toHaveBeenCalledWith("SHARE_BFM_USER_CODE_scope-user");
+        expect(store.getHashByKey).toHaveBeenCalledWith("USER:RESOURCES:AUTH:2");
     });
 
     it("attaches Redis AI model config from prologue.modelId", async () => {
@@ -671,7 +703,7 @@ describe("createAgentWatchdog", () => {
         );
     });
 
-    it("does not call writeConfigFile when index matches Redis content", async () => {
+    it("synchronizes missing tool policy even when the content index already matches", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
         await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
         const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
@@ -710,7 +742,9 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!();
         await wd.stop();
 
-        expect(writeConfigFile).not.toHaveBeenCalled();
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        expect(writeConfigFile.mock.calls[0][0].agents.list.find((entry: any) => entry.id === agentId).tools.alsoAllow)
+            .toContain("baiying_skills");
     });
 
     it("calls writeConfigFile when index matches disk but fullWorkspaceReseed (auth) forces sync", async () => {
@@ -793,6 +827,85 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
     });
 
+    it("refreshes tool snapshots on resource association, description and permission changes with unchanged native policy", async () => {
+        vi.stubEnv("USER_CODE", "tool-user");
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-resource-tools-"));
+        const id = "10000455";
+        const agentId = `${MANAGED_AGENT_PREFIX}${id}`;
+        const raw = {
+            resourceId: id, resourceName: "Demo", integrationType: "NONE", relTools: ["read"],
+            controlledResources: [{ resourceId: "500", resourceBizType: "AGENT", createBy: "1", active: true }],
+            relResourceList: [] as any[],
+        };
+        const resource = {
+            resourceId: "500", resourceName: "Published agent", resourceBizType: "AGENT",
+            resourceCode: "published", resourceDesc: "Original capability", resourceStatus: 2,
+        };
+        const entries = new Map<string, RedisJsonPayload>();
+        const update = () => entries.set(id, payloadFromContent(`DIG_EMPLOYEE_${id}`, JSON.stringify(raw)));
+        update();
+        const store = createMemoryRedisJsonStore(entries);
+        let rights: Record<string, string> = { "500": "AGENT" };
+        store.getStringByKey = vi.fn(async () => "2");
+        store.getHashByKey = vi.fn(async () => rights);
+        let cfg: any = { agents: { list: [{ id: "main", name: "Main" }] }, models: { providers: {} } };
+        const writeConfigFile = vi.fn(async (next: any) => { cfg = next; });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig.mockImplementation(() => cfg);
+        const registry = new AgentRegistryState();
+        const wd = createAgentWatchdogBase({
+            api, registry, redisJsonStore: store,
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set([id]) },
+            absoluteDir: dir, contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: { workspaceAutoSeed: false, workspaceSkillAutoEnable: false, mainWorkspaceAgentsAutoSeed: false },
+            debounceMs: 60_000,
+        });
+        const signature = () => cfg.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature;
+        try {
+            await wd.start();
+            await wd.__flushNow!();
+            const nativePolicy = JSON.stringify(registry.get(agentId)?.listEntry.tools);
+            let previous = signature();
+            cfg.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature = "legacy-snapshot";
+            await wd.__flushNow!();
+            expect(signature()).toBe(previous);
+            for (const next of [
+                resource,
+                { ...resource, resourceName: "Renamed agent" },
+                { ...resource, resourceDesc: "New capability" },
+                { ...resource, param: { authorization: "fixture-secret" } },
+            ]) {
+                raw.relResourceList = [next]; update();
+                await wd.__flushNow!();
+                expect(signature()).not.toBe(previous);
+                expect(signature()).not.toContain("fixture-secret");
+                expect(registry.get(agentId)?.associatedResources?.[0]?.resourceName).toBe(next.resourceName);
+                expect(JSON.stringify(registry.get(agentId)?.listEntry.tools)).toBe(nativePolicy);
+                previous = signature();
+            }
+            rights = {};
+            await wd.__flushNow!({ fullWorkspaceReseed: true });
+            expect(registry.get(agentId)?.associatedResources ?? []).toHaveLength(0);
+            expect(signature()).not.toBe(previous);
+            previous = signature();
+            rights = { "500": "AGENT" };
+            await wd.__flushNow!({ fullWorkspaceReseed: true });
+            expect(registry.get(agentId)?.associatedResources).toHaveLength(1);
+            expect(signature()).not.toBe(previous);
+            previous = signature();
+            raw.relResourceList = []; update();
+            await wd.__flushNow!();
+            expect(registry.get(agentId)?.associatedResources ?? []).toHaveLength(0);
+            expect(signature()).not.toBe(previous);
+            const writes = writeConfigFile.mock.calls.length;
+            await wd.__flushNow!();
+            expect(writeConfigFile).toHaveBeenCalledTimes(writes);
+        } finally {
+            await wd.stop();
+        }
+    });
+
     it("touches skills reload marker when relTools changes the managed agent tool policy", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-tools-"));
         const raw = {
@@ -830,6 +943,7 @@ describe("createAgentWatchdog", () => {
                         "read",
                         "write",
                         "baiying_call",
+                        "baiying_skills",
                         "image_generate",
                         "byclaw_chat_context",
                         "updateTaskPlan",
@@ -861,7 +975,7 @@ describe("createAgentWatchdog", () => {
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
         expect(entry.tools).toEqual({
-            allow: ["read", "baiying_call", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
+            allow: ["read", "baiying_call", "baiying_skills", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
         });
         expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
         expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe(
@@ -870,7 +984,7 @@ describe("createAgentWatchdog", () => {
         expect(
             next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature,
         ).toContain(
-            'tools={"allow":["read","baiying_call","image_generate","byclaw_chat_context","updateTaskPlan"]}',
+            'tools={"allow":["read","baiying_call","baiying_skills","image_generate","byclaw_chat_context","updateTaskPlan"]}',
         );
     });
 
@@ -991,7 +1105,9 @@ describe("createAgentWatchdog", () => {
 
         await wd.start();
         await wd.__flushNow!();
-        expect(writeConfigFile).not.toHaveBeenCalled();
+        // The initial run first aligns the target version's tool policy.
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        writeConfigFile.mockClear();
 
         await wd.__flushNow!({ deletedSourceKeys: ["10863047"] });
         await wd.stop();
@@ -1396,7 +1512,7 @@ describe("createAgentWatchdog", () => {
         expect(await pathExists(activeWs)).toBe(true);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual(["alpha"]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, "alpha"]);
     });
 
     it("seeds main SUBAGENT_ROUTING.md when mainAgentsMdPath is set (context handled by separate watcher)", async () => {
@@ -1700,7 +1816,7 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual(["alpha"]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, "alpha"]);
         expect(entry.workspace).toBe(agentWs);
     });
 
@@ -1736,7 +1852,7 @@ describe("createAgentWatchdog", () => {
         );
         const zipPath = await createHubSkillZip("hub-skill");
         vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
-        vi.stubEnv("BAIYING_WORKSPACE_ARCHIVE_BASE_URL", "http://example.test/byaiService");
+        vi.mocked(discoverBackendBaseUrl).mockResolvedValueOnce("http://example.test/byaiService");
         vi.spyOn(globalThis, "fetch")
             .mockResolvedValueOnce(
                 new Response(
@@ -1766,9 +1882,9 @@ describe("createAgentWatchdog", () => {
                 name: "Hub Skill Agent",
                 workspace: agentWs,
                 identity: { name: "Hub Skill Agent" },
-                skills: ["hub-skill"],
+                skills: [...CORE_SKILLS, "hub-skill"],
                 tools: {
-                    alsoAllow: ["baiying_call", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
+                    alsoAllow: ["baiying_call", "baiying_skills", "image_generate", "byclaw_chat_context", "updateTaskPlan"],
                 },
             },
         ]) as any;
@@ -1794,7 +1910,7 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual(["hub-skill"]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, "hub-skill"]);
         expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
         expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe("hub-skill-sync");
         await expect(readFile(path.join(stateDir, "skills", "hub-skill", "SKILL.md"), "utf8")).resolves.toContain("# hub-skill");
@@ -1852,7 +1968,7 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual(["json-skill", "shared-skill", "agent-skill", "main-skill"]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, "json-skill", "shared-skill", "agent-skill", "main-skill"]);
     });
 
     it("does not merge main workspace skills by default", async () => {
@@ -1897,7 +2013,7 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual([]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, ]);
     });
 
     it("does not merge skills from another managed agent workspace", async () => {
@@ -1966,8 +2082,8 @@ describe("createAgentWatchdog", () => {
         const next = writeConfigFile.mock.calls[0][0];
         const one = next.agents.list.find((a: any) => a.id === agentOneId);
         const two = next.agents.list.find((a: any) => a.id === agentTwoId);
-        expect(one.skills).toEqual(["dws", "clawhub"]);
-        expect(two.skills).toEqual(["other-agent-skill"]);
+        expect(one.skills).toEqual([...CORE_SKILLS, "dws", "clawhub"]);
+        expect(two.skills).toEqual([...CORE_SKILLS, "other-agent-skill"]);
     });
 
     it("removes stale workspace skills from config when the uploaded SKILL.md is gone", async () => {
@@ -2019,7 +2135,7 @@ describe("createAgentWatchdog", () => {
         expect(writeConfigFile).toHaveBeenCalledTimes(1);
         const next = writeConfigFile.mock.calls[0][0];
         const entry = next.agents.list.find((a: any) => a.id === agentId);
-        expect(entry.skills).toEqual([]);
+        expect(entry.skills).toEqual([...CORE_SKILLS, ]);
     });
 
     it("periodic workspace skill scan does not unregister agents when agent JSON is unavailable", async () => {
@@ -2093,7 +2209,7 @@ describe("createAgentWatchdog", () => {
         expect(logText).toContain(`workspace skill sync`);
         expect(logText).toContain(`${agentId} (Demo)`);
         expect(logText).toContain("enabled=[alpha]");
-        expect(logText).toContain("active=[alpha]");
+        expect(logText).toContain(`active=[${[...CORE_SKILLS, "alpha"].join(", ")}]`);
     });
 
     it("uses a full sync when workspace skill refresh sees a stale config snapshot", async () => {
@@ -2162,7 +2278,7 @@ describe("createAgentWatchdog", () => {
         expect(ids).toContain(agentOneId);
         expect(ids).toContain(agentTwoId);
         const agentTwoEntry = next.agents.list.find((entry: any) => entry.id === agentTwoId);
-        expect(agentTwoEntry.skills).toEqual(["alpha"]);
+        expect(agentTwoEntry.skills).toEqual([...CORE_SKILLS, "alpha"]);
         const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
         expect(logText).toContain("stale config snapshot");
     });

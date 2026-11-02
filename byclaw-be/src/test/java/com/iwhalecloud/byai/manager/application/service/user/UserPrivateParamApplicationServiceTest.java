@@ -31,7 +31,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class UserPrivateParamApplicationServiceTest {
+class UserPrivateParamApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private UserPrivateParamMapper mapper;
     private UserPrivateParamApplicationService service;

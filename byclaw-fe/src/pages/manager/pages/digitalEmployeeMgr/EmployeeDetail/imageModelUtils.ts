@@ -19,12 +19,10 @@ export const getImageModelRows = (response?: ModelListByPageResponse): ModelList
 
 export const buildImageModelOptions = (
   models: ModelListItem[] = [],
-  globalDefaultLabel: string,
-  includeGlobalDefault: boolean = true,
   modelType: string = 'IMAGE_GENERATION'
 ): ImageModelOption[] => {
   const normalizedModelType = modelType.trim().toUpperCase();
-  const options = models
+  return models
     .filter(
       (model) =>
         `${model.modelType || ''}`.trim().toUpperCase() === normalizedModelType &&
@@ -39,8 +37,6 @@ export const buildImageModelOptions = (
       };
     })
     .filter((option): option is ImageModelOption => option !== null);
-
-  return includeGlobalDefault ? [{ label: globalDefaultLabel, value: '' }, ...options] : options;
 };
 
 export const applyImageModelId = (payload: Record<string, unknown>, value: unknown): void => {

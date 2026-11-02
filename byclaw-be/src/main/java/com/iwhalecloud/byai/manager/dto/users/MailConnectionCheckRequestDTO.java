@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.dto.users;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -10,11 +12,11 @@ import lombok.Setter;
 @Setter
 public class MailConnectionCheckRequestDTO {
 
-    @NotNull(message = "邮箱账号ID不能为空")
+    @NotNull(message = "{mail.account.idRequired}")
     private Long accountId;
 
     @JsonAnySetter
     public void rejectUnknownField(String ignoredName, Object ignoredValue) {
-        throw new IllegalArgumentException("Unsupported mail connection check field");
+        throw new IllegalArgumentException(I18nUtil.get("mail.connection.fieldUnsupported"));
     }
 }

@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 /* eslint-disable indent */
 // 单个 RankCandidate 候选卡 —— 展示 score/confidence/risks/scoreExplanation/endpoint。
 // 配色全走主题 token(theme.useToken),等宽字段用 Fira Code(.code class)。
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export default function CandidateCard({ candidate, selected, disabled, verify, onSelect }: Props) {
+  const intl = useIntl();
   const {
     id,
     endpoint,
@@ -54,9 +56,20 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
 
   // LLM paramUnion 的 exposeAsArg → 必填/可选/不暴露(语义层标签,优先于 paramObservations 事实)。
   const EXPOSE_LABEL: Record<'yes' | 'optional_candidate' | 'no', { text: string; tip: string; color?: string }> = {
-    yes: { text: '必填', tip: '建议作为命令必填入参', color: token.colorPrimary },
-    optional_candidate: { text: '可选', tip: '可作为命令可选入参', color: token.colorInfo },
-    no: { text: '不暴露', tip: '基础设施/动态/鉴权参数,不建议暴露为入参' },
+    yes: {
+      text: intl.formatMessage({ id: 'projectSpace.onboarding.badge.required' }),
+      tip: intl.formatMessage({ id: 'adapterRecorder.argument.requiredHint' }),
+      color: token.colorPrimary,
+    },
+    optional_candidate: {
+      text: intl.formatMessage({ id: 'projectSpace.onboarding.badge.optional' }),
+      tip: intl.formatMessage({ id: 'adapterRecorder.argument.optionalHint' }),
+      color: token.colorInfo,
+    },
+    no: {
+      text: intl.formatMessage({ id: 'adapterRecorder.argument.hidden' }),
+      tip: intl.formatMessage({ id: 'adapterRecorder.argument.hiddenHint' }),
+    },
   };
   const usePU = !!paramUnion?.length; // 有 LLM 语义推断则优先展示它,否则回退 core 事实
 
@@ -81,9 +94,11 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
             {endpoint.method} {endpoint.pathname}
           </Text>
           {aggregated && (
-            <Tooltip title="同一接口在 A/B 录制里被多次调用,已按 endpoint 聚拢成一行,参数取并集">
+            <Tooltip title={intl.formatMessage({ id: 'adapterRecorder.candidate.mergedHint' })}>
               <Tag color={token.colorInfo} style={{ marginInlineEnd: 0, fontSize: 11 }}>
-                聚合 {mergedCount} 次调用
+                {intl.formatMessage({ id: 'adapterRecorder.candidate.merged' })}
+                {mergedCount}
+                {intl.formatMessage({ id: 'adapterRecorder.candidate.calls' })}
               </Tag>
             </Tooltip>
           )}
@@ -92,7 +107,7 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
       extra={
         <Space size={12} align="start">
           {/* Rank 置信:be 权威双轨分,决定排序/自动生成(录制阶段、可审计,非 verify 结果) */}
-          <Tooltip title="系统基于可审计证据计算,决定排序与自动生成">
+          <Tooltip title={intl.formatMessage({ id: 'adapterRecorder.candidate.rankHint' })}>
             <Space direction="vertical" size={2} align="center">
               <Progress
                 type="circle"
@@ -102,19 +117,19 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
                 format={(p) => <span style={{ fontSize: 11 }}>{p}</span>}
               />
               <Text type="secondary" style={{ fontSize: 10, lineHeight: '12px' }}>
-                Rank 置信
+                {intl.formatMessage({ id: 'adapterRecorder.candidate.rankConfidence' })}
               </Text>
               <Tag
                 color={scoredBy === 'llm' ? token.colorPrimary : undefined}
                 style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '14px', padding: '0 4px' }}
               >
-                {scoredBy === 'llm' ? 'LLM' : '规则'}
+                {scoredBy === 'llm' ? 'LLM' : intl.formatMessage({ id: 'adapterRecorder.candidate.rules' })}
               </Tag>
             </Space>
           </Tooltip>
           {/* LLM 效用:模型自报「做成数据命令是否有用」的语义判断,仅供参考(可选,LLM-off 无此维度) */}
           {utility && (
-            <Tooltip title="模型对『做成数据命令是否有用』的语义判断,仅供参考">
+            <Tooltip title={intl.formatMessage({ id: 'adapterRecorder.candidate.utilityHint' })}>
               <Space direction="vertical" size={2} align="center">
                 <Progress
                   type="circle"
@@ -124,7 +139,7 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
                   format={(p) => <span style={{ fontSize: 11 }}>{p}</span>}
                 />
                 <Text type="secondary" style={{ fontSize: 10, lineHeight: '12px' }}>
-                  LLM 效用
+                  {intl.formatMessage({ id: 'adapterRecorder.candidate.utility' })}
                 </Text>
                 <Tag
                   color={confidenceColor[utility.band]}
@@ -141,19 +156,19 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
       {inferredFunction && (
         <Paragraph style={{ marginBottom: 8, fontSize: 13, lineHeight: 1.5, color: token.colorText }}>
           <Text strong style={{ color }}>
-            接口功能　
+            {intl.formatMessage({ id: 'adapterRecorder.candidate.function' })}
           </Text>
           {inferredFunction}
         </Paragraph>
       )}
       <Descriptions size="small" column={1} colon={false} styles={{ label: { width: 96 } }}>
-        <Descriptions.Item label="URL 模板">
+        <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.urlTemplate' })}>
           <Text className="code" copyable style={{ fontSize: 12 }}>
             {endpoint.urlTemplate}
           </Text>
         </Descriptions.Item>
         {endpoint.queryParams && Object.keys(endpoint.queryParams).length > 0 && (
-          <Descriptions.Item label="查询参数">
+          <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.queryParameters' })}>
             <Space size={[4, 4]} wrap>
               {Object.entries(endpoint.queryParams).map(([k, v]) => (
                 <Tag key={k} className="code" style={{ fontSize: 11 }}>
@@ -164,10 +179,10 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
           </Descriptions.Item>
         )}
         {!!endpoint.dynamicParams?.length && (
-          <Descriptions.Item label="动态参数">
+          <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.dynamicParameters' })}>
             <Space size={[4, 4]} wrap>
               {endpoint.dynamicParams.map((p) => (
-                <Tooltip key={p} title="时间戳/缓存破坏等动态参数,已排除出稳定 endpoint">
+                <Tooltip key={p} title={intl.formatMessage({ id: 'adapterRecorder.candidate.dynamicHint' })}>
                   <Tag className="code" style={{ fontSize: 11 }}>
                     {p}
                   </Tag>
@@ -177,7 +192,7 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
           </Descriptions.Item>
         )}
         {!!args?.length && (
-          <Descriptions.Item label="参数映射">
+          <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.mapping' })}>
             <Space size={[4, 4]} wrap>
               {args.map((a) => (
                 <Tag key={a.argName} className="code" style={{ fontSize: 11 }}>
@@ -188,7 +203,7 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
           </Descriptions.Item>
         )}
         {usePU ? (
-          <Descriptions.Item label="参数语义">
+          <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.semantics' })}>
             <Space direction="vertical" size={2} style={{ width: '100%' }}>
               {paramUnion!.map((p) => {
                 const expose = p.exposeAsArg ? EXPOSE_LABEL[p.exposeAsArg] : undefined;
@@ -208,7 +223,7 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
                       </Tooltip>
                     )}
                     {p.paramRole && (
-                      <Tooltip title={p.why || '参数语义角色(LLM 推断)'}>
+                      <Tooltip title={p.why || intl.formatMessage({ id: 'adapterRecorder.candidate.semanticsHint' })}>
                         <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>{p.paramRole}</Tag>
                       </Tooltip>
                     )}
@@ -224,18 +239,38 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
           </Descriptions.Item>
         ) : (
           !!paramObservations?.length && (
-            <Descriptions.Item label="参数并集">
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.parameterUnion' })}>
               <Space direction="vertical" size={2} style={{ width: '100%' }}>
                 {paramObservations.map((p) => {
                   const flags: Array<{ text: string; tip: string }> = [];
-                  if (p.dynamicLike) flags.push({ text: '动态', tip: '疑似时间戳/缓存破坏/签名等动态参数' });
-                  if (p.cursorLike) flags.push({ text: '翻页', tip: '疑似 cursor/offset/page/limit 翻页参数' });
+                  if (p.dynamicLike)
+                    flags.push({
+                      text: intl.formatMessage({ id: 'adapterRecorder.parameter.dynamic' }),
+                      tip: intl.formatMessage({ id: 'adapterRecorder.parameter.dynamicHint' }),
+                    });
+                  if (p.cursorLike)
+                    flags.push({
+                      text: intl.formatMessage({ id: 'adapterRecorder.parameter.pagination' }),
+                      tip: intl.formatMessage({ id: 'adapterRecorder.parameter.paginationHint' }),
+                    });
                   if (p.observedVariation === true)
-                    flags.push({ text: '值有变化', tip: 'A/B 调用间该参数取值发生变化' });
+                    flags.push({
+                      text: intl.formatMessage({ id: 'adapterRecorder.parameter.changed' }),
+                      tip: intl.formatMessage({ id: 'adapterRecorder.parameter.changedHint' }),
+                    });
                   else if (p.observedVariation === false)
-                    flags.push({ text: '值固定', tip: 'A/B 调用间该参数取值未变(不等于一定是常量)' });
+                    flags.push({
+                      text: intl.formatMessage({ id: 'adapterRecorder.parameter.fixed' }),
+                      tip: intl.formatMessage({ id: 'adapterRecorder.parameter.fixedHint' }),
+                    });
                   if (!p.observedAlways)
-                    flags.push({ text: `${p.observedCount}/${p.totalCalls} 次出现`, tip: '该参数并非每次调用都出现' });
+                    flags.push({
+                      text: intl.formatMessage(
+                        { id: 'adapterRecorder.parameter.occurrences' },
+                        { v0: p.observedCount, v1: p.totalCalls }
+                      ),
+                      tip: intl.formatMessage({ id: 'adapterRecorder.parameter.notAlwaysPresent' }),
+                    });
                   return (
                     <Space key={`${p.in}:${p.name}`} size={[4, 2]} wrap style={{ fontSize: 11 }}>
                       <Tag className="code" style={{ fontSize: 11, marginInlineEnd: 0 }}>
@@ -257,16 +292,19 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
           )
         )}
         {responseShape && (
-          <Descriptions.Item label="响应结构">
+          <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.candidate.responseShape' })}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {responseShape.kind}
               {responseShape.itemKeys?.length ? ` · ${responseShape.itemKeys.join(', ')}` : ''}
-              {responseShape.count !== null && responseShape.count !== undefined ? ` · ${responseShape.count} 条` : ''}
+              {responseShape.count !== null && responseShape.count !== undefined
+                ? intl.formatMessage({ id: 'adapterRecorder.candidate.recordCount' }, { v0: responseShape.count })
+                : ''}
             </Text>
             {responseShapeVariants && responseShapeVariants.length > 1 && (
-              <Tooltip title="聚拢的多次调用返回过不同结构(已标记需复核)">
+              <Tooltip title={intl.formatMessage({ id: 'adapterRecorder.candidate.polymorphicHint' })}>
                 <Tag color={token.colorWarning} style={{ marginInlineStart: 6, fontSize: 10 }}>
-                  多形态 {responseShapeVariants.join('/')}
+                  {intl.formatMessage({ id: 'adapterRecorder.candidate.polymorphic' })}
+                  {responseShapeVariants.join('/')}
                 </Tag>
               </Tooltip>
             )}
@@ -279,17 +317,27 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
       {verify !== null && verify !== undefined && (
         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Verify 状态
+            {intl.formatMessage({ id: 'adapterRecorder.verify.status' })}
           </Text>
           {verify.ok ? (
             <Tag icon={<CheckCircleOutlined />} color="success" style={{ marginInlineEnd: 0, fontSize: 11 }}>
-              通过{verify.rows !== null && verify.rows !== undefined ? ` · ${verify.rows} 行` : ''}
-              {verify.fieldCount !== null && verify.fieldCount !== undefined ? ` / ${verify.fieldCount} 字段` : ''}
+              {intl.formatMessage({ id: 'projectSpace.detail.integration.result.status.passed' })}
+              {verify.rows !== null && verify.rows !== undefined
+                ? intl.formatMessage({ id: 'adapterRecorder.verify.rows' }, { v0: verify.rows })
+                : ''}
+              {verify.fieldCount !== null && verify.fieldCount !== undefined
+                ? intl.formatMessage({ id: 'adapterRecorder.verify.fields' }, { v0: verify.fieldCount })
+                : ''}
             </Tag>
           ) : (
-            <Tooltip title={verify.error?.message || verify.stage || '验证未通过'}>
+            <Tooltip
+              title={
+                verify.error?.message || verify.stage || intl.formatMessage({ id: 'adapterRecorder.verify.failedHint' })
+              }
+            >
               <Tag icon={<WarningOutlined />} color={token.colorError} style={{ marginInlineEnd: 0, fontSize: 11 }}>
-                未通过{verify.stage ? ` · ${verify.stage}` : ''}
+                {intl.formatMessage({ id: 'adapterRecorder.verify.failed' })}
+                {verify.stage ? ` · ${verify.stage}` : ''}
               </Tag>
             </Tooltip>
           )}
@@ -336,12 +384,12 @@ export default function CandidateCard({ candidate, selected, disabled, verify, o
         }}
       >
         {confidence === 'rejected'
-          ? '不可选(已拒绝)'
+          ? intl.formatMessage({ id: 'adapterRecorder.candidate.rejected' })
           : selected
-          ? '已选定'
+          ? intl.formatMessage({ id: 'adapterRecorder.candidate.selected' })
           : reviewRequired
-          ? '选定(需复核)'
-          : '选定此候选'}
+          ? intl.formatMessage({ id: 'adapterRecorder.candidate.selectReview' })
+          : intl.formatMessage({ id: 'adapterRecorder.candidate.select' })}
       </Button>
     </Card>
   );

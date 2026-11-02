@@ -34,4 +34,7 @@ public class ChatMessage extends AssistantChatDto {
     /** 群聊引用消息 ID；普通聊天不使用。 */
     private Long replyToMessageId;
 
+    /** Notify all current human group members; never dispatch digital employees. */
+    private Boolean mentionAllUsers;
+
 }

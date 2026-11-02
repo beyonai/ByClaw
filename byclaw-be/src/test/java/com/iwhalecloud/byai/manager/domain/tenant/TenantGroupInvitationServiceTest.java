@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
@@ -12,7 +14,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEvent
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest;
 import org.junit.jupiter.api.Test;
 
-class TenantGroupInvitationServiceTest {
+class TenantGroupInvitationServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final MessageShareLinkMapper links = mock(MessageShareLinkMapper.class);
     private final TenantAdminMemberService contexts = mock(TenantAdminMemberService.class);
     private final UserService users = mock(UserService.class);
@@ -144,4 +151,17 @@ class TenantGroupInvitationServiceTest {
         assertThat(service.resolve("validateInvitation", invitation(), null)).isNull();
         verifyNoInteractions(contexts, data);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|邀请无效或已过期", "en-US|Invitation is invalid or expired"
+    }, delimiter = '|')
+    void invalidInvitationUsesTheRequestLocale(String language, String expected) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        var request = new GroupChatInvitationTokenRequest();
+        request.setToken("invalid-token");
+        assertThatThrownBy(() -> service.resolve("validateInvitation", new Object[]{request}, null))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage(expected);
+        verifyNoInteractions(links, data, contexts);
+    }
+
 }

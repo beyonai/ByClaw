@@ -103,6 +103,61 @@ class ConnectorInfoServiceTest {
     }
 
     @Test
+    void exposesMediaModelFieldsIncludingNumbersAndJsonTextareas() {
+        ConnectorListDto dto = credentialConnector("""
+            {"credentialForm":{"helpUrl":"https://docs.example.com/models","fields":[
+              {"key":"modelName","label":"模型名称","inputType":"text","maxLength":256},
+              {"key":"modelCode","label":"模型型号","inputType":"text","maxLength":256},
+              {"key":"modelProtocol","label":"模型协议","inputType":"text","maxLength":64},
+              {"key":"apiEndpoint","label":"API Endpoint","inputType":"text","maxLength":2048},
+              {"key":"apiToken","label":"API Token","inputType":"password","maxLength":2048},
+              {"key":"headersJson","label":"Headers (JSON)","inputType":"textarea","maxLength":8192},
+              {"key":"connectTimeoutSeconds","label":"连接超时（秒）","inputType":"number","maxLength":4},
+              {"key":"readTimeoutSeconds","label":"读取超时（秒）","inputType":"number","maxLength":4},
+              {"key":"maxRetryCount","label":"最大重试次数","inputType":"number","maxLength":2},
+              {"key":"retryIntervalSeconds","label":"重试间隔（秒）","inputType":"number","maxLength":4},
+              {"key":"optionsJson","label":"高级参数 (JSON)","inputType":"textarea","maxLength":8192}
+            ]}}
+            """);
+
+        ConnectorInfoService.sanitizeCredentialForm(dto);
+
+        assertThat(dto.getCredentialForm()).isNotNull();
+        assertThat(dto.getCredentialForm().getFields()).hasSize(11);
+        assertThat(dto.getCredentialForm().getFields())
+            .extracting(field -> field.getInputType())
+            .contains("number", "textarea");
+    }
+
+    @Test
+    void exposesSafeDefaultsButNeverPasswordDefaults() {
+        ConnectorListDto dto = credentialConnector("""
+            {"credentialForm":{"helpUrl":"https://docs.example.com/models","fields":[
+              {"key":"modelProtocol","label":"模型协议","inputType":"text","maxLength":64,
+               "defaultValue":"OPENAI_IMAGE","placeholder":"OPENAI_IMAGE",
+               "description":"当前仅支持 OPENAI_IMAGE。","advanced":true},
+              {"key":"apiToken","label":"API Token","inputType":"password","maxLength":2048,
+               "defaultValue":"must-not-leak"},
+              {"key":"connectTimeoutSeconds","label":"连接超时（秒）","inputType":"number","maxLength":4,
+               "defaultValue":"30"}
+            ]}}
+            """);
+
+        ConnectorInfoService.sanitizeCredentialForm(dto);
+
+        assertThat(dto.getCredentialForm()).isNotNull();
+        assertThat(dto.getCredentialForm().getFields())
+            .extracting(field -> field.getDefaultValue())
+            .containsExactly("OPENAI_IMAGE", null, "30");
+        assertThat(dto.getCredentialForm().getFields().get(0).getPlaceholder()).isEqualTo("OPENAI_IMAGE");
+        assertThat(dto.getCredentialForm().getFields().get(0).getDescription())
+            .isEqualTo("当前仅支持 OPENAI_IMAGE。");
+        assertThat(dto.getCredentialForm().getFields().get(0).getAdvanced()).isTrue();
+        assertThat(dto.getCredentialForm().getFields().get(1).getAdvanced()).isFalse();
+        assertThat(JSON.toJSONString(dto)).doesNotContain("must-not-leak", "authConfig");
+    }
+
+    @Test
     void suppressesCredentialFormsWithUnsafeGenericSchema() {
         assertInvalidCredentialForm("""
             {"credentialForm":{"helpUrl":"https://mp.weixin.qq.com/","fields":[

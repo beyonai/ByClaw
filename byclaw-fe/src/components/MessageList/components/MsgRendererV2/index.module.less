@@ -1,0 +1,61 @@
+.finalSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  color: var(--beyond-color-text-tertiary);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #6f5cff);
+    outline-offset: 2px;
+  }
+
+  // 只隐藏同级过程节点；最终正文、分隔线和需要用户处理的连接器操作始终可见。
+  &[data-collapsed='true'] ~ :not(.finalContent):not(.finalDivider):not(.connectorActions) {
+    display: none;
+  }
+}
+
+.finalDivider {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--beyond-color-border-secondary, #e8e8e8);
+}
+
+.finalContent {
+  min-width: 0;
+}
+
+.connectorActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.connectorActionButton {
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 1px solid var(--beyond-color-primary);
+  border-radius: 6px;
+  color: #fff;
+  background: var(--beyond-color-primary);
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.88;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary);
+    outline-offset: 2px;
+  }
+}

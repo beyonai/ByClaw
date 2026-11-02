@@ -1,10 +1,26 @@
 @antPrefix: ant;
 
 .container {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   height: 100%;
-  padding: 20px 24px;
-  overflow: auto;
+  min-height: 0;
+  padding: 25px 30px 20px;
+  overflow: hidden;
   background: #fff;
+}
+
+.fixedHeader {
+  flex-shrink: 0;
+}
+
+// 仅员工内容区滚动；续载和搜索重置共用此区域，不移动顶部筛选。
+.listScroller {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .auditContainer {
@@ -14,7 +30,7 @@
 }
 
 .header {
-  margin-bottom: 16px;
+  margin-bottom: 23px;
 
   :global {
     .@{antPrefix}-tabs-nav {
@@ -158,7 +174,7 @@
 
 .employeeSearch,
 .auditSearch {
-  // 各页签统一使用“我可用”搜索框的尺寸，图标置于输入框内部右侧。
+  // 沿用“我可用”的搜索框尺寸，边框、圆角和字号由统一输入框主题提供。
   box-sizing: border-box;
   width: 200px;
   height: 32px;
@@ -186,8 +202,15 @@
 }
 
 .back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 12px;
-  color: #666;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #747b87;
+  font: inherit;
   cursor: pointer;
 }
 
@@ -196,16 +219,17 @@
 }
 
 .toolbar > .filters {
-  // 管理页筛选铺满内容区，类型、归属和状态按两端对齐排列。
+  // 按原型从左向右排列，空间不足时以完整筛选组换行。
   width: 100%;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 16px 26px;
   margin-bottom: 0;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px;
+  gap: 21px;
 }
 
 .avatar {
@@ -226,5 +250,196 @@
 @media (max-width: 1200px) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.headerTools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.searchButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.viewSwitch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 7px;
+  background: #f2f4f7;
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 29px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #737b88;
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .activeView {
+    background: #fff;
+    color: var(--beyond-color-primary, #2465ff);
+    box-shadow: 0 1px 4px #202c4910;
+  }
+}
+
+.back,
+.searchButton,
+.viewSwitch button,
+.tableWrap,
+.enterpriseTableWrap {
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #2465ff);
+    outline-offset: 3px;
+  }
+}
+
+.filterActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.loadMore {
+  padding: 20px 0;
+  text-align: center;
+}
+
+.tableWrap,
+.enterpriseTableWrap {
+  // 横纵滚动统一交给 listScroller，避免内层滚动容器使表头吸顶失效。
+  // 优先填满可用宽度，仅在文字列已难以阅读时允许横向滚动。
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 640px;
+  overflow: visible;
+  border: 1px solid #e7e9ee;
+  // 顶边框由吸顶表头绘制，避免表头初始位置与 top: 0 相差 1px。
+  border-top: 0;
+  border-radius: 10px;
+}
+
+.enterpriseTableWrap {
+  min-width: 760px;
+}
+
+.employeeTable,
+.enterpriseTable {
+  width: 100%;
+  // 独立绘制单元格边框，防止合并边框随表体滚动而脱离吸顶表头。
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 44px;
+    padding: 0 15px;
+    border-top: 1px solid #e7e9ee;
+    background: #f7f8fa;
+    color: #7a8391;
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    box-shadow: 0 1px 0 #e7e9ee;
+  }
+
+  th:first-child {
+    border-top-left-radius: 10px;
+  }
+
+  th:last-child {
+    border-top-right-radius: 10px;
+  }
+
+  th:nth-child(1) {
+    width: 30%;
+  }
+  th:nth-child(2) {
+    // 简介承接剩余空间，操作列保持固定宽度，不随屏幕变宽。
+    width: auto;
+  }
+  th:nth-child(3) {
+    width: 16%;
+  }
+  th:nth-child(4) {
+    width: 100px;
+  }
+  th:last-child {
+    width: 120px;
+  }
+}
+
+.enterpriseTable {
+  th:nth-child(1) {
+    width: 24%;
+  }
+  th:nth-child(2) {
+    width: auto;
+  }
+  th:nth-child(3) {
+    width: 13%;
+  }
+  th:nth-child(4) {
+    width: 100px;
+  }
+  th:nth-child(5) {
+    width: 88px;
+  }
+  th:nth-child(6) {
+    width: 76px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .header :global(.@{antPrefix}-tabs-nav) {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .header :global(.@{antPrefix}-tabs-extra-content) {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .headerTools {
+    width: 100%;
+  }
+
+  .employeeSearch {
+    flex: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .container {
+    padding: 21px 18px;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .employeeSearch {
+    min-width: 0;
+    width: auto;
   }
 }

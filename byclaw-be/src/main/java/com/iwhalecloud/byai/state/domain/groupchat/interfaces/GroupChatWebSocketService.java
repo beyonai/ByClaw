@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.application.TenantGroupAgentDispatcher;
@@ -34,16 +37,18 @@ public class GroupChatWebSocketService {
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final TenantGroupAgentDispatcher tenantDispatcher;
+    private final TenantModeService tenantModes;
 
     @Autowired
     public GroupChatWebSocketService(GroupChatApplicationService applicationService, TenantNodeClient tenantNodeClient,
         ByaiGroupChatMentionMapper mentionMapper, GroupChatEventPublisher eventPublisher,
-        TenantGroupAgentDispatcher tenantDispatcher) {
+        TenantGroupAgentDispatcher tenantDispatcher, TenantModeService tenantModes) {
         this.applicationService = applicationService;
         this.tenantNodeClient = tenantNodeClient;
         this.mentionMapper = mentionMapper;
         this.eventPublisher = eventPublisher;
         this.tenantDispatcher = tenantDispatcher;
+        this.tenantModes = tenantModes;
     }
 
     public GroupChatWebSocketService(GroupChatApplicationService applicationService) {
@@ -52,6 +57,7 @@ public class GroupChatWebSocketService {
         this.mentionMapper = null;
         this.eventPublisher = null;
         this.tenantDispatcher = null;
+        this.tenantModes = null;
     }
 
     public void send(ChannelHandlerContext context, ChatMessage message) {
@@ -76,7 +82,11 @@ public class GroupChatWebSocketService {
     private JSONObject accept(ChatMessage message) {
         try {
             TenantRequestContext tenant = TenantRequestContextHolder.get();
-            if (tenant != null) return acceptTenant(tenant, message);
+            // 有租户上下文不等于有独立 Node：试用租户和默认企业的群消息仍写公共库。
+            // 保留上下文，供公共业务校验真实企业归属、限额及回执中的 enterpriseId。
+            if (tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId())) {
+                return acceptTenant(tenant, message);
+            }
             Long messageId = applicationService.acceptUserMessage(message);
             JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
             ack.put("messageId", messageId);
@@ -101,8 +111,8 @@ public class GroupChatWebSocketService {
                 message.getSessionId(), message.getClientRequestId(), error);
             boolean storageFailure = error instanceof DataAccessException;
             return failure(message, "ERROR", storageFailure ? "GROUP_CHAT_STORAGE_ERROR" : "GROUP_CHAT_INTERNAL_ERROR",
-                storageFailure ? "数据库处理失败，消息发送结果暂未确认，请稍后重试"
-                    : "服务处理异常，消息发送结果暂未确认，请稍后重试");
+                storageFailure ? I18nUtil.get("groupchat.storageFailure")
+                    : I18nUtil.get("groupchat.serviceFailure"));
         }
     }
 
@@ -118,7 +128,7 @@ public class GroupChatWebSocketService {
             new GroupMessagePayload(message.getChatContent(), message.getResourceList() == null ? java.util.List.of() : message.getResourceList(), message.getFiles(),
                 message.getReplyToMessageId() == null ? null : message.getReplyToMessageId().toString(),
                 message.getSenderName(), (String) coordinator.get("coordinatorAgentId"),
-                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized")), message.getClientRequestId());
+                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized"), message.getMentionAllUsers()), message.getClientRequestId());
         if (result == null || result.messageId() == null) {
             throw new IllegalStateException("tenant group message was not committed");
         }
@@ -133,6 +143,7 @@ public class GroupChatWebSocketService {
         event.put("creatorId", tenant.userId());
         event.put("creatorName", message.getSenderName());
         event.put("resourceList", message.getResourceList());
+        event.put("mentionAllUsers", Boolean.TRUE.equals(message.getMentionAllUsers()));
         event.put("files", message.getFiles());
         event.put("replyToMessageId", message.getReplyToMessageId());
         event.put("speaker", java.util.Map.of("type", "USER",
@@ -192,7 +203,7 @@ public class GroupChatWebSocketService {
     private JSONObject failure(ChatMessage message, String type, String code, String reason) {
         JSONObject response = event(message, type);
         response.put("code", code);
-        response.put("message", reason == null || reason.isBlank() ? "消息发送被拒绝" : reason);
+        response.put("message", reason == null || reason.isBlank() ? I18nUtil.get("groupchat.sendRejected") : reason);
         return response;
     }
 }

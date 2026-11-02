@@ -1,0 +1,38 @@
+web-tree-sitter LANGUAGE_VERSION=15 MIN_COMPATIBLE_VERSION=13 on linux/arm64 v22.23.2
+official-tarball: python=ok(abi 15) go=ok(abi 15) rust=ok(abi 14) java=ok(abi 14)
+vscode: python=ok(abi 15) go=ok(abi 15) rust=ok(abi 15) java=ok(abi 14)
+tree-sitter-wasms: python=FAIL go=FAIL rust=FAIL java=FAIL
+
+python /e2e-test-samples/repos/fastapi-template/backend/app/utils.py:
+  assignment logger  L16-16
+  class      EmailData  L20-22 (decorated)
+  function   render_email_template  L25-31
+  function   send_email  L34-57
+  function   generate_test_email  L60-67
+  function   generate_reset_password_email  L70-84
+  function   generate_new_account_email  L87-102
+  function   generate_password_reset_token  L105-115
+  function   verify_password_reset_token  L118-125
+
+go /e2e-test-samples/repos/miniflux/internal/model/entry.go:
+  const      EntryStatusUnread  L11-16 (grouped)
+  const      EntryStatusRead  L11-16 (grouped)
+  const      DefaultSortingOrder  L11-16 (grouped)
+  const      DefaultSortingDirection  L11-16 (grouped)
+  const      MaxEntryLimit  L20-20
+  const      MaxEntryIDsLimit  L24-24
+  type       Entry  L27-48
+  func       NewEntry  L50-59
+  method     ShouldMarkAsReadOnView  L62-75 recv (e *Entry)
+  type       Entries  L78-78
+  type       EntriesStatusUpdateRequest  L81-85
+  type       EntryUpdateRequest  L88-91
+  method     Patch  L93-101 recv (e *EntryUpdateRequest)
+
+python '#' in string survives: true, comments gone: true
+go '//' in string survives: true
+
+go MaxEntryLimit stripped:
+  const MaxEntryLimit = 1000
+go hasHTTPPrefix stripped:
+  func hasHTTPPrefix(inputURL string) bool { return strings.HasPrefix(inputURL, "https://") || strings.HasPrefix(inputURL, "http://") }

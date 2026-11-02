@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -15,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class TenantGroupPublicationServiceTest {
+class TenantGroupPublicationServiceTest extends I18nTestSupport {
     @Test
     void publicationUsesAuthorizedMemberIdentityWithoutDeserializingNodeIsoDates() throws Exception {
         var mapper = new ObjectMapper();
@@ -46,5 +47,26 @@ class TenantGroupPublicationServiceTest {
         assertThat(members.getValue().get(0).getMemObjId()).isEqualTo(88L);
         assertThat(members.getValue().get(0).getMemObjType()).isEqualTo("AGENT");
         verify(events, times(2)).publishTenant(eq(tenant), eq(Long.valueOf(groupId)), any());
+    }
+
+    @Test
+    void pendingPublicationCannotBeOverwrittenInEitherLanguage() {
+        var data = mock(TenantGroupData.class);
+        var tasks = mock(GroupChatTaskService.class);
+        var uploads = mock(GroupChatPublicationUploader.class);
+        var events = mock(GroupChatEventPublisher.class);
+        var service = new TenantGroupPublicationService(data, tasks, uploads, events, new ObjectMapper());
+        var request = new GroupChatTaskCompleteRequest();
+        request.setPendingPublicationId(123L);
+        request.setText("replacement");
+        var tenant = new TenantRequestContext(57L, 11237409L, "MEMBER");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.complete(tenant, 99L, request))
+            .hasMessage("Confirm pending publication without overriding text/files");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.complete(tenant, 99L, request))
+            .hasMessage("确认待发布成果时不能覆盖正文或文件");
+        verifyNoInteractions(tasks, uploads, events);
+        verify(data, never()).write(any(), any(), any(), any(), any(), any());
     }
 }

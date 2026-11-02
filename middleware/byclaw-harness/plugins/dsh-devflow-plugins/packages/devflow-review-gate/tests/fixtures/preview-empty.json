@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "mode": "range",
+  "repository": "/tmp/ocrfix",
+  "from": "main",
+  "to": "main",
+  "merge_base": "b53859a0a6a1244f6ee9b2e2fe6aa0b40ddadbdf",
+  "total_files": 0,
+  "reviewable_count": 0,
+  "excluded_count": 0,
+  "total_insertions": 0,
+  "total_deletions": 0,
+  "reviewable_files": [],
+  "excluded_files": []
+}

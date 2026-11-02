@@ -12,7 +12,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 
-class BackgroundFollowupAdmissionTest {
+class BackgroundFollowupAdmissionTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     @Test
     void idleRootAcceptsNewMessageWhileBackgroundAgentsKeepWorking() {
         RunningChatInfo running = running(false, true);

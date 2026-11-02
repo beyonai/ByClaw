@@ -60,6 +60,10 @@ const OrganizationInfo = (props) => {
             )}
             <div className={styles.content}>
               <div className={styles.item}>
+                <div className={styles.label}>{intl.formatMessage({ id: 'orgMgr.modal.administrators' })}：</div>
+                <div className={styles.value}>{record.administratorNames?.join('、') || '—'}</div>
+              </div>
+              <div className={styles.item}>
                 <div className={styles.label}>{intl.formatMessage({ id: 'orgMgr.organization.parent' })}：</div>
                 <div className={styles.value}>{record.parentOrgName || ' '}</div>
               </div>

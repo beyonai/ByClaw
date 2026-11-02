@@ -1,13 +1,16 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import com.dingtalk.api.DefaultDingTalkClient;
 import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiGettokenRequest;
 import com.dingtalk.api.response.OapiGettokenResponse;
@@ -24,9 +27,12 @@ public class DingtalkTokenService {
     private static final String ACCESS_TOKEN_CACHE_KEY_PREFIX = "dingtalk:access_token:";
 
     private final DingtalkRobotConfigService robotConfigService;
+    private final DingtalkHttpClientFactory httpClientFactory;
+    private final ConcurrentMap<String, CompletableFuture<String>> inFlightTokens = new ConcurrentHashMap<>();
 
-    public DingtalkTokenService(DingtalkRobotConfigService robotConfigService) {
+    public DingtalkTokenService(DingtalkRobotConfigService robotConfigService, DingtalkHttpClientFactory httpClientFactory) {
         this.robotConfigService = robotConfigService;
+        this.httpClientFactory = httpClientFactory;
     }
 
     public String getAccessToken(String senderStaffId, String robotCode) {
@@ -41,14 +47,32 @@ public class DingtalkTokenService {
             throw new IllegalStateException("DingTalk clientId/clientSecret is empty, robotCode=" + robotCode);
         }
 
-        String accessTokenCacheKey = ACCESS_TOKEN_CACHE_KEY_PREFIX + robotCode + ":" + clientId + ":" + senderStaffId;
+        long started = System.nanoTime();
+        // This token belongs to the robot application, rather than to a particular sender.
+        String accessTokenCacheKey = ACCESS_TOKEN_CACHE_KEY_PREFIX + robotCode + ":" + clientId;
         String cachedAccessToken = RedisUtil.getString(accessTokenCacheKey);
         if (StringUtils.hasText(cachedAccessToken)) {
+            logTokenTiming(robotCode, started, "hit");
             return cachedAccessToken;
         }
 
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        CompletableFuture<String> existing = inFlightTokens.putIfAbsent(accessTokenCacheKey, pending);
+        if (existing != null) {
+            try {
+                return existing.join();
+            } finally {
+                logTokenTiming(robotCode, started, "shared");
+            }
+        }
         try {
-            DingTalkClient client = new DefaultDingTalkClient(GET_TOKEN_URL);
+            // A different request or BE instance may have populated Redis while we were waiting.
+            cachedAccessToken = RedisUtil.getString(accessTokenCacheKey);
+            if (StringUtils.hasText(cachedAccessToken)) {
+                pending.complete(cachedAccessToken);
+                return cachedAccessToken;
+            }
+            DingTalkClient client = httpClientFactory.legacyClient(GET_TOKEN_URL);
             OapiGettokenRequest request = new OapiGettokenRequest();
             request.setAppkey(clientId);
             request.setAppsecret(clientSecret);
@@ -63,10 +87,24 @@ public class DingtalkTokenService {
 
             String accessToken = response.getAccessToken();
             RedisUtil.setString(accessTokenCacheKey, accessToken, ACCESS_TOKEN_EXPIRE_MINUTES, TimeUnit.MINUTES);
+            pending.complete(accessToken);
             return accessToken;
         } catch (ApiException e) {
-            throw new IllegalStateException("Request DingTalk access_token failed", e);
+            IllegalStateException failure = new IllegalStateException("Request DingTalk access_token failed", e);
+            pending.completeExceptionally(failure);
+            throw failure;
+        } catch (RuntimeException | Error e) {
+            pending.completeExceptionally(e);
+            throw e;
+        } finally {
+            inFlightTokens.remove(accessTokenCacheKey, pending);
+            logTokenTiming(robotCode, started, "miss");
         }
+    }
+
+    private void logTokenTiming(String robotCode, long started, String cache) {
+        logger.info("dingtalk_chain requestId={} robotCode={} stage=token cache={} durationMs={}",
+            MDC.get("dingtalkRequestId"), robotCode, cache, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
     }
 
     public void evictAccessTokensByRobotCode(String robotCode) {

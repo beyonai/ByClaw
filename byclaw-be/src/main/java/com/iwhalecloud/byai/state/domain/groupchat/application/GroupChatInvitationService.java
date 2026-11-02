@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -61,7 +63,7 @@ public class GroupChatInvitationService {
             validate(toRecord(existing));
             existing.setExpireTime(now.plus(VALIDITY));
             existing.setUpdateTime(now);
-            if (links.updateInvitation(existing) != 1) throw new IllegalStateException("Unable to renew invitation");
+            if (links.updateInvitation(existing) != 1) throw new IllegalStateException(I18nUtil.get("groupchat.invitation.renewFailed"));
             return response(existing.getLinkToken(), toRecord(existing));
         }
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -78,10 +80,10 @@ public class GroupChatInvitationService {
                 .accessPermission("PUBLIC").expireTime(now.plus(VALIDITY))
                 .createTime(now).updateTime(now).currentAccessCount(0L).build();
             int rows = existing == null ? links.insert(record) : links.updateInvitation(record);
-            if (rows != 1) throw new IllegalStateException("Unable to save invitation");
+            if (rows != 1) throw new IllegalStateException(I18nUtil.get("groupchat.invitation.saveFailed"));
             return response(token, toRecord(record));
         }
-        throw new IllegalStateException("Unable to create invitation");
+        throw new IllegalStateException(I18nUtil.get("groupchat.invitation.createFailed"));
     }
 
     private GroupChatInvitationTokenResponse response(String token, InvitationRecord record) {
@@ -175,7 +177,7 @@ public class GroupChatInvitationService {
             || link.getLinkId() == null
             || link.getCreatorId() == null || link.getExpireTime() == null
             || link.getLinkToken() == null || !link.getLinkToken().matches("[A-Za-z0-9]{8}")) throw invalid();
-        if (!"ACTIVE".equals(link.getStatus())) throw new IllegalArgumentException("Invitation has been revoked");
+        if (!"ACTIVE".equals(link.getStatus())) throw new IllegalArgumentException(I18nUtil.get("groupchat.invitation.revoked"));
         InvitationRecord record = new InvitationRecord();
         record.setSessionId(link.getLinkId());
         record.setInviterId(link.getCreatorId());
@@ -186,10 +188,10 @@ public class GroupChatInvitationService {
 
     private ByaiSession validate(InvitationRecord record) {
         if (record.getExpiresAt() <= System.currentTimeMillis())
-            throw new IllegalArgumentException("Invitation has expired");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.invitation.expired"));
         ByaiSession snapshot = sessions.findById(record.getSessionId());
         if (snapshot != null && GroupChatAuthorizationService.DISSOLVED_STATE.equals(snapshot.getState()))
-            throw new IllegalArgumentException("Group has been dissolved");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.dissolved"));
         ByaiSession group = authorization.requireGroup(record.getSessionId());
         if (!Objects.equals(group.getEnterpriseId(), record.getEnterpriseId())) throw invalid();
         requireLinkEnabled(group.getSessionId());
@@ -211,13 +213,13 @@ public class GroupChatInvitationService {
     private void requireLinkEnabled(Long sessionId) {
         ByaiSessionExt ext = extensions.findOneByExtParamCode(sessionId, "group_join_link_enabled");
         if (ext != null && !"true".equals(ext.getExtParamValue()))
-            throw new IllegalArgumentException("Group link joining is disabled");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.invitation.linkDisabled"));
     }
 
 
     private Long requireUser() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        if (userId == null || userId <= 0) throw new IllegalArgumentException("Login required");
+        if (userId == null || userId <= 0) throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
         return userId;
     }
 

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
 
-class UserProfileApplicationServiceTest {
+class UserProfileApplicationServiceTest extends I18nTestSupport {
 
     private final UsersMapper mapper = mock(UsersMapper.class);
     private final UserAvatarApplicationService avatarService = mock(UserAvatarApplicationService.class);
@@ -88,6 +89,20 @@ class UserProfileApplicationServiceTest {
         assertThat(result.companyName()).isEqualTo("鲸智科技");
         assertThat(result.profileInterests()).containsExactly("内容创作", "数据分析");
         assertThat(capturedUpdate().getSqlSet()).doesNotContain("company_name=", "profile_role=", "profile_interests=");
+    }
+
+    @Test
+    void savesPresetAvatarPathInProfileAndLoginSnapshotWithoutUploading() throws Exception {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        String presetAvatar = "beyond/avatar/woman/avatar01.jpg";
+
+        UserProfileResponse result = service.updateProfile(new UserProfileUpdateRequest("新名字", presetAvatar));
+
+        assertThat(result.avatar()).isEqualTo(presetAvatar);
+        assertThat(loginInfo.getAvatar()).isEqualTo(presetAvatar);
+        assertThat(capturedUpdate().getParamNameValuePairs().values()).contains(presetAvatar);
+        verifyNoInteractions(avatarService);
     }
 
     @Test
@@ -214,6 +229,64 @@ class UserProfileApplicationServiceTest {
     }
 
     @Test
+    void removeAvatarClearsStoredValueLoginSnapshotAndSubsequentRead() throws Exception {
+        Users user = activeUserWithProfile();
+        user.setAvatar("/avatars/old.png");
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setRemoveAvatar(true);
+
+        UserProfileResponse result = service.updateProfile(request);
+
+        assertThat(result.avatar()).isEmpty();
+        assertThat(result.companyName()).isEqualTo("鲸智科技");
+        assertThat(loginInfo.getAvatar()).isEmpty();
+        LambdaUpdateWrapper<Users> update = capturedUpdate();
+        assertThat(update.getSqlSet()).contains("thumbnail_uri=");
+        assertThat(update.getParamNameValuePairs().values()).contains("");
+        assertThat(service.getProfile().avatar()).isEmpty();
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
+    void removeAvatarTakesPriorityOverFileAndAddressWithoutUploading() throws Exception {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", "/avatars/new.png");
+        request.setAvatarFile(new MockMultipartFile("avatarFile", "头像.png", "image/png", new byte[] {1}));
+        request.setRemoveAvatar(true);
+
+        assertThat(service.updateProfile(request).avatar()).isEmpty();
+        assertThat(capturedUpdate().getParamNameValuePairs().values()).doesNotContain("/avatars/new.png");
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
+    void failedAvatarRemovalDoesNotChangeLoginSnapshot() {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(0);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setRemoveAvatar(true);
+
+        assertThatThrownBy(() -> service.updateProfile(request)).isInstanceOf(BaseException.class);
+        assertThat(loginInfo.getAvatar()).isEqualTo("/avatars/old.png");
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
+    void failedLeadWriteDuringAvatarRemovalDoesNotChangeLoginSnapshot() {
+        activeUser();
+        when(mapper.update(isNull(), any())).thenReturn(1);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setCompanyName("个人");
+        request.setRemoveAvatar(true);
+
+        assertThatThrownBy(() -> service.updateProfile(request)).isInstanceOf(BaseException.class);
+        assertThat(loginInfo.getAvatar()).isEqualTo("/avatars/old.png");
+        verifyNoInteractions(avatarService);
+    }
+
+    @Test
     void missingLoginDoesNotReadOrUpdateAnyUser() {
         CurrentUserHolder.clearLoginInfo();
 
@@ -301,4 +374,17 @@ class UserProfileApplicationServiceTest {
         verify(mapper).update(isNull(), captor.capture());
         return captor.getValue();
     }
+
+    @Test
+    void invalidProfileRoleIsLocalizedWithoutChangingStoredOptionValues() {
+        activeUser();
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("新名字", null);
+        request.setProfileRole("unknown");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.updateProfile(request)).hasMessage("Select a valid role");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> service.updateProfile(request)).hasMessage("请选择有效的岗位");
+        verify(mapper, never()).update(isNull(), any());
+    }
+
 }

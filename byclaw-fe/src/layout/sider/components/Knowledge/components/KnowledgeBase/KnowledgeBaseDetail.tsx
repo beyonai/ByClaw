@@ -1,3 +1,5 @@
+import { createRelativePathResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
+import MessageFilePreviewPanel from '@/components/MessageList/components/FileRender/components/Previewer/MessageFilePreviewPanel';
 import React, { useState, useRef, useEffect, useCallback, useContext, useMemo } from 'react';
 import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload, Empty } from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
@@ -40,10 +42,6 @@ import { deleteTreeNode, updateTreeNode } from './utils';
 import commonStyles from '../common.module.less';
 import styles from './index.module.less';
 import { TreeProps } from 'antd/lib';
-
-const PreViewFile = React.lazy(() =>
-  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
-);
 
 const SHARED_FILES_PATH = '/.shared/';
 
@@ -311,34 +309,6 @@ function getFileType(name: string): string {
   if (['html', 'htm'].includes(ext)) return 'h5';
   return ext;
 }
-
-interface FilePreviewPanelProps {
-  data: string | Blob | null;
-  fileName: string;
-  fileType: string;
-  loading: boolean;
-  onClose: () => void;
-}
-
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ data, fileName, fileType, loading, onClose }) => (
-  <div className={styles.previewPanel}>
-    <div className={styles.previewHeader}>
-      <span className={styles.previewTitle}>{fileName}</span>
-      <span className={styles.previewClose} onClick={onClose}>
-        <AntdIcon type="icon-a-Closeguanbi1" />
-      </span>
-    </div>
-    <div className={styles.previewBody}>
-      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {data && (
-          <React.Suspense fallback={null}>
-            <PreViewFile data={data} type={fileType} title={fileName} className={styles.previewContent} />
-          </React.Suspense>
-        )}
-      </Spin>
-    </div>
-  </div>
-);
 
 const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const { editable, dataset, onGoBack, onFileClick, onSelect, activeAgentResourceId, quoteDisabled } = props;
@@ -631,14 +601,25 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   );
 
   const renderPreviewPanel = useCallback(
-    (item: IKnowledgeDetailTreeItem, options: { data?: string | Blob | null; fileType?: string; loading: boolean }) => {
+    (item: IKnowledgeDetailTreeItem) => {
       const fileName = String(item.title || item.collectionName || '');
+      const directoryPath = resolveTreeItemDirectoryPath(item);
+      const resourceId = dataset.resourceId;
       setDetailPanel?.(
-        <FilePreviewPanel
-          data={options.data ?? null}
+        <MessageFilePreviewPanel
+          fileItem={{
+            uid: directoryPath,
+            fileType: 'file',
+            status: 'done',
+            queryFile: { fileName, filePath: directoryPath },
+            downloadRequest: () => downloadResourceFile({ resourceId, directoryPath }),
+            resolvePreviewResource: createRelativePathResourceResolver(
+              directoryPath,
+              async (path) => (await downloadResourceFile({ resourceId, directoryPath: path })).file
+            ),
+          }}
           fileName={fileName}
-          fileType={options.fileType || getFileType(fileName)}
-          loading={options.loading}
+          fileType={getFileType(fileName)}
           onClose={() => clearDetailPanel?.()}
         />,
         {
@@ -648,7 +629,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         }
       );
     },
-    [clearDetailPanel, setDetailPanel]
+    [clearDetailPanel, setDetailPanel, dataset.resourceId]
   );
 
   const handlePreviewFile = useCallback(
@@ -665,20 +646,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         return;
       }
 
-      renderPreviewPanel(item, { loading: true });
-      try {
-        const res: any = await downloadResourceFile({
-          resourceId: dataset.resourceId,
-          directoryPath,
-        });
-        const rawBlob = getRawBlob(res);
-        const mimeType = getMimeType(fileName);
-        const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        renderPreviewPanel(item, { data: blob, loading: false });
-      } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
-        clearDetailPanel?.();
-      }
+      renderPreviewPanel(item);
     },
     [clearDetailPanel, dataset.resourceId, intl, message, renderPreviewPanel]
   );

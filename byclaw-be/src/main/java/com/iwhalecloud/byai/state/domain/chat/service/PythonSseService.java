@@ -490,6 +490,8 @@ public class PythonSseService {
      */
     public void throwPythonException(String value) {
         JSONObject jsonObject = JSON.parseObject(value);
+        var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(java.util.Collections.singletonMap("data",jsonObject.get("quota")));
+        if(quota!=null)throw quota;
         String message = jsonObject.getString("message");
         Integer errorCode = jsonObject.getInteger("error_code");
         String traceback = jsonObject.getString("traceback");

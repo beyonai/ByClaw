@@ -28,11 +28,7 @@ export class SchemaExecutionAdapter implements SchemaExecution {
       await fresh.verifyIdentity();
       await verifyCatalog(fresh, manifest);
       const marker = await readMarker(fresh, this.connection.identity.enterpriseId);
-      if (
-        marker?.version !== manifest.version ||
-        marker.scriptDigest !== manifest.sqlSha256 ||
-        marker.catalogDigest !== manifest.catalogDigest
-      )
+      if (marker?.version !== manifest.version || marker.scriptDigest !== manifest.sqlSha256)
         throw new DomainError("SCHEMA_MARKER_MISMATCH");
     } finally {
       await fresh.close();

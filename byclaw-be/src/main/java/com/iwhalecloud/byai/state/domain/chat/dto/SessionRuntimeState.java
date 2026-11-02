@@ -18,6 +18,9 @@ public class SessionRuntimeState {
 
     private String source;
 
+    /** Identifies one in-memory runtime generation; changes when a sandbox process is recreated. */
+    private String runtimeInstanceId;
+
     private String status;
 
     private Boolean rootActive;

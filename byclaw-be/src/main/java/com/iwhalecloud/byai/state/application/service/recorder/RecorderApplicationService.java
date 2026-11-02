@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderEnvelope;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderError;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
@@ -428,15 +429,15 @@ public class RecorderApplicationService {
 
     private String llmSynthesisMessage(RecorderLlmService.Availability availability) {
         return switch (availability.reason()) {
-            case "available" -> "已配置默认 LLM 模型；AI 评分需在下一步明确同意。";
-            case "default_model_list_lookup_failed" -> "默认 LLM 模型列表查询失败；将继续使用本地规则流程。";
-            case "default_model_detail_lookup_failed" -> "默认 LLM 模型详情查询失败；将继续使用本地规则流程。";
-            case "default_model_not_found" -> "未找到已启用的默认 LLM 模型；将继续使用本地规则流程。";
-            case "default_model_detail_unavailable" -> "默认 LLM 模型详情不可用；将继续使用本地规则流程。";
-            case "default_model_endpoint_missing" -> "默认 LLM 模型缺少服务地址；将继续使用本地规则流程。";
-            case "default_model_token_missing" -> "默认 LLM 模型缺少服务端凭据；将继续使用本地规则流程。";
-            case "default_model_code_missing" -> "默认 LLM 模型缺少模型编码；将继续使用本地规则流程。";
-            default -> "默认 LLM 模型查询失败；将继续使用本地规则流程。";
+            case "available" -> I18nUtil.get("recorder.health.available");
+            case "default_model_list_lookup_failed" -> I18nUtil.get("recorder.health.listFailed");
+            case "default_model_detail_lookup_failed" -> I18nUtil.get("recorder.health.detailsFailed");
+            case "default_model_not_found" -> I18nUtil.get("recorder.health.modelMissing");
+            case "default_model_detail_unavailable" -> I18nUtil.get("recorder.health.detailsUnavailable");
+            case "default_model_endpoint_missing" -> I18nUtil.get("recorder.health.endpointMissing");
+            case "default_model_token_missing" -> I18nUtil.get("recorder.health.credentialsMissing");
+            case "default_model_code_missing" -> I18nUtil.get("recorder.health.codeMissing");
+            default -> I18nUtil.get("recorder.health.lookupFailed");
         };
     }
 
@@ -678,7 +679,7 @@ public class RecorderApplicationService {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("draftId", failed.draftId());
         item.put("code", failed.code());
-        item.put("reason", publicSaveMessage(failed.code()));
+        item.put("reason", RecorderMessages.localize(publicSaveMessage(failed.code())));
         if (failed.adapterPath() != null) {
             item.put("adapterPath", failed.adapterPath());
         }
@@ -745,7 +746,7 @@ public class RecorderApplicationService {
     }
 
     private RecorderResponse<Map<String, Object>> ok(Map<String, Object> data) {
-        return new RecorderResponse<>(200, RecorderEnvelope.ok(requestRegistry.nextRequestId(), data));
+        return new RecorderResponse<>(200, RecorderEnvelope.ok(requestRegistry.nextRequestId(), RecorderMessages.localizeResponse(data)));
     }
 
     private RecorderResponse<Map<String, Object>> bycliStorageUnavailable() {
@@ -778,7 +779,7 @@ public class RecorderApplicationService {
                 "recorder.v1",
                 requestId == null ? requestRegistry.nextRequestId() : requestId,
                 null,
-                new RecorderError(code, message, null, details)
+                new RecorderError(code, RecorderMessages.localize(message), null, details)
             )
         );
     }

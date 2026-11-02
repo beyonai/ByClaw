@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "Cancellation cleanup fixture (holds the probe open on the SSE stream; never expected to pass)",
+  "baseUrl": "http://127.0.0.1:3082",
+  "buildProbe": { "path": "/plugins/events", "expected": "cancellation-fixture-holds-probe-open" },
+  "cases": [
+    {
+      "id": "cancel-fixture",
+      "steps": [
+        { "kind": "goto", "path": "/" },
+        { "kind": "assert", "prompt": "The Devflow task board is visible." }
+      ]
+    }
+  ]
+}

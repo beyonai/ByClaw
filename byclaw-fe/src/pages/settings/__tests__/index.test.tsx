@@ -94,4 +94,24 @@ describe('Settings version info', () => {
     expect(screen.queryByText('feat: show version details')).not.toBeInTheDocument();
     expect(screen.queryByText('byclaw-fe')).not.toBeInTheDocument();
   });
+  it('defaults speech switches on and persists each preference independently for the current user', () => {
+    const view = render(<Settings />);
+    const playback = screen.getByRole('switch', { name: 'settings.voiceAutoPlay' });
+    const transcription = screen.getByRole('switch', { name: 'settings.voiceAutoTranscribe' });
+    expect(playback).toHaveAttribute('aria-checked', 'true');
+    expect(transcription).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(playback);
+    expect(playback).toHaveAttribute('aria-checked', 'false');
+    expect(transcription).toHaveAttribute('aria-checked', 'true');
+    view.rerender(<Settings />);
+    expect(screen.getByRole('switch', { name: 'settings.voiceAutoPlay' })).toHaveAttribute('aria-checked', 'false');
+    mockUseSelector.mockImplementation((selector: (state: any) => any) =>
+      selector({ user: { userInfo: { userCode: 'U002' } } })
+    );
+    view.rerender(<Settings />);
+    expect(screen.getAllByRole('switch', { name: 'settings.voiceAutoPlay' }).pop()).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+  });
 });

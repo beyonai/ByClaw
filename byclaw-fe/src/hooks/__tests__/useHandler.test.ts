@@ -53,6 +53,24 @@ describe('hooks/useChat/useHandler', () => {
     } as any);
   });
 
+  it.each(['finalAnswer', 'final_answer'])('stores %s separately without changing state or segments', (event) => {
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const answer = {
+      messageState: IMessageState.Answer,
+      messageList: [{ content: { substance: 'intermediate' }, seq: 2 }],
+      thinkList: [{ content: { substance: 'thinking' }, seq: 1 }],
+    } as any;
+    const props = { sseRes: { finalContent: 'final' }, sseMsg: { event }, newAnswerMsg: answer } as any;
+
+    result.current.messageHandler(props);
+    result.current.messageHandler(props);
+
+    expect(answer.finalContent).toBe('final');
+    expect(answer.messageState).toBe(IMessageState.Answer);
+    expect(answer.messageList).toEqual([{ content: { substance: 'intermediate' }, seq: 2 }]);
+    expect(answer.thinkList).toEqual([{ content: { substance: 'thinking' }, seq: 1 }]);
+  });
+
   it('sessionInfoHandler writes session ext params, adds session and updates current ids', () => {
     const dispatch = mockUseDispatch.mock.results[0]?.value || mockUseDispatch();
     const addSession = jest.fn();

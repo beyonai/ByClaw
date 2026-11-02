@@ -26,7 +26,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class MailOAuth2AuthorizationProviderTest {
+class MailOAuth2AuthorizationProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private static final String GMAIL_SCOPE =
         "openid email https://www.googleapis.com/auth/gmail.modify";
     private static final String MICROSOFT_SCOPE =
@@ -534,5 +534,21 @@ class MailOAuth2AuthorizationProviderTest {
             case "GMAIL_OAUTH_REDIRECT_URI", "MICROSOFT_OAUTH_REDIRECT_URI" -> "https://app.example/callback";
             default -> throw new IllegalStateException("missing " + name);
         };
+    }
+
+    @Test
+    void configurationFailureLocalizesTheMessageButKeepsTheProviderErrorCode() {
+        GmailOAuth2AuthorizationProvider provider = gmail(mock(MailOAuth2Client.class),
+            mock(ConnectorCredentialSecretStore.class), name -> env(name));
+        Map<String, Object> weakened = new java.util.LinkedHashMap<>(gmailConfig());
+        weakened.put("scope", "openid email");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        AuthorizationStartResult english = provider.start(context("gmail-oauth2", weakened, "openid email"));
+        assertThat(english.errorCode()).isEqualTo("OAUTH_PROVIDER_CONFIG_INVALID");
+        assertThat(english.errorMessage()).isEqualTo("Gmail OAuth2 configuration is incomplete. Contact an administrator.");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        AuthorizationStartResult chinese = provider.start(context("gmail-oauth2", weakened, "openid email"));
+        assertThat(chinese.errorCode()).isEqualTo(english.errorCode());
+        assertThat(chinese.errorMessage()).isEqualTo("Gmail OAuth2未配置完整，请联系管理员");
     }
 }

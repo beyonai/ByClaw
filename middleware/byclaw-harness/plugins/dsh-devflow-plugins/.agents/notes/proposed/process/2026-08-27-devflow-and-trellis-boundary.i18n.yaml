@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-08-27-devflow-and-trellis-boundary.md
+2026-08-27-devflow-and-trellis-boundary.md: e74974592c4b2aa939c96459ec7a84a76fc0fd6e
+2026-08-27-devflow-and-trellis-boundary.zh.md: 906976d423398e0f7922abe0b3e68f7b01d16765

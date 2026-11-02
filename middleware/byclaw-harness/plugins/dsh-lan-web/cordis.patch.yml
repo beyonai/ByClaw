@@ -1,0 +1,11 @@
+# Replace only the Web command-line provider; it maps `--host 0.0.0.0` to this
+# host's LAN interface address because DSH 0.2 WebServer rejects wildcard binds.
+# The shipped WebServer, trusted-host fence, browser sessions, and API/WebSocket
+# authentication remain authoritative.
+- id: web-startup
+  disabled: true
+
+- insert:
+    - id: byclaw-lan-web-startup
+      name: '@byclaw/dsh-lan-web/startup'
+      inject: [cmdlineArgs]

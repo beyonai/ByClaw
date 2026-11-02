@@ -1,0 +1,90 @@
+[
+  {
+    "sessionId": "1000",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": null,
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2001",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": null,
+    "member": true,
+    "eligible": true
+  },
+  {
+    "sessionId": "2002",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": "OPEN",
+    "member": true,
+    "eligible": true
+  },
+  {
+    "sessionId": "2003",
+    "enterpriseId": "2",
+    "sessionType": "hs_as",
+    "state": null,
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2004",
+    "enterpriseId": null,
+    "sessionType": "hs_as",
+    "state": null,
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2005",
+    "enterpriseId": "1",
+    "sessionType": "h_as",
+    "state": null,
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2006",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": null,
+    "member": false,
+    "eligible": false
+  },
+  {
+    "sessionId": "2010",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": "CLOSED",
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2011",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": "GROUP_DISSOLVED",
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2012",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": "GROUP_CHAT_ROUTING",
+    "member": true,
+    "eligible": false
+  },
+  {
+    "sessionId": "2013",
+    "enterpriseId": "1",
+    "sessionType": "hs_as",
+    "state": "GROUP_CHAT_DISPATCH",
+    "member": true,
+    "eligible": false
+  }
+]

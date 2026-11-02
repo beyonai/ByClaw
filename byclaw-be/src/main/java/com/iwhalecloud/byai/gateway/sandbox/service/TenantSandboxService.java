@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -36,6 +38,25 @@ import org.slf4j.LoggerFactory;
 @Service
 public class TenantSandboxService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformTenantFileRouting platformTenantFiles;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper tenantPolicyConfigs;
+
+    @Value("${file.storage.type:minio}")
+    private String recoveryStorageType = "minio";
+    @Value("${REDIS_MODE:standalone}")
+    private String redisMode = "standalone";
+    @Value("${spring.redis.cluster.nodes:${REDIS_CLUSTER_HOST:}}")
+    private String redisClusterHost = "";
+    @Value("${REDIS_CLUSTER_NODES:}")
+    private String redisClusterNodes = "";
+    @Value("${REDIS_KEY_SCHEMA_VERSION:}")
+    private String redisKeySchemaVersion = "";
+    @Value("${REDIS_TLS:false}")
+    private String redisTls = "false";
+
     private static final Logger LOG = LoggerFactory.getLogger(TenantSandboxService.class);
 
     private static final String DB_TYPE = "tenant-opengauss";
@@ -47,8 +68,6 @@ public class TenantSandboxService {
     private final SandboxServiceSpecRepository specRepository;
     private final SsSandboxRecordMapper recordMapper;
     private final ObjectMapper objectMapper;
-    private final String image;
-    private final String nodeImage;
     private final String volumeRoot;
     private final String redisHost;
     private final String redisPort;
@@ -59,27 +78,40 @@ public class TenantSandboxService {
     private final String internalToken;
     private final String nodeAdvertiseHost;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TenantSandboxService(SandboxLifecycleFacade lifecycleFacade, OpenSandboxClient openSandboxClient,
                                 SandboxServiceSpecRepository specRepository,
                                 SsSandboxRecordMapper recordMapper, ObjectMapper objectMapper,
-                                @Value("${IMAGE_OPENGAUSS:}") String image,
                                 @Value("${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:}") String volumeRoot,
-                                @Value("${IMAGE_TENANT_NODE:}") String nodeImage,
-                                @Value("${BYCLAW_TENANT_REDIS_HOST:host.containers.internal}") String redisHost,
-                                @Value("${BYCLAW_TENANT_REDIS_PORT:6379}") String redisPort,
-                                @Value("${REDIS_DATABASE:0}") String redisDatabase,
-                                @Value("${REDIS_USERNAME:default}") String redisUsername,
-                                @Value("${REDIS_PASSWORD:}") String redisPassword,
+                                @Value("${spring.redis.host:${REDIS_HOST:}}") String redisHost,
+                                @Value("${spring.redis.port:${REDIS_PORT:6379}}") String redisPort,
+                                @Value("${spring.redis.database:${REDIS_DATABASE:0}}") String redisDatabase,
+                                @Value("${spring.redis.username:${REDIS_USERNAME:default}}") String redisUsername,
+                                @Value("${spring.redis.password:${REDIS_PASSWORD:}}") String redisPassword,
                                 @Value("${BYCLAW_TENANT_BE_INTERNAL_URL:}") String beInternalUrl,
-                                @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken,
-                                @Value("${BYCLAW_TENANT_NODE_ADVERTISE_HOST:host.containers.internal}") String nodeAdvertiseHost) {
+                                com.iwhalecloud.byai.manager.domain.tenant.TenantRuntimeIdentity identity) {
+        this(lifecycleFacade, openSandboxClient, specRepository, recordMapper, objectMapper, volumeRoot,
+            redisHost, redisPort, redisDatabase, redisUsername, redisPassword, beInternalUrl,
+            identity.internalToken(), "");
+    }
+
+    public TenantSandboxService(SandboxLifecycleFacade lifecycleFacade, OpenSandboxClient openSandboxClient,
+                                SandboxServiceSpecRepository specRepository,
+                                SsSandboxRecordMapper recordMapper, ObjectMapper objectMapper,
+                                @Value("${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:}") String volumeRoot,
+                                @Value("${spring.redis.host:${REDIS_HOST:}}") String redisHost,
+                                @Value("${spring.redis.port:${REDIS_PORT:6379}}") String redisPort,
+                                @Value("${spring.redis.database:${REDIS_DATABASE:0}}") String redisDatabase,
+                                @Value("${spring.redis.username:${REDIS_USERNAME:default}}") String redisUsername,
+                                @Value("${spring.redis.password:${REDIS_PASSWORD:}}") String redisPassword,
+                                @Value("${BYCLAW_TENANT_BE_INTERNAL_URL:}") String beInternalUrl,
+                                String internalToken,
+                                String nodeAdvertiseHost) {
         this.lifecycleFacade = lifecycleFacade;
         this.openSandboxClient = openSandboxClient;
         this.specRepository = specRepository;
         this.recordMapper = recordMapper;
         this.objectMapper = objectMapper;
-        this.image = image;
-        this.nodeImage = nodeImage;
         this.volumeRoot = volumeRoot;
         this.redisHost = redisHost;
         this.redisPort = redisPort;
@@ -93,32 +125,38 @@ public class TenantSandboxService {
 
     public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
                                             long generation) {
+        return launchDataNode(enterpriseId, profileKey, dbRecordId, generation, null);
+    }
+
+    public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
+                                            long generation, String providerRequestKey) {
+        validateProviderRequestKey(providerRequestKey);
+        boolean cluster=(redisClusterHost!=null && !redisClusterHost.isBlank()) || "cluster".equals(redisMode);
+        if(!Set.of("standalone","cluster").contains(redisMode) || (cluster && ((redisClusterHost==null || redisClusterHost.isBlank()) && (redisClusterNodes==null || redisClusterNodes.isBlank()) || !"0".equals(redisDatabase))))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"tenant.node.redis.configuration.invalid");
         if (enterpriseId <= 0 || dbRecordId <= 0 || generation <= 0
             || profileKey == null || !PROFILES.contains(profileKey)
-            || nodeImage == null || nodeImage.isBlank() || volumeRoot == null || volumeRoot.isBlank()
-            || redisHost == null || redisHost.isBlank() || redisPassword == null || redisPassword.isBlank()
+            || volumeRoot == null || volumeRoot.isBlank()
+            || (!cluster && (redisHost == null || redisHost.isBlank())) || redisPassword == null || redisPassword.isBlank()
             || beInternalUrl == null || !beInternalUrl.startsWith("http://")
             || internalToken == null || internalToken.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node launch configuration is incomplete");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.launch.incomplete");
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, NODE_TYPE);
         if (active != null) {
-            SandboxDetail detail = active.getSandboxId() == null ? null
-                : openSandboxClient.getSandboxIfExists(active.getSandboxId());
-            if ("RUNNING".equals(active.getStatus()) && detail != null && detail.getStatus() != null
-                && "Running".equalsIgnoreCase(detail.getStatus().getState())) {
+            if (isRunning(active)) {
                 return new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint());
             }
             if (!"RUNNING".equals(active.getStatus()) || recordMapper.updateStatusToFailed(active.getId(),
                     "tenant Node sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node sandbox launch is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.launch.inProgress");
             }
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(NODE_TYPE, profileKey)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node spec unavailable"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.spec.unavailable"));
         if (!"TENANT".equals(spec.getOwnerScope()) || spec.getResourceLimits() == null
             || spec.getResourceLimits().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node resource profile is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.profile.unavailable");
         }
         Date now = new Date();
         SsSandboxRecord record = new SsSandboxRecord();
@@ -144,24 +182,31 @@ public class TenantSandboxService {
         request.setUserCode(record.getUserCode());
         request.setSandboxType(NODE_TYPE);
         request.setProfileKey(profileKey);
+        // Provider storage ownership uses user_info; metadata remains the recovery correlation.
+        request.setUserInfo(Map.of("enterpriseId", Long.toString(enterpriseId)));
         Map<String, String> envs = new LinkedHashMap<>();
         envs.put("TENANT_ID", Long.toString(enterpriseId));
+        envs.put("COMMERCIAL_MANAGED", Boolean.toString(commercialManaged(enterpriseId)));
         envs.put("TENANT_GENERATION", Long.toString(generation));
         envs.put("DB_SANDBOX_RECORD_ID", Long.toString(dbRecordId));
-        envs.put("IMAGE_TENANT_NODE", nodeImage);
         envs.put("NODE_ADVERTISE_HOST", nodeAdvertiseHost);
         envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", volumeRoot);
         envs.put("BE_INTERNAL_URL", beInternalUrl);
         envs.put("KMS_DECRYPT_URL", beInternalUrl + "/internal/v1/tenantKms/decrypt");
         envs.put("INTERNAL_API_TOKEN", internalToken);
-        envs.put("REDIS_HOST", redisHost);
+        envs.put("REDIS_MODE",cluster?"cluster":"standalone");
+        envs.put("REDIS_CLUSTER_HOST",redisClusterHost==null?"":redisClusterHost);
+        envs.put("REDIS_CLUSTER_NODES",redisClusterNodes==null?"":redisClusterNodes);
+        envs.put("REDIS_KEY_SCHEMA_VERSION",redisKeySchemaVersion==null?"":redisKeySchemaVersion);
+        envs.put("REDIS_TLS",redisTls);
+        envs.put("REDIS_HOST", redisHost==null?"":redisHost);
         envs.put("REDIS_PORT", redisPort);
         envs.put("REDIS_DATABASE", redisDatabase);
         envs.put("REDIS_USERNAME", redisUsername);
         envs.put("REDIS_PASSWORD", redisPassword);
         request.setEnvs(envs);
-        request.setMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
-            "recordId", Long.toString(record.getId())));
+        request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
+            "recordId", Long.toString(record.getId())), providerRequestKey));
         SandboxResponse<SandboxLaunchData> response = lifecycleFacade.launchSandbox(request);
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String reason = response == null ? "OpenSandbox did not return a response" : response.getMessage();
@@ -175,9 +220,15 @@ public class TenantSandboxService {
         if (recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
                 data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null,
                 new Date(), 0) != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node record changed during launch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    private boolean commercialManaged(long enterpriseId) {
+        return tenantPolicyConfigs.selectConfigs(enterpriseId).stream()
+            .anyMatch(row -> "COMMERCIAL_MANAGED".equals(row.getParamsCode())
+                && "true".equals(row.getParamsValue()));
     }
 
     /** Recreates only the tenant Node sandbox from the configured image; the DB sandbox is retained. */
@@ -187,12 +238,12 @@ public class TenantSandboxService {
         if (active != null) {
             if (!"RUNNING".equals(active.getStatus()) || active.getSandboxId() == null
                 || active.getLockVersion() == null) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node replacement is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.replacement.inProgress");
             }
-            openSandboxClient.deleteSandbox(active.getSandboxId());
+            removeProvider(active);
             if (recordMapper.updateStatusToReleased(active.getId(), "tenant Node image replacement",
                 new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant Node record changed during replacement");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.changedDuringReplacement");
             }
         }
         return launchDataNode(enterpriseId, profileKey, dbRecordId, generation);
@@ -207,21 +258,19 @@ public class TenantSandboxService {
         if (record == null || !"RUNNING".equals(record.getStatus()) || record.getSandboxId() == null) {
             return false;
         }
-        SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-        return detail != null && detail.getStatus() != null
-            && "Running".equalsIgnoreCase(detail.getStatus().getState());
+        SandboxRuntimeInstance instance = observeProvider(record);
+        return instance != null && "Running".equalsIgnoreCase(instance.getState());
     }
 
-    /** Live provider observation. UNKNOWN means OpenSandbox could not be queried, not that the sandbox stopped. */
+    /** Live provider observation. UNKNOWN means the configured provider could not be queried, not that the sandbox stopped. */
     public String providerStatus(SsSandboxRecord record) {
         if (record == null || record.getSandboxId() == null || record.getSandboxId().isBlank()) {
             return "MISSING";
         }
         try {
-            SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-            if (detail == null) return "MISSING";
-            if (detail.getStatus() == null || detail.getStatus().getState() == null) return "UNKNOWN";
-            return "Running".equalsIgnoreCase(detail.getStatus().getState()) ? "RUNNING" : "STOPPED";
+            SandboxRuntimeInstance instance = observeProvider(record);
+            if (instance == null) return "MISSING";
+            return "Running".equalsIgnoreCase(instance.getState()) ? "RUNNING" : "STOPPED";
         }
         catch (RuntimeException e) {
             LOG.warn("Could not verify tenant sandbox provider status for record {}: {}",
@@ -237,45 +286,59 @@ public class TenantSandboxService {
         if (latest == null || latest.getId() == null || latest.getId() != recordId
             || !Set.of("RUNNING", "FAILED").contains(latest.getStatus())
             || latest.getLockVersion() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox is not the current restartable record");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.restartRecord.invalid");
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, sandboxType);
         if (active != null && !active.getId().equals(latest.getId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "another tenant sandbox is active");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.anotherActive");
         }
         if (latest.getSandboxId() != null && !latest.getSandboxId().isBlank()) {
-            openSandboxClient.deleteSandbox(latest.getSandboxId());
+            removeProvider(latest);
         }
         if (recordMapper.markReleased(latest.getId(), "tenant sandbox restart", new Date(),
             latest.getLockVersion()) != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox record changed during restart");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringRestart");
         }
     }
 
     /** Remove every provider instance before removing the tenant's private database and Node volumes. */
     public void deleteTenantResources(long enterpriseId) {
         if (enterpriseId <= 0 || volumeRoot == null || volumeRoot.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant resource location");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.resource.location.invalid");
         }
         List<SsSandboxRecord> records = recordMapper.selectTenantRecords(enterpriseId);
         for (SsSandboxRecord record : records) {
             if (record.getSandboxId() != null && !record.getSandboxId().isBlank()) {
-                openSandboxClient.deleteSandbox(record.getSandboxId());
-                if (openSandboxClient.getSandboxIfExists(record.getSandboxId()) != null) {
+                removeProvider(record);
+                if (observeProvider(record) != null) {
                     throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "tenant sandbox still exists after delete request");
+                        "i18n.status.tenant.sandbox.still.exists.after.delete.request");
                 }
             }
             if (!"RELEASED".equals(record.getStatus()) && recordMapper.markReleased(record.getId(),
                 "tenant deleted", new Date(), record.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox changed during deletion");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringDeletion");
             }
+        }
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()
+            && java.util.stream.Stream.of(DB_TYPE, NODE_TYPE).map(specRepository::findByServiceKey)
+                .flatMap(java.util.Optional::stream).anyMatch(spec -> spec.getVolumes() != null
+                    && spec.getVolumes().stream().anyMatch(v -> v != null && "persistent".equals(v.getType())))) {
+            platformTenantFiles.purgeTenant(enterpriseId);
+            return;
         }
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenants = root.resolve("tenants");
         Path tenantDirectory = tenants.resolve(Long.toString(enterpriseId));
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()) {
+            try { platformTenantFiles.delete(root, tenants, tenantDirectory); return; }
+            catch (ResponseStatusException conflict) { throw conflict; }
+            catch (RuntimeException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.volume.delete.failed", e);
+            }
+        }
         if (!tenantDirectory.startsWith(tenants) || Files.isSymbolicLink(tenants)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid tenant volume path");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.volume.path.invalid");
         }
         if (!Files.exists(tenantDirectory)) return;
         try {
@@ -295,24 +358,30 @@ public class TenantSandboxService {
             });
         }
         catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant volume deletion failed", e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.volume.delete.failed", e);
         }
     }
 
     private void requireTenantType(String sandboxType) {
         if (!DB_TYPE.equals(sandboxType) && !NODE_TYPE.equals(sandboxType)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant sandbox type");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.sandbox.type.invalid");
         }
     }
 
     public TenantSandboxView launchOpenGauss(long enterpriseId, String profileKey, String dbName,
                                              String dbUser, String dbPassword) {
+        return launchOpenGauss(enterpriseId, profileKey, dbName, dbUser, dbPassword, null);
+    }
+
+    public TenantSandboxView launchOpenGauss(long enterpriseId, String profileKey, String dbName,
+                                             String dbUser, String dbPassword, String providerRequestKey) {
+        validateProviderRequestKey(providerRequestKey);
         if (enterpriseId <= 0 || profileKey == null || !PROFILES.contains(profileKey)
             || !("byclaw_t_" + enterpriseId).equals(dbName)
             || !("bc_t_" + enterpriseId + "_admin").equals(dbUser)
             || dbPassword == null || dbPassword.isBlank()
-            || image == null || image.isBlank() || volumeRoot == null || volumeRoot.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox launch configuration is incomplete");
+            || volumeRoot == null || volumeRoot.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.launch.incomplete");
         }
 
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, DB_TYPE);
@@ -322,18 +391,23 @@ public class TenantSandboxService {
             }
             if (!"RUNNING".equals(active.getStatus()) || recordMapper.updateStatusToFailed(active.getId(),
                     "tenant database sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant database sandbox launch is in progress");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.launch.inProgress");
             }
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(DB_TYPE, profileKey)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss spec unavailable"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.spec.unavailable"));
         if (!"TENANT".equals(spec.getOwnerScope())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss spec scope mismatch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.spec.scopeMismatch");
         }
         if (spec.getResourceLimits() == null || spec.getResourceLimits().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant OpenGauss resource profile is unavailable");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.profile.unavailable");
         }
-        prepareEntrypoint(enterpriseId);
+        // Persistent volumes are initialized by the provider on the tenant NAS space.
+        // The tenant database image already contains its startup script.
+        boolean providerStorage = spec.getVolumes() != null && !spec.getVolumes().isEmpty()
+            && spec.getVolumes().stream().allMatch(volume -> volume != null
+                && "persistent".equals(volume.getType()) && volume.getHostPath() == null);
+        if (!providerStorage) prepareEntrypoint(enterpriseId);
 
         Date now = new Date();
         SsSandboxRecord record = new SsSandboxRecord();
@@ -361,17 +435,18 @@ public class TenantSandboxService {
         request.setUserCode(record.getUserCode());
         request.setSandboxType(DB_TYPE);
         request.setProfileKey(profileKey);
+        // Provider storage ownership uses user_info; metadata remains the recovery correlation.
+        request.setUserInfo(Map.of("enterpriseId", Long.toString(enterpriseId)));
         Map<String, String> envs = new LinkedHashMap<>();
         envs.put("TENANT_ID", Long.toString(enterpriseId));
         envs.put("ENTERPRISE_ID", Long.toString(enterpriseId));
         envs.put("DB_NAME", dbName);
         envs.put("DB_USER", dbUser);
         envs.put("DB_PASSWORD", dbPassword);
-        envs.put("IMAGE_OPENGAUSS", image);
         envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", volumeRoot);
         request.setEnvs(envs);
-        request.setMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
-            "recordId", Long.toString(record.getId()), "byclawTcpPort", "5432"));
+        request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
+            "recordId", Long.toString(record.getId()), "byclawTcpPort", "5432"), providerRequestKey));
 
         SandboxResponse<SandboxLaunchData> response = lifecycleFacade.launchSandbox(request);
         if (response == null || !response.isSuccess() || response.getData() == null) {
@@ -386,9 +461,81 @@ public class TenantSandboxService {
         int updated = recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
             data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null, new Date(), 0);
         if (updated != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant sandbox record changed during launch");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    /** Only a complete provider inventory and exact ownership can authorize command recovery. */
+    public RecoveryResource inspectRecovery(long enterpriseId, String step, String providerRequestKey) {
+        if ("whale-agent".equalsIgnoreCase(recoveryStorageType)) return new RecoveryResource("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", null, null);
+        String type = "DB_CREATE".equals(step) ? DB_TYPE : NODE_TYPE;
+        List<SandboxDetail> resources;
+        try {
+            // Query by enterprise alone so wrong type/owner/key resources cannot disappear behind an over-specific filter.
+            resources = openSandboxClient.recoveryInventory(Map.of("enterpriseId", Long.toString(enterpriseId)));
+        } catch (RuntimeException failure) {
+            String code = failure.getMessage();
+            return new RecoveryResource(code != null && Set.of("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", "PROVIDER_QUERY_DISABLED",
+                "PROVIDER_QUERY_INVALID", "PROVIDER_QUERY_FAILED", "PROVIDER_QUERY_INCOMPLETE", "PROVIDER_QUERY_UNSTABLE").contains(code)
+                ? code : "PROVIDER_QUERY_FAILED", null, null);
+        }
+        List<SandboxDetail> candidates = new java.util.ArrayList<>();
+        for (SandboxDetail resource : resources) {
+            var metadata = resource.getMetadata();
+            if (metadata == null || !Long.toString(enterpriseId).equals(metadata.get("enterpriseId"))
+                || !"TENANT".equals(metadata.get("ownerScope")) || !Set.of(DB_TYPE, NODE_TYPE).contains(metadata.get("serviceKey"))) {
+                return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+            }
+            if (type.equals(metadata.get("serviceKey"))) candidates.add(resource);
+        }
+        SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, type);
+        if (candidates.isEmpty()) {
+            // A durable provider identifier with a now-missing resource needs investigation, not replacement.
+            if (active != null && active.getSandboxId() != null) return new RecoveryResource("RECORDED_RESOURCE_MISSING", null, null);
+            return new RecoveryResource("ABSENT", null, active);
+        }
+        if (candidates.size() != 1) return new RecoveryResource("MULTIPLE_PROVIDER_RESOURCES", null, null);
+        SandboxDetail candidate = candidates.getFirst();
+        if (!providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))) {
+            return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+        }
+        if (active == null || !"TENANT".equals(active.getOwnerScope()) || !Long.valueOf(enterpriseId).equals(active.getEnterpriseId())
+            || !Long.valueOf(enterpriseId).equals(active.getResourceId()) || !type.equals(active.getSandboxType())
+            || !type.equals(active.getServiceType()) || !candidate.getId().equals(active.getSandboxId())
+            || !Long.toString(active.getId()).equals(candidate.getMetadata().get("recordId"))
+            || active.getLockVersion() == null || !"RUNNING".equals(active.getStatus()) || active.getEndpoint() == null || active.getEndpoint().isBlank()
+            || (DB_TYPE.equals(type) && !active.getEndpoint().startsWith("tcp://"))) {
+            return new RecoveryResource("RESOURCE_CONNECTION_DATA_UNAVAILABLE", null, null);
+        }
+        if (candidate.getStatus() == null || !"Running".equalsIgnoreCase(candidate.getStatus().getState())) {
+            return new RecoveryResource("RESOURCE_NOT_RUNNING", null, null);
+        }
+        return new RecoveryResource("MATCHED", new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint()), active);
+    }
+
+    /** Retire only the exact unbound local intent inspected before the command CAS. */
+    public void retireUnboundRecoveryRecord(RecoveryResource resource) {
+        SsSandboxRecord record = resource.observedRecord();
+        if (record != null && recordMapper.updateStatusToFailed(record.getId(), "command recovery confirmed provider absence",
+            new Date(), record.getLockVersion()) != 1) {
+            throw new com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException(409, "RECOVERY_RESOURCE_CHANGED");
+        }
+    }
+
+    public record RecoveryResource(String reasonCode, TenantSandboxView adopted, SsSandboxRecord observedRecord) { }
+
+    private static void validateProviderRequestKey(String providerRequestKey) {
+        if (providerRequestKey != null && !providerRequestKey.matches("[A-Za-z0-9_.:-]{1,128}")) {
+            throw new IllegalArgumentException("invalid provider request key");
+        }
+    }
+
+    private static Map<String, String> correlatedMetadata(Map<String, String> ownership, String providerRequestKey) {
+        Map<String, String> metadata = new LinkedHashMap<>(ownership);
+        // Persisted command-step identity supports reconciliation without granting blind provider retries.
+        if (providerRequestKey != null) metadata.put("providerRequestKey", providerRequestKey);
+        return metadata;
     }
 
     private String toJson(Object value) {
@@ -402,9 +549,35 @@ public class TenantSandboxService {
     }
 
     private void prepareEntrypoint(long enterpriseId) {
+        try {
+            prepareEntrypointFiles(enterpriseId);
+        } catch (RuntimeException failure) {
+            // This boundary finishes before any provider call, so the durable code is positive non-creation evidence.
+            var classified = new com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandException(
+                409, "PROVIDER_NOT_CALLED_FILE_PREPARATION");
+            classified.initCause(failure);
+            throw classified;
+        }
+    }
+
+    private void prepareEntrypointFiles(long enterpriseId) {
         Path root = Path.of(volumeRoot).toAbsolutePath().normalize();
         Path tenantDirectory = root.resolve("tenants").resolve(Long.toString(enterpriseId)).resolve("opengauss");
         Path target = tenantDirectory.resolve("byclaw-tenant-entrypoint.py");
+        if (platformTenantFiles != null && platformTenantFiles.isRemote()) {
+            try {
+                platformTenantFiles.prepare(root, tenantDirectory, tenantDirectory.resolve("data"));
+                try (java.io.InputStream source = new ClassPathResource("tenant/opengauss-entrypoint.py").getInputStream();
+                     java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[8192]; int length;
+                    while ((length = source.read(buffer)) != -1) bytes.write(buffer, 0, length);
+                    platformTenantFiles.copy(root, target, bytes.toByteArray());
+                }
+                return;
+            } catch (IOException | RuntimeException e) {
+                throw new IllegalStateException("tenant OpenGauss startup script could not be prepared", e);
+            }
+        }
         try {
             Files.createDirectories(tenantDirectory);
             // Create the subPath as the BE/tenant-image owner before kubelet creates it as root.
@@ -415,17 +588,65 @@ public class TenantSandboxService {
                 Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        catch (IOException e) {
+        catch (IOException | RuntimeException e) {
             throw new IllegalStateException("tenant OpenGauss startup script could not be prepared", e);
         }
     }
 
     private boolean isReusable(SsSandboxRecord record) {
-        if (!"RUNNING".equals(record.getStatus()) || record.getSandboxId() == null
-            || record.getEndpoint() == null || !record.getEndpoint().startsWith("tcp://")) return false;
-        SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
-        return detail != null && detail.getStatus() != null
-            && "Running".equalsIgnoreCase(detail.getStatus().getState());
+        if(record.getEndpoint()==null)return false;
+        if(record.getEndpoint().startsWith("tcp://"))return isRunning(record);
+        if(record.getSandboxId()==null || !record.getSandboxId().startsWith("microvm--"))return false;
+        // An unsupported endpoint must never retire a live stateful database.
+        // Connectivity and ownership are verified separately before configuration publication.
+        return isRunning(record);
+    }
+
+    private SandboxInfo providerInfo(SsSandboxRecord record) {
+        return SandboxInfo.builder().sandboxId(record.getSandboxId())
+            .sandboxType(record.getSandboxType()).serviceKey(record.getServiceType())
+            .userCode(record.getUserCode()).build();
+    }
+
+    private void removeProvider(SsSandboxRecord record) {
+        SandboxResponse<Void> response = lifecycleFacade.removeSandbox(providerInfo(record));
+        if (response == null || !response.isSuccess()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.unavailable");
+        }
+    }
+
+    private SandboxRuntimeInstance observeProvider(SsSandboxRecord record) {
+        SandboxResponse<SandboxRuntimeInstance> response = lifecycleFacade.getSandbox(providerInfo(record));
+        if (response == null || !response.isSuccess()) {
+            // A failed query is not evidence that the existing database can be retired or replaced.
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.unavailable");
+        }
+        SandboxRuntimeInstance instance = response.getData();
+        if (instance != null && (!record.getSandboxId().equals(instance.getSandboxId())
+            || instance.getState() == null || instance.getState().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.sandbox.provider.invalid");
+        }
+        return instance;
+    }
+
+    /** Tokens are refreshed from the provider and never persisted in tenant_config or Redis. */
+    public Map<String,String> privateTransport(long enterpriseId, String type) {
+        requireTenantType(type);
+        SsSandboxRecord record=recordMapper.selectActiveTenantByResourceAndType(enterpriseId,type);
+        if(record==null || !"RUNNING".equals(record.getStatus()) || record.getEnterpriseId()==null
+            || record.getEnterpriseId()!=enterpriseId || !"TENANT".equals(record.getOwnerScope()))
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.transport.identity.mismatch");
+        if(record.getSandboxId()==null || !record.getSandboxId().startsWith("microvm--"))return Map.of();
+        SandboxRuntimeInstance instance=observeProvider(record);
+        String alias=DB_TYPE.equals(type)?"opengauss":"tenant-node";
+        String endpoint=instance==null || instance.getInstanceEndpoints()==null?null:instance.getInstanceEndpoints().get(alias);
+        String token=instance==null || instance.getEndpointHeaders()==null?null:instance.getEndpointHeaders().get("e2b-traffic-access-token");
+        java.net.URI uri=endpoint==null?null:java.net.URI.create(endpoint);
+        if(uri==null || !"https".equals(uri.getScheme()) || uri.getHost()==null
+            || !uri.getHost().matches("[a-z0-9-]+\\.[a-z0-9-]+-vpc\\.sandbox\\.aliyuncs\\.com")
+            || token==null || token.isBlank())
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.transport.privateEndpoint.required");
+        return Map.of("url",endpoint,"trafficToken",token);
     }
 
     public record TenantSandboxView(long recordId, String sandboxId, String endpoint) {

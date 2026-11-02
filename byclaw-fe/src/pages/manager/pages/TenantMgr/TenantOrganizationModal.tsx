@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { Button, Checkbox, Input, Modal, Segmented, Space, Table, Tag, Tree, message } from 'antd';
 import type { DataNode } from 'antd/es/tree';
@@ -38,6 +39,7 @@ function buildTree(organizations: TenantOrganization[]): DataNode[] {
 }
 
 export default function TenantOrganizationModal({ tenant, onClose }: Props) {
+  const intl = useIntl();
   const [organizations, setOrganizations] = useState<TenantOrganization[]>([]);
   const [members, setMembers] = useState<TenantOrganizationMember[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>();
@@ -96,7 +98,12 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
     setSubmitting(true);
     try {
       const result = await attachTenantOrganization(tenant.enterpriseId, selectedOrgId, includeDescendants, addMembers);
-      message.success(`已挂靠 ${result.attachedOrganizations} 个组织，新增 ${result.addedMembers} 名成员`);
+      message.success(
+        intl.formatMessage(
+          { id: 'tenant.org.attachedResult' },
+          { organizations: result.attachedOrganizations, members: result.addedMembers }
+        )
+      );
       const [nextOrganizations, nextMembers] = await Promise.all([
         listTenantOrganizations(tenant.enterpriseId),
         listTenantOrganizationMembers(tenant.enterpriseId, selectedOrgId, includeDescendants),
@@ -114,7 +121,7 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
     try {
       const selected = members.filter((member) => selectedMemberIds.includes(member.userId) && !member.alreadyMember);
       for (const member of selected) await addTenantMember(tenant.enterpriseId, member.userCode);
-      message.success(`已添加 ${selected.length} 名成员`);
+      message.success(intl.formatMessage({ id: 'tenant.org.addedResult' }, { count: selected.length }));
       setMembers(await listTenantOrganizationMembers(tenant.enterpriseId, selectedOrgId!, includeDescendants));
       setSelectedMemberIds([]);
     } finally {
@@ -127,7 +134,7 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
     setSubmitting(true);
     try {
       await addTenantMember(tenant.enterpriseId, accountCode.trim());
-      message.success('成员已加入租户');
+      message.success(intl.formatMessage({ id: 'tenant.org.joinedSuccess' }));
       setAccountCode('');
       if (selectedOrgId) {
         setMembers(await listTenantOrganizationMembers(tenant.enterpriseId, selectedOrgId, includeDescendants));
@@ -139,7 +146,7 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
 
   return (
     <Modal
-      title={`添加成员 · ${tenant?.enterpriseName || ''}`}
+      title={intl.formatMessage({ id: 'tenant.org.title' }, { name: tenant?.enterpriseName || '' })}
       open={Boolean(tenant)}
       onCancel={onClose}
       footer={null}
@@ -148,8 +155,8 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
       <Segmented
         value={mode}
         options={[
-          { label: '按组织', value: 'org' },
-          { label: '按成员', value: 'member' },
+          { label: intl.formatMessage({ id: 'tenant.org.byOrg' }), value: 'org' },
+          { label: intl.formatMessage({ id: 'tenant.org.byMember' }), value: 'member' },
         ]}
         onChange={(value) => setMode(value as 'org' | 'member')}
         style={{ marginBottom: 16 }}
@@ -158,7 +165,7 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
         <div style={{ width: 300, height: 480, overflow: 'auto', borderRight: '1px solid #eee', paddingRight: 12 }}>
           <Input
             className={orgTreeStyles.search}
-            placeholder="搜索组织"
+            placeholder={intl.formatMessage({ id: 'tenant.org.search' })}
             allowClear
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -182,7 +189,7 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
                       {org?.orgName}
                     </span>
                   </div>
-                  {org?.attached && <Tag color="green">已挂靠</Tag>}
+                  {org?.attached && <Tag color="green">{intl.formatMessage({ id: 'tenant.org.attached' })}</Tag>}
                 </div>
               );
             }}
@@ -195,14 +202,18 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
         </div>
         <div style={{ width: 670 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
-            <strong>{selectedOrg ? `${selectedOrg.orgName} · ${members.length} 名成员` : '请选择左侧组织'}</strong>
+            <strong>
+              {selectedOrg
+                ? intl.formatMessage({ id: 'tenant.org.members' }, { name: selectedOrg.orgName, count: members.length })
+                : intl.formatMessage({ id: 'tenant.org.select' })}
+            </strong>
             <Checkbox checked={includeDescendants} onChange={(event) => setIncludeDescendants(event.target.checked)}>
-              包含下级组织
+              {intl.formatMessage({ id: 'tenant.org.includeDescendants' })}
             </Checkbox>
           </Space>
           {mode === 'member' && (
             <Input.Search
-              placeholder="按用户编码或姓名筛选当前组织成员"
+              placeholder={intl.formatMessage({ id: 'tenant.org.searchMembers' })}
               allowClear
               value={memberSearch}
               onChange={(event) => setMemberSearch(event.target.value)}
@@ -217,22 +228,27 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
             rowSelection={mode === 'member' ? memberRowSelection : undefined}
             pagination={{ pageSize: 8 }}
             columns={[
-              { title: '用户编码', dataIndex: 'userCode' },
-              { title: '用户名', dataIndex: 'userName' },
+              { title: intl.formatMessage({ id: 'tenant.org.userCode' }), dataIndex: 'userCode' },
+              { title: intl.formatMessage({ id: 'tenant.org.userName' }), dataIndex: 'userName' },
               {
-                title: '租户状态',
+                title: intl.formatMessage({ id: 'tenant.org.membership' }),
                 dataIndex: 'alreadyMember',
-                render: (joined: boolean) => (joined ? <Tag color="green">已加入</Tag> : <Tag>未加入</Tag>),
+                render: (joined: boolean) =>
+                  joined ? (
+                    <Tag color="green">{intl.formatMessage({ id: 'tenant.org.joined' })}</Tag>
+                  ) : (
+                    <Tag>{intl.formatMessage({ id: 'tenant.org.notJoined' })}</Tag>
+                  ),
               },
             ]}
           />
           {mode === 'org' ? (
             <Space style={{ marginTop: 12 }}>
               <Button disabled={!selectedOrgId} loading={submitting} onClick={() => void attach(false)}>
-                仅挂靠组织
+                {intl.formatMessage({ id: 'tenant.org.attachOnly' })}
               </Button>
               <Button type="primary" disabled={!selectedOrgId} loading={submitting} onClick={() => void attach(true)}>
-                挂靠组织并添加成员
+                {intl.formatMessage({ id: 'tenant.org.attachWithMembers' })}
               </Button>
             </Space>
           ) : (
@@ -243,16 +259,16 @@ export default function TenantOrganizationModal({ tenant, onClose }: Props) {
                 loading={submitting}
                 onClick={() => void addSelected()}
               >
-                添加选中成员
+                {intl.formatMessage({ id: 'tenant.org.addSelected' })}
               </Button>
               <Input
-                placeholder="或输入已有用户账号"
+                placeholder={intl.formatMessage({ id: 'tenant.org.existingAccount' })}
                 value={accountCode}
                 onChange={(event) => setAccountCode(event.target.value)}
                 style={{ width: 190 }}
               />
               <Button disabled={!accountCode.trim()} loading={submitting} onClick={() => void addByAccount()}>
-                按账号添加
+                {intl.formatMessage({ id: 'tenant.org.addAccount' })}
               </Button>
             </Space>
           )}

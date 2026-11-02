@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 /* eslint-disable indent, lines-around-comment */
 // byclaw Java backend transport.
 // Browser-visible endpoints are /byaiService/recorder/*, while the UI keeps the recorder envelope unchanged.
@@ -251,7 +252,10 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
     } catch (e) {
       const response = (e as { response?: { status?: unknown; data?: unknown } } | null)?.response;
       if (response?.status === 409 && isRecorderEnvelope(response.data)) return response.data as RequestEnvelope<T>;
-      return envelopeError('network_error', e instanceof Error ? e.message : '请求失败') as RequestEnvelope<T>;
+      return envelopeError(
+        'network_error',
+        e instanceof Error ? e.message : getIntl().formatMessage({ id: 'modelMgr.error.requestFail' })
+      ) as RequestEnvelope<T>;
     }
   }
 
@@ -309,7 +313,10 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
           schemaVersion: 'recorder.v1',
           requestId,
           data: null,
-          error: st.error ?? { code: 'adapter_runtime_error', message: `请求 ${st.status}` },
+          error: st.error ?? {
+            code: 'adapter_runtime_error',
+            message: getIntl().formatMessage({ id: 'adapterRecorder.error.requestNumber' }, { v0: st.status }),
+          },
         };
       }
       await new Promise((r) => {
@@ -317,8 +324,14 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
       });
     }
     // 区分 idle 卡死 vs 绝对上限;错误码用 pipeline_timeout(不再复用误导性的 verify_timeout)。
-    const reason = Date.now() >= absoluteDeadline ? '总时长超过上限' : '长时间无进展';
-    return envelopeError('pipeline_timeout', `轮询超时(${reason})`) as RequestEnvelope<T>;
+    const reason =
+      Date.now() >= absoluteDeadline
+        ? getIntl().formatMessage({ id: 'adapterRecorder.poll.durationExceeded' })
+        : getIntl().formatMessage({ id: 'adapterRecorder.poll.stalled' });
+    return envelopeError(
+      'pipeline_timeout',
+      getIntl().formatMessage({ id: 'adapterRecorder.poll.timeout' }, { v0: reason })
+    ) as RequestEnvelope<T>;
   }
 
   /** 发起 202 异步请求并轮询到最终结果(onProgress:轮询途中实时回调阶段进度;onPartial:阶段性 prompt 回调,用于 pipeline 展示)。 */

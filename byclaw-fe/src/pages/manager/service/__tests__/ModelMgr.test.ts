@@ -1,5 +1,7 @@
+let mockLocale: 'zh-CN' | 'en-US' = 'zh-CN';
 jest.mock('@umijs/max', () => ({
-  getLocale: jest.fn(() => 'zh-CN'),
+  getLocale: jest.fn(() => mockLocale),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
 }));
 
 jest.mock('@/pages/manager/utils/auth', () => ({
@@ -22,6 +24,9 @@ jest.mock('@/service/common/request', () => ({
 
 import {
   debugModelImageGeneration,
+  debugModelAsr,
+  debugModelTts,
+  debugPersonalModelStream,
   debugModelStream,
   deleteModel,
   getModelDetail,
@@ -126,7 +131,7 @@ describe('manager/service/ModelMgr', () => {
     expect((mockPOST.mock.calls[0][2] as any).cancelToken.signal.aborted).toBe(true);
   });
 
-  it('debugModelStream sends signed fetch request and returns json for non-stream response', async () => {
+  it('debugModelStream sends a signed request and rejects a non-stream response without model output', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       headers: {
@@ -136,7 +141,7 @@ describe('manager/service/ModelMgr', () => {
     });
 
     const payload = { modelCode: 'gpt-4o', signal: 'signal' as any };
-    await expect(debugModelStream(payload)).resolves.toEqual({ code: 0, data: { success: true } });
+    await expect(debugModelStream(payload)).rejects.toThrow();
 
     expect(global.fetch).toHaveBeenCalledWith('/byaiService/new/model/debugModelStream', {
       method: 'POST',
@@ -191,6 +196,151 @@ describe('manager/service/ModelMgr', () => {
     });
     expect(onDelta).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onDelta).toHaveBeenNthCalledWith(2, ' World');
+  });
+
+  it('debugPersonalModelStream parses SSE and emits only assistant text', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode('data:{"choices":[{"delta":{"role":"assistant","content":null}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"天气"}}]}\n\n'),
+      encoder.encode('data:{"choices":[{"delta":{"content":"很好"}}]}\n\n'),
+      encoder.encode('data:[DONE]\n\n'),
+    ];
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: jest.fn(() => 'text/event-stream') },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: chunks[0], done: false })
+            .mockResolvedValueOnce({ value: chunks[1], done: false })
+            .mockResolvedValueOnce({ value: chunks[2], done: false })
+            .mockResolvedValueOnce({ value: chunks[3], done: false })
+            .mockResolvedValueOnce({ value: undefined, done: true }),
+        }),
+      },
+    });
+
+    await expect(debugPersonalModelStream({ id: '42', input: '{}', onDelta })).resolves.toEqual({
+      code: 0,
+      data: { output: '天气很好', success: true },
+    });
+    expect(onDelta.mock.calls).toEqual([['天气'], ['很好']]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/byaiService/personal/model/debug',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('renders Responses text deltas once and ignores completion snapshots', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const data = [
+      { type: 'response.created', response: { output: [] } },
+      { type: 'response.output_text.delta', delta: 'Hello' },
+      { type: 'response.output_text.delta', delta: ' GPT' },
+      { type: 'response.output_text.done', text: 'Hello GPT' },
+      { type: 'response.completed', response: { output: [{ content: [{ text: 'Hello GPT' }] }] } },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join('');
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: encoder.encode(data), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({ onDelta })).resolves.toMatchObject({
+      data: { output: 'Hello GPT', success: true },
+    });
+    expect(onDelta.mock.calls).toEqual([['Hello'], [' GPT']]);
+  });
+
+  it.each([
+    { type: 'response.failed', response: { error: { message: 'upstream failed' } } },
+    { type: 'error', message: 'upstream failed' },
+    { code: -1, data: null, msg: 'upstream failed', success: false },
+    { success: false, msg: 'upstream failed' },
+    { error: { message: 'upstream failed' } },
+  ])('rejects an upstream stream error instead of reporting empty success: $type', async (event) => {
+    const encoder = new TextEncoder();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: encoder.encode(`data: ${JSON.stringify(event)}\n\n`), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({})).rejects.toThrow('upstream failed');
+  });
+
+  it.each([debugModelStream, debugPersonalModelStream])(
+    'rejects the HTTP 200 business error envelope',
+    async (debug) => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ code: -1, data: null, msg: 'upstream failed', success: false }),
+      });
+      await expect(debug({ id: '42' })).rejects.toThrow('upstream failed');
+    }
+  );
+
+  it.each([
+    '',
+    'data: upstream failed\n\n',
+    'data: {\ndata: "code": -1,\ndata: "success": false\ndata: }\n\n',
+    'data: [DONE]\n\n',
+    'event: error\ndata: {"message":"upstream failed"}\n\n',
+    'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"code":-1,"success":false}\n\n',
+  ])('rejects empty and failed streams and releases their reader: %s', async (data) => {
+    const reader = {
+      read: jest
+        .fn()
+        .mockResolvedValueOnce({ value: new TextEncoder().encode(data), done: false })
+        .mockResolvedValue({ done: true }),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => reader },
+    });
+    await expect(debugPersonalModelStream({ id: '42' })).rejects.toThrow();
+    expect(reader.cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
+  it('parses a valid JSON event split across multiple SSE data lines', async () => {
+    const data = 'data: {\ndata: "choices": [{"delta":{"content":"OK"}}]\ndata: }\n\ndata: [DONE]\n\n';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: new TextEncoder().encode(data), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({})).resolves.toMatchObject({ data: { output: 'OK', success: true } });
   });
 
   it('debugModelStream parses Anthropic content_block_delta events', async () => {
@@ -265,7 +415,7 @@ describe('manager/service/ModelMgr', () => {
     expect(onDelta).toHaveBeenNthCalledWith(2, 'B');
   });
 
-  it('debugModelStream falls back to success payload when stream reader is missing', async () => {
+  it('debugModelStream rejects an unreadable stream instead of returning empty success', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       headers: {
@@ -274,12 +424,37 @@ describe('manager/service/ModelMgr', () => {
       body: {},
     });
 
-    await expect(debugModelStream({})).resolves.toEqual({
-      code: 0,
-      data: {
-        output: '',
-        success: true,
-      },
-    });
+    await expect(debugModelStream({})).rejects.toThrow();
   });
+});
+
+describe('speech model debugging', () => {
+  it.each([
+    [debugModelAsr, 'debugModelAsr', { fileId: '123', sessionId: '88' }],
+    [debugModelTts, 'debugModelTts', { text: '你好' }],
+  ])('sends speech input to its own backend endpoint', async (service, endpoint, input) => {
+    mockPOST.mockClear();
+    const signal = new AbortController().signal;
+    await service({ id: '42', input: JSON.stringify(input), signal });
+    expect(mockPOST).toHaveBeenCalledWith(
+      `/byaiService/new/model/${endpoint}`,
+      { ...input, id: '42' },
+      expect.objectContaining({ timeout: 185000, cancelToken: { signal } })
+    );
+  });
+});
+
+it.each([
+  ['zh-CN', '请输入包含 fileId 的 JSON 对象', '请输入包含 text 的 JSON 对象'],
+  ['en-US', 'Enter a JSON object containing fileId', 'Enter a JSON object containing text'],
+] as const)('localizes speech debug JSON errors in %s without making requests', async (locale, asr, tts) => {
+  mockLocale = locale;
+  (POST as jest.Mock).mockClear();
+  try {
+    await expect(debugModelAsr({ input: '{' })).rejects.toThrow(asr);
+    await expect(debugModelTts({ input: '{' })).rejects.toThrow(tts);
+    expect(POST).not.toHaveBeenCalled();
+  } finally {
+    mockLocale = 'zh-CN';
+  }
 });

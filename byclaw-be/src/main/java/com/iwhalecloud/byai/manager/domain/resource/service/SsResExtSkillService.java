@@ -190,7 +190,7 @@ public class SsResExtSkillService {
 
     private void fillDefaults(SsResExtSkill ssResExtSkill) {
         if (ssResExtSkill == null) {
-            throw new IllegalArgumentException("技能扩展数据不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("skill.extension.required"));
         }
         if (!StringUtils.hasText(ssResExtSkill.getSkillType())) {
             ssResExtSkill.setSkillType(DEFAULT_SKILL_TYPE);

@@ -1,12 +1,20 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { listTenants } from '@/pages/manager/service/TenantMgr';
 import SandboxMgr from '../index';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
+jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn() }));
 const mockDispatch = jest.fn();
 let mockUserInfo: any;
+let mockLocale = 'zh-CN';
 jest.mock('@umijs/max', () => ({
-  useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+  useIntl: () => ({
+    formatMessage: ({ id }: { id: string }) =>
+      id.startsWith('sandbox.')
+        ? jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale).formatMessage({ id })
+        : id,
+  }),
   useDispatch: () => mockDispatch,
   useSelector: (select: any) => select({ user: { userInfo: mockUserInfo } }),
 }));
@@ -18,6 +26,8 @@ jest.mock('@/pages/manager/service/TenantMgr', () => ({ listTenants: jest.fn().m
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: 'commercial' });
+  mockLocale = 'zh-CN';
   mockUserInfo = { enterpriseId: '123', usersOrganizations: [{ userType: 'PLAT_MAN' }] };
 });
 
@@ -90,4 +100,139 @@ test('a role change to business manager ignores an earlier tenant response', () 
   act(() => tenantRequest.success({ list: [{ ...record, sandboxId: 'earlier-tenant-sandbox' }] }));
   expect(screen.getByText('current-user-sandbox')).toBeInTheDocument();
   expect(screen.queryByText('earlier-tenant-sandbox')).not.toBeInTheDocument();
+});
+
+test('localizes ownership controls while retaining the TENANT request scope', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+  const { rerender } = render(<SandboxMgr />);
+  expect(screen.getByRole('tab', { name: '租户资源' })).toBeInTheDocument();
+  mockLocale = 'en-US';
+  rerender(<SandboxMgr />);
+  expect(screen.getByRole('tab', { name: 'Tenant resources' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'User resources' })).toBeInTheDocument();
+  expect(mockDispatch).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: 'sandboxMgr/listSandboxRecords',
+      payload: expect.objectContaining({ ownerScope: 'TENANT' }),
+    })
+  );
+});
+
+test.each([
+  ['adminvip', 'openSource', true],
+  ['ordinary', 'openSource', false],
+  ['adminvip', 'commercial', false],
+  ['ordinary', 'commercial', false],
+  ['adminvip', undefined, false],
+])('recovery tab for account %s and version %s is visible=%s', async (account, version, visible) => {
+  mockUserInfo = { userCode: account, usersOrganizations: [] };
+  (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: version });
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  await act(async () => {
+    render(<SandboxMgr />);
+  });
+  expect(Boolean(screen.queryByRole('tab', { name: '恢复任务' }))).toBe(visible);
+});
+
+test('running endpoints show named links and expand the complete list without navigating JSON', async () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 1,
+          ownerScope: 'USER',
+          sandboxType: 'byclaw-dsh',
+          status: 'RUNNING',
+          endpoint: JSON.stringify({
+            openclaw: 'https://sandbox.example/chat',
+            vnc: 'https://sandbox.example/vnc',
+            bycli: 'https://sandbox.example/cli',
+          }),
+        },
+      ],
+    })
+  );
+  expect(screen.getByRole('link', { name: 'openclaw' })).toHaveAttribute('href', 'https://sandbox.example/chat');
+  expect(screen.getByRole('link', { name: 'vnc' })).toHaveAttribute('href', 'https://sandbox.example/vnc');
+  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.endpoint.more/ }));
+  const menu = await screen.findByRole('menu', { hidden: true });
+  await waitFor(() => expect(menu).toBeVisible());
+  expect(within(menu).getByRole('link', { name: 'bycli', hidden: true })).toHaveAttribute(
+    'href',
+    'https://sandbox.example/cli'
+  );
+  expect(screen.queryByText(/\{"openclaw"/)).not.toBeInTheDocument();
+}, 15000);
+
+test('shows the user name returned for a user sandbox record', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 1,
+          ownerScope: 'USER',
+          userCode: 'user001',
+          userName: 'Test User',
+          sandboxType: 'openclaw',
+          status: 'RUNNING',
+        },
+      ],
+    })
+  );
+  expect(screen.getByText('Test User')).toBeInTheDocument();
+});
+
+test.each(['FAILED', 'RELEASING'])('allows retrying release for a %s user record', (status) => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [{ id: 12969, ownerScope: 'USER', userCode: 'user001', sandboxType: 'byclaw-dsh', status }],
+    })
+  );
+  expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
+});
+
+test('filters actual provider state independently of the persisted lifecycle', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'sandboxMgr.filter.providerStatus' }));
+  fireEvent.click(screen.getByText('sandboxMgr.status.running', { selector: '.ant-select-item-option-content' }));
+  expect(mockDispatch).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: 'sandboxMgr/listSandboxRecords',
+      payload: expect.objectContaining({ status: '', providerStatus: 'RUNNING', pageIndex: 1 }),
+    })
+  );
+});
+
+test('shows both states and permits releasing a remote instance whose record is released', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+  render(<SandboxMgr />);
+  const request = mockDispatch.mock.calls[0][0];
+  act(() =>
+    request.success({
+      list: [
+        {
+          id: 13688,
+          ownerScope: 'USER',
+          userCode: 'user001',
+          sandboxType: 'byclaw-dsh',
+          sandboxId: 'test-instance',
+          status: 'RELEASED',
+          providerStatus: 'RUNNING',
+        },
+      ],
+    })
+  );
+  expect(screen.getByText('sandboxMgr.status.released')).toBeInTheDocument();
+  expect(screen.getByText('sandboxMgr.status.running')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
 });

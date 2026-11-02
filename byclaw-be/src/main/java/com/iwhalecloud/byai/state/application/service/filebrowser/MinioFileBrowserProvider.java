@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -256,7 +257,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
         String normalized = normalizeRelativePath(relativePath);
         String absolutePath = ROOT_PREFIX + normalized;
         if (!absolutePath.startsWith(ROOT_PREFIX)) {
-            throw new IllegalArgumentException("非法路径: " + relativePath);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.invalid", relativePath));
         }
         return absolutePath;
     }
@@ -266,7 +267,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             return "";
         }
         if (path.contains("..")) {
-            throw new IllegalArgumentException("路径不允许包含 '..' : " + path);
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.path.traversal", path));
         }
         return path.startsWith("/") ? path.substring(1) : path;
     }
@@ -292,7 +293,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             sourcePrefix.substring(0, sourcePrefix.lastIndexOf('/', sourcePrefix.length() - 2) + 1));
         String targetPrefix = targetAbsolute + dirName + "/";
         if (targetPrefix.startsWith(sourcePrefix)) {
-            throw new IllegalArgumentException("不能复制文件夹到自身或其子目录下");
+            throw new IllegalArgumentException(I18nUtil.get("fileBrowser.copy.self"));
         }
 
         objectStorage.put(buildLocation(bucket, targetPrefix), InputStream.nullInputStream(), 0L,

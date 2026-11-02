@@ -1,12 +1,36 @@
+import { POST } from '@/service/common/request';
 import { act, render } from '@testing-library/react';
 import ModelFormModal from './ModelFormModal';
+import { checkModelHealth, getCachedModelHealth } from '@/service/modelHealth';
+import { getMyModels, getPublicModels, upsertMyModel } from '../service';
 
 const mockGetSourceSystemList = jest.fn();
 const mockGetDcSystemConfigListByStandType = jest.fn();
 let mockSharedModelFormProps: any;
 
 jest.mock('@umijs/max', () => ({
+  getLocale: () => 'zh-CN',
+  useSelector: (selector: any) => selector({ user: { userInfo: { userId: 17 } } }),
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+}));
+
+jest.mock('@/service/modelHealth', () => ({
+  ...jest.requireActual('@/service/modelHealth'),
+  checkModelHealth: jest.fn(),
+}));
+jest.mock('@/service/common/request', () => ({ POST: jest.fn() }));
+jest.mock('@/utils/auth', () => ({ getAuthSnapshot: () => ({}), isCurrentAuthSnapshot: () => true }));
+
+jest.mock('@/pages/manager/utils/auth', () => ({
+  getSessionKey: () => 'session-1',
+  getssoToken: () => 'sso-token',
+  getToken: () => 'token-1',
+  ssotokenKey: 'SSO-TOKEN',
+  tokenKey: 'Beyond-Token',
+}));
+
+jest.mock('@/pages/manager/utils/signature', () => ({
+  generateSignature: () => ({ 'x-signature': 'signed' }),
 }));
 
 jest.mock('@/pages/manager/service/OrgMgr', () => ({
@@ -25,6 +49,8 @@ jest.mock('@/pages/manager/pages/ModelMgr/components/SharedModelFormModal', () =
 jest.mock('../service', () => ({
   getMyModelDetail: jest.fn(),
   upsertMyModel: jest.fn(),
+  getMyModels: jest.fn(),
+  getPublicModels: jest.fn(),
 }));
 
 const renderForm = (type: 'add' | 'edit' = 'add') => {
@@ -33,9 +59,107 @@ const renderForm = (type: 'add' | 'edit' = 'add') => {
 };
 
 describe('models/components/ModelFormModal', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    (POST as jest.Mock).mockReset();
     mockSharedModelFormProps = undefined;
+  });
+
+  it('does not copy personal or public model records into official templates', () => {
+    const row = { id: 7, modelCode: 'model2', modelType: 'LLM', apiEndpoint: 'https://example.test/v1' };
+    (getMyModels as jest.Mock).mockResolvedValue({ code: 0, data: { rows: [row], total: 1 } });
+    (getPublicModels as jest.Mock).mockResolvedValue({ code: 0, data: { rows: [row], total: 1 } });
+    expect(renderForm()).not.toHaveProperty('loadConfiguredPresets');
+    expect(getMyModels).not.toHaveBeenCalled();
+    expect(getPublicModels).not.toHaveBeenCalled();
+  });
+
+  it('uses the personal JSON image endpoint and returns the upstream image response', async () => {
+    const data = { data: [{ url: 'https://example.test/image.jpeg' }] };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ code: 0, data }) });
+    const signal = new AbortController().signal;
+    const onDelta = jest.fn();
+    const props = renderForm();
+    await expect(
+      props.runDebugRequest({ modelId: 42, modelType: 'IMAGE_GENERATION', input: '{}', signal, onDelta })
+    ).resolves.toEqual({ output: JSON.stringify(data, null, 2) });
+    expect(global.fetch).toHaveBeenCalledWith('/byaiService/personal/model/debugImageGeneration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: '42', input: '{}' }),
+      signal,
+    });
+    expect(onDelta).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing LLM stream endpoint and delta behavior', async () => {
+    const chunk = new TextEncoder().encode('data:{"choices":[{"delta":{"content":"ok"}}]}\n\ndata:[DONE]\n\n');
+    const read = jest.fn().mockResolvedValueOnce({ done: false, value: chunk }).mockResolvedValueOnce({ done: true });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => ({ read }) },
+    });
+    const props = renderForm();
+    const onDelta = jest.fn();
+    await expect(props.runDebugRequest({ modelId: 42, modelType: 'LLM', input: '{}', onDelta })).resolves.toEqual({
+      output: 'ok',
+    });
+    expect(global.fetch).toHaveBeenCalledWith('/byaiService/personal/model/debug', expect.any(Object));
+    expect(onDelta).toHaveBeenCalledWith('ok');
+  });
+
+  it('reports image API failures rather than treating HTTP 200 as success', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ code: 40001, msg: 'invalid model' }) });
+    await expect(
+      renderForm().runDebugRequest({ modelId: 42, modelType: 'IMAGE_GENERATION', input: '{}' })
+    ).rejects.toThrow('invalid model');
+  });
+
+  it('marks both personal models when both debug calls return the same business error', async () => {
+    global.fetch = jest.fn().mockImplementation(async () => ({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ code: -1, data: null, msg: 'upstream failed', success: false }),
+    }));
+    const props = renderForm();
+    (POST as jest.Mock).mockImplementation(async (url, params) => {
+      if (url.endsWith('/healthDebugBegin')) return { code: 0, data: 1 };
+      return {
+        code: 0,
+        data: {
+          scope: 'PERSONAL',
+          checkedAt: Date.now(),
+          healthy: false,
+          presented: true,
+          dismissed: true,
+          models: (params.id === '43' ? ['43', '42'] : ['42']).map((modelId) => ({
+            modelId,
+            modelName: `Broken ${modelId}`,
+            modelType: 'LLM',
+            status: 'FAILED',
+            errorCode: 'DEBUG_FAILED',
+          })),
+        },
+      };
+    });
+    for (const modelId of ['42', '43']) {
+      await expect(
+        props.runDebugRequest({ modelId, modelName: `Broken ${modelId}`, modelType: 'LLM', input: '{}' })
+      ).rejects.toThrow('upstream failed');
+    }
+    const cached = getCachedModelHealth({ userId: 17 }, 'PERSONAL')!;
+    expect(cached.models).toHaveLength(2);
+    expect(cached.models.every((model) => model.status === 'FAILED' && model.errorCode === 'DEBUG_FAILED')).toBe(true);
+    expect(cached.models.map((model) => model.modelName)).toEqual(['Broken 43', 'Broken 42']);
+    expect(checkModelHealth).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   it.each(['add', 'edit'] as const)('loads ability and system tag options for the %s form', async (type) => {
@@ -100,4 +224,13 @@ describe('models/components/ModelFormModal', () => {
     mockGetDcSystemConfigListByStandType.mockRejectedValue(new Error('dictionary unavailable'));
     await expect(renderForm().loadAbilityOptions()).rejects.toThrow('dictionary unavailable');
   });
+});
+
+it('forces a check of the saved personal model on every save', async () => {
+  (upsertMyModel as jest.Mock).mockResolvedValue({ code: 0, data: { id: '42' } });
+  const props = renderForm();
+  await props.saveModelRequest({ modelCode: 'test' });
+  await props.saveModelRequest({ modelCode: 'test' });
+  expect(checkModelHealth).toHaveBeenCalledTimes(2);
+  expect(checkModelHealth).toHaveBeenLastCalledWith({ userId: 17 }, { modelId: '42', scope: 'PERSONAL', force: true });
 });

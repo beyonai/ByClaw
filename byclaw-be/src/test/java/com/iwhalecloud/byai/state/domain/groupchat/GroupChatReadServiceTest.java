@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,7 +43,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRespons
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 
-class GroupChatReadServiceTest {
+class GroupChatReadServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
 
     @Test
     void memberSummaryQueryReadsAvatarForBothMemberTypes() throws Exception {
@@ -145,7 +152,7 @@ class GroupChatReadServiceTest {
             assertThat(result.isLatestMessageRecalled()).isTrue();
             assertThat(result.getLatestMessageId()).isEqualTo(20L);
             assertThat(result.getLatestMessageTime()).isEqualTo(new Date(100));
-            assertThat(result.getLatestMessageContent()).endsWith(" 撤回了一条消息");
+            assertThat(result.getLatestMessageContent()).endsWith(" recalled a message");
             assertThat(result.getLatestMessageAttachments()).isEmpty();
             assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("SECRET");
             verifyNoInteractions(messageMapper, broadcastService);
@@ -207,6 +214,37 @@ class GroupChatReadServiceTest {
         }
         finally {
             PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    void publishesGroupReceiptCursorOnlyAfterCommitAndOnlyWhenAdvanced() {
+        ByaiMessage message = new ByaiMessage();
+        message.setMessageId(20L);
+        message.setSessionId(10L);
+        when(messageMapper.selectByMessageId(20L)).thenReturn(message);
+        when(memberMapper.advanceReadCursor(eq(11L), eq(20L), any())).thenReturn(1);
+        GroupChatListItemResponse state = new GroupChatListItemResponse();
+        state.setLastReadMessageId(20L);
+        when(mentionMapper.selectMentionState(10L, 30L)).thenReturn(state);
+        ByaiSessionMember recipient = new ByaiSessionMember();
+        recipient.setMemObjType("USER");
+        recipient.setMemObjId(40L);
+        when(memberMapper.findOrderedGroupMembers(10L)).thenReturn(List.of(recipient));
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.markRead(10L, 20L);
+            verifyNoInteractions(broadcastService);
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            ArgumentCaptor<JSONObject> event = ArgumentCaptor.forClass(JSONObject.class);
+            verify(broadcastService).broadcastRawToUser(eq(40L), event.capture(), isNull());
+            assertThat(event.getValue().getString("event")).isEqualTo("READ_RECEIPTS_UPDATED");
+            assertThat(event.getValue().getString("userId")).isEqualTo("30");
+            assertThat(event.getValue().getString("lastReadMessageId")).isEqualTo("20");
+            assertThat(event.getValue()).doesNotContainKey("unreadCount");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
         }
     }
 

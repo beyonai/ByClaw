@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.state.domain.sys.service;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 
 import cn.hutool.core.util.IdUtil;
 import com.iwhalecloud.byai.manager.mapper.system.SequenceMapper;
@@ -52,6 +55,26 @@ public class SequenceService {
      */
     public Long nextVal() {
         return this.nextVal(this.defaultSequenceName);
+    }
+
+    /** 按需从原序列获取一批主键；回滚可能留下序列空号，不复用已分配的 ID。 */
+    public List<Long> nextValues(int count) {
+        if (count < 0) throw new IllegalArgumentException("Sequence count must not be negative");
+        if (count == 0) return List.of();
+        String dbType = byaiDruidProperties.getDbType();
+        List<Long> values;
+        if (DS_POSTGRESQL.equalsIgnoreCase(dbType) || DS_OPENGAUSS.equalsIgnoreCase(dbType)) {
+            values = sequenceMapper.nextValuesForPostgreSql(defaultSequenceName, count);
+        } else {
+            // 其他数据库沿用现有取号契约，避免改变跨库主键生成规则。
+            values = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) values.add(nextVal());
+        }
+        if (values == null || values.size() != count || values.stream().anyMatch(java.util.Objects::isNull)
+            || new HashSet<>(values).size() != count) {
+            throw new IllegalStateException("Sequence returned an incomplete or duplicate ID batch");
+        }
+        return values;
     }
 
     /**

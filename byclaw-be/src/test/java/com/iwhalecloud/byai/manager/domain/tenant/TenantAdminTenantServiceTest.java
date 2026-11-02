@@ -1,8 +1,12 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,12 +27,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
-class TenantAdminTenantServiceTest {
+class TenantAdminTenantServiceTest extends I18nTestSupport {
 
     private final TenantAdminTenantMapper mapper = mock(TenantAdminTenantMapper.class);
     private final SequenceService sequenceService = mock(SequenceService.class);
+    private final TenantSandboxProperties sandboxProperties = org.mockito.Mockito.mock(TenantSandboxProperties.class);
     private final TenantAdminTenantService service = new TenantAdminTenantService(mapper, sequenceService,
-        new ObjectMapper());
+        new ObjectMapper(), sandboxProperties);
+
+    @org.junit.jupiter.api.BeforeEach
+    void defaultProfiles() {
+        when(sandboxProperties.getProfileKey()).thenReturn("m");
+        when(sandboxProperties.getNodeProfileKey()).thenReturn("m");
+    }
 
     @AfterEach
     void clearLogin() {
@@ -44,7 +55,7 @@ class TenantAdminTenantServiceTest {
     }
 
     @Test
-    void reservesTenantAndSnapshotsBasicPackage() {
+    void reservesTenantWithMediumProfileAndPreservesBasicPackageMemberLimit() {
         platformAdmin();
         TenantPackageRow selectedPackage = new TenantPackageRow();
         selectedPackage.setId(1L);
@@ -59,8 +70,59 @@ class TenantAdminTenantServiceTest {
         assertThat(tenant.enterpriseId()).isEqualTo("123");
         assertThat(tenant.provisionState()).isEqualTo("RESERVED");
         verify(mapper).insertEnterprise(123L, "测试租户01");
-        verify(mapper).insertConfig(127L, 123L, "PACKAGE_CONTENT_SNAPSHOT", selectedPackage.getPackageContent());
+        verify(mapper).insertConfig(127L, 123L, "PACKAGE_CONTENT_SNAPSHOT", "{\"profileKey\":\"m\",\"memberLimit\":10,\"nodeProfileKey\":\"m\"}");
         verify(mapper).insertOwner(129L, 123L, 1L);
+    }
+
+    @Test
+    void configuredProfileIsIndependentOfPackageResourceFields() throws Exception {
+        platformAdmin();
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("s");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
+        TenantPackageRow selectedPackage = new TenantPackageRow();
+        selectedPackage.setId(1L);
+        selectedPackage.setPackageName("企业版");
+        selectedPackage.setPackageContent("{\"memberLimit\":50,\"description\":\"Enterprise\"}");
+        when(mapper.selectEnabledPackage(1)).thenReturn(selectedPackage);
+        AtomicLong ids = new AtomicLong(123);
+        when(sequenceService.nextVal()).thenAnswer(ignored -> ids.getAndIncrement());
+
+        service.create("测试租户01", 1, "request-001");
+
+        var snapshot = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(mapper).insertConfig(anyLong(), eq(123L), eq("PACKAGE_CONTENT_SNAPSHOT"), snapshot.capture());
+        var content = new ObjectMapper().readTree(snapshot.getValue());
+        assertThat(content.path("profileKey").asText()).isEqualTo("s");
+        assertThat(content.path("nodeProfileKey").asText()).isEqualTo("l");
+        assertThat(content.path("memberLimit").asInt()).isEqualTo(50);
+        assertThat(content.path("description").asText()).isEqualTo("Enterprise");
+        verify(mapper).insertConfig(anyLong(), eq(123L), eq("PACKAGE_SPEC_ID"), eq("1"));
+        verify(mapper).insertConfig(anyLong(), eq(123L), eq("PACKAGE_NAME_SNAPSHOT"), eq("企业版"));
+    }
+
+    @Test
+    void replayDoesNotRewriteExistingTenantWhenDeploymentProfileChanges() {
+        platformAdmin();
+        org.mockito.Mockito.when(sandboxProperties.getProfileKey()).thenReturn("l");
+        org.mockito.Mockito.when(sandboxProperties.getNodeProfileKey()).thenReturn("l");
+        TenantPackageRow selectedPackage = new TenantPackageRow();
+        selectedPackage.setId(1L);
+        selectedPackage.setPackageName("基础版");
+        selectedPackage.setPackageContent("{\"profileKey\":\"s\",\"memberLimit\":10}");
+        when(mapper.selectEnabledPackage(1)).thenReturn(selectedPackage);
+        TenantAdminTenantRow existing = new TenantAdminTenantRow();
+        existing.setEnterpriseId(123L);
+        existing.setEnterpriseName("测试租户01");
+        existing.setPackageName("基础版");
+        existing.setCreatedBy(1L);
+        existing.setProvisionStateJson("{\"status\":\"RESERVED\"}");
+        when(mapper.selectByRequestId("request-001")).thenReturn(existing);
+
+        assertThat(service.create("测试租户01", 1, "request-001").enterpriseId()).isEqualTo("123");
+
+        verify(mapper, never()).insertEnterprise(anyLong(), any());
+        verify(mapper, never()).insertConfig(anyLong(), anyLong(), any(), any());
+        verify(sequenceService, never()).nextVal();
     }
 
     @Test
@@ -94,4 +156,50 @@ class TenantAdminTenantServiceTest {
         loginInfo.setUsersOrganizations(List.of(organization));
         CurrentUserHolder.setLoginInfo(loginInfo);
     }
+
+    @Test
+    void persistedFailureKeysUseTheViewersLocaleAndLegacyDiagnosticsRemainReadable() {
+        platformAdmin();
+        TenantAdminTenantRow row = new TenantAdminTenantRow();
+        row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"FAILED\"}");
+        row.setFailureReason("tenant.node.launch.incomplete");
+        when(mapper.selectTenants(any(), any(), any(), any(), any())).thenReturn(List.of(row));
+        var filter = new TenantAdminTenantService.TenantListFilter(null, null, null, null, null);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("tenant Node launch configuration is incomplete");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("租户 Node 启动配置不完整");
+        row.setFailureReason("tenant deletion failed: IllegalStateException");
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("租户删除失败：IllegalStateException");
+        row.setFailureReason("provider diagnostic");
+        assertThat(service.list(filter).getFirst().failureReason()).isEqualTo("provider diagnostic");
+    }
+
+    @Test
+    void deletionFailureKeepsLifecycleAndLocalizedReasonOverHistoricalProvisionSuccess() {
+        platformAdmin();
+        var row=new TenantAdminTenantRow();row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"DELETE_FAILED\"}");
+        row.setCommandStatus("SUCCEEDED");row.setCommandStage("READY");
+        row.setFailureReason("TENANT_DELETE_RESOURCE_UNCERTAIN");
+        when(mapper.selectTenants(any(),any(),any(),any(),any())).thenReturn(List.of(row));
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        var result=service.list(null).getFirst();
+        assertThat(result.provisionState()).isEqualTo("DELETE_FAILED");
+        assertThat(result.failureReason()).isNotEqualTo("TENANT_DELETE_RESOURCE_UNCERTAIN").isNotBlank();
+    }
+
+    @Test
+    void pausedCommercialCommandOverridesStaleCreatingSnapshot() {
+        platformAdmin();
+        var row=new TenantAdminTenantRow();row.setEnterpriseId(123L);
+        row.setProvisionStateJson("{\"status\":\"DB_CREATING\"}");
+        row.setCommandStatus("MANUAL_REQUIRED");row.setCommandStage("DB_CREATE");row.setCommandErrorCode("PROVIDER_RESULT_UNKNOWN");
+        when(mapper.selectTenants(any(),any(),any(),any(),any())).thenReturn(List.of(row));
+        var result=service.list(new TenantAdminTenantService.TenantListFilter(null,null,null,"createdAt","desc")).getFirst();
+        assertThat(result.provisionState()).isEqualTo("MANUAL_REQUIRED");assertThat(result.provisionStage()).isEqualTo("DB_CREATE");
+        assertThat(result.failureReason()).isEqualTo("PROVIDER_RESULT_UNKNOWN");
+    }
+
 }

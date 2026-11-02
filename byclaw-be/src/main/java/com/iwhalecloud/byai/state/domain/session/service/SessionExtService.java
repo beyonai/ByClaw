@@ -117,11 +117,11 @@ public class SessionExtService {
      * @param sessionId 会话标识
      * @param paramCode 参数编码
      */
-    public void deleteBySessionIdAndParamCode(Long sessionId, String paramCode) {
+    public int deleteBySessionIdAndParamCode(Long sessionId, String paramCode) {
         LambdaQueryWrapper<ByaiSessionExt> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ByaiSessionExt::getSessionId, sessionId);
         queryWrapper.eq(ByaiSessionExt::getExtParamCode, paramCode);
-        byaiSessionExtMapper.delete(queryWrapper);
+        return byaiSessionExtMapper.delete(queryWrapper);
     }
 
 }

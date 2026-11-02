@@ -22,6 +22,7 @@ public abstract class I18nTestSupport {
         source.setBasename("i18n/messages");
         source.setDefaultEncoding("UTF-8");
         source.setFallbackToSystemLocale(false);
+        source.setUseCodeAsDefaultMessage(true);
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", source);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     }

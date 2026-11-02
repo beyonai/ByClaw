@@ -10,7 +10,6 @@ import AntdIcon from '@/components/AntdIcon';
 import CommonTabs from '@/components/CommonTabs';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
 import { type ResourceOperationPermissions } from '@/pages/manager/service/resources';
-import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import AddFolderModal from './components/AddFolderModal';
 import BaseInfo from './components/BaseInfo';
 import DownloadFile from './components/DownloadFile';
@@ -53,7 +52,6 @@ const KnowledgeDetail: React.FC = () => {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [selectedBuildCount, setSelectedBuildCount] = useState(0);
   const [selectedCount, setSelectedCount] = useState(0);
-  const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [operationPermissions, setOperationPermissions] = useState<ResourceOperationPermissions | null>(null);
 
   const { queryResourceDetail } = useKnowledgeStore();
@@ -124,22 +122,6 @@ const KnowledgeDetail: React.FC = () => {
     resourceSourcePkId,
   ]);
 
-  useEffect(() => {
-    queryKnowledgeCapability()
-      .then((res: any) => {
-        setKnowledgeCapability(res?.data || res || null);
-      })
-      .catch(() => {
-        setKnowledgeCapability({
-          knowledgeMode: 'THIRD_PARTY',
-          allowKnowledgeBaseCreate: false,
-          allowKnowledgeBaseEdit: false,
-          allowKnowledgeBaseDelete: false,
-          allowKnowledgeImport: true,
-        });
-      });
-  }, []);
-
   const items: TabsProps['items'] = [
     {
       key: 'directoryManage',
@@ -191,8 +173,7 @@ const KnowledgeDetail: React.FC = () => {
       <BaseInfo
         data={baseInfo}
         resourceId={resourceId || ''}
-        allowKnowledgeBaseDelete={knowledgeCapability?.allowKnowledgeBaseDelete}
-        canManage={canManageKnowledge}
+        canDelete={operationPermissions?.canDelete === true}
         backPath={knowledgeCenterBackPath}
         backState={knowledgeCenterBackState}
       />

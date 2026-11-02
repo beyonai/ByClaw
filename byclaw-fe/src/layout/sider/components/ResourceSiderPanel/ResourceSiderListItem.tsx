@@ -85,6 +85,7 @@ interface ResourceSiderListItemProps {
   item: ResourceItem;
   resourceType: ResourceSiderType;
   actions?: React.ReactNode[];
+  runtimeStatus?: React.ReactNode;
   renderSkillSourceTag?: (item: ResourceItem) => React.ReactNode;
   renderName?: (item: ResourceItem) => React.ReactNode;
   renderDescription?: (item: ResourceItem) => React.ReactNode;
@@ -106,6 +107,7 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
   item,
   resourceType,
   actions,
+  runtimeStatus,
   renderSkillSourceTag,
   renderName,
   renderDescription,
@@ -162,13 +164,16 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
           </span>
         }
         description={
-          description ? (
-            <Tooltip title={description} placement="right">
-              <span className={styles.resourceDescription}>
-                {renderDescription ? renderDescription(item) : description}
-              </span>
-            </Tooltip>
-          ) : null
+          <>
+            {description ? (
+              <Tooltip title={description} placement="right">
+                <span className={styles.resourceDescription}>
+                  {renderDescription ? renderDescription(item) : description}
+                </span>
+              </Tooltip>
+            ) : null}
+            {runtimeStatus}
+          </>
         }
       />
     </List.Item>

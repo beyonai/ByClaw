@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "mode": "workspace",
+  "repository": "/tmp/ocrfix",
+  "total_files": 2,
+  "reviewable_count": 1,
+  "excluded_count": 1,
+  "total_insertions": 2,
+  "total_deletions": 0,
+  "reviewable_files": [
+    {
+      "path": "src.ts",
+      "status": "modified",
+      "insertions": 1,
+      "deletions": 0
+    }
+  ],
+  "excluded_files": [
+    {
+      "path": "note.md",
+      "status": "added",
+      "insertions": 1,
+      "deletions": 0,
+      "exclude_reason": "unsupported_ext"
+    }
+  ]
+}

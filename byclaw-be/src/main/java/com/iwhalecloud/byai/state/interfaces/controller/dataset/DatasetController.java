@@ -29,11 +29,15 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataUpdateRequ
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityDiscoveryRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeEntityEnrichRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeMetadataSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCopyResult;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -80,6 +84,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.application.service.dataset.OpenClawKnowledgeDocumentService;
+import com.iwhalecloud.byai.state.application.service.upload.GlobalFileUploadValidator;
 import jakarta.validation.Valid;
 
 /**
@@ -103,6 +108,9 @@ public class DatasetController {
 
     @Autowired
     private OpenClawKnowledgeDocumentService openClawKnowledgeDocumentService;
+
+    @Autowired
+    private GlobalFileUploadValidator globalFileUploadValidator;
 
     /**
      * 分页查询资源列表。
@@ -239,6 +247,14 @@ public class DatasetController {
             datasetApplicationService.moveKnowledgeItems(request, headers));
     }
 
+    /** 复制原始文档到指定知识库目录，支持项目云盘及跨知识库复制。 */
+    @PostMapping("/copyKnowledgeFile")
+    public ResponseUtil<KnowledgeFileCopyResult> copyKnowledgeFile(HttpServletRequest httpServletRequest,
+        @Valid @RequestBody KnowledgeFileCopyRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.copy.success"),
+            datasetApplicationService.copyKnowledgeFile(request, this.parseHeadersFromRequest(httpServletRequest)));
+    }
+
     /**
      * 查询 Markdown 文件的入站、出站引用关系。
      */
@@ -258,7 +274,7 @@ public class DatasetController {
         Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
 
         KnowledgeEntityBatchResult knowledgeEntityBatchResult = datasetApplicationService.entityDiscovery(requestParam, headers);
-        return ResponseUtil.successResponse("知识实体发现任务已受理", knowledgeEntityBatchResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.discovery.accepted"), knowledgeEntityBatchResult);
     }
 
 
@@ -272,7 +288,7 @@ public class DatasetController {
 
         KnowledgeEntityBatchResult responseResult = datasetApplicationService.entityEnrich(requestParam, headers);
 
-        return ResponseUtil.successResponse("知识实体补全任务已受理", responseResult);
+        return ResponseUtil.successResponse(I18nUtil.get("knowledge.enrichment.accepted"), responseResult);
     }
 
     /**
@@ -301,8 +317,15 @@ public class DatasetController {
     }
 
     /**
-     * 按 QA glob 单层通配规则匹配文件或目录。
+     * 统计指定知识库所有层级的未删除文件数量。
      */
+    @PostMapping("/knowledgeBases/fileCount")
+    public ResponseUtil<KnowledgeFileCountResult> fileCount(@Valid @RequestBody KnowledgeFileCountRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.fileCount(request));
+    }
+
+    /** 按 QA glob 单层通配规则匹配文件或目录。 */
     @PostMapping("/glob")
     public ResponseUtil<List<DirAndFileVo>> globKnowledgeItems(@Valid @RequestBody KnowledgeGlobRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
@@ -361,14 +384,24 @@ public class DatasetController {
                                                   @RequestPart(value = "fileDescription", required = false) String fileDescription,
                                                   @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
                                                   @RequestPart(value = "overwrite", required = false) String overwrite,
-                                                  @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate) {
+                                                  @RequestPart(value = "skipIfDuplicate", required = false) String skipIfDuplicate,
+                                                  @RequestPart(value = "extractZip", required = false) String extractZip,
+                                                  @RequestPart(value = "metadata", required = false) String metadata) {
         try {
+            // 项目云盘与知识库页面共用此入口，先整批校验，再执行覆盖或导入操作。
+            globalFileUploadValidator.validateKnowledgeUpload(files);
             Map<String, String> headers = this.parseHeadersFromRequest(httpServletRequest);
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
                 fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.parseBoolean(overwrite),
-                Boolean.parseBoolean(skipIfDuplicate), headers);
+                Boolean.parseBoolean(skipIfDuplicate), parseOptionalBoolean(extractZip), metadata, headers);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
+                | com.iwhalecloud.byai.state.common.exception.StoragePreparingException e) {throw e;}
+        catch (org.springframework.web.server.ResponseStatusException quotaFailure) {
+            // 保留配额 409/503，由统一异常处理返回可识别的状态和国际化原因。
+            logger.error("Knowledge upload admission failed, resourceId={}", resourceId, quotaFailure);
+            throw quotaFailure;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
@@ -402,8 +435,8 @@ public class DatasetController {
             return ResponseEntity.ok().contentType(MediaType.parseMediaType(result.getContentType()))
                 .header("Content-Disposition", buildContentDisposition(result.getFileName())).body(responseBody);
         } catch (Exception e) {
-            logger.error("文件转Markdown失败", e);
-            String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
+            logger.error(I18nUtil.get("knowledge.markdown.failed"), e);
+            String errorMessage = e.getMessage() == null ? I18nUtil.get("knowledge.markdown.failed") : e.getMessage();
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(outputStream -> outputStream.write(errorMessage.getBytes(StandardCharsets.UTF_8)));
         }

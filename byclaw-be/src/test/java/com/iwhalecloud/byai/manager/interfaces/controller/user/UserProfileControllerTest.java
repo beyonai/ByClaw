@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -21,7 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.mockito.ArgumentCaptor;
 
-class UserProfileControllerTest {
+class UserProfileControllerTest extends I18nTestSupport {
 
     @Test
     void updateProfileAcceptsFormWithoutAvatarFile() throws Exception {
@@ -38,6 +39,26 @@ class UserProfileControllerTest {
         ArgumentCaptor<UserProfileUpdateRequest> request = ArgumentCaptor.forClass(UserProfileUpdateRequest.class);
         verify(service).updateProfile(request.capture());
         assertThat(request.getValue().getUserName()).isEqualTo("张三");
+        assertThat(request.getValue().getAvatar()).isNull();
+        assertThat(request.getValue().getAvatarFile()).isNull();
+        assertThat(request.getValue().isRemoveAvatar()).isFalse();
+    }
+
+    @Test
+    void updateProfileBindsExplicitAvatarRemovalAndReturnsEmptyAvatar() throws Exception {
+        UserController controller = new UserController();
+        UserProfileApplicationService service = mock(UserProfileApplicationService.class);
+        ReflectionTestUtils.setField(controller, "userProfileApplicationService", service);
+        when(service.updateProfile(any())).thenReturn(new UserProfileResponse("张三", ""));
+
+        MockMvcBuilders.standaloneSetup(controller).build()
+            .perform(multipart("/system/user/updateProfile")
+                .param("userName", "张三").param("removeAvatar", "true"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.avatar").value(""));
+        ArgumentCaptor<UserProfileUpdateRequest> request = ArgumentCaptor.forClass(UserProfileUpdateRequest.class);
+        verify(service).updateProfile(request.capture());
+        assertThat(request.getValue().isRemoveAvatar()).isTrue();
         assertThat(request.getValue().getAvatar()).isNull();
         assertThat(request.getValue().getAvatarFile()).isNull();
     }
@@ -116,4 +137,27 @@ class UserProfileControllerTest {
                 .content("{\"userName\":\"张三\"}"))
             .andExpect(status().isUnsupportedMediaType());
     }
+
+    @Test
+    void profileValidationUsesBilingualMessagesAndPreservesLengthConstraints() {
+        var source = new org.springframework.context.support.ResourceBundleMessageSource();
+        source.setBasename("i18n/messages");
+        source.setDefaultEncoding("UTF-8");
+        source.setFallbackToSystemLocale(false);
+        try (var validator = new org.springframework.validation.beanvalidation.LocalValidatorFactoryBean()) {
+            validator.setValidationMessageSource(source);
+            validator.afterPropertiesSet();
+            var request = new UserProfileUpdateRequest("张三", null);
+            request.setCompanyName("a".repeat(101));
+            org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+            assertThat(validator.validate(request)).extracting(jakarta.validation.ConstraintViolation::getMessage)
+                .containsExactly("Company / organization name must not exceed 100 characters");
+            org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+            assertThat(validator.validate(request)).extracting(jakarta.validation.ConstraintViolation::getMessage)
+                .containsExactly("公司 / 组织名称不能超过 100 个字符");
+            request.setCompanyName("a".repeat(100));
+            assertThat(validator.validate(request)).isEmpty();
+        }
+    }
+
 }

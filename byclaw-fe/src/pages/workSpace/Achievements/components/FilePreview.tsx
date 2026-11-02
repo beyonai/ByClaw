@@ -1,3 +1,4 @@
+import { createRelativeResourceResolver } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Spin } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
@@ -33,6 +34,7 @@ export function FilePreview({ onBack, fileInfo }: FilePreviewProps) {
       }
       fetch(url)
         .then((res) => {
+          if (!res.ok) throw new Error(res.statusText);
           res.blob().then((blob) => {
             setContent(blob);
           });
@@ -56,6 +58,8 @@ export function FilePreview({ onBack, fileInfo }: FilePreviewProps) {
     }
   }, [fileInfo]);
 
+  const resolveResource = useMemo(() => createRelativeResourceResolver(fileInfo.path), [fileInfo.path]);
+
   const type = useMemo(() => {
     return resolvePreviewType(fileInfo.type, fileInfo.name, content instanceof Blob ? content.type : undefined);
   }, [fileInfo, content]);
@@ -75,7 +79,13 @@ export function FilePreview({ onBack, fileInfo }: FilePreviewProps) {
       )}
       {!loading && PREVIEWABLE_TYPES.includes(type) && (
         <React.Suspense fallback={<Spin />}>
-          <Twins data={content} type={type} title={fileInfo.name} />
+          <Twins
+            data={content}
+            type={type}
+            title={fileInfo.name}
+            resolveMarkdownImage={resolveResource}
+            resolveHtmlResource={resolveResource}
+          />
         </React.Suspense>
       )}
     </div>

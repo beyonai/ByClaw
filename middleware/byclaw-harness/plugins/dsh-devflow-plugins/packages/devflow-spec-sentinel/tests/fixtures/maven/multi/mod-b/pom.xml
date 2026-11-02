@@ -1,0 +1,5 @@
+<project>
+  <parent>
+    <artifactId>aggregator</artifactId>
+  </parent>
+</project>

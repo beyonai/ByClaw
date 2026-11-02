@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.infrastructure.capability;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -39,20 +41,20 @@ public class AiServiceCapabilityDraftGenerator implements AgentCapabilityDraftGe
     public String generate(AgentCapabilityCompileInput input) {
         ModelDto model = aiModelService.getDefaultChatModel();
         if (model == null) {
-            throw new BaseException("No default chat model configured for capability card generation");
+            throw new BaseException(I18nUtil.get("capability.model.missing"));
         }
         String userPrompt = AgentCapabilityCardService.agentSourceForPrompt(input);
         try {
             String json = aiService.generateJsonObject(
                 AgentCapabilityCardService.systemPrompt(), userPrompt, model, MAX_TOKENS);
             if (StringUtils.isBlank(json)) {
-                throw new BaseException("Capability model returned an empty card");
+                throw new BaseException(I18nUtil.get("capability.model.empty"));
             }
             return json;
         } catch (BaseException e) {
             throw e;
         } catch (Exception e) {
-            throw new BaseException("Capability card generation failed", e);
+            throw new BaseException(I18nUtil.get("capability.generate.failed"), e);
         }
     }
 }

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-26-devflow-owns-its-browser-channel.md
+2026-08-26-devflow-owns-its-browser-channel.md: fe93be8aa7dff2057004e33076c5f8394d054994
+2026-08-26-devflow-owns-its-browser-channel.zh.md: ad98f31f4e37cf61ee12b3561beecc6f4f213eee

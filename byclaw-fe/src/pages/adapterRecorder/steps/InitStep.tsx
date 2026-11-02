@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // Step 5 · 生成草稿 —— select-only init,契约三态:dry-run 预览 → ADR-0005 责任声明 → 确认写入。
 // 预览不推进会话;写入(带 responsibleUseAcknowledgedAt)推进 ranked→draft_created。
 import { useState } from 'react';
@@ -38,17 +39,17 @@ export default function InitStep({
   onWrite,
   onBack,
 }: Props) {
+  const intl = useIntl();
   const [acknowledged, setAcknowledged] = useState(false);
   const { token } = theme.useToken();
 
   return (
-    <Card title="生成 Adapter 草稿" variant="borderless">
+    <Card title={intl.formatMessage({ id: 'adapterRecorder.init.title' })} variant="borderless">
       <Button icon={<ArrowLeftOutlined />} onClick={onBack} style={{ marginBottom: 12 }}>
-        返回候选
+        {intl.formatMessage({ id: 'adapterRecorder.init.back' })}
       </Button>
       <Paragraph type="secondary" style={{ lineHeight: 1.6 }}>
-        基于选定候选 select-only 生成 adapter:先 dry-run 预览(不写盘),确认 ADR-0005 责任声明后写入。
-        写入成功后会话推进到 draft_created。
+        {intl.formatMessage({ id: 'adapterRecorder.init.description' })}
       </Paragraph>
 
       {selectedCandidate ? (
@@ -63,33 +64,40 @@ export default function InitStep({
               </Text>
               <Text type="secondary">→ adapter</Text>
               <Text className="code" strong>
-                {adapterName ?? '(未派生)'}
+                {adapterName ?? intl.formatMessage({ id: 'adapterRecorder.init.notDerived' })}
               </Text>
             </Space>
           }
         />
       ) : (
-        <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="请先在上方选择一个候选 endpoint" />
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={intl.formatMessage({ id: 'adapterRecorder.init.selectFirst' })}
+        />
       )}
 
       <Button icon={<EyeOutlined />} loading={loading} disabled={!selectedCandidate} onClick={() => onPreview()}>
-        {preview ? '重新预览 (dry-run)' : '预览草稿 (dry-run)'}
+        {preview
+          ? intl.formatMessage({ id: 'adapterRecorder.init.previewAgain' })
+          : intl.formatMessage({ id: 'adapterRecorder.init.preview' })}
       </Button>
 
       {preview && (
         <div style={{ marginTop: 16 }}>
           <Descriptions size="small" column={2} colon={false} styles={{ label: { width: 110 } }} bordered>
-            <Descriptions.Item label="Adapter 路径">
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.init.adapterPath' })}>
               <Text className="code" copyable>
                 {preview.report.adapterPath}
               </Text>
             </Descriptions.Item>
-            <Descriptions.Item label="报告路径">
+            <Descriptions.Item label={intl.formatMessage({ id: 'projectSpace.detail.integration.suite.reportPath' })}>
               <Text className="code" copyable>
                 {preview.report.reportPath}
               </Text>
             </Descriptions.Item>
-            <Descriptions.Item label="发布通道" span={2}>
+            <Descriptions.Item label={intl.formatMessage({ id: 'adapterRecorder.init.channel' })} span={2}>
               <Text className="code">{preview.report.releaseChannel}</Text>
               <Text type="secondary" style={{ marginLeft: 8 }}>
                 profile {preview.report.localExperimentProfile} · cfg v{preview.report.configSnapshotVersion}
@@ -97,12 +105,14 @@ export default function InitStep({
             </Descriptions.Item>
             <Descriptions.Item label="Dry-run" span={2}>
               {preview.dryRun.exists ? (
-                <Tag color={token.colorWarning}>已存在,将覆盖</Tag>
+                <Tag color={token.colorWarning}>{intl.formatMessage({ id: 'adapterRecorder.init.overwrite' })}</Tag>
               ) : (
-                <Tag color={token.colorSuccess}>新建</Tag>
+                <Tag color={token.colorSuccess}>{intl.formatMessage({ id: 'common.create' })}</Tag>
               )}
               <Text type="secondary" style={{ marginLeft: 8 }}>
-                变更 {preview.dryRun.changedLines ?? '—'} 行
+                {intl.formatMessage({ id: 'adapterRecorder.init.changes' })}
+                {preview.dryRun.changedLines ?? '—'}
+                {intl.formatMessage({ id: 'adapterRecorder.init.lines' })}
               </Text>
             </Descriptions.Item>
           </Descriptions>
@@ -118,8 +128,8 @@ export default function InitStep({
               showIcon
               icon={<RobotOutlined />}
               style={{ marginTop: 12 }}
-              message="用 AI 生成 adapter(实验功能)"
-              description="点击后会把本次录制的页面截图 + 抓到的真实请求/响应发送给 Anthropic 分析,生成 func/columns。数据可能含登录态站点信息,仅在你接受该外发时继续。当前预览为空骨架,未发送任何数据。"
+              message={intl.formatMessage({ id: 'adapterRecorder.init.aiTitle' })}
+              description={intl.formatMessage({ id: 'adapterRecorder.init.aiConsent' })}
               action={
                 <Button
                   danger
@@ -128,7 +138,7 @@ export default function InitStep({
                   loading={loading}
                   onClick={() => onPreview(true)}
                 >
-                  用 AI 生成(发送痕迹)
+                  {intl.formatMessage({ id: 'adapterRecorder.init.aiAction' })}
                 </Button>
               }
             />
@@ -142,11 +152,11 @@ export default function InitStep({
                   showIcon
                   icon={<RobotOutlined />}
                   style={{ marginBottom: 8 }}
-                  message="此 adapter 由 AI 基于你的录制痕迹生成"
-                  description="你的页面截图与抓到的真实请求/响应已发送给模型分析。写盘前请逐行审阅下方代码,确认逻辑正确且不含敏感信息。"
+                  message={intl.formatMessage({ id: 'adapterRecorder.init.aiGenerated' })}
+                  description={intl.formatMessage({ id: 'adapterRecorder.init.reviewHint' })}
                 />
               )}
-              <Text type="secondary">生成的 adapter 源码(写盘前审阅):</Text>
+              <Text type="secondary">{intl.formatMessage({ id: 'adapterRecorder.init.sourceTitle' })}</Text>
               <pre
                 className="code"
                 style={{
@@ -169,7 +179,9 @@ export default function InitStep({
           <div style={{ marginTop: 16 }}>
             <Checkbox checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)}>
               <SafetyCertificateOutlined style={{ marginRight: 6 }} />
-              我已阅读并接受 <Text strong>责任使用声明</Text>(ADR-0005):仅在获授权的场景下生成与运行此 adapter。
+              {intl.formatMessage({ id: 'adapterRecorder.init.acceptBefore' })}
+              <Text strong>{intl.formatMessage({ id: 'adapterRecorder.init.responsibility' })}</Text>
+              {intl.formatMessage({ id: 'adapterRecorder.init.acceptAfter' })}
             </Checkbox>
           </div>
 
@@ -181,7 +193,7 @@ export default function InitStep({
             onClick={onWrite}
             style={{ marginTop: 12 }}
           >
-            确认写入
+            {intl.formatMessage({ id: 'adapterRecorder.init.write' })}
           </Button>
         </div>
       )}

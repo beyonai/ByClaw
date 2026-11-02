@@ -316,6 +316,10 @@ public class ResourceAuthVo extends AuthVo {
 
     private Boolean canViewDetail;
 
+    private Boolean hasViewPermission;
+
+    private Boolean canViewBasicInfo;
+
     private Boolean useApplyPending;
 
     private Boolean canRestore;

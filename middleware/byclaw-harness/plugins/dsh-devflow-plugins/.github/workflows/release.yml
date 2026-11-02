@@ -1,0 +1,60 @@
+# Publish every package at the version the tag names.
+#
+# Authentication is npm trusted publishing: this workflow's OIDC identity is
+# registered as a trusted publisher on each of the twelve packages, so no token
+# is stored anywhere. `id-token: write` is what lets pnpm exchange the Actions
+# OIDC token for a short-lived publish grant — remove it and every publish 404s.
+#
+# That grant is bound to this repository, this workflow filename, and this
+# ref, so renaming the file or moving the job means updating the trusted
+# publisher on all twelve packages first.
+#
+# The gates run again here rather than trusting the CI run on the same commit:
+# a release is the one action that cannot be taken back.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: The tag must name the version the packages carry
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared=$(node -p "require('./packages/devflow/package.json').version")
+          if [ "$tagged" != "$declared" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package version $declared" >&2
+            exit 1
+          fi
+      - run: pnpm run verify
+      - run: pnpm run build
+      - run: pnpm run preflight
+      # No `NODE_AUTH_TOKEN`: pnpm attempts the OIDC exchange first and only
+      # falls back to a token when that fails, so removing the token is what
+      # makes trusted publishing the only path rather than a preference.
+      - name: Publish packages under the release channel
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          case "$version" in
+            *-dev.*) npm_tag=dev ;;
+            *-*)
+              echo "unsupported prerelease channel in $version" >&2
+              exit 1
+              ;;
+            *) npm_tag=latest ;;
+          esac
+          pnpm publish -r --access public --no-git-checks --tag "$npm_tag"

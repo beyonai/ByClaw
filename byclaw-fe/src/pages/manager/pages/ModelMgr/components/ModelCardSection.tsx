@@ -9,6 +9,8 @@ type IntlShape = {
 
 type Props = {
   intl: IntlShape;
+  scrollRef: React.Ref<HTMLDivElement>;
+  onScroll: React.UIEventHandler<HTMLDivElement>;
   list: any[];
   isLoading: boolean;
   actionLoading: boolean;
@@ -21,6 +23,8 @@ type Props = {
 
 const ModelCardSection: React.FC<Props> = ({
   intl,
+  scrollRef,
+  onScroll,
   list,
   isLoading,
   actionLoading,
@@ -30,9 +34,9 @@ const ModelCardSection: React.FC<Props> = ({
   onReset,
   cardItemFn,
 }) => {
-  // 模型管理页交给外层页面滚动，避免 CardList 内部滚动和页面滚动叠加。
+  // 由列表区域统一承接滚动和触底加载，CardList 自身保持内容高度，避免嵌套滚动。
   return (
-    <div className={styles.cardList}>
+    <div className={styles.cardList} ref={scrollRef} onScroll={onScroll}>
       {!list.length && !isLoading && !actionLoading ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyBadge}>AI</div>

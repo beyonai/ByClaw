@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -51,6 +53,9 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class SsResourceService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+
 
     /**
      * 序列服务，用于生成 {@link SsResource#getResourceId()}
@@ -143,6 +148,7 @@ public class SsResourceService {
         if (resourceId == null) {
             return;
         }
+        businessLocks.acquire("resource:" + resourceId);
         LambdaUpdateWrapper<SsResource> w = new LambdaUpdateWrapper<>();
         w.eq(SsResource::getResourceId, resourceId).set(SsResource::getResourceDVerid, null)
             .set(SsResource::getResourceRVerid, null);
@@ -155,6 +161,7 @@ public class SsResourceService {
      * @param resourceId 资源
      */
     public void removeById(Long resourceId) {
+        businessLocks.acquire("resource:" + resourceId);
         ssResourceMapper.deleteById(resourceId);
     }
 
@@ -166,10 +173,11 @@ public class SsResourceService {
         skillImportLockService.acquire(resourceCode);
     }
 
-    /** 生命周期事务先锁定资源，防止并发上架覆盖已经提交的注销状态。 */
+    /** 生命周期事务读取当前资源。方法名保留兼容，不附加查询锁。 */
     public SsResource findByIdForUpdate(Long resourceId) {
+        businessLocks.acquire("resource:" + resourceId);
         return ssResourceMapper.selectOne(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceId, resourceId).last("FOR UPDATE"));
+            .eq(SsResource::getResourceId, resourceId));
     }
 
     /**
@@ -265,7 +273,7 @@ public class SsResourceService {
             return null;
         }
         if (resources.size() > 1) {
-            throw new BaseException("资源自然键不唯一：" + systemCode + "/" + resourceBizType + "/" + resourceCode);
+            throw new BaseException(I18nUtil.get("resource.naturalKey.duplicate", systemCode, resourceBizType, resourceCode));
         }
         return resources.get(0);
     }
@@ -281,8 +289,7 @@ public class SsResourceService {
         SsResource existing = findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
             ssResource.getResourceBizType(), ssResource.getResourceCode());
         if (existing != null) {
-            throw new BaseException("资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType()
-                + "/" + ssResource.getResourceCode());
+            throw new BaseException(I18nUtil.get("resource.code.alreadyExists", ssResource.getSystemCode(), ssResource.getResourceBizType(), ssResource.getResourceCode()));
         }
     }
 
@@ -448,6 +455,8 @@ public class SsResourceService {
      * @param parentResourceId 父资源标识
      */
     public void approvalByParentResourceId(Long parentResourceId) {
+        findByParentResourceId(parentResourceId).stream().map(SsResource::getResourceId).sorted()
+            .forEach(id -> businessLocks.acquire("resource:" + id));
 
         SsResource ssResource = new SsResource();
         ssResource.setAuthStatus("passed");

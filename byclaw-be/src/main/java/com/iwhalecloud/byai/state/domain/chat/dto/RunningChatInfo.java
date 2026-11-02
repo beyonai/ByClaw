@@ -49,6 +49,8 @@ public class RunningChatInfo {
 
     private String runtimeSource;
 
+    private String runtimeInstanceId;
+
     private Boolean rootActive;
 
     private Boolean acceptingInput;

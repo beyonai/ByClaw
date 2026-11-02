@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
@@ -62,7 +63,7 @@ public class GroupChatCoordinationService {
             extensions.save(ext);
         }
         else if (!JSON.parseObject(ext.getExtParamValue()).equals(scope)) {
-            throw new GroupChatMessageRejectedException("An existing group task cannot change its coordination scope");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.scopeImmutable"));
         }
     }
 
@@ -77,7 +78,7 @@ public class GroupChatCoordinationService {
                 Map<String, Object> scope = JSON.parseObject(ext.getExtParamValue());
                 if (!SCHEMA_VERSION.equals(scope.get("schemaVersion"))
                     || !current.toString().equals(scope.get("taskSessionId"))) {
-                    throw new GroupChatMessageRejectedException("Invalid group coordination scope");
+                    throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.scopeInvalid"));
                 }
                 return scope;
             }
@@ -103,13 +104,13 @@ public class GroupChatCoordinationService {
         Object root = params.get("byclaw_root_session_id");
         if (root == null || !request.getSessionId().toString().equals(root.toString())
             || !scope.get("taskSessionId").toString().equals(root.toString())) {
-            throw new GroupChatMessageRejectedException("Group child routing must use its original task session");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.originalSessionRequired"));
         }
         for (String key : List.of("byclaw_root_session_id", "dsh_target_session_id", "dsh_parent_session_id")) {
             Object value = params.get(key);
             if (value == null) continue;
             if (!(value instanceof String id) || id.length() > 200 || !id.matches("[A-Za-z0-9._:-]+")) {
-                throw new GroupChatMessageRejectedException("Invalid group child session routing hint");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.routingInvalid"));
             }
             gatewayParams.put(key, value);
         }
@@ -158,7 +159,7 @@ public class GroupChatCoordinationService {
         Long groupId = Long.valueOf(scope.get("groupSessionId").toString());
         Long coordinator = Long.valueOf(scope.get("coordinatorAgentId").toString());
         if (members.findSessionMember(groupId, "AGENT", coordinator) == null) {
-            throw new GroupChatMessageRejectedException("Group work assistant is no longer a group member");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.assistantRemoved"));
         }
         boolean root = request.getSessionId().toString().equals(scope.get("taskSessionId"));
         List<?> allowed = (List<?>) scope.get("allowedAgentIds");
@@ -168,23 +169,23 @@ public class GroupChatCoordinationService {
             if (session == null || !Objects.equals(session.getObjectId(), request.getAgentId())
                 || (!allowed.contains(String.valueOf(request.getAgentId())) && !coordinator.equals(request.getAgentId()))
                 || members.findSessionMember(groupId, "AGENT", request.getAgentId()) == null) {
-                throw new GroupChatMessageRejectedException("Child session must continue with its assigned group employee");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.assignedEmployeeRequired"));
             }
         }
         for (Object id : allowed) {
             if (members.findSessionMember(groupId, "AGENT", Long.valueOf(id.toString())) == null) {
-                throw new GroupChatMessageRejectedException("A selected employee is no longer a group member");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.selectedEmployeeRemoved"));
             }
         }
         if (members.findSessionMember(groupId, "AGENT", request.getAgentId()) == null) {
-            throw new GroupChatMessageRejectedException("The task employee is no longer a group member");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.taskEmployeeRemoved"));
         }
         if (!COORDINATED.equals(scope.get("mode"))) return;
         if (root && !Objects.equals(coordinator, request.getAgentId())) {
-            throw new GroupChatMessageRejectedException("Group coordination must continue through the group work assistant");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.assistantRequired"));
         }
         if (params != null && (params.containsKey("multiAgent") || params.containsKey("multi_agent"))) {
-            throw new GroupChatMessageRejectedException("Group coordination cannot use parallel chat lanes");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.parallelUnsupported"));
         }
         if (request.getResourceList() != null) {
             request.getResourceList().stream()
@@ -194,7 +195,7 @@ public class GroupChatCoordinationService {
                     String id = resource.getResourceId();
                     if ((!coordinator.toString().equals(id) && !allowed.contains(id))
                         || members.findSessionMember(groupId, "AGENT", Long.valueOf(id)) == null) {
-                        throw new GroupChatMessageRejectedException("Agent is outside this group coordination task");
+                        throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.coordination.agentOutsideScope"));
                     }
                 });
         }

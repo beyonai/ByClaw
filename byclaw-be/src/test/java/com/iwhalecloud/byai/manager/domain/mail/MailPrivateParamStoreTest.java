@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.mail;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -19,7 +21,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class MailPrivateParamStoreTest {
+class MailPrivateParamStoreTest extends I18nTestSupport {
     private final UserPrivateParamMapper mapper = mock(UserPrivateParamMapper.class);
     private final ObjectMapper json = new ObjectMapper();
     private final MailPrivateParamStore store = new MailPrivateParamStore(mapper, json);

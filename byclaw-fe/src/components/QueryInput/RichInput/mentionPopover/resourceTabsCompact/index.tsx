@@ -426,7 +426,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       return;
     }
 
-    const visible: string[] = isOpenSource ? ['skill'] : [];
+    const visible: string[] = ['skill'];
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
     visible.push('space');
@@ -505,25 +505,23 @@ const ResourceTabsCompact: React.FC<Props> = ({
         </div>
       ),
     });
-    if (isOpenSource) {
-      items.push({
-        key: 'skill',
-        label: intl.formatMessage({ id: 'common.skill' }),
-        children: (
-          <div className={styles.listContainer}>
-            <ResourceCitation
-              key={`skill-${openRefreshKey}`}
-              resourceType="SKILL"
-              layout="list"
-              onSelect={onSelectSkill}
-              keyword={queryKeyword}
-              agentId={agentId}
-              agentIds={agentIds}
-            />
-          </div>
-        ),
-      });
-    }
+    items.push({
+      key: 'skill',
+      label: intl.formatMessage({ id: 'common.skill' }),
+      children: (
+        <div className={styles.listContainer}>
+          <ResourceCitation
+            key={`skill-${openRefreshKey}`}
+            resourceType="SKILL"
+            layout="list"
+            onSelect={onSelectSkill}
+            keyword={queryKeyword}
+            agentId={agentId}
+            agentIds={agentIds}
+          />
+        </div>
+      ),
+    });
     if (isOpenSource) {
       items.push({
         key: 'file',
@@ -533,7 +531,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
             {pathHistory.length > 0 && (
               <div className={styles.filePathHeader}>
                 <button type="button" className={styles.backButton} onClick={handleBackClick}>
-                  ← 返回上一级
+                  {intl.formatMessage({ id: 'ui.resource.back' })}
                 </button>
               </div>
             )}
@@ -577,7 +575,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
                           handleDownloadFile(file.filePath, file.name);
                         }}
                       >
-                        下载
+                        {intl.formatMessage({ id: 'fileBrowser.action.download' })}
                       </Button>
                     )}
                   </div>
@@ -588,7 +586,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
         ),
       });
     }
-    const tabOrder = isOpenSource ? ['skill', 'knowledge', 'tool', 'space', 'file'] : ['knowledge', 'tool', 'space'];
+    const tabOrder = ['skill', 'knowledge', 'tool', 'space', ...(isOpenSource ? ['file'] : [])];
     const ordered = tabOrder.map((key) => items.find((item) => item.key === key)).filter(Boolean) as typeof items;
     return onlyTab ? ordered.filter((item) => item.key === onlyTab) : ordered;
   }, [
@@ -657,12 +655,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    const tabs = [
-      ...(isOpenSource ? [skillTab] : []),
-      ...filteredConditionalTabs,
-      baseTabs[0],
-      ...(isOpenSource ? [fileTab] : []),
-    ];
+    const tabs = [skillTab, ...filteredConditionalTabs, baseTabs[0], ...(isOpenSource ? [fileTab] : [])];
     return onlyTab ? tabs.filter((tab) => tab.key === onlyTab) : tabs;
   }, [agentType, intl, visibleKeys, isOpenSource, onlyTab]);
 

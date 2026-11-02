@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 
 import java.util.Collections;
@@ -146,7 +147,7 @@ public class GroupChatTaskService {
             if (existing != null) {
                 return existing;
             }
-            throw new IllegalStateException("Task disposition changed concurrently");
+            throw new IllegalStateException(I18nUtil.get("groupchat.task.dispositionChanged"));
         }
         ByaiGroupChatTask task = new ByaiGroupChatTask();
         task.setTaskSessionId(execution.getCandidateSessionId());
@@ -198,21 +199,21 @@ public class GroupChatTaskService {
         sessionService.lockById(task.getGroupSessionId());
         taskAuthorizationService.requireInitiator(taskId);
         // 文件转存及最终提交共用任务行锁；继续对话、取消和替换必须等待本次发布结束。
-        task = taskMapper.selectForUpdate(taskId);
+        task = taskMapper.selectWithRedisLock(taskId);
         Long pendingId = request == null ? null : request.getPendingPublicationId();
         if (pendingId != null && (request.getText() != null
             || (request.getFiles() != null && !request.getFiles().isEmpty()))) {
-            throw new IllegalArgumentException("Confirm with pendingPublicationId only; text/files cannot be overridden");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.confirmOnly"));
         }
         ByaiGroupChatTaskPublication existing = publicationMapper.selectById(taskId);
         if (existing != null) {
             if (pendingId != null && !pendingId.equals(existing.getPendingPublicationId())) {
-                throw new IllegalArgumentException("Pending publication is outdated");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.outdated"));
             }
             return response(existing);
         }
         if (task == null || !"ACTIVE".equals(task.getStatus()) || "RUNNING".equals(task.getTurnStatus())) {
-            throw new IllegalArgumentException("Task is not ready for publication");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.notReady"));
         }
         List<GroupChatTaskFile> files = request == null || request.getFiles() == null
             ? Collections.emptyList() : request.getFiles();
@@ -220,7 +221,7 @@ public class GroupChatTaskService {
         if (pendingId != null) {
             ByaiGroupChatPendingPublication pending = pendingStore.find(taskId);
             if (pending == null || !pendingId.equals(pending.getPendingPublicationId())) {
-                throw new IllegalArgumentException("Pending publication is outdated; refresh the current card");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.refreshRequired"));
             }
             text = pending.getTextContent();
             List<String> sources = JSON.parseArray(pending.getSourceFilesJson(), String.class);
@@ -228,7 +229,7 @@ public class GroupChatTaskService {
                 : publicationUploader.upload(pending, projectCloudResourceId(task));
         }
         if (StringUtils.isBlank(text) && files.isEmpty()) {
-            throw new IllegalArgumentException("Published task result requires text or files");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.contentRequired"));
         }
         validateCloudFiles(task, files);
         // 只解析最终确认发布的正文，不能使用任务过程答复或未确认的交付内容触发委派。
@@ -247,7 +248,7 @@ public class GroupChatTaskService {
         publicationMapper.insert(publication);
         createGroupMessage(task, text, "TASK_RESULT", files, messageId, mentions);
         if (taskMapper.publish(taskId, messageId, publication.getPublisherUserId(), new Date()) != 1) {
-            throw new IllegalStateException("Task publication state changed concurrently");
+            throw new IllegalStateException(I18nUtil.get("groupchat.publication.stateChanged"));
         }
         task.setStatus("PUBLISHED");
         task.setPublishMessageId(messageId);
@@ -284,7 +285,7 @@ public class GroupChatTaskService {
                 if ((latest.getMessageId() != null && !Objects.equals(latest.getMessageId(), request.getMessageId()))
                     || (StringUtils.isNotBlank(latest.getTraceId())
                         && !Objects.equals(latest.getTraceId(), request.getTraceId()))) {
-                    throw new IllegalArgumentException("Task started a new turn; retry cancellation");
+                    throw new IllegalArgumentException(I18nUtil.get("groupchat.task.cancelNewTurn"));
                 }
             }
             finishCancellation(current);
@@ -293,7 +294,7 @@ public class GroupChatTaskService {
 
     /** 撤回事务已验证群权限；只取消由指定轮次创建的活动任务。 */
     public ByaiGroupChatTask cancelForRecall(Long taskId, Long dispatchId) {
-        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
         if (task == null || !Objects.equals(dispatchId, task.getDispatchId()) || !"ACTIVE".equals(task.getStatus())) {
             return null;
         }
@@ -303,7 +304,7 @@ public class GroupChatTaskService {
 
     private void finishCancellation(ByaiGroupChatTask task) {
         if (taskMapper.cancel(task.getTaskSessionId(), new Date()) != 1) {
-            throw new IllegalArgumentException("Task is no longer active");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.noLongerActive"));
         }
         task.setStatus("CANCELLED");
         pendingStore.clear(task, null);
@@ -312,9 +313,9 @@ public class GroupChatTaskService {
 
     private ByaiGroupChatTask requireActiveCancellation(Long taskId) {
         taskAuthorizationService.requireCanceller(taskId);
-        ByaiGroupChatTask task = taskMapper.selectForUpdate(taskId);
+        ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
         if (task == null || !"ACTIVE".equals(task.getStatus())) {
-            throw new IllegalArgumentException("Task is no longer active");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.noLongerActive"));
         }
         return task;
     }
@@ -364,6 +365,7 @@ public class GroupChatTaskService {
         ByaiGroupChatTask task = taskMapper.selectById(taskId);
         if (task == null) return null;
         Long turnId = sequenceService.nextVal();
+        // 只要求任务仍为 ACTIVE；替换轮次标识后，旧 trace 的迟到回调不能结束本轮。
         if (taskMapper.claimTurn(taskId, turnId, new Date()) != 1) {
             return null;
         }
@@ -381,12 +383,12 @@ public class GroupChatTaskService {
             ByaiMessage answer = messageMapper.selectByMessageId(TraceIdCodec.decode(traceId).getModelAnswerMessageId());
             if (answer != null && (Boolean.TRUE.equals(answer.getIsComplete())
                 || MsgStatus.FINISH.getCode().equals(answer.getMsgStatus()))) {
-                throw new IllegalArgumentException("Group task new turn requires a new answer message ID");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.task.answerIdRequired"));
             }
         }
         if (turnId == null || StringUtils.isBlank(traceId)
             || taskMapper.bindTurn(taskId, turnId, traceId, new Date()) != 1) {
-            throw new IllegalStateException("Group task turn is no longer current");
+            throw new IllegalStateException(I18nUtil.get("groupchat.task.turnOutdated"));
         }
     }
 
@@ -403,7 +405,7 @@ public class GroupChatTaskService {
 
     public Long tenantProjectCloudResourceId(Long projectId) {
         Project project = projectService.findById(projectId);
-        if (project == null || project.getCloudResourceId() == null) throw new IllegalArgumentException("Group project cloud drive is unavailable");
+        if (project == null || project.getCloudResourceId() == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.project.cloudUnavailable"));
         return project.getCloudResourceId();
     }
 
@@ -411,7 +413,7 @@ public class GroupChatTaskService {
         ByaiSession group = sessionService.findById(task.getGroupSessionId());
         Project project = group == null ? null : projectService.findById(group.getProjectId());
         if (project == null || project.getCloudResourceId() == null) {
-            throw new IllegalArgumentException("Group project cloud drive is unavailable");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.project.cloudUnavailable"));
         }
         return project.getCloudResourceId();
     }
@@ -429,12 +431,12 @@ public class GroupChatTaskService {
         for (GroupChatTaskFile file : files) {
             if (file == null || StringUtils.isBlank(file.getFileName()) || StringUtils.isBlank(file.getFilePath())
                 || file.getFilePath().contains("..") || file.getFilePath().contains("\\")) {
-                throw new IllegalArgumentException("Invalid project cloud file reference");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.file.referenceInvalid"));
             }
             String normalized = file.getFilePath().startsWith("/") ? file.getFilePath() : "/" + file.getFilePath();
             int slash = normalized.lastIndexOf('/');
             if (!normalized.substring(slash + 1).equals(file.getFileName())) {
-                throw new IllegalArgumentException("File name does not match project cloud path");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.file.nameMismatch"));
             }
             String directory = slash <= 0 ? "/" : normalized.substring(0, slash);
             DirAndFileQo query = new DirAndFileQo();
@@ -446,7 +448,7 @@ public class GroupChatTaskService {
             boolean found = matches != null && matches.stream().anyMatch(item -> !"directory".equals(item.getType())
                 && (file.getFileName().equals(item.getFileName()) || file.getFileName().equals(item.getName())));
             if (!found) {
-                throw new IllegalArgumentException("Project cloud file not found: " + file.getFileName());
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.file.notFound", file.getFileName()));
             }
             file.setFilePath(normalized);
             file.setCloudResourceId(String.valueOf(cloudResourceId));

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.channels.service.feishu.support;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.io.IOException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +20,7 @@ public class FeishuStreamingOutputStream extends FeishuBufferedOutputStream {
 
     private static final Logger logger = LoggerFactory.getLogger(FeishuStreamingOutputStream.class);
 
-    private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
+    private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
     /**
      * 飞书更新消息接口频率不宜太高；这里做轻量节流，避免每个 token 都发一次 HTTP 请求。
      * 200ms 能保持接近打字机的观感，同时比逐字更新更不容易触发飞书接口频控。
@@ -78,7 +79,7 @@ public class FeishuStreamingOutputStream extends FeishuBufferedOutputStream {
      */
     public synchronized void finish() {
         String displayContent = getDisplayContent();
-        updateMessage(StringUtils.hasText(displayContent) ? displayContent : DEFAULT_FALLBACK_REPLY, true);
+        updateMessage(StringUtils.hasText(displayContent) ? displayContent : I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY), true);
     }
 
     public boolean hasUpdateFailed() {

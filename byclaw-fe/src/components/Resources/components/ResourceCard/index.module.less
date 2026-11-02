@@ -1035,3 +1035,166 @@ div.beyond-typography,
     left: 100%;
   }
 }
+
+// 仅管理员工页使用原型卡片尺寸，其他资源浏览页保持原有密度。
+.resourceCard.digitalEmployeeCard.employeeManagementCard {
+  height: 171px;
+  border-color: #dedfe4;
+  border-radius: 15px;
+
+  .renderContent {
+    padding: 20px 17px 17px;
+  }
+
+  .resourceDescription {
+    margin-top: 10px;
+    color: #737b85;
+    font-size: 13px;
+    line-height: 24px;
+  }
+
+  .digitalEmployeeActions {
+    top: 53px;
+    right: 13px;
+    gap: 6px;
+  }
+
+  &:hover {
+    border-color: #b8c9ec;
+    box-shadow: 0 5px 16px #24355607;
+  }
+}
+
+.employeeRow {
+  td {
+    height: 88px;
+    padding: 18px 15px;
+    border-top: 1px solid #eef0f4;
+    color: #616b7c;
+    font-size: 12px;
+    vertical-align: middle;
+  }
+
+  // 表格内的标签需独立成盒，避免内部块级文字将行内背景拆到上下两行。
+  .digitalEmployeeStatusTag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    vertical-align: middle;
+  }
+
+  &:hover {
+    background: #fafbff;
+  }
+}
+
+.employeeRowName {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.employeeRowAvatar {
+  display: block;
+  flex: 0 0 39px;
+  width: 39px;
+  height: 39px;
+  overflow: hidden;
+  border-radius: 50%;
+
+  > div {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.employeeRowIdentity {
+  min-width: 0;
+}
+
+.employeeCardTitle,
+.employeeRowTitle {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #252b36;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #2465ff);
+    outline-offset: 3px;
+  }
+}
+
+.employeeRowDefault {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f2edff;
+  color: #7755da;
+  font-size: 10px;
+}
+
+.employeeRowDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #737d8b;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.employeeRowType {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #f1f4f8;
+  color: #67758a;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.employeeRowGroup {
+  background: #f4effc;
+  color: #8464b4;
+}
+
+.employeeRowActions {
+  // 固定两个操作位，缺少编辑权限时“更多”仍与其他行对齐。
+  display: grid;
+  grid-template-columns: 3em max-content;
+  align-items: center;
+  justify-items: start;
+  gap: 16px;
+  font-size: 12px;
+
+  :global(.@{antPrefix}-btn) {
+    height: auto;
+    padding: 0;
+    font-size: 12px;
+  }
+}
+
+.employeeRowEditAction {
+  grid-column: 1;
+}
+
+.employeeRowMoreAction {
+  grid-column: 2;
+}
+
+.employeeCardTitle {
+  font-size: inherit;
+  font-weight: inherit;
+}

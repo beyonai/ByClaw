@@ -34,6 +34,10 @@ public class DigitalEmployeePublication {
     private Long officialId;
     private String status;
     private Long revision;
+    /** Shared-version updates require approval from every already published target. */
+    private boolean scopeUpdate;
+    @TableField(exist = false)
+    private java.util.List<EmployeePublicationTarget> targets;
     @JsonIgnore
     private String snapshotJson;
     @JsonIgnore

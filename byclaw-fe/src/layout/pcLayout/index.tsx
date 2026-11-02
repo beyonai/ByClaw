@@ -7,6 +7,7 @@ import { Outlet, useIntl, useLocation, useSelector, useSearchParams } from '@umi
 import { Layout, Tooltip } from 'antd';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import useSessionIdState from '@/hooks/useSessionIdState';
 import ResourcePanelToggleIcon from '@/components/ChatLayoutComp/ChatResourceWorkspace/ResourcePanelToggleIcon';
 import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
@@ -130,7 +131,7 @@ const PCLayout = () => {
   useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
-  const [sessionId, setSessionId] = useState<string>('');
+  const [sessionId, setSessionId] = useSessionIdState();
 
   React.useEffect(() => {
     if (pathname !== '/chat' || !sessionId) return;
@@ -157,12 +158,7 @@ const PCLayout = () => {
     if (detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH) return `${mainContentHalfWidth}px`;
     return detailPanelWidth;
   })();
-  const detailPanelStyle = detailPanelBasis
-    ? {
-      flex: '0 0 auto',
-      width: detailPanelBasis,
-    }
-    : undefined;
+  const detailPanelStyle = detailPanelBasis ? { flex: '0 0 auto', width: detailPanelBasis } : undefined;
 
   React.useEffect(() => {
     if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;

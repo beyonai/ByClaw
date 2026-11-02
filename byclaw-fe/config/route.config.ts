@@ -14,6 +14,10 @@ export default [
     component: '@/layout/commonLayout',
     routes: [
       {
+        path: '/sandbox/market',
+        component: './sandbox/market',
+      },
+      {
         path: '/manager',
         component: '@/pages/manager/layout',
         routes: [

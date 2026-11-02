@@ -22,7 +22,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 
-class GitHubCredentialResolverTest {
+class GitHubCredentialResolverTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ConnectorInfoService connectorInfoService;
     private ConnectorConnectionStateService connectionStateService;

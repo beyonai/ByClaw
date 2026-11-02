@@ -12,6 +12,9 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -100,13 +103,60 @@ class TargetAgentResolverTest {
     }
 
     @Test
-    void resolveAgentType_canRouteBySuperToCurrentUsersLocalOpenClawWorker() {
-        ReflectionTestUtils.setField(targetAgentResolver, "routeBySuperToUserSandbox", true);
-
+    void resolveAgentType_scopesGenericDshResumeToCurrentUser() {
         String targetAgentType = targetAgentResolver.resolveAgentType(
-            WorkerAgentType.BY_SUPER.getCode(), 11001912L, null, "0027024710");
+            WorkerAgentType.HARNESS.getCode(), 100L, WorkerAgentType.BYCLAW_DSH.getCode(), "0027029322");
 
-        assertThat(targetAgentType).isEqualTo("BYCLAW_EXE_0027024710");
+        assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_0027029322");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {11001912L})
+    void resolveAgentType_routesPublicAndResourceSuperToDshByDefault(Long agentId) {
+        String targetAgentType = targetAgentResolver.resolveAgentType(
+            WorkerAgentType.BY_SUPER.getCode(), agentId, null, "0027024710");
+
+        assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_0027024710");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {11001912L})
+    void resolveAgentType_allowsSuperOnlyWhenCompatibilityIsEnabled(Long agentId) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", true);
+
+        assertThat(targetAgentResolver.resolveAgentType("BY_SUPER", agentId, null, "user001"))
+            .isEqualTo("BY_SUPER");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolveAgentType_appliesCompatibilitySwitchToHistoricalSuperResume(boolean enabled) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", enabled);
+
+        assertThat(targetAgentResolver.resolveAgentType("BYCLAW_EXE", 100L, "BY_SUPER", "user001"))
+            .isEqualTo(enabled ? "BY_SUPER" : "BYCLAW_DSH_user001");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolveAgentType_keepsSystemDshPolicyWhenSuperCompatibilityChanges(boolean enabled) {
+        ReflectionTestUtils.setField(targetAgentResolver, "superEnabled", enabled);
+        when(systemParamTargetAgentResolver.resolve("BY_SUPER", 100L, "user001"))
+            .thenReturn("HARNESS_user001");
+
+        assertThat(targetAgentResolver.resolveAgentType("BY_SUPER", 100L, null, "user001"))
+            .isEqualTo("BYCLAW_DSH_user001");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"BYCLAW_EXE", "BYCLAW_CODE", "BYCLAW_QA"})
+    void resolveAgentType_doesNotRerouteOtherWorkersWhenSuperIsDisabled(String workerAgentType) {
+        String expected = "BYCLAW_QA".equals(workerAgentType) ? workerAgentType : workerAgentType + "_user001";
+
+        assertThat(targetAgentResolver.resolveAgentType(workerAgentType, 100L, null, "user001"))
+            .isEqualTo(expected);
     }
 
     @Test
@@ -115,6 +165,49 @@ class TargetAgentResolverTest {
             WorkerAgentType.HARNESS.getCode(), 100L, null, "user001");
 
         assertThat(targetAgentType).isEqualTo("BYCLAW_DSH_user001");
+    }
+
+    @Test
+    void managedTargetOverridesClientResumeWithCurrentTenantMapping() {
+        var shared = org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        ReflectionTestUtils.setField(targetAgentResolver, "sharedSandboxGateway", shared);
+        var launch = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+        launch.setWorkerAgentType("BYCLAW_DSH_SHARED_tenantA_mapping1");
+        when(shared.tryAcquire("user001", "byclaw-dsh")).thenReturn(launch);
+        assertThat(targetAgentResolver.resolveAgentType("HARNESS", 1L, "BYCLAW_DSH_SHARED_tenantB_mapping2", "user001"))
+            .isEqualTo("BYCLAW_DSH_SHARED_tenantA_mapping1");
+    }
+
+    @Test
+    void revokedSharedEligibilityCannotBeBypassedByHistoricalResumeTarget() {
+        var client = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPlatformClient.class);
+        var policy = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy.class);
+        var users = org.mockito.Mockito.mock(
+            com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserInfoFactory.class);
+        var provider = new org.springframework.beans.factory.support.StaticListableBeanFactory(
+            java.util.Map.of("sharedClient", client)).getBeanProvider(
+                com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPlatformClient.class);
+        var shared = new com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway(
+            provider, policy, users, new com.fasterxml.jackson.databind.ObjectMapper());
+        ReflectionTestUtils.setField(targetAgentResolver, "sharedSandboxGateway", shared);
+        org.mockito.Mockito.lenient().when(users.build("user001"))
+            .thenReturn(java.util.Map.of("userCode", "user001", "userId", 1L, "enterpriseId", 10L));
+        org.mockito.Mockito.lenient().when(client.call(org.mockito.ArgumentMatchers.eq("lookup"),
+            org.mockito.ArgumentMatchers.anyMap())).thenReturn(java.util.Map.of("code", 0, "data",
+                java.util.Map.of("workerAgentType", "BYCLAW_DSH_SHARED_old_1")));
+        when(client.call(org.mockito.ArgumentMatchers.eq("releaseAll"), org.mockito.ArgumentMatchers.anyMap()))
+            .thenReturn(java.util.Map.of("code", 0, "data", 1));
+
+        assertThat(targetAgentResolver.resolveAgentType("HARNESS", 1L, "BYCLAW_DSH_SHARED_old_1", "user001"))
+            .isEqualTo("BYCLAW_DSH_user001");
+        org.mockito.Mockito.verify(client).call(org.mockito.ArgumentMatchers.eq("releaseAll"),
+            org.mockito.ArgumentMatchers.argThat(p -> "eligibility.revoked".equals(p.get("reason"))));
+        when(client.call(org.mockito.ArgumentMatchers.eq("releaseAll"), org.mockito.ArgumentMatchers.anyMap()))
+            .thenReturn(java.util.Map.of("code", -1, "msg", "stop unconfirmed"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> targetAgentResolver.resolveAgentType(
+            "HARNESS", 1L, "BYCLAW_DSH_SHARED_old_1", "user001")).hasMessageContaining("stop unconfirmed");
     }
 
 }

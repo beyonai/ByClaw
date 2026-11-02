@@ -1,0 +1,13 @@
+go 1.22
+
+use ./svc // the service module
+use (
+	./mod-a
+	"./mod-b"
+	./ghost
+)
+use
+use (junk on one line)
+use "unterminated
+use /outside/the/root
+replace example.com/x => ./x

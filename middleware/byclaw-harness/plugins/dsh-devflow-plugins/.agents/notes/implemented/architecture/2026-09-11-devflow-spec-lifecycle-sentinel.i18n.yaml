@@ -1,0 +1,5 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record.
+2026-09-11-devflow-spec-lifecycle-sentinel.md: 7b527178128de0bb693f0b0893b14ee8f788b616
+2026-09-11-devflow-spec-lifecycle-sentinel.zh.md: 271be4261d0626032aac199a6ebe67c8a5cab8cd

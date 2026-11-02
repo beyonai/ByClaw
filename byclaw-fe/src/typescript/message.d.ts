@@ -25,17 +25,26 @@ export type TaskPlanStatusReason = {
 
 export type TaskPlanTask = {
   taskId: string;
+  teamId?: string;
   position: number;
   title: string;
   description?: string;
+  assignee?: string;
   status: TaskPlanTaskStatus;
   statusReason?: TaskPlanStatusReason | null;
   startedAt?: string;
   completedAt?: string;
+  executions?: Array<{
+    attempt: number;
+    attemptId?: string;
+    assignee?: string;
+    runs: Array<{ sessionId?: string; messageId?: string; runId?: string; childTurn?: number }>;
+  }>;
 };
 
 export type TaskPlanSnapshot = {
   planId: string;
+  teamId?: string;
   version: number;
   title: string;
   status: TaskPlanStatus;
@@ -60,6 +69,7 @@ export type IMessageListItem = {
     parentOrderId?: string;
     orderId?: string;
     sourceAgentType?: string;
+    runtimeType?: 'dsh' | 'openclaw' | 'unknown' | string;
     formStatus?: IFormStatus;
    };
   contentType: SSEMessageType;
@@ -123,6 +133,7 @@ export type ICollectInfo = {
 }
 
 export type IMessage = {
+  voice?: import('@/utils/voice').VoiceMessage;
   traceId?: string;
   streamId?: string;
   snapshotStreamId?: string;
@@ -133,6 +144,8 @@ export type IMessage = {
   metadata?: string;
 
   text?: string; // markdown文本
+  /** 独立于流式过程片段保存的最终答复正文。 */
+  finalContent?: string;
   /** 输入框展示文本，仅用于前端显示；发送给后端的 text 仍使用资源占位符。 */
   displayText?: string;
   suggest?: string[]; // 推荐问题

@@ -1,0 +1,112 @@
+package com.iwhalecloud.byai.manager.application.service.resource;
+
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.*;
+
+class EnterpriseResourceSyncContextTest {
+    @Test void runtimeSkillIdentityRequiresPersistedRevisionAndCompleteEnterpriseSkillIdentity() {
+        var skill = resource(10L, "external-skill");
+        skill.setResourceBizType("SKILL");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setThirdSyncRevision(1L);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isTrue();
+        skill.setOwnerType("personal");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setOwnerType("enterprise"); skill.setResourceBizType("TOOLKIT");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setResourceBizType("SKILL"); skill.setSystemCode(null);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setSystemCode("BYAI"); skill.setResourceCode("");
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+        skill.setResourceCode("external-skill"); skill.setThirdSyncRevision(0L);
+        assertThat(EnterpriseResourceSyncContext.isSynchronizedSkill(skill)).isFalse();
+    }
+
+    @Test void callableSyncIdentityDoesNotIncludeOrdinaryResourcesOrKnowledgeContainers() {
+        for (String type : java.util.List.of("AGENT", "TOOLKIT", "MCP", "SKILL")) {
+            var resource = resource(10L, "external"); resource.setResourceBizType(type);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+            resource.setThirdSyncRevision(1L);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isTrue();
+            resource.setOwnerType("personal");
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+            resource.setOwnerType("enterprise"); resource.setResourceCode(null);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+        }
+        for (String type : java.util.List.of("DIG_EMPLOYEE", "KG_CLOUD", "KG_DOC")) {
+            var resource = resource(10L, "external"); resource.setResourceBizType(type); resource.setThirdSyncRevision(1L);
+            assertThat(EnterpriseResourceSyncContext.isSynchronizedCapability(resource)).isFalse();
+        }
+    }
+
+    @BeforeEach void login() {
+        var login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+    }
+
+    @AfterEach void cleanup() { CurrentUserHolder.setLoginInfo(null); }
+
+    @Test void importExceptionIsLimitedToTrustedIdentityAndTenantAndRestoredAfterFailure() {
+        var target = resource(10L, "target");
+        var unrelated = resource(11L, "other");
+        assertThatThrownBy(() -> EnterpriseResourceSyncContext.execute(true, "BYAI", "TOOLKIT", "target", () -> {
+            assertThat(EnterpriseResourceSyncContext.canUpdate(target)).isTrue();
+            assertThat(EnterpriseResourceSyncContext.canUpdate(unrelated)).isFalse();
+            target.setComAcctId(2L);
+            assertThat(EnterpriseResourceSyncContext.canUpdate(target)).isFalse();
+            target.setComAcctId(1L);
+            throw new IllegalStateException("import failed");
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(EnterpriseResourceSyncContext.canUpdate(target)).isFalse();
+    }
+
+    @Test void untrustedImportNeverSkipsEnterpriseChecks() {
+        var resource = resource(10L, "target");
+        EnterpriseResourceSyncContext.execute(false, "BYAI", "TOOLKIT", "target", () -> {
+            assertThat(EnterpriseResourceSyncContext.canUpdate(resource)).isFalse();
+            assertThat(EnterpriseResourceSyncContext.skipsImportEnterpriseCheck(resource)).isFalse();
+            return null;
+        });
+    }
+
+    @Test void privateResourcesAndReviewSnapshotsRemainProtected() {
+        var target = resource(10L, "target");
+        target.setOwnerType("personal");
+        EnterpriseResourceSyncContext.execute(true, "BYAI", "TOOLKIT", "target", () -> {
+            assertThat(EnterpriseResourceSyncContext.canUpdate(target)).isFalse();
+            return null;
+        });
+        target.setOwnerType("enterprise"); target.setResourceBizType("SKILL"); target.setResourceStatus(4);
+        EnterpriseResourceSyncContext.execute(true, "BYAI", "SKILL", "target", () -> {
+            assertThat(new AuthApplicationService().hasResourceManagePermission(target)).isFalse();
+            return null;
+        });
+    }
+
+    @Test void selectedUseCheckPreservesTenantBoundaryAndRestoresAfterFailure() {
+        var selected = resource(10L, "selected");
+        var unrelated = resource(11L, "unrelated");
+        assertThatThrownBy(() -> EnterpriseResourceSyncContext.checkUsePermission(selected, () -> {
+            assertThat(EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(selected)).isTrue();
+            assertThat(EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(unrelated)).isFalse();
+            selected.setComAcctId(2L);
+            assertThat(EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(selected)).isFalse();
+            throw new IllegalStateException("permission check failed");
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(EnterpriseResourceSyncContext.skipsUseEnterpriseCheck(selected)).isFalse();
+    }
+
+    private SsResource resource(Long id, String code) {
+        var resource = new SsResource();
+        resource.setResourceId(id); resource.setResourceCode(code); resource.setSystemCode("BYAI");
+        resource.setOwnerType("enterprise"); resource.setComAcctId(1L); resource.setCreateBy(9L);
+        resource.setResourceBizType("TOOLKIT"); resource.setResourceStatus(2); resource.setUseAuthControlled(true);
+        return resource;
+    }
+}

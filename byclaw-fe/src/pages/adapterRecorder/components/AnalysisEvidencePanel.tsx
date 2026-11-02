@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // 分析证据面板 —— 展示 A/B 两次录制的请求痕迹；评分完成后可额外展示实际发给 LLM 的评分提示词。
 // 配色全走主题 token,等宽字段用 .code class(与 CandidateCard 一致)。
 import { Collapse, Empty, Input, Space, Tag, Typography, theme } from 'antd';
@@ -7,6 +8,7 @@ const { Text } = Typography;
 
 /** 单条痕迹行:method 标签 + host/pathname(截断)+ 状态码 + 耗时;WS 连接额外标注帧数。 */
 function EntryRow({ e }: { e: NetworkEntry }) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const status = e.response?.status ?? e.responseStatus;
   const ms = e.timing?.durationMs;
@@ -24,8 +26,13 @@ function EntryRow({ e }: { e: NetworkEntry }) {
         {path}
       </Text>
       {isWs && (
-        <Tag color={token.colorInfo} style={{ fontSize: 10 }} title="WebSocket 连接(数据帧单独捕获,打分排除)">
-          WS · {e.webSocketFrames?.length ?? 0} 帧
+        <Tag
+          color={token.colorInfo}
+          style={{ fontSize: 10 }}
+          title={intl.formatMessage({ id: 'adapterRecorder.trace.websocket' })}
+        >
+          WS · {e.webSocketFrames?.length ?? 0}
+          {intl.formatMessage({ id: 'adapterRecorder.trace.frames' })}
         </Tag>
       )}
       {status !== null && status !== undefined && (
@@ -57,15 +64,19 @@ function deduplicateEntries(entries: NetworkEntry[]): NetworkEntry[] {
 
 /** 单个样本(A/B)的痕迹分组:标题带条数,列表限高滚动。 */
 function SampleBlock({ sample }: { sample: CaptureSample }) {
+  const intl = useIntl();
   const entries = deduplicateEntries(sample.entries ?? []);
   return (
     <div>
       <Text type="secondary" style={{ fontSize: 12 }}>
-        样本 {sample.sampleName} · {entries.length} 条请求
+        {intl.formatMessage({ id: 'adapterRecorder.trace.sample' })}
+        {sample.sampleName} · {entries.length}
+        {intl.formatMessage({ id: 'adapterRecorder.trace.requests' })}
         {sample.actionsDropped ? (
           <Text type="warning" style={{ fontSize: 11 }}>
             {' '}
-            (操作溢出丢弃 {sample.actionsDropped})
+            {intl.formatMessage({ id: 'adapterRecorder.trace.droppedActions' })}
+            {sample.actionsDropped})
           </Text>
         ) : null}
       </Text>
@@ -74,7 +85,7 @@ function SampleBlock({ sample }: { sample: CaptureSample }) {
           entries.map((e, i) => <EntryRow key={`${sample.sampleName}-${i}`} e={e} />)
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            无痕迹
+            {intl.formatMessage({ id: 'adapterRecorder.trace.empty' })}
           </Text>
         )}
       </div>
@@ -104,11 +115,12 @@ export default function AnalysisEvidencePanel({
   showScorePrompt = false,
   defaultOpen,
 }: Props) {
+  const intl = useIntl();
   const samples = [sampleA, sampleB].filter((s): s is CaptureSample => !!s);
   const items = [
     {
       key: 'evidence',
-      label: '本次分析的录制痕迹(A/B 请求)',
+      label: intl.formatMessage({ id: 'adapterRecorder.trace.title' }),
       children: samples.length ? (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {samples.map((s) => (
@@ -116,18 +128,21 @@ export default function AnalysisEvidencePanel({
           ))}
         </Space>
       ) : (
-        <Empty description="暂无痕迹" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty
+          description={intl.formatMessage({ id: 'adapterRecorder.trace.none' })}
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
       ),
     },
     ...(showScorePrompt
       ? [
         {
           key: 'prompt',
-          label: '发给 AI 的评分提示词',
+          label: intl.formatMessage({ id: 'adapterRecorder.trace.scoringPrompt' }),
           children: (
             <Input.TextArea
               className="code"
-              value={scorePrompt || '(未返回评分提示词)'}
+              value={scorePrompt || intl.formatMessage({ id: 'adapterRecorder.trace.noPrompt' })}
               readOnly
               autoSize={{ minRows: 4, maxRows: 16 }}
               style={{ fontSize: 12 }}

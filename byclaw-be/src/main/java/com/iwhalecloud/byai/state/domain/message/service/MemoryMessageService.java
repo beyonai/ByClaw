@@ -124,6 +124,23 @@ public class MemoryMessageService {
     }
 
     /**
+     * Persist a response produced while recovering an existing turn.
+     *
+     * <p>The recovered runtime only contains segments emitted after it was restarted. Replacing the existing row with
+     * that partial projection removes the original tool call and completed interaction card. When the answer row
+     * already exists, append the recovered segments to its persisted projection; retain save-or-update as the
+     * idempotent fallback for recovery before the original row has been committed.</p>
+     */
+    public ByaiMessageHotDto saveOrAppendRecovery(ChatProcessContext ctx, Long sessionId, Integer usage,
+        MessageContext messageStruct, AssistantChatDto assistantChatDto) {
+        ByaiMessageHotDto existing = byaiMessageHotService.findById(messageStruct.getMessageId());
+        if (existing != null) {
+            return updateTaskMessage(ctx, existing, messageStruct);
+        }
+        return saveOrUpdate(sessionId, usage, messageStruct, assistantChatDto);
+    }
+
+    /**
      * 生成消息对象
      *
      * @param sessionId 会话ID
@@ -161,6 +178,14 @@ public class MemoryMessageService {
         MessageResourceDto messageResourceDto = new MessageResourceDto();
         // 用户输入的记录用户输入的文件和扩展参数
         if (USER_INPUT.getCode().equals(usage)) {
+            if (assistantChatDto.getExtParams() != null
+                && assistantChatDto.getExtParams().get("voice") instanceof Map<?, ?> voice) {
+                JSONObject metadata = StringUtils.isBlank(byaiMessageHotDto.getMetadata())
+                    ? new JSONObject() : JSON.parseObject(byaiMessageHotDto.getMetadata());
+                metadata.put("voice", voice);
+                metadata.put("messageType", "VOICE");
+                byaiMessageHotDto.setMetadata(metadata.toJSONString());
+            }
             messageResourceDto.setFiles(messageStruct.getUploadFiles());
             messageResourceDto.setExtParams(assistantChatDto.getExtParams());
             messageResourceDto.setResourceList(assistantChatDto.getResourceList());
@@ -563,8 +588,13 @@ public class MemoryMessageService {
                 if (!sessionId.equals(targetMessage.getSessionId())) {
                     throw new MemoryRuntimeException(I18nUtil.get("memory.message.service.message.not.belong.session"));
                 }
-                long position = byaiMessageHotService.countPositionInSession(sessionId, messageId);
-                result.put("position", position);
+                // History pages are ordered newest first; allocation order of ids is not execution order.
+                var target = byaiMessageHotService.selectConversationOutline(sessionId).stream()
+                    .filter(item -> messageId.equals(item.getMessageId()))
+                    .findFirst().orElseThrow(() -> new MemoryRuntimeException(
+                        I18nUtil.get("memory.message.service.message.not.exist", messageId)));
+                result.put("position", target.getPosition());
+                result.put("totalCount", target.getTotalCount());
             }
             return result;
         }

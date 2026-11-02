@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -97,7 +99,7 @@ public class ConnectorAuthService {
         String userId = currentUserId();
         Optional<String> lockToken = sessionRepository.tryAcquireStartLock(userId, connectorId, ENABLE_STATE_LOCK_TTL);
         if (lockToken.isEmpty()) {
-            throw new IllegalStateException("当前连接器已有进行中的授权任务");
+            throw new IllegalStateException(I18nUtil.get("connector.authorization.active"));
         }
         try {
             connectionStateService.updateEnableFlag(userId, connectorId, enabled);
@@ -127,26 +129,26 @@ public class ConnectorAuthService {
 
     private void validate(ConnectorAuth connectorAuth) {
         if (connectorAuth == null || connectorAuth.getConnectorId() == null) {
-            throw new IllegalArgumentException("connectorId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.id.required"));
         }
         ConnectorInfo connectorInfo = connectorInfoMapper.selectById(connectorAuth.getConnectorId());
         if (connectorInfo == null || !"00A".equals(connectorInfo.getStatusCd())) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
         String authMode = connectorInfo.getAuthMode();
         if (authMode != null && !java.util.Set.of(
                 "NONE", "OAUTH2", "AK_SK", "PASSWORD", "TOKEN", "DEVICE_FLOW", "CLI_INIT")
             .contains(authMode)) {
-            throw new IllegalArgumentException("authMode不受支持");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authMode.unsupported"));
         }
         if (connectorAuth.getAuthMode() != null && !java.util.Objects.equals(authMode, connectorAuth.getAuthMode())) {
-            throw new IllegalArgumentException("authMode与连接器模板不一致");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authMode.mismatch"));
         }
         if (!"NONE".equals(authMode) && !org.springframework.util.StringUtils.hasText(connectorAuth.getAuthCredential())) {
-            throw new IllegalArgumentException("授权凭证不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.credential.required"));
         }
         if ("NONE".equals(authMode) && org.springframework.util.StringUtils.hasText(connectorAuth.getAuthCredential())) {
-            throw new IllegalArgumentException("NONE授权方式不能携带授权凭证");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authMode.noneCredentials"));
         }
         if (CLI_AUTH_MODES.contains(authMode)) {
             validateCliCredential(connectorAuth.getAuthCredential());
@@ -154,11 +156,11 @@ public class ConnectorAuthService {
         if (connectorAuth.getExpireTime() != null
             && connectorAuth.getExpireTime().before(new java.util.Date())
             && "Y".equals(connectorAuth.getEnableFlag())) {
-            throw new IllegalArgumentException("启用授权的expireTime不能早于当前时间");
+            throw new IllegalArgumentException(I18nUtil.get("connector.expireTime.past"));
         }
         if (connectorAuth.getEnableFlag() != null && !java.util.Set.of("Y", "N")
             .contains(connectorAuth.getEnableFlag())) {
-            throw new IllegalArgumentException("enableFlag只能为Y或N");
+            throw new IllegalArgumentException(I18nUtil.get("connector.enableFlag.invalid"));
         }
         connectorAuth.setAuthMode(authMode);
         if (connectorAuth.getEnableFlag() == null) {
@@ -198,6 +200,6 @@ public class ConnectorAuthService {
     }
 
     private IllegalArgumentException invalidCliCredential() {
-        return new IllegalArgumentException("授权凭证格式无效");
+        return new IllegalArgumentException(I18nUtil.get("connector.credential.formatInvalid"));
     }
 }

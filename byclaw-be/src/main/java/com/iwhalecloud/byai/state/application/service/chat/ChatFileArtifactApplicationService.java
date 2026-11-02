@@ -7,6 +7,8 @@ import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
@@ -146,6 +148,20 @@ public class ChatFileArtifactApplicationService {
         return fsOperationApplicationService.downloadFileAsUser(ownerUserCode, "USER", null, normalizedPath);
     }
 
+    private JsonNode imageMetadata(String owner, String path) {
+        // Optional, bounded presentation metadata. It never changes the authorized file path.
+        try {
+            return withUserContext(owner, () -> {
+                try (InputStream input = userFS.read(path + ".artifact.json")) {
+                    if (input == null) return null;
+                    byte[] bytes = input.readNBytes(8193);
+                    return bytes.length > 8192 ? null : new ObjectMapper().readTree(bytes);
+                }
+            });
+        }
+        catch (RuntimeException e) { return null; }
+    }
+
     private ChatFileArtifactVo resolveCandidate(ByaiSession session, String ownerUserCode, String messageId,
         String candidate) {
         String sourcePath = normalizeUserPath(candidate);
@@ -168,7 +184,13 @@ public class ChatFileArtifactApplicationService {
             return null;
         }
         String fileName = FilenameUtils.getName(artifactPath);
+        JsonNode image = artifactPath.startsWith(sessionPrefix + "image/") ? imageMetadata(ownerUserCode, artifactPath) : null;
         return ChatFileArtifactVo.builder()
+            .imageId(image == null ? null : fileName)
+            .parentImageId(image == null ? null : image.path("parentId").asText(null))
+            .title(image == null ? null : image.path("title").asText(null))
+            .width(image == null || !image.has("width") ? null : image.path("width").asInt())
+            .height(image == null || !image.has("height") ? null : image.path("height").asInt())
             .sourcePath(sourcePath)
             .path(artifactPath)
             .fileName(StringUtils.defaultIfBlank(metadata.getFileName(), fileName))

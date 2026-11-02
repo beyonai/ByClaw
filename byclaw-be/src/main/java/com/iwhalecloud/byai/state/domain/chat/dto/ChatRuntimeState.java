@@ -50,6 +50,8 @@ public class ChatRuntimeState {
 
     private LoginInfo loginInfo;
 
+    private String language;
+
     private String targetAgentType;
 
     private String transport;

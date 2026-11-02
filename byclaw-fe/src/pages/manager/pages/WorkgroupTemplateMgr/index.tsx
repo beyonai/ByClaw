@@ -97,7 +97,7 @@ export default function WorkgroupTemplateMgr() {
 
   if (userInfo?.userCode?.toLowerCase() === 'adminvip' && allowed === undefined) return <Spin fullscreen />;
   if (userInfo?.userCode?.toLowerCase() !== 'adminvip' || !allowed) {
-    return <Alert type="warning" message="仅开源版 adminvip 可访问工作组模板管理。" />;
+    return <Alert type="warning" message={intl.formatMessage({ id: 'workgroupTemplate.adminOnly' })} />;
   }
 
   const edit = (item?: WorkgroupTemplate) => {
@@ -124,11 +124,11 @@ export default function WorkgroupTemplateMgr() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1>工作组模板</h1>
-          <p>配置创建工作组时可直接选择的场景模板、资产目录与数字员工阵容。</p>
+          <h1>{intl.formatMessage({ id: 'workgroupTemplate.title' })}</h1>
+          <p>{intl.formatMessage({ id: 'workgroupTemplate.description' })}</p>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>
-          新建模板
+          {intl.formatMessage({ id: 'workgroupTemplate.create' })}
         </Button>
       </div>
 
@@ -139,7 +139,7 @@ export default function WorkgroupTemplateMgr() {
         pagination={{ pageSize: 10, showSizeChanger: false }}
         columns={[
           {
-            title: '模板',
+            title: intl.formatMessage({ id: 'workgroupTemplate.template' }),
             render: (_, item) => (
               <div className={styles.templateCell}>
                 <strong>{item.template.templateName}</strong>
@@ -147,13 +147,15 @@ export default function WorkgroupTemplateMgr() {
               </div>
             ),
           },
-          { title: '资产目录', dataIndex: 'catalogName', width: 180 },
+          { title: intl.formatMessage({ id: 'workgroupTemplate.catalog' }), dataIndex: 'catalogName', width: 180 },
           {
-            title: '数字员工阵容',
+            title: intl.formatMessage({ id: 'workgroupTemplate.team' }),
             width: 260,
             render: (_, item) =>
               item.available === false ? (
-                <span className={styles.unavailable}>{item.unavailableReason || '关联资源不可用'}</span>
+                <span className={styles.unavailable}>
+                  {item.unavailableReason || intl.formatMessage({ id: 'workgroupTemplate.unavailable' })}
+                </span>
               ) : (
                 <Space size={[4, 4]} wrap>
                   {item.resources.map((resource) => (
@@ -163,18 +165,18 @@ export default function WorkgroupTemplateMgr() {
               ),
           },
           {
-            title: '操作',
+            title: intl.formatMessage({ id: 'common.operation' }),
             width: 150,
             render: (_, item) => (
               <Space size={0}>
                 <Button type="link" onClick={() => edit(item)}>
-                  编辑
+                  {intl.formatMessage({ id: 'common.edit' })}
                 </Button>
                 <Popconfirm
-                  title="确定删除这个工作组模板吗？"
-                  description="删除后，创建工作组时将无法再选择该模板。"
-                  okText="删除"
-                  cancelText="取消"
+                  title={intl.formatMessage({ id: 'workgroupTemplate.deleteConfirm' })}
+                  description={intl.formatMessage({ id: 'workgroupTemplate.deleteDescription' })}
+                  okText={intl.formatMessage({ id: 'common.delete' })}
+                  cancelText={intl.formatMessage({ id: 'common.cancel' })}
                   okButtonProps={{ danger: true, loading: deletingId === item.template.templateId }}
                   onConfirm={async () => {
                     setDeletingId(item.template.templateId);
@@ -192,7 +194,7 @@ export default function WorkgroupTemplateMgr() {
                   }}
                 >
                   <Button type="link" danger icon={<DeleteOutlined />}>
-                    删除
+                    {intl.formatMessage({ id: 'common.delete' })}
                   </Button>
                 </Popconfirm>
               </Space>
@@ -203,13 +205,17 @@ export default function WorkgroupTemplateMgr() {
 
       <Modal
         className={styles.editorModal}
-        title={editing ? '编辑工作组模板' : '新建工作组模板'}
+        title={
+          editing
+            ? intl.formatMessage({ id: 'workgroupTemplate.editTitle' })
+            : intl.formatMessage({ id: 'workgroupTemplate.createTitle' })
+        }
         open={open}
         onCancel={close}
         onOk={() => form.submit()}
         confirmLoading={saving}
         width={860}
-        okText="保存模板"
+        okText={intl.formatMessage({ id: 'workgroupTemplate.save' })}
         destroyOnClose
       >
         <Form
@@ -219,7 +225,7 @@ export default function WorkgroupTemplateMgr() {
           onFinish={async (values) => {
             if (savingRef.current) return;
             if (!resources.length) {
-              message.warning('请至少选择一个数字员工或数字员工组');
+              message.warning(intl.formatMessage({ id: 'workgroupTemplate.resourceRequired' }));
               return;
             }
             const payload = { ...values, resourceIds: resources.map((resource) => resource.resourceId) };
@@ -240,55 +246,85 @@ export default function WorkgroupTemplateMgr() {
             }
           }}
         >
-          <div className={styles.sectionTitle}>基本信息</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'workgroupTemplate.basicInfo' })}</div>
           <div className={styles.twoColumns}>
-            <Form.Item name="templateName" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
-              <Input maxLength={100} placeholder="例如：品牌内容创作小组" />
+            <Form.Item
+              name="templateName"
+              label={intl.formatMessage({ id: 'workgroupTemplate.name' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'workgroupTemplate.nameRequired' }) }]}
+            >
+              <Input maxLength={100} placeholder={intl.formatMessage({ id: 'workgroupTemplate.namePlaceholder' })} />
             </Form.Item>
-            <Form.Item name="catalogId" label="资产目录" rules={[{ required: true, message: '请选择资产目录' }]}>
+            <Form.Item
+              name="catalogId"
+              label={intl.formatMessage({ id: 'workgroupTemplate.catalog' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'workgroupTemplate.catalogRequired' }) }]}
+            >
               <TreeSelect
                 treeDataSimpleMode
                 treeData={toCatalogTreeData(catalogs)}
                 showSearch
                 treeNodeFilterProp="title"
-                placeholder="选择资产目录管理中的目录"
+                placeholder={intl.formatMessage({ id: 'workgroupTemplate.catalogPlaceholder' })}
               />
             </Form.Item>
           </div>
-          <Form.Item name="summary" label="模板摘要" rules={[{ required: true, message: '请输入模板摘要' }]}>
-            <Input.TextArea maxLength={500} showCount rows={3} placeholder="简要说明模板适用的协作场景" />
+          <Form.Item
+            name="summary"
+            label={intl.formatMessage({ id: 'workgroupTemplate.summary' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'workgroupTemplate.summaryRequired' }) }]}
+          >
+            <Input.TextArea
+              maxLength={500}
+              showCount
+              rows={3}
+              placeholder={intl.formatMessage({ id: 'workgroupTemplate.summaryPlaceholder' })}
+            />
           </Form.Item>
 
-          <div className={styles.sectionTitle}>创建后默认内容</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'workgroupTemplate.defaults' })}</div>
           <Form.Item
             name="defaultGroupName"
-            label="默认工作组名称"
-            rules={[{ required: true, message: '请输入默认工作组名称' }]}
+            label={intl.formatMessage({ id: 'workgroupTemplate.groupName' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'workgroupTemplate.groupNameRequired' }) }]}
           >
-            <Input maxLength={100} placeholder="用户选择模板后可继续修改" />
+            <Input maxLength={100} placeholder={intl.formatMessage({ id: 'workgroupTemplate.groupNamePlaceholder' })} />
           </Form.Item>
           <Form.Item
             name="defaultGoal"
-            label="默认工作目标"
-            rules={[{ required: true, message: '请输入默认工作目标' }]}
+            label={intl.formatMessage({ id: 'workgroupTemplate.goal' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'workgroupTemplate.goalRequired' }) }]}
           >
-            <Input.TextArea maxLength={500} showCount rows={4} placeholder="描述团队要共同完成的目标" />
+            <Input.TextArea
+              maxLength={500}
+              showCount
+              rows={4}
+              placeholder={intl.formatMessage({ id: 'workgroupTemplate.goalPlaceholder' })}
+            />
           </Form.Item>
 
-          <div className={styles.sectionTitle}>数字员工阵容</div>
+          <div className={styles.sectionTitle}>{intl.formatMessage({ id: 'workgroupTemplate.team' })}</div>
           <EmployeeGroupMembers
             value={resources}
             onChange={setResources}
             candidateLoader={loadTemplateCandidates}
             showTeamRole={false}
-            title="模板资源"
-            hint="选择单个数字员工或数字员工组；创建工作组时，组资源会自动展开为组内成员"
-            addText="选择资源"
-            selectorTitle="选择数字员工或数字员工组"
-            candidateTypeLabel={(resource) => (resource?.agentType === '017' ? '数字员工组' : '数字员工')}
+            title={intl.formatMessage({ id: 'workgroupTemplate.resources' })}
+            hint={intl.formatMessage({ id: 'workgroupTemplate.resourcesHint' })}
+            addText={intl.formatMessage({ id: 'workgroupTemplate.selectResources' })}
+            selectorTitle={intl.formatMessage({ id: 'workgroupTemplate.resourceSelector' })}
+            candidateTypeLabel={(resource) =>
+              resource?.agentType === '017'
+                ? intl.formatMessage({ id: 'workgroupTemplate.employeeGroup' })
+                : intl.formatMessage({ id: 'workgroupTemplate.employee' })
+            }
           />
 
-          <Form.Item name="sortOrder" label="排序" className={styles.sortField}>
+          <Form.Item
+            name="sortOrder"
+            label={intl.formatMessage({ id: 'workgroupTemplate.sortOrder' })}
+            className={styles.sortField}
+          >
             <InputNumber min={0} precision={0} />
           </Form.Item>
           <Form.Item name="expectedVersion" hidden>

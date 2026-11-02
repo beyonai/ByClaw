@@ -15,7 +15,7 @@ public class KbFileImport {
     private String knCode;
 
     /**
-     * 上传到知识库后的文件全路径，以 {@code /} 开头，不包括知识库名称，必填
+     * 普通文件及不解压 ZIP 为文件全路径；解压 ZIP 为目标目录，以 {@code /} 开头，必填
      */
     private String filePath;
 
@@ -24,6 +24,12 @@ public class KbFileImport {
 
     /** 是否解析 Markdown 文件中的 YAML front matter；不传时由 QA 按默认 true 处理。 */
     private Boolean processFrontMatter;
+
+    /** 是否解压 ZIP；不传时由 QA 按默认 true 处理，false 时保存原始 ZIP。 */
+    private Boolean extractZip;
+
+    /** JSON object 字符串，作为文件及本次自动创建父目录的基础元数据。 */
+    private String metadata;
 
     /** 文件二进制内容（multipart 中的 {@code fileContent} 部分），必填 */
     private MultipartFile multipartFile;

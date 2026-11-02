@@ -39,10 +39,19 @@ public class TenantNodeInternalController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final String internalToken;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService sandboxService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TenantNodeInternalController(TenantAdminTenantMapper tenantMapper, TenantCredentialCrypto crypto,
+                                        JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                        com.iwhalecloud.byai.manager.domain.tenant.TenantRuntimeIdentity identity) {
+        this(tenantMapper, crypto, jdbc, objectMapper, identity.internalToken());
+    }
 
     public TenantNodeInternalController(TenantAdminTenantMapper tenantMapper, TenantCredentialCrypto crypto,
                                         JdbcTemplate jdbc, ObjectMapper objectMapper,
-                                        @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken) {
+                                        String internalToken) {
         this.tenantMapper = tenantMapper;
         this.crypto = crypto;
         this.jdbc = jdbc;
@@ -62,17 +71,25 @@ public class TenantNodeInternalController {
         if (!database.equals(request.databaseName()) || !aad.equals(request.aad())
             || stored == null || request.envelope() == null
             || !objectMapper.readValue(stored, Map.class).equals(request.envelope())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant credential identity mismatch");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.credential.identity.mismatch");
         }
         String password = crypto.decrypt(enterpriseId, database, stored);
-        return Map.of("plaintext", Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
+        Map<String,String> result=new HashMap<>();
+        result.put("plaintext",Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
+        String host=tenantMapper.selectConfig(enterpriseId,"DB_HOST");
+        if(host!=null && host.endsWith("-vpc.sandbox.aliyuncs.com")) {
+            Map<String,String> transport=sandboxService.privateTransport(enterpriseId,"tenant-opengauss");
+            result.put("databaseWebSocketUrl",transport.get("url").replaceFirst("^https:","wss:")+"/postgresql");
+            result.put("databaseTrafficToken",transport.get("trafficToken"));
+        }
+        return result;
     }
 
     @GetMapping("/tenants/{enterpriseId}/schema/current")
     public Map<String, Object> current(@RequestHeader(value = "Authorization", required = false) String authorization,
                                        @PathVariable long enterpriseId) {
         authenticate(authorization);
-        if (enterpriseId <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid enterprise ID");
+        if (enterpriseId <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.enterpriseId.invalid");
         var rows = jdbc.query("SELECT audit_id, observed_version FROM byai.tenant_schema_audit "
                 + "WHERE enterprise_id=? AND is_current=TRUE", (rs, row) -> {
                     Map<String, Object> value = new HashMap<>();
@@ -99,12 +116,12 @@ public class TenantNodeInternalController {
         if (!auditId.matches("[A-Za-z0-9_-]{1,64}") || attemptNo <= 0
             || !java.util.Set.of("VERIFIED", "FAILED", "NEEDS_ATTENTION", "RECONCILING")
                 .contains(status)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid schema task report");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.schema.report.invalid");
         }
         int count = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_schema_audit WHERE audit_id=? "
             + "AND enterprise_id=? AND generation=? AND attempt_no=?", Integer.class,
             auditId, enterpriseId, generation, attemptNo);
-        if (count != 1) throw new ResponseStatusException(HttpStatus.CONFLICT, "schema task audit mismatch");
+        if (count != 1) throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.schema.audit.mismatch");
         if ("VERIFIED".equals(status)) {
             jdbc.update("UPDATE byai.tenant_schema_audit SET is_current=FALSE WHERE enterprise_id=? AND is_current=TRUE",
                 enterpriseId);
@@ -128,22 +145,22 @@ public class TenantNodeInternalController {
     private Timestamp timestamp(String value) {
         if (value == null) return null;
         try { return Timestamp.from(Instant.parse(value)); }
-        catch (Exception e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid report timestamp"); }
+        catch (Exception e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.report.timestamp.invalid"); }
     }
 
     private long parseId(String value) {
         if (value == null || !value.matches("[1-9][0-9]*")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant identity");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.identity.invalid");
         }
         try { return Long.parseLong(value); }
-        catch (NumberFormatException e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid tenant identity"); }
+        catch (NumberFormatException e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.identity.invalid"); }
     }
 
     private void authenticate(String authorization) {
         byte[] expected = ("Bearer " + internalToken).getBytes(StandardCharsets.UTF_8);
         byte[] actual = authorization == null ? new byte[0] : authorization.getBytes(StandardCharsets.UTF_8);
         if (internalToken == null || internalToken.isBlank() || !MessageDigest.isEqual(expected, actual)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant Node token required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.node.token.required");
         }
     }
 

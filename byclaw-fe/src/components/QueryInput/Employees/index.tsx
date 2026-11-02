@@ -23,6 +23,7 @@ import { chatModeMap } from '@/constants/query';
 import { ResourceTypeMap } from '@/constants/resource';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import { createPendingRemoteSession } from '@/utils/session';
+import { resolvePendingSessionProjectId } from '@/components/ChatLayoutComp/draftSessionProject';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
 import styles from './index.module.less';
@@ -211,11 +212,11 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     super.componentDidMount();
   }
 
-  getSendPayload = () => {
+  getSendPayload = (textOverride?: string) => {
     const { userInfo, myAgentType } = this.props;
     const currentInputPayload = this.getCurrentInputPayload();
     const { fileList, chatSettings, connectNetAgentId } = this.state;
-    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const inputValue = textOverride ?? currentInputPayload?.text ?? this.state.inputValue;
     const sendVal = trim(inputValue);
 
     const { agentId } = this.props.globalContext;
@@ -447,7 +448,10 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                 sessionType: 'AGENT',
                 sessionId,
                 // 上传接口会提前创建临时会话，必须同步带上当前选择的项目，避免会话落到默认项目。
-                projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
+                projectId: resolvePendingSessionProjectId(
+                  this.props.projectId,
+                  this.props.selectedProject?.projectId
+                ),
               }}
               onCreate={(fileItem: IFile) => {
                 return this.onEmployeeCreateFile({
@@ -466,13 +470,19 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
                     sessionId: mySessionId,
                     sessionName,
                     projectName: this.props.selectedProject?.projectName,
-                    projectId: this.props.projectId ?? this.props.selectedProject?.projectId,
+                    projectId: resolvePendingSessionProjectId(
+                      this.props.projectId,
+                      this.props.selectedProject?.projectId
+                    ),
                     objectId: agentId,
                     objectType: agentId ? 'DigEmployee' : undefined,
                     agentType: this.props.myAgentType,
                   }),
                 });
-                const projectId = this.props.projectId ?? this.props.selectedProject?.projectId;
+                const projectId = resolvePendingSessionProjectId(
+                  this.props.projectId,
+                  this.props.selectedProject?.projectId
+                );
                 if (projectId !== undefined && projectId !== null) {
                   this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,
@@ -498,7 +508,6 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             value={this.state.selectedModelId}
             onChange={this.onModelSelectChange}
           />
-          {this.STTRender()}
         </Space>
       </>
     );

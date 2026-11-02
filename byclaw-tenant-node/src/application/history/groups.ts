@@ -1,3 +1,4 @@
+import { isSnapshotOnly, forwardResources, passiveText } from "./forward-projection.js";
 import { recallIdentity, recallContent } from "./message-format.js";
 import { bounded } from "./paging.js";
 import { DomainError } from "../../domain/errors.js";
@@ -13,6 +14,17 @@ import {
 
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
+  /** 仅供 BE 出站调用；用户身份取内部鉴权 actor，群成员关系由当前租户核验。 */
+  async groupMemberApiKey(actor: string, sessionId: string) {
+    await this.access(actor, sessionId, true);
+    return { api_key: await this.repository.groupMemberApiKey(sessionId, actor) };
+  }
+
+  private async publicMembers(sessionId: string) {
+    return (await this.repository.members(sessionId)).map(
+      ({ apiKey: _apiKey, api_key: _rawApiKey, ...member }) => member,
+    );
+  }
   /** BE can observe a dispatch after CHAT hides its execution session; task APIs stay task-only. */
   async dispatch(actor: string, sessionId: string) {
     requireId(sessionId);
@@ -123,7 +135,14 @@ export class GroupHistory extends HistoryAccess {
         return {
           ...summary,
           latestMessageRecalled: latestMessageRecalledAt != null,
-          latestMessageContent: latestMessageRecalledAt ? recallContent(recalledMessage) : preview,
+          latestMessageContent: latestMessageRecalledAt
+            ? recallContent(recalledMessage)
+            : isSnapshotOnly(latestMessageMetadata)
+              ? passiveText(
+                  String(r.latestMessageContent ?? ""),
+                  forwardResources(objectJson(latestMessageMetadata)),
+                )
+              : preview,
           latestMessageRecall: latestMessageRecalledAt ? recallIdentity(recalledMessage) : null,
           members: (await this.repository.members(r.sessionId))
             .slice(0, 9)
@@ -149,7 +168,7 @@ export class GroupHistory extends HistoryAccess {
   }
   async management(actor: string, sessionId: string) {
     const session = await this.access(actor, sessionId, true, true);
-    return { session, members: await this.repository.members(sessionId) };
+    return { session, members: await this.publicMembers(sessionId) };
   }
   async detail(actor: string, sessionId: string) {
     const session = await this.access(actor, sessionId, true);
@@ -159,7 +178,7 @@ export class GroupHistory extends HistoryAccess {
     )?.extParamValue;
     return {
       session,
-      members: await this.repository.members(sessionId),
+      members: await this.publicMembers(sessionId),
       settings: await this.settings(actor, sessionId),
       ...(coordinatorAgentId ? { coordinatorAgentId } : {}),
     };

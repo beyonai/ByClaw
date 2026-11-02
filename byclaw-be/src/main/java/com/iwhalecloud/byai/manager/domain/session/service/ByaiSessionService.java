@@ -39,6 +39,13 @@ public class ByaiSessionService {
     }
 
     /**
+     * 修改附件上传所预建草稿会话的项目归属。
+     */
+    public boolean changeDraftProject(Long sessionId, Long projectId, Long currentUserId) {
+        return byaiSessionMapper.updateDraftSessionProject(sessionId, projectId, currentUserId) == 1;
+    }
+
+    /**
      * 查询调试会话
      *
      * @param agentId 数据员工标识

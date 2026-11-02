@@ -68,7 +68,8 @@ public class ResourceRuntimeInfoResolver {
 
     /**
      * 根据数字员工类型和资源编码解析运行时注册信息。
-     * 默认超级助手 {@code {userCode}_main} 固定路由到公共 {@code BY_SUPER} Worker。
+     * 默认超级助手 {@code {userCode}_main} 保留 {@code BY_SUPER} 逻辑类型，
+     * 实际 Worker 由聊天路由的 Super 兼容开关决定。
      *
      * @author qin.guoquan
      * @date 2026-04-26 13:10:00

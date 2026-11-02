@@ -2,8 +2,9 @@ import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { invitationPreview } from "./group-invitation.js";
 import { text } from "../../domain/values.js";
-import { first, insert, nextId } from "./sql-utils.js";
+import { first } from "./sql-utils.js";
 import { membershipNotice } from "./member-notice.js";
+import { requireGroupMemberCapacity } from "./group-quota.js";
 /** BE 验证链接后，Node 再检查群状态与链接开关，仅把当前用户加入为 MEMBER。 */
 export async function joinGroup(context: CommandContext): Promise<Record<string, any> | void> {
   const { command, db } = context;
@@ -24,8 +25,8 @@ export async function joinGroup(context: CommandContext): Promise<Record<string,
   );
   if (setting?.extParamValue === "false") throw new DomainError("GROUP_JOIN_DISABLED");
   if (await context.member()) return;
-  await insert(db, "byai_session_member", {
-    byai_session_member_id: await nextId(db, command.enterpriseId),
+  await requireGroupMemberCapacity(context, [{ memObjType: "USER", memObjId: command.userId }]);
+  const byaiSessionMemberId = await context.saveMember({
     session_id: command.sessionId,
     mem_obj_type: "USER",
     mem_obj_id: command.userId,
@@ -38,6 +39,7 @@ export async function joinGroup(context: CommandContext): Promise<Record<string,
   const notice = await membershipNotice(
     context,
     {
+      byaiSessionMemberId,
       memObjId: command.userId,
       memObjType: "USER",
       memName: text(command.payload.memName ?? "", 255),

@@ -19,6 +19,9 @@ describe('connector icons', () => {
     ['ima-openapi', 'file-text'],
     ['weixin-official-api', 'global'],
     ['weixin-open-platform', 'link'],
+    ['deepseek-web-search', 'deepseek'],
+    ['image-generation-model', 'image-generation'],
+    ['speech-generation-model', 'speech-generation'],
   ])('matches %s by code without relying on its localized name', (code, icon) => {
     const { container } = render(<>{getConnectorIcon(code)}</>);
     expect(container.querySelector(`svg[data-icon="${icon}"]`)).toBeInTheDocument();
@@ -49,5 +52,19 @@ describe('connector icons', () => {
   it('keeps the generic connector fallback for an unknown platform', () => {
     const { container } = render(<>{getConnectorIcon('unknown')}</>);
     expect(container.querySelector('svg[data-icon="api"]')).toBeInTheDocument();
+  });
+
+  it('reuses the DeepSeek brand asset under the runtime deployment path', () => {
+    const originalPublicPath = window.publicPath;
+    try {
+      window.publicPath = '/byclaw';
+      const { container } = render(<>{getConnectorIcon('deepseek-web-search', 'Gmail')}</>);
+      expect(container.querySelector('svg[data-icon="deepseek"] image')).toHaveAttribute(
+        'href',
+        '/byclaw/model-providers/deepseek.svg'
+      );
+    } finally {
+      window.publicPath = originalPublicPath;
+    }
   });
 });

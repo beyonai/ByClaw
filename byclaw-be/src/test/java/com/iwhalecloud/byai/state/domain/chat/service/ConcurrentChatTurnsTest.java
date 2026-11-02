@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,7 +20,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 
-class ConcurrentChatTurnsTest {
+class ConcurrentChatTurnsTest extends I18nTestSupport {
     private final OutputStreamManager outputs = new OutputStreamManager();
     private final ChatRuntimeStateService states = mock(ChatRuntimeStateService.class);
     private final RunningOutputStreamRegistry running = mock(RunningOutputStreamRegistry.class);
@@ -104,6 +106,26 @@ class ConcurrentChatTurnsTest {
         verify(states).saveConcurrent(followup);
         verify(streams, never()).startSessionListener(anyString(), any());
         verify(running, never()).markRunning(any());
+    }
+
+    @Test
+    void coldResumeRebindsWebSocketContextAfterPreviousTerminalRemovedIt() {
+        outputs.removeContext("10");
+        followup.traceId = "background";
+        followup.concurrentGatewayTurn = false;
+        followup.continueRunningTrace = true;
+        followup.sendByFrameworkMsgOnly = true;
+        ChatStreamRuntimeCoordinator coordinator = coordinator(true);
+        doReturn(true).when(streams).startSessionListener("10", followup);
+
+        assertThat(coordinator.startIfNecessary(followup)).isTrue();
+
+        assertThat(followup.sendByFrameworkMsgOnly).isFalse();
+        assertThat(followup.recoveryOnly).isTrue();
+        assertThat(followup.streamRecoveryToRequester).isTrue();
+        assertThat(outputs.getContext("10", "background")).isSameAs(followup);
+        verify(streams).startSessionListener("10", followup);
+        verify(running).markRunning(followup);
     }
 
     @Test

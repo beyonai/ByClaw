@@ -1,10 +1,13 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
@@ -28,7 +31,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPendingP
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPublicationUploader;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskFile;
 
-class GroupChatPublicationUploaderTest {
+class GroupChatPublicationUploaderTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final UserFS userFS = mock(UserFS.class);
     private final DatasetApplicationService datasets = mock(DatasetApplicationService.class);
     private final GroupChatPendingPublicationStore store = mock(GroupChatPendingPublicationStore.class);
@@ -39,7 +47,7 @@ class GroupChatPublicationUploaderTest {
         ByaiGroupChatPendingPublication pending = pending();
         when(userFS.read(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(new byte[] {1, 2}));
         AtomicReference<Boolean> failSecond = new AtomicReference<>(true);
-        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(false), any()))
+        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(false), eq(false), isNull(), any()))
             .thenAnswer(invocation -> {
                 String directory = invocation.getArgument(2);
                 MultipartFile file = ((MultipartFile[]) invocation.getArgument(0))[0];
@@ -68,6 +76,42 @@ class GroupChatPublicationUploaderTest {
     }
 
     @Test
+    void publishesZipAsOneOriginalFileWithoutExtraction() throws Exception {
+        ByaiGroupChatPendingPublication pending = pending();
+        String source = "/by/.sessions/60/bundle.zip";
+        String target = "/group-task-results/60/100/0/bundle.zip";
+        pending.setSourceFilesJson(JSON.toJSONString(List.of(source)));
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("agents/openai.yaml"));
+            zip.write("name: example".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        byte[] original = bytes.toByteArray();
+        when(userFS.read(source)).thenReturn(new ByteArrayInputStream(original));
+        // 上传边界必须收到原始压缩包和显式关闭解压的选项。
+        when(datasets.uploadFiles(any(), eq(777L), eq("/group-task-results/60/100/0"),
+            eq("bundle.zip"), eq(false), eq(false), eq(false), eq(false), isNull(), any()))
+            .thenAnswer(invocation -> {
+                MultipartFile[] files = invocation.getArgument(0);
+                assertThat(files).hasSize(1);
+                assertThat(files[0].getOriginalFilename()).isEqualTo("bundle.zip");
+                assertThat(files[0].getBytes()).isEqualTo(original);
+                return uploaded(target);
+            });
+
+        List<GroupChatTaskFile> result = uploader.upload(pending, 777L);
+
+        assertThat(result).extracting(GroupChatTaskFile::getFilePath).containsExactly(target);
+        assertThat(result).extracting(GroupChatTaskFile::getFileName).containsExactly("bundle.zip");
+        org.mockito.ArgumentCaptor<String> checkpoint = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(store).checkpoint(eq(100L), eq(777L), checkpoint.capture());
+        List<GroupChatTaskFile> saved = JSON.parseObject(checkpoint.getValue()).getJSONArray(source)
+            .toJavaList(GroupChatTaskFile.class);
+        assertThat(saved).extracting(GroupChatTaskFile::getFilePath).containsExactly(target);
+    }
+
+    @Test
     void sourceTransferEnforcesPlatformUploadLimit() {
         ReflectionTestUtils.setField(uploader, "maxFileSize", "1B");
         when(userFS.read(anyString())).thenReturn(new ByteArrayInputStream(new byte[] {1, 2}));
@@ -89,7 +133,7 @@ class GroupChatPublicationUploaderTest {
         when(userFS.read(anyString())).thenReturn(new ByteArrayInputStream(new byte[] {1}));
         UploadResult result = uploaded("/group-task-results/60/100/0/a.md");
         result.getFailedItems().add(new UploadItem());
-        when(datasets.uploadFiles(any(), any(), any(), any(), any(), any(), eq(false), any())).thenReturn(result);
+        when(datasets.uploadFiles(any(), any(), any(), any(), any(), any(), eq(false), eq(false), isNull(), any())).thenReturn(result);
         assertThatThrownBy(() -> uploader.upload(pending, 777L)).hasMessageContaining("upload failed");
         verifyNoInteractions(store);
     }

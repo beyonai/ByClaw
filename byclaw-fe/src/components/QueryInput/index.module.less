@@ -150,6 +150,15 @@
     background: var(--beyond-color-fill-quaternary);
     border-radius: 50%;
 
+    // 图标外层使用 flex，避免文字基线使加号偏离按钮中心。
+    :global {
+      .@{antPrefix}-btn-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+
     &:hover {
       color: var(--beyond-color-primary);
       background: var(--beyond-color-fill-tertiary);

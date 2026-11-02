@@ -12,8 +12,12 @@ export interface ConnectorListQuery {
 export interface ConnectorCredentialField {
   key: string;
   label: string;
-  inputType: 'text' | 'password';
+  inputType: 'text' | 'password' | 'number' | 'textarea';
   maxLength: number;
+  defaultValue?: string | null;
+  placeholder?: string | null;
+  description?: string | null;
+  advanced?: boolean;
 }
 
 export interface ConnectorCredentialForm {

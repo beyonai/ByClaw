@@ -1,5 +1,10 @@
 import { buildOperationAccountPayload, normalizeAccounts } from './index';
 
+jest.mock('@umijs/max', () => ({
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
+
 describe('ProjectAccounts custom link data', () => {
   it('keeps historical custom links visible when their name is empty', () => {
     expect(

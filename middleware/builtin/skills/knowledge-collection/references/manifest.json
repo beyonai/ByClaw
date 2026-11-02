@@ -1,0 +1,48 @@
+{
+  "name": "knowledge-collection-references",
+  "description": "knowledge-collection 的按需加载工作流、来源桥接、采集契约与交付边界索引。",
+  "skills": [
+    {
+      "name": "site-crawl",
+      "path": "site-crawl/SKILL.md",
+      "description": "站点文档爬取与产品解读报告。sitemap/llms.txt 发现 URL + frontier 维护覆盖面,取内容仍委派 bycli。嵌在深化研究的抓取环节。"
+    }
+  ],
+  "references": [
+    {
+      "name": "screenshot-collection",
+      "path": "screenshot-collection.md",
+      "description": "独立截图素材闭环：显式目标、只读 byCLI 采集、持久预算、Agent 哈希绑定审查、完整 PNG 校验与 ZIP 白名单。"
+    },
+    {
+      "name": "agent-reach",
+      "path": "agent-reach.md",
+      "description": "统一渠道选路、能力协商、执行计划、邮件接口与兼容工作流边界。"
+    },
+    {
+      "name": "public-internet",
+      "path": "sources/public-internet.md",
+      "description": "公共互联网来源执行规则、bycli 网页铁律、视频号统计采集/确认续采/物化与兜底/STOP 约束。"
+    },
+    {
+      "name": "research-methodology",
+      "path": "research-methodology.md",
+      "description": "递归树状深化研究方法论(默认模式)。"
+    },
+    {
+      "name": "collection-contract",
+      "path": "collection-contract.md",
+      "description": "session.json 采集状态、受控 collect payload 与视频号统计物化契约。"
+    },
+    {
+      "name": "delivery",
+      "path": "delivery.md",
+      "description": "只交付已验证 sanitized/items Markdown 的终止边界。"
+    },
+    {
+      "name": "online-search",
+      "path": "online-search.md",
+      "description": "腾讯 WSA/Search1API 与 hot-discovery 协同的公共网页 URL 发现、预算与恢复规则。"
+    }
+  ]
+}

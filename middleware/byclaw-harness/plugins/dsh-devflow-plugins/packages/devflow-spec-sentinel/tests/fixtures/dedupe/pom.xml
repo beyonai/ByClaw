@@ -1,0 +1,4 @@
+<project>
+  <groupId>org.springframework.samples</groupId>
+  <artifactId>spring-petclinic</artifactId>
+</project>

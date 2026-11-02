@@ -21,7 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * MiniMax image-generation model debugging service.
+ * Non-streaming image debugging with isolated MiniMax and Volcengine contracts.
  */
 @Service
 @Slf4j
@@ -32,6 +32,10 @@ public class ModelDebugImageGenerationApplicationService {
     private static final String PROTOCOL_MINIMAX_IMAGE = "MINIMAX_IMAGE";
 
     private static final String IMAGE_GENERATION_PATH = "/v1/image_generation";
+
+    private static final String PROTOCOL_VOLCENGINE_IMAGE = "VOLCENGINE_IMAGE";
+
+    private static final String VOLCENGINE_IMAGE_PATH = "/api/v3/images/generations";
 
     private static final String RESPONSE_FORMAT_URL = "url";
 
@@ -56,15 +60,23 @@ public class ModelDebugImageGenerationApplicationService {
     }
 
     /**
-     * Calls the configured MiniMax image generation endpoint and returns its parsed JSON body.
+     * Calls the configured image endpoint; existing MiniMax requests retain their original contract.
      *
      * @param body debug request containing a JSON string or object in {@code input}
      * @return sanitized upstream JSON body; HTTP response headers are never exposed
      */
     public JsonNode startImageGenerationDebug(Map<String, Object> body) {
         JsonNode input = parseInput(body == null ? null : body.get("input"));
-        validateProvider(input);
-        String url = validateUrl(textValue(input, "url"));
+        boolean volcengine = PROTOCOL_VOLCENGINE_IMAGE.equals(textValue(input, "modelProtocol"));
+        if (volcengine) {
+            if (!"VOLCENGINE".equals(ImageModelProviderResolver.resolve(
+                textValue(input, "providerName"), textValue(input, "modelProtocol")))) {
+                throw invalidInput();
+            }
+        } else {
+            validateProvider(input);
+        }
+        String url = validateUrl(textValue(input, "url"), volcengine ? VOLCENGINE_IMAGE_PATH : IMAGE_GENERATION_PATH);
         String authorization = bearerAuthorization(input.path("headers"));
         JsonNode param = input.path("param");
         if (!param.isObject()) {
@@ -74,13 +86,28 @@ public class ModelDebugImageGenerationApplicationService {
         if (responseFormat == null || responseFormat.isBlank()) {
             responseFormat = RESPONSE_FORMAT_URL;
         }
-        if (!RESPONSE_FORMAT_URL.equals(responseFormat) && !RESPONSE_FORMAT_BASE64.equals(responseFormat)) {
+        String base64Format = volcengine ? "b64_json" : RESPONSE_FORMAT_BASE64;
+        if (!RESPONSE_FORMAT_URL.equals(responseFormat) && !base64Format.equals(responseFormat)) {
             throw invalidInput();
         }
+        if (volcengine) {
+            validateVolcengineParam(param);
+        }
 
-        Request request = new Request.Builder().url(url).post(RequestBody.create(writeJson(param), JSON_MEDIA_TYPE))
+        Request.Builder builder = new Request.Builder().url(url).post(RequestBody.create(writeJson(param), JSON_MEDIA_TYPE))
             .header("Accept", "application/json").header("Content-Type", "application/json")
-            .header("Authorization", authorization).build();
+            .header("Authorization", authorization);
+        // Only the new provider branch forwards custom headers; MiniMax's transport stays unchanged.
+        if (volcengine) {
+            input.path("headers").fields().forEachRemaining(field -> {
+                String name = field.getKey();
+                if (field.getValue().isTextual() && !"Authorization".equalsIgnoreCase(name)
+                    && !"Content-Type".equalsIgnoreCase(name) && !"Accept".equalsIgnoreCase(name)) {
+                    builder.header(name, field.getValue().asText());
+                }
+            });
+        }
+        Request request = builder.build();
         OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(positiveTimeout(connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS), TimeUnit.MILLISECONDS)
             .readTimeout(positiveTimeout(readTimeoutMs, DEFAULT_READ_TIMEOUT_MS), TimeUnit.MILLISECONDS).build();
@@ -92,14 +119,18 @@ public class ModelDebugImageGenerationApplicationService {
                 throw upstreamFailure(response.code());
             }
             JsonNode parsed = objectMapper.readTree(responseJson);
-            validateResponse(parsed, responseFormat);
+            if (volcengine) {
+                validateVolcengineResponse(parsed, responseFormat);
+            } else {
+                validateResponse(parsed, responseFormat);
+            }
             return parsed;
         }
         catch (BaseException e) {
             throw e;
         }
         catch (IOException | RuntimeException e) {
-            log.warn("MiniMax image debug request failed, host={}, cause={}", safeHost(url),
+            log.warn("Image debug request failed, host={}, cause={}", safeHost(url),
                 e.getClass().getSimpleName());
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_50010, "aimodel.debug.upstream.error");
         }
@@ -125,16 +156,17 @@ public class ModelDebugImageGenerationApplicationService {
     }
 
     private void validateProvider(JsonNode input) {
-        if (!PROVIDER_MINIMAX.equals(textValue(input, "providerName"))
+        if (!PROVIDER_MINIMAX.equals(ImageModelProviderResolver.resolve(
+            textValue(input, "providerName"), textValue(input, "modelProtocol")))
             || !PROTOCOL_MINIMAX_IMAGE.equals(textValue(input, "modelProtocol"))) {
             throw invalidInput();
         }
     }
 
-    private String validateUrl(String url) {
+    private String validateUrl(String url, String expectedPath) {
         try {
             HttpUrl httpUrl = HttpUrl.get(url == null ? "" : url);
-            if (!IMAGE_GENERATION_PATH.equals(httpUrl.encodedPath())) {
+            if (!expectedPath.equals(httpUrl.encodedPath())) {
                 throw invalidInput();
             }
             return httpUrl.toString();
@@ -184,6 +216,35 @@ public class ModelDebugImageGenerationApplicationService {
         if (!images.isArray() || images.isEmpty() || !images.get(0).isTextual() || images.get(0).asText().isBlank()) {
             throw upstreamFailure(200);
         }
+    }
+
+    private void validateVolcengineParam(JsonNode param) {
+        String model = textValue(param, "model");
+        String prompt = textValue(param, "prompt");
+        // This JSON endpoint deliberately does not consume SSE; custom model / ep IDs remain valid.
+        if (model == null || model.isBlank() || prompt == null || prompt.isBlank()
+            || (param.has("stream") && (!param.get("stream").isBoolean() || param.get("stream").asBoolean()))) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.debug.image.input.invalid");
+        }
+    }
+
+    private void validateVolcengineResponse(JsonNode response, String responseFormat) {
+        if (response == null || !response.isObject() || response.hasNonNull("error")) {
+            throw upstreamFailure(200);
+        }
+        JsonNode images = response.path("data");
+        String field = "b64_json".equals(responseFormat) ? "b64_json" : "url";
+        if (!images.isArray() || images.isEmpty()) {
+            throw upstreamFailure(200);
+        }
+        // Keep the raw response, including item errors, when a multi-image request partially succeeds.
+        for (JsonNode item : images) {
+            String image = textValue(item, field);
+            if (!item.hasNonNull("error") && image != null && !image.isBlank()) {
+                return;
+            }
+        }
+        throw upstreamFailure(200);
     }
 
     private BaseException invalidInput() {

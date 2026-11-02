@@ -20,6 +20,12 @@ import Md from '@/components/Preview/Md';
 import { updateMessageStructById } from '@/service/message';
 import styles from './index.module.less';
 import { IMessageState } from '@/constants/message';
+import {
+  buildDshInteractionResumePayload,
+  isDshInteractionResume,
+  resolveDshResumeRoute,
+  resolveResumeTraceId,
+} from './resumePayload';
 
 type IAskUserQuestion = {
   question: string;
@@ -54,7 +60,7 @@ export type IMessageListItemContent = {
 
 export type IProps = {
   message: IMessage;
-  updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
+  updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => IMessage | void;
   messageListItemContent: IMessageListItemContent;
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
@@ -234,7 +240,9 @@ export function AskUserQuestions(props: IProps) {
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
-  const isDisabled = messageInfo.isHistoryMsg || isFinished || isPreviewMode || submitting;
+  // 会话重载后消息会被标记为历史消息；只要持久化表单仍未结束，快捷确认区仍需允许用户提交。
+  const isDisabled =
+    (messageInfo.isHistoryMsg && props.presentation !== 'dock') || isFinished || isPreviewMode || submitting;
 
   if (props.presentation !== 'dock') {
     if (!isFinished) return null;
@@ -468,15 +476,24 @@ export function AskUserQuestions(props: IProps) {
             loading={submitting}
             disabled={isDisabled || (isAskUserQuestion && !allQuestionsAnswered)}
             onClick={async () => {
+              const resumeTraceId = resolveResumeTraceId(messageInfo.traceId, messageListItemContent);
               const resumeMetadata = pickRawResumeMetadata(messageInfo, messageListItemContent);
-              const resumeRoute = getUserInteractionResumeRoute(resumeMetadata);
+              const resumeRoute = resolveDshResumeRoute(
+                getUserInteractionResumeRoute(resumeMetadata),
+                get(messageListItemContent, 'substance.interactionId')
+              );
+              const isDshResume = isDshInteractionResume(
+                sourceAgentType,
+                resumeRoute.interactionId,
+                resumeRoute.parentRunId
+              );
               const missingRouteFields = [
                 !resumeRoute.interactionId ? 'interaction_id' : undefined,
-                !resumeRoute.parentRunId ? 'parent_run_id' : undefined,
+                !isDshResume && !resumeRoute.parentRunId ? 'parent_run_id' : undefined,
               ].filter(Boolean);
               if (missingRouteFields.length > 0) {
                 console.error('[ASK_USER_QUESTION_RESUME_TRACE] FE_SUBMIT_UNROUTABLE', {
-                  traceId: messageInfo.traceId,
+                  traceId: resumeTraceId,
                   sessionId: messageInfo.sessionId,
                   messageId: messageInfo.messageId,
                   resumeMessageId,
@@ -525,9 +542,12 @@ export function AskUserQuestions(props: IProps) {
               const payload: Record<string, unknown> = {
                 actionType: 'RESUME',
                 llmMessageId: messageInfo.messageId,
-                traceId: messageInfo.traceId,
+                traceId: resumeTraceId,
                 sourceAgentType,
                 resumeMessageId,
+                ...(isDshResume
+                  ? buildDshInteractionResumePayload(resumeRoute.interactionId, submittedAnswers, questions)
+                  : {}),
               };
               if (resumeMetadata !== undefined) {
                 payload.metadata = resumeMetadata;
@@ -547,15 +567,16 @@ export function AskUserQuestions(props: IProps) {
                   content: JSON.stringify(persistedContent),
                   updateField,
                   sessionId: messageInfo.sessionId,
-                  traceId: messageInfo.traceId,
+                  traceId: resumeTraceId,
                 });
 
-                updateMessageListItemContent(finishedContent);
+                const finishedAnswerMessage = updateMessageListItemContent(finishedContent);
                 EventEmitter.emit('beyond-chat-on-send-msg', {
                   sendProps: {
                     queryQuestion,
                     payload,
                     inheritQryMsgId: messageInfo.queryMsgId,
+                    resumeAnswerMsg: finishedAnswerMessage,
                     msgOpt: {
                       answerMsg: {
                         messageState: IMessageState.Query,

@@ -7,7 +7,7 @@ import java.util.Date;
 
 import org.junit.jupiter.api.Test;
 
-class DevloopTaskListQueryDtoTest {
+class DevloopTaskListQueryDtoTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void normalizesPaginationDefaultsAndMaximumPageSize() {

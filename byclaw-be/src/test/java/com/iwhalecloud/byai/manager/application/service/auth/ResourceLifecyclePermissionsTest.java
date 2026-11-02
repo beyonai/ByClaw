@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.auth;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -8,7 +10,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** 列表与单条查询共同调用的权限规则，状态与创建者身份必须同时满足。 */
-class ResourceLifecyclePermissionsTest {
+class ResourceLifecyclePermissionsTest extends I18nTestSupport {
     @org.junit.jupiter.api.BeforeEach
     void clearUserContext() {
         com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo();

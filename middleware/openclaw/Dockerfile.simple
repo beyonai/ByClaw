@@ -76,6 +76,8 @@ RUN set -eux; \
 ## ── stage 2: final image ─────────────────────────────────────────
 FROM ghcr.io/openclaw/openclaw:2026.6.6
 
+ENV BYCLAW_DATA_ROOT=/by
+
 USER root
 
 RUN chown root:root /app
@@ -129,7 +131,7 @@ RUN ln -s /app /app/node_modules/openclaw
 # start-openclaw.sh can be reused without changes.
 COPY middleware/openclaw/runtime-bootstrap.simple.sh /usr/local/bin/openclaw-runtime-bootstrap
 COPY middleware/openclaw/start-openclaw.sh          /usr/local/bin/start-openclaw.sh
-COPY middleware/openclaw/runtime-tools/              /usr/local/lib/byclaw/runtime-tools/
+COPY middleware/builtin/runtime-tools/              /usr/local/lib/byclaw/runtime-tools/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
     /usr/local/bin/start-openclaw.sh

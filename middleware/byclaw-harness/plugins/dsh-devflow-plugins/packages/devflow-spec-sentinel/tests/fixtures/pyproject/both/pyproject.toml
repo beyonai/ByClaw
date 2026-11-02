@@ -1,0 +1,5 @@
+[project]
+name = "pep621-name"
+
+[tool.poetry]
+name = "poetry-name"

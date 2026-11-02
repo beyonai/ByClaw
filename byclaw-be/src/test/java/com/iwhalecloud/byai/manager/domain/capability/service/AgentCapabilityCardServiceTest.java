@@ -18,7 +18,7 @@ import com.iwhalecloud.byai.manager.dto.capability.AgentCapabilityCompileResult;
  *
  * @author tangs
  */
-class AgentCapabilityCardServiceTest {
+class AgentCapabilityCardServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private AgentCapabilityCardService service;
 
@@ -144,7 +144,7 @@ class AgentCapabilityCardServiceTest {
         AgentCapabilityCompileInput input = input("  ", "描述");
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("name is required");
+            .hasMessageContaining("数字员工名称不能为空");
     }
 
     @Test
@@ -156,7 +156,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("At least one capability source");
+            .hasMessageContaining("至少需要一个能力来源");
     }
 
     @Test
@@ -167,7 +167,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("invalid JSON");
+            .hasMessageContaining("能力模型返回的 JSON 无效");
     }
 
     @Test
@@ -178,7 +178,7 @@ class AgentCapabilityCardServiceTest {
 
         assertThatThrownBy(() -> service.compile(input))
             .isInstanceOf(BaseException.class)
-            .hasMessageContaining("No JSON object found");
+            .hasMessageContaining("未找到 JSON 对象");
     }
 
     @Test

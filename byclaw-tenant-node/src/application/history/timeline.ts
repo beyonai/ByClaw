@@ -1,3 +1,4 @@
+import { passiveAgentMessage } from "./forward-projection.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId } from "../../domain/values.js";
 import type { Row } from "./contracts.js";
@@ -74,7 +75,7 @@ export class TimelineHistory extends HistoryAccess {
         if (message.content.length > maxCharacters)
           message.content = message.content.slice(0, maxCharacters);
         if (agentContext && message.replyTo?.usage === 5) delete message.replyTo;
-        return message;
+        return agentContext ? passiveAgentMessage(message) : message;
       }),
       snapshot: {
         beforeMessageId: boundary,

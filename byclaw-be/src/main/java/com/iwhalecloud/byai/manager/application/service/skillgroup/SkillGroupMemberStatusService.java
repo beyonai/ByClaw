@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.skillgroup;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -95,7 +97,7 @@ public class SkillGroupMemberStatusService {
     private Long requireCurrentTenant() {
         Long tenantId = CurrentUserHolder.getEnterpriseId();
         if (tenantId == null) {
-            throw new BaseException("当前用户企业信息缺失");
+            throw new BaseException(I18nUtil.get("user.enterprise.required"));
         }
         return tenantId;
     }

@@ -52,7 +52,7 @@ const TokenQuotaModal = ({ visible, record, onCancel, onOk, dispatch }) => {
           onOk?.();
         },
         fail: (res) => {
-          message.error(res?.msg || 'Failed');
+          message.error(res?.msg || intl.formatMessage({ id: 'orgMgr.members.assignTokenQuota.failed' }));
           setLoading(false);
         },
       });

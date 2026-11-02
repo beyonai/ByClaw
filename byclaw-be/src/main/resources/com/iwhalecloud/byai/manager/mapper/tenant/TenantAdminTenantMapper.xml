@@ -16,6 +16,9 @@
         <result property="createdAt" column="created_at"/>
         <result property="openedAt" column="opened_at"/>
         <result property="failureReason" column="failure_reason"/>
+        <result property="commandStatus" column="command_status"/>
+        <result property="commandStage" column="command_stage"/>
+        <result property="commandErrorCode" column="command_error_code"/>
         <result property="createdBy" column="created_by"/>
     </resultMap>
 
@@ -38,6 +41,8 @@
                CASE WHEN s.params_value::jsonb -&gt;&gt; 'status' = 'READY'
                     THEN to_char(s.updated_at, 'YYYY-MM-DD HH24:MI:SS') END AS opened_at,
                f.params_value AS failure_reason,
+               recovery_command.status AS command_status, recovery_command.stage AS command_stage,
+               recovery_command.error_code AS command_error_code,
                m.user_id AS created_by
         FROM byai.tenant_config r
         JOIN byai.po_enterprise_info e ON e.enterprise_id = r.enterprise_id
@@ -45,6 +50,11 @@
         LEFT JOIN byai.tenant_config n ON n.enterprise_id = e.enterprise_id AND n.params_code = 'PACKAGE_NAME_SNAPSHOT'
         LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
+        LEFT JOIN byai.tenant_config commercial ON commercial.enterprise_id = e.enterprise_id AND commercial.params_code = 'COMMERCIAL_MANAGED'
+        LEFT JOIN byai.tenant_task recovery_command ON recovery_command.id = (
+            SELECT c.id FROM byai.tenant_task c WHERE c.enterprise_id = e.enterprise_id
+            AND c.type = 'PROVISION' AND commercial.params_value = 'true' ORDER BY c.created_at DESC,c.id DESC LIMIT 1
+        )
         WHERE r.params_code = 'PROVISION_REQUEST_ID' AND r.params_value = #{requestId}
     </select>
 
@@ -55,12 +65,19 @@
                CASE WHEN s.params_value::jsonb -&gt;&gt; 'status' = 'READY'
                     THEN to_char(s.updated_at, 'YYYY-MM-DD HH24:MI:SS') END AS opened_at,
                f.params_value AS failure_reason,
+               recovery_command.status AS command_status, recovery_command.stage AS command_stage,
+               recovery_command.error_code AS command_error_code,
                m.user_id AS created_by
         FROM byai.po_enterprise_info e
         JOIN byai.tenant_config r ON r.enterprise_id = e.enterprise_id AND r.params_code = 'PROVISION_REQUEST_ID'
         LEFT JOIN byai.tenant_config n ON n.enterprise_id = e.enterprise_id AND n.params_code = 'PACKAGE_NAME_SNAPSHOT'
         LEFT JOIN byai.tenant_config s ON s.enterprise_id = e.enterprise_id AND s.params_code = 'PROVISION_STATE'
         LEFT JOIN byai.tenant_config f ON f.enterprise_id = e.enterprise_id AND f.params_code = 'PROVISION_FAILURE_REASON'
+        LEFT JOIN byai.tenant_config commercial ON commercial.enterprise_id = e.enterprise_id AND commercial.params_code = 'COMMERCIAL_MANAGED'
+        LEFT JOIN byai.tenant_task recovery_command ON recovery_command.id = (
+            SELECT c.id FROM byai.tenant_task c WHERE c.enterprise_id = e.enterprise_id
+            AND c.type = 'PROVISION' AND commercial.params_value = 'true' ORDER BY c.created_at DESC,c.id DESC LIMIT 1
+        )
         LEFT JOIN byai.tenant_user_membership m ON m.enterprise_id = e.enterprise_id AND m.role = 'OWNER'
         <where>
             AND (s.params_value IS NULL OR s.params_value::jsonb -&gt;&gt; 'status' != 'DELETED')

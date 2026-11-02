@@ -16,7 +16,7 @@ describe('adapter recorder scoped styles', () => {
     );
 
     expect(pageSource).toContain("import styles from './index.module.less';");
-    expect(pageSource).toContain("import { useSelector } from '@umijs/max';");
+    expect(pageSource).toMatch(/import \{[^}]*\buseSelector\b[^}]*\} from '@umijs\/max';/);
     expect(pageSource).toContain("import UserIdentityBar from './components/UserIdentityBar';");
     expect(pageSource).toContain('const userInfo = useSelector(({ user }) => user.userInfo);');
     expect(pageSource).toContain('<aside className={styles.sidebar}');

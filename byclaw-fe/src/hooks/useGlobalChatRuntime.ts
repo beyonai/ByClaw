@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMultiTenancy } from '@/utils/multiTenancy';
 import { isEqual } from 'lodash';
 import { useDispatch, useSelector } from '@umijs/max';
@@ -18,6 +18,7 @@ import type { ISession } from '@/typescript/session';
 import type { TaskPlanSnapshot } from '@/typescript/message';
 
 type State = {
+  session?: { sessionList?: ISession[] };
   user: {
     userInfo?: {
       userId?: string | number;
@@ -33,6 +34,9 @@ export default function useGlobalChatRuntime() {
   const dispatch = useDispatch();
   const userInfo = useSelector((state: State) => state.user.userInfo);
 
+  const sessions = useSelector((state: State) => state.session?.sessionList);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const userId = userInfo?.userId;
 
   useEffect(() => {
@@ -117,10 +121,42 @@ export default function useGlobalChatRuntime() {
       }
     };
 
+    // Title generation can finish after the turn or after navigation to another session.
+    const handleSessionEvent = (message: {
+      event?: string;
+      sessionId?: string;
+      data?: string | { sessionName?: string; previousSessionName?: string; updateTime?: string | number };
+    }) => {
+      if (message.event !== 'sessionTitleUpdated' || !message.sessionId) return;
+      try {
+        const payload = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
+        if (!payload || typeof payload.sessionName !== 'string' || !payload.sessionName.trim()) return;
+        const current = sessionsRef.current?.find((session) => `${session.sessionId}` === `${message.sessionId}`);
+        if (
+          current &&
+          typeof payload.previousSessionName === 'string' &&
+          current.sessionName !== payload.previousSessionName
+        ) {
+          return; // A local rename already superseded this delayed generated-title event.
+        }
+        dispatch({
+          type: 'session/updateSession',
+          payload: {
+            sessionId: `${message.sessionId}`,
+            sessionName: payload.sessionName,
+            updateTime: payload.updateTime,
+          },
+        });
+      } catch {
+        // Ignore malformed optional title updates; persisted titles are loaded with the session list.
+      }
+    };
+
     webSocketManager.onMessage('ERROR', handleChatStreamError);
     webSocketManager.onMessage('NOTIFICATION', handleNotification);
     webSocketManager.onMessage('TASK_PLAN_SNAPSHOT', handleTaskPlan);
     webSocketManager.onMessage('SESSION_RUNTIME_STATUS', handleSessionRuntime);
+    webSocketManager.onMessage('SESSION_EVENT', handleSessionEvent);
 
     return () => {
       unsubscribeChatStream();
@@ -128,6 +164,7 @@ export default function useGlobalChatRuntime() {
       webSocketManager.offMessage('NOTIFICATION', handleNotification);
       webSocketManager.offMessage('TASK_PLAN_SNAPSHOT', handleTaskPlan);
       webSocketManager.offMessage('SESSION_RUNTIME_STATUS', handleSessionRuntime);
+      webSocketManager.offMessage('SESSION_EVENT', handleSessionEvent);
     };
   }, [dispatch, userId, loaded, enabled]);
 }

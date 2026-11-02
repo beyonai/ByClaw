@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-27-devflow-artifact-kinds-and-store-written-content.md
+2026-08-27-devflow-artifact-kinds-and-store-written-content.md: 6f98a9049791448f09cc20c6e1cbf2fb79223e94
+2026-08-27-devflow-artifact-kinds-and-store-written-content.zh.md: d1ae7be42fd241d48879c9949d6e90f095042fd6

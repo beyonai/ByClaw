@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper">
+  <resultMap id="sandbox" type="com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo">
+    <id column="id" property="id" />
+    <result column="owner_scope" property="ownerScope" />
+    <result column="enterprise_id" property="enterpriseId" />
+    <result column="resource_id" property="resourceId" />
+    <result column="user_code" property="userCode" />
+    <result column="user_name" property="userName" />
+    <result column="enterprise_name" property="enterpriseName" />
+    <result column="sandbox_type" property="sandboxType" />
+    <result column="sandbox_id" property="sandboxId" />
+    <result column="profile_key" property="profileKey" />
+    <result column="status" property="status" />
+    <result column="create_time" property="createTime" />
+    <result column="last_access_time" property="lastAccessTime" />
+    <result column="lock_version" property="lockVersion" />
+    <result column="current_record" property="currentRecord" />
+    <result column="user_active" property="userActive" />
+  </resultMap>
+  <sql id="current">
+    NOT EXISTS(SELECT 1 FROM byai.ss_sandbox_record newer
+      WHERE newer.owner_scope=s.owner_scope AND newer.sandbox_type=s.sandbox_type
+        AND newer.resource_id IS NOT DISTINCT FROM s.resource_id
+        AND newer.user_code IS NOT DISTINCT FROM s.user_code
+        AND newer.enterprise_id IS NOT DISTINCT FROM s.enterprise_id AND newer.id&gt;s.id)
+  </sql>
+  <sql id="columns">
+    s.id,s.owner_scope,s.enterprise_id,s.resource_id,s.user_code,s.sandbox_type,s.sandbox_id,
+    s.profile_key,s.status,s.create_time,s.last_access_time,s.lock_version,
+    u.user_name,e.com_acct_name AS enterprise_name,
+    (<include refid="current" />) AS current_record,
+    (u.state='A' AND UPPER(COALESCE(u.is_locked,'N'))!='Y'
+      AND (u.user_exp_date IS NULL OR u.user_exp_date&gt;CURRENT_TIMESTAMP)) AS user_active
+  </sql>
+  <sql id="source">
+    FROM byai.ss_sandbox_record s
+    LEFT JOIN byai.po_users u ON u.user_code=s.user_code
+    LEFT JOIN byai.po_enterprise_info e ON e.enterprise_id=s.enterprise_id
+  </sql>
+  <select id="selectRows" resultMap="sandbox">
+    SELECT <include refid="columns" /> <include refid="source" />
+    WHERE s.owner_scope IN ('USER','TENANT')
+    <if test="query.keyword != ''">
+      AND (POSITION(LOWER(#{query.keyword}) IN LOWER(COALESCE(u.user_name,'')||' '||
+        COALESCE(s.user_code,'')||' '||COALESCE(e.com_acct_name,'')||' '||s.id::text))&gt;0)
+    </if>
+    <if test="query.enterpriseId != null">AND s.enterprise_id=#{query.enterpriseId}</if>
+    <if test="query.status != ''">AND s.status=#{query.status}</if>
+    <if test="query.ownerScope != ''">AND s.owner_scope=#{query.ownerScope}</if>
+    ORDER BY s.create_time DESC NULLS LAST,s.id DESC
+  </select>
+  <select id="selectDetail" resultMap="sandbox">
+    SELECT <include refid="columns" /> <include refid="source" /> WHERE s.id=#{id}
+      AND s.owner_scope IN ('USER','TENANT')
+  </select>
+  <update id="claim">
+    UPDATE byai.ss_sandbox_record s SET lock_version=COALESCE(s.lock_version,0)+1,update_time=CURRENT_TIMESTAMP
+    WHERE s.id=#{record.id} AND COALESCE(s.lock_version,0)=COALESCE(#{record.lockVersion,jdbcType=INTEGER},0)
+      AND s.status=#{record.status} AND (<include refid="current" />)
+    <if test="action == 'start'">
+      AND EXISTS(SELECT 1 FROM byai.po_users u WHERE u.user_code=s.user_code
+        AND u.state='A' AND UPPER(COALESCE(u.is_locked,'N'))!='Y'
+        AND (u.user_exp_date IS NULL OR u.user_exp_date&gt;CURRENT_TIMESTAMP))
+    </if>
+  </update>
+</mapper>
+

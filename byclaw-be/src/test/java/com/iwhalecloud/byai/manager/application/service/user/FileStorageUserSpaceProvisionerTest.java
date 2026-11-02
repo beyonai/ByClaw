@@ -44,6 +44,9 @@ class FileStorageUserSpaceProvisionerTest {
 
     private FileStorageUserSpaceProvisioner provisioner(String fileRoot) {
         FileStorageUserSpaceProvisioner provisioner = new FileStorageUserSpaceProvisioner();
+        ReflectionTestUtils.setField(provisioner, "platformStorageRouting",
+            new com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBusinessStorageRouting(
+                org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway.class), null));
         ReflectionTestUtils.setField(provisioner, "fileRoot", fileRoot);
         return provisioner;
     }

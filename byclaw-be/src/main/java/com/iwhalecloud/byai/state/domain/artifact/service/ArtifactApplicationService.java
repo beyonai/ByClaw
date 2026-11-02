@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
@@ -101,7 +103,7 @@ public class ArtifactApplicationService {
             String calculatedSha256 = calculateSha256(file);
             if (StringUtils.isNotBlank(expectedSha256)
                 && !calculatedSha256.equalsIgnoreCase(expectedSha256.trim())) {
-                throw new IllegalArgumentException("上传文件SHA-256校验失败");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.checksumFailed"));
             }
             record.setSha256(calculatedSha256);
             record.setContentType(ArtifactMediaTypeResolver.resolve(originalName, readPrefix(file, 512)));
@@ -127,7 +129,7 @@ public class ArtifactApplicationService {
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new IllegalStateException("Artifact发布失败", e);
+            throw new IllegalStateException(I18nUtil.get("artifact.publish.failed"), e);
         }
     }
 
@@ -149,7 +151,7 @@ public class ArtifactApplicationService {
         LocalDateTime now = LocalDateTime.now();
         if (!ArtifactStatus.READY.name().equals(current.getStatus())
             || current.getPurgeAt() == null || !current.getPurgeAt().isAfter(now)) {
-            throw new IllegalArgumentException("Artifact已进入删除流程或超过物理保留期限，无法更新");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.updateUnavailable"));
         }
 
         String originalName = safeOriginalName(file.getOriginalFilename());
@@ -170,7 +172,7 @@ public class ArtifactApplicationService {
             String calculatedSha256 = calculateSha256(file);
             if (StringUtils.isNotBlank(expectedSha256)
                 && !calculatedSha256.equalsIgnoreCase(expectedSha256.trim())) {
-                throw new IllegalArgumentException("上传文件SHA-256校验失败");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.checksumFailed"));
             }
             replacement.setSha256(calculatedSha256);
             replacement.setContentType(ArtifactMediaTypeResolver.resolve(originalName, readPrefix(file, 512)));
@@ -193,7 +195,7 @@ public class ArtifactApplicationService {
             int updated = artifactMapper.replaceContent(replacement, current.getOwnerUserId(), previousOriginalKey,
                 previousContentPrefix, now);
             if (updated != 1) {
-                throw new IllegalArgumentException("Artifact已被更新或当前不可修改，请重新获取后重试");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.updateConflict"));
             }
             activated = true;
             applyContentMetadata(current, replacement);
@@ -212,7 +214,7 @@ public class ArtifactApplicationService {
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new IllegalStateException("Artifact更新失败", e);
+            throw new IllegalStateException(I18nUtil.get("artifact.updateFailed"), e);
         }
     }
 
@@ -225,7 +227,7 @@ public class ArtifactApplicationService {
         LocalDateTime now = LocalDateTime.now();
         if (!ArtifactStatus.READY.name().equals(record.getStatus())
             || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(now)) {
-            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.renewUnavailable"));
         }
 
         LocalDateTime expiresAt = now.plusSeconds(ttlSeconds);
@@ -234,7 +236,7 @@ public class ArtifactApplicationService {
         int updated = artifactMapper.renewExpiration(
             artifactId, record.getOwnerUserId(), expiresAt, purgeAt, now);
         if (updated != 1) {
-            throw new IllegalArgumentException("Artifact已超过物理保留期限或进入删除流程，无法续约");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.renewUnavailable"));
         }
         record.setExpiresAt(expiresAt);
         record.setPurgeAt(purgeAt);
@@ -256,7 +258,7 @@ public class ArtifactApplicationService {
     public void requirePublicDataAccessible(String artifactId) {
         ArtifactRecord record = resolvePublicAccess(artifactId);
         if (record == null) {
-            throw new IllegalArgumentException("Artifact不存在或已过期");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.notFound"));
         }
         requireRetainedHtmlDataAccessible(record);
     }
@@ -266,16 +268,16 @@ public class ArtifactApplicationService {
      */
     public void requireManagementDataAccessible(String artifactId, String accessKey) {
         if (StringUtils.isAnyBlank(artifactId, accessKey)) {
-            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.manageDenied"));
         }
         ArtifactRecord record = artifactMapper.selectById(artifactId);
         if (record == null || StringUtils.isBlank(record.getAccessKeyHash())) {
-            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.manageDenied"));
         }
         byte[] actual = sha256Hex(accessKey.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.US_ASCII);
         byte[] expected = record.getAccessKeyHash().getBytes(StandardCharsets.US_ASCII);
         if (!MessageDigest.isEqual(actual, expected)) {
-            throw new IllegalArgumentException("Artifact不存在或管理访问密钥无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.manageDenied"));
         }
         requireRetainedHtmlDataAccessible(record);
         renewPurgeAfterAccess(record);
@@ -335,7 +337,7 @@ public class ArtifactApplicationService {
         boolean zip = isZip(file, record.getOriginalName());
         if (!zip) {
             if (mode == ArtifactPublishMode.SITE && !ArtifactMediaTypeResolver.isHtml(record.getOriginalName())) {
-                throw new IllegalArgumentException("SITE模式只支持ZIP站点或单个HTML文件");
+                throw new IllegalArgumentException(I18nUtil.get("artifact.site.formatUnsupported"));
             }
             ArtifactKind kind = mode == ArtifactPublishMode.DOWNLOAD_ONLY
                 ? ArtifactKind.DOWNLOAD_ONLY : ArtifactKind.FILE;
@@ -351,7 +353,7 @@ public class ArtifactApplicationService {
         String normalizedEntryPoint = normalizeEntryPoint(requestedEntryPoint);
         boolean entryExists = extraction.paths().contains(normalizedEntryPoint);
         if (!entryExists && mode == ArtifactPublishMode.SITE) {
-            throw new IllegalArgumentException("ZIP中不存在站点入口: " + normalizedEntryPoint);
+            throw new IllegalArgumentException(I18nUtil.get("artifact.entry.notFound", normalizedEntryPoint));
         }
         if (!entryExists) {
             return new Publication(ArtifactKind.DOWNLOAD_ONLY, null, extraction.expandedSize(), extraction.warnings());
@@ -377,7 +379,7 @@ public class ArtifactApplicationService {
         ArtifactRecord record = artifactMapper.selectById(artifactId);
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         if (record == null || currentUserId == null || !currentUserId.equals(record.getOwnerUserId())) {
-            throw new IllegalArgumentException("Artifact不存在");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.missing"));
         }
         return record;
     }
@@ -388,7 +390,7 @@ public class ArtifactApplicationService {
         if (!ArtifactStatus.READY.name().equals(record.getStatus())
             || record.getPurgeAt() == null || !record.getPurgeAt().isAfter(LocalDateTime.now())
             || !htmlArtifact) {
-            throw new IllegalArgumentException("Artifact数据已不可访问");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.dataUnavailable"));
         }
     }
 
@@ -483,17 +485,17 @@ public class ArtifactApplicationService {
 
     private void validateUpload(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("上传文件不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.upload.required"));
         }
         if (file.getSize() > properties.getMaxUploadBytes()) {
-            throw new IllegalArgumentException("上传文件超过300MB限制");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.upload.tooLarge"));
         }
     }
 
     private long validateExpiry(Long expiresInSeconds) {
         long value = expiresInSeconds == null ? properties.getDefaultExpiresSeconds() : expiresInSeconds;
         if (value <= 0 || value > properties.getMaxExpiresSeconds()) {
-            throw new IllegalArgumentException("expiresInSeconds必须大于0且不超过" + properties.getMaxExpiresSeconds());
+            throw new IllegalArgumentException(I18nUtil.get("artifact.expiry.limit", String.valueOf(properties.getMaxExpiresSeconds())));
         }
         return value;
     }
@@ -528,7 +530,7 @@ public class ArtifactApplicationService {
                 || (signature[2] == 7 && signature[3] == 8));
         boolean zipExtension = fileName.toLowerCase(Locale.ROOT).endsWith(".zip");
         if (zipExtension && !zipSignature) {
-            throw new IllegalArgumentException("ZIP文件格式无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.zip.invalid"));
         }
         return zipSignature;
     }
@@ -576,7 +578,7 @@ public class ArtifactApplicationService {
         int slash = value.lastIndexOf('/');
         value = slash >= 0 ? value.substring(slash + 1) : value;
         if (value.isBlank() || ".".equals(value) || "..".equals(value)) {
-            throw new IllegalArgumentException("上传文件名无效");
+            throw new IllegalArgumentException(I18nUtil.get("artifact.filename.invalid"));
         }
         return value;
     }
@@ -587,7 +589,7 @@ public class ArtifactApplicationService {
 
     private String normalizeEntryPoint(String entryPoint) {
         String value = StringUtils.defaultIfBlank(entryPoint, "index.html").replace('\\', '/');
-        return normalizeRelativePath(value, "站点入口路径无效");
+        return normalizeRelativePath(value, I18nUtil.get("artifact.entryPath.invalid"));
     }
 
     private String normalizeRequestedPath(String requestedPath) {
@@ -598,7 +600,7 @@ public class ArtifactApplicationService {
         if (value.isBlank()) {
             return "";
         }
-        return normalizeRelativePath(value, "预览资源路径无效");
+        return normalizeRelativePath(value, I18nUtil.get("artifact.previewPath.invalid"));
     }
 
     private String normalizeRelativePath(String value, String errorMessage) {

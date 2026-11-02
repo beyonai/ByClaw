@@ -133,3 +133,13 @@ export const DEFAULT_DIGITAL_EMPLOYEE_GROUP_TEMPLATES = [
     tip: '填写数字员工组的任务拆分、成员调度、结果汇总和安全边界',
   },
 ];
+
+// 仅翻译系统默认提示，自定义模板说明与保存内容保持原样。
+export const localizeDefaultTemplateTip = (tip: string) => {
+  const messageIds: Record<string, string> = {
+    '填写整体工作准则、响应要求与行为边界，约束大模型整体输出风格': 'employee.template.workTip',
+    '填写数字员工组的任务拆分、成员调度、结果汇总和安全边界': 'employee.template.groupWorkTip',
+  };
+  const id = messageIds[tip];
+  return id ? getIntl().formatMessage({ id }) : tip;
+};

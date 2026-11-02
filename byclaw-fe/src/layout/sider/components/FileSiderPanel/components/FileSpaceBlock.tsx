@@ -47,6 +47,7 @@ interface FileSpaceBlockProps {
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+  expandAction?: false | 'click' | 'doubleClick';
 
   /** 是否显示文件/文件夹下方的大小、更新时间和创建人员信息。 */
   showItemMeta?: boolean;
@@ -63,6 +64,7 @@ interface FileSpaceBlockProps {
   /** 项目代码可通过接口 URL 覆盖文件悬浮提示路径。 */
   getTooltipPath?: (item: FileBrowserItem) => string | undefined;
   getNodeExtra?: (item: FileTreeItem) => React.ReactNode;
+  getDisplayName?: (item: FileBrowserItem) => string;
 }
 
 export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
@@ -95,6 +97,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   accordionGroups = false,
   groupCollapseResetKey,
   showActions = false,
+  expandAction = 'click',
   showItemMeta = true,
   onRefresh,
   onSwitchChange,
@@ -106,6 +109,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   onAction,
   getTooltipPath,
   getNodeExtra,
+  getDisplayName,
   style,
 }) => {
   // 分组文件数量使用语言包处理英文单复数。
@@ -169,6 +173,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         loading={treeLoading}
         emptyText={treeEmptyText}
         showActions={showActions}
+        expandAction={expandAction}
         showItemMeta={showItemMeta}
         onExpand={onExpand}
         onLoadData={onLoadData}
@@ -178,6 +183,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         onAction={onAction || noopAction}
         getTooltipPath={getTooltipPath}
         getNodeExtra={getNodeExtra}
+        getDisplayName={getDisplayName}
       />
     </div>
   );

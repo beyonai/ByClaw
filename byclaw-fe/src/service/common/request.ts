@@ -1,3 +1,4 @@
+import { showNasQuotaError } from '@/utils/nasQuota';
 import { ERROR_CODE, EXCEED_LIMITED_LOGIN_NUMBER, TOKEN_ERROR_CODE } from '@/constants/error/errorCode';
 import {
   type AuthSnapshot,
@@ -12,6 +13,7 @@ import {
   loginRedirect,
 } from '@/utils/auth';
 import { generateSignature } from '@/utils/signature';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { getLocale, history, getIntl } from '@umijs/max';
 import { message } from 'antd';
 import { showRequestErrorModal } from '@/utils/antdAppModal';
@@ -121,13 +123,18 @@ function checkFactoryRes(
     return Promise.reject();
   }
 
+  if (code !== 0) {
+    const quotaMessage = showNasQuotaError(resData);
+    if (quotaMessage) return Promise.reject(quotaMessage);
+  }
+
   if (customHandle) {
     return resData;
   }
 
   // 请求没报错，但接口code返回不为0，提示接口url和接口返回的错误信息
   if (code !== 0) {
-    const errText = !isNil(msg) && String(msg).trim() !== '' ? String(msg) : '请求失败';
+    const errText = localizeErrorMessage(msg, getIntl().formatMessage({ id: 'common.requestFailed' }), getLocale());
     if (!hideErrorTips) {
       showRequestErrorModal(errText);
     }
@@ -259,6 +266,8 @@ instance.interceptors.response.use(
     const { config, response } = err;
     const status = err.status ?? response?.status;
     const { url } = config || {};
+    const quotaMessage = showNasQuotaError(response?.data);
+    if (quotaMessage) return Promise.reject(quotaMessage);
     if (status === 409 && config?.preserveErrorResponse && response) {
       return Promise.reject(err);
     }
@@ -288,7 +297,11 @@ instance.interceptors.response.use(
     }
 
     // 请求报错，返回错误码信息通过useRequest的onError中去提示
-    const errMsg = String(get(response, 'data.msg') || ERROR_CODE[status] || response?.statusText || '网络异常');
+    const errMsg = localizeErrorMessage(
+      get(response, 'data.msg') || ERROR_CODE[status] || response?.statusText,
+      getIntl().formatMessage({ id: 'common.requestFailed' }),
+      getLocale()
+    );
     return Promise.reject(errMsg);
   }
 );
@@ -339,8 +352,12 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
   });
 
   // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
-  return getDesktopLocalRequest(url, method, myData).then((desktop) =>
-    instance
+  return getDesktopLocalRequest(url, method, myData).then(async (desktop) => {
+    if (!desktop && /\/(?:chat\/uploadFiles|datasetController\/uploadFiles|fileBrowser\/)/.test(url)) {
+      const { requiresPersonalStorage, waitForPersonalStorage } = await import('@/utils/personalStorageReadiness');
+      if (requiresPersonalStorage(url)) await waitForPersonalStorage(cancelToken?.signal);
+    }
+    return instance
       .request({
         ...config,
         headers: desktop ? desktopHeaders(desktop.token) : headers,
@@ -383,8 +400,8 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
         }
         return checkFactoryRes(res.data, res, responseCfg);
       })
-      .finally(() => requestFinish({ url }))
-  );
+      .finally(() => requestFinish({ url }));
+  });
 }
 
 /**

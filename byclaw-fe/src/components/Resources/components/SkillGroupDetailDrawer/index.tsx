@@ -372,6 +372,9 @@ const SkillGroupDetailDrawer: React.FC<SkillGroupDetailDrawerProps> = ({ groupId
     if (skill.manualSource) {
       sources.push(intl.formatMessage({ id: 'resource.skillGroup.manualSource' }));
     }
+    if (skill.automaticSource) {
+      sources.push(intl.formatMessage({ id: 'resource.skillGroup.automaticSource' }));
+    }
     if (skill.otherGroupNames.length) {
       sources.push(
         intl.formatMessage({ id: 'resource.skillGroup.otherGroupSource' }, { groups: skill.otherGroupNames.join('、') })

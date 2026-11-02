@@ -1,3 +1,4 @@
+import { inputMetadata } from "../../domain/input-metadata.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { InputState } from "../../application/mirror-ports.js";
 import type { MirrorEnvelope } from "../../domain/mirror.js";
@@ -95,7 +96,7 @@ export class MirrorInputWriter {
   }
   async insertInput(event: MirrorEnvelope): Promise<void> {
     const metadata: Record<string, unknown> = {
-      ...event.payload.metadata,
+      ...inputMetadata(event.payload.metadata),
       clientRequestId: event.clientRequestId,
     };
     delete metadata.groupPublicContext;

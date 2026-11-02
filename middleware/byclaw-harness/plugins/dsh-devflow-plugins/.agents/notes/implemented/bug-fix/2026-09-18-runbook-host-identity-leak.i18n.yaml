@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state.
+2026-09-18-runbook-host-identity-leak.md: 67ed60b0b93837f07003de2282462c4309d93ff5
+2026-09-18-runbook-host-identity-leak.zh.md: a2f2608536a23639797c9828d13ed569b717bbf7

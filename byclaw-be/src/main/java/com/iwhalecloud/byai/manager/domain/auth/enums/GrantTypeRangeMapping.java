@@ -13,6 +13,7 @@ public enum GrantTypeRangeMapping {
     FORCE_USE(GrantType.FORCE_USE, "2", "强制使用"),
     ALLOW_MANAGE(GrantType.ALLOW_MANAGE, "3", "管理授权"),
     SHARE_USE(GrantType.SHARE_USE, "4", "分享授权"),
+    ALLOW_VIEW(GrantType.ALLOW_VIEW, "6", "查看授权"),
     OWNER(GrantType.OWNER, "5", "归属授权");
 
     private final String grantType;

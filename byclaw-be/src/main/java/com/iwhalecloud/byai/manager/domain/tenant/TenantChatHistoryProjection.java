@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.MessageView;
 
 /** Adapts plain worker replies to the existing chat history rendering contract. */
-final class TenantChatHistoryProjection {
+public final class TenantChatHistoryProjection {
 
     private static final Pattern THINK_BLOCK = Pattern.compile("(?s)^\\s*<think>(.*?)</think>\\s*");
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -17,7 +17,7 @@ final class TenantChatHistoryProjection {
     private TenantChatHistoryProjection() {
     }
 
-    static MessageView project(MessageView message) {
+    public static MessageView project(MessageView message) {
         if (message != null) {
             message.setMessageStruct(numericRenderSequences(message.getMessageStruct()));
             message.setInferLog(numericRenderSequences(message.getInferLog()));
@@ -39,7 +39,7 @@ final class TenantChatHistoryProjection {
         return message;
     }
 
-    static List<MessageView> project(List<MessageView> messages) {
+    public static List<MessageView> project(List<MessageView> messages) {
         if (messages != null) messages.forEach(TenantChatHistoryProjection::project);
         return messages;
     }

@@ -4,6 +4,9 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.alibaba.fastjson.JSONObject;
@@ -40,6 +43,8 @@ public class ExternalChildSessionService {
 
     public static final String EXT_EVENT_SOURCE = "event_source";
 
+    private static final String EXT_EXTERNAL_RUN_MESSAGE_PREFIX = "external_run_message_";
+
     private final SessionService sessionService;
 
     private final SessionExtService sessionExtService;
@@ -49,6 +54,10 @@ public class ExternalChildSessionService {
     private final TransactionTemplate bindingTransaction;
 
     private final Map<String, ExternalChildSessionBinding> bindings = new ConcurrentHashMap<>();
+
+    private final Map<String, ExternalChildSessionBinding> runBindings = new ConcurrentHashMap<>();
+
+    private final Map<Long, JSONObject> latestRuns = new ConcurrentHashMap<>();
 
     private final Map<String, Object> bindingLocks = new ConcurrentHashMap<>();
 
@@ -104,6 +113,94 @@ public class ExternalChildSessionService {
             bindingLocks.remove(bindingKey, lock);
             return binding;
         }
+    }
+
+    /** Return a distinct durable message binding for one child execution turn. */
+    public ExternalChildSessionBinding ensureRunBinding(Long parentSessionId, JSONObject metadata) {
+        ExternalChildSessionBinding sessionBinding = ensureBinding(parentSessionId, metadata);
+        String runId = metadata == null ? null : StringUtils.trimToNull(metadata.getString("child_run_id"));
+        if (runId == null) return sessionBinding;
+        String bindingKey = parentSessionId + ":" + sessionBinding.externalSessionId() + ":" + runId;
+        ExternalChildSessionBinding cached = runBindings.get(bindingKey);
+        if (cached != null) return cached;
+        Object lock = bindingLocks.computeIfAbsent(bindingKey, key -> new Object());
+        synchronized (lock) {
+            cached = runBindings.get(bindingKey);
+            if (cached != null) return cached;
+            String extCode = EXT_EXTERNAL_RUN_MESSAGE_PREFIX + sha256(runId);
+            ExternalChildSessionBinding binding = Objects.requireNonNull(bindingTransaction.execute(status -> {
+                ByaiSessionExt existing = sessionExtService.findOneByExtParamCode(sessionBinding.session().getSessionId(), extCode);
+                if (existing != null && StringUtils.isNumeric(existing.getExtParamValue())) {
+                    return new ExternalChildSessionBinding(sessionBinding.session(), sessionBinding.externalSessionId(),
+                        Long.valueOf(existing.getExtParamValue()));
+                }
+                Long messageId = sequenceService.nextVal();
+                ByaiSessionExt runMessage = new ByaiSessionExt();
+                runMessage.setExtId(sequenceService.nextVal());
+                runMessage.setSessionId(sessionBinding.session().getSessionId());
+                runMessage.setExtParamCode(extCode);
+                runMessage.setExtParamName("外部子会话运行消息标识");
+                runMessage.setExtParamValue(String.valueOf(messageId));
+                sessionExtService.save(runMessage);
+                return new ExternalChildSessionBinding(sessionBinding.session(), sessionBinding.externalSessionId(), messageId);
+            }));
+            runBindings.put(bindingKey, binding);
+            bindingLocks.remove(bindingKey, lock);
+            return binding;
+        }
+    }
+
+    private String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte item : digest) result.append(String.format("%02x", item));
+            return result.toString();
+        }
+        catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    /** Event-only watermark; resolving a historical task link must never advance this marker. */
+    public boolean isStaleRun(ExternalChildSessionBinding binding, JSONObject metadata) {
+        Long turn = metadata.getLong("child_turn");
+        String runId = StringUtils.trimToNull(metadata.getString("child_run_id"));
+        if (turn == null || runId == null) return false;
+        Long sessionId = binding.session().getSessionId();
+        JSONObject cached = latestRuns.get(sessionId);
+        if (cached != null && turn <= cached.getLong("turn")) {
+            return turn < cached.getLong("turn") || !runId.equals(cached.getString("runId"));
+        }
+        JSONObject marker = new JSONObject();
+        marker.put("turn", turn);
+        marker.put("runId", runId);
+        boolean stale = Boolean.TRUE.equals(bindingTransaction.execute(status -> {
+            String code = "external_latest_run";
+            ByaiSessionExt existing = sessionExtService.findOneByExtParamCode(sessionId, code);
+            JSONObject previous = existing == null ? null : JSONObject.parseObject(existing.getExtParamValue());
+            Long previousTurn = previous == null ? null : previous.getLong("turn");
+            if (previousTurn != null) {
+                if (turn < previousTurn || turn.equals(previousTurn) && !runId.equals(previous.getString("runId"))) return true;
+                if (turn.equals(previousTurn)) return false;
+            }
+            if (existing == null) {
+                ByaiSessionExt extension = new ByaiSessionExt();
+                extension.setExtId(sequenceService.nextVal());
+                extension.setSessionId(sessionId);
+                extension.setExtParamCode(code);
+                extension.setExtParamName("外部子会话当前运行轮次");
+                extension.setExtParamValue(marker.toJSONString());
+                sessionExtService.save(extension);
+            }
+            else {
+                existing.setExtParamValue(marker.toJSONString());
+                sessionExtService.update(existing);
+            }
+            return false;
+        }));
+        if (!stale) latestRuns.put(sessionId, marker);
+        return stale;
     }
 
     private ExternalChildSessionBinding findExisting(Long parentSessionId, String externalSessionId) {

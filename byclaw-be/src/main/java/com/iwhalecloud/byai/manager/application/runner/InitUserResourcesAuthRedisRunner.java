@@ -52,6 +52,9 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
     @Value("${INIT_USER_AUTH_RESOURCES_REDIS_ENABLED:false}")
     private boolean loadUserAuthEnabled;
 
+    @Value("${BE_ENV:}")
+    private String beEnv;
+
     @Value("${load.to.redis.batchSize:1000}")
     private int batchSize;
 
@@ -83,10 +86,15 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
     }
 
     void initialize() {
-        try {
-            groupAuthorizationBackfillService.backfill();
-        } catch (Exception e) {
-            logger.error("数字员工组存量授权补齐失败", e);
+        // 开发环境只跳过启动补齐，正常业务授权及缓存同步仍沿用原有链路。
+        if ("development".equals(beEnv)) {
+            logger.info("BE_ENV=development，跳过数字员工组存量授权补齐");
+        } else {
+            try {
+                groupAuthorizationBackfillService.backfill();
+            } catch (Exception e) {
+                logger.error("数字员工组存量授权补齐失败", e);
+            }
         }
         if (loadUserAuthEnabled) {
             doFullInit();

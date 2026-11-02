@@ -80,6 +80,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
+ENV BYCLAW_DATA_ROOT=/by
+
 USER root
 
 ARG OPENCLAW_VERSION
@@ -263,14 +265,14 @@ RUN set -eux; \
 # Install the repository-owned Python CLIs into the image's global Python 3.12
 # environment. Copy only package metadata and source so local venvs, tests, and
 # build artifacts never enter the image.
-COPY middleware/openclaw/callcli/pyproject.toml /tmp/byclaw-python-clis/callcli/pyproject.toml
-COPY middleware/openclaw/callcli/src/ /tmp/byclaw-python-clis/callcli/src/
-COPY middleware/openclaw/dbcli/pyproject.toml /tmp/byclaw-python-clis/dbcli/pyproject.toml
-COPY middleware/openclaw/dbcli/src/ /tmp/byclaw-python-clis/dbcli/src/
-COPY middleware/openclaw/kbcli/pyproject.toml /tmp/byclaw-python-clis/kbcli/pyproject.toml
-COPY middleware/openclaw/kbcli/src/ /tmp/byclaw-python-clis/kbcli/src/
-COPY middleware/openclaw/groksearchcli/pyproject.toml /tmp/byclaw-python-clis/groksearchcli/pyproject.toml
-COPY middleware/openclaw/groksearchcli/src/ /tmp/byclaw-python-clis/groksearchcli/src/
+COPY middleware/builtin/python-clis/callcli/pyproject.toml /tmp/byclaw-python-clis/callcli/pyproject.toml
+COPY middleware/builtin/python-clis/callcli/src/ /tmp/byclaw-python-clis/callcli/src/
+COPY middleware/builtin/python-clis/dbcli/pyproject.toml /tmp/byclaw-python-clis/dbcli/pyproject.toml
+COPY middleware/builtin/python-clis/dbcli/src/ /tmp/byclaw-python-clis/dbcli/src/
+COPY middleware/builtin/python-clis/kbcli/pyproject.toml /tmp/byclaw-python-clis/kbcli/pyproject.toml
+COPY middleware/builtin/python-clis/kbcli/src/ /tmp/byclaw-python-clis/kbcli/src/
+COPY middleware/builtin/python-clis/groksearchcli/pyproject.toml /tmp/byclaw-python-clis/groksearchcli/pyproject.toml
+COPY middleware/builtin/python-clis/groksearchcli/src/ /tmp/byclaw-python-clis/groksearchcli/src/
 
 RUN set -eux; \
     python3 -m pip install --no-cache-dir \
@@ -313,10 +315,10 @@ RUN set -eux; \
 RUN ln -s /app /app/node_modules/openclaw
 
 
-COPY middleware/openclaw/skills/ /app/skills/
+COPY middleware/builtin/skills/ /app/skills/
 RUN python3 /app/skills/mail/scripts/mailctl.py --help >/dev/null \
     && python3 -m compileall -q /app/skills/mail/scripts
-COPY middleware/openclaw/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
+COPY middleware/builtin/runtime-tools/ /usr/local/lib/byclaw/runtime-tools/
 
 RUN cd /app/skills/knowledge-collection/scripts \
     && npm ci --omit=dev --prefer-offline

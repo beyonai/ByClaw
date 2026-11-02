@@ -11,12 +11,14 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.men.TaskOperateTypeEnum;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
@@ -32,6 +34,8 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class GatewayStreamEventProcessor {
 
+    private static final String DSH_RESUME_ACKNOWLEDGEMENT = "RESUMED";
+
     @Autowired
     private PythonSseService pythonSseService;
 
@@ -43,6 +47,46 @@ public class GatewayStreamEventProcessor {
 
     @Autowired
     private RunningChatSnapshotService runningChatSnapshotService;
+
+    @Autowired
+    private TargetAgentResolver targetAgentResolver;
+
+    @Autowired(required = false)
+    private ModelErrorPresentationService modelErrorPresentationService = new ModelErrorPresentationService();
+
+    @Autowired(required=false)
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway quotaGateway;
+
+    /** Runtime attribution requires a trusted storage marker. Generic EDQUOT only triggers a capacity recheck. */
+    public void enrichQuotaError(ChatProcessContext ctx, JSONObject metadata, JSONObject payload) {
+        if (ctx == null || ctx.tenantContext != null || ctx.loginInfo == null || quotaGateway == null
+            || !quotaGateway.isRemote()) return;
+        if (metadata != null && "MODEL".equals(metadata.getString("error_domain"))) return;
+        boolean personalNas = metadata != null && "STORAGE".equals(metadata.getString("error_domain"))
+            && "NAS_QUOTA_EXCEEDED".equals(metadata.getString("error_code"))
+            && "USER_NAS".equals(metadata.getString("storage_scope"));
+        String error = metadata == null ? null : metadata.getString("error");
+        if (error == null) error = payload.getString("message");
+        boolean filesystemQuota = error != null
+            && java.util.regex.Pattern.compile("(?i)(\\bEDQUOT\\b|disk quota exceeded)").matcher(error).find();
+        if (!personalNas && !filesystemQuota) return;
+        try {
+            String request = ctx.currentStreamId == null ? java.util.UUID.randomUUID().toString() : "stream-" + ctx.currentStreamId;
+            Map<String, Object> quota = personalNas
+                ? quotaGateway.reportQuotaRejection(ctx.loginInfo.getUserCode(), request)
+                : quotaGateway.recheckPersonalQuota(ctx.loginInfo.getUserCode());
+            if (quota != null && "NAS_QUOTA_EXCEEDED".equals(quota.get("errorType"))) {
+                payload.put("quota", quota);
+                payload.put("errorCode", "NAS_QUOTA_EXCEEDED");
+            }
+        } catch (RuntimeException unavailable) {
+            log.warn("NAS quota rejection check unavailable: {}", unavailable.getClass().getSimpleName());
+            if (personalNas) {
+                payload.put("quota", java.util.Collections.singletonMap("errorType", "NAS_QUOTA_EXCEEDED"));
+                payload.put("errorCode", "NAS_QUOTA_EXCEEDED");
+            }
+        }
+    }
 
     private final Map<String, HistoryBatch> historyBatchMap = new ConcurrentHashMap<>();
 
@@ -104,10 +148,13 @@ public class GatewayStreamEventProcessor {
     }
 
     public String buildEventData(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
+        JSONObject clientMetadata = clientSafeMetadata(metadata);
         // Normalize before stripping the Gateway envelope: final_content can live at its top level.
         if (FinalAnswerContent.isFinalEvent(dataJson.getString("event_type"))) {
             JSONObject finalPayload = new JSONObject();
             finalPayload.put("final_content", FinalAnswerContent.extract(dataJson));
+            JSONObject diagnostics = ChatReplyLog.envelope(dataJson);
+            if (diagnostics != null) finalPayload.put("chatChain", diagnostics);
             return finalPayload.toJSONString();
         }
         String eventData = dataJson.getString("data");
@@ -123,21 +170,26 @@ public class GatewayStreamEventProcessor {
             eventPayload.remove("stream_id");
             eventPayload.put("sessionId", sessionId);
             eventPayload.put("streamId", streamId);
-            if (metadata != null && !metadata.isEmpty()) {
-                eventPayload.put("metadata", metadata.toJSONString());
+            eventPayload.put("runtimeType", targetAgentResolver.resolveRuntimeType(sourceAgentType));
+            if (clientMetadata != null && !clientMetadata.isEmpty()) {
+                eventPayload.put("metadata", clientMetadata.toJSONString());
             }
+            if(SseResponseEventEnum.error.equals(dataJson.getString("event_type")))enrichQuotaError(ctx,metadata,eventPayload);
             enrichLaneMetadata(ctx, dataJson, metadata, eventPayload);
             return eventPayload.toJSONString();
         }
         try {
             JSONObject dataObj = JSON.parseObject(eventData);
             if (dataObj != null) {
+                applyModelErrorPresentation(dataObj, metadata);
+                if(SseResponseEventEnum.error.equals(dataJson.getString("event_type")))enrichQuotaError(ctx,metadata,dataObj);
                 dataObj.put("sourceAgentType", sourceAgentType);
+                dataObj.put("runtimeType", targetAgentResolver.resolveRuntimeType(sourceAgentType));
                 dataObj.put("sessionId", sessionId);
                 dataObj.put("traceId", traceId);
                 dataObj.put("streamId", streamId);
-                if (metadata != null && !metadata.isEmpty()) {
-                    dataObj.put("metadata", metadata.toJSONString());
+                if (clientMetadata != null && !clientMetadata.isEmpty()) {
+                    dataObj.put("metadata", clientMetadata.toJSONString());
                 }
                 enrichLaneMetadata(ctx, dataJson, metadata, dataObj);
                 if (StringUtils.isNotBlank(dataObj.getString("parentOrderId"))
@@ -151,6 +203,39 @@ public class GatewayStreamEventProcessor {
         catch (Exception e) {
             return eventData;
         }
+    }
+
+    public String presentErrorMessage(JSONObject metadata, String fallback) {
+        return modelErrorPresentationService == null
+            ? fallback
+            : modelErrorPresentationService.present(metadata, fallback);
+    }
+
+    private JSONObject clientSafeMetadata(JSONObject metadata) {
+        if (metadata == null || !"MODEL".equals(metadata.getString("error_domain"))) {
+            return metadata;
+        }
+        JSONObject safe = new JSONObject(metadata);
+        safe.remove("provider_code");
+        safe.remove("provider_message");
+        return safe;
+    }
+
+    private void applyModelErrorPresentation(JSONObject dataObj, JSONObject metadata) {
+        if (dataObj == null || metadata == null || modelErrorPresentationService == null
+            || !"MODEL".equals(metadata.getString("error_domain")) || dataObj.getJSONArray("choices") == null) {
+            return;
+        }
+        dataObj.getJSONArray("choices").forEach(item -> {
+            if (!(item instanceof JSONObject choice)) {
+                return;
+            }
+            JSONObject delta = choice.getJSONObject("delta");
+            if (delta == null || !delta.containsKey("content")) {
+                return;
+            }
+            delta.put("content", modelErrorPresentationService.present(metadata, delta.getString("content")));
+        });
     }
 
     public String normalizeEventType(ChatProcessContext ctx, JSONObject dataJson) {
@@ -180,8 +265,31 @@ public class GatewayStreamEventProcessor {
 
     public boolean shouldIgnoreEvent(ChatProcessContext ctx, String eventType, JSONObject dataJson) {
         String sourceAgentType = dataJson.getString("source_agent_type");
+        if (isDshResumeAcknowledgement(eventType, dataJson, sourceAgentType)) {
+            log.info("过滤 DSH 内部恢复确认事件, sessionId: {}, traceId: {}, streamId: {}",
+                ctx == null ? null : ctx.sessionId, dataJson.getString("trace_id"), dataJson.getString("stream_id"));
+            return true;
+        }
         return !isTargetAgentType(ctx, sourceAgentType)
             && (SseResponseEventEnum.appStreamResponse.equals(eventType) || FinalAnswerContent.isFinalEvent(eventType));
+    }
+
+    private boolean isDshResumeAcknowledgement(String eventType, JSONObject dataJson, String sourceAgentType) {
+        if (!SseResponseEventEnum.reasoningLogDelta.equals(eventType)
+            || !StringUtils.startsWith(sourceAgentType, WorkerAgentType.BYCLAW_DSH.getCode()) || dataJson == null) {
+            return false;
+        }
+        try {
+            JSONObject payload = JSON.parseObject(dataJson.getString("data"));
+            return payload != null
+                && MessageContentTypeEnum.THINK_TITLE.getCode().equals(payload.getString("contentType"))
+                && DSH_RESUME_ACKNOWLEDGEMENT.equals(StringUtils.trim(
+                    payload.getJSONArray("choices").getJSONObject(0).getJSONObject("delta").getString("content")));
+        }
+        catch (RuntimeException ignored) {
+            // Malformed gateway payloads continue through the normal parser/error path.
+            return false;
+        }
     }
 
     public void enrichLaneMetadata(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata, JSONObject payload) {

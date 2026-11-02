@@ -53,7 +53,25 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @DisabledOnOs(OS.WINDOWS)
-class ConnectorAuthorizationServiceTest {
+class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void cachedProviderErrorsUseTheViewersLocaleWithoutChangingStatusOrExternalDetails() {
+        RedisAuthorizationSession session = terminalSession(
+            AuthorizationStatus.FAILED, 12L, "PROVIDER_START_FAILED", "Unable to start Lark authorization");
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(session));
+        ConnectorAuthorizationDto chinese = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(chinese.getErrorMessage()).isEqualTo("飞书授权启动失败");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        ConnectorAuthorizationDto english = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(english.getErrorMessage()).isEqualTo("Unable to start Lark authorization");
+        assertThat(english.getStatus()).isEqualTo("failed");
+        assertThat(english.getErrorCode()).isEqualTo("PROVIDER_START_FAILED");
+        assertThat(session.errorMessage()).isEqualTo("Unable to start Lark authorization");
+        assertThat(ConnectorMessages.localize("Provider detail: account 9007199254740993"))
+            .isEqualTo("Provider detail: account 9007199254740993");
+        verifyNoInteractions(providerRegistry);
+    }
 
     @Test
     void callbackUsesOwnedPendingSessionAndFinalizesProviderResult() {

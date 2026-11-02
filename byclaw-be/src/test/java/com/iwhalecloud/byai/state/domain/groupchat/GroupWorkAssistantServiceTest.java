@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import java.util.Collection;
 import java.util.List;
 
@@ -22,7 +23,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class GroupWorkAssistantServiceTest {
+class GroupWorkAssistantServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiSystemConfigService config = mock(ByaiSystemConfigService.class);
     private final GroupWorkAssistantMapper mapper = mock(GroupWorkAssistantMapper.class);
     private final SsResourceService resources = mock(SsResourceService.class);
@@ -97,4 +103,14 @@ class GroupWorkAssistantServiceTest {
         assertThat(service.getDefaultAssistants()).isEmpty();
         verifyNoInteractions(resources);
     }
+
+    @Test
+    void missingCoordinatorIsLocalizedBeforeAnyGroupMembershipWrite() {
+        when(mapper.findCandidates("群组工作助手")).thenReturn(List.of());
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(service::resolveDefaultCoordinatorId).hasMessage("请配置且仅配置一个群组工作助手");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(service::resolveDefaultCoordinatorId).hasMessage("Configure exactly one group work assistant");
+    }
+
 }

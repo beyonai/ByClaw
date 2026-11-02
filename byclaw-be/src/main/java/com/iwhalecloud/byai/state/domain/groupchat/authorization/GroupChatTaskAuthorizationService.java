@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.authorization;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -34,7 +36,7 @@ public class GroupChatTaskAuthorizationService {
     public ByaiGroupChatTask requireTask(Long taskId) {
         ByaiGroupChatTask task = taskMapper.selectById(taskId);
         if (task == null) {
-            throw new IllegalArgumentException("Group task not found");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.notFound"));
         }
         return task;
     }
@@ -43,7 +45,7 @@ public class GroupChatTaskAuthorizationService {
         ByaiGroupChatTask task = requireTask(taskId);
         groupAuthorizationService.requireCurrentUserMember(task.getGroupSessionId());
         if (!task.getInitiatorUserId().equals(CurrentUserHolder.getCurrentUserId())) {
-            throw new IllegalArgumentException("Only task initiator can access unpublished task content");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.privateAccessDenied"));
         }
         return task;
     }
@@ -52,13 +54,13 @@ public class GroupChatTaskAuthorizationService {
     public ByaiGroupChatTask requireActiveAgent(Long taskId, Long agentId) {
         ByaiGroupChatTask task = requireInitiator(taskId);
         if (!"ACTIVE".equals(task.getStatus())) {
-            throw new IllegalArgumentException("Group task does not accept a new turn");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.newTurnDenied"));
         }
         if (agentId == null
             || memberService.findSessionMember(task.getGroupSessionId(), MemObjType.AGENT.name(), agentId) == null
             || resourceService.findById(agentId) == null
             || !resourceAuthService.getAuthContextBo().isAuthResourceId(agentId)) {
-            throw new IllegalArgumentException("Agent is not an authorized group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.agentDenied"));
         }
         return task;
     }
@@ -69,7 +71,7 @@ public class GroupChatTaskAuthorizationService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (!task.getInitiatorUserId().equals(userId) && !UserRole.OWNER.name().equals(member.getUserRole())
             && !UserRole.ADMIN.name().equals(member.getUserRole())) {
-            throw new IllegalArgumentException("Task cannot be cancelled by current user");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.task.cancelDenied"));
         }
         return task;
     }

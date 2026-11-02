@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.deepseek;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -19,7 +21,12 @@ import org.junit.jupiter.api.Test;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-class DeepSeekWebSearchRuntimeServiceTest {
+class DeepSeekWebSearchRuntimeServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
 
     private final ConnectorInfoService connectorInfoService = mock(ConnectorInfoService.class);
     private final ConnectorConnectionStateService connectionStateService = mock(ConnectorConnectionStateService.class);
@@ -290,4 +297,18 @@ class DeepSeekWebSearchRuntimeServiceTest {
         authorization.setStatusCd("00A");
         return authorization;
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(value = {
+        "zh-CN|maxResults 必须为 1 至 20|queries 至少需要一条查询",
+        "en-US|maxResults must be between 1 and 20|queries must contain at least one query"
+    }, delimiter = '|')
+    void invalidRequestsAreLocalizedBeforeCallingTheProvider(String language, String maximum, String query) {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
+        assertThatThrownBy(() -> service.search(42L, "query", 1000))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage(maximum);
+        assertThatThrownBy(() -> service.search(42L, List.of(), 1))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage(query);
+        org.mockito.Mockito.verifyNoInteractions(client, batchExecutor, connectorInfoService);
+    }
+
 }

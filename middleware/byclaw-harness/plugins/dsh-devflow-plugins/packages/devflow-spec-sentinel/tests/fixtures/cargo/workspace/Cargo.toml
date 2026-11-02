@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/*", "tools/cli"]
+
+[package]
+name = "root-crate"
+version = "0.1.0"

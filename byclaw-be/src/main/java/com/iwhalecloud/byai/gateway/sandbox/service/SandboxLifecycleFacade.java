@@ -16,6 +16,10 @@ import java.util.Map;
  */
 public interface SandboxLifecycleFacade {
 
+    /** True only when the ID is known to belong to another execution engine. */
+    default boolean isForeignSandbox(String sandboxId) { return false; }
+
+
     SandboxResponse<SandboxLaunchData> launchSandbox(SandboxLaunchRequest request);
 
     SandboxResponse<Void> removeSandbox(SandboxInfo sandboxInfo);

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.authorization;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,7 +19,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorCredentialSecretEn
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorCredentialSecretMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class ConnectorCredentialSecretStoreTest {
+class ConnectorCredentialSecretStoreTest extends I18nTestSupport {
 
     @Test
     void referenceLookupUsesReferenceOwnerAndActiveStatus() {

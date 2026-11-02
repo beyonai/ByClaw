@@ -9,3 +9,13 @@ export const filterSessionRootItems = (items: FileBrowserItem[], repos: Pick<Dev
   );
   return items.filter((item) => !isDirectory(item) || !repoNames.has(item.name));
 };
+
+export const CANONICAL_SESSION_ROOT = '/by/.sessions/';
+
+export const appendProjectSessionsDirectory = (
+  items: FileBrowserItem[],
+  sessionId: string | number
+): FileBrowserItem[] => [
+  { name: '.sessions', path: `${CANONICAL_SESSION_ROOT}${sessionId}/`, isDir: true },
+  ...items.filter((item) => item.name !== '.sessions'),
+];

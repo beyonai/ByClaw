@@ -41,7 +41,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-class SkillGroupControllerTest {
+class SkillGroupControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Map<String, EndpointContract> ENDPOINTS = endpoints();
 

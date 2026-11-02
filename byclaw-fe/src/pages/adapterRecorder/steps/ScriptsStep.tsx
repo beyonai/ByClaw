@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // 拆步③ 测试保存页:展示生成的脚本,每个脚本有「测试」(单草稿真 verify)和「保存」(单存)按钮。
 // 可逐个测/存,保存后卡片标记已存,停留本页(不自动结束会话)。
 import { useEffect, useState } from 'react';
@@ -41,6 +42,7 @@ export default function ScriptsStep({
   onSaveDraft,
   onBack,
 }: Props) {
+  const intl = useIntl();
   // 每个草稿(可能编辑过的)源码,按 draft.id 索引。drafts 变化时按新 id 集重置。
   const [sources, setSources] = useState<Record<string, string>>({});
   const draftKey = (drafts ?? []).map((d) => d.id).join('|');
@@ -56,20 +58,24 @@ export default function ScriptsStep({
 
   if (!drafts?.length) {
     return (
-      <Card title="③ 测试并保存脚本" variant="borderless">
-        <Alert type="warning" showIcon message="LLM 未产出可用脚本" description="可返回上一步重新生成,或返回重录。" />
+      <Card title={intl.formatMessage({ id: 'adapterRecorder.scripts.title' })} variant="borderless">
+        <Alert
+          type="warning"
+          showIcon
+          message={intl.formatMessage({ id: 'adapterRecorder.scripts.empty' })}
+          description={intl.formatMessage({ id: 'adapterRecorder.scripts.emptyHint' })}
+        />
         <Button style={{ marginTop: 12 }} icon={<ArrowLeftOutlined />} onClick={onBack}>
-          上一步
+          {intl.formatMessage({ id: 'projectSpace.onboarding.action.prev' })}
         </Button>
       </Card>
     );
   }
 
   return (
-    <Card title="③ 测试并保存脚本" variant="borderless">
+    <Card title={intl.formatMessage({ id: 'adapterRecorder.scripts.title' })} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.7 }}>
-        每个脚本可单独「测试」(真跑 verify,看抽到几行/几字段)与「保存」(写入 ~/.bycli/clis/)。可逐个测、逐个存;
-        保存后可继续处理其他脚本，也可再次保存；再次保存时若文件仍存在会先询问是否覆盖。
+        {intl.formatMessage({ id: 'adapterRecorder.scripts.description' })}
       </Paragraph>
 
       {savedAdapters?.length ? (
@@ -77,7 +83,10 @@ export default function ScriptsStep({
           type="success"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`已成功保存 ${savedAdapters.length} 个脚本到 ${relativeSavedPath}`}
+          message={intl.formatMessage(
+            { id: 'adapterRecorder.scripts.saved' },
+            { v0: savedAdapters.length, v1: relativeSavedPath }
+          )}
         />
       ) : null}
 
@@ -101,24 +110,32 @@ export default function ScriptsStep({
                   icon={<ExperimentOutlined />}
                   loading={verifying}
                   disabled={(loading && !verifying) || !d.filePath}
-                  title={!d.filePath ? '无可测文件(静态检查未通过或写盘失败)' : undefined}
+                  title={!d.filePath ? intl.formatMessage({ id: 'adapterRecorder.scripts.unavailable' }) : undefined}
                   onClick={() => onVerifyDraft(d.id, source)}
                 >
-                  测试(verify)
+                  {intl.formatMessage({ id: 'adapterRecorder.scripts.verify' })}
                 </Button>
                 <Button
                   type="primary"
                   icon={saved ? <CheckCircleFilled /> : <SaveOutlined />}
                   loading={loading && !verifying}
                   disabled={loading || sourceChanged || !d.usable}
-                  title={sourceChanged || !d.usable ? '源码已修改或尚未通过测试，请先重新测试' : undefined}
+                  title={
+                    sourceChanged || !d.usable
+                      ? intl.formatMessage({ id: 'adapterRecorder.scripts.reverifyHint' })
+                      : undefined
+                  }
                   onClick={() => onSaveDraft(d.id, source)}
                 >
-                  {saved ? '再次保存' : '保存'}
+                  {saved
+                    ? intl.formatMessage({ id: 'adapterRecorder.scripts.saveAgain' })
+                    : intl.formatMessage({ id: 'common.save' })}
                 </Button>
                 {(sourceChanged || !d.usable) && !saved && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {sourceChanged ? '源码已修改，请重新测试后保存' : '请先测试通过再保存'}
+                    {sourceChanged
+                      ? intl.formatMessage({ id: 'adapterRecorder.scripts.changedHint' })
+                      : intl.formatMessage({ id: 'adapterRecorder.scripts.verifyFirst' })}
                   </Text>
                 )}
               </Space>
@@ -129,7 +146,7 @@ export default function ScriptsStep({
 
       <div style={{ marginTop: 12 }}>
         <Button icon={<ArrowLeftOutlined />} disabled={loading} onClick={onBack}>
-          上一步:重新生成
+          {intl.formatMessage({ id: 'adapterRecorder.scripts.previous' })}
         </Button>
       </div>
     </Card>

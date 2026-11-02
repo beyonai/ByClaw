@@ -1,3 +1,4 @@
+import { isSnapshotOnly } from "../../application/history/forward-projection.js";
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
@@ -13,10 +14,11 @@ export async function acknowledgeMessage(context: CommandContext) {
   const member = await context.member();
   const message = await first(
     db,
-    "SELECT m.creator_id FROM byai.byai_message m JOIN byai.byai_session s ON s.session_id=m.session_id WHERE m.message_id=$1 AND m.session_id=$2 AND s.enterprise_id=$3 AND m.enterprise_id=$3 AND s.session_type='hs_as' AND m.recalled_at IS NULL",
+    "SELECT m.creator_id,m.metadata FROM byai.byai_message m JOIN byai.byai_session s ON s.session_id=m.session_id WHERE m.message_id=$1 AND m.session_id=$2 AND s.enterprise_id=$3 AND m.enterprise_id=$3 AND s.session_type='hs_as' AND m.recalled_at IS NULL",
     [messageId, command.sessionId, command.enterpriseId],
   );
   if (!member || !message) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  if (isSnapshotOnly(message.metadata)) throw new DomainError("FORBIDDEN");
   const mentioned = await first(
     db,
     "SELECT 1 FROM byai.byai_group_chat_mention WHERE group_session_id=$1 AND message_id=$2 AND mentioned_user_id=$3",

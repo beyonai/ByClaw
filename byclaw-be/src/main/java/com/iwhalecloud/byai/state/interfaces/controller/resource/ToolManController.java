@@ -119,6 +119,15 @@ public class ToolManController {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService authApplicationService;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService enterpriseResourceSyncService;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper resourceSyncJobMapper;
+
+    @Autowired
     private ResourceApplicationService resourceApplicationService;
 
     @Autowired
@@ -265,7 +274,14 @@ public class ToolManController {
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
-            return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"), data);
+            String message = "tool.resource.import.success";
+            if (data.get("association") instanceof Map<?, ?> association
+                && !"NOT_REQUESTED".equals(association.get("status"))) {
+                message = Boolean.TRUE.equals(association.get("effective")) ? "tool.resource.sync.effective"
+                    : List.of("PENDING", "RUNNING").contains(association.get("status"))
+                        ? "tool.resource.sync.processing" : "tool.resource.sync.incomplete";
+            }
+            return ResponseUtil.successResponse(I18nUtil.get(message), data);
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -1366,6 +1382,8 @@ public class ToolManController {
         if (resolvedSkillId == null) {
             return ResponseUtil.fail(I18nUtil.get("byclaw.skill.resource.id.empty"));
         }
+        try { validateControlledResourceContent(resolvedSkillId); }
+        catch (IllegalArgumentException exception) { return ResponseUtil.fail(exception.getMessage()); }
         SsResExtSkill extSkill = ssResExtSkillService.findById(resolvedSkillId);
         if (extSkill == null || StringUtils.isBlank(extSkill.getVersion())) {
             return ResponseUtil.fail(I18nUtil.get("byclaw.skill.version.notfound"));
@@ -1503,6 +1521,7 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
+            if (finalSkillId != null) validateControlledResourceContent(finalSkillId);
             if (request != null && Boolean.TRUE.equals(request.getPersonalWorkspace()) && finalSkillId == null) {
                 resolvedUserCode = CurrentUserHolder.getCurrentUserCode();
                 finalResourceId = byClawSkillQueryApplicationService.resolveMySkillSource(finalSkillPath);
@@ -1842,6 +1861,7 @@ public class ToolManController {
      */
     @PostMapping("/mcp/listTools")
     public ResponseUtil<McpSchema.ListToolsResult> listTools(@RequestBody ResourceIdDto resourceIdDto) {
+        validateControlledResourceContent(resourceIdDto.getResourceId());
         McpSchema.ListToolsResult listToolsResult = ssResExtMcpService.listTools(resourceIdDto);
         return ResponseUtil.success(listToolsResult);
     }
@@ -1854,7 +1874,51 @@ public class ToolManController {
      */
     @PostMapping("/mcp/callToolRequest")
     public ResponseUtil<McpSchema.CallToolResult> callToolRequest(@RequestBody CallMcpParamsDto callMcpParamsDto) {
+        validateControlledResourceContent(callMcpParamsDto.getResourceId());
         McpSchema.CallToolResult callToolResult = ssResExtMcpService.callToolRequest(callMcpParamsDto);
         return ResponseUtil.success(callToolResult);
     }
+    /** Runtime checks use permission, never metadata-view permission or shared-employee membership. */
+    @PostMapping("/checkResourceUse")
+    public ResponseUtil<Map<String, Object>> checkResourceUse(@RequestBody Map<String, String> request) {
+        String identity = request.get("resourceId");
+        if (StringUtils.isBlank(identity)) return ResponseUtil.fail(I18nUtil.get("resource.sync.resource.id.required"));
+        SsResource resource = identity.matches("[0-9]+") ? ssResourceService.findById(Long.valueOf(identity))
+            : ssResourceService.findByIdOrCode(null, identity);
+        if (resource == null && identity.matches("[0-9]+")) resource = ssResourceService.findByIdOrCode(null, identity);
+        boolean controlled = resource != null && (Boolean.TRUE.equals(resource.getUseAuthControlled())
+            || Boolean.TRUE.equals(resource.getViewAuthControlled()));
+        boolean allowed = !controlled || authApplicationService.hasResourceUsePermission(resource);
+        return ResponseUtil.success(Map.of("controlled", controlled, "allowed", allowed));
+    }
+
+    @PostMapping("/queryResourceSyncJob")
+    public ResponseUtil<Map<String, Object>> queryResourceSyncJob(@RequestBody Map<String, String> request) {
+        try {
+            enterpriseResourceSyncService.requireSyncPrincipal();
+            Long id = Long.valueOf(request.get("jobId"));
+            var job = resourceSyncJobMapper.selectById(id);
+            if (job == null || !Objects.equals(job.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
+                return ResponseUtil.fail(I18nUtil.get("resource.sync.job.not.found"));
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("jobId", String.valueOf(id));
+            data.put("resourceId", String.valueOf(job.getResourceId()));
+            data.put("syncRevision", String.valueOf(job.getSyncRevision()));
+            data.put("status", job.publicStatus());
+            data.put("effective", job.associationResult().get("effective"));
+            data.put("retryCount", job.getRetryCount());
+            data.put("result", job.getResultSummary() == null ? Collections.emptyMap() : JSON.parseObject(job.getResultSummary()));
+            return ResponseUtil.success(data);
+        } catch (Exception exception) { return ResponseUtil.fail(I18nUtil.get("resource.sync.job.query.failed")); }
+    }
+
+    private void validateControlledResourceContent(Long resourceId) {
+        SsResource resource = ssResourceService.findById(resourceId);
+        if (resource != null && (Boolean.TRUE.equals(resource.getViewAuthControlled())
+            || Boolean.TRUE.equals(resource.getUseAuthControlled())) && !authApplicationService.hasResourceAccessPermission(resource)) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.content.use.denied"));
+        }
+    }
+
 }

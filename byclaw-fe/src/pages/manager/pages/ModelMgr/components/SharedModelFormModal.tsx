@@ -1,8 +1,8 @@
 import { getTitle, type ModalStore } from '@/pages/manager/hooks/useShowModal';
-import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { Button, Form, message, Modal } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useIntl, getLocale } from '@umijs/max';
+import { useIntl } from '@umijs/max';
+import { getCatalogProviderValues } from './mediaProviderCatalog';
 import ModelDebugPanel from './ModelDebugPanel';
 import ModelFormFields from './ModelFormFields';
 import {
@@ -10,9 +10,9 @@ import {
   buildDebugDefaults,
   buildModelUpsertPayload,
   DEFAULT_CONTEXT_TOKENS,
-  DEFAULT_MAX_TOKENS,
   formatReasoningEffortMapText,
   getDefaultFormValues,
+  getDefaultMaxTokens,
   getImageGenerationDefaultFormValues,
   getImageProviderTransitionFormValues,
   getModelTypeTransitionFormValues,
@@ -20,12 +20,23 @@ import {
   normalizeModelType,
 } from './modelFormUtils';
 import useModelDebug from './useModelDebug';
+import useModelTypeOptions from './useModelTypeOptions';
+import { getImageConfigFormValues, isVolcengineImage } from './volcengineImageConfig';
+import { getImageGenerationProvider, resolveImageGenerationProviderName } from './imageGenerationProviders';
+import {
+  applyAutofillFields,
+  applyModelAutofill,
+  createModelAutofillState,
+  getNewModelFormValues,
+  MODEL_FORM_PRESETS,
+} from './modelFormPresets';
 import styles from './ModelFormModal.module.less';
 
 type Option = { label: string; value: string };
 
 type DebugRequestParams = {
   modelId: string | number;
+  modelName?: string;
   input: string;
   modelType?: any;
   signal: AbortSignal;
@@ -70,28 +81,16 @@ const SharedModelFormModal: React.FC<Props> = ({
   const [form] = Form.useForm();
 
   const [tokenVisible, setTokenVisible] = useState(type === 'add');
-  const fallbackModelTypeOptions = useMemo(
-    () => [
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeLLM' }), value: 'LLM' },
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeTTS' }), value: 'TTS' },
-      {
-        label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeIMAGE_GENERATION' }),
-        value: 'IMAGE_GENERATION',
-      },
-    ],
-    [intl]
-  );
+  const modelTypeOptions = useModelTypeOptions(open);
   const [abilityOptions, setAbilityOptions] = useState<Option[]>([]);
   const [systemOptions, setSystemOptions] = useState<Option[]>([]);
-  const [modelTypeOptions, setModelTypeOptions] = useState<Option[]>(() => fallbackModelTypeOptions);
-  const [activeSections, setActiveSections] = useState<string[]>(['basic', 'connection', 'params']);
+  const [activeSections, setActiveSections] = useState<string[]>(['basic']);
   const [submitAction, setSubmitAction] = useState<'save_continue' | 'save_close' | null>(null);
   const [savedNewId, setSavedNewId] = useState<string | number | undefined>(undefined);
   const savedNewIdRef = useRef<string | number | undefined>(undefined);
   const lastApiEndpointForSyncRef = useRef<string | undefined>(undefined);
   const lastModelTypeForSyncRef = useRef<string>('LLM');
+  const autofillRef = useRef(createModelAutofillState());
 
   const currentModelType = Form.useWatch('modelType', form);
   const currentDisplayName = Form.useWatch('displayName', form);
@@ -99,10 +98,9 @@ const SharedModelFormModal: React.FC<Props> = ({
   const currentContextTokens = Form.useWatch('contextTokens', form);
   const currentSystems = Form.useWatch('systems', form);
   const currentAbilities = Form.useWatch('abilities', form);
+  const currentModelProtocol = Form.useWatch('modelProtocol', form);
 
   const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
-  const local = getLocale();
-  const isEN = useMemo(() => local.includes('en'), [local]);
 
   const existingModelId =
     data?.id === null || data?.id === undefined || `${data?.id}`.trim() === '' ? undefined : data?.id;
@@ -110,6 +108,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     () => existingModelId ?? savedNewIdRef.current ?? savedNewId,
     [existingModelId, savedNewId]
   );
+  const canAutofill = type === 'add' && existingModelId === undefined && savedNewId === undefined;
 
   const {
     copyText,
@@ -130,7 +129,9 @@ const SharedModelFormModal: React.FC<Props> = ({
     intl,
     open,
     currentModelType,
+    currentModelName: currentDisplayName,
     currentProviderName,
+    currentModelProtocol,
     getCurrentModelId,
     allowRerankTable,
     formatDebugError,
@@ -144,31 +145,8 @@ const SharedModelFormModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (!open) return;
-    setActiveSections(showTags ? ['basic', 'connection', 'params', 'tags'] : ['basic', 'connection', 'params']);
-
-    getByParamGroupCode({ paramGroupCode: 'SYSTEM_MODEL_TYPE' })
-      .then((res: any) => {
-        const list = res?.data?.byaiSystemConfigLists;
-        if (Array.isArray(list) && list.length > 0) {
-          const opts = list
-            .map((item: any) => ({
-              label: isEN ? item.paramEnName : item.paramName,
-              value: item?.paramValue,
-            }))
-            .filter((item: any) => item.value);
-          const imageOption = fallbackModelTypeOptions.find((item) => item.value === 'IMAGE_GENERATION');
-          setModelTypeOptions(
-            imageOption && !opts.some((item: Option) => item.value === 'IMAGE_GENERATION')
-              ? [...opts, imageOption]
-              : opts
-          );
-          return;
-        }
-        setModelTypeOptions(fallbackModelTypeOptions);
-      })
-      .catch(() => {
-        setModelTypeOptions(fallbackModelTypeOptions);
-      });
+    // 新增时优先填写基础配置，编辑和调试时展开更多配置便于核对已有参数。
+    setActiveSections(type === 'add' ? ['basic'] : ['basic', 'more']);
 
     if (showTags && loadAbilityOptions) {
       loadAbilityOptions()
@@ -185,7 +163,7 @@ const SharedModelFormModal: React.FC<Props> = ({
     } else {
       setSystemOptions([]);
     }
-  }, [fallbackModelTypeOptions, isEN, loadAbilityOptions, loadSystemOptions, open, showTags, type]);
+  }, [loadAbilityOptions, loadSystemOptions, open, showTags, type]);
 
   useEffect(() => {
     if (!open) return;
@@ -212,15 +190,25 @@ const SharedModelFormModal: React.FC<Props> = ({
           const modelType = normalizeModelType(detail.modelType);
           const imageDefaults: Record<string, any> =
             modelType === 'IMAGE_GENERATION' ? getImageGenerationDefaultFormValues() : {};
+          let providerName = detail.providerName;
+          if (modelType === 'IMAGE_GENERATION') {
+            providerName = resolveImageGenerationProviderName(
+              detail.providerName,
+              detail.modelProtocol || imageDefaults.modelProtocol
+            );
+          }
           const nextFormValues = {
             ...imageDefaults,
+            ...getImageConfigFormValues(detail),
             displayName: detail.displayName,
-            providerName: detail.providerName || imageDefaults.providerName,
+            providerName,
             modelProtocol: detail.modelProtocol || imageDefaults.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode || imageDefaults.modelCode,
             modelType,
             apiEndpoint: detail.apiEndpoint || imageDefaults.apiEndpoint || '',
             apiToken: detail.apiToken || '',
+            extendParam:
+              typeof detail.extendParam === 'object' ? JSON.stringify(detail.extendParam, null, 2) : detail.extendParam,
             headers: Array.isArray(detail.headers) && detail.headers.length ? detail.headers : [{ key: '', value: '' }],
             connectTimeoutSec: detail.connectTimeoutSec ?? 32,
             readTimeoutSec: detail.readTimeoutSec ?? 60,
@@ -229,13 +217,14 @@ const SharedModelFormModal: React.FC<Props> = ({
             contextTokens: detail.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
             temperature: detail.temperature ?? 0.7,
             topP: detail.topP ?? 0.9,
-            maxTokens: detail.maxTokens ?? DEFAULT_MAX_TOKENS,
+            maxTokens: detail.maxTokens ?? getDefaultMaxTokens(detail.contextTokens),
             frequencyPenalty: detail.frequencyPenalty ?? 0,
             presencePenalty: detail.presencePenalty ?? 0,
             reasoningConfig: detail.reasoningConfig ?? getDefaultFormValues().reasoningConfig,
             reasoningEffortMapText: formatReasoningEffortMapText(detail.reasoningConfig),
             abilities: detail.abilities || [],
             systems: detail.systems || [],
+            applicabilityScope: detail.applicabilityScope ?? '',
             status: detail.status || 'ENABLED',
           };
 
@@ -255,6 +244,8 @@ const SharedModelFormModal: React.FC<Props> = ({
           }
           lastApiEndpointForSyncRef.current = nextFormValues.apiEndpoint ?? '';
           lastModelTypeForSyncRef.current = nextFormValues.modelType;
+          // setFieldsValue 会深合并对象，先清空新字段，避免另一条模型记录的参数串入。
+          form.setFieldValue('imageGenerationConfig', undefined);
           form.setFieldsValue(nextFormValues);
         })
         .catch(() => undefined);
@@ -262,13 +253,15 @@ const SharedModelFormModal: React.FC<Props> = ({
     }
 
     form.resetFields();
-    const nextFormValues = getDefaultFormValues();
+    const nextFormValues = getNewModelFormValues();
+    autofillRef.current = createModelAutofillState();
     form.setFieldsValue(nextFormValues);
     setDebugInputMode('auto');
     setDebugInput(
       buildAutoDebugRequestText({
         formValues: nextFormValues,
         prevText: '',
+        syncFormParameters: true,
         ...debugDefaults,
       })
     );
@@ -308,7 +301,9 @@ const SharedModelFormModal: React.FC<Props> = ({
   const scrollToFirstError = (error: any) => {
     const firstNamePath = error?.errorFields?.[0]?.name;
     if (Array.isArray(firstNamePath) && firstNamePath.length) {
-      form.scrollToField?.(firstNamePath, { behavior: 'smooth' });
+      // 折叠区内的必填/格式错误必须先展开，避免用户看不到保存失败的原因。
+      setActiveSections(['basic', 'more', 'basicExtra']);
+      requestAnimationFrame(() => form.scrollToField?.(firstNamePath, { behavior: 'smooth' }));
     }
   };
 
@@ -331,16 +326,17 @@ const SharedModelFormModal: React.FC<Props> = ({
     setSubmitAction(mode);
     try {
       const values = await form.validateFields();
+      // validateFields 只包含已注册控件；合并整块图片配置以保留未来版本的未知字段。
+      const storedImageConfig = form.getFieldValue('imageGenerationConfig');
+      if (storedImageConfig) values.imageGenerationConfig = storedImageConfig;
       const payload = buildUpsertPayload(values);
       const res = await saveModelRequest(payload);
 
       const extractedModelId = extractModelIdFromSave?.(res);
-      const resolvedModelId =
-        extractedModelId !== null && extractedModelId !== undefined
-          ? extractedModelId
-          : querySavedModelId
-            ? await querySavedModelId(values, res)
-            : undefined;
+      let resolvedModelId = extractedModelId;
+      if ((resolvedModelId === null || resolvedModelId === undefined) && querySavedModelId) {
+        resolvedModelId = await querySavedModelId(values, res);
+      }
 
       if (mode === 'save_continue') {
         if (resolvedModelId !== null && resolvedModelId !== undefined) {
@@ -376,10 +372,76 @@ const SharedModelFormModal: React.FC<Props> = ({
     }
   };
 
-  const handleValuesChange = (changedValues: any, allValues: any) => {
+  const handleValuesChange = (changedValues: any, registeredValues: any, fromPreset = false) => {
+    // onValuesChange 只返回已注册字段，保留预设中未挂载的嵌套参数，避免误判为手动修改。
+    const allValues = { ...registeredValues, ...form.getFieldsValue(true) };
     const changedKeys = Object.keys(changedValues || {});
     let syncedValues = allValues;
-    if (changedKeys.includes('modelType')) {
+    if (type === 'add' && typeof changedValues?.reasoningConfig?.enabled === 'boolean') {
+      const config = allValues.reasoningConfig || {};
+      const capability = config.capability === 'unsupported' ? 'effort' : config.capability;
+      let defaultLevel = 'off';
+      if (config.enabled) {
+        if (config.defaultLevel && config.defaultLevel !== 'off') defaultLevel = config.defaultLevel;
+        else defaultLevel = capability === 'adaptive' ? 'adaptive' : 'high';
+      }
+      const reasoningConfig = { ...config, capability, defaultLevel };
+      form.setFieldValue('reasoningConfig', reasoningConfig);
+      syncedValues = { ...allValues, reasoningConfig };
+    }
+    if (canAutofill) {
+      changedKeys
+        .filter((key) => !fromPreset || key !== 'modelCode')
+        .forEach((key) => autofillRef.current.edited.add(key));
+      if (changedKeys.includes('modelType')) {
+        const defaults = getModelTypeTransitionFormValues(lastModelTypeForSyncRef.current, syncedValues.modelType);
+        // 保留类型切换的既有默认值，但新增草稿不清除密钥、Header 或手动填写的接入信息。
+        const suggestions: Record<string, any> = { ...defaults };
+        delete suggestions.apiToken;
+        delete suggestions.headers;
+        const patch = applyAutofillFields(autofillRef.current, syncedValues, suggestions);
+        Object.entries(patch).forEach(([key, value]) => form.setFieldValue(key, value));
+        syncedValues = { ...syncedValues, ...patch };
+        const capabilities = applyModelAutofill(autofillRef.current, {}, syncedValues);
+        Object.entries(capabilities).forEach(([key, value]) => form.setFieldValue(key, value));
+        syncedValues = { ...syncedValues, ...capabilities };
+      }
+      if (
+        changedKeys.includes('providerName') &&
+        syncedValues.modelType === 'IMAGE_GENERATION' &&
+        !getCatalogProviderValues('IMAGE_GENERATION', changedValues.providerName)
+      ) {
+        const provider = getImageGenerationProvider(changedValues.providerName);
+        if (provider) {
+          const connection = applyAutofillFields(autofillRef.current, syncedValues, {
+            modelProtocol: provider.modelProtocol,
+            apiEndpoint: provider.apiEndpoint,
+            modelCode: provider.modelCode,
+          });
+          syncedValues = { ...syncedValues, ...connection };
+          const defaults = applyModelAutofill(
+            autofillRef.current,
+            {},
+            syncedValues,
+            `${provider.providerName}:${syncedValues.modelCode}`
+          );
+          syncedValues = { ...syncedValues, ...defaults };
+          Object.entries({ ...connection, ...defaults }).forEach(([key, value]) => form.setFieldValue(key, value));
+        }
+      }
+      // 手动确认上下文后同步收窄缺省输出预算；显式填写的 Max Tokens 仍优先。
+      if (changedKeys.includes('modelCode') || changedKeys.includes('contextTokens')) {
+        const patch = applyModelAutofill(autofillRef.current, fromPreset ? {} : changedValues, syncedValues);
+        // 自动切换类型/协议也要重建调试路径，防止同一厂商的 embeddings/responses 路径互相残留。
+        ['modelType', 'modelProtocol'].forEach((key) => {
+          if (key in patch && patch[key] !== syncedValues[key] && !changedKeys.includes(key)) changedKeys.push(key);
+        });
+        // 避免 AntD 深合并把上一型号的 reasoning/image 参数留在新模板中。
+        Object.entries(patch).forEach(([key, value]) => form.setFieldValue(key, value));
+        syncedValues = { ...syncedValues, ...patch };
+      }
+      lastModelTypeForSyncRef.current = normalizeModelType(syncedValues?.modelType);
+    } else if (changedKeys.includes('modelType')) {
       const targetModelType = normalizeModelType(changedValues?.modelType);
       const modelTypeDefaults = getModelTypeTransitionFormValues(lastModelTypeForSyncRef.current, targetModelType);
       form.setFieldsValue(modelTypeDefaults);
@@ -387,10 +449,24 @@ const SharedModelFormModal: React.FC<Props> = ({
       lastModelTypeForSyncRef.current = targetModelType;
     }
 
-    if (changedKeys.includes('providerName') && normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION') {
-      const providerDefaults = getImageProviderTransitionFormValues(changedValues?.providerName);
-      form.setFieldsValue(providerDefaults);
-      syncedValues = { ...syncedValues, ...providerDefaults };
+    if (changedKeys.includes('providerName')) {
+      const providerDefaults =
+        getCatalogProviderValues(normalizeModelType(syncedValues?.modelType), changedValues?.providerName) ||
+        (!canAutofill && normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION'
+          ? getImageProviderTransitionFormValues(changedValues?.providerName, syncedValues)
+          : {});
+      const providerPatch = canAutofill
+        ? applyAutofillFields(autofillRef.current, syncedValues, providerDefaults)
+        : providerDefaults;
+      Object.entries(providerPatch).forEach(([key, value]) => form.setFieldValue(key, value));
+      syncedValues = { ...syncedValues, ...providerPatch };
+    }
+
+    if (normalizeModelType(syncedValues?.modelType) === 'IMAGE_GENERATION' && !syncedValues?.providerName?.trim()) {
+      // 协议补全只写缺失的提供商，已有配置及自定义接入地址/型号保持原值。
+      const providerName = resolveImageGenerationProviderName(undefined, syncedValues?.modelProtocol);
+      form.setFieldValue('providerName', providerName);
+      syncedValues = { ...syncedValues, providerName };
     }
 
     // 协议切换只联动 placeholder；若当前仍是示例地址则清空，避免挡住新协议样例。
@@ -401,7 +477,9 @@ const SharedModelFormModal: React.FC<Props> = ({
 
     if (debugInputMode !== 'auto') return;
 
-    const shouldSync = changedKeys.some((key) => !['systems', 'abilities', 'status'].includes(key));
+    const shouldSync = changedKeys.some(
+      (key) => !['systems', 'applicabilityScope', 'abilities', 'status'].includes(key)
+    );
     if (!shouldSync) return;
 
     const prevEndpoint = lastApiEndpointForSyncRef.current;
@@ -412,10 +490,22 @@ const SharedModelFormModal: React.FC<Props> = ({
         prevText: prev,
         changedKeys,
         previousApiEndpoint: prevEndpoint,
+        syncFormParameters: type === 'add',
         ...debugDefaults,
       })
     );
     lastApiEndpointForSyncRef.current = `${syncedValues?.apiEndpoint ?? ''}`.trim();
+  };
+
+  const handlePresetSelect = (presetId: string) => {
+    if (!canAutofill) return;
+    const preset = MODEL_FORM_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    autofillRef.current.presetId = presetId;
+    autofillRef.current.edited.delete('modelCode');
+    autofillRef.current.automatic.modelCode = preset.values.modelCode;
+    form.setFieldValue('modelCode', preset.values.modelCode);
+    handleValuesChange({ modelCode: preset.values.modelCode }, form.getFieldsValue(true), true);
   };
 
   const isSectionOpen = (key: string) => activeSections.includes(key);
@@ -463,6 +553,10 @@ const SharedModelFormModal: React.FC<Props> = ({
     >
       <div className={styles.modalBody}>
         <ModelFormFields
+          simplified={type === 'add'}
+          canAutofill={canAutofill}
+          presetId={autofillRef.current.presetId}
+          onPresetSelect={handlePresetSelect}
           form={form}
           modalTitle={modalTitle}
           currentDisplayName={currentDisplayName}
@@ -484,6 +578,8 @@ const SharedModelFormModal: React.FC<Props> = ({
 
         <div className={styles.right}>
           <ModelDebugPanel
+            showImagePreview={isVolcengineImage({ modelType: currentModelType, modelProtocol: currentModelProtocol })}
+            currentModelType={normalizeModelType(currentModelType)}
             debugInputMode={debugInputMode}
             debugInput={debugInput}
             setDebugInput={setDebugInput}

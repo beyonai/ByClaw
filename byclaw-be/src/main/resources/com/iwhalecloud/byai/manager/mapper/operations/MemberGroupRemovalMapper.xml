@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.MemberGroupRemovalMapper">
+    <select id="snapshot" resultType="java.util.LinkedHashMap">
+        SELECT g.session_id::text AS "sessionId", g.session_name AS "groupName",
+            m.byai_session_member_id::text AS "memberId", m.mem_obj_id::text AS "userId",
+            m.user_role AS "role", m.mem_name AS "name",
+            CAST(EXTRACT(EPOCH FROM m.create_time) * 1000 AS BIGINT)::text AS "joinedAt",
+            (SELECT e.ext_param_value FROM byai.byai_session_ext e WHERE e.session_id=g.session_id
+                AND e.ext_param_code='group_admin_since_' || m.byai_session_member_id LIMIT 1) AS "adminSince"
+        FROM byai.byai_session g JOIN byai.byai_session_member m ON m.session_id=g.session_id
+        WHERE g.enterprise_id=#{enterpriseId} AND g.session_type='hs_as'
+            AND COALESCE(g.state,'ACTIVE')='ACTIVE' AND m.com_acct_id=#{enterpriseId} AND m.mem_obj_type='USER'
+            AND EXISTS (SELECT 1 FROM byai.byai_session_member target WHERE target.session_id=g.session_id
+                AND target.com_acct_id=#{enterpriseId} AND target.mem_obj_type='USER' AND target.mem_obj_id=#{userId})
+        ORDER BY g.session_id,m.byai_session_member_id
+    </select>
+    <select id="candidates" resultType="java.util.LinkedHashMap">
+        SELECT u.user_id::text AS "userId", COALESCE(u.user_name,u.user_code) AS "name"
+        FROM byai.tenant_user_membership m JOIN byai.po_users u ON u.user_id=m.user_id
+        WHERE m.enterprise_id=#{enterpriseId} AND m.status='ACTIVE' AND u.state='A'
+            AND COALESCE(u.is_locked,'N')!='Y' ORDER BY u.user_id
+    </select>
+    <select id="actor" resultType="java.util.LinkedHashMap">
+        SELECT u.user_id::text AS "userId", COALESCE(u.user_name,u.user_code) AS "name"
+        FROM byai.po_users u WHERE u.user_id=#{actorId} AND u.state='A' AND COALESCE(u.is_locked,'N')!='Y'
+            AND (LOWER(u.user_code)='adminvip' OR EXISTS (
+                SELECT 1 FROM byai.tenant_user_membership m WHERE m.enterprise_id=#{enterpriseId}
+                    AND m.user_id=u.user_id AND m.status='ACTIVE' AND m.role='OWNER'))
+    </select>
+</mapper>

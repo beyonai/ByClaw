@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import CredentialHelpCard from '../CredentialHelpCard';
 
+let mockLocale = 'zh-CN';
+jest.mock('@umijs/max', () => ({
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
+}));
+
 const structuredHelpText =
   '连接器作用：安全保存公众号 AppID 和 AppSecret，并在启用时提供给数字员工。\n\n获取步骤：\n1. 登录微信开发者平台。\n2. 选择目标公众号。\n3. 打开开发接口管理。\n4. 复制 AppID。\n5. 查看或重置 AppSecret。\n6. 配置出口 IP 白名单。\n7. 返回本页保存连接。\n\n安全提示：AppSecret 相当于 API 密码，请妥善保存。';
 
@@ -32,4 +37,16 @@ describe('CredentialHelpCard', () => {
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
+});
+
+it('switches the accessible label and recognizes English safety headings without altering help content', () => {
+  mockLocale = 'zh-CN';
+  const help = 'Safety: Keep your AppSecret private.';
+  const { rerender } = render(<CredentialHelpCard helpText={help} />);
+  expect(screen.getByRole('region', { name: '凭据获取说明' })).toHaveTextContent('Keep your AppSecret private.');
+  mockLocale = 'en-US';
+  rerender(<CredentialHelpCard helpText={help} />);
+  expect(screen.getByRole('region', { name: 'Credential setup instructions' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Safety' }).parentElement).toHaveClass('warningSection');
+  mockLocale = 'zh-CN';
 });

@@ -32,7 +32,7 @@ import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper;
 
-class SandboxResizeServiceTest {
+class SandboxResizeServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void handleResizeRequest_skipsRecentSameDirectionAlertDuringCooldown() {

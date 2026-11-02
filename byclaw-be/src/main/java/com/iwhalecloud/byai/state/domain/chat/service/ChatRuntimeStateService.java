@@ -121,6 +121,7 @@ public class ChatRuntimeStateService {
         state.setAssistantChatDto(ctx.assistantChatDto);
         state.setAskMsg(ctx.askMsg);
         state.setLoginInfo(ctx.loginInfo);
+        state.setLanguage(ctx.language);
         state.setTargetAgentType(ctx.targetAgentType);
         state.setTransport(ctx.transport == null ? null : ctx.transport.name());
         state.setClientRequestId(ctx.clientRequestId);
@@ -388,6 +389,7 @@ public class ChatRuntimeStateService {
         ctx.suppressUserEvents = state.isSuppressUserEvents();
         ctx.askMsg = resolveAskMsg(state);
         ctx.loginInfo = state.getLoginInfo();
+        ctx.language = state.getLanguage();
         ctx.targetAgentType = state.getTargetAgentType();
         ctx.params = new HashMap<>();
         ctx.clientRequestId = state.getClientRequestId();

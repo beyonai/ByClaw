@@ -1,0 +1,6 @@
+- insert:
+    - id: todo-execution
+      name: '@byclaw/dsh-todo-execution'
+      config:
+        maxStopCorrections: 3
+        delegationTools: [subagent, workflow, ralph, call_subagent, byclaw_instantiate_template]

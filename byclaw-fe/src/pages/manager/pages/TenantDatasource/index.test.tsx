@@ -1,10 +1,13 @@
-import { fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render as renderComponent, screen, waitFor } from '@testing-library/react';
 import { ConfigProvider, Modal } from 'antd';
 import TenantDatasource from './index';
 import { listTenants } from '../../service/TenantMgr';
 import { browseTenantTable, executeTenantSql, listTenantTables } from '../../service/TenantDatasource';
 
+let mockLocale = 'zh-CN';
+
 jest.mock('@umijs/max', () => ({
+  useIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(mockLocale),
   useSelector: (selector: (state: unknown) => unknown) =>
     selector({ user: { userInfo: { usersOrganizations: [{ userType: 'PLAT_MAN' }] } } }),
 }));
@@ -70,12 +73,87 @@ describe('tenant datasource workbench', () => {
   jest.setTimeout(15000);
   beforeEach(() => {
     jest.clearAllMocks();
+    mockLocale = 'zh-CN';
     (listTenants as jest.Mock).mockResolvedValue([
       { enterpriseId: '123', enterpriseName: '测试租户', provisionState: 'READY' },
     ]);
     (listTenantTables as jest.Mock).mockResolvedValue([{ schema: 'byai', name: 'sample', type: 'BASE TABLE' }]);
     (browseTenantTable as jest.Mock).mockResolvedValue(result());
     (executeTenantSql as jest.Mock).mockResolvedValue(result(1, true));
+  });
+
+  it('keeps table list failures visible and reloads successfully with the existing refresh button', async () => {
+    (listTenantTables as jest.Mock).mockRejectedValueOnce(new Error('tenant.datasource.query.failed'));
+    const { rerender } = render(<TenantDatasource />);
+    expect(screen.getByText('请选择租户')).toBeInTheDocument();
+    await screen.findByRole('option', { name: '测试租户 · 123' });
+    fireEvent.change(screen.getByRole('combobox', { name: '选择租户' }), { target: { value: '123' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据表列表加载失败，请点击“刷新对象树”重试。');
+    expect(screen.queryByText('暂无数据表')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
+
+    mockLocale = 'en-US';
+    rerender(<TenantDatasource />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Failed to load the table list. Click “Refresh object tree” to retry.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh object tree' }));
+    await screen.findByRole('treeitem', { name: /sample/ });
+    expect(listTenantTables).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows zero tables only after a successful empty response', async () => {
+    (listTenantTables as jest.Mock).mockResolvedValueOnce([]);
+    render(<TenantDatasource />);
+    await screen.findByRole('option', { name: '测试租户 · 123' });
+    fireEvent.change(screen.getByRole('combobox', { name: '选择租户' }), { target: { value: '123' } });
+    expect(await screen.findByText('暂无数据表')).toBeInTheDocument();
+    expect(screen.getByText(/^0$/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not let an old tenant failure replace a newer tenant table list', async () => {
+    let rejectOld!: (reason: Error) => void;
+    (listTenants as jest.Mock).mockResolvedValue([
+      { enterpriseId: '123', enterpriseName: '测试租户', provisionState: 'READY' },
+      { enterpriseId: '456', enterpriseName: '另一租户', provisionState: 'READY' },
+    ]);
+    (listTenantTables as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOld = reject;
+        })
+    );
+    render(<TenantDatasource />);
+    await screen.findByRole('option', { name: '另一租户 · 456' });
+    const select = screen.getByRole('combobox', { name: '选择租户' });
+    fireEvent.change(select, { target: { value: '123' } });
+    expect(screen.getByRole('tree')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('暂无数据表')).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: '456' } });
+    await screen.findByRole('treeitem', { name: /sample/ });
+    await act(async () => rejectOld(new Error('tenant.datasource.query.failed')));
+    expect(screen.getByRole('treeitem', { name: /sample/ })).toBeInTheDocument();
+    expect(screen.getByRole('tree')).toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('switches the existing workspace to English without changing the selected tenant or SQL', async () => {
+    const { rerender } = render(<TenantDatasource />);
+    await screen.findByRole('option', { name: '测试租户 · 123' });
+    fireEvent.change(screen.getByRole('combobox', { name: '选择租户' }), { target: { value: '123' } });
+    await screen.findByRole('treeitem', { name: /sample/ });
+    fireEvent.change(screen.getByPlaceholderText('输入一条 SQL 语句…'), { target: { value: 'SELECT 1' } });
+    mockLocale = 'en-US';
+    rerender(<TenantDatasource />);
+    expect(screen.getByPlaceholderText('Enter one SQL statement…')).toHaveValue('SELECT 1');
+    expect(screen.getByRole('tree', { name: 'Tenant database objects' })).toBeInTheDocument();
+    // Ant Design 图标的名称也会进入按钮的可访问名称，与中文用例采用相同匹配方式。
+    fireEvent.click(screen.getByRole('button', { name: /Run SQL/ }));
+    await waitFor(() => expect(executeTenantSql).toHaveBeenCalledWith('123', 'SELECT 1', 1, false));
+    expect(await screen.findByText(/^Page 1 · 1 rows(?: · \d+ ms)?$/)).toBeInTheDocument();
+    expect(screen.getByText('Up to 500 rows per page')).toBeInTheDocument();
   });
 
   it('selects a table on single click and opens a closable data tab on double click', async () => {

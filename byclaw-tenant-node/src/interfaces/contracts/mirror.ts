@@ -1,3 +1,4 @@
+import { inputMetadata } from "../../domain/input-metadata.js";
 import { DomainError } from "../../domain/errors.js";
 import type { MirrorEnvelope } from "../../domain/mirror.js";
 import { assertTenant, type TenantIdentity } from "../../domain/tenant.js";
@@ -85,7 +86,8 @@ export function validateMirror(input: unknown, identity: TenantIdentity): Mirror
       throw new DomainError("INVALID_MIRROR");
     payload.mentionedUserIds.forEach(requireId);
   }
-  if (payload.metadata !== undefined) record(payload.metadata);
+  if (event.eventType === "INPUT") inputMetadata(payload.metadata);
+  else if (payload.metadata !== undefined) record(payload.metadata);
   if (mirrorHash(event) !== event.payloadHash) throw new DomainError("HASH_MISMATCH");
   return event;
 }

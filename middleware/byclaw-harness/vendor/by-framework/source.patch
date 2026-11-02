@@ -1,0 +1,221 @@
+diff --git a/README.md b/README.md
+index d1c815c..989cce7 100644
+--- a/README.md
++++ b/README.md
+@@ -131 +130,0 @@ const runner = new WorkerRunner(worker, {
+-    maxConcurrency: 50,
+@@ -254 +252,0 @@ Default environment variables:
+-| `BYAI_WORKER_CONCURRENCY` | Max worker concurrency, default `50` |
+@@ -358 +355,0 @@ new WorkerRunner(
+-        maxConcurrency?: number;
+@@ -520,0 +518,6 @@ enum EventType {
++
++### Asynchronous message admission
++
++The automatic runner dispatches messages without a task concurrency cap. Pending business tasks do not stop the consumer from reading later requests or replies. The legacy `maxConcurrency` options remain accepted for source compatibility but are ignored; `BYAI_WORKER_CONCURRENCY` is no longer read. `fetchCount` controls each stream read batch, not the total number of unfinished tasks.
++
++Blocking Redis reads use dedicated asynchronous connections; idle consumers still wait for messages. ACK, cancellation, lease renewal, health checks, and graceful draining remain active. A stalled consumer is unhealthy even when tasks remain unfinished. Workload-specific admission and model/tool resource limits belong to the application. Uncapped dispatch can increase retained memory and Redis pending entries under sustained overload and does not establish production capacity.
+diff --git a/README_zh.md b/README_zh.md
+index 57602bc..3e53a62 100644
+--- a/README_zh.md
++++ b/README_zh.md
+@@ -131 +130,0 @@ const runner = new WorkerRunner(worker, {
+-    maxConcurrency: 50,
+@@ -245 +243,0 @@ createRedis(options?: {
+-| `BYAI_WORKER_CONCURRENCY` | Worker 最大并发，默认 `50` |
+@@ -333 +330,0 @@ new WorkerRunner(
+-        maxConcurrency?: number;
+@@ -520,0 +518,6 @@ enum EventType {
++
++### 异步消息分发
++
++自动消费循环不再设置任务并发上限，未完成的业务任务不会阻止后续请求或回复被读取。旧 `maxConcurrency` 参数保留类型兼容性，但不再生效；`BYAI_WORKER_CONCURRENCY` 不再读取。`fetchCount` 只控制每个 Stream 的读取批量，不限制未完成任务总数。
++
++Redis 阻塞读取使用独立的异步连接，空闲时仍等待消息。ACK、取消、租约续期、健康检查和正常退出时等待在途任务均保留；消费循环停滞不会因为还有未完成任务而被视为健康。业务准入及模型、工具资源控制由应用负责。持续超载时，无上限分发会增加内存占用和 Redis 待确认记录，不能据此保证生产容量。
+diff --git a/src/app.ts b/src/app.ts
+index db83599..b2e4c9b 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -20,0 +21 @@ export interface RunWorkerOptions {
++    /** @deprecated Ignored. Message dispatch has no task concurrency cap. */
+@@ -44,2 +44,0 @@ export async function runWorker(
+-    const maxConcurrency =
+-        options.maxConcurrency ?? Number(process.env.BYAI_WORKER_CONCURRENCY || 50);
+@@ -49 +48 @@ export async function runWorker(
+-        options.redisMaxConnections ?? Number(process.env.BYAI_REDIS_MAX_CONNECTIONS || maxConcurrency + 10);
++        options.redisMaxConnections ?? Number(process.env.BYAI_REDIS_MAX_CONNECTIONS || 60);
+@@ -101 +99,0 @@ export async function runWorker(
+-        maxConcurrency,
+diff --git a/src/factory.ts b/src/factory.ts
+index b13b00f..d91dd9c 100644
+--- a/src/factory.ts
++++ b/src/factory.ts
+@@ -14,0 +15 @@ export interface WorkerOptions {
++    /** @deprecated Ignored. Message dispatch has no task concurrency cap. */
+@@ -51 +51,0 @@ export function createWorkerRunner(options: WorkerOptions): WorkerRunner {
+-        maxConcurrency: options.maxConcurrency,
+diff --git a/src/runner.ts b/src/runner.ts
+index 79dfd16..281910a 100644
+--- a/src/runner.ts
++++ b/src/runner.ts
+@@ -75 +74,0 @@ export class WorkerRunner {
+-    private maxConcurrency: number;
+@@ -90,2 +89 @@ export class WorkerRunner {
+-    // Tasks currently being processed. Held as a field (rather than a local in
+-    // start()) so health judgement can tell a saturated worker from a stalled one.
++    // Track completion for shutdown without delaying message admission.
+@@ -142,0 +141 @@ export class WorkerRunner {
++            /** @deprecated Ignored. The runner dispatches without a task concurrency cap. */
+@@ -172 +170,0 @@ export class WorkerRunner {
+-        this.maxConcurrency = options.maxConcurrency ?? 50;
+@@ -316,4 +314,3 @@ export class WorkerRunner {
+-     * Three independent signals, because the consumer tick alone is wrong in
+-     * both directions: it stays fresh while a blocked connection quietly lets
+-     * the lease expire, and it goes stale while a saturated worker is perfectly
+-     * busy.
++     * Lease renewal, event-loop delay, and consumer progress are independent
++     * signals. Task completion never blocks consumption, so unfinished tasks
++     * cannot excuse a stale consumer tick.
+@@ -325,3 +322,2 @@ export class WorkerRunner {
+-     * 3. Consumer loop — stale ticks mean stalled, *unless* every slot is full,
+-     *    which means busy. Whether the tasks themselves progress is a separate
+-     *    concern and not judged here.
++     * 3. Consumer loop — stale ticks mean stalled. Per-task progress is not
++     *    judged here.
+@@ -343 +339 @@ export class WorkerRunner {
+-        return this.inFlight.size >= this.maxConcurrency;
++        return false;
+@@ -1187,15 +1183,2 @@ export class WorkerRunner {
+-                        while (inFlight.size >= this.maxConcurrency) {
+-                            // Waiting for a slot is a healthy state — the
+-                            // scheduler is alive and doing the only thing it
+-                            // can. Without this, a saturated worker whose tasks
+-                            // all run longer than consumerHealthTimeoutMs would
+-                            // look stalled and evict itself.
+-                            //
+-                            // This says nothing about whether the tasks
+-                            // themselves are progressing; isHealthy() still
+-                            // requires saturation before forgiving a stale tick,
+-                            // and per-task progress is not tracked here.
+-                            this.lastConsumerTick = Date.now();
+-                            await Promise.race(inFlight);
+-                        }
+-
++                        // A later message may resume an earlier suspended task.
++                        // Keep reading independently of business-task completion.
+diff --git a/tests/app.test.ts b/tests/app.test.ts
+index f6b845d..a26103b 100644
+--- a/tests/app.test.ts
++++ b/tests/app.test.ts
+@@ -70 +70 @@ describe('runWorker', () => {
+-    it('applies env defaults for concurrency/fetch and wires worker/runner', async () => {
++    it('applies fetch defaults and ignores the legacy concurrency environment setting', async () => {
+@@ -90 +89,0 @@ describe('runWorker', () => {
+-                maxConcurrency: 77,
+@@ -93,0 +93 @@ describe('runWorker', () => {
++        expect(WorkerRunner.mock.calls[0][1]).not.toHaveProperty('maxConcurrency');
+diff --git a/tests/runner_dispatch.test.ts b/tests/runner_dispatch.test.ts
+new file mode 100644
+index 0000000..f7b467b
+--- /dev/null
++++ b/tests/runner_dispatch.test.ts
+@@ -0,0 +1,86 @@
++import { WorkerRunner } from '../src/runner';
++import { AskAgentCommand, GatewayCommand, ResumeCommand } from '../src/protocol/commands';
++import { MessageHeader } from '../src/protocol/message_header';
++
++function deferred() {
++    let resolve!: () => void;
++    const promise = new Promise<void>(done => { resolve = done; });
++    return { promise, resolve };
++}
++
++function makeRunner(maxConcurrency?: number) {
++    const runner = new WorkerRunner({
++        workerId: 'dispatch-probe',
++        getAgentTypes: () => ['probe'],
++        handleMessage: async () => undefined,
++        registry: {},
++    } as any, { redisClient: {} as any, maxConcurrency });
++    const release = jest.spyOn(runner, 'release').mockResolvedValue(undefined);
++    return { runner, release };
++}
++
++function ask(index: number) {
++    return new AskAgentCommand(new MessageHeader(`m-${index}`, `s-${index}`, `t-${index}`), 'work');
++}
++
++describe('WorkerRunner asynchronous dispatch', () => {
++    test.each([undefined, 1, 8, 50])('dispatches beyond legacy limit %s and waits for tasks on stop', async legacyLimit => {
++        const { runner, release } = makeRunner(legacyLimit);
++        const work = deferred();
++        const started: string[] = [];
++        jest.spyOn(runner, 'processAndAck').mockImplementation(async (_stream, _id, command) => {
++            started.push(command.header.messageId);
++            await work.promise;
++        });
++        jest.spyOn(runner, 'poll')
++            .mockResolvedValueOnce(Array.from({ length: 64 }, (_, index) => ({
++                streamName: 'tasks', msgId: `${index}-0`, data: ask(index),
++            })))
++            .mockImplementation(async () => { runner.stop(); return []; });
++
++        const run = runner.start({ initialize: false });
++        try {
++            await new Promise<void>(resolve => setImmediate(resolve));
++            expect(started).toHaveLength(64);
++            expect(release).not.toHaveBeenCalled();
++        } finally {
++            runner.stop();
++            work.resolve();
++            await run;
++        }
++        expect(release).toHaveBeenCalledTimes(1);
++    });
++
++    test('reads a later Resume while every earlier request is waiting for that reply', async () => {
++        const { runner } = makeRunner(8);
++        const reply = deferred();
++        let resumed = false;
++        // The message-processing seam suspends requests until a later Resume arrives.
++        jest.spyOn(runner, 'processAndAck').mockImplementation(async (_stream, _id, command: GatewayCommand) => {
++            if (command instanceof ResumeCommand) {
++                resumed = true;
++                reply.resolve();
++            } else {
++                await reply.promise;
++            }
++        });
++        jest.spyOn(runner, 'poll')
++            .mockResolvedValueOnce(Array.from({ length: 9 }, (_, index) => ({
++                streamName: 'tasks', msgId: `${index}-0`, data: ask(index),
++            })))
++            .mockResolvedValueOnce([{
++                streamName: 'tasks', msgId: '10-0',
++                data: new ResumeCommand(new MessageHeader('reply', 's-0', 't-0'), 'answer'),
++            }])
++            .mockImplementation(async () => { runner.stop(); return []; });
++        const run = runner.start({ initialize: false });
++        try {
++            await new Promise<void>(resolve => setImmediate(resolve));
++            expect(resumed).toBe(true);
++        } finally {
++            runner.stop();
++            reply.resolve();
++            await run;
++        }
++    });
++});
+diff --git a/tests/runner_health.test.ts b/tests/runner_health.test.ts
+index abea7aa..7260794 100644
+--- a/tests/runner_health.test.ts
++++ b/tests/runner_health.test.ts
+@@ -57 +57 @@ describe('WorkerRunner.isHealthy', () => {
+-    test('a saturated worker with long tasks stays healthy', () => {
++    test('unfinished tasks do not hide a stalled consumer loop', () => {
+@@ -59 +59 @@ describe('WorkerRunner.isHealthy', () => {
+-        // Every slot busy, no task finished for well past the stall timeout.
++        // Dispatch is independent of completion: unfinished work cannot excuse a stale tick.
+@@ -61 +61 @@ describe('WorkerRunner.isHealthy', () => {
+-        expect(runner.isHealthy()).toBe(true);
++        expect(runner.isHealthy()).toBe(false);

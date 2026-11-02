@@ -17,7 +17,6 @@
         UPDATE byai_group_chat_task SET turn_status = 'RUNNING', current_turn_id = #{turnId},
             current_turn_trace_id = NULL, update_time = #{now}
         WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
-          AND turn_status IN ('WAITING_USER', 'FAILED')
     </update>
 
     <update id="bindTurn">

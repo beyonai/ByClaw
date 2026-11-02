@@ -1,4 +1,4 @@
-import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled } from '../serviceSpecUtils';
+import { buildServiceSpecPayload, formatJsonIfValid, isServiceSpecAutoStartEnabled } from '../serviceSpecUtils';
 
 describe('serviceSpecUtils', () => {
   it('treats missing historical enabled values as auto-start enabled', () => {
@@ -25,5 +25,15 @@ describe('serviceSpecUtils', () => {
       templateJson: '{"env":{}}',
       enabled: 0,
     });
+  });
+
+  it('formats valid JSON for the spec editor', () => {
+    expect(formatJsonIfValid('{"image":"dsh","env":{"TZ":"Asia/Shanghai"}}')).toBe(
+      '{\n  "image": "dsh",\n  "env": {\n    "TZ": "Asia/Shanghai"\n  }\n}'
+    );
+  });
+
+  it('preserves invalid JSON so the user can correct it', () => {
+    expect(formatJsonIfValid('{"image":')).toBe('{"image":');
   });
 });

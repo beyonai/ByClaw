@@ -17,6 +17,10 @@ public interface SandboxRuntimeProvider {
 
     String providerType();
 
+    default boolean isForeignSandbox(String sandboxId) {
+        return SandboxRuntimeOwnership.isForeign(providerType(), sandboxId);
+    }
+
     default Optional<SandboxRuntimeInstance> findReusable(String userCode, String sandboxType) {
         return Optional.empty();
     }

@@ -5,6 +5,9 @@
  * 封装了SendHelper实例，提供统一的消息发送接口
  * 主要用于聊天功能，支持会话管理和回调处理
  */
+import { getAuthSnapshot, isCurrentAuthSnapshot } from '@/utils/auth';
+import { NasReadinessCancelled } from '@/utils/nasReadinessWaiter';
+import { waitForPersonalStorage } from '@/utils/personalStorageReadiness';
 import { recordChatChain } from '@/utils/chatChainLog';
 import { useCallback } from 'react';
 import DOMPurify from 'dompurify'; // HTML 净化器
@@ -58,7 +61,7 @@ export default function useSend(params: IParam) {
       // 从选项中提取callback回调函数
       // const { callback, ...optsRest } = opts;
 
-      const { clientRequestId } = payload;
+      const { clientRequestId } = payload || {};
       let closed = false;
 
       const closeConsoleGroup = () => {
@@ -66,19 +69,34 @@ export default function useSend(params: IParam) {
         closed = true;
       };
 
+      const storageWait = new AbortController();
+      const auth = getAuthSnapshot();
+      const scope = webSocketManager.getScopedSessionId();
+      const current = () => isCurrentAuthSnapshot(auth) && scope === webSocketManager.getScopedSessionId();
       const promise = webSocketManager
-        .sendMessageWhenReady({
-          type: 'LLM_MESSAGE',
-          clientRequestId,
-          language: getLocale(),
-          chatContent: DOMPurify.sanitize(text),
-          relModelId: -1,
-          accessTerminal: 'Web',
-          sessionId,
-          chatId: sessionId,
-          ...(payload || {}),
-          extParams: { ...(payload?.extParams || {}), requestId },
+        .requiresCloudStorage()
+        .then((cloud) => {
+          if (!current() || storageWait.signal.aborted) throw new NasReadinessCancelled();
+          return cloud ? waitForPersonalStorage(storageWait.signal) : undefined;
         })
+        .then(() =>
+          webSocketManager.sendMessageWhenReady(
+            {
+              type: 'LLM_MESSAGE',
+              clientRequestId,
+              language: getLocale(),
+              chatContent: DOMPurify.sanitize(text),
+              relModelId: -1,
+              accessTerminal: 'Web',
+              sessionId,
+              chatId: sessionId,
+              ...(payload || {}),
+              extParams: { ...(payload?.extParams || {}), requestId },
+            },
+            storageWait.signal,
+            current
+          )
+        )
         .then(() => {
           recordChatChain('fe.sent', {
             requestId,
@@ -90,14 +108,15 @@ export default function useSend(params: IParam) {
         .catch((error) => {
           recordChatChain('fe.sent', { requestId, sessionId: payload?.sessionId || sessionId }, 'failed');
           // WS 连接失败（本地开发后端未启动等）属预期情况：记录但不抛出，避免 Unhandled Rejection。
-          console.error('WebSocket 发送消息失败:', error);
-          return {};
+          if (error?.name !== 'NasReadinessCancelled') console.error('WebSocket 发送消息失败:', error);
+          return { cancelled: error?.name === 'NasReadinessCancelled', failed: true };
         })
         .finally(closeConsoleGroup);
 
       return {
         promise,
         cancel: () => {
+          storageWait.abort();
           closeConsoleGroup();
         },
       };

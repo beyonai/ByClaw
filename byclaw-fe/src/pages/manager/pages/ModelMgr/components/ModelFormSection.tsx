@@ -13,7 +13,13 @@ type Props = {
 const ModelFormSection: React.FC<Props> = ({ title, desc, open, onToggle, children }) => {
   return (
     <div className={styles.sectionCard}>
-      <button type="button" className={styles.sectionHeader} onClick={onToggle}>
+      <button
+        type="button"
+        className={styles.sectionHeader}
+        onClick={onToggle}
+        aria-label={title}
+        aria-expanded={open}
+      >
         <div className={styles.sectionTitle}>
           <span className={styles.sectionBar} />
           {title}
@@ -21,7 +27,9 @@ const ModelFormSection: React.FC<Props> = ({ title, desc, open, onToggle, childr
         <span className={styles.sectionAction}>{open ? <DownOutlined /> : <RightOutlined />}</span>
       </button>
       <div className={styles.sectionDesc}>{desc}</div>
-      <div className={open ? styles.sectionContentOpen : styles.sectionContentClosed}>{children}</div>
+      <div hidden={!open} className={open ? styles.sectionContentOpen : styles.sectionContentClosed}>
+        {children}
+      </div>
     </div>
   );
 };

@@ -1,0 +1,3 @@
+[tool.poetry]
+name = "poetry-pkg"
+version = "0.1.0"

@@ -46,6 +46,8 @@ public class ResourceOperationPermissionsVo {
      * 是否具备资源管理权限。
      */
     private boolean hasManagePermission;
+    private boolean canApplyManage;
+    private boolean manageApplyPending;
 
     /**
      * 是否具备资源使用权限。
@@ -56,6 +58,10 @@ public class ResourceOperationPermissionsVo {
      * 是否允许进入资源详情。
      */
     private boolean canViewDetail;
+
+    private boolean hasViewPermission;
+
+    private boolean canViewBasicInfo;
 
     /**
      * 是否可编辑信息。

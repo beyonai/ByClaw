@@ -1,59 +1,82 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import classNames from 'classnames';
-import {
-  DashboardOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  DeleteOutlined,
-  InfoCircleOutlined,
-  ReloadOutlined,
-  SettingOutlined,
-  PlusOutlined,
-  EditOutlined,
-  RocketOutlined,
-  ClearOutlined,
-  ThunderboltOutlined,
-  FormatPainterOutlined,
-  CopyOutlined,
-  FullscreenOutlined,
-  FullscreenExitOutlined,
-} from '@ant-design/icons';
-import { trim } from 'lodash';
-import {
-  message,
-  Table,
-  Button,
-  Input,
-  Space,
-  Popconfirm,
-  Select,
-  Typography,
-  Tooltip,
-  Row,
-  Col,
-  Switch,
-  Tag,
-  Drawer,
-  Form,
-  InputNumber,
-  Modal,
-  Tabs,
-} from 'antd';
-import { useIntl, useDispatch, useSelector } from '@umijs/max';
-import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
+import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
 import { hasAnyUserRole } from '@/utils/userRole';
-import { buildServiceSpecPayload, isServiceSpecAutoStartEnabled, type ServiceSpecConfig } from './serviceSpecUtils';
+import {
+  ClearOutlined,
+  CopyOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FormatPainterOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RocketOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
+import { useDispatch, useIntl, useSelector } from '@umijs/max';
+import {
+  Button,
+  Col,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
+import classNames from 'classnames';
+import { trim } from 'lodash';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
+import {
+  buildServiceSpecPayload,
+  formatJsonIfValid,
+  isServiceSpecAutoStartEnabled,
+  type ServiceSpecConfig,
+} from './serviceSpecUtils';
 
+import EndpointLinks from './EndpointLinks';
+import RecoveryPanel from './RecoveryPanel';
+import SharedConfigPanel from './SharedConfig';
+import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
+import SharedResources from './SharedResources';
+import { formatReleaseReason } from './releaseReasonUtils';
+import { primarySandboxEndpoint } from './endpointUtils';
 import styles from './index.module.less';
 
 const { Option } = Select;
-const RELEASABLE_STATUSES = ['STARTING', 'RUNNING'];
+const RELEASABLE_STATUSES = ['STARTING', 'RUNNING', 'FAILED', 'RELEASING'];
+const STATUS_LABELS: Record<string, string> = {
+  STARTING: 'starting',
+  RUNNING: 'running',
+  RELEASING: 'releasing',
+  RELEASED: 'released',
+  FAILED: 'failed',
+  STOPPED: 'stopped',
+  MISSING: 'missing',
+  UNKNOWN: 'unknown',
+};
 const DEFAULT_SERVICE_TYPE = 'openclaw';
 const PROFILE_ORDER: Record<string, number> = { xs: 1, s: 2, m: 3, l: 4 };
 const RESIZE_STRATEGIES = ['IN_PLACE', 'PREFERRED_ONLY', 'HOT_SWITCH'];
@@ -134,12 +157,13 @@ interface SsSandboxRecord {
   enterpriseId?: string | number;
   resourceId: number;
   userCode: string;
+  userName?: string;
   sandboxType: string;
   endpoint: string;
   sandboxId?: string;
   chatId: string;
   status: string;
-  providerStatus?: 'RUNNING' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
+  providerStatus?: 'STARTING' | 'RUNNING' | 'RELEASING' | 'RELEASED' | 'FAILED' | 'STOPPED' | 'MISSING' | 'UNKNOWN';
   autoRelease: number;
   leasePolicy?: string;
   timeoutSeconds?: number;
@@ -236,6 +260,33 @@ const SandboxMgr = () => {
   const dispatch = useDispatch();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
   const showLaunchButton = isAdminVip(userInfo);
+  const [brandVersion, setBrandVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((response) => {
+        if (active) setBrandVersion(response?.paramValue ?? null);
+      })
+      .catch(() => {
+        if (active) setBrandVersion(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const canManageRecovery = userInfo?.userCode?.toLowerCase() === 'adminvip' && brandVersion === 'openSource';
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const isPlatformManager = hasAnyUserRole(
+    userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+    ['PLAT_MAN']
+  );
+  const canViewShared =
+    isPlatformManager ||
+    hasAnyUserRole(
+      userInfo?.usersOrganizations?.map((organization: { userType?: string }) => organization?.userType),
+      ['BUSINESS_MAN']
+    );
   const canViewTenantResources =
     multiTenancyEnabled &&
     hasAnyUserRole(
@@ -246,7 +297,8 @@ const SandboxMgr = () => {
   tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('RUNNING');
+  const [status, setStatus] = useState('');
+  const [providerStatus, setProviderStatus] = useState('');
   const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
   const ownerScope = canViewTenantResources ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
@@ -263,6 +315,7 @@ const SandboxMgr = () => {
 
   // 沙箱配置抽屉相关状态
   const [specDrawerOpen, setSpecDrawerOpen] = useState(false);
+  const templateRebuild = useTemplateRebuildSupport(specDrawerOpen && isPlatformManager);
   const [specList, setSpecList] = useState<ServiceSpecItem[]>([]);
   const [specLoading, setSpecLoading] = useState(false);
   const [specFormVisible, setSpecFormVisible] = useState(false);
@@ -313,6 +366,7 @@ const SandboxMgr = () => {
     pageSize?: number;
     keyword?: string;
     status?: string;
+    providerStatus?: string;
     ownerScope?: 'USER' | 'TENANT';
     enterpriseId?: string;
   }>({});
@@ -482,13 +536,15 @@ const SandboxMgr = () => {
       st?: string,
       silent?: boolean,
       scope = ownerScope,
-      tenantId = enterpriseId
+      tenantId = enterpriseId,
+      liveStatus = providerStatus
     ) => {
       const p = {
         pageIndex: myPageInfo.pageIndex,
         pageSize: myPageInfo.pageSize,
         keyword: kw,
         status: st,
+        providerStatus: liveStatus || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
         enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
@@ -520,7 +576,7 @@ const SandboxMgr = () => {
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId, canViewTenantResources]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus]
   );
 
   useEffect(() => {
@@ -659,27 +715,11 @@ const SandboxMgr = () => {
     [dispatch, intl, loadData, pageInfo, keyword, status]
   );
 
-  const handleView = useCallback((endpoint: string) => {
-    // openclaw 控制台把 gatewayUrl/token 持久化在同源共享的 localStorage(openclaw.control.settings.v1)。
-    // 整页代理下所有 sandbox 同源，仅靠 URL 的 token 不够：若不显式覆盖 gatewayUrl，
-    // 第二次打开会复用上一次残留的 gatewayUrl，连到上一个 sandbox（端口串台）。
-    // 这里在打开 URL 上补上本 endpoint 对应的 gatewayUrl（ws(s)://当前host/代理前缀），强制覆盖残留。
-    try {
-      const url = new URL(endpoint, window.location.origin);
-      // 代理前缀：endpoint 路径去掉末尾的 /chat，即 /byaiService/openclaw-ui/{ip}/{port}
-      const proxyPrefix = url.pathname.replace(/\/chat$/, '');
-      // gatewayUrl 与 endpoint 同 host/同源，仅协议换成 ws(s)，避免与 endpoint 的 host 不一致。
-      const wsProto = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      const gatewayUrl = `${wsProto}//${url.host}${proxyPrefix}`;
-      url.searchParams.set('gatewayUrl', gatewayUrl);
-      window.open(url.toString(), '_blank');
-    } catch {
-      window.open(endpoint, '_blank');
-    }
-  }, []);
-
   const canReleaseSandbox = useCallback(
-    (record: SsSandboxRecord) => record.ownerScope !== 'TENANT' && RELEASABLE_STATUSES.includes(record.status),
+    (record: SsSandboxRecord) =>
+      record.ownerScope !== 'TENANT' &&
+      (RELEASABLE_STATUSES.includes(record.status) ||
+        Boolean(record.sandboxId && ['STARTING', 'RUNNING', 'RELEASING'].includes(record.providerStatus || ''))),
     []
   );
 
@@ -832,7 +872,7 @@ const SandboxMgr = () => {
       setEditingSpec(record);
       specForm.setFieldsValue({
         serviceKey: record.serviceKey,
-        specJson: record.specJson,
+        specJson: formatJsonIfValid(record.specJson),
         templateJson: record.templateJson || '',
         enabled: isServiceSpecAutoStartEnabled(record.enabled),
       });
@@ -1368,14 +1408,19 @@ const SandboxMgr = () => {
       width: 90,
     },
     {
-      title: '归属维度',
+      title: intl.formatMessage({ id: 'sandbox.ownerScope' }),
       dataIndex: 'ownerScope',
       align: 'center' as const,
       width: 110,
-      render: (value: string) => (value === 'TENANT' ? <Tag color="blue">租户</Tag> : <Tag>用户</Tag>),
+      render: (value: string) =>
+        value === 'TENANT' ? (
+          <Tag color="blue">{intl.formatMessage({ id: 'sandbox.ownerTenant' })}</Tag>
+        ) : (
+          <Tag>{intl.formatMessage({ id: 'sandbox.ownerUser' })}</Tag>
+        ),
     },
     {
-      title: '租户',
+      title: intl.formatMessage({ id: 'sandbox.ownerTenant' }),
       dataIndex: 'enterpriseId',
       align: 'center' as const,
       width: 180,
@@ -1391,6 +1436,15 @@ const SandboxMgr = () => {
       align: 'center' as const,
       fixed: 'left' as const,
       width: 150,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.userName' }),
+      dataIndex: 'userName',
+      align: 'center' as const,
+      fixed: 'left' as const,
+      width: 120,
       ellipsis: true,
       render: renderEllipsisText,
     },
@@ -1438,28 +1492,16 @@ const SandboxMgr = () => {
       align: 'center' as const,
       width: 260,
       ellipsis: true,
-      render: (value: string, record: SsSandboxRecord) => {
-        if (record.ownerScope === 'TENANT') return renderEllipsisText(value);
-        if (record.status === 'RUNNING' && value) {
-          return <Typography.Link onClick={() => handleView(value)}>{value}</Typography.Link>;
-        }
-        return <Typography.Text disabled>{value || '-'}</Typography.Text>;
-      },
+      render: (value: string, record: SsSandboxRecord) => (
+        <EndpointLinks value={value} sandboxType={record.sandboxType} running={record.status === 'RUNNING'} />
+      ),
     },
     {
-      title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lifecycleStatus' }),
       dataIndex: 'status',
       align: 'center' as const,
       width: 110,
-      render: (value: string, record: SsSandboxRecord) => {
-        if (record.ownerScope === 'TENANT' && value === 'RUNNING') {
-          if (record.providerStatus === 'MISSING' || record.providerStatus === 'STOPPED') {
-            return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerAbnormal' })}</Tag>;
-          }
-          if (record.providerStatus !== 'RUNNING') {
-            return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.tenant.providerUnknown' })}</Tag>;
-          }
-        }
+      render: (value: string) => {
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
@@ -1476,6 +1518,20 @@ const SandboxMgr = () => {
           return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Tag>;
         }
         return <Tag>{value}</Tag>;
+      },
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.providerStatus' }),
+      dataIndex: 'providerStatus',
+      align: 'center' as const,
+      width: 110,
+      render: (value?: string) => {
+        const observed = value || 'UNKNOWN';
+        return (
+          <Tag color={observed === 'RUNNING' ? 'green' : observed === 'FAILED' ? 'red' : 'default'}>
+            {intl.formatMessage({ id: `sandboxMgr.status.${STATUS_LABELS[observed] || 'unknown'}` })}
+          </Tag>
+        );
       },
     },
     {
@@ -1575,7 +1631,7 @@ const SandboxMgr = () => {
       align: 'center' as const,
       width: 180,
       ellipsis: true,
-      render: renderEllipsisText,
+      render: (value: string) => renderEllipsisText(formatReleaseReason(intl, value)),
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.version' }),
@@ -1625,8 +1681,10 @@ const SandboxMgr = () => {
                 size="small"
                 type="link"
                 icon={<EyeOutlined />}
-                onClick={() => handleView(record.endpoint)}
-                disabled={!record.endpoint}
+                href={primarySandboxEndpoint(record.endpoint, record.sandboxType)}
+                target="_blank"
+                rel="noopener noreferrer"
+                disabled={!primarySandboxEndpoint(record.endpoint, record.sandboxType)}
               >
                 {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
               </Button>
@@ -1997,6 +2055,7 @@ const SandboxMgr = () => {
     'sandboxId',
     'endpoint',
     'status',
+    'providerStatus',
     'createTime',
     'releaseTime',
     'releaseReason',
@@ -2007,28 +2066,58 @@ const SandboxMgr = () => {
       ? columns.filter((column) => tenantColumnKeys.has(String(column.dataIndex)))
       : columns.filter((column) => !['ownerScope', 'enterpriseId'].includes(String(column.dataIndex)));
 
+  const scopeTabs = (
+    <Tabs
+      activeKey={sharedOpen && canViewShared ? 'SHARED' : recoveryOpen && canManageRecovery ? 'RECOVERY' : ownerScope}
+      items={[
+        ...(canViewTenantResources
+          ? [{ key: 'TENANT', label: intl.formatMessage({ id: 'sandbox.tenantResources' }) }]
+          : []),
+        { key: 'USER', label: intl.formatMessage({ id: 'sandbox.userResources' }) },
+        ...(canViewShared ? [{ key: 'SHARED', label: intl.formatMessage({ id: 'sandboxMgr.shared.title' }) }] : []),
+        ...(canManageRecovery ? [{ key: 'RECOVERY', label: '恢复任务' }] : []),
+      ]}
+      onChange={(key) => {
+        setRecoveryOpen(key === 'RECOVERY');
+        setSharedOpen(key === 'SHARED');
+        if (key === 'RECOVERY' || key === 'SHARED') return;
+        const scope = key as 'TENANT' | 'USER';
+        setOwnerScope(scope);
+        setEnterpriseId(undefined);
+        loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
+      }}
+    />
+  );
+  if (sharedOpen && canViewShared) {
+    return (
+      <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+        {scopeTabs}
+        <SharedResources
+          key={String(userInfo?.enterpriseId) + String(isPlatformManager)}
+          canManage={isPlatformManager}
+        />
+      </div>
+    );
+  }
+  if (recoveryOpen && canManageRecovery) {
+    return (
+      <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
+        {scopeTabs}
+        <RecoveryPanel />
+      </div>
+    );
+  }
+
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
-      <Tabs
-        activeKey={ownerScope}
-        items={[
-          ...(canViewTenantResources ? [{ key: 'TENANT', label: '租户资源' }] : []),
-          { key: 'USER', label: '用户资源' },
-        ]}
-        onChange={(key) => {
-          const scope = key as 'TENANT' | 'USER';
-          setOwnerScope(scope);
-          setEnterpriseId(undefined);
-          loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
-        }}
-      />
+      {scopeTabs}
       <Row gutter={16} align="middle">
         <Col flex="auto">
           <Space size="middle">
             <Input.Search
               placeholder={
                 ownerScope === 'TENANT'
-                  ? '按租户名称 / 编码搜索'
+                  ? intl.formatMessage({ id: 'sandbox.tenantSearch' })
                   : intl.formatMessage({ id: 'sandboxMgr.search.placeholder' })
               }
               value={keyword}
@@ -2038,8 +2127,13 @@ const SandboxMgr = () => {
               style={{ width: 300 }}
               allowClear
             />
-            <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
-              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.lifecycleStatus' })}
+              value={status}
+              onChange={handleStatusChange}
+              style={{ width: 150 }}
+            >
+              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.filter.allLifecycle' })}</Option>
               <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
               <Option value="RUNNING">
                 {ownerScope === 'TENANT'
@@ -2050,12 +2144,28 @@ const SandboxMgr = () => {
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
               <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
             </Select>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.providerStatus' })}
+              value={providerStatus}
+              style={{ width: 160 }}
+              onChange={(value: string) => {
+                setProviderStatus(value);
+                loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, ownerScope, enterpriseId, value);
+              }}
+            >
+              <Option value="">{intl.formatMessage({ id: 'sandboxMgr.filter.allProvider' })}</Option>
+              {['STARTING', 'RUNNING', 'RELEASING', 'RELEASED', 'FAILED', 'UNKNOWN'].map((value) => (
+                <Option key={value} value={value}>
+                  {intl.formatMessage({ id: `sandboxMgr.status.${STATUS_LABELS[value]}` })}
+                </Option>
+              ))}
+            </Select>
             {ownerScope === 'TENANT' && (
               <Select
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                placeholder="筛选租户"
+                placeholder={intl.formatMessage({ id: 'sandbox.filterTenant' })}
                 value={enterpriseId}
                 style={{ width: 220 }}
                 onChange={(value?: string) => {
@@ -2124,7 +2234,7 @@ const SandboxMgr = () => {
             showTotal: (total: number) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
             onChange: handlePaginationChange,
           }}
-          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2690, y: 'calc(100vh - 280px)' }}
+          scroll={{ x: ownerScope === 'TENANT' ? 1600 : 2810, y: 'calc(100vh - 280px)' }}
           loading={manualLoading}
           className={styles.table}
         />
@@ -2147,6 +2257,7 @@ const SandboxMgr = () => {
               label: intl.formatMessage({ id: 'sandboxMgr.config.tab.spec' }),
               children: (
                 <div className={styles.specDrawerContent}>
+                  {templateRebuild.error && <Typography.Text type="warning">{templateRebuild.error}</Typography.Text>}
                   <Row justify="end" style={{ marginBottom: 16 }}>
                     <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
                       {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
@@ -2193,10 +2304,14 @@ const SandboxMgr = () => {
                       },
                       {
                         title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-                        width: 150,
+                        width: templateRebuild.supported ? 390 : 150,
                         align: 'center',
                         render: (_: any, record: ServiceSpecItem) => (
                           <Space size="small">
+                            <TemplateRebuildActions
+                              serviceKey={record.serviceKey}
+                              supported={templateRebuild.supported}
+                            />
                             <Button
                               size="small"
                               type="link"
@@ -2609,6 +2724,7 @@ const SandboxMgr = () => {
                 </div>
               ),
             },
+            ...(isPlatformManager ? [{ key: 'shared', label: '共享沙箱配置', children: <SharedConfigPanel /> }] : []),
           ]}
         />
       </Drawer>
@@ -2655,11 +2771,7 @@ const SandboxMgr = () => {
                     onClick={() => {
                       const val = specForm.getFieldValue('specJson');
                       if (!val) return;
-                      try {
-                        specForm.setFieldsValue({ specJson: JSON.stringify(JSON.parse(val), null, 2) });
-                      } catch {
-                        return;
-                      }
+                      specForm.setFieldsValue({ specJson: formatJsonIfValid(val) });
                     }}
                   />
                 </Tooltip>

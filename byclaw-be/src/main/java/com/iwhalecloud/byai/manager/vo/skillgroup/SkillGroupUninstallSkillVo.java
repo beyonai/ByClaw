@@ -16,6 +16,8 @@ public class SkillGroupUninstallSkillVo {
 
     private Boolean manualSource;
 
+    private Boolean automaticSource;
+
     @JsonSerialize(contentUsing = ToStringSerializer.class)
     private List<Long> otherGroupIds = new ArrayList<>();
 
