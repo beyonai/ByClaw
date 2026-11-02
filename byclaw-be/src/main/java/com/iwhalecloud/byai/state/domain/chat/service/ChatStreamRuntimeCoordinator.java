@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.concurrent.ArrayBlockingQueue;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,7 +50,25 @@ public class ChatStreamRuntimeCoordinator {
         String sessionId = String.valueOf(ctx.sessionId);
 
         boolean alreadyRunning = isSessionAlreadyRunning(ctx.sessionId);
-        if (ctx.sendByFrameworkMsgOnly || (alreadyRunning && !ctx.concurrentGatewayTurn)) {
+        boolean missingContinuedTraceContext = ctx.sendByFrameworkMsgOnly
+            && ctx.continueRunningTrace
+            && outputStreamManager.getContext(sessionId, ctx.traceId) == null;
+        if (missingContinuedTraceContext) {
+            // The previous request may already have consumed appStreamResponse and removed
+            // its WebSocket context while DSH still reports the session as active. A cold
+            // RESUME needs a fresh context/listener binding for the same trace; otherwise
+            // the Gateway command runs successfully but every reconstructed event has no
+            // clientRequestId/channel to return to.
+            ctx.sendByFrameworkMsgOnly = false;
+            // This request continues the already-persisted answer identified by
+            // modelAnswerMessageId. Its terminal write must update that message
+            // instead of inserting a second assistant history record.
+            ctx.recoveryOnly = true;
+            ctx.streamRecoveryToRequester = true;
+            log.info("继续运行的 trace 缺少输出上下文，重新绑定本次请求, sessionId: {}, traceId: {}, clientRequestId: {}",
+                sessionId, ctx.traceId, ctx.clientRequestId);
+        }
+        else if (ctx.sendByFrameworkMsgOnly || (alreadyRunning && !ctx.concurrentGatewayTurn)) {
             ctx.sendByFrameworkMsgOnly = true;
             log.info("会话已有运行态，本次只发送 Gateway 消息, sessionId: {}, traceId: {}", sessionId, ctx.traceId);
             return false;
@@ -63,7 +83,7 @@ public class ChatStreamRuntimeCoordinator {
             boolean localListener = sessionStreamManager.isSessionListenerActive(sessionId);
             if (!localListener && !ChatTransport.WEBSOCKET.equals(ctx.transport)) {
                 throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException(
-                    "当前连接无法接收此会话的新回复，请重新连接后再试");
+                    I18nUtil.get("chat.connection.unavailable"));
             }
             // Persist before sending: the listener may be owned by another backend instance.
             chatRuntimeStateService.saveConcurrent(ctx);

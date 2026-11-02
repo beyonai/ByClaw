@@ -15,6 +15,8 @@ type Props = {
   onEdit: (record: any) => void;
   onDebug: (record: any) => void;
   onDelete: (record: any) => void;
+  healthIndicator?: React.ReactNode;
+  className?: string;
 };
 
 const ModelCardItem: React.FC<Props> = ({
@@ -27,6 +29,8 @@ const ModelCardItem: React.FC<Props> = ({
   onEdit,
   onDebug,
   onDelete,
+  healthIndicator,
+  className,
 }) => {
   const {
     modelType,
@@ -74,7 +78,7 @@ const ModelCardItem: React.FC<Props> = ({
   }
 
   return (
-    <div className={styles.cardItem}>
+    <div className={classNames(styles.cardItem, className)}>
       <div className={styles.cardAccent} />
       <div className={styles.cardHead}>
         <div className={styles.titleBlock}>
@@ -87,6 +91,7 @@ const ModelCardItem: React.FC<Props> = ({
               {providerName || '-'}
             </span>
           </div>
+          {healthIndicator}
         </div>
         <div className={styles.cardStatusGroup}>
           {/* 展示当前类型的默认模型，涵盖语音、重排、图片等非对话类型。 */}

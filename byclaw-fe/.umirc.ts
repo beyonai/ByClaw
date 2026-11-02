@@ -110,6 +110,12 @@ export default defineConfig({
       .rule('archive-wasm-browser')
       .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
       .set('resolve', { alias: { fs: false, path: false, crypto: false } });
+    // RAW 依赖的 BigInt 字面量无法按现有 ES2015/Safari 12 目标压缩，局部转换其语法。
+    config.module
+      .rule('camera-raw-bigint-literals')
+      .test(/(?:@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs|typed-cstruct[\\/]dist[\\/].*\.js)$/)
+      .use('raw-bigint-literals')
+      .loader(path.resolve(__dirname, 'config/loaders/raw-bigint-literals.js'));
 
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({

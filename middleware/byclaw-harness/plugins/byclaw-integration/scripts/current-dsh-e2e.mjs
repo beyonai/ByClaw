@@ -2,11 +2,10 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readdir, readFile, writeFile, symlink } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { writeAgentTemplate } from '../lib/agent-template.js'
@@ -77,13 +76,23 @@ async function runProbe(ctx, requests, entered, release) {
   const template = {
     schemaVersion: 'dsh.agent-template/v1', id: templateId, kind: 'agent', name: 'E2E employee',
     description: 'current runtime regression', persona: 'E2E_TEMPLATE_PERSONA',
-    skills: [{ code: 'e2e-skill', path: skillDir }],
+    skills: [{ code: 'e2e-skill', path: skillDir, ref: {
+      id: 'fixture', code: 'e2e-skill', type: 'SKILL', versionUrl: '/version', downloadUrl: '/zip',
+    } }],
     source: { system: 'byclaw', resourceId: 'e2e', resourceCode: 'E2E', workerAgentType: 'BYCLAW_DSH', directlyAuthorized: true },
   }
   await writeAgentTemplate(catalog, template)
   await mkdir(join(root, 'builtin'), { recursive: true })
-  const skillRuntime = await ByClawSkillRuntime.install(ctx, { builtinSkillDir: join(root, 'builtin') })
+  let skillLoads = 0
+  const skillRuntime = await ByClawSkillRuntime.install(ctx, {
+    builtinSkillDir: join(root, 'builtin'),
+    resolveDeferredTemplate: async deferred => {
+      skillLoads++
+      return { ...deferred, skills: deferred.skills.map(({ ref: _ref, ...skill }) => skill) }
+    },
+  })
   ;(await skillRuntime.prepareGeneration([template], root, root))()
+  assert.equal(skillLoads, 0, 'startup must not load associated Skill content')
   const registry = new ByClawSessionWorkspaceRegistry()
   const templates = registerAgentTemplateRuntime(ctx, { catalogDir: catalog, subagentProvider: 'spawn',
     resolveModel: async () => selection, workspaceRegistry: registry, skillRuntime })
@@ -120,6 +129,10 @@ async function runProbe(ctx, requests, entered, release) {
   if (phase === 'create') {
     child = (await templates.instantiate(parent, templateId, 'first', signal, childId)).agent
     await entered.promise
+    const skillCall = await ctx.tools.execute({ agent: child, signal,
+      callId: ToolCallId('e2e-lazy-skill'), name: 'skill', arguments: { name: 'e2e-skill' } })
+    assert.equal(skillCall.isError, false, `the shipped Skill tool must load the deferred Skill: ${JSON.stringify(skillCall)}`)
+    assert.ok(JSON.stringify(skillCall).includes('E2E_SKILL_BODY'), 'the tool must return the associated Skill body')
     await firstProjected.promise
     await turn.forwarding
     assert.ok(live.some(f => f.type === 'chunk' && f.chunk.type === 'text-delta'), 'real agent loop must emit live frames before settlement')
@@ -154,9 +167,14 @@ async function runProbe(ctx, requests, entered, release) {
     'template persona and workspace must exist from the first provider request')
   const skills = await ctx.skills.list({ scope: child })
   assert.ok(skills.some(s => s.name === 'e2e-skill'), 'real template composition must install scoped Skill')
+  assert.ok(skillLoads > 0, 'real catalog lookup must activate deferred Skills')
   assert.ok(live.some(f => f.type === 'end'), 'real lifecycle must settle its assistant stream')
-  await ctx.sessions.flush(child.session)
-  await ctx.sessions.flush(parent.session)
+  // The spawn backend may retain a child in its own session-store scope.
+  // Flush visible live entries; the exact persisted-event assertions below
+  // also verify the child loop's durability checkpoint when no entry is exposed.
+  const liveChild = child.ctx.sessions.get(child.id)
+  if (liveChild !== undefined) await child.ctx.sessions.flush(liveChild)
+  await parent.ctx.sessions.flush(parent.session)
   const persisted = await loadPersistedSessionById(ctx.sessionPersistence, child.id)
   assert.equal(persisted.meta.version, SESSION_FORMAT_VERSION)
   assert.equal(persisted.inheritedEventCount, child.session.inheritedEventCount)
@@ -215,10 +233,9 @@ async function runMain() {
   await writeFile(join(profile, 'cordis.yml'), '[]\n')
   const patch = join(root, 'probe.patch.yml')
   await writeFile(patch, `- id: headless-startup\n  disabled: true\n- id: headless-runner\n  disabled: true\n- id: session-title-llm\n  disabled: true\n- id: session-persistence-jsonl\n  config:\n    root: ${JSON.stringify(join(home, 'sessions'))}\n    compression: none\n- id: agent-default-model\n  config:\n    provider: byclaw-e2e-mock\n    model: byclaw-e2e-model\n- insert:\n    - id: byclaw-current-dsh-e2e\n      name: ${JSON.stringify(fileURLToPath(import.meta.url))}\n`)
-  const requireDsh = createRequire(join(dshRoot, 'package.json'))
   for (const phase of ['create', 'resume']) {
     const output = []
-    const child = spawn(process.execPath, ['--import', requireDsh.resolve('tsx/esm'), join(dshRoot, 'apps/cli/src/bin.ts'),
+    const child = spawn(process.execPath, [...(process.env.BYCLAW_E2E_SOURCE_CLI === '1' ? ['--import', 'tsx/esm', join(dshRoot, 'apps/cli/src/bin.ts')] : [join(dshRoot, 'apps/cli/lib/bin.js')]),
       '--profile', 'headless', '--patch', patch], {
       cwd: dshRoot, env: { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', TSX_TSCONFIG_PATH: join(dshRoot, 'tsconfig.json'), BYCLAW_E2E_ROOT: root, BYCLAW_E2E_PHASE: phase },
       stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',

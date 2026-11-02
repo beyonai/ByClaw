@@ -42,7 +42,7 @@ jest.mock('@umijs/max', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 jest.mock('@/hooks/useGlobal', () => () => mockGlobal);
-jest.mock('@/models/common/useAppStore', () => () => mockAppStore);
+jest.mock('@/models/common/useAppStore', () => Object.assign(() => mockAppStore, { getState: () => mockAppStore }));
 jest.mock('@/hooks/useVncOpener', () => () => mockOpenVnc);
 jest.mock('@/layout/components/provider/global', () => ({ Platform: { pc: 'pc' } }));
 jest.mock('@/layout/sider/siderContentContext', () => ({
@@ -126,6 +126,7 @@ describe('chat remote computer entry', () => {
     mockGlobal.EventEmitter = mockEventEmitter;
     mockMessages = [];
     mockAppStore.sandboxesInfo = [];
+    mockAppStore.getSandboxesInfoUrl = jest.fn();
   });
 
   it('restores the latest employee browser entry from history without opening it', () => {
@@ -261,5 +262,65 @@ describe('chat remote computer entry', () => {
     mockMessages = [...mockMessages, employeeMessage('answer-2', true)];
     view.rerender(renderChat());
     expect(options.isCurrent()).toBe(false);
+  });
+
+  describe('a tool sandbox with its own desktop', () => {
+    const ownDesktop = [
+      {
+        status: 'RUNNING',
+        instanceEndpoints: {
+          vnc: '/v1/sandboxes/tool-1/proxy/8081?token=t',
+          desktop: '/v1/sandboxes/tool-1/proxy/8083?token=t',
+        },
+      },
+    ];
+
+    it('offers the entry without browser activity and opens the sandbox desktop', async () => {
+      mockMessages = [employeeMessage('answer-1')];
+      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue(ownDesktop);
+
+      render(renderChat());
+
+      fireEvent.click(await screen.findByTitle('common.remoteComputer'));
+      const options = mockOpenVnc.mock.calls[0][0];
+      expect(options.instance).toBe('desktop');
+      expect(options.isCurrent()).toBe(true);
+    });
+
+    it('opens the browser desktop when the latest answer used the browser', async () => {
+      mockMessages = [employeeMessage('answer-1', true)];
+      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue(ownDesktop);
+
+      render(renderChat());
+      await act(async () => {});
+
+      fireEvent.click(screen.getByTitle('common.remoteComputer'));
+      expect(mockOpenVnc.mock.calls[0][0].instance).toBe('vnc');
+    });
+
+    it('does not offer the entry for a sandbox that only declares the browser desktop', async () => {
+      mockMessages = [employeeMessage('answer-1')];
+      mockAppStore.getSandboxesInfoUrl = jest
+        .fn()
+        .mockResolvedValue([
+          { status: 'RUNNING', instanceEndpoints: { vnc: '/v1/sandboxes/tool-1/proxy/8081?token=t' } },
+        ]);
+
+      render(renderChat());
+      await act(async () => {});
+
+      expect(mockAppStore.getSandboxesInfoUrl).toHaveBeenCalled();
+      expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
+    });
+
+    it('does not offer the entry when that sandbox is not running', async () => {
+      mockMessages = [employeeMessage('answer-1')];
+      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue([{ ...ownDesktop[0], status: 'STOPPED' }]);
+
+      render(renderChat());
+      await act(async () => {});
+
+      expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
+    });
   });
 });

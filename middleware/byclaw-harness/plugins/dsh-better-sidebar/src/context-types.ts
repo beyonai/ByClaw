@@ -73,6 +73,8 @@ export interface SidebarWebUpgradeRoute {
 
 /** The webServer service face this plugin uses. */
 export interface SidebarWebServer {
+  /** The listener's bind address (absent on fakes / non-listening carriers). */
+  readonly host?: string
   register(route: SidebarWebRoute): () => void
   registerUpgrade(route: SidebarWebUpgradeRoute): () => void
 }
@@ -96,12 +98,11 @@ export interface SidebarSessionStore {
 }
 
 /**
- * The web runtime service face (mirror of @deepseek-ai/dsh-web-app's
- * WebRuntimeValues): the bind-derived trust list the /api gateway's fence
- * accepts — LAN IP literals sampled when the server binds all interfaces,
- * plus explicit `--trusted-host` authorities.
+ * The web startup service face (mirror of @deepseek-ai/dsh-web-app's
+ * WebStartupValues): the explicit `--trusted-host` authorities the /api
+ * gateway's fence accepts besides loopback and the listener's bind IP.
  */
-export interface SidebarWebRuntime {
+export interface SidebarWebStartup {
   trustedHosts: readonly string[]
 }
 
@@ -459,45 +460,21 @@ export interface SidebarWorkspacesService {
 }
 
 /**
- * The invariant service face (mirror of @deepseek-ai/dsh-invariants'
- * InvariantRegistry). The upstream augmentation does not reach this Context
- * (dual-cordis-instance resolution), so the register signature is restated
- * structurally, exactly like the other service faces above.
+ * The settings service face (mirror of @deepseek-ai/dsh-settings' 0.2.1
+ * SettingsForms). Forms are keyed by profile entry id and project the
+ * entry's volatile Config fields; there is no per-namespace `register`.
  */
-export interface SidebarInvariantsService {
-  /** Reserve one package's checks and install them in the service's child fiber. */
-  register(
-    packageName: string,
-    installer: (ctx: Context, fail: (message: string) => never) => void | Promise<void>,
-  ): () => void
-}
-
-/** The settings service face (mirror of @deepseek-ai/dsh-settings' SettingsProvider). */
 export interface SidebarSettingsService {
-  /**
-   * Register one namespace schema (the resolved value layers schema defaults,
-   * then the composition base, then the user document).
-   */
-  register<T>(
-    ns: string,
-    schema: unknown,
-    options?: { base?: Partial<T>; applies?: 'live' | 'restart' },
-  ): {
-    get(): T
-    watch(callback: (next: T, prev: T) => void | Promise<void>): () => void
-    update(patch: object): Promise<void>
-    replace(section: object): Promise<void>
-  }
-  /** Redacted descriptors of every registered namespace (secrets stripped). */
+  /** Redacted descriptors of every configurable profile entry (secrets stripped). */
   describe(options?: { redactSecrets?: boolean }): Array<{
     ns: string
     value?: unknown
     base?: unknown
     user?: unknown
-    applies: 'live' | 'restart'
+    applies: 'live'
     revision: number
   }>
-  /** Service-level merge write with the revision guard (a stale writer is refused). */
+  /** Merge write into one entry's volatile fields with the revision guard (a stale writer is refused). */
   update(ns: string, patch: object, expectedRevision?: number): Promise<void>
 }
 
@@ -538,16 +515,14 @@ export interface SidebarContextShape {
   sessions: SidebarSessionStore & SidebarSessionsService
   /** The wire handle the Side Chat transcript polls through. */
   connection: SidebarConnectionHandle
-  /** The web runtime trust list (bind-derived). */
-  webRuntime: SidebarWebRuntime
+  /** The web startup trust list (--trusted-host authorities). */
+  webStartup: SidebarWebStartup
   /** The client slot registry (register/inject). */
   slots: SidebarSlotsService
   /** The client workspaces service face (file-open funnel). */
   workspaces: SidebarWorkspacesService
   /** The settings service face (prefs persistence + namespace reads). */
   settings: SidebarSettingsService
-  /** The invariant registry face. */
-  invariants: SidebarInvariantsService
   /** The tool registry face. */
   tools: SidebarToolsService
   /** The client locale service face. */

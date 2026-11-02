@@ -37,6 +37,7 @@ export default {
   'personalModel.search': '搜索模型',
   'personalModel.enableSuccess': '启用{name}模型成功',
   'personalModel.detail.title': '模型详情',
+  'personalModel.detail.loadFailed': '模型详情加载失败',
   'personalModel.detail.yes': '是',
   'personalModel.detail.no': '否',
   'personalModel.detail.separator': '、',

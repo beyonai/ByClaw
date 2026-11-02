@@ -74,6 +74,18 @@ public class AIService {
         throw new ModelSelectionException();
     }
 
+    private ModelDto resolveModel(String modelCode, String modelId) {
+        if (StringUtils.isBlank(modelId)) {
+            return resolveModel(modelCode);
+        }
+        // 同一供应商模型编码可以配置多个地址、协议及凭据，编辑页选择的实例 ID 才是唯一标识。
+        ModelDto selectedModel = aiModelService.getModel(modelId);
+        if (selectedModel == null) {
+            throw new ModelSelectionException();
+        }
+        return selectedModel;
+    }
+
     public static class ModelSelectionException extends RuntimeException {
         public ModelSelectionException() {
             super("Selected model is unavailable");
@@ -87,6 +99,12 @@ public class AIService {
     public String generateText(String systemPrompt, String userPrompt, String modelCode, int maxTokens) {
         ModelDto defaultModel = resolveModel(modelCode);
         return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens);
+    }
+
+    public String generateText(String systemPrompt, String userPrompt, String modelCode, String modelId,
+        int maxTokens) {
+        ModelDto selectedModel = resolveModel(modelCode, modelId);
+        return generateText(systemPrompt, userPrompt, selectedModel, null, maxTokens);
     }
 
     /**
@@ -199,14 +217,16 @@ public class AIService {
 
     public String generateTextStream(String systemPrompt, String userPrompt, String modelCode, int maxTokens,
                                      TextChunkHandler chunkHandler) {
-        ModelDto defaultModel = resolveModel(modelCode);
+        return generateTextStream(systemPrompt, userPrompt, modelCode, null, maxTokens, chunkHandler);
+    }
+
+    public String generateTextStream(String systemPrompt, String userPrompt, String modelCode, String modelId,
+        int maxTokens, TextChunkHandler chunkHandler) {
+        ModelDto defaultModel = resolveModel(modelCode, modelId);
         ModelConfigurationValidator.validate(defaultModel);
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();
-        if (StringUtils.isNotBlank(modelCode)) {
-            model = modelCode;
-        }
         try {
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", model);

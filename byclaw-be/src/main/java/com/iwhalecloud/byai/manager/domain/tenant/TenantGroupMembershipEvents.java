@@ -9,6 +9,25 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 final class TenantGroupMembershipEvents {
     private TenantGroupMembershipEvents() {}
 
+    /** 消费 Node 在成员表实际插入后记录的事实，与邀请及聊天系统消息解耦。 */
+    static void joined(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook hooks,
+        TenantRequestContext tenant, String sessionId, TenantNodeModels.CommandResult result) {
+        if (result == null || result.data() == null) return;
+        var notices = result.data().path("savedMembers");
+        if (!notices.isArray()) return;
+        var users = new java.util.HashSet<String>();
+        for (var notice : notices) {
+            if (!sessionId.equals(notice.path("groupId").asText())
+                || !Long.toString(tenant.enterpriseId()).equals(notice.path("enterpriseId").asText())) {
+                throw new IllegalStateException("groupchat.member.ownership.unconfirmed");
+            }
+            if (users.add(notice.path("byaiSessionMemberId").asText())) {
+                hooks.memberJoined(sessionId, tenant.enterpriseId(), notice.path("userId").asText(),
+                    notice.path("invitedBy").asText(), notice.path("byaiSessionMemberId").asText());
+            }
+        }
+    }
+
     static void publish(GroupChatEventPublisher events, TenantRequestContext tenant, Long sessionId,
         TenantNodeModels.CommandResult result) {
         publish(events, tenant, sessionId, result, "MEMBER_ADDED", null);

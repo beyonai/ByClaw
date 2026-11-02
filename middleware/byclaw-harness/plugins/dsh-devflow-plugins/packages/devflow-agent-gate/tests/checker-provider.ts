@@ -9,20 +9,21 @@ export interface CheckerCall {
   prompt: string
   label: string | undefined
   agentOptions: SubagentStartRequest['agentOptions']
-  toolFilter: SubagentStartRequest['toolFilter']
   cwd: string | undefined
   parentAgentsAvailable: boolean
   signal: AbortSignal
   disposed: () => boolean
 }
 
-/** A scripted reply; `hang` never settles the child result. */
+/**
+ * A scripted reply; `hang` settles the child result only once the run is
+ * cancelled, as a real backend does when the runtime aborts its start signal.
+ */
 export type ScriptedReply = SubagentResult | 'hang'
 
 interface CheckerOptions {
   name?: string
   agentOptions?: boolean
-  toolFilter?: boolean
   replies: ScriptedReply[]
 }
 
@@ -35,8 +36,7 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
       agentOptions: options.agentOptions ?? true,
       outputSchema: false,
       depthLimit: false,
-      toolFilter: options.toolFilter ?? false,
-      persona: false,
+      agentPreset: false,
     },
     inheritsParentContext: false,
     start(request) {
@@ -47,7 +47,6 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
         prompt: request.prompt.map(block => block.type === 'text' ? block.text : '').join(''),
         label: request.label,
         agentOptions: request.agentOptions,
-        toolFilter: request.toolFilter,
         cwd: request.parent.session.header.cwd,
         parentAgentsAvailable: request.parent.ctx.agents !== undefined,
         signal: request.signal,
@@ -56,7 +55,7 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
       return Promise.resolve({
         id: SessionId(`checker-child-${++seq}`),
         localAgent: undefined,
-        result: reply === 'hang' ? new Promise<SubagentResult>(() => {}) : Promise.resolve(reply),
+        result: reply === 'hang' ? cancelled(request.signal) : Promise.resolve(reply),
         dispose: () => {
           disposed = true
           return Promise.resolve()
@@ -79,4 +78,13 @@ export function allowReply(summary: string): SubagentResult {
 /** A completed run ending in a well-formed `veto` verdict block. */
 export function vetoReply(summary: string, findings?: string[]): SubagentResult {
   return checkerReply(`Problems found.\n\n\`\`\`json\n${JSON.stringify({ verdict: 'veto', summary, ...findings === undefined ? {} : { findings } })}\n\`\`\`\n`)
+}
+
+/** The result of a run that only ends when it is cancelled. */
+function cancelled(signal: AbortSignal): Promise<SubagentResult> {
+  return new Promise<SubagentResult>((resolve) => {
+    const settle = (): void => { resolve({ output: [], stopReason: 'aborted' }) }
+    if (signal.aborted) settle()
+    else signal.addEventListener('abort', settle, { once: true })
+  })
 }

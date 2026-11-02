@@ -1,3 +1,7 @@
+import {
+  createRelativePathResourceResolver,
+  createRelativeResourceResolver,
+} from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import Markdown from '@/components/Markdown';
 import { downloadResourceFile, normalizeDatasetDirectoryPath } from '@/service/file';
 import { downloadFile } from '@/utils/file';
@@ -8,10 +12,14 @@ import classnames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AntdIcon from '../AntdIcon';
 import { downloadFile as downloadFileService } from '@/service/workSpace';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 import { RenderSourceIcon } from '@/components/ReferenceSource';
 import styles from './index.module.less';
+import { canPreviewName, resolvePreviewType } from '@/components/Preview/formats';
 
-const Office = React.lazy(() => import('@/components/Preview/Office').then((module) => ({ default: module.Office })));
+const PreViewFile = React.lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
 
 const { Title, Paragraph } = Typography;
 interface IProps {
@@ -26,6 +34,17 @@ const DetailDrawer = (props: IProps) => {
   const intl = useIntl();
   const { title = '', chunkList = [] } = detailInfo || {};
   const documentId = detailInfo?.documentId ?? detailInfo?.id;
+
+  const resolveResource = useMemo(() => {
+    const resourceId = detailInfo?.resourceId ?? detailInfo?.datasetId;
+    const path = detailInfo?.directoryPath || (title ? `/${title}` : '');
+    if (resourceId && path)
+      return createRelativePathResourceResolver(
+        path,
+        async (directoryPath) => (await downloadResourceFile({ resourceId, directoryPath })).file
+      );
+    return createRelativeResourceResolver(detailInfo?.fileUrl);
+  }, [detailInfo, title]);
 
   const [activeTab, setActiveTab] = useState('sourceDetail');
   const [loading, setLoading] = useState(false);
@@ -65,38 +84,42 @@ const DetailDrawer = (props: IProps) => {
       return;
     }
 
-    if (abortController.current?.signal.aborted) return;
+    abortController.current?.abort();
 
     setLoading(true);
 
-    const supportedOfficeFormats = ['xlsx', 'docx', 'pdf', 'pptx'];
-    const fileExtension = title?.split('.').pop()?.toLowerCase() || '';
-
-    if (!supportedOfficeFormats.includes(fileExtension)) {
+    if (!canPreviewName(title)) {
       message.info(intl.formatMessage({ id: 'sourceDrawer.previewNotSupported' }));
       setLoading(false);
       return;
     }
 
+    const requestController = new AbortController();
+    abortController.current = requestController;
     try {
-      abortController.current = new AbortController();
-      const fileRes = await downloadFileService(
-        { fileId: documentId },
-        { cancelToken: abortController.current.signal }
-      );
-      abortController.current = undefined;
+      const fileRes = await downloadFileService({ fileId: documentId }, { cancelToken: requestController });
+      if (requestController.signal.aborted) return;
       if (fileRes?.file) {
         console.log({ fileRes });
 
         setFile(new File([fileRes.file], fileRes.fileName));
       }
     } catch (error: any) {
-      if (!abortController.current?.signal.aborted) {
+      if (!requestController.signal.aborted) {
         console.error(error);
-        message.error(error.message || error || intl.formatMessage({ id: 'sourceDrawer.previewFailed' }));
+        message.error(
+          localizeErrorMessage(
+            error?.message || error,
+            intl.formatMessage({ id: 'sourceDrawer.previewFailed' }),
+            intl.locale
+          )
+        );
       }
     } finally {
-      setLoading(false);
+      if (abortController.current === requestController) {
+        abortController.current = undefined;
+        setLoading(false);
+      }
     }
   }, [documentId, title, intl]);
 
@@ -233,7 +256,17 @@ const DetailDrawer = (props: IProps) => {
       </div>
       {activeTab === 'pagePreview' && (
         <React.Suspense fallback={<Spin />}>
-          <Office loading={loading} data={file} fileName={title} />
+          <Spin spinning={loading}>
+            {file && (
+              <PreViewFile
+                data={file}
+                title={title}
+                type={resolvePreviewType(undefined, title)}
+                resolveMarkdownImage={resolveResource}
+                resolveHtmlResource={resolveResource}
+              />
+            )}
+          </Spin>
         </React.Suspense>
       )}
     </Drawer>

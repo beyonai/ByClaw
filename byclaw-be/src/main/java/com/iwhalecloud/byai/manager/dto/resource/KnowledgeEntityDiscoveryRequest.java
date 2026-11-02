@@ -21,7 +21,7 @@ import lombok.Setter;
 @Setter
 public class KnowledgeEntityDiscoveryRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
     /** 原始文档路径；传入时优先于 directoryPath。 */
@@ -35,8 +35,8 @@ public class KnowledgeEntityDiscoveryRequest {
      */
     private String targetDirectoryPath;
 
-    @Positive(message = "最大实体数必须大于 0")
-    @Max(value = 12, message = "最大实体数不能超过 12")
+    @Positive(message = "{knowledge.discovery.limitPositive}")
+    @Max(value = 12, message = "{knowledge.discovery.limitMax}")
     private Integer maxEntities = 12;
 
     private Boolean force = false;

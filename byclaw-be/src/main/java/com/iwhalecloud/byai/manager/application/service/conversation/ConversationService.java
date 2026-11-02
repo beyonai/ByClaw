@@ -345,9 +345,9 @@ public class ConversationService {
             return config.getParamName();
         }
         return switch (StringUtils.defaultString(config.getParamValue())) {
-            case "ANS_INACCURATE" -> "答案不准确";
-            case "WRONG_PERSON" -> "找错人";
-            case "FEED_OTHER" -> "其他";
+            case "ANS_INACCURATE" -> I18nUtil.get("feedback.reason.inaccurate");
+            case "WRONG_PERSON" -> I18nUtil.get("feedback.reason.wrongAssignee");
+            case "FEED_OTHER" -> I18nUtil.get("feedback.reason.other");
             default -> config.getParamName();
         };
     }

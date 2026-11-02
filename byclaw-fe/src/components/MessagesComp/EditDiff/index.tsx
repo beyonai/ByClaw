@@ -102,7 +102,9 @@ function EditDiff({ messageListItemContent }: { messageListItemContent?: { subst
   const title = operationTitle(payload.operation);
   const primaryPath = payload.files[0].path;
   const fileCountSuffix = payload.files.length > 1 ? ` +${payload.files.length - 1}` : '';
-  const toggleLabel = `${expanded ? '收起' : '展开'} ${title} ${primaryPath}`;
+  const toggleLabel = `${
+    expanded ? intl.formatMessage({ id: 'fileChanges.collapse' }) : intl.formatMessage({ id: 'common.expand' })
+  } ${title} ${primaryPath}`;
 
   const copyPath = (path: string) => {
     copyTextToClipboard(

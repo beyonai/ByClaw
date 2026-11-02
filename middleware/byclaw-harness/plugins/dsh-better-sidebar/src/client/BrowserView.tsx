@@ -18,11 +18,11 @@
  */
 import { useEffect, useState } from 'react'
 import {
-  IconChevronLeftOutline14,
-  IconChevronRightOutline14,
-  IconLinkOutline14,
-  IconRefreshOutline14,
-  IconWarningOutline16,
+  IconChevronLeftOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconLinkOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconWarningOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { VscLinkExternal } from 'react-icons/vsc'
 import { api } from './api.ts'
@@ -172,7 +172,7 @@ export function BrowserView(props: TabComponentProps) {
           disabled={cursor <= 0}
           onClick={goBack}
         >
-          <IconChevronLeftOutline14 />
+          <IconChevronLeftOutlineRegular />
         </button>
         <button
           type="button"
@@ -182,7 +182,7 @@ export function BrowserView(props: TabComponentProps) {
           disabled={cursor >= history.length - 1}
           onClick={goForward}
         >
-          <IconChevronRightOutline14 />
+          <IconChevronRightOutlineRegular />
         </button>
         <button
           type="button"
@@ -191,7 +191,7 @@ export function BrowserView(props: TabComponentProps) {
           title={t('refresh')}
           onClick={() => { setReloadKey(key => key + 1) }}
         >
-          <IconRefreshOutline14 />
+          <IconRefreshOutlineRegular size={14} />
         </button>
         <input
           className={css.browserInput}
@@ -210,7 +210,7 @@ export function BrowserView(props: TabComponentProps) {
           title={t('browserGo')}
           onClick={() => { navigateTo(input) }}
         >
-          <IconLinkOutline14 />
+          <IconLinkOutlineRegular size={14} />
         </button>
         <button
           type="button"
@@ -273,7 +273,7 @@ export function BrowserEmbedBlocked(props: {
   try { host = new URL(url).hostname } catch { /* keep the raw URL */ }
   return (
     <div className={css.browserBlocked}>
-      <IconWarningOutline16 size={16} />
+      <IconWarningOutlineRegular size={16} />
       <div className={css.browserBlockedTitle}>{t('browserEmbedBlocked', { host })}</div>
       <div className={css.browserBlockedDesc}>{t('browserEmbedBlockedDesc')}</div>
       <div className={css.browserBlockedActions}>

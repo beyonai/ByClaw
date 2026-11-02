@@ -71,6 +71,7 @@ export interface BrowserGoalServices {
   config: GoalConfig
   text: BrowserTextServiceFactory
   artifactRoot: string
+  saveDownload?: (path: string, name: string, runId: string) => Promise<string>
   log: (event: string, data: Record<string, unknown>) => void
 }
 export interface BrowserSessionControllerOptions {
@@ -764,6 +765,7 @@ export class BrowserSessionController {
           state: s => this.#broker.goal!(lease, { command: 'state', runId }, s) as Promise<GoalControlState>,
           progress: async (decisions, actions, s) => { await this.#broker.goal!(lease, { command: 'progress', runId, decisions, actions }, s) },
           saveDownload: async (path, name) => {
+            if (services.saveDownload) return services.saveDownload(path, name, runId)
             const directory = join(services.artifactRoot, runId)
             await mkdir(directory, { recursive: true, mode: 0o700 })
             const target = join(directory, `${randomUUID()}-${basename(name).replace(/[^a-zA-Z0-9._-]/g, '_') || 'download'}`)

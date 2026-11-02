@@ -94,6 +94,9 @@ public class IndexApplicationServiceV2 {
     @Autowired
     private ResourceFavoriteService resourceFavoriteService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeAudienceDisplayService employeeAudienceDisplayService;
+
     private static final String SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
     private static final String CREATE_TYPE_FROM_THIRD = "FROM_THIRD";
@@ -447,6 +450,7 @@ public class IndexApplicationServiceV2 {
         }
 
         this.fillMarketOperationPermissions(discoverList);
+        employeeAudienceDisplayService.fill(discoverList);
     }
 
     /**

@@ -670,7 +670,7 @@
           AND user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, id DESC
         LIMIT 1
     </select>
 
@@ -679,6 +679,17 @@
         FROM ss_sandbox_record
         WHERE owner_scope = 'USER'
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+        ORDER BY create_time DESC, id DESC
+        LIMIT 1
+    </select>
+
+    <!-- 根据沙箱实例ID和状态反查最新一条个人沙箱记录 -->
+    <select id="selectBySandboxIdAndStatus" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE owner_scope = 'USER'
+          AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+          AND status = #{status,jdbcType=VARCHAR}
         ORDER BY create_time DESC
         LIMIT 1
     </select>
@@ -697,5 +708,60 @@
         WHERE id = #{id,jdbcType=BIGINT}
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
+
+
+    <!-- Live sandbox ids and persisted status are independent filters and may apply together. -->
+    <sql id="CurrentInventoryFilter">
+        <where>
+            <if test="sandboxIds != null and sandboxIds.size() == 0">
+                AND 1 = 0
+            </if>
+            <if test="sandboxIds != null and sandboxIds.size() &gt; 0">
+                AND sandbox_id IN
+                <foreach collection="sandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>
+            </if>
+            <if test="observedSandboxIds != null and observedSandboxIds.size() &gt; 0">
+                AND (sandbox_id IS NULL OR sandbox_id NOT IN
+                <foreach collection="observedSandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>)
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status,jdbcType=VARCHAR}
+            </if>
+            AND NOT EXISTS (SELECT 1 FROM ss_sandbox_record newer
+                WHERE newer.sandbox_id = ss_sandbox_record.sandbox_id AND newer.id > ss_sandbox_record.id)
+            <if test="ownerScope != 'ALL'">
+                AND owner_scope = #{ownerScope}
+            </if>
+            <if test="enterpriseId != null">
+                <choose>
+                    <when test="ownerScope == 'USER'">AND <include refid="UserEnterpriseScope" /></when>
+                    <otherwise>AND enterprise_id = #{enterpriseId}</otherwise>
+                </choose>
+            </if>
+
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    user_code LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    <if test="ownerScope == 'TENANT'">
+                        OR EXISTS (SELECT 1 FROM byai.po_enterprise_info e
+                            WHERE e.enterprise_id = ss_sandbox_record.enterprise_id
+                              AND LOWER(e.com_acct_name) LIKE CONCAT('%', LOWER(#{keyword,jdbcType=VARCHAR}), '%'))
+                    </if>
+                )
+            </if>
+        </where>
+    </sql>
+    <select id="selectInventoryPage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" /> FROM ss_sandbox_record
+        <include refid="CurrentInventoryFilter" />
+        ORDER BY id DESC LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+    <select id="countInventory" resultType="int">
+        SELECT COUNT(*) FROM ss_sandbox_record
+        <include refid="CurrentInventoryFilter" />
+    </select>
 
 </mapper>

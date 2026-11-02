@@ -46,6 +46,10 @@ public class TenantConfigPublisher {
         }
         try {
             JsonNode state = objectMapper.readTree(rows.get("PROVISION_STATE"));
+            // A delayed Redis request from an expired command must not resurrect a READY projection.
+            JsonNode commandDeadline = state.get("commandLeaseUntilEpochSeconds");
+            if (commandDeadline != null && (!commandDeadline.asText().matches("[1-9][0-9]{0,11}")
+                || Long.parseLong(commandDeadline.asText()) <= java.time.Instant.now().getEpochSecond())) return false;
             if (state.path("generation").asLong(0) <= 0 || state.path("fencingToken").asLong(0) <= 0
                 || Long.parseLong(rows.get("DB_CREDENTIAL_VERSION")) <= 0
                 || !("byclaw_t_" + enterpriseId).equals(rows.get("DB_NAME"))

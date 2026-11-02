@@ -1,3 +1,9 @@
+jest.mock('@umijs/max', () => ({
+  useSelector: () => null,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
+
 import { getEnabledRecordingModes, getRecorderClient, resetRecorderClient } from './recorderClient';
 import { buildRecorderEndpoint, createHttpRecorderClient } from './byclawRecorderClient';
 import { GET, POST } from '@/service/common/request';

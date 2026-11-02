@@ -126,7 +126,13 @@ import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message'
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import webSocketManager from '@/utils/websocket';
 import { IMessageState, SSEMessageType } from '@/constants/message';
-import { clearChatRuntime, handleParsedChatStream } from '../useChat/chatRuntime';
+import {
+  clearChatRuntime,
+  handleParsedChatStream,
+  registerPendingChatContext,
+  registerSessionChatContext,
+  unregisterSessionChatContext,
+} from '../useChat/chatRuntime';
 
 import useChat from '../useChat';
 
@@ -181,6 +187,477 @@ describe('hooks/useChat/index', () => {
     });
   });
 
+  it('rebinds a cold resume to the existing answer after the original stream was completed', async () => {
+    mockMessageList = [
+      {
+        msgId: 'query-client',
+        messageId: '101',
+        text: '原始问题',
+        agentType: 'agent',
+        sessionId: '101',
+      },
+      {
+        msgId: 'answer-client',
+        messageId: '201',
+        queryMsgId: 'query-client',
+        fromBeyond: true,
+        agentId: 'employee-42',
+        agentName: '当前数字员工',
+        messageState: IMessageState.Answer,
+        sessionId: '101',
+      },
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Sandbox release can leave the session runtime marked as running even
+    // after appStreamResponse removed the original stream context.
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'completed-original-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        },
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const resumeClientRequestId = mockSend.mock.calls[0]?.[1]?.clientRequestId;
+    expect(resumeClientRequestId).toBeTruthy();
+    expect(chatSessionRuntimeManager.getByClientRequest(resumeClientRequestId)).toMatchObject({
+      sessionId: '101',
+      answerMessageId: 'answer-client',
+    });
+  });
+
+  it('uses the freshly completed answer instead of the stale message ref for a cold resume', async () => {
+    const staleAnswer = {
+      msgId: 'answer-client',
+      messageId: '201',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+      messageList: [
+        {
+          uuid: 'interaction-card',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 0, substance: { formStatus: 0 } },
+        },
+      ],
+    };
+    const completedAnswer = {
+      ...staleAnswer,
+      messageList: [
+        {
+          ...staleAnswer.messageList[0],
+          content: { formStatus: 2, substance: { formStatus: 2 } },
+        },
+      ],
+    };
+    mockMessageList = [
+      {
+        msgId: 'query-client',
+        messageId: '101',
+        text: '原始问题',
+        agentType: 'agent',
+        sessionId: '101',
+      },
+      staleAnswer,
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'completed-original-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: completedAnswer,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        } as any,
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend.mock.calls[0]?.[1]?.clientRequestId).toMatch(/_answer-client$/);
+  });
+
+  it('refreshes an existing restored stream context before continuing a resume', async () => {
+    const queryMessage = {
+      msgId: 'query-client',
+      messageId: '101',
+      text: '原始问题',
+      agentType: 'agent',
+      sessionId: '101',
+    };
+    const staleAnswer = {
+      msgId: 'answer-client',
+      messageId: '201',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+      traceId: 'trace-1',
+      messageList: [
+        {
+          uuid: 'interaction-card',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 0, substance: { formStatus: 0 } },
+        },
+      ],
+    };
+    const completedAnswer = {
+      ...staleAnswer,
+      messageList: [
+        {
+          ...staleAnswer.messageList[0],
+          content: { formStatus: 2, substance: { formStatus: 2 } },
+        },
+      ],
+    };
+    mockMessageList = [queryMessage, staleAnswer];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const restoredContext = {
+      clientRequestId: 'restored-client',
+      queryMsg: queryMessage,
+      answerMsg: staleAnswer,
+      getMessageList: () => mockMessageList,
+      flowHandler: jest.fn(),
+      updateMessage: mockUpdateMessage,
+      restored: true,
+    } as any;
+    registerPendingChatContext(restoredContext);
+    registerSessionChatContext('101', restoredContext);
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'restored-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: completedAnswer,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        },
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend.mock.calls[0]?.[1]?.clientRequestId).toMatch(/_answer-client$/);
+  });
+
+  it('falls back to cold resume when the restored context disappears before send', async () => {
+    const queryMessage = {
+      msgId: 'query-client',
+      messageId: '101',
+      text: '原始问题',
+      agentType: 'agent',
+      sessionId: '101',
+    };
+    const staleAnswer = {
+      msgId: 'answer-client',
+      messageId: '201',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+      traceId: 'trace-1',
+      messageList: [
+        {
+          uuid: 'interaction-card',
+          contentType: SSEMessageType.askUserQuestions,
+          content: { formStatus: 0, substance: { formStatus: 0 } },
+        },
+      ],
+    };
+    const completedAnswer = {
+      ...staleAnswer,
+      messageList: [
+        {
+          ...staleAnswer.messageList[0],
+          content: { formStatus: 2, substance: { formStatus: 2 } },
+        },
+      ],
+    };
+    mockMessageList = [queryMessage, staleAnswer];
+    const onBeforeSend = jest.fn(() => unregisterSessionChatContext('101'));
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn(), onBeforeSend } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const restoredContext = {
+      clientRequestId: 'restored-client',
+      queryMsg: queryMessage,
+      answerMsg: staleAnswer,
+      getMessageList: () => mockMessageList,
+      flowHandler: jest.fn(),
+      updateMessage: mockUpdateMessage,
+      restored: true,
+    } as any;
+    registerPendingChatContext(restoredContext);
+    registerSessionChatContext('101', restoredContext);
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'restored-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: completedAnswer,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        },
+        { onlyQuery: true }
+      );
+    });
+
+    expect(onBeforeSend).toHaveBeenCalled();
+    expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    const resumeClientRequestId = mockSend.mock.calls[0]?.[1]?.clientRequestId;
+    expect(chatSessionRuntimeManager.getByClientRequest(resumeClientRequestId)).toBeDefined();
+  });
+
+  it('rejects a fresh cold-resume answer when its message identity is incomplete', async () => {
+    const staleAnswer = {
+      msgId: 'answer-client',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+    };
+    mockMessageList = [
+      {
+        msgId: 'query-client',
+        text: '原始问题',
+        agentType: 'agent',
+        sessionId: '101',
+      },
+      staleAnswer,
+    ];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      chatSessionRuntimeManager.register({
+        clientRequestId: 'completed-original-client',
+        sessionId: '101',
+        traceId: 'trace-1',
+        answerMessageId: 'answer-client',
+        restored: true,
+      });
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: { ...staleAnswer, messageList: [] },
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        } as any,
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+  });
+
+  it('reuses the persisted zht answer when the refreshed interaction card omits sessionId', async () => {
+    const queryMessage = {
+      msgId: 'query-client',
+      text: '原始问题',
+      agentType: 'agent',
+      sessionId: '101',
+    };
+    const persistedAnswer = {
+      msgId: 'answer-client',
+      messageId: '201',
+      queryMsgId: 'query-client',
+      fromBeyond: true,
+      messageState: IMessageState.Done,
+      sessionId: '101',
+      agentId: 'zht',
+      messageList: [{ contentType: SSEMessageType.askUserQuestions, content: { formStatus: 0 } }],
+    };
+    const completedCardWithoutSessionId = {
+      ...persistedAnswer,
+      sessionId: undefined,
+      messageList: [{ contentType: SSEMessageType.askUserQuestions, content: { formStatus: 2 } }],
+    };
+    mockMessageList = [queryMessage, persistedAnswer];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          inheritQryMsgId: 'query-client',
+          resumeAnswerMsg: completedCardWithoutSessionId,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        },
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        msgId: 'answer-client',
+        sessionId: '101',
+        agentId: 'zht',
+        traceId: 'trace-1',
+        messageList: completedCardWithoutSessionId.messageList,
+      }),
+      { isAssign: true }
+    );
+    expect(mockSend).toHaveBeenCalledWith(
+      '苹果',
+      expect.objectContaining({
+        agentId: null,
+        agentCode: 'zht',
+      })
+    );
+  });
+
+  it('reuses the restored answer when refresh dropped the client query id', async () => {
+    const completedAnswer = {
+      msgId: 'answer-client-after-refresh',
+      messageId: '201',
+      fromBeyond: true,
+      agentId: 'employee-42',
+      agentName: '原数字员工',
+      messageState: IMessageState.Answer,
+      sessionId: '101',
+      messageList: [],
+    };
+    mockMessageList = [completedAnswer];
+
+    const { result } = renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mockUpdateMessage.mockClear();
+
+    await act(async () => {
+      await result.current.sendQuery(
+        {
+          queryQuestion: '苹果',
+          resumeAnswerMsg: completedAnswer,
+          payload: {
+            actionType: 'RESUME',
+            traceId: 'trace-1',
+            llmMessageId: '201',
+            sourceAgentType: 'BYCLAW_DSH_u1',
+          },
+          msgOpt: { answerMsg: { messageState: IMessageState.Query } },
+        } as any,
+        { onlyQuery: true }
+      );
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(completedAnswer, { isAssign: true });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[1]).toMatchObject({
+      agentCode: 'employee-42',
+      clientRequestId: expect.stringContaining('answer-client-after-refresh'),
+    });
+  });
+
   it('waits for session messages before restoring running messages', async () => {
     let resolveSessionMessages!: () => void;
     const sessionMessagesPromise = new Promise<void>((resolve) => {
@@ -222,13 +699,9 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['101'] });
-    expect(mockUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: '201',
-        sessionId: '101',
-      }),
-      { isAssign: true }
-    );
+    // runningStatus alone is not proof that an answer exists. A failed worker can leave
+    // this Redis marker behind, so an empty assistant placeholder must not be rendered.
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
     expect(mockSendMessageWhenReady).toHaveBeenCalledWith({
       type: 'TASK_PLAN_GET',
       clientRequestId: 'client-1',
@@ -237,6 +710,48 @@ describe('hooks/useChat/index', () => {
       traceId: 'trace-1',
       laneId: undefined,
     });
+  });
+
+  it('does not render a default assistant placeholder for stale running state after resume failure', async () => {
+    mockMessageList = [
+      {
+        messageId: 'previous-answer',
+        msgId: 'previous-answer',
+        fromBeyond: true,
+        messageState: IMessageState.Done,
+        sessionId: '101',
+        finalContent: 'RESUMED',
+      },
+    ];
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: '101',
+        running: true,
+        traceId: 'failed-resume-trace',
+        clientRequestId: 'failed-resume-client',
+        modelAnswerMessageId: 'empty-answer',
+        userMessageId: 'resume-message',
+      },
+    ] as any);
+    mockGetChatRunningSnapshot.mockResolvedValue(null);
+
+    renderHook(() => useChat({ sessionId: '101', addSession: jest.fn() } as any));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'empty-answer',
+        fromBeyond: true,
+        text: '',
+      }),
+      expect.anything()
+    );
   });
 
   it('requests the latest task plan after websocket reconnect', async () => {
@@ -837,7 +1352,7 @@ describe('hooks/useChat/index', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('sends multi-agent lane metadata and creates one answer placeholder per lane', async () => {
+  it('limits programmatic multi-employee payloads to the latest employee', async () => {
     const { result } = renderHook(() =>
       useChat({
         sessionId: 's1',
@@ -869,34 +1384,16 @@ describe('hooks/useChat/index', () => {
 
     expect(mockSend).toHaveBeenCalledTimes(1);
     const payload = mockSend.mock.calls[0]?.[1] as any;
-    expect(payload.multiAgent).toMatchObject({
-      mode: 'parallel',
-      lanes: [
-        {
-          agentId: '101',
-          agentCode: 'agent-a',
-          agentName: 'Agent A',
-          order: 0,
-        },
-        {
-          agentId: '102',
-          agentCode: 'agent-b',
-          agentName: 'Agent B',
-          order: 1,
-        },
-      ],
-    });
-    expect(payload.multiAgent.turnId).toBeTruthy();
-    expect(payload.extParams.multiAgent).toEqual(payload.multiAgent);
-    expect(payload.clientRequestId).toBe(payload.multiAgent.lanes[0].clientRequestId);
-    expect(payload.multiAgent.lanes[0].queryMessageId).toBe(payload.multiAgent.turnId);
-    expect(payload.multiAgent.lanes[0].answerMessageId).toBe(payload.multiAgent.lanes[0].laneId);
-    expect(payload.multiAgent.lanes[1].answerMessageId).toBe(payload.multiAgent.lanes[1].laneId);
+    expect(payload.multiAgent).toBeUndefined();
+    expect(payload.extParams.multiAgent).toBeUndefined();
+    expect(payload.agentId).toBe('102');
+    expect(payload.agentCode).toBeNull();
+    expect(payload.resourceList.map((item: any) => item.resourceId)).toEqual(['102']);
 
     const updatedMessages = mockUpdateMessage.mock.calls.map(([msg]) => msg);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(2);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond)).toHaveLength(1);
     expect(updatedMessages.filter((msg) => !msg.fromBeyond)).toHaveLength(1);
-    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['101', '102']);
+    expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['102']);
   });
 
   it('uses the single inline mentioned digital employee for the answer placeholder even when payload has an agentId', async () => {

@@ -7,7 +7,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
-class OAuth2StateTest {
+class OAuth2StateTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void createsStateThatRecoversAuthorizationIdAndUsesIndependentRandomValue() {

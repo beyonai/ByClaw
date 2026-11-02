@@ -1,5 +1,11 @@
 # ByClaw-BE
 
+### 个人网盘容量业务门控
+
+`BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED=false`（属性 `byclaw.storage.personal-admission.enabled`）默认关闭聊天容量预查、账号存储预热与容量错误重查；认证后的 readiness 返回 `enabled=false, ready=true, state=DISABLED`。不修改用户空间绑定、身份、云端配额或容量账本；普通文件请求继续走原存储接口，权限拒绝、文件不存在与实际 IO 错误仍失败。
+
+BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启动时读取。恢复业务门控须同时显式开启部署开关与原数据库 SaaS 开关，并重新构建前端。
+
 > BeyondAI 后端服务 - 企业级 AI 应用平台
 
 [![CI](https://github.com/byclaw/byclaw-be/actions/workflows/ci.yml/badge.svg)](https://github.com/byclaw/byclaw-be/actions)
@@ -17,6 +23,63 @@ ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发�
 - 📚 **知识库** - 文档管理和检索增强生成 (RAG)
 - 🛠️ **工具集成** - 灵活的插件和工具编排
 - 📊 **数据分析** - 对话分析和性能监控
+
+## 钉钉机器人首次反馈与耗时排查
+
+钉钉消息先完成用户绑定、员工权限和会话校验，再投递“正在思考...”卡片。
+附件下载、会话文件保存以及模型执行在首卡投递后进行。首卡准备与长问答使用独立的有界线程池；
+长问答不再占用首卡准备线程，聊天池可直接使用配置的并发数。队列满时提示“当前咨询人数较多，请稍后再试”，
+不会将模型执行转移到 Stream 回调线程。卡片创建失败发送文字提示；已创建卡片后附件处理失败或聊天容量耗尽，
+会结束等待卡片，更新失败时再发送文字提示。拒绝的消息不会自动重放，用户需重新发送。
+
+以下环境变量均可选，需设置为正整数：
+
+| 环境变量 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `DINGTALK_PREPARATION_WORKERS` | 8 | 每个 BE 实例的用户校验及首卡准备并发 |
+| `DINGTALK_PREPARATION_QUEUE_CAPACITY` | 32 | 首卡准备排队容量 |
+| `DINGTALK_CHAT_WORKERS` | 32 | 附件处理及整轮问答并发 |
+| `DINGTALK_CHAT_QUEUE_CAPACITY` | 64 | 首卡已投递后的问答排队容量 |
+| `DINGTALK_CONNECT_TIMEOUT_MILLIS` | 3000 | 钉钉 HTTP 连接超时 |
+| `DINGTALK_READ_TIMEOUT_MILLIS` | 10000 | 钉钉 SDK、Webhook 和附件请求的读取超时 |
+| `DINGTALK_REQUEST_TIMEOUT_MILLIS` | 15000 | 每次文字 Webhook 请求的总超时 |
+| `DINGTALK_FILE_TIMEOUT_MILLIS` | 120000 | 每次附件地址获取/文件下载请求的总超时 |
+
+连接/读取超时也应用于 Token、用户查询及卡片 SDK；卡片 SDK 不开启应用层自动重试，
+这两个 SDK 的连接/读取超时不是整轮问答总超时。附件总超时按单次 HTTP 请求计算，
+多附件仍按原有顺序保存。容量用尽时的文字提示使用有超时的 Webhook 请求，不运行模型。
+Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例的并发缓存未命中共用一次获取；
+机器人配置变更仍按原有机器人前缀失效缓存，无需数据迁移。
+
+检索 `dingtalk_chain`，按 `msgId` / `requestId` 关联以下阶段：
+`preparation_dequeued`（首卡排队）、`user_resolved`、`authorized`、`session_resolved`、
+`token`（缓存命中及获取耗时）、`first_card`（Token 获取及卡片投递）、`chat_dequeued`（问答排队）、
+`files_ready`、`first_content`（进入聊天处理后首段可展示内容就绪，含沙箱就绪和派发等待）、
+`first_card_update`（首次内容更新的 HTTP 耗时）、`completed`。
+`durationMs` 为该阶段耗时，`elapsedMs` 为收到回调后的累计时间；线程池活跃数及队列长度一并记录。
+`first_card.elapsedMs` 反映服务端首卡投递完成时间，不包含钉钉客户端展示延迟。
+后续使用同一 `requestId` 对照 Gateway 日志的 `readyMs`、`dispatchMs`，区分沙箱就绪与消息派发。
+完整事件内容不再逐包记录到 INFO。生产效果需部署后用实际钉钉消息验证，单元测试不代表外网或模型可用。
+
+## 登录预热与首次聊天
+
+远程模式的 `/sandbox/autoscale/boundary-blacklist/metrics` 透传 Platform 的 Prometheus 纯文本指标。
+Platform 控制客户端独立解码文本指标和 JSON 业务响应，避免通用 Feign 的 JSON 校验将正常 HTTP 200 指标响应误报为失败。
+其他 HTTP 错误仍会失败；平台请求异常保留原始原因链，便于区分传输与解码问题。此修复无需新增 SQL 或环境变量。
+
+仅在 `BE_ENV=development` 时，共享资格失效触发的 `shared/releaseAll` 请求报错会记录 WARN 并继续路由；其他环境及手动释放保持原有报错行为。请求仍使用原有超时配置。
+
+登录异步预热与首次聊天共用 Platform 的幂等启动流程：专享使用 `sandbox/business/launch`，共享使用 `shared/lookup`、`shared/acquire`。
+首次聊天按最终 Worker 类型确定服务及资源键，复用同一用户的启动结果；不会因 Worker 暂未注册而重启登录正在拉起的沙箱。
+BE 本机合并相同路由的等待，跨实例并发由 Platform 的启动所有权协调。只有消息实际发送失败后的既有恢复路径使用重启。
+
+`.env` 中 `BYCLAW_SANDBOX_STARTUP_TIMEOUT_MS` 默认 `60000` 毫秒，BE 与 Platform 应配置相同值。
+BE 的同一等待预算包含目标解析（含共享分配）、启动 RPC 和后续 Worker 注册等待。调用方到期立即结束等待；后台启动仍保留至远端实际返回，同租户、同路由重试只加入该任务，不取消或重复创建。异步任务保留用户、语言与租户身份，不向已经超时或取消的请求追加进度消息。
+专享沙箱离线就绪检查在 `business/launch` 传递 `verifyExisting=true`，由 Platform 持有启动所有权后核验当前实例；登录预热不额外探测。共享沿用 `shared/lookup`、`shared/acquire` 幂等成员协议。
+已有 `byclaw.gateway.worker-readiness-timeout-ms` 显式配置优先于该环境变量。
+Platform 客户端默认读超时取 `130000` 与启动预算加 `10000` 毫秒的较大值，为传输提供容差；这不会增加 Worker 等待预算。
+若显式覆盖 `byclaw.platform.read-timeout-ms`，应至少比启动预算多 `10000` 毫秒；连接超时仍默认 `5000` 毫秒。
+目标解析或启动失败时，BE 在数据库持久化与运行态清理前立即发送带会话、消息、trace 和 clientRequestId 的 `CHAT_STREAM/error` 终态；前端结束加载，已取消的回答保持取消状态。此变更需配套部署 Platform 的并发启动协调修复。
 
 ## Super 运行时兼容
 
@@ -42,7 +105,9 @@ Standalone 和 K3s 默认部署已移除 Super 服务及专用镜像、运行参
 
 ## 技能导入并发与外部子会话恢复
 
-技能导入、审核与审核后的运行文件刷新按技能编码共享 Spring Integration `RedisLockRegistry`。
+资源中心 ZIP 导入在查询同编码技能前，按技能编码取得 Spring Integration `RedisLockRegistry` 分布式锁；
+第三方资源同步也通过 `SsResourceService.lockSkillImport` 串行化同一外部资源身份。
+审核、生命周期维护和同步产物更新沿用各自的资源 ID 事务锁，不改动审核和授权规则。
 锁使用已有 Redis 连接，在数据库事务提交或回滚后释放；持锁期间自动续租，提交前再次验证锁所有权。
 若提交前已失去租约或 Redis 无法验证锁，事务回滚。
 同事务重复取得同编码锁不会重复持有，不同编码可以并发执行；等待超过 30 秒或 Redis 获取锁失败时终止操作，
@@ -145,7 +210,7 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 
 ## 群列表消息摘要
 
-租户请求带 `X-Enterprise-Id` 和 `X-Tenant-Context` 时，新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。
+租户请求带 `X-Enterprise-Id` 时，BE 会按当前登录用户的 ACTIVE 成员关系重新校验租户范围；不再使用 `X-Tenant-Context`。新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。群列表和群详情返回归属 `enterpriseId`，调用方切换工作组时以该字段建立聊天上下文。
 
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
@@ -723,7 +788,9 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 
 平台管理员选择套餐创建租户后，BE 异步创建独立 OpenGauss 沙箱、校验数据库身份、发布 Redis 配置、启动 `tenant-data-node`，并向 Node 的 `/internal/v1/schema-tasks` 上传 JAR 内置的最新版本 baseline ZIP。Maven 构建时自动把 `byclaw-tenant-node/baseline/*__baseline.zip` 纳入 BE JAR；新增版本的 ZIP 无需修改 BE 路径或版本常量。需要覆盖内置制品时，可设置 `BYCLAW_TENANT_BASELINE_BUNDLE` 为 BE 容器内可读的 ZIP 绝对路径。Node 完成 baseline 后回报 `/internal/v1/tenantSchemaTaskReports`，BE 将 `tenant_schema_audit` 置为 `VERIFIED` 并发布 `READY`。失败可从租户管理的阶段进度弹窗重试；每次初始化尝试保留独立审计行。
 
-数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。
+建表初始化与普通租户请求使用相同的 Redis 服务发现地址（`TENANT_DATA_<企业ID>`），不使用 ACS 公网网关 endpoint。初始化最多等待 90 秒，允许节点处于 `ADMIN_ONLY` 或 `READY`，但注册记录必须唯一且匹配企业 ID、generation 和数据库沙箱记录 ID；数据库健康响应还必须返回相同身份及 `dbWritable=true` 才上传 baseline。普通业务请求仍只接受 `READY`。BE 到注册节点仅携带租户内部令牌，不转发沙箱平台 API Key。
+
+数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。 数据库与 Node 的复用和运行状态检查通过 provider-neutral 生命周期接口查询当前执行引擎，兼容 ACS，不再调用 OpenSandbox 专属详情接口。查询失败或返回身份/状态不完整时停止开通并保留现有资源，避免把“状态未核实”当作沙箱丢失。
 
 本地 Podman 联调时，OpenSandbox 的 TCP endpoint 可能返回容器网段地址。Docker 模式返回的 `/proxy/5432` 地址由 BE 的连接探测和租户数据源管理统一转换为数据库容器名与原生 5432 端口；两者也兼容沙箱记录中的 `openclaw` JSON endpoint。`BYCLAW_TENANT_DB_PROBE_HOST=127.0.0.1` 可覆盖 BE 连接租户数据库时使用的主机；Node 仍使用同一 Podman 网络内的数据库容器名。Node 到 BE 的 `BYCLAW_TENANT_BE_INTERNAL_URL`、Redis 地址和 `BYCLAW_TENANT_INTERNAL_TOKEN` 由部署环境注入。HTTP 模式下 BE 通过已核验沙箱 ID 对应的容器名和注册端口直连 Node，使用 `X-Byclaw-Internal-Token`；Node 直连 BE 的三个内部接口使用 Bearer 令牌。这些接口由控制器核验专用令牌。
 
@@ -829,3 +896,150 @@ HTTP(S) origins/paths, and still forwards the authenticated user's current share
 token. It is not a request parameter and does not modify user endpoint records.
 
 Management audit records redact credential fields and authorization header values from both request and response JSON. API response payloads are unchanged.
+
+`AiModelService.getModel` reads enabled model details from Redis first. On a cache miss,
+it queries the model table by ID and returns the same `ModelDto` representation for an
+enabled model and restores its Redis entry. Missing, disabled, or invalid IDs return `null`.
+
+### 登录后的模型配置检查
+
+`POST /new/model/healthCheck` 接受空请求体（登录检查）或 `{ "id": "模型ID" }`（保存后强制检查）。后端从登录态确定范围：`adminvip` 检查公共模型，其他用户只检查本人个人模型；指定 ID 时同样验证所有权，管理员可检查本人个人模型和公共模型。响应包含 scope、检查时间和每个模型的 ID、名称、类型、状态、稳定错误码、HTTP 状态及脱敏服务源地址，不返回凭证和上游错误原文。检查不会变更模型启停状态。
+
+个人登录检查仅覆盖已启用的 LLM；没有个人 LLM 时静默跳过，不提示缺失配置，也不探测个人 Embedding。公共登录检查覆盖 LLM 和 Embedding，并分别提示缺失配置。保存后的指定 ID 检查始终验证刚保存的模型。文本模型使用 OpenAI Chat Completions、Responses 或 Anthropic Messages 协议发送固定短请求（输出上限 16 Token），Embedding 和 Rerank 使用固定短文本，不重试。单个请求最长 12 秒。图片及音频模型保存后返回 SKIPPED/MANUAL_DEBUG_REQUIRED，需要现有调试入口验证，不自动生成收费媒体。
+
+检查先验证必要配置，再由后端 OkHttp 按模型的服务地址、凭证、协议及自定义请求头发起真实 POST 请求（不执行 shell/curl）。LLM 输入固定为 `Reply OK`，使用与文本调试一致的流式请求模式（`stream: true`、`Accept: text/event-stream`）；Embedding 输入为 `ping`，Rerank 使用固定查询及单条文档，不携带用户聊天内容。LLM 要求成功的 HTTP 状态、SSE 响应类型和有效正文或推理文本增量，并消费后续事件，避免忽略正文之后的错误；Embedding 要求非空向量，Rerank 要求非空结果数组。HTTP 200 中的 `code != 0`、`success: false`、协议错误事件，以及空响应均不视为成功。不验证回答语义、业务效果或 Embedding 维度是否与知识库一致。前端说明这是检查时的基础可用性，未通过检查不一概表述为模型无法使用。
+
+LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasoningConfig.compatFormat` 关闭可关闭的额外思考，不修改保存的模型设置。无法关闭思考的模型返回有效推理文本同样证明真实调用可用，不要求一定生成最终答案；仍需消费整个流并排除后续错误。解析同时兼容标准多行 SSE 和缺少空行分隔的完整 JSON 数据行。接口失败事件返回 `UPSTREAM_ERROR`，无文本返回 `EMPTY_RESPONSE`，明确耗尽探测额度且无文本返回 `PROBE_OUTPUT_LIMIT`，不再一概归因于协议不匹配。仅 `INVALID_RESPONSE` 表示响应格式无法识别。手动调试成功直接覆盖同一模型的 Redis 旧失败记录，不追加探测，也不重置其他模型结果或 24 小时登录检查期限；已有缓存不会因更新解析规则自动触发额外模型调用，可通过调试或“重新检查”更新。
+
+个人和公共模型的手动调试结果也会按精确模型 ID 更新 Redis 缓存及页面异常标记，复用已有调用，不为同步状态额外发起检查、不延长登录检查的 24 小时有效期，也不自动弹窗或跳转。调试失败使用 `DEBUG_FAILED`，引导核对当前调试请求及模型配置，避免误报为认证失败；成功只清除该模型的异常。取消调试、账号切换、模型已删除或更新的保存检查均阻止旧调试结果覆盖缓存。旧自动检查也不能覆盖之后完成的调试失败。调试请求可在表单中自定义，自动检查仍只验证固定最小请求，不能代替对全部业务参数的验证。
+
+模型检查的持久状态统一使用项目公共 `RedisUtil`（沿用现有单机/集群连接配置），不新增 Redis 客户端、连接配置或业务 Lua 脚本。公共模型定义为全局资源，因此公共检查结果共享；个人检查结果按创建者用户 ID 隔离；“已展示/已关闭”状态按用户和归属分别记录，跨浏览器和设备生效。成功及失败的登录检查均由后端去重 24 小时。最近结果保留 30 天以展示历史状态，24 小时探测期限使用独立 `loginCheckedAt`，读取缓存、关闭提示和单模型更新不会延长期限。旧版本 localStorage 检查记录不再读取或写入，也不直接导入服务端。保存个人或公共模型后，始终按保存的模型 ID 发起检查，覆盖该模型的旧结果；局部保存检查不会延长其他模型的登录检查有效期。个人模型失败时自动打开 `/models?tab=mine&healthModelId=...`，精确筛选并标记问题模型；公共模型失败时自动打开 `/manager/systemParams/modal?healthModelId=...`，按精确 ID 筛选并标记对应模型，刷新后仍可定位，但不自动打开编辑表单。只有点击卡片编辑或诊断中的“编辑配置”才打开表单；显式编辑/新增路由指令使用后即清除，刷新不会重复弹出。公共模型缺失配置时进入该管理页面，点击添加模型后打开新增表单。可关闭的国际化告警卡片提供原因、处理建议、脱敏详情、编辑配置及重新检查；成功时静默移除告警。已关闭的同次告警不重复展示。跨设备共享同一用户的提示状态和对应模型结果。
+
+保存检查失败时优先定位刚保存的模型，其他模型的历史失败仍保留；保存检查成功时不跳转到其他历史失败。单模型定位按 `model_id = ID` 查询。删除成功后同步移除该模型的 Redis 检查结果及告警，不重置登录检查有效期，也不调用模型；删除前尚未完成的检查不会恢复已删除的模型。删除当前定位的模型时恢复完整列表。对于旧缓存生成的失效链接，只有成功的精确 ID 查询确认模型不存在后才清理缓存和筛选；请求失败不清理。
+
+`POST /new/model/healthCache` 按登录态读取 `PERSONAL` 或 `PUBLIC` 检查结果，只清理数据库已确认删除的记录，不调用模型。`healthNotice` 持久化提示状态；`healthRemoveDeleted` 只允许清理数据库已不存在的 ID；调试通过 `healthDebugBegin`/`healthDebugComplete` 复用原调试结果，后端按模型 ID 验证所有权并用版本号阻止旧结果覆盖。保存提交后失效在途旧结果，删除在事务提交后清理 Redis；短分布式锁只保护缓存的读取、合并和写入，不覆盖真实模型调用。
+
+直接进入模型页面会读取当前账号可见归属的 Redis 检查缓存。`/models` 顶部汇总个人和公共模型的历史异常总数，切换 tab 不改变统计范围；按归属分别列出异常数量，点击对应入口查看该范围的诊断（例如个人 1 项、公共 2 项，总计 3 项）。各 tab 的卡片仅显示自身模型的警告标记，公共 tab 保持只读；`/manager/systemParams/modal` 仅统计公共模型，并在汇总文案中明确标注归属。页面切换和点击警告只读取缓存，不调用模型、不刷新 24 小时有效期。关闭浮层不会移除页面上的异常标记，点击卡片标记可重新查看该模型的诊断。检查未完成使用未知状态文案，历史结果不当作实时可用性结论。公共模型仅管理员提供编辑和重新检查入口，其他用户显示联系管理员的建议。保存、删除和调试后即时刷新当前页面；切换页面、窗口重新获焦及可见页面每 60 秒只读取 Redis，用于同步其他标签页或设备的变化，不额外调用模型。资源中心入口和“模型”标签使用与审批中心一致的 Ant Design 小号数字徽章，统计个人与公共模型的失败总数（个人 1 + 公共 2 = 3），0 时隐藏；关闭诊断不清除徽章。
+
+### Group mention-all-users
+
+`GROUP_CHAT_SEND` accepts optional boolean `mentionAllUsers`. The caller must already be a group member. Both personal and tenant-owned groups resolve current `USER` members at message commit, exclude the sender, and deduplicate with explicit human mentions through the existing mention index. The marker never adds digital employees to task dispatch. No database migration is required. Message metadata and group timeline responses retain the flag; text stays readable as `@所有人` for older clients. Plain text and forwarded snapshots do not confer mention-all notification authority. Deploy the tenant Node and Java backend together before enabling the matching Hacu frontend.
+## 查询 SQL 的并发约定
+
+查询 SQL 不附加 `FOR UPDATE`。历史 `ForUpdate` / `lockResource` 方法名保留兼容，不表示查询持有行锁。业务并发控制应依赖显式事务互斥、条件更新或唯一约束；已有事务注解本身不保证先读后写串行化。子会话发送门禁通过独立连接上的显式 UPDATE 持有互斥，释放租约时回滚；普通资源查询不再提供悲观锁保证。
+
+## 资源编辑与数字员工配置生成
+
+数字员工配置生成接口接受可选 `modelId`，按模型缓存中的实例 ID 精确读取服务配置，并使用该实例的供应商模型编码。初次生成、重新生成及 JSON 修复均使用同一实例；指定实例不存在时不回退到同编码的其他实例。未传 `modelId` 的旧客户端沿用 `modelCode` 选择方式。
+
+资源基础信息保存中的标准 JSON 产物登记加入当前事务。普通技能刷新已在该事务内更新同一产物记录，后续登记不能挂起事务后再次写入该记录，否则会等待自身持有的写锁。
+
+## 组织管理员与组织范围发布（V0.5.1）
+
+新增和编辑组织均支持从当前企业的有效成员中设置多名管理员；选中用户自动加入目标组织，
+撤销管理员只移除该角色，保留成员关系和其他角色。新增组织、企业组织归属及管理员角色在同一事务中保存。
+管理员选择通过 `POST /system/organization/administratorOrganizations` 获取当前企业组织树，
+通过 `POST /system/organization/administratorCandidates` 按 `memberOrgId` 精确查询直属用户，不展开子组织；
+两个接口均携带目标 `orgId`（编辑）或 `parentOrgId`（新增），并校验操作权限及企业范围。
+组织管理员接口使用项目实际 FastJson 消息转换器回归验证请求解析和字段输出；前后端须同时部署，
+旧后端若缺少管理员接口会抛出 `NoResourceFoundException`，不能仅更新前端。
+组织管理员的发布及申请审核范围为本组织和下级组织，审核时读取当前角色，撤权后旧登录态不能继续审核。
+
+个人数字员工可选择全公司或多个组织发布（选择上级组织已包含其下级，不重复创建目标）。全公司由平台管理员或超管审核；
+具体组织由目标组织及上级组织管理员、平台管理员或超管审核。首次发布逐组织生效，获批范围成员可直接查看和使用，管理权限仍需申请。
+部分组织拒绝后可以重新申请；已生效范围保留，重新申请只增加范围，使用现有企业配置。
+企业配置保持一个共享版本，更新必须经所有已发布组织审核通过后一起切换，期间继续使用旧版本。
+审核权限不包含修改候选配置；管理员修改待审配置会重置全部组织审核结果。
+发布审核列表和详情只向组织管理员返回本组织及下级组织的目标行，不返回其他组织的审核人、意见或历史汇总审核信息；
+发布人、平台管理员和超管保留完整范围。展示过滤使用独立响应副本，不改变共享版本的全组织审批判断。
+员工发布执行中的关联技能复制沿用目标组织审核权限，并校验执行状态、企业、员工来源与申请关联；
+组织管理员不再因旧的平台管理员专用检查导致技能复制失败，原有快照校验、事务回滚和重试幂等保持不变。
+
+企业推荐的 `POST /api/v2/digitEmploy/discover` 返回 `audienceOrganizations`（字符串 `orgId` 和 `orgName`）。
+发布副本从生效发布范围读取；直接创建的企业员工和员工组从有效组织使用授权读取，排除过期、未生效及黑名单授权，
+不以创建者组织或 `manOrgId` 代替。仅返回查看者所属或管理范围匹配的组织，创建者、平台管理员和超管可看完整范围。
+`orgId=-1` 表示全公司，空数组表示未设置可展示的组织；待审或驳回范围不作为生效范围返回。
+
+使用与管理申请的列表、待办计数和审核动作采用相同的审核人规则：资源创建者、有效管理授权人、
+`adminvip`，或申请人所在组织的管理员（申请人必须属于其管理的本组织/下级组织，且员工已生效发布范围覆盖申请人）。
+平台管理员角色本身不获得使用/管理申请审核权；员工发布审核和技能上架审核沿用各自流程。
+企业员工申请通过后，仅为本次申请人补齐实际绑定资源的使用授权，不要求审核人另有这些资源的管理权；
+租户、资源状态、黑名单和外部同步控制范围仍保留，不扩大到其他员工使用人。失败时审批事务整体回滚。
+管理申请使用独立的 `MANAGE_APPLY` 待审记录，批准后才授予 `ALLOW_MANAGE`；条件更新避免重复处理。
+
+部署前请人工检查 `deploy/migrations/versions/V0.5.1/V0.5.1__ddl.sql` 和 `V0.5.1__dml.sql`，先 DDL 后 DML。
+迁移只登记已有企业发布副本的全公司历史范围，不扩大手工创建资源的授权。
+创建待审申请唯一索引前，先检查以下查询是否返回重复记录；迁移不会自动删除历史申请：
+
+```sql
+SELECT grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type, COUNT(*)
+FROM byai.au_privilege_grant
+WHERE status_cd = 'P' AND grant_obj_type = 'DIG_EMPLOYEE' AND grant_to_obj_type = 'USER'
+  AND grant_to_type = 'RED' AND grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')
+GROUP BY grant_obj_type, grant_obj_id, grant_to_obj_type, grant_to_obj_id, grant_type
+HAVING COUNT(*) > 1;
+```
+
+本次查询没有增加行锁子句，并发依赖条件更新、事务及唯一约束。版本迁移不自动合并初始化 SQL。
+
+## 标准资源 JSON 的 Redis 副本
+
+商业资源同步和本地配置管理复用标准产物 JSON，按 `<resourceBizType>_<resourceId>` 存储 Redis String，
+例如 `SKILL_42`、`KG_DOC_43`、`TOOLKIT_44`（工具使用自身实际业务类型，不统一改成 TOOL）。
+创建、导入、基础信息或技能包更新时覆盖，下架、注销和删除时清除；不缓存 ZIP 内容、技能包内同名 JSON 或数字员工已有的专用缓存。
+文件写入可挂起数据库事务，Redis 回调仍保留在调用方事务内，仅提交后执行，回滚不改变原缓存。
+Redis 故障记录日志，不能把已成功提交的保存操作误报为回滚。
+
+启动时按资源 ID 分页读取现有扩展表的 `target_content`，回填已上架资源并清除未上架资源的旧 key；
+不重新发布文件，不修改数据库。可用 `init.Redis.resource.json.runner.enabled=false` 关闭回填。
+知识正文或文件仍在原存储中，Redis 存放资源配置 JSON。该副本不代替现有查看、使用或管理授权校验。
+
+第三方同步技能的运行权限以有效显式使用或管理授权为准。服务端持久化的正数同步版本、
+企业技能类型及完整外部资源身份用于识别同步技能；企业记账字段为空或与用户企业不一致，
+不会使已有授权失效。查看授权仅允许读取基础信息，不能下载或执行技能。授权未生效、
+过期、撤销、使用黑名单及资源下架仍会阻止使用；创建人和管理员身份不替代同步技能的显式授权。
+普通资源的企业隔离和资源维护权限保持原规则。自动关联支持用户唯一且有权使用的个人或企业
+普通默认数字员工，继续排除超级助手、未上架员工和默认员工不唯一的情况。
+
+### 同步工具关联后的运行配置
+
+第三方同步的 `AGENT`、`TOOLKIT`、`MCP` 与 `SKILL` 使用相同的显式授权策略：必须具备有效的使用或管理授权；
+仅有查看授权、创建人或管理员身份不能代替调用授权。同步来源由服务端持久化的同步版本及完整资源身份确认，
+企业记账字段为空或不一致不再单独阻止已授权调用；普通资源仍保留原有企业隔离。
+
+保存数字员工后，先同步关联资源的运行配置，再发布员工 Redis 快照；缺失工具运行配置或依赖 Redis 写入失败会使刷新失败。
+提交后的刷新最多尝试三次，仅成功后发布变更事件。连续失败时接口明确提示“配置已保存，但运行配置同步失败，请重试保存”，
+关联关系已经提交，需要修复存储或资源配置后重新保存。第三方资源同步任务沿用现有持久化任务重试机制。
+
+资源同步调度不加入全局服务事务：任务领取立即提交，每名员工的关联及 `skills` 在独立事务中提交后，
+才刷新 `target_content`、资源文件和 Redis。快照写入失败或员工扩展记录缺失会中止发布，任务保留为
+可重试的 `PARTIAL`，不再把旧运行配置标为同步完成。离线快照预生成仍返回失败计数。
+升级无需数据库迁移；历史已标为 `COMPLETED` 的旧快照需通过员工保存或原资源同步接口重新触发刷新。
+
+资源同步接口在导入事务提交后立即启动关联和运行配置同步，默认最多等待 5 秒返回结果
+（`byai.resource-sync.response-wait-ms`，范围 0–10000 毫秒）。返回的 `association.effective=true`
+才表示本次关联和运行配置全部完成且没有跳过用户；`association.status` 为 `PENDING` / `RUNNING`
+表示仍在处理，`PARTIAL` / `FAILED` 表示等待后台重试，跳过原因和失败员工见 `association.result`。
+超过等待时间不取消任务，可用 `association.jobId` 调用 `/tool/queryResourceSyncJob` 查询最终结果。
+该状态表示运行配置已发布，不代表已完成模型调用或沙箱内的技能下载验证。
+
+新版待执行、执行中和待重试任务在库内使用 `_V2` 后缀，接口仍返回原有状态名称。
+旧版调度器无法领取这些任务，新版也能接管旧版遗留的可重试任务；已被旧版领取的事务仍需结束后才能恢复。
+即时执行使用独立的有界线程池，进程退出或队列满时由持久化任务轮询恢复，无需表结构或数据迁移。
+回滚前应先用新版处理完 `_V2` 任务；旧版本不会恢复这些任务。自动关联仍以 `${userCode}_personal`
+对应的唯一有效个人助理为目标，不随用户选择的默认数字员工变化。
+
+同一资源同步接口支持 `TOOLKIT`、`MCP`、`AGENT`、`SKILL` 以及 `KG_DOC` / `KG_DB` / `KG_QA` /
+`KG_TERM`。非技能资源每次导入都会更新运行 JSON，因此也必须触发已关联员工的运行配置刷新，
+包括手工关联且没有自动关联来源记录的员工。省略授权字段或仅传 `autoAuthorize=false` 不会跳过内容刷新，
+也不会因此新增授权或自动关联；原有授权开关语义不变。关联资源 Redis 写入失败或缺少运行 JSON 时，
+不能发布员工的新快照或把同步标为全部生效。`VIEW`、`OBJECT` 和 `DIG_EMPLOYEE` 不属于此接口支持的同步类型。
+
+### 技能运行状态
+
+手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。
+
+
+### 沙箱运行记录与释放
+
+记录生命周期 `status` 与执行引擎观察 `providerStatus` 独立返回及筛选；未观测到实例为 `UNKNOWN`，不据此认定远端已删除。已释放记录仍有远端实例时，可通过按记录 ID 的正式释放接口精确回收，保留后继实例和用户文件。登录自动启动排除带 `runtimeOptions.fileService` 的内部文件计算规格；原生 AgenticFS 共享存储不重复走旧 NAS 绑定。

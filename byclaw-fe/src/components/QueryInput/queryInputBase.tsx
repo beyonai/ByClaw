@@ -30,6 +30,7 @@ import { getInputResourceProject } from './utils/resourceProject';
 import { isUploadFileButtonVisible, isUploadFileCountExceeded, isUploadFileSizeExceeded } from './utils/fileUpload';
 import MentionPopover from './RichInput/mentionPopover';
 import { getResourcePopoverAdapter } from './RichInput/mentionPopover/resourcePopoverAdapter';
+import { hasUnresolvedEmployeeResource } from './RichInput/utils/employeeResourceCompatibility';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -97,6 +98,7 @@ export type IState = {
   toolsPopoverWidth?: number;
   toolsPopoverKeyword?: string;
   visitedToolTabs?: string[];
+  replacementResourceId?: string;
 };
 
 class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends React.Component<
@@ -130,6 +132,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       activeToolMenuKey: tabKey,
       visitedToolTabs: [tabKey],
     });
+  };
+
+  openReplacementResourcePicker = ({ tabKey, resourceId }: { tabKey: string; resourceId: string }) => {
+    this.openResourcePicker(tabKey);
+    this.setState({ replacementResourceId: resourceId });
   };
 
   constructor(props: P & IProps) {
@@ -174,6 +181,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     EventEmitter.on('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.on('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
+    EventEmitter.on('queryInput-open-resource-picker', this.openReplacementResourcePicker);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
     this.props.onMounted?.();
     this.restoreInputDraft();
@@ -194,12 +202,21 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     EventEmitter.off('queryInput-set-value-and-send', this.setInputValueAndSend);
     EventEmitter.off('queryInput-set-schema-imme', this.setCommonStateBySchema);
     EventEmitter.off('queryInput-paste-files', this.onPasteFiles);
+    EventEmitter.off('queryInput-open-resource-picker', this.openReplacementResourcePicker);
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
   }
 
   onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
-    this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '', toolsPopoverOpen: false }));
+    this.richInputRef.current?.insertItem(
+      this.state.replacementResourceId ? { ...item, replaceResourceId: this.state.replacementResourceId } : item,
+      type
+    );
+    this.setState((prev) => ({
+      ...prev,
+      showMentionPopoverType: '',
+      toolsPopoverOpen: false,
+      replacementResourceId: undefined,
+    }));
   };
 
   restoreInputDraft = () => {
@@ -504,7 +521,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const currentInputPayload = this.getCurrentInputPayload();
     const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const trimInputValue = trim(inputValue || '');
-    return trimInputValue?.length > 0;
+    return (
+      trimInputValue?.length > 0 &&
+      !hasUnresolvedEmployeeResource(currentInputPayload?.resourceList || this.state.resourceList || [])
+    );
   }
 
   inputLower = () => {
@@ -741,6 +761,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           }}
           canQuote={this.checkCanQuote()}
           resourceAgentIds={this.getResourceAgentIds()}
+          userCode={(this.props.userInfo as any)?.userCode}
           {...getInputResourceProject(this.props)}
           mentionPopoverPlacement={this.props.mentionPopoverPlacement}
           onResourcePopoverChange={({ open, inputText, width }) => {
@@ -843,7 +864,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
             placement: this.props.mentionPopoverPlacement,
           })}
           onClose={() =>
-            this.setState({ toolsPopoverOpen: false, toolsPopoverWidth: undefined, toolsPopoverKeyword: undefined })
+            this.setState({
+              toolsPopoverOpen: false,
+              toolsPopoverWidth: undefined,
+              toolsPopoverKeyword: undefined,
+              replacementResourceId: undefined,
+            })
           }
           onSelect={(item, type) => this.onSelectMentionPopoverItem(item, type)}
         />

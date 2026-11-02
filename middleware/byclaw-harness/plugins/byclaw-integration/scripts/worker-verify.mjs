@@ -357,14 +357,14 @@ if (sessionEventCard.contentType !== '3015'
 const contextProjection = describeDshSessionEvent({
   type: 'user/message',
   data: {
-    source: { kind: 'plugin', plugin: 'skill-loader', form: 'catalog' },
+    source: { kind: 'plugin:skill-loader', form: 'catalog' },
     content: [{ type: 'text', text: 'Loaded Spring Boot skills' }],
   },
 })
 const systemPromptProjection = describeDshSessionEvent({
   type: 'user/message',
   data: {
-    source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'system-prompt' },
+    source: { kind: 'runtime-context', form: 'snapshot' },
     content: [{ type: 'text', text: 'DeepSeek-AI DeepSeek DSH runtime instructions' }],
   },
 })
@@ -374,9 +374,10 @@ const toolCallProjection = describeDshSessionEvent({
 })
 const toolResultProjection = describeDshSessionEvent({
   type: 'tool/result',
-  data: { message: { content: [{
-    type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'file body' }],
-  }] } },
+  data: { message: {
+    role: 'tool', source: { kind: 'tool', callId: 'call-1' }, toolCallId: 'call-1',
+    content: [{ type: 'text', text: 'file body' }],
+  } },
 })
 const planProjection = describeDshSessionEvent({
   type: 'todo/write',
@@ -600,13 +601,9 @@ asyncTeamGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } 
 if (!asyncTeamGate.waiting) {
   throw new Error('active team did not remain pending across a completed captain turn')
 }
-asyncTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'start-call', isError: false, content: [],
-}] } } })
+asyncTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'start-call' }, toolCallId: 'start-call', content: [], isError: false } } })
 asyncTeamGate.observe({ type: 'tool/call', data: { name: 'agent_teams_delete', callId: 'delete-call' } })
-asyncTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'delete-call', isError: false, content: [],
-}] } } })
+asyncTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'delete-call' }, toolCallId: 'delete-call', content: [], isError: false } } })
 asyncTeamGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
 await asyncTeamGate.completion
 asyncTeamGate.assertHealthy()
@@ -615,9 +612,7 @@ if (asyncTeamGate.waiting) throw new Error('deleted temporary team did not compl
 const retainedTeamGate = new ByClawAsyncTeamGate()
 retainedTeamGate.observe({ type: 'turn/start', data: { turn: 1 } })
 retainedTeamGate.observe({ type: 'tool/call', data: { name: 'agent_teams_start', callId: 'retained-start' } })
-retainedTeamGate.observe({ type: 'tool/result', data: { message: { content: [{
-  type: 'tool-result', toolCallId: 'retained-start', isError: false, content: [],
-}] } } })
+retainedTeamGate.observe({ type: 'tool/result', data: { message: { role: 'tool', source: { kind: 'tool', callId: 'retained-start' }, toolCallId: 'retained-start', content: [], isError: false } } })
 retainedTeamGate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
 retainedTeamGate.completeRetainedTeamWhenQuiescent()
 await Promise.resolve()
@@ -678,9 +673,7 @@ assert.throws(() => cancelledGate.assertHealthy(), /was cancelled/u)
 
 const templateGate = new ByClawAsyncTeamGate()
 templateGate.observe({ type: 'tool/call', data: { name: 'byclaw_instantiate_template', callId: 'instantiate-call' } })
-templateGate.observe({ type: 'tool/result', data: { meta: { instance_session_id: 'child' }, message: { content: [{
-  type: 'tool-result', toolCallId: 'instantiate-call', isError: false, content: [],
-}] } } })
+templateGate.observe({ type: 'tool/result', data: { meta: { instance_session_id: 'child' }, message: { role: 'tool', source: { kind: 'tool', callId: 'instantiate-call' }, toolCallId: 'instantiate-call', content: [], isError: false } } })
 templateGate.observe({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
 if (!templateGate.waiting) throw new Error('template dispatch conclusion incorrectly completed the ByClaw turn')
 templateGate.observe({ type: 'user/message', data: {
@@ -701,7 +694,7 @@ await new Promise(resolve => setImmediate(resolve))
 if (!emitted?.metadata?.interaction_id || !emitted.prompt.includes('选择方案')) {
   throw new Error('ask_user request did not emit a correlated interaction')
 }
-if (!broker.resume('external-session', '问题 1: B', emitted.metadata.interaction_id)) {
+if (!await broker.resume('external-session', '', '问题 1: B', emitted.metadata.interaction_id)) {
   throw new Error('Resume did not resolve the pending ask_user interaction')
 }
 const answer = await waiting
@@ -739,7 +732,7 @@ const structured = dshProtocol.parseDshInteractionResponse(structuredCommand)
 if (structured?.answers[0]?.selected[0] !== 'B' || structured?.answers[1]?.skipped !== true) {
   throw new Error('structured DSH interaction response was not parsed')
 }
-if (!broker.resumeStructured('structured-session', structured)) {
+if (!await broker.resumeStructured('structured-session', '', structured)) {
   throw new Error('structured DSH interaction did not resolve its matching question')
 }
 const structuredAnswer = await structuredWaiting
@@ -772,5 +765,25 @@ await handler.process(new ResumeCommand(header, 'B', 'RESUMED', null, {
   interaction_id: emitted.metadata.interaction_id,
 }), resumeContext)
 if (calls[1]?.kind !== 'resume' || resumeContext.finished !== true) throw new Error('Resume was not correlated to DSH ask_user')
+
+// The reclaimed ASK can leave the shared message stream marked finished before
+// the reconstructed RESUME returns its result. Cold recovery must clear it.
+const coldResumeContext = { sessionId: 'external-session', finished: true, setStreamFinished(value) { this.finished = value } }
+const recoveredHandler = new ByClawDshCommandHandler({
+  async ask() { throw new Error('recovered Resume must not enter the handler Ask branch') },
+  async resume(_command, context) {
+    assert.equal(context, coldResumeContext)
+    return { answer: 'continued', finalAnswer: '已根据回答继续', dshSessionId: 'recovered-root' }
+  },
+  cancel() {},
+})
+const recoveredResult = await recoveredHandler.process(new ResumeCommand(header, 'B', 'RESUMED'), coldResumeContext)
+assert.equal(recoveredResult.content, '已根据回答继续')
+assert.equal(recoveredResult.metadata?.dshSessionId, 'recovered-root')
+assert.equal(
+  coldResumeContext.finished,
+  false,
+  'cold recovery must let GatewayWorker emit APP_STREAM_RESPONSE for the reconstructed turn',
+)
 
 console.log('BYCLAW_DSH command bridge checks passed')

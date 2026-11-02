@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // 拆步② 生成脚本页:折叠展示 generate 提示词 + 「生成 cli 脚本」按钮。点击后按阶段进度逐步展示生成过程,
 // 生成结束由父组件自动切到第③步(脚本页)。
 import { RobotOutlined, ArrowLeftOutlined } from '@ant-design/icons';
@@ -41,14 +42,14 @@ export default function GenerateStep({
   onRunGenerate,
   onBack,
 }: Props) {
+  const intl = useIntl();
   const running = loading || !!pipelineProgress?.some((phase) => phase.status === 'running');
   const selectedCount = selectedCandidates.length;
 
   return (
-    <Card title="② 生成 cli 脚本" variant="borderless">
+    <Card title={intl.formatMessage({ id: 'adapterRecorder.generate.title' })} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.7 }}>
-        为选中的接口生成确定性 cli 脚本。若上一步启用了
-        AI，它仅用于候选接口的语义评分；不会把模型输出直接写入可执行脚本。生成完成后可逐个测试并保存。
+        {intl.formatMessage({ id: 'adapterRecorder.generate.description' })}
       </Paragraph>
 
       {running ? (
@@ -59,11 +60,15 @@ export default function GenerateStep({
             type={selectedCount ? 'info' : 'warning'}
             showIcon
             icon={llmSynthesis ? <RobotOutlined /> : undefined}
-            message={selectedCount ? `将生成 ${selectedCount} 个本地 adapter 草稿` : '尚未选择候选接口'}
+            message={
+              selectedCount
+                ? intl.formatMessage({ id: 'adapterRecorder.generate.draftCount' }, { v0: selectedCount })
+                : intl.formatMessage({ id: 'adapterRecorder.generate.noneSelected' })
+            }
             description={
               selectedCount
-                ? '仅为下方列出的接口生成本地草稿；生成后仍需逐个测试（verify）才能保存。'
-                : '请返回上一步勾选至少一个候选 endpoint。'
+                ? intl.formatMessage({ id: 'adapterRecorder.generate.selectedHint' })
+                : intl.formatMessage({ id: 'adapterRecorder.generate.selectHint' })
             }
           />
           {selectedCount > 0 && (
@@ -71,7 +76,7 @@ export default function GenerateStep({
               size="small"
               bordered
               style={{ marginTop: 12 }}
-              header={<Text strong>已选候选 endpoint</Text>}
+              header={<Text strong>{intl.formatMessage({ id: 'adapterRecorder.generate.selectedEndpoints' })}</Text>}
               dataSource={selectedCandidates}
               renderItem={(candidate) => (
                 <List.Item>
@@ -87,7 +92,10 @@ export default function GenerateStep({
                       {candidate.endpoint.pathname || candidate.endpoint.urlTemplate}
                     </Text>
                     <Text type="secondary" className="code" style={{ fontSize: 12 }}>
-                      预计草稿：{previewDraftName(candidate)} · 候选分数 {candidate.score}
+                      {intl.formatMessage({ id: 'adapterRecorder.generate.estimated' })}
+                      {previewDraftName(candidate)}
+                      {intl.formatMessage({ id: 'adapterRecorder.generate.candidateScore' })}
+                      {candidate.score}
                     </Text>
                   </Space>
                 </List.Item>
@@ -99,7 +107,7 @@ export default function GenerateStep({
 
       <Space style={{ marginTop: 12 }}>
         <Button icon={<ArrowLeftOutlined />} disabled={loading} onClick={onBack}>
-          上一步
+          {intl.formatMessage({ id: 'projectSpace.onboarding.action.prev' })}
         </Button>
         <Button
           type="primary"
@@ -108,9 +116,15 @@ export default function GenerateStep({
           loading={loading}
           disabled={!selectedCount}
           onClick={onRunGenerate}
-          aria-label={selectedCount ? `生成 ${selectedCount} 个 cli 脚本` : '生成 cli 脚本'}
+          aria-label={
+            selectedCount
+              ? intl.formatMessage({ id: 'adapterRecorder.generate.countAction' }, { v0: selectedCount })
+              : intl.formatMessage({ id: 'adapterRecorder.generate.action' })
+          }
         >
-          {selectedCount ? `生成 ${selectedCount} 个 cli 脚本` : '生成 cli 脚本'}
+          {selectedCount
+            ? intl.formatMessage({ id: 'adapterRecorder.generate.countAction' }, { v0: selectedCount })
+            : intl.formatMessage({ id: 'adapterRecorder.generate.action' })}
         </Button>
       </Space>
     </Card>

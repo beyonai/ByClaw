@@ -47,6 +47,19 @@ describe('camera RAW decoder contract', () => {
     document.dispose();
     expect(decoder.dispose).toHaveBeenCalledTimes(1);
   });
+  it.each(['BigInt', 'BigInt64Array', 'BigUint64Array'] as const)(
+    'rejects browsers without %s before loading the RAW decoder',
+    async (name) => {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)!;
+      Object.defineProperty(globalThis, name, { configurable: true, value: undefined });
+      try {
+        await expect(openRawDocument(new ArrayBuffer(4))).rejects.toThrow('unsupported');
+        expect(loadRaw).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(globalThis, name, descriptor);
+      }
+    }
+  );
   it('rejects excessive sensor dimensions before pixel allocation', async () => {
     decoder.getRawWidth.mockReturnValue(20000);
     decoder.getRawHeight.mockReturnValue(20000);

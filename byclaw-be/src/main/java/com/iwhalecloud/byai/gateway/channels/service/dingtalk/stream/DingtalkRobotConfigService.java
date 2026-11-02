@@ -70,24 +70,45 @@ public class DingtalkRobotConfigService {
                     .map(RobotConfigParseResult.ParseError::code)
                     .distinct()
                     .toList());
+            // 页面优先提示首个可修正的问题，日志继续保留全部错误码。
+            String messageKey = switch (result.errors().get(0).code()) {
+                case "INVALID_JSON" -> "dingtalk.robot.config.invalidJson";
+                case "MISSING_CREDENTIALS" -> "dingtalk.robot.config.missingCredentials";
+                case "DUPLICATE_ROBOT_CODE" -> "dingtalk.robot.config.duplicateRobotCode";
+                default -> "dingtalk.robot.config.invalid";
+            };
             throw new DingtalkRobotConfigValidationException(
                     "Invalid DingTalk robot config, resourceId="
                             + (digitalEmployee == null ? null : digitalEmployee.getResourceId())
-                            + ", errorCodes=" + errorCodes);
+                            + ", errorCodes=" + errorCodes,
+                    messageKey);
         }
+        RobotConfigSnapshot snapshot = configSnapshot.get();
         for (DingtalkRobotChannelConfig candidate : result.configs()) {
-            Set<Long> currentOwners = configSnapshot.get().ownersByRobotCode()
+            Set<Long> currentOwners = snapshot.ownersByRobotCode()
                     .getOrDefault(candidate.getRobotCode(), Set.of());
             Long otherOwner = currentOwners.stream()
                     .filter(owner -> !safeEquals(owner, candidate.getResourceId()))
                     .findFirst()
                     .orElse(null);
             if (otherOwner != null) {
-                throw new DingtalkRobotConfigValidationException(
-                        "Invalid DingTalk robot config, errorCode=ROBOT_CODE_OWNED_BY_ANOTHER_RESOURCE"
-                                + ", robotCode=" + candidate.getRobotCode()
-                                + ", ownerResourceId=" + otherOwner
-                                + ", conflictResourceId=" + candidate.getResourceId());
+                // 与归属判断使用同一份快照；冲突机器人不在运行映射中，名称需从完整归属配置读取。
+                String ownerName = snapshot.ownedConfigsByResourceId().getOrDefault(otherOwner, List.of()).stream()
+                        .filter(config -> safeEquals(config.getRobotCode(), candidate.getRobotCode()))
+                        .map(DingtalkRobotChannelConfig::getResourceName)
+                        .filter(StringUtils::hasText)
+                        .findFirst()
+                        .orElse(null);
+                String errorMessage = "Invalid DingTalk robot config, errorCode=ROBOT_CODE_OWNED_BY_ANOTHER_RESOURCE"
+                        + ", robotCode=" + candidate.getRobotCode()
+                        + ", ownerResourceId=" + otherOwner
+                        + ", conflictResourceId=" + candidate.getResourceId();
+                if (StringUtils.hasText(ownerName)) {
+                    throw new DingtalkRobotConfigValidationException(errorMessage,
+                            "dingtalk.robot.config.ownedByNamedEmployee", ownerName);
+                }
+                throw new DingtalkRobotConfigValidationException(errorMessage,
+                        "dingtalk.robot.config.ownedByAnotherEmployee");
             }
         }
         return result.configs().stream().map(this::copyConfig).toList();

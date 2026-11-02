@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个可选 DSH profile bundle 用于启用现有命令 `dsh web --host 0.0.0.0`。它只替换发行版 Web 命令行 provider；除非启用 ByClaw 显式免鉴权开关，否则 HTTP server、LAN 地址发现、可信 Host 校验、浏览器会话、API transport 和 WebSocket 鉴权仍由 DSH 原实现负责。
+这个可选 DSH profile bundle 用于启用现有命令 `dsh web --host 0.0.0.0`。它只替换发行版 Web 命令行 provider；除非启用 ByClaw 显式免鉴权开关，否则 HTTP server、可信 Host 校验、浏览器会话、API transport 和 WebSocket 鉴权仍由 DSH 原实现负责。
 
 ## 安装
 
@@ -13,13 +13,13 @@ pnpm --filter @byclaw/dsh-lan-web run build
 dsh plugin --profile web add /path/to/deepseek-harness/plugins/dsh-lan-web
 ```
 
-在所有 IPv4 网卡上启动 GUI：
+在局域网上启动 GUI：
 
 ```sh
 dsh web --host 0.0.0.0 --no-open
 ```
 
-DSH 会打印 loopback 启动 URL 和一个 LAN URL；在其他设备上打开 LAN URL 即可。除非设置 `BYCLAW_DSH_WEB_AUTH_ENABLED=false`，该 URL 会包含当前启动 token。`--port` 和可重复的 `--trusted-host` 保持发行版原有语义。
+DSH 0.2 的 WebServer 在加载时拒绝通配地址，因此本 bundle 会把 `--host 0.0.0.0` 换成本机第一个非内部 IPv4 网卡地址（容器内即 `hostname -i` 报告的地址），只监听这一个地址。此模式不再监听 loopback；若本机没有外部 IPv4 网卡，则监听 `127.0.0.1` 并打印提示。DSH 的 Host 校验无需 `--trusted-host` 即接受该监听地址；代理或 DNS 名称仍需配置。DSH 会打印 LAN 启动 URL，在其他设备上打开即可。除非设置 `BYCLAW_DSH_WEB_AUTH_ENABLED=false`，该 URL 会包含当前启动 token。`--port` 和可重复的 `--trusted-host` 保持发行版原有语义。
 
 ## 鉴权
 
@@ -35,7 +35,7 @@ BYCLAW_DSH_WEB_AUTH_ENABLED=false
 
 ## 安全限制
 
-服务器使用明文 HTTP，不提供 TLS。启用鉴权时，任何获得启动 token 并取得会话 cookie 的 LAN 用户，都可以调用 dsh API，并执行该 profile 授予的工具。设置 `BYCLAW_DSH_WEB_AUTH_ENABLED=false` 后，任何通过 Host/Origin 校验的客户端无需 token 即可执行这些操作。只应在可信、隔离的网络中监听所有网卡；不可信网络应使用带身份认证的 TLS 反向代理、VPN 或 SSH 转发。启动过程会分别为监听所有网卡和免鉴权模式打印警告。
+服务器使用明文 HTTP，不提供 TLS。启用鉴权时，任何获得启动 token 并取得会话 cookie 的 LAN 用户，都可以调用 dsh API，并执行该 profile 授予的工具。设置 `BYCLAW_DSH_WEB_AUTH_ENABLED=false` 后，任何通过 Host/Origin 校验的客户端无需 token 即可执行这些操作。只应在可信、隔离的网络中启用 LAN 监听；不可信网络应使用带身份认证的 TLS 反向代理、VPN 或 SSH 转发。启动过程会分别为 LAN 监听和免鉴权模式打印警告。
 
 ## 开发验证
 

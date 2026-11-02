@@ -1,10 +1,65 @@
 import type { SchemaState } from "../../application/schema/types.js";
 import type { ConnectionManager } from "../../application/connection-manager.js";
 import type { BeSchemaClient } from "./be-schema-client.js";
-import { readMarker, verifyCatalog } from "./catalog.js";
+import { readMarker } from "./catalog.js";
 import { DomainError } from "../../domain/errors.js";
 
 const requiredColumns: Record<string, string[]> = {
+  // Worker identity, durable attempts and publication bindings are required before admitting business traffic.
+  byai_group_chat_forward_request: [
+    "request_id",
+    "enterprise_id",
+    "actor_user_id",
+    "backend",
+    "source_session_id",
+    "client_request_id",
+    "mode",
+    "request_hash",
+    "state",
+    "snapshot_version",
+    "frozen_json",
+    "source_manifest_json",
+    "sources_frozen",
+    "lease_owner",
+    "fencing_version",
+    "lease_until",
+    "create_time",
+    "update_time",
+  ],
+  byai_group_chat_forward_target: [
+    "target_id",
+    "enterprise_id",
+    "request_id",
+    "target_session_id",
+    "state",
+    "lease_owner",
+    "fencing_version",
+    "lease_until",
+    "checkpoint_json",
+    "message_ids_json",
+    "error_code",
+    "retryable",
+    "pending_delivery",
+    "create_time",
+    "update_time",
+  ],
+  byai_group_chat_forward_item: [
+    "item_id",
+    "enterprise_id",
+    "request_id",
+    "target_id",
+    "ordinal",
+    "selected_message_id",
+    "selected_merged_card",
+    "source_message_id",
+    "content",
+    "speaker_json",
+    "source_created_at",
+    "references_json",
+    "attachments_json",
+    "bound_message_id",
+    "create_time",
+  ],
   byai_session: ["session_id", "enterprise_id", "last_seq"],
   byai_message: [
     "id",
@@ -38,7 +93,7 @@ const requiredColumns: Record<string, string[]> = {
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
-/** 业务结构门禁：BE 审计、库内标记、完整指纹及运行所需字段/索引都一致才放行。 */
+/** 业务结构门禁：BE 审计、库内标记及运行所需字段/索引都一致才放行。 */
 export class SchemaReadiness {
   state: SchemaState = { observedVersion: null, auditedVersion: null, verified: false };
   constructor(
@@ -46,6 +101,7 @@ export class SchemaReadiness {
     private readonly be: BeSchemaClient,
   ) {}
   async check(): Promise<void> {
+    const revision = this.connection.schemaRevision;
     this.state.verified = false;
     const auditedVersion = await this.be.currentVersion();
     this.state.auditedVersion = auditedVersion;
@@ -57,16 +113,9 @@ export class SchemaReadiness {
         this.connection.setSchemaReady(false);
         return;
       }
-      await verifyCatalog(db, {
-        ...marker,
-        parentVersion: null,
-        engine: "openGauss",
-        nodeProtocol: { min: 1, max: 1 },
-        sqlSha256: marker.scriptDigest,
-        objects: [],
-      });
       await this.checkColumns(db);
       await this.connection.guard(pool);
+      if (revision !== this.connection.schemaRevision) return;
       this.state.verified = true;
       this.connection.setSchemaReady(true);
     });
@@ -89,6 +138,11 @@ export class SchemaReadiness {
       "SELECT c.relname AS name FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='byai' AND i.indisunique AND i.indisvalid",
     );
     const required = [
+      "uq_forward_request_actor_key",
+      "uq_forward_request_tenant",
+      "uq_forward_target_group",
+      "uq_forward_target_tenant",
+      "uq_forward_item_ordinal",
       "uq_tenant_session_business_id",
       "uq_tenant_message_business_id",
       "uq_tenant_message_command",

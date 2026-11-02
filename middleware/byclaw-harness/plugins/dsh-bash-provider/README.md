@@ -21,7 +21,7 @@ The bundle disables the shipped `bash-sandbox` row and installs `byclaw-bash-pro
 
 ## Busy Enter delivery
 
-This package was previously named `dsh-env-forward`; `dsh-bash-provider` is its current source directory. The bundle also replaces the shipped `settings` row with `byclaw-settings`, a subclass of the file settings provider that supplies the conversation's environment default. This settings row is enabled on every platform. If your profile customizes the settings file path or watcher options, apply that configuration to `byclaw-settings`.
+This package was previously named `dsh-env-forward`; `dsh-bash-provider` is its current source directory. The bundle sets the default of the Web profile's `ui-conversation` row from the launch environment; the shipped `settings` row is unchanged.
 
 Set this in the DSH launch environment or its `.env` file:
 
@@ -29,9 +29,9 @@ Set this in the DSH launch environment or its `.env` file:
 BYCLAW_DSH_BUSY_ENTER=queue
 ```
 
-`queue` (also the default when unset) means Queue; `steer` means Steer. Other values, including an empty string, fail plugin load. The value is read when the settings provider starts; restart DSH after changing it. Redis parameters forwarded to Bash do not configure the Host UI.
+`queue` (also the default when unset) means Queue; `steer` means Steer. Other values, including an empty string, fail validation and the `ui-conversation` row does not load. The value is read when the profile loads; restart DSH after changing it. Redis parameters forwarded to Bash do not configure the Host UI.
 
-The value supplies the base for `ui-conversation.busyEnter` without writing the settings file. A saved UI preference takes precedence; clear that field from the settings document to inherit the environment default again. UI changes continue to apply live. While the agent is busy, Enter uses the selected behavior and Cmd/Ctrl+Enter uses the other behavior; the mouse send button still queues. Steer delivers at the next available step boundary, without interrupting a running operation.
+The value is the `ui-conversation` row's `busyEnter` default and is never written anywhere. A preference saved in the UI goes to the profile's `cordis.patch.yml`, whose `ui-conversation` entry replaces that config and so takes precedence; remove that entry to inherit the environment default again. UI changes continue to apply live. While the agent is busy, Enter uses the selected behavior and Cmd/Ctrl+Enter uses the other behavior; the mouse send button still queues. Steer delivers at the next available step boundary, without interrupting a running operation.
 
 ## Command compression (rtk)
 
@@ -63,7 +63,7 @@ For every Bash execution, values are merged in this order:
 4. The current Redis login Hash, mapped to `BEYOND_TOKEN`, `SSO_TOKEN`, `WHALE_AGENT_AUTHORIZATION`, `USER_CODE`, `USER_ID`, and `USER_NAME`.
 5. The current managed `DSH_*` snapshot supplied by `dsh-shell-env`.
 
-Later layers win. Redis runtime values therefore replace matching local or request values, while current managed values such as `DSH_SESSION_ID` still cannot be displaced. Foreground commands refresh Redis immediately before execution; background commands use the last-good cache, refreshed at startup and every five seconds. Each refresh gets one connection attempt with a one-second hard deadline and no in-attempt retries. Missing keys are normal empty results; connection/command failures, invalid JSON, and invalid payload shapes are logged without Redis values and retain the last-good cache. If no cache exists, Bash continues with its local and request environment.
+Later layers win. Redis runtime values therefore replace matching local or request values, while current managed values such as `DSH_SESSION_ID` still cannot be displaced. Every command, foreground or background, refreshes Redis immediately before execution (the cache is also refreshed at startup and every five seconds). Each refresh gets one connection attempt with a one-second hard deadline and no in-attempt retries. Missing keys are normal empty results; connection/command failures, invalid JSON, and invalid payload shapes are logged without Redis values and retain the last-good cache. If no cache exists, Bash continues with its local and request environment.
 
 The forwarding applies to the model-facing `bash` tool and other calls routed through `ctx.shell`. It does not change persistent terminals, PowerShell, MCP/LSP transports, subagents, or other consumers that call `ctx.subprocess` directly.
 

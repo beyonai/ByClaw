@@ -11,6 +11,7 @@ jest.mock('@umijs/max', () => {
   return {
     useDispatch: () => jest.fn(),
     useIntl: () => intl,
+    getIntl: () => jest.requireActual('@/testUtils/localeIntl').getLocaleIntl(),
     useNavigate: () => jest.fn(),
     useSelector: (selector: (state: any) => any) => selector({ user: { userInfo: { userId: 1 } } }),
   };

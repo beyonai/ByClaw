@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,7 +28,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageS
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatMessageSearchRequest;
 
-class GroupChatMessageSearchServiceTest {
+class GroupChatMessageSearchServiceTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiMessageMapper mapper = mock(ByaiMessageMapper.class);
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
     private final GroupChatContextService context = mock(GroupChatContextService.class);
@@ -103,5 +110,16 @@ class GroupChatMessageSearchServiceTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Group message not found");
         verify(authorization).requireCurrentUserMember(10L);
+    }
+
+    @Test
+    void keywordValidationUsesTheCurrentLanguageBeforeQueryingMessages() {
+        GroupChatMessageSearchRequest request = new GroupChatMessageSearchRequest();
+        request.setKeyword("x".repeat(101));
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> service.search(10L, request)).hasMessage("Keyword must not exceed 100 characters");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> service.search(10L, request)).hasMessage("关键字不能超过 100 个字符");
+        org.mockito.Mockito.verifyNoInteractions(mapper);
     }
 }

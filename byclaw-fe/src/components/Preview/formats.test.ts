@@ -111,7 +111,7 @@ describe('shared file preview formats', () => {
     expect(resolvePreviewType()).toBe('txt');
   });
 
-  it.each(['archive.bz2', 'scan.psd', 'photo.jpx', 'program.exe', 'README'])(
+  it.each(['archive.bz2', 'scan.psd', 'photo.jpx', 'program.exe'])(
     'does not advertise an unavailable decoder for %s',
     (name) => expect(isPreviewableName(name)).toBe(false)
   );

@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +12,7 @@ import java.time.format.DateTimeParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantRow;
@@ -23,15 +27,34 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TenantAdminTenantService {
 
+    private ObjectProvider<TenantExecutionPolicyService> tenantExecutionPolicies;
+
+    @Autowired(required = false)
+    public void setTenantExecutionPolicies(
+        ObjectProvider<TenantExecutionPolicyService> policies) {
+        this.tenantExecutionPolicies = policies;
+    }
+
+    private void requireLegacyCreationAllowed() {
+        if (tenantExecutionPolicies != null) {
+            var policy = tenantExecutionPolicies.getIfAvailable();
+            if (policy != null) policy.requireLegacyCreationAllowed();
+        }
+    }
+
     private final TenantAdminTenantMapper tenantMapper;
     private final SequenceService sequenceService;
     private final ObjectMapper objectMapper;
+    private final TenantSandboxProperties sandboxProperties;
 
+    @Autowired
     public TenantAdminTenantService(TenantAdminTenantMapper tenantMapper, SequenceService sequenceService,
-                                    ObjectMapper objectMapper) {
+                                    ObjectMapper objectMapper,
+                                    TenantSandboxProperties sandboxProperties) {
         this.tenantMapper = tenantMapper;
         this.sequenceService = sequenceService;
         this.objectMapper = objectMapper;
+        this.sandboxProperties = sandboxProperties;
     }
 
     @Transactional(readOnly = true)
@@ -78,6 +101,7 @@ public class TenantAdminTenantService {
 
     @Transactional
     public TenantView create(String name, long packageId, String requestId) {
+        requireLegacyCreationAllowed();
         requirePlatformAdmin();
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || userId <= 0) {
@@ -109,7 +133,7 @@ public class TenantAdminTenantService {
         insertConfig(enterpriseId, "PROVISION_REQUEST_ID", requestId);
         insertConfig(enterpriseId, "PACKAGE_SPEC_ID", Long.toString(packageId));
         insertConfig(enterpriseId, "PACKAGE_NAME_SNAPSHOT", selectedPackage.getPackageName());
-        insertConfig(enterpriseId, "PACKAGE_CONTENT_SNAPSHOT", selectedPackage.getPackageContent());
+        insertConfig(enterpriseId, "PACKAGE_CONTENT_SNAPSHOT", packageSnapshot(selectedPackage.getPackageContent()));
         insertConfig(enterpriseId, "PROVISION_STATE", state);
         tenantMapper.insertOwner(sequenceService.nextVal(), enterpriseId, userId);
         return new TenantView(Long.toString(enterpriseId), name, selectedPackage.getPackageName(), "RESERVED",
@@ -123,11 +147,23 @@ public class TenantAdminTenantService {
     private boolean validPackage(String json) {
         try {
             JsonNode content = objectMapper.readTree(json);
-            return content.path("memberLimit").asInt() > 0
-                && List.of("s", "m", "l").contains(content.path("profileKey").asText());
+            return content.isObject() && content.path("memberLimit").asInt() > 0;
         }
         catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private String packageSnapshot(String packageContent) {
+        try {
+            ObjectNode snapshot = (ObjectNode) objectMapper.readTree(packageContent);
+            // Preserve package limits and metadata while freezing the table defaults for each tenant service.
+            snapshot.put("profileKey", sandboxProperties.getProfileKey());
+            snapshot.put("nodeProfileKey", sandboxProperties.getNodeProfileKey());
+            return objectMapper.writeValueAsString(snapshot);
+        }
+        catch (JsonProcessingException e) {
+            throw new IllegalStateException("tenant package snapshot serialization failed", e);
         }
     }
 
@@ -151,8 +187,16 @@ public class TenantAdminTenantService {
         catch (Exception ignored) {
             // Invalid persisted state never grants tenant access.
         }
+        // Commercial command truth supersedes the older provisioning snapshot after a paused worker.
+        if (row.getCommandStatus()!=null && !List.of("DELETED", "DELETING", "DELETE_FAILED").contains(status)) {
+            status="SUCCEEDED".equals(row.getCommandStatus()) ? "READY" : row.getCommandStatus();
+            stage=row.getCommandStage();
+        }
+        boolean deleting = List.of("DELETING", "DELETE_FAILED", "DELETED").contains(status);
+        String reason = !deleting && row.getCommandStatus() != null
+            ? row.getCommandErrorCode() : row.getFailureReason();
         return new TenantView(Long.toString(row.getEnterpriseId()), row.getEnterpriseName(),
-            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(row.getFailureReason()));
+            row.getPackageName(), status, stage, row.getCreatedAt(), row.getOpenedAt(), failureReason(reason));
     }
 
     /** 后台任务保存稳定错误键；读取时按查看者语言展示，历史诊断原文保持可读。 */
@@ -168,7 +212,7 @@ public class TenantAdminTenantService {
             }
         }
         if ("tenant provisioning failed".equals(reason)) return I18nUtil.get("tenant.failure.provisioning");
-        if (!reason.startsWith("tenant.")) return reason;
+        if (!reason.startsWith("tenant.") && !reason.startsWith("TENANT_DELETE_")) return reason;
         try {
             return I18nUtil.get(reason);
         } catch (org.springframework.context.NoSuchMessageException ignored) {

@@ -6,7 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import java.util.LinkedHashMap;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminMemberMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantMemberRow;
@@ -25,15 +26,15 @@ public class TenantAdminOrganizationService {
     private final TenantOrganizationMapper organizationMapper;
     private final TenantAdminMemberMapper memberMapper;
     private final SequenceService sequenceService;
-    private final ObjectMapper objectMapper;
+    private final SharedQuotaAdmission quotaAdmission;
 
     public TenantAdminOrganizationService(TenantOrganizationMapper organizationMapper,
                                           TenantAdminMemberMapper memberMapper,
-                                          SequenceService sequenceService, ObjectMapper objectMapper) {
+                                          SequenceService sequenceService, SharedQuotaAdmission quotaAdmission) {
         this.organizationMapper = organizationMapper;
         this.memberMapper = memberMapper;
         this.sequenceService = sequenceService;
-        this.objectMapper = objectMapper;
+        this.quotaAdmission = quotaAdmission;
     }
 
     @Transactional(readOnly = true)
@@ -67,19 +68,18 @@ public class TenantAdminOrganizationService {
         requirePlatformAdmin();
         long enterpriseId = parseId(enterpriseIdText);
         List<Long> orgIds = branch(parseId(orgIdText), includeDescendants);
-        // This row lock also serializes single-member additions and enforces the package limit.
-        String snapshot = memberMapper.selectPackageSnapshotForUpdate(enterpriseId);
-        if (snapshot == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
-        int memberLimit = memberLimit(snapshot);
-        List<TenantMemberRow> candidates = addMembers
-            ? organizationMapper.selectActiveUsersByOrgIds(orgIds) : List.of();
+        if (memberMapper.countEnterprise(enterpriseId) != 1)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
+        var quota = quotaAdmission.beginEnterprise(enterpriseId);
+        // A user can belong to multiple attached branches; one identity consumes one seat.
+        Map<Long, TenantMemberRow> uniqueCandidates = new LinkedHashMap<>();
+        if (addMembers) organizationMapper.selectActiveUsersByOrgIds(orgIds)
+            .forEach(row -> uniqueCandidates.putIfAbsent(row.getUserId(), row));
+        List<TenantMemberRow> candidates = List.copyOf(uniqueCandidates.values());
         Map<Long, TenantMemberRow> existing = new HashMap<>();
         for (TenantMemberRow row : memberMapper.selectMembers(enterpriseId)) existing.put(row.getUserId(), row);
         List<TenantMemberRow> toAdd = candidates.stream().filter(row -> !existing.containsKey(row.getUserId())).toList();
-        long activeCount = existing.values().stream().filter(row -> "ACTIVE".equals(row.getStatus())).count();
-        if (activeCount + toAdd.size() > memberLimit) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.org.memberLimit");
-        }
+        quotaAdmission.checkMembers(quota, toAdd.size());
         if (candidates.stream().anyMatch(row -> existing.containsKey(row.getUserId())
             && !"ACTIVE".equals(existing.get(row.getUserId()).getStatus()))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.org.disabledMembership");
@@ -104,17 +104,6 @@ public class TenantAdminOrganizationService {
         List<Long> branch = organizationMapper.selectBranchOrgIds(orgId);
         if (branch.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.org.notFound");
         return includeDescendants ? branch : List.of(orgId);
-    }
-
-    private int memberLimit(String json) {
-        try {
-            int limit = objectMapper.readTree(json).path("memberLimit").asInt();
-            if (limit > 0) return limit;
-        }
-        catch (Exception ignored) {
-            // Invalid snapshots cannot authorize membership writes.
-        }
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.package.snapshot.invalid");
     }
 
     private long parseId(String text) {

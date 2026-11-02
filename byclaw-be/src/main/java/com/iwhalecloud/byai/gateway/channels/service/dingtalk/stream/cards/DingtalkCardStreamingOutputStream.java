@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -398,7 +399,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         try {
             JsonNode root = objectMapper.readTree(jsonBlock);
             String event = root.path("event").asText("");
-            logger.info("Received event: {}, root: {}", event, root);
+            logger.debug("Received DingTalk stream event: {}", event);
             switch (event) {
                 case EVENT_ANSWER_START, EVENT_ANSWER_DELTA, EVENT_ANSWER_END -> handleAnswerDelta(root);
                 case EVENT_REASON_START, EVENT_REASON_DELTA, EVENT_REASON_END -> {
@@ -508,9 +509,16 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             return;
         }
         try {
+            long started = System.nanoTime();
+            boolean firstUpdate = !cardUpdated;
             dingtalkCardService.streamingUpdateAssistantReply(session, displayContent, isFinalize);
             cardUpdated = true;
             lastCardUpdateAtMillis = currentTimeMillis.getAsLong();
+            if (firstUpdate) {
+                logger.info("dingtalk_chain requestId={} stage=first_card_update durationMs={} outTrackId={}",
+                    MDC.get("dingtalkRequestId"), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                    session.getOutTrackId());
+            }
         } catch (Exception e) {
             streamingFailed = true;
             logger.warn("Streaming update failed during chat output, stop card streaming. outTrackId={}",

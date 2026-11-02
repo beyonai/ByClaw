@@ -12,11 +12,16 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 /** BE 初始化平台项目并解析模板，Node 原子创建租户群及初始成员。 */
 @Service
 public class TenantGroupCreationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.common.quota.SharedQuotaAdmission quotaAdmission;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks workgroupHooks;
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService projectMembers;
     private final TenantNodeClient node;
@@ -38,6 +43,7 @@ public class TenantGroupCreationService {
         this.grants = grants;
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public JsonNode create(TenantRequestContext tenant, GroupChatCreateRequest request) {
         var userIds = new LinkedHashSet<>(request.getUserIds() == null ? List.<Long>of() : request.getUserIds());
         userIds.remove(tenant.userId());
@@ -45,6 +51,8 @@ public class TenantGroupCreationService {
         if (request.getTemplateId() != null) agentIds.addAll(templates.resolveResourceIds(request.getTemplateId(), request.getExpectedTemplateVersion()));
         Long coordinatorAgentId = groupWorkAssistant.resolveDefaultCoordinatorId();
         agentIds.add(coordinatorAgentId);
+        // Initial cardinalities are known before platform project/cloud side effects; Node checks again in its write transaction.
+        quotaAdmission.checkInitialWorkgroup(tenant.enterpriseId(), userIds.size() + 1, agentIds.size());
         grants.grantDigitalEmployeesToUser(List.of(coordinatorAgentId), tenant.userId());
         var users = members.prepareMembers(tenant, "USER", new ArrayList<>(userIds));
         var agents = new ArrayList<>(members.prepareMembers(tenant, "AGENT", agentIds.stream()
@@ -58,7 +66,9 @@ public class TenantGroupCreationService {
                 "memName", member.memName() == null ? "" : member.memName(), "resourceAuthorized", member.resourceAuthorized()));
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
-        projectRequest.setDescription(request.getGoal());
+        // 与默认空间一致：空目标不设置项目描述，Node 协议中的会话内容使用空串。
+        String goal = StringUtils.trimToNull(request.getGoal());
+        projectRequest.setDescription(goal);
         var project = projects.createGroupChatProject(projectRequest);
         if (!userIds.isEmpty()) projectMembers.addMembers(project.getProjectId(), new ArrayList<>(userIds),
             com.iwhalecloud.byai.common.constants.devloop.MemberRole.MEMBER);
@@ -66,13 +76,16 @@ public class TenantGroupCreationService {
         List<String> asserted = new ArrayList<>(); asserted.add(Long.toString(tenant.userId()));
         users.forEach(user -> asserted.add(user.memObjId()));
         node.command(tenant, "POST", "/internal/v1/group-chats", id, "CREATE_GROUP", new TenantNodeModels.Fields(Map.of(
-            "sessionName", project.getProjectName(), "sessionContent", request.getGoal() == null ? "" : request.getGoal(),
+            "sessionName", project.getProjectName(), "sessionContent", goal == null ? "" : goal,
             "projectId", project.getProjectId().toString(), "members", initial,
             "coordinatorAgentId", coordinatorAgentId.toString())), java.util.UUID.randomUUID().toString(), asserted);
         if (!agentIds.isEmpty()) {
             userIds.add(tenant.userId());
             for (Long user : userIds) grants.grantDigitalEmployeesToUser(new ArrayList<>(agentIds), user);
         }
-        return data.read(tenant, "group-chats/" + id);
+        JsonNode response = data.read(tenant, "group-chats/" + id);
+        // Node 创建、授权和详情读取成功后登记通知；投递等待 BE 当前事务提交。
+        workgroupHooks.created(id, project.getProjectName(), tenant.enterpriseId(), project.getProjectId(), tenant.userId());
+        return response;
     }
 }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +72,7 @@ public class TenantGroupAgentDispatcher {
             if (!claimed) return;
             Users user = users.findById(tenant.userId());
             if (user == null || user.getUserCode() == null) {
-                throw new IllegalStateException("group task initiator unavailable");
+                throw new IllegalStateException(I18nUtil.get("groupchat.task.initiatorUnavailable"));
             }
             userContext.runAsUser(user.getUserCode(), () -> {
                 CurrentUserHolder.getLoginInfo().setEnterpriseId(tenant.enterpriseId());
@@ -89,7 +91,7 @@ public class TenantGroupAgentDispatcher {
                     chat.chat(request, new DiscardingResponseStream(), null);
                 }
                 catch (java.io.IOException error) {
-                    throw new IllegalStateException("Unable to execute tenant group agent", error);
+                    throw new IllegalStateException(I18nUtil.get("groupchat.task.executeFailed"), error);
                 }
             });
             // Gateway dispatch may return before the Redis Stream delivers the final answer.

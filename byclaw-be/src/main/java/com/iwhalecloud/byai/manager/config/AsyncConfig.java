@@ -22,6 +22,20 @@ import lombok.extern.slf4j.Slf4j;
 @EnableAsync
 public class AsyncConfig {
 
+    /** Optional model-generated titles must never run on a chat request thread under load. */
+    @Bean("sessionTitleExecutor")
+    public Executor sessionTitleExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(32);
+        executor.setThreadNamePrefix("session-title-");
+        configureContextPropagation(executor);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     /**
      * 项目初始化任务执行器
      *

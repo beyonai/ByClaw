@@ -2,7 +2,7 @@
 
 [中文](README.zh.md) | English
 
-This opt-in DSH profile bundle enables the existing `dsh web --host 0.0.0.0` command. It replaces only the shipped Web command-line provider; DSH still owns the HTTP server, LAN-address discovery, trusted-host checks, browser sessions, API transport, and WebSocket authentication unless ByClaw's explicit no-auth switch is enabled.
+This opt-in DSH profile bundle enables the existing `dsh web --host 0.0.0.0` command. It replaces only the shipped Web command-line provider; DSH still owns the HTTP server, trusted-host checks, browser sessions, API transport, and WebSocket authentication unless ByClaw's explicit no-auth switch is enabled.
 
 ## Install
 
@@ -13,13 +13,13 @@ pnpm --filter @byclaw/dsh-lan-web run build
 dsh plugin --profile web add /path/to/deepseek-harness/plugins/dsh-lan-web
 ```
 
-Start the GUI on every IPv4 interface:
+Start the GUI on the LAN:
 
 ```sh
 dsh web --host 0.0.0.0 --no-open
 ```
 
-DSH prints its loopback launch URL and one LAN URL. Open the LAN URL from another device. The URL contains the active launch token unless `BYCLAW_DSH_WEB_AUTH_ENABLED=false`. `--port` and repeatable `--trusted-host` retain their shipped behavior.
+DSH 0.2 WebServer rejects wildcard binds at load, so this bundle translates `--host 0.0.0.0` into this host's first non-internal IPv4 interface address (in a container, the address `hostname -i` reports) and binds that one address. Loopback is not served in this mode; when the host has no external IPv4 interface, it binds `127.0.0.1` and says so. DSH's Host fence accepts the bind address without a `--trusted-host` entry; a proxy or DNS name still needs one. DSH prints the LAN launch URL; open it from another device. The URL contains the active launch token unless `BYCLAW_DSH_WEB_AUTH_ENABLED=false`. `--port` and repeatable `--trusted-host` retain their shipped behavior.
 
 ## Authentication
 
@@ -35,7 +35,7 @@ The switch defaults to enabled and accepts `true/false`, `1/0`, `on/off`, or `ye
 
 ## Security
 
-The server uses plain HTTP rather than TLS. With authentication enabled, any LAN user who obtains the launch token and receives a session cookie can invoke the dsh APIs and execute the tools granted to that profile. With `BYCLAW_DSH_WEB_AUTH_ENABLED=false`, every client admitted by the Host/Origin checks can do so without a token. Use the all-interface bind only on a trusted, isolated network; prefer an authenticated TLS reverse proxy, VPN, or SSH forwarding on untrusted networks. Startup prints warnings for the all-interface bind and the no-auth mode.
+The server uses plain HTTP rather than TLS. With authentication enabled, any LAN user who obtains the launch token and receives a session cookie can invoke the dsh APIs and execute the tools granted to that profile. With `BYCLAW_DSH_WEB_AUTH_ENABLED=false`, every client admitted by the Host/Origin checks can do so without a token. Use the LAN bind only on a trusted, isolated network; prefer an authenticated TLS reverse proxy, VPN, or SSH forwarding on untrusted networks. Startup prints warnings for the LAN bind and the no-auth mode.
 
 ## Development
 

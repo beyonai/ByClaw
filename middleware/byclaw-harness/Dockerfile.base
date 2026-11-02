@@ -1,13 +1,14 @@
-# syntax=docker/dockerfile:1
-
 # 通用基础镜像：开发工具链 + 已完成依赖安装和构建的上游 DSH。
 # 该镜像不包含本仓库的 plugins、builtin 或 entrypoint。
-# 构建示例：docker build -f Dockerfile.base -t byclaw/dsh-base:latest .
-FROM python:3.12-slim-trixie AS dsh-base
+# PYTHON_IMAGE must be an explicitly approved domestic registry reference.
+# RTK, NVM and DSH have no verified public domestic mirror default: callers
+# must provide controlled mirrors; missing inputs fail before downloading.
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE} AS dsh-base
 
 ARG NVM_VERSION=0.40.3
 ARG NODE_VERSION=22.19.0
-ARG PNPM_VERSION=11.7.0
+ARG PNPM_VERSION=11.28.5
 ARG PLAYWRIGHT_VERSION=1.62.1
 ARG CODEGRAPH_VERSION=1.6.0
 ARG PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
@@ -19,7 +20,9 @@ ARG ALIYUN_CLI_ARM64_SHA256=b0b6f6f7545f9472b697fc27915c8956e5a3320a6160729dcc5b
 ARG RTK_VERSION=0.47.0
 ARG RTK_AMD64_SHA256=7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7
 ARG RTK_ARM64_SHA256=960ceb5f1f5f0b0939b32b5b1d41dec6d9a7113137b0703c68dca0d169a260fc
-ARG RTK_DOWNLOAD_BASE=https://github.com/rtk-ai/rtk/releases/download
+ARG RTK_DOWNLOAD_BASE
+ARG NVM_SOURCE_BASE
+ARG DSH_REPOSITORY
 ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -28,7 +31,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NVM_DIR=/opt/nvm \
     NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -38,6 +47,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST} \
     CODEGRAPH_MCP_CWD=/ \
     PATH=/opt/nvm/current/bin:/usr/local/bin:$PATH
+
+RUN set -eu; \
+    : "${RTK_DOWNLOAD_BASE:?Provide a verified domestic RTK mirror; no overseas fallback is available}"; \
+    : "${NVM_SOURCE_BASE:?Provide a verified domestic NVM mirror; no overseas fallback is available}"; \
+    : "${DSH_REPOSITORY:?Provide a verified domestic DSH repository mirror; no overseas fallback is available}"; \
+    for source in "${RTK_DOWNLOAD_BASE}" "${NVM_SOURCE_BASE}" "${DSH_REPOSITORY}"; do \
+        case "${source}" in \
+            *://github.com/*|*://githubfast.com/*|*://*.githubusercontent.com/*|*://*.jsdelivr.net/*|*://registry.npmjs.org/*) \
+                echo 'A controlled domestic source is required; known overseas defaults are rejected' >&2; exit 1 ;; \
+        esac; \
+    done
 
 RUN groupadd --gid 1001 byclaw \
     && useradd --uid 1001 --gid byclaw --create-home --shell /bin/bash byclaw
@@ -129,9 +149,8 @@ RUN set -eux; \
 # this binary on PATH at startup and silently no-ops the command-compression
 # half of its executor when it is absent, so this step is required for that
 # feature (not just recommended) but never blocks a boot without it.
-# RTK_DOWNLOAD_BASE is overridable at build time the same way DSH_REPOSITORY
-# is, if a mirror is needed for hosts where github.com release assets are
-# slow or unreachable.
+# The caller supplies RTK_DOWNLOAD_BASE as a controlled domestic mirror.
+# The pinned checksum remains mandatory; there is no upstream fallback.
 RUN set -eux; \
     case "${TARGETARCH}" in \
         amd64) rtk_asset="rtk-x86_64-unknown-linux-musl.tar.gz"; rtk_sha256="${RTK_AMD64_SHA256}" ;; \
@@ -156,7 +175,6 @@ RUN printf '%s\n' \
         'timeout = 120' \
         > /etc/pip.conf
 
-ARG NVM_SOURCE_BASE=https://cdn.jsdelivr.net/gh/nvm-sh/nvm
 ARG NVM_SH_SHA256=390260ab9eb1da20e8bc0ebea2ee90f528d53e5e9f6e13b16717db4af454df9d
 ARG NVM_EXEC_SHA256=e6b7a2bafac6994e1ba14282cff82c75476fba0788f68a9ecf558dfdf3331621
 ARG NVM_BASH_COMPLETION_SHA256=b7eb3bf03d59b61e451957b020640aa55fe8bf47fb39d85d244e259f445d2fbe
@@ -192,7 +210,7 @@ RUN npm install --global \
         "playwright@${PLAYWRIGHT_VERSION}" \
     && npm install --global \
         "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" \
-        --registry=https://registry.npmjs.org \
+        --registry="${NPM_CONFIG_REGISTRY}" \
     && test "$(codegraph --version)" = "${CODEGRAPH_VERSION}" \
     && playwright install --with-deps chromium \
     && test "$(playwright --version)" = "Version ${PLAYWRIGHT_VERSION}" \
@@ -207,8 +225,10 @@ RUN printf '%s\n' \
         > /etc/profile.d/nvm.sh \
     && chmod 0644 /etc/profile.d/nvm.sh
 
-ARG DSH_REPOSITORY=https://githubfast.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REF=dsh-v0.1.5-rc.2
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /usr/local/bin/byclaw-configure-cn-sources
+RUN bash /usr/local/bin/byclaw-configure-cn-sources
+
+ARG DSH_REF=dsh-v0.2.1-rc.2
 
 RUN git clone --depth 1 --branch "${DSH_REF}" "${DSH_REPOSITORY}" /workspace
 

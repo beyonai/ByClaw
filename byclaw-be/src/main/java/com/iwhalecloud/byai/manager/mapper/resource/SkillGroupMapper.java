@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.resource;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.qo.skillgroup.SkillGroupPageQo;
@@ -14,13 +15,14 @@ import org.apache.ibatis.annotations.Param;
 public interface SkillGroupMapper {
 
     /**
-     * Locks one tenant-owned skill-group row for update. Task 5 install/uninstall operations must acquire this same
-     * database row lock before reading or changing installed group sources.
+     * Locks one tenant-owned skill-group resource in Redis. Task 5 install/uninstall operations must acquire this same
+     * Redis transaction lock before reading or changing installed group sources.
      *
      * @param groupId skill-group resource ID
      * @param comAcctId current tenant ID
      * @return locked skill-group row, or {@code null} when the ID/type/tenant scope does not match
      */
+    @RedisTransactionLock(value = "resource", parameters = {"groupId"})
     SsResource selectGroupForUpdate(
             @Param("groupId") Long groupId, @Param("comAcctId") Long comAcctId);
 
@@ -33,6 +35,7 @@ public interface SkillGroupMapper {
      * @param comAcctId current tenant ID
      * @return locked digital employee, or {@code null} when ID/type/tenant does not match
      */
+    @RedisTransactionLock(value = "resource", parameters = {"digitalEmployeeId"})
     SsResource selectDigitalEmployeeForUpdate(
             @Param("digitalEmployeeId") Long digitalEmployeeId,
             @Param("comAcctId") Long comAcctId);
@@ -44,6 +47,7 @@ public interface SkillGroupMapper {
      * @param comAcctId current tenant ID
      * @return matching locked active skills ordered by resource ID
      */
+    @RedisTransactionLock(value = "resource", parameters = {"skillIds"})
     List<SsResource> selectActiveSkillsForUpdate(
             @Param("skillIds") List<Long> skillIds,
             @Param("comAcctId") Long comAcctId);
@@ -55,6 +59,7 @@ public interface SkillGroupMapper {
      * @param comAcctId current tenant ID
      * @return affected row count
      */
+    @RedisTransactionLock(value = "resource", parameters = {"group.resourceId"})
     int updateGroupFields(@Param("group") SsResource group, @Param("comAcctId") Long comAcctId);
 
     /**

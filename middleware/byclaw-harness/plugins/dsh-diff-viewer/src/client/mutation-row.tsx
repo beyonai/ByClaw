@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  DisclosureRow, IconEditOutline16, IconInspectOutline12, StateDot,
+  DisclosureRow, IconEditOutlineRegular, IconInspectOutlineRegular, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallBlock, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
@@ -54,6 +54,13 @@ function parseArgs(argsRaw: string): Record<string, unknown> | undefined {
   }
 }
 
+/** The path a preparing call has already streamed completely, as the stock row shows it. */
+function preparingPath(args: ToolCallBlock['args']): string | undefined {
+  const filePath = args.complete('file_path') ? args.text('file_path') : undefined
+  if (filePath !== undefined && filePath !== '') return filePath
+  return args.complete('path') ? args.text('path') : undefined
+}
+
 /** Derive the row model for the edit/write variants (stock toolRowModel mirror). */
 function rowModel(toolName: string, block: ToolCallBlock, cwd?: string): {
   variant: ToolRowVariant
@@ -67,7 +74,8 @@ function rowModel(toolName: string, block: ToolCallBlock, cwd?: string): {
 } {
   const variant = (toolName === 'edit' ? 'edit' : 'write') as ToolRowVariant
   const done = 'kind' in block
-  const argsRaw = (done ? block.call?.argsRaw : block.argsRaw) ?? ''
+  // A call still preparing (DSH 0.2) has no complete raw arguments yet.
+  const argsRaw = (done ? block.call?.argsRaw : block.phase === 'start' ? block.argsRaw : undefined) ?? ''
   const state: ToolRowState = !done ? 'running'
     : block.error?.code === 'interrupted' ? 'stopped'
       : block.isError ? 'error' : 'ok'
@@ -75,7 +83,7 @@ function rowModel(toolName: string, block: ToolCallBlock, cwd?: string): {
   const path = parsed !== undefined
     ? (typeof parsed['file_path'] === 'string' && parsed['file_path'] !== '' ? parsed['file_path']
       : typeof parsed['path'] === 'string' ? parsed['path'] : undefined)
-    : undefined
+    : !done && block.phase === 'preparing' ? preparingPath(block.args) : undefined
   // Workspace-rooted paths display relative to the session cwd (stock rule).
   const rel = (text: string): string => {
     if (cwd === undefined || cwd === '') return text
@@ -178,7 +186,7 @@ export function MutationRow({ toolName, block, cwd, openFile, inspect }: Mutatio
         leadingClassName={rowCss.leading}
         titleClassName={rowCss.title}
         chevronClassName={rowCss.chevron}
-        icon={leadingFor(model.state, <IconEditOutline16 size={14} />)}
+        icon={leadingFor(model.state, <IconEditOutlineRegular size={14} />)}
         title={model.title}
         open={open}
         expandable={expandable}
@@ -232,7 +240,7 @@ export function MutationRow({ toolName, block, cwd, openFile, inspect }: Mutatio
             )}
           {inspect !== undefined && (
             <button type="button" className={rowCss.inspectButton} onClick={inspect}>
-              <IconInspectOutline12 />
+              <IconInspectOutlineRegular />
               Inspect
             </button>
           )}

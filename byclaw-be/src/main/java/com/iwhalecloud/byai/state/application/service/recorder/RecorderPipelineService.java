@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -78,7 +79,7 @@ public class RecorderPipelineService {
         }
         RecorderLlmService.Availability availability = recorderLlmService.availability();
         if (!availability.available()) {
-            result.put("llmError", "默认 LLM 模型不可用，已使用本地规则评分。");
+            result.put("llmError", I18nUtil.get("recorder.score.modelUnavailable"));
             log.warn(
                 "recorder_llm_score phase=skipped sessionId={} candidateCount={} approved=true modelCalled=false "
                     + "availabilityReason={} mergeApplied=false fallback=rule_score_model_unavailable elapsedMs={}",
@@ -106,11 +107,11 @@ public class RecorderPipelineService {
                 result.put(
                     "llmError",
                     "length".equalsIgnoreCase(llmResponse.finishReason())
-                        ? "AI 评分输出超出长度限制，已使用本地规则评分。"
-                        : "AI 评分返回格式无效，已使用本地规则评分。"
+                        ? I18nUtil.get("recorder.score.outputTooLong")
+                        : I18nUtil.get("recorder.score.invalidFormat")
                 );
             } else if (merge.appliedCandidateCount() == 0) {
-                result.put("llmError", "AI 评分未匹配当前候选，已使用本地规则评分。");
+                result.put("llmError", I18nUtil.get("recorder.score.noMatch"));
             }
             log.info(
                 "recorder_llm_score phase=received sessionId={} candidateCount={} approved=true modelCalled=true "
@@ -121,7 +122,7 @@ public class RecorderPipelineService {
                 llmResponse.finishReason(), merge.fallback(), elapsedMillis(startedAtNanos)
             );
         } catch (RuntimeException e) {
-            result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");
+            result.put("llmError", I18nUtil.get("recorder.score.failed"));
             log.warn(
                 "recorder_llm_score phase=call_failed sessionId={} candidateCount={} approved=true modelCalled=true "
                     + "exceptionType={} mergeApplied=false fallback=rule_score_call_failed elapsedMs={}",

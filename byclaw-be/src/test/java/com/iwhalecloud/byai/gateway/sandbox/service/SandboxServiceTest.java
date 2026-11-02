@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import org.mockito.MockedStatic;
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import java.time.OffsetDateTime;
 import java.time.Instant;
@@ -7,6 +9,11 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostClient;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts;
+import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway;
+import org.springframework.beans.factory.ObjectProvider;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -36,10 +43,15 @@ import redis.clients.jedis.Jedis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -48,6 +60,110 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SandboxServiceTest extends I18nTestSupport {
+
+    @Test
+    void remoteLaunch_waitsForPersonalQuotaBeforeCreatingSandbox() {
+        PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
+        when(gateway.isRemote()).thenReturn(true);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
+        when(gateways.getObject()).thenReturn(gateway);
+        org.mockito.Mockito.doThrow(new com.iwhalecloud.byai.state.common.exception.StoragePreparingException())
+            .when(gateway).call(eq("storage"), eq("quota-check"), any());
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "platformGatewayProvider", gateways);
+        assertThatThrownBy(() -> service.launchSandboxWithServiceKey("user001", "byclaw-dsh"))
+            .isInstanceOf(com.iwhalecloud.byai.state.common.exception.StoragePreparingException.class);
+        verify(gateway, never()).service(eq("launch"), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1})
+    @org.junit.jupiter.params.provider.NullSource
+    void remoteLaunch_passesAutoReleaseToPlatform(Integer autoRelease) {
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformControlClient client =
+            mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformControlClient.class);
+        com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution execution =
+            mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution.class);
+        when(execution.isLegacyExecutor()).thenReturn(false);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformControlClient> clients =
+            mock(ObjectProvider.class);
+        when(clients.getObject()).thenReturn(client);
+        PlatformRemoteGateway gateway = new PlatformRemoteGateway(execution, clients, new ObjectMapper(),
+            new org.springframework.mock.env.MockEnvironment().withProperty("byclaw.platform.base-url", "http://platform"));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
+        when(gateways.getObject()).thenReturn(gateway);
+        when(client.call(eq("storage"), eq("quota-check"), any())).thenReturn(Map.of("code", 0));
+        when(client.call(eq("sandbox"), eq("business/launch"), any()))
+            .thenReturn(Map.of("code", 0, "data", Map.of("sandboxId", "remote-sandbox")));
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "platformGatewayProvider", gateways);
+
+        assertThat(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", autoRelease).getSandboxId())
+            .isEqualTo("remote-sandbox");
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(client).call(eq("sandbox"), eq("business/launch"), payload.capture());
+        Map<?, ?> params = (Map<?, ?>) payload.getValue();
+        assertThat(params.get("userCode")).isEqualTo("user001");
+        assertThat(((Map<?, ?>) params.get("routing")).get("sandboxType")).isEqualTo("byclaw-dsh-tools");
+        assertThat(params.get("autoRelease")).isEqualTo(autoRelease);
+        if (autoRelease == null) assertThat(params.containsKey("autoRelease")).isFalse();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "MANUAL,1,REMOTE_AUTO_EXPIRE", "REMOTE_AUTO_EXPIRE,0,MANUAL",
+        "MANUAL,,MANUAL", "REMOTE_AUTO_EXPIRE,,REMOTE_AUTO_EXPIRE"
+    })
+    void launchAutoRelease_overridesOnlyNewRecordPolicy(String defaultPolicy, Integer autoRelease,
+        String expectedPolicy) {
+        SandboxLaunchContextFactory factory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade lifecycle = mock(SandboxLifecycleFacade.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxLaunchContextFactory", factory);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(service, "sandboxLifecycleFacade", lifecycle);
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", mock(SandboxMetadataCache.class));
+        ReflectionTestUtils.setField(service, "byaiSystemConfigService",
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class));
+        ReflectionTestUtils.setField(service, "defaultLeasePolicy", defaultPolicy);
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw", -1L);
+        when(factory.resolveRouting(null, "user001")).thenReturn(routing);
+        when(factory.buildContext("user001", null, "openclaw"))
+            .thenReturn(new SandboxLaunchContext("openclaw", Map.of(), Map.of(), "gateway-token"));
+        doAnswer(call -> { ((SsSandboxRecord) call.getArgument(0)).setId(99L); return 1; })
+            .when(mapper).insert(any(SsSandboxRecord.class));
+        SandboxLaunchData data = new SandboxLaunchData();
+        data.setSandboxId("created-sandbox");
+        data.setEndpoint("http://fixture");
+        when(lifecycle.launchSandbox(any())).thenReturn(SandboxResponse.success(data));
+        when(mapper.updateLaunchSuccess(eq(99L), any(), any(), any(), any(), any(), any(), any(), any(), eq(0)))
+            .thenReturn(1);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.lock(anyString(), anyString(), anyLong())).thenReturn(true);
+            assertThat(service.launchSandboxWithServiceKey("user001", null, autoRelease).getSandboxId())
+                .isEqualTo("created-sandbox");
+        }
+        ArgumentCaptor<SsSandboxRecord> inserted = ArgumentCaptor.forClass(SsSandboxRecord.class);
+        verify(mapper).insert(inserted.capture());
+        assertThat(inserted.getValue().getLeasePolicy()).isEqualTo(expectedPolicy);
+        assertThat(inserted.getValue().getAutoRelease()).isEqualTo("MANUAL".equals(expectedPolicy) ? 0 : 1);
+
+        SsSandboxRecord existing = inserted.getValue();
+        when(mapper.selectActiveByUserAndResource("user001", "openclaw", -1L)).thenReturn(existing);
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.lock(anyString(), anyString(), anyLong())).thenReturn(true);
+            assertThat(service.launchSandboxWithServiceKey("user001", "openclaw",
+                "MANUAL".equals(expectedPolicy) ? 1 : 0).getSandboxId()).isEqualTo("created-sandbox");
+        }
+        assertThat(existing.getLeasePolicy()).isEqualTo(expectedPolicy);
+        verify(lifecycle, times(1)).launchSandbox(any());
+        verify(mapper, never()).updateAutoRelease(any(), any(), any());
+    }
 
     @Test
     void userLaunch_rejectsTenantSandboxSpecBeforeCreatingRecord() {
@@ -275,6 +391,122 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void doLaunchSandbox_skipsByclawDshServedBySharedHost() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade lifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", lifecycleFacade);
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "user001"))
+                .thenReturn("multi-host-a");
+
+            SandboxLaunchData result = ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+                "user001", 100L, routing);
+
+            assertThat(result).isNotNull();
+            assertThat(result.getSandboxId()).isNull();
+        }
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+        verify(lifecycleFacade, never()).launchSandbox(any());
+        verify(contextFactory, never()).buildContext(any(), any(), any());
+    }
+
+    @Test
+    void sharedDshHost_onlyAppliesToByclawDshAndMarkedUsers() {
+        SandboxService sandboxService = new SandboxService();
+        SandboxLaunchRouting dsh = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        SandboxLaunchRouting openclaw = new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "served"))
+                .thenReturn(" multi-host-a ");
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "broken"))
+                .thenThrow(new IllegalStateException("redis down"));
+
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", dsh))
+                .isEqualTo("multi-host-a");
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", openclaw))
+                .isNull();
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "other", dsh))
+                .isNull();
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "broken", dsh))
+                .isNull();
+        }
+    }
+
+    @Test
+    void doLaunchSandbox_recordsSharedHostContextWhenHostIsManaged() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade lifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", lifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", mock(SandboxMetadataCache.class));
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService",
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostBaseUrl", "http://10.0.0.5:7300");
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(contextFactory.buildContext("user001", 100L, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE))
+            .thenReturn(new SandboxLaunchContext(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE, Map.of(), Map.of(),
+                "be-token"));
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(recordMapper).insert(any(SsSandboxRecord.class));
+        SandboxLaunchData launched = new SandboxLaunchData();
+        launched.setSandboxId("byclaw-dsh-user001");
+        launched.setEndpoint("https://dsh.example.com/u/user001/");
+        launched.setGatewayToken("web-token");
+        when(lifecycleFacade.launchSandbox(any())).thenReturn(SandboxResponse.success(launched));
+        when(recordMapper.updateLaunchSuccess(eq(99L), eq("byclaw-dsh-user001"), any(), eq("web-token"),
+            any(), any(), any(), any(), any(), eq(0))).thenReturn(1);
+
+        SandboxLaunchData result;
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            // The host's own claim must not short-circuit a BE-managed launch.
+            redis.when(() -> RedisUtil.getString(SandboxService.SHARED_DSH_HOST_KEY_PREFIX + "user001"))
+                .thenReturn("multi-host-a");
+            result = ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox", "user001", 100L, routing);
+        }
+
+        assertThat(result).isNotNull();
+        assertThat(result.getSandboxId()).isEqualTo("byclaw-dsh-user001");
+        assertThat(result.getEndpoint()).isEqualTo("https://dsh.example.com/u/user001/chat?token=web-token");
+        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest> request =
+            ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        verify(lifecycleFacade).launchSandbox(request.capture());
+        assertThat(request.getValue().getEnvs()).containsEntry("BYAI_WORKER_ID", "byclaw-dsh-user001");
+    }
+
+    @Test
+    void sharedDshHost_guardIsOffWhenHostIsManaged() {
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostBaseUrl", "http://10.0.0.5:7300");
+        SandboxLaunchRouting dsh = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        try (MockedStatic<RedisUtil> redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString(any())).thenReturn("multi-host-a");
+
+            assertThat((String) ReflectionTestUtils.invokeMethod(sandboxService, "sharedDshHost", "served", dsh))
+                .isNull();
+            redis.verifyNoInteractions();
+        }
+    }
+
+    @Test
     void doLaunchSandbox_continuesWhenModelEnvsMissing() {
         SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
@@ -413,6 +645,37 @@ class SandboxServiceTest extends I18nTestSupport {
         verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
         verify(sandboxHealthWatchService).touch("user001", "openclaw");
         verify(sandboxHealthWatchService).touch("user001", "byclaw-dsh");
+    }
+
+    @Test
+    void sharedInventoryReadsOnlyItsCurrentGenerationWorkerHeartbeat() {
+        WorkerRegistry registry = mock(WorkerRegistry.class);
+        RedisClient redis = mock(RedisClient.class);
+        Jedis jedis = mock(Jedis.class);
+        var shared = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "gatewayWorkerRegistry", registry);
+        ReflectionTestUtils.setField(service, "redisClient", redis);
+        ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
+        String route = "BYCLAW_DSH_SHARED_context_9";
+        SandboxInfo info = SandboxInfo.builder().isShared(true).userCode("alice")
+            .sandboxType("custom-assistant").serviceKey("shared-host")
+            .mappingId("mapping-9").workerAgentType(route).build();
+        when(shared.infos("alice")).thenReturn(List.of(info));
+        when(registry.hasOnlineAgentType(route, true))
+            .thenReturn(new WorkerRegistry.OnlineAgentCheckResult(true, List.of("worker-9")));
+        when(registry.getWorker("worker-9")).thenReturn(Map.of("last_seen", 8_000L));
+        when(redis.getCommands()).thenReturn(jedis);
+        when(jedis.ttl(Constants.RegistryKeys.workerOnlineLease("worker-9"))).thenReturn(25L);
+
+        List<SandboxInfo> result = ReflectionTestUtils.invokeMethod(service, "withSharedHostContext", "alice", List.of());
+        assertThat(result).containsExactly(info);
+        assertThat(info.getWorkerOnline()).isTrue();
+        assertThat(info.getWorkerId()).isEqualTo("worker-9");
+        assertThat(info.getWorkerLastSeen()).isEqualTo(8_000L);
+        assertThat(info.getWorkerLeaseTtlSeconds()).isEqualTo(25L);
+        verify(registry, never()).getWorker("byclaw-dsh-alice");
+        verify(jedis).close();
     }
 
     @Test
@@ -625,6 +888,7 @@ class SandboxServiceTest extends I18nTestSupport {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", mock(SandboxLifecycleFacade.class));
 
         LoginInfo operator = new LoginInfo();
         operator.setUserCode("operator001");
@@ -647,6 +911,19 @@ class SandboxServiceTest extends I18nTestSupport {
 
         verify(sandboxRecordMapper).markReleasing(eq(1L), eq("release.manual:operator001"), any(Date.class), eq(3));
         verify(sandboxRecordMapper, never()).updateStatusToReleased(any(), any(), any(), any());
+    }
+
+    @Test
+    void findRecordIdBySandboxIdAndStatus_returnsMatchedRecordId() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(9L);
+        when(sandboxRecordMapper.selectBySandboxIdAndStatus("sandbox-9", "RUNNING")).thenReturn(record);
+
+        assertThat(sandboxService.findRecordIdBySandboxIdAndStatus("sandbox-9", "RUNNING")).isEqualTo(9L);
+        assertThat(sandboxService.findRecordIdBySandboxIdAndStatus("missing", "RUNNING")).isNull();
     }
 
     @Test
@@ -909,6 +1186,73 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void reconcileSandboxes_relaunchesMissingRemoteWithRecordSandboxType() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        SandboxUserContextRunner sandboxUserContextRunner = new SandboxUserContextRunner(loginApplicationService);
+        SandboxService sandboxService = spy(new SandboxService());
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxUserContextRunner", sandboxUserContextRunner);
+        ReflectionTestUtils.setField(sandboxService, "reconcileJobLockEnabled", false);
+        ReflectionTestUtils.setField(sandboxService, "reconcileGroupLimit", 50);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRecordLimitPerGroup", 500);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemotePageSize", 200);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxRecordsPerRun", 3000);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxDurationMs", 30000L);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemoteConcurrency", 1);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("user001");
+        record.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("RUNNING");
+        record.setSandboxId("byclaw-dsh-user001");
+        record.setEndpoint("http://host:7300/u/user001/chat?token=old-token");
+        record.setGatewayToken("old-token");
+        record.setTimeoutSeconds(600);
+        record.setLockVersion(0);
+        record.setVersion(1);
+        record.setCreateTime(new Date());
+        record.setLastAccessTime(new Date());
+
+        LoginInfo dbLoginInfo = new LoginInfo();
+        dbLoginInfo.setUserCode("user001");
+        when(loginApplicationService.getLoginInfo("user001")).thenReturn(dbLoginInfo);
+        when(sandboxRecordMapper.countReconcileSandboxes()).thenReturn(1);
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        group.setRecordCount(1);
+        when(sandboxRecordMapper.selectReconcileGroups(eq(50))).thenReturn(List.of(group));
+        when(sandboxRecordMapper.selectReconcileSandboxesByGroup(eq("user001"),
+            eq(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE), isNull(), isNull(), eq(500)))
+            .thenReturn(List.of(record));
+        when(sandboxLifecycleFacade.listSandboxesByMetadata(
+            eq(Map.of("userCode", "user001", "serviceKey", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE)),
+            eq(1), eq(200))).thenReturn(SandboxResponse.success(SandboxRuntimePage.empty(1, 200)));
+        when(sandboxRecordMapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
+            .thenReturn(1);
+
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("byclaw-dsh-user001");
+        launchData.setEndpoint("http://host:7300/u/user001/chat?token=new-token");
+        doReturn(launchData).when(sandboxService)
+            .launchSandboxWithServiceKey("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+
+        SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
+
+        assertThat(report.getAffectedCount()).isEqualTo(1);
+        // The record's own type drives the relaunch; resolving by resourceId would pick the employee's openclaw.
+        verify(sandboxService).launchSandboxWithServiceKey("user001", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        verify(sandboxService, never()).launchSandbox(anyString(), any());
+    }
+
+    @Test
     void buildSandboxWorkerId_returnsServiceKeyDashUserCode() {
         SandboxService sandboxService = new SandboxService();
 
@@ -1063,6 +1407,174 @@ class SandboxServiceTest extends I18nTestSupport {
 
         com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest captured = requestCaptor.getValue();
         assertThat(captured.getEnvs()).doesNotContainKey("BYAI_WORKER_ID");
+    }
+
+
+    // ---- platform-remote mode with a BE-managed shared DSH host ----
+
+    private static PlatformRemoteGateway remoteGateway(SandboxService sandboxService) {
+        PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
+        when(gateway.isRemote()).thenReturn(true);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(gateway);
+        ReflectionTestUtils.setField(sandboxService, "platformGatewayProvider", provider);
+        return gateway;
+    }
+
+    private static SsSandboxRecord hostRecord(String userCode) {
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(7L);
+        record.setUserCode(userCode);
+        record.setSandboxType(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        record.setSandboxId("byclaw-dsh-" + userCode);
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("RUNNING");
+        record.setEndpoint("https://dsh.example.com/u/" + userCode + "/");
+        record.setGatewayToken("wt");
+        record.setVersion(1);
+        record.setLockVersion(1);
+        return record;
+    }
+
+    private static SharedDshHostContexts contexts(String... users) {
+        SharedDshHostClient client = mock(SharedDshHostClient.class);
+        SharedDshHostClient.UserContext ready = new SharedDshHostClient.UserContext();
+        ready.setStatus(SharedDshHostClient.UserContext.STATUS_READY);
+        ready.setWebToken("wt");
+        ready.setWebPath("/u/user001/");
+        when(client.ensureUser(any(), any(), any())).thenReturn(ready);
+        when(client.getUser(any())).thenReturn(ready);
+        return new SharedDshHostContexts(client, "https://dsh.example.com", Set.of(users)::contains,
+            user -> Map.of("USER_CODE", user), Runnable::run);
+    }
+
+    @Test
+    void residentHost_listedUserDshLaunchIsAnIdempotentPutWithoutARecord() {
+        SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade facade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", contextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", facade);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+
+        SandboxLaunchData result = sandboxService.launchSandboxWithServiceKey("user001",
+            SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+
+        assertThat(result.getSandboxId()).isEqualTo("byclaw-dsh-user001");
+        assertThat(result.getEndpoint()).isEqualTo("https://dsh.example.com/u/user001/chat?token=wt");
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+        verify(facade, never()).launchSandbox(any());
+        verify(gateway, never()).service(eq("launch"), any());
+
+        // Chat readiness restarts go the same way, with the worker wait the caller asked for.
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        when(contextFactory.resolveRouting(null, "user001")).thenReturn(routing);
+        assertThat(sandboxService.restartSandboxForTargetWithoutWait("user001", null, "BYCLAW_DSH_user001").getSandboxId())
+            .isEqualTo("byclaw-dsh-user001");
+        verify(gateway, never()).service(eq("restart"), any());
+    }
+
+    @Test
+    void residentHost_browserLivesInTheToolSandboxWhetherOrNotTheContextRuns() {
+        SandboxService sandboxService = new SandboxService();
+        SharedDshHostContexts contexts = contexts("user001");
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Not running (released, host restarted): the answer does not depend on the context.
+        SharedDshHostClient.UserContext absent = new SharedDshHostClient.UserContext();
+        absent.setStatus(SharedDshHostClient.UserContext.STATUS_ABSENT);
+        when(((SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client")).getUser(any())).thenReturn(absent);
+        assertThat(sandboxService.browserServiceKey("user001")).isEqualTo("byclaw-dsh-tools");
+        // Everyone else keeps the browser in the sandbox the client already picks.
+        assertThat(sandboxService.browserServiceKey("user002")).isNull();
+        assertThat(new SandboxService().browserServiceKey("user001")).isNull();
+    }
+
+    @Test
+    void residentHost_unlistedUsersAndOtherTypesKeepTheirRuntime() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+
+        sandboxService.launchSandboxWithServiceKey("user002", SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        sandboxService.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools");
+
+        verify(gateway, times(2)).service(eq("launch"), any());
+        verify(recordMapper, never()).insert(any(SsSandboxRecord.class));
+    }
+
+    @Test
+    void residentHost_removeIsADeleteOnTheHostAndNothingElseForThatType() {
+        SharedDshHostContexts contexts = contexts("user001");
+        SharedDshHostClient client = (SharedDshHostClient) ReflectionTestUtils.getField(contexts, "client");
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", mock(SsSandboxRecordMapper.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts);
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+
+        sandboxService.removeSandbox("user001", null, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        verify(client).deleteUser("user001");
+        verify(gateway, never()).service(eq("remove"), any());
+
+        // No type given: the host context goes, and the user's other sandboxes are still the platform's.
+        sandboxService.removeSandbox("user001", null, null);
+        verify(client, times(2)).deleteUser("user001");
+        verify(gateway, times(1)).service(eq("remove"), any());
+
+        sandboxService.removeSandbox("user002", null, SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE);
+        sandboxService.removeSandbox("user001", null, "openclaw");
+        verify(client, times(2)).deleteUser(any());
+        verify(gateway, times(3)).service(eq("remove"), any());
+    }
+
+    @Test
+    void residentHost_sandboxInfoListsTheContextFromTheHostInsteadOfRecords() {
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", mock(SsSandboxRecordMapper.class));
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        PlatformRemoteGateway gateway = remoteGateway(sandboxService);
+        SandboxInfo platformInfo = SandboxInfo.builder().userCode("user001").sandboxType("openclaw").sandboxId("os-1").build();
+        SandboxInfo stale = SandboxInfo.builder().userCode("user001").sandboxType("byclaw-dsh").sandboxId("old-record").build();
+        when(gateway.convert(any(), any(java.lang.reflect.Type.class))).thenReturn(List.of(platformInfo, stale));
+
+        List<SandboxInfo> infos = sandboxService.sandboxInfo("user001");
+
+        assertThat(infos).extracting(SandboxInfo::getSandboxId).containsExactly("os-1", "byclaw-dsh-user001");
+        assertThat(infos.get(1).getEndpoints()).containsExactly("https://dsh.example.com/u/user001/chat?token=wt");
+    }
+
+    @Test
+    void residentHost_heartbeatsNeedNoRecordForTheContext() {
+        SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", recordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sharedDshHostContexts", contexts("user001"));
+        remoteGateway(sandboxService);
+
+        assertThat(sandboxService.heartbeatDshSandbox("user001")).isTrue();
+        verify(recordMapper, never()).selectRunningByUserAndSandboxType(any(), any());
+    }
+    @Test
+    void managedSharedPoolLaunchAndHeartbeatUsePlatformMapping() {
+        SandboxService service = new SandboxService();
+        var shared = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
+        var legacy = remoteGateway(service);
+        SandboxLaunchData hosted = new SandboxLaunchData();
+        hosted.setSandboxId("shared-instance-1");
+        when(shared.tryAcquire("user001", "byclaw-dsh")).thenReturn(hosted);
+        when(shared.heartbeat("user001", "byclaw-dsh")).thenReturn(true);
+        assertThat(service.launchSandboxWithServiceKey("user001", "byclaw-dsh").getSandboxId())
+            .isEqualTo("shared-instance-1");
+        assertThat(service.heartbeatDshSandbox("user001")).isTrue();
+        verify(legacy, never()).service(any(), any());
     }
 
 }

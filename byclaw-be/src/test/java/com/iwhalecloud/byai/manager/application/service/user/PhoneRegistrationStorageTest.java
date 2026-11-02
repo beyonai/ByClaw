@@ -32,6 +32,11 @@ class PhoneRegistrationStorageTest {
         ReflectionTestUtils.setField(service, "userService", userService);
         ReflectionTestUtils.setField(service, "userBucketProvisioningService", mock(UserBucketProvisioningService.class));
 
+        // The storage test runs with outbound hooks disabled, as in a default deployment.
+        ReflectionTestUtils.setField(service, "hookPublisher", new com.iwhalecloud.byai.common.hook.HookPublisher(
+            new org.springframework.beans.factory.support.DefaultListableBeanFactory()
+                .getBeanProvider(com.iwhalecloud.byai.common.hook.HookDispatcher.class)));
+
         service.registerByPhone("13800138000");
 
         ArgumentCaptor<Users> saved = ArgumentCaptor.forClass(Users.class);

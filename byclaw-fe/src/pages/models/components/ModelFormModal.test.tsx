@@ -1,6 +1,8 @@
+import { POST } from '@/service/common/request';
 import { act, render } from '@testing-library/react';
 import ModelFormModal from './ModelFormModal';
-import { getMyModels, getPublicModels } from '../service';
+import { checkModelHealth, getCachedModelHealth } from '@/service/modelHealth';
+import { getMyModels, getPublicModels, upsertMyModel } from '../service';
 
 const mockGetSourceSystemList = jest.fn();
 const mockGetDcSystemConfigListByStandType = jest.fn();
@@ -8,8 +10,16 @@ let mockSharedModelFormProps: any;
 
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
+  useSelector: (selector: any) => selector({ user: { userInfo: { userId: 17 } } }),
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
 }));
+
+jest.mock('@/service/modelHealth', () => ({
+  ...jest.requireActual('@/service/modelHealth'),
+  checkModelHealth: jest.fn(),
+}));
+jest.mock('@/service/common/request', () => ({ POST: jest.fn() }));
+jest.mock('@/utils/auth', () => ({ getAuthSnapshot: () => ({}), isCurrentAuthSnapshot: () => true }));
 
 jest.mock('@/pages/manager/utils/auth', () => ({
   getSessionKey: () => 'session-1',
@@ -57,6 +67,7 @@ describe('models/components/ModelFormModal', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (POST as jest.Mock).mockReset();
     mockSharedModelFormProps = undefined;
   });
 
@@ -109,6 +120,46 @@ describe('models/components/ModelFormModal', () => {
     await expect(
       renderForm().runDebugRequest({ modelId: 42, modelType: 'IMAGE_GENERATION', input: '{}' })
     ).rejects.toThrow('invalid model');
+  });
+
+  it('marks both personal models when both debug calls return the same business error', async () => {
+    global.fetch = jest.fn().mockImplementation(async () => ({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ code: -1, data: null, msg: 'upstream failed', success: false }),
+    }));
+    const props = renderForm();
+    (POST as jest.Mock).mockImplementation(async (url, params) => {
+      if (url.endsWith('/healthDebugBegin')) return { code: 0, data: 1 };
+      return {
+        code: 0,
+        data: {
+          scope: 'PERSONAL',
+          checkedAt: Date.now(),
+          healthy: false,
+          presented: true,
+          dismissed: true,
+          models: (params.id === '43' ? ['43', '42'] : ['42']).map((modelId) => ({
+            modelId,
+            modelName: `Broken ${modelId}`,
+            modelType: 'LLM',
+            status: 'FAILED',
+            errorCode: 'DEBUG_FAILED',
+          })),
+        },
+      };
+    });
+    for (const modelId of ['42', '43']) {
+      await expect(
+        props.runDebugRequest({ modelId, modelName: `Broken ${modelId}`, modelType: 'LLM', input: '{}' })
+      ).rejects.toThrow('upstream failed');
+    }
+    const cached = getCachedModelHealth({ userId: 17 }, 'PERSONAL')!;
+    expect(cached.models).toHaveLength(2);
+    expect(cached.models.every((model) => model.status === 'FAILED' && model.errorCode === 'DEBUG_FAILED')).toBe(true);
+    expect(cached.models.map((model) => model.modelName)).toEqual(['Broken 43', 'Broken 42']);
+    expect(checkModelHealth).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   it.each(['add', 'edit'] as const)('loads ability and system tag options for the %s form', async (type) => {
@@ -173,4 +224,13 @@ describe('models/components/ModelFormModal', () => {
     mockGetDcSystemConfigListByStandType.mockRejectedValue(new Error('dictionary unavailable'));
     await expect(renderForm().loadAbilityOptions()).rejects.toThrow('dictionary unavailable');
   });
+});
+
+it('forces a check of the saved personal model on every save', async () => {
+  (upsertMyModel as jest.Mock).mockResolvedValue({ code: 0, data: { id: '42' } });
+  const props = renderForm();
+  await props.saveModelRequest({ modelCode: 'test' });
+  await props.saveModelRequest({ modelCode: 'test' });
+  expect(checkModelHealth).toHaveBeenCalledTimes(2);
+  expect(checkModelHealth).toHaveBeenLastCalledWith({ userId: 17 }, { modelId: '42', scope: 'PERSONAL', force: true });
 });

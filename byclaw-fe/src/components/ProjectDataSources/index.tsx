@@ -29,6 +29,7 @@ import {
   type DataSourceInput,
 } from '@/service/projectDataSources';
 import styles from './index.module.less';
+import { useProjectDataSourcesEnabled } from './useProjectDataSourcesEnabled';
 
 interface Props {
   projectId?: number;
@@ -38,7 +39,13 @@ interface Props {
   renderHeader?: (actions: React.ReactNode) => React.ReactNode;
 }
 
-const ProjectDataSources = ({ projectId, sessionId, canManage = false, refreshKey = 0, renderHeader }: Props) => {
+const ProjectDataSourcesContent = ({
+  projectId,
+  sessionId,
+  canManage = false,
+  refreshKey = 0,
+  renderHeader,
+}: Props) => {
   const intl = useIntl();
   const { EventEmitter } = useGlobal();
   const label = (key: string): string => intl.formatMessage({ id: `dataSource.${key}` });
@@ -465,4 +472,7 @@ const ProjectDataSources = ({ projectId, sessionId, canManage = false, refreshKe
     </>
   );
 };
-export default ProjectDataSources;
+export default function ProjectDataSources(props: Props) {
+  const enabled = useProjectDataSourcesEnabled();
+  return enabled ? <ProjectDataSourcesContent {...props} /> : null;
+}

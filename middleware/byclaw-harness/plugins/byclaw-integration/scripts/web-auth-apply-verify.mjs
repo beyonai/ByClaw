@@ -12,6 +12,8 @@ delete process.env.USER_CODE
 const errors = []
 
 let dispose = () => undefined
+const rootEffects = []
+let searchGuard
 const connection = {
   authenticatedUrl(baseUrl) {
     const url = new URL(baseUrl)
@@ -30,7 +32,11 @@ const connection = {
 
 try {
   await apply({
+    effect(factory) { rootEffects.push(factory()) },
+    tools: { guard(check) { searchGuard = check; return () => { searchGuard = undefined } } },
     logger: {
+      // Startup phases log at info level before the userCode check.
+      info() {},
       error(message) { errors.push(message) },
     },
     inject(services, callback) {
@@ -44,6 +50,8 @@ try {
     },
   }, { enabled: true })
 
+  assert.match(searchGuard({ name: 'web_search' }), /disabled by ByClaw policy/u, 'default web search must be guarded before startup')
+  assert.equal(searchGuard({ name: 'bash' }), undefined)
   assert.equal(errors.length, 1)
   assert.match(errors[0], /requires config\.userCode or USER_CODE/u)
 
@@ -63,6 +71,7 @@ try {
   }), 403)
 } finally {
   dispose()
+  for (const release of rootEffects.reverse()) release?.()
   if (previousEnabled === undefined) delete process.env[BYCLAW_DSH_WEB_AUTH_ENABLED_ENV]
   else process.env[BYCLAW_DSH_WEB_AUTH_ENABLED_ENV] = previousEnabled
   if (previousToken === undefined) delete process.env[BYCLAW_DSH_WEB_AUTH_TOKEN_ENV]

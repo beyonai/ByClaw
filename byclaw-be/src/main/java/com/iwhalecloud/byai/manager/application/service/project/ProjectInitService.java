@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.project;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -102,22 +104,22 @@ public class ProjectInitService {
     @Autowired
     private GitHubCredentialResolver githubCredentialResolver;
 
-    /**
-     * 初始化项目工作目录。
-     *
-     * @param projectId 项目 ID
-     * @return 项目工作目录
-     */
+
+    /** 仅解析原项目路径，不进行文件IO，供独立存储入口使用。 */
+    public Path resolveProjectWorkspace(Long projectId) {
+        return Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(), userFsRootPathSegment(),
+            "projects", String.valueOf(projectId));
+    }
+
+    /** 为BE本地Git/CLI初始化工作目录，不按平台模式选路。 */
     public Path initProjectWorkspace(Long projectId) {
-        Path projectWorkspace = Paths.get(fileStorageLocalPath, resolveCurrentUserBucket(), userFsRootPathSegment(),
-            "projects",
-            String.valueOf(projectId));
+        Path projectWorkspace = resolveProjectWorkspace(projectId);
         try {
             Files.createDirectories(projectWorkspace);
             return projectWorkspace;
         }
         catch (IOException e) {
-            throw new IllegalStateException("Failed to create project workspace: " + projectWorkspace, e);
+            throw new IllegalStateException(I18nUtil.get("project.init.workspaceFailed", String.valueOf(projectWorkspace)), e);
         }
     }
 
@@ -284,7 +286,7 @@ public class ProjectInitService {
         Project project = projectService.findById(request.getProjectId());
         if (project == null) {
             log.error("[Step 1/14] Project not found: projectId={}", request.getProjectId());
-            throw new BaseException(50404, "Project not found: " + request.getProjectId());
+            throw new BaseException(50404, I18nUtil.get("project.init.notFound", String.valueOf(request.getProjectId())));
         }
         log.debug("[Step 1/14] Project found: projectId=, projectName={}, projectType={}",
             project.getProjectId(), project.getProjectName(), project.getProjectType());
@@ -626,7 +628,7 @@ public class ProjectInitService {
             .toAbsolutePath().normalize();
         Path repositoryPath = root.resolve(repoName).normalize();
         if (!root.equals(repositoryPath.getParent())) {
-            throw new BaseException(50400, "Invalid repository name: " + repoName);
+            throw new BaseException(50400, I18nUtil.get("project.init.repoNameInvalid", repoName));
         }
         return repositoryPath;
     }
@@ -660,7 +662,7 @@ public class ProjectInitService {
         }
         String token = getUserGitHubToken(userId, userCode);
         if (token == null || token.isBlank()) {
-            throw new BaseException(50403, "GitHub Token (GH_TOKEN) is required for Git operations.");
+            throw new BaseException(50403, "project.githubTokenRequired");
         }
         try {
             Files.createDirectories(repoPath.getParent());
@@ -669,7 +671,7 @@ public class ProjectInitService {
             return repoPath;
         }
         catch (Exception e) {
-            throw new BaseException(50500, "Failed to clone repository: " + repoUrl + ". Error: " + e.getMessage(), e);
+            throw new BaseException(50500, I18nUtil.get("project.cloneFailed", repoUrl, e.getMessage()), e);
         }
     }
 
@@ -735,7 +737,7 @@ public class ProjectInitService {
     private String extractRepoName(ProjectRepo repo) throws BaseException {
         // 编程式校验：数据库数据不能依赖参数注解
         if (repo == null) {
-            throw new BaseException(50400, "ProjectRepo is null");
+            throw new BaseException(50400, I18nUtil.get("project.repo.required"));
         }
 
         String repoFullName = repo.getRepoFullName();

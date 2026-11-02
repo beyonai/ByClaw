@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.resource;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -53,8 +54,9 @@ public interface ResourceSyncScopeMapper {
 
     @Select("""
         SELECT default_dig_employee_id FROM byai.suas_superassist
-        WHERE create_user = #{userId} AND com_acct_id = #{tenantId} AND status = '00' FOR UPDATE
+        WHERE create_user = #{userId} AND com_acct_id = #{tenantId} AND status = '00'
         """)
+    @RedisTransactionLock(value = "user-default-employee", parameters = {"tenantId", "userId"})
     List<Long> defaultEmployeesForUpdate(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
 
     /** Read by creator, never by superassist primary key; duplicate defaults are intentionally rejected. */
@@ -63,4 +65,27 @@ public interface ResourceSyncScopeMapper {
         WHERE create_user = #{userId} AND com_acct_id = #{tenantId} AND status = '00'
         """)
     List<Long> defaultEmployees(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
+
+    @Select("""
+        <script>
+        SELECT u.user_id AS user_id, r.resource_id AS employee_id
+        FROM byai.po_users u
+        JOIN byai.ss_resource r ON r.resource_code = CONCAT(u.user_code, '_personal')
+        WHERE u.state = 'A' AND u.user_code IS NOT NULL AND u.user_code != ''
+          AND r.resource_biz_type = 'DIG_EMPLOYEE' AND r.resource_status = 2
+          AND r.com_acct_id = #{tenantId}
+          AND EXISTS (SELECT 1 FROM byai.tenant_user_membership m WHERE m.user_id = u.user_id
+              AND m.enterprise_id = #{tenantId} AND m.status = 'ACTIVE')
+          AND u.user_id IN
+          <foreach collection="userIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+        </script>
+        """)
+    List<UserAssistantRow> personalAssistantsBatch(@Param("userIds") List<Long> userIds, @Param("tenantId") Long tenantId);
+
+    record UserAssistantRow(Long userId, Long employeeId) { }
+
+    @RedisTransactionLock(value = "user-personal-employee", parameters = {"tenantId", "userId"})
+    default List<Long> personalAssistants(Long userId, Long tenantId) {
+        return personalAssistantsBatch(List.of(userId), tenantId).stream().map(UserAssistantRow::employeeId).toList();
+    }
 }

@@ -102,4 +102,28 @@ public class GroupChatEventPublisher {
         }
         return sent;
     }
+    /** Only the forwarding service supplies freshly bound USER recipients; completion means enqueue, never client receipt. */
+    public void publishForwardMembers(long enterpriseId,List<Long> recipientIds,JSONObject event) {
+        if(enterpriseId<=0||event==null)throw new IllegalArgumentException("FORWARD_INVALID_DELIVERY");
+        event.put("enterpriseId",Long.toString(enterpriseId));
+        List<io.netty.channel.ChannelFuture> sends=new java.util.ArrayList<>();
+        try {
+            for(Long id:new java.util.LinkedHashSet<>(recipientIds)) {
+                for(Channel channel:channelManager.getChannels(id)) {
+                    if(!channel.isActive()||!Objects.equals(Long.toString(enterpriseId),channel.attr(Constant.ATT_ENTERPRISE_ID).get()))continue;
+                    sends.add(channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString())));
+                }
+            }
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            for(var send:sends) {
+                long left=deadline-System.nanoTime();
+                if(left<=0||!send.await(left,java.util.concurrent.TimeUnit.NANOSECONDS)||!send.isSuccess())throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
+            }
+        } catch(InterruptedException interrupted) {
+            Thread.currentThread().interrupt();throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
+        } catch(RuntimeException failure) {
+            throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
+        }
+    }
+
 }

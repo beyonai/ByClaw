@@ -4,6 +4,8 @@ import { arrayJson, objectJson, recalled } from "./message-format.js";
 /** 文件列表只投影消息的 related_resources，保留上传文件的预览字段。 */
 export function relatedResourceAttachments(source: Row): Row[] {
   if (recalled(source)) return [];
+  const meta = objectJson(source.metadata);
+  if (meta.kind === "FORWARD_MERGED") return [];
   const resources = objectJson(source.relatedResources);
   return arrayJson(resources.files)
     .filter((f) => f && f.fileId && f.fileName)
@@ -12,7 +14,8 @@ export function relatedResourceAttachments(source: Row): Row[] {
       fileName: f.fileName,
       filePath: f.filePath,
       fileUrl: f.fileUrl,
-      mediaType: f.fileType,
+      mediaType: f.mediaType ?? f.fileType,
+      ...(typeof f.size === "number" ? { size: f.size } : {}),
     }));
 }
 
@@ -22,7 +25,7 @@ export function messageAttachments(source: Row): Row[] {
   const meta = objectJson(source.metadata);
   return [
     ...relatedResourceAttachments(source),
-    ...(meta.scene === "GROUP_CHAT" && meta.kind === "TASK_RESULT"
+    ...(meta.scene === "GROUP_CHAT" && ["TASK_RESULT", "FORWARD_SINGLE"].includes(meta.kind)
       ? arrayJson(meta.files)
           .filter((f) => f && f.fileName && f.filePath)
           .map((f) => ({

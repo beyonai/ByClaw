@@ -19,8 +19,6 @@ import { sessionHandler } from '@/utils/session';
 import { Button } from 'antd';
 import { saveProjectScopeIdToStorage } from '@/pages/projectSpace/constants';
 import useAppStore from '@/models/common/useAppStore';
-import ChildSessionNavigator from './ChildSessionNavigator';
-import AgentTeamsHeaderActivity from './AgentTeamsHeaderActivity';
 import type { IMessage } from '@/typescript/message';
 
 interface ChatTitleProps {
@@ -117,11 +115,6 @@ export default function ChatTitle(props: ChatTitleProps) {
                 <div className={styles.chatTitle}>{titleSession.sessionName}</div>
               </>
             )}
-            <AgentTeamsHeaderActivity
-              rootSessionId={`${currentSession?.parentSessionId || sessionId || ''}`}
-              currentSession={currentSession}
-            />
-            <ChildSessionNavigator sessionId={sessionId} currentSession={currentSession} />
             <div className={styles.actions}>
               <ProjectSessionActions
                 projectId={props.projectId}

@@ -3,7 +3,7 @@ import { WebSocket } from 'ws'
 import type { Context, SidebarHttpRequest } from './context-types.ts'
 import type { ResolvedSidebarConfig } from './config.ts'
 import { requireAbsolute } from './fs-tree.ts'
-import { resolveGitTarget, type GitTarget } from './git-workspaces.ts'
+import { discoverGitWorkspace, resolveGitTarget, type GitTarget, type GitWorkspaces } from './git-workspaces.ts'
 import type { PtyManager } from './pty-manager.ts'
 import { AgentPtyRegistry, clampDims, type AgentTerminalHandle } from './agent-pty.ts'
 import { PTY_DEPS_MISSING } from './pty-deps.ts'
@@ -13,6 +13,19 @@ import { SidebarError } from './wire.ts'
 interface ResolvedTerminalWorkingDirectory {
   cwd: string
   authoritativeSessionCwd?: string
+}
+
+/** Where terminal targets resolve: the plugin instance's own inventory and cwd fallback. */
+export interface TerminalWorkspaceScope {
+  /** Per-instance Git inventory (default: the host-world inventory). */
+  gitWorkspaces?: GitWorkspaces
+  /** Working directory used before a session has one (default: this process's cwd). */
+  cwdFallback?: () => string
+}
+
+const hostScope: Required<TerminalWorkspaceScope> = {
+  gitWorkspaces: { discoverGitWorkspace, resolveGitTarget },
+  cwdFallback: () => process.cwd(),
 }
 
 export interface TerminalShellOverrides {
@@ -26,6 +39,7 @@ export interface TerminalShellOverrides {
  * @param sessionId - session that owns the terminal tab.
  * @param clientCwd - legacy cwd used only by normal terminal tabs.
  * @param target - optional opaque repository/worktree IDs.
+ * @param scope - the plugin instance's inventory and cwd fallback.
  * @returns the validated directory for PTY creation.
  */
 export async function resolveTerminalWorkingDirectory(
@@ -33,17 +47,20 @@ export async function resolveTerminalWorkingDirectory(
   sessionId: string,
   clientCwd?: string,
   target?: GitTarget,
+  scope: TerminalWorkspaceScope = {},
 ): Promise<string> {
-  return (await resolveTerminalWorkingDirectoryRequest(ctx, sessionId, clientCwd, target)).cwd
+  return (await resolveTerminalWorkingDirectoryRequest(ctx, sessionId, clientCwd, target, scope)).cwd
 }
 
 async function resolveTerminalWorkingDirectoryRequest(
   ctx: Context,
   sessionId: string,
-  clientCwd?: string,
-  target?: GitTarget,
+  clientCwd: string | undefined,
+  target: GitTarget | undefined,
+  scope: TerminalWorkspaceScope,
 ): Promise<ResolvedTerminalWorkingDirectory> {
-  if (target === undefined) return { cwd: sessionCwdOf(ctx, sessionId, clientCwd) }
+  const { gitWorkspaces, cwdFallback } = { ...hostScope, ...scope }
+  if (target === undefined) return { cwd: sessionCwdOf(ctx, sessionId, clientCwd, cwdFallback) }
   if (clientCwd !== undefined) {
     throw new SidebarError('bad-request', 'a targeted terminal must not include a client cwd')
   }
@@ -52,7 +69,7 @@ async function resolveTerminalWorkingDirectoryRequest(
     throw new SidebarError('bad-request', `session "${sessionId}" has no authoritative working directory`)
   }
   const absoluteSessionCwd = requireAbsolute(authoritativeCwd)
-  const resolvedTarget = await resolveGitTarget(absoluteSessionCwd, target, { refresh: true })
+  const resolvedTarget = await gitWorkspaces.resolveGitTarget(absoluteSessionCwd, target, { refresh: true })
   return { cwd: resolvedTarget.worktree.path, authoritativeSessionCwd: absoluteSessionCwd }
 }
 
@@ -67,6 +84,7 @@ async function resolveTerminalWorkingDirectoryRequest(
  * @param resolved - validated plugin configuration.
  * @param getShellOverrides - current settings-derived shell overrides.
  * @param isPluginDisposing - teardown guard sampled immediately before PTY creation.
+ * @param scope - the plugin instance's inventory and cwd fallback.
  * @returns when the socket is attached or rejected.
  */
 export async function attachTerminal(
@@ -78,6 +96,7 @@ export async function attachTerminal(
   resolved: ResolvedSidebarConfig,
   getShellOverrides: () => TerminalShellOverrides,
   isPluginDisposing: () => boolean = () => false,
+  scope: TerminalWorkspaceScope = {},
 ): Promise<void> {
   try {
     const url = new URL(req.url ?? '/', 'http://dsh.internal')
@@ -118,7 +137,7 @@ export async function attachTerminal(
     let disconnectedWhileResolving = false
     const markPendingDisconnect = (): void => { disconnectedWhileResolving = true }
     ws.once('close', markPendingDisconnect)
-    const workingDirectory = await resolveTerminalWorkingDirectoryRequest(ctx, sessionId, clientCwd, target)
+    const workingDirectory = await resolveTerminalWorkingDirectoryRequest(ctx, sessionId, clientCwd, target, scope)
     if (disconnectedWhileResolving || ws.readyState !== WebSocket.OPEN || isPluginDisposing()) return
     if (workingDirectory.authoritativeSessionCwd !== undefined) {
       const currentSessionCwd = ctx.sessions.get(sessionId)?.header.cwd

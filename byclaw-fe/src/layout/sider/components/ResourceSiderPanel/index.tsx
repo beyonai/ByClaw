@@ -39,6 +39,8 @@ import ResourceSiderListItem, {
 import styles from './index.module.less';
 import { useEnterpriseSkillPublication } from './useEnterpriseSkillPublication';
 import { useWorkspaceSkillCenterSync } from './useWorkspaceSkillCenterSync';
+import { useSkillRuntimeStatus } from './useSkillRuntimeStatus';
+import SkillRuntimeBadge from './SkillRuntimeBadge';
 const PAGE_SIZE = 30;
 
 interface Props {
@@ -173,6 +175,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
   }, [resourceList]);
 
   const activeSiderAgent = useActiveSiderAgent();
+  const skillRuntime = useSkillRuntimeStatus(resourceType === 'SKILL' ? activeSiderAgent.resourceId : undefined);
   const { isCenterPage: isResourceCenterPage, toggleCenter } = useResourceCenterRouter(
     config.navigatePath,
     config.siderKey,
@@ -1028,6 +1031,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType, embedded = false, s
               item={item}
               resourceType={resourceType}
               actions={[renderDetailDropdown(item)]}
+              runtimeStatus={
+                resourceType === 'SKILL' && !isWorkspaceSkill(item) ? (
+                  <SkillRuntimeBadge
+                    skill={skillRuntime.status?.skills.find(
+                      (skill) => String(skill.resourceId) === String(item.resourceId)
+                    )}
+                    retry={skillRuntime.retry}
+                    retrying={skillRuntime.retrying}
+                  />
+                ) : undefined
+              }
               renderSkillSourceTag={renderSkillSourceTag}
               onClick={handleResourceItemClick}
               onDoubleClick={handleResourceItemDoubleClick}

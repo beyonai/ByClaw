@@ -38,6 +38,19 @@
     text-decoration: line-through;
     opacity: 0.72;
   }
+
+  &.invalidResource {
+    cursor: pointer;
+    padding-right: 8px;
+
+    &:hover {
+      background: var(~'--@{antPrefix}-color-fill-tertiary', #0000000f) !important;
+
+      .deleteIcon {
+        opacity: 1;
+      }
+    }
+  }
 }
 
 .deleteIcon {

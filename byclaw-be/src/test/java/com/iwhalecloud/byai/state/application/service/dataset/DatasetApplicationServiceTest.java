@@ -42,7 +42,6 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBuildResu
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -60,9 +59,15 @@ import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceDiscoveryRegistrationService;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
+import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
+
 import java.util.*;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -76,7 +81,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -86,13 +90,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 @DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
-class DatasetApplicationServiceTest {
+class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Locale TEST_LOCALE = new Locale("zh", "CN");
 
@@ -107,8 +112,8 @@ class DatasetApplicationServiceTest {
 
     private DatasetApplicationService service;
 
-    @BeforeAll
-    static void initI18n() {
+    @BeforeEach
+    void initI18n() {
         StaticMessageSource messageSource = new StaticMessageSource();
         var bundle = new org.springframework.context.support.ResourceBundleMessageSource();
         bundle.setBasename("i18n/messages");
@@ -133,10 +138,6 @@ class DatasetApplicationServiceTest {
             "resource.lifecycle.status.invalid", "dataset.creator.immutable", "dataset.file.exists")) {
             messageSource.addMessage(key, TEST_LOCALE, key);
         }
-        ApplicationContext applicationContext = org.mockito.Mockito.mock(ApplicationContext.class);
-        org.mockito.Mockito.when(applicationContext.getBean(org.springframework.context.MessageSource.class))
-            .thenReturn(messageSource);
-        ReflectionTestUtils.setField(ApplicationContextUtil.class, "applicationContext", applicationContext);
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
     }
 
@@ -147,6 +148,8 @@ class DatasetApplicationServiceTest {
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", feignPythonBuildService);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(feignPythonBuildService));
         ReflectionTestUtils.setField(service, "datasetSystem", "");
     }
 
@@ -174,6 +177,69 @@ class DatasetApplicationServiceTest {
         verify(feignPythonBuildService).createDirectory(captor.capture(), any());
         assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
         assertThat(captor.getValue().getDirectoryPath()).isEqualTo("/2026/reports");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void capabilitiesEnableMaintenanceAcrossModesWithoutChangingCreation(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        var capabilities = service.queryKnowledgeCapability();
+        assertThat(capabilities.getAllowKnowledgeBaseEdit()).isTrue();
+        assertThat(capabilities.getAllowKnowledgeBaseDelete()).isTrue();
+        assertThat(capabilities.getAllowKnowledgeBaseCreate()).isEqualTo(mode.isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void datasetManagersCanUpdateAndDeleteAcrossModes(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(OwnerType.PERSONAL);
+        resource.setResourceStatus(3);
+        SsResExtDocService documents = org.mockito.Mockito.mock(SsResExtDocService.class);
+        ResourceDiscoveryRegistrationService discovery = org.mockito.Mockito.mock(ResourceDiscoveryRegistrationService.class);
+        ReflectionTestUtils.setField(service, "ssResExtDocService", documents);
+        ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", discovery);
+        ReflectionTestUtils.setField(service, "resourceRuntimeInfoResolver", org.mockito.Mockito.mock(ResourceRuntimeInfoResolver.class));
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResourceService.updateResource(100L, "Updated", "Description")).thenReturn(resource);
+        SsResExtDoc document = new SsResExtDoc();
+        when(documents.updateSsResExtDocTargetContent(100L, "dataset", "Updated", "Description"))
+            .thenReturn(document);
+        DatasetDto request = new DatasetDto();
+        request.setResourceId(100L);
+        request.setResourceName("Updated");
+        request.setResourceDesc("Description");
+        request.setType("dataset");
+        service.updateDataset(request);
+        verify(feignPythonBuildService).updateKnowledgeBase(org.mockito.ArgumentMatchers.argThat(update ->
+            "Updated".equals(update.getKnName()) && "personal-kb".equals(update.getKnCode())));
+
+        ResourceOperationPermissionsVo permissions = new ResourceOperationPermissionsVo();
+        permissions.setCanDelete(true);
+        when(authApplicationService.queryResourceOperationPermissions(100L)).thenReturn(permissions);
+        assertThat(service.deleteDataset(100L)).isTrue();
+        assertThat(resource.getResourceStatus()).isEqualTo(-1);
+        verify(feignPythonBuildService).deleteKnowledgeBase(any(), eq(100L));
+        verify(authApplicationService).invalidateResourceAuthorizationCachesAfterCommit(100L, "KG_DOC");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void datasetWriteEndpointsRejectNonManagersAcrossModes(String mode) {
+        ReflectionTestUtils.setField(service, "datasetSystem", mode);
+        SsResource resource = defaultPersonalDataset();
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(OwnerType.PERSONAL);
+        when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
+        DatasetDto request = new DatasetDto();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.updateDataset(request)).hasMessage("No permission to manage this resource");
+        assertThatThrownBy(() -> service.deleteDataset(100L)).hasMessage("No permission to manage this resource");
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        verifyNoInteractions(feignPythonBuildService);
     }
 
     @Test
@@ -448,6 +514,78 @@ class DatasetApplicationServiceTest {
         assertThat(captor.getValue().getOverwrite()).isFalse();
         assertThat(result.getSummary().getSucceeded()).isEqualTo(1);
         assertThat(result.getSummary().getFailed()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, 12})
+    void fileCountChecksReadAccessAndMapsResourceCode(long count) {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        var qaResult = new com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult();
+        qaResult.setFileCount(count);
+        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
+        response.setResultCode("0");
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+
+        assertThat(service.fileCount(request).getFileCount()).isEqualTo(count);
+        var captor = ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount.class);
+        verify(feignPythonBuildService).fileCount(captor.capture(), eq(100L));
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+    }
+
+    @Test
+    void fileCountRejectsUnreadableAndMissingResourcesBeforeCallingQa() {
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(feignPythonBuildService);
+    }
+
+    @Test
+    void fileCountDoesNotTurnProviderFailureIntoZero() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
+        response.setResultCode("-1");
+        response.setResultMsg("knowledge base not found: personal-kb");
+        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
+        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
+        request.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(BaseException.class)
+            .hasMessageContaining("knowledge base not found: personal-kb");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rawZipUsesFullFilePathAndForwardsMetadataInBothUploadVariants(boolean direct) throws Exception {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        var response = new PythonBuildResponse<KbImportResult>();
+        response.setResultCode("0");
+        when(feignPythonBuildService.importKnowledgeItem(any(), any())).thenReturn(response);
+        MockMultipartFile[] files = {new MockMultipartFile("files", "raw.zip", "application/zip", new byte[]{1, 2, 3})};
+        if (direct) {
+            service.uploadFilesDirect(files, 100L, "/docs/", null, false, false, false, false,
+                "{\"owner\":\"HR\"}", Map.of());
+        } else {
+            service.uploadFiles(files, 100L, "/docs/", null, false, false, false, false,
+                "{\"owner\":\"HR\"}", Map.of());
+        }
+        var captor = ArgumentCaptor.forClass(KbFileImport.class);
+        verify(feignPythonBuildService).importKnowledgeItem(captor.capture(), any());
+        assertThat(captor.getValue().getFilePath()).isEqualTo("/docs/raw.zip");
+        assertThat(captor.getValue().getExtractZip()).isFalse();
+        assertThat(captor.getValue().getMetadata()).isEqualTo("{\"owner\":\"HR\"}");
+        assertThat(captor.getValue().getMultipartFile()).isSameAs(files[0]);
     }
 
     @Test
@@ -1174,8 +1312,27 @@ class DatasetApplicationServiceTest {
         response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
         when(feignPythonBuildService.updateKnowledgeItem(any(), any())).thenReturn(response);
         service.uploadFiles(new MockMultipartFile[]{new MockMultipartFile("files", "old.md", "text/markdown", new byte[]{1})},
-            100L, "/reports/", "", false, true, false, Map.of());
-        verify(feignPythonBuildService).updateKnowledgeItem(any(), any());
+            100L, "/reports/", "", false, true, false, null, "{\"owner\":\"HR\"}", Map.of());
+        var update = ArgumentCaptor.forClass(KbFileUpdate.class);
+        verify(feignPythonBuildService).updateKnowledgeItem(update.capture(), any());
+        assertThat(update.getValue().getMetadata()).isEqualTo("{\"owner\":\"HR\"}");
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
+    }
+
+    @Test
+    void directOverwriteChecksQuotaBeforeDeletingExistingCloudFile() throws Exception {
+        SsResource resource = prepareCloudConflict(false);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        WorkgroupStorageAdmission admission = mock(WorkgroupStorageAdmission.class);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission", admission);
+        org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT, "full")).when(admission)
+            .write(eq(100L), any(), any(), any(), any(), eq(true), any());
+        assertThatThrownBy(() -> service.uploadFilesDirect(
+            new MockMultipartFile[]{new MockMultipartFile("files", "old.md", "text/markdown", new byte[2048])},
+            100L, "/reports/", "", false, true, false, Map.of()))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
         verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
     }
@@ -1234,10 +1391,16 @@ class DatasetApplicationServiceTest {
     }
 
     private SsResource prepareCloudConflict() {
+        return prepareCloudConflict(true);
+    }
+
+    private SsResource prepareCloudConflict(boolean requiresAccessPermission) {
         SsResource resource = defaultPersonalDataset();
         resource.setResourceBizType("KG_CLOUD");
         when(ssResourceService.findById(100L)).thenReturn(resource);
-        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        if (requiresAccessPermission) {
+            when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        }
         DirOrFile item = new DirOrFile();
         item.setName("/reports/old.md");
         item.setType("file");

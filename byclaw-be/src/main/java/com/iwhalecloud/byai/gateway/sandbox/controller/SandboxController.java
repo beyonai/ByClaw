@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,8 @@ import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
@@ -46,6 +49,7 @@ import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -117,6 +121,9 @@ public class SandboxController {
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
 
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory runtimeInventory;
+
     @Value("${server.servlet.context-path:}")
     private String contextPath;
 
@@ -143,7 +150,7 @@ public class SandboxController {
             try {
                 resourceId = Long.parseLong(resourceIdObj.toString());
             } catch (NumberFormatException e) {
-                return ResponseUtil.fail("resourceId must be a valid number");
+                return ResponseUtil.failI18n("i18n.error.sandbox.resourceId.invalid");
             }
         }
 
@@ -151,7 +158,7 @@ public class SandboxController {
         if (success) {
             return ResponseUtil.successResponse();
         }
-        return ResponseUtil.fail("No running sandbox found for this resource");
+        return ResponseUtil.failI18n("i18n.error.sandbox.running.notFound");
     }
 
     /**
@@ -172,7 +179,7 @@ public class SandboxController {
         if (userCode == null) {
             Object userCodeObj = params.get("userCode");
             if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-                return ResponseUtil.fail("userCode is required");
+                return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
             }
             userCode = userCodeObj.toString().trim();
         }
@@ -185,13 +192,13 @@ public class SandboxController {
             try {
                 resourceId = Long.parseLong(resourceIdObj.toString());
             } catch (NumberFormatException e) {
-                return ResponseUtil.fail("resourceId must be a valid number");
+                return ResponseUtil.failI18n("i18n.error.sandbox.resourceId.invalid");
             }
         }
 
         SandboxInfo sandboxInfo = sandboxService.renewSandbox(userCode, resourceId);
         if (sandboxInfo == null) {
-            return ResponseUtil.fail("No running sandbox found for this resource");
+            return ResponseUtil.failI18n("i18n.error.sandbox.running.notFound");
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -214,52 +221,62 @@ public class SandboxController {
     @PostMapping("/getSandboxInfo")
     @Operation(summary = "查询当前用户的沙箱信息", description = "查询当前用户的沙箱信息")
     public ResponseUtil getSandboxIdByUserCode(@RequestBody Map<String, Object> params) {
-        String userCode = CurrentUserHolder.getCurrentUserCode();
-        if (userCode == null) {
-            Object userCodeObj = params.get("userCode");
-            if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-                return ResponseUtil.fail("userCode is required");
-            }
-            userCode = userCodeObj.toString().trim();
-        }
-        List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
-
-        Object sandboxTypeObj = params.get("sandboxType");
-        String sandboxType = null;
-        if (sandboxTypeObj != null) {
-            sandboxType =  sandboxTypeObj.toString().trim();
-        }
-
-        List<Map<String, Object>> data = new ArrayList<>();
-        if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
-            for (SandboxInfo sandbox : sandboxInfo) {
-                if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
-                    continue;
+        try {
+            String userCode = CurrentUserHolder.getCurrentUserCode();
+            if (userCode == null) {
+                Object userCodeObj = params.get("userCode");
+                if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+                    return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
                 }
-
-                // 查询数据库记录获取完整状态
-                SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxId(
-                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId()
-                );
-
-                Map<String, Object> result = new HashMap<>();
-                result.put("userCode", userCode);
-                result.put("sandboxType", sandbox.getSandboxType());
-                result.put("sandboxId", sandbox.getSandboxId());
-                result.put("endpoints", sandbox.getEndpoints());
-                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
-                result.put("token", sandbox.getGatewayToken());
-                result.put("status", record != null ? record.getStatus() : "UNKNOWN");
-                SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
-                result.put("workerId", workerView == null ? null : workerView.getWorkerId());
-                result.put("workerOnline", workerView == null ? null : workerView.getWorkerOnline());
-                result.put("workerLastSeen", workerView == null ? null : workerView.getWorkerLastSeen());
-                result.put("workerLeaseTtlSeconds",
-                    workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
-                data.add(result);
+                userCode = userCodeObj.toString().trim();
             }
+            List<SandboxInfo> sandboxInfo = sandboxService.sandboxInfo(userCode);
+
+            Object sandboxTypeObj = params.get("sandboxType");
+            String sandboxType = null;
+            if (sandboxTypeObj != null) {
+                sandboxType = sandboxTypeObj.toString().trim();
+            }
+
+            List<Map<String, Object>> data = new ArrayList<>();
+            if (sandboxInfo != null && !sandboxInfo.isEmpty()) {
+                for (SandboxInfo sandbox : sandboxInfo) {
+                    if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
+                        continue;
+                    }
+
+                    // 查询数据库记录获取完整状态
+                    boolean shared = Boolean.TRUE.equals(sandbox.getIsShared());
+                    SsSandboxRecord record = shared ? null : sandboxRecordMapper.selectLatestBySandboxId(
+                        userCode, sandbox.getSandboxType(), sandbox.getSandboxId());
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("userCode", userCode);
+                    result.put("sandboxType", sandbox.getSandboxType());
+                    result.put("sandboxId", sandbox.getSandboxId());
+                    result.put("endpoints", sandbox.getEndpoints());
+                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("endpointHeaders", sandbox.getEndpointHeaders());
+                    result.put("token", sandbox.getGatewayToken());
+                    result.put("isShared", shared);
+                    result.put("serviceKey", sandbox.getServiceKey());
+                    result.put("mappingId", sandbox.getMappingId());
+                    // Shared listings contain only validated ACTIVE mappings on running/draining hosts.
+                    result.put("status", shared ? "RUNNING" : record != null ? record.getStatus() : "UNKNOWN");
+                    SandboxRecordView workerView = record == null ? null : sandboxService.buildRecordView(record);
+                    result.put("workerId", shared ? sandbox.getWorkerId() : workerView == null ? null : workerView.getWorkerId());
+                    result.put("workerOnline", shared ? sandbox.getWorkerOnline() : workerView == null ? null : workerView.getWorkerOnline());
+                    result.put("workerLastSeen", shared ? sandbox.getWorkerLastSeen() : workerView == null ? null : workerView.getWorkerLastSeen());
+                    result.put("workerLeaseTtlSeconds",
+                        shared ? sandbox.getWorkerLeaseTtlSeconds() : workerView == null ? null : workerView.getWorkerLeaseTtlSeconds());
+                    data.add(result);
+                }
+            }
+            return ResponseUtil.successResponse(data);
+        } catch (Exception e) {
+            log.error("getSandboxIdByUserCode error", e);
+            return ResponseUtil.successResponse(Collections.emptyList());
         }
-        return ResponseUtil.successResponse(data);
     }
 
     /**
@@ -289,7 +306,7 @@ public class SandboxController {
             return ResponseUtil.successResponse();
         } catch (IllegalArgumentException exception) {
             log.warn("[SandboxBrowser] stage=CONTROLLER_REJECTED requestId={} userCode={} sandboxId={} "
-                + "sessionKey={} target={} exceptionType={} error={}",
+                    + "sessionKey={} target={} exceptionType={} error={}",
                 requestId, userCode, sandboxId, sessionKey, SandboxBrowserNavigationService.safeUri(targetUrl),
                 exception.getClass().getSimpleName(), SandboxBrowserNavigationService.safeLogValue(
                     exception.getMessage()));
@@ -329,7 +346,7 @@ public class SandboxController {
         Long resourceId = null;
 
         if (userCode == null) {
-            return ResponseUtil.fail("userCode is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
         }
 
         if (resourceIdObj != null && resourceIdObj instanceof Number) {
@@ -338,10 +355,29 @@ public class SandboxController {
             try {
                 resourceId = Long.parseLong(resourceIdObj.toString());
             } catch (NumberFormatException e) {
-                return ResponseUtil.fail("resourceId must be a valid number");
+                return ResponseUtil.failI18n("i18n.error.sandbox.resourceId.invalid");
             }
         }
 
+        if (params.containsKey("expectedSandboxId")) {
+            if (!(params.get("expectedSandboxId") instanceof String)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expectedSandboxId must be a nonempty string");
+            }
+            String expectedSandboxId = ((String) params.get("expectedSandboxId")).trim();
+            if (expectedSandboxId.isEmpty() || sandboxType == null || sandboxType.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "sandboxType and expectedSandboxId are required for exact release");
+            }
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Exact sandbox release requires the sandbox owner or a platform operator");
+            }
+            Long exactResourceId = resourceId;
+            return ResponseUtil.successResponse(sandboxUserContextRunner.callAsUser(userCode,
+                () -> sandboxService.removeSandbox(userCode, exactResourceId, sandboxType, expectedSandboxId)));
+        }
         sandboxService.removeSandbox(userCode, resourceId, sandboxType);
         return ResponseUtil.successResponse();
     }
@@ -349,11 +385,11 @@ public class SandboxController {
     /**
      * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱规格
      *
-     * @param params 请求参数，userCode 必填，serviceKey 可选
+     * @param params 请求参数，userCode 必填，serviceKey、autoRelease 可选
      * @return ResponseUtil
      */
     @PostMapping("/launchByUserCode")
-    @Operation(summary = "按工号启动沙箱", description = "按工号为指定用户启动沙箱，可选传入 serviceKey 覆盖默认沙箱规格")
+    @Operation(summary = "按工号启动沙箱", description = "按工号启动沙箱；serviceKey 可选；autoRelease 为 0/1，仅对新建独占沙箱生效，不传沿用默认策略")
     @ApiResponses({
         @ApiResponse(responseCode = "0", description = "启动成功"),
         @ApiResponse(responseCode = "-1", description = "启动失败，参数缺失或规格不存在")
@@ -361,9 +397,21 @@ public class SandboxController {
     public ResponseUtil launchByUserCode(@RequestBody Map<String, Object> params) {
         Object userCodeObj = params.get("userCode");
         if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-            return ResponseUtil.fail("userCode is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
         }
         String userCode = userCodeObj.toString().trim();
+
+        // Check the authenticated caller before callAsUser replaces its identity.
+        if (params.get("toolEnvironmentKeys") != null) {
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            }
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Request-scoped tool keys require the sandbox owner or a platform operator");
+            }
+        }
 
         Object serviceKeyObj = params.get("serviceKey");
         String serviceKey = serviceKeyObj != null ? serviceKeyObj.toString().trim() : null;
@@ -371,15 +419,35 @@ public class SandboxController {
             serviceKey = null;
         }
 
+        Object autoReleaseObj = params.get("autoRelease");
+        Integer autoRelease = null;
+        if (autoReleaseObj != null) {
+            String value = autoReleaseObj.toString();
+            if (!"0".equals(value) && !"1".equals(value)) {
+                return ResponseUtil.fail("autoRelease must be 0 or 1");
+            }
+            autoRelease = Integer.valueOf(value);
+        }
+
         try {
             String finalServiceKey = serviceKey;
+            Integer finalAutoRelease = autoRelease;
+            Map<String, String> toolKeys = com.iwhalecloud.byai.gateway.sandbox.service.ToolEnvironmentBootstrapKeys.parse(
+                params.get("toolEnvironmentKeys"));
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
-                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
+                () -> toolKeys.isEmpty()
+                    ? sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease)
+                    : sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease, toolKeys));
 
-            // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射
-            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+            // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
+            // Enabled controls execution; lifecycle.autoStart=false keeps on-demand tools out of
+            // login choices and must neither replace nor clear the user's main service preference.
+            boolean loginChoice = finalServiceKey != null
+                && sandboxService.isServiceKeyAutoStartEnabled(finalServiceKey);
+            if (loginChoice && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
+                && sandboxService.isServiceKeyEnabled(finalServiceKey)) {
                 sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
-            } else if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+            } else if (loginChoice && SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
                 sandboxService.removePreferredServiceKey(userCode);
             }
 
@@ -391,6 +459,7 @@ public class SandboxController {
             result.put("sandboxId", data.getSandboxId());
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
+            result.put("endpointHeaders", data.getEndpointHeaders());
             return ResponseUtil.successResponse(result);
         } catch (Exception e) {
             return ResponseUtil.fail("沙箱启动失败: " + e.getMessage());
@@ -434,50 +503,82 @@ public class SandboxController {
         if (params.get("ownerScope") != null) {
             ownerScope = params.get("ownerScope").toString().trim();
             if (!List.of("USER", "TENANT", "ALL").contains(ownerScope)) {
-                return ResponseUtil.fail("invalid sandbox owner scope");
+                return ResponseUtil.fail(I18nUtil.get("sandbox.ownerScopeInvalid"));
             }
         }
         if (params.get("enterpriseId") != null && !params.get("enterpriseId").toString().isBlank()) {
             String text = params.get("enterpriseId").toString();
-            if (!text.matches("[1-9][0-9]*")) return ResponseUtil.fail("invalid enterprise ID");
+            if (!text.matches("[1-9][0-9]*")) return ResponseUtil.fail(I18nUtil.get("sandbox.enterpriseIdInvalid"));
             enterpriseId = Long.parseLong(text);
         }
         if (pageIndex < 1 || pageSize < 1 || pageSize > 100) {
-            return ResponseUtil.fail("invalid sandbox page");
+            return ResponseUtil.fail(I18nUtil.get("sandbox.pageInvalid"));
         }
 
-        enterpriseId = userResourceEnterpriseScope(enterpriseId);
+        // Business managers share the administrative USER inventory. Mutations still enforce enterprise scope.
+        if (!CurrentUserHolder.isPlatformManager() && !CurrentUserHolder.isBusinessAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.enterprise.denied");
+        }
         if (!CurrentUserHolder.isPlatformManager() && !"USER".equals(ownerScope)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.userScope.required");
         }
 
-        int offset = (pageIndex - 1) * pageSize;
-        List<SandboxRecordView> list = sandboxRecordMapper.selectByPage(keyword, status, ownerScope, enterpriseId,
-                offset, pageSize).stream()
-            .map(record -> {
+        Map<String, String> inventory = runtimeInventory.current();
+        final String requestedStatus = status;
+        String providerStatus = params.get("providerStatus") == null ? null : params.get("providerStatus").toString().trim();
+        if (providerStatus != null && providerStatus.isEmpty()) providerStatus = null;
+        if (providerStatus != null && !List.of("RUNNING", "STARTING", "RELEASING", "RELEASED", "FAILED", "UNKNOWN").contains(providerStatus)) {
+            return ResponseUtil.fail("invalid providerStatus");
+        }
+        final String requestedProviderStatus = providerStatus;
+        List<String> sandboxIds = requestedProviderStatus == null || "UNKNOWN".equals(requestedProviderStatus) ? null : inventory.entrySet().stream()
+            .filter(entry -> requestedProviderStatus.equals(entry.getValue()))
+            .map(Map.Entry::getKey).collect(Collectors.toList());
+        Map<String, Object> query = new HashMap<>();
+        query.put("keyword", keyword);
+        query.put("ownerScope", ownerScope);
+        query.put("enterpriseId", enterpriseId);
+        query.put("offset", (pageIndex - 1) * pageSize);
+        query.put("pageSize", pageSize);
+        query.put("sandboxIds", sandboxIds);
+        query.put("observedSandboxIds", "UNKNOWN".equals(requestedProviderStatus) ? inventory.entrySet().stream()
+            .filter(entry -> !"UNKNOWN".equals(entry.getValue())).map(Map.Entry::getKey).collect(Collectors.toList()) : null);
+        query.put("status", requestedStatus);
+        List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
+                // Persisted lifecycle and current provider observation are independent.
+                // An inventory miss is unknown, not proof that a remote instance was deleted.
+                String sandboxId = record.getSandboxId();
+                String liveStatus = sandboxId == null ? null : inventory.get(sandboxId);
                 SandboxRecordView view = sandboxService.buildRecordView(record);
-                if (view != null && "TENANT".equals(record.getOwnerScope())
-                    && ("RUNNING".equals(record.getStatus()) || "FAILED".equals(record.getStatus()))) {
-                    view.setProviderStatus(tenantSandboxService.providerStatus(record));
+                if (view != null) {
+                    view.setStatus(record.getStatus());
+                    view.setProviderStatus(liveStatus == null ? "UNKNOWN" : liveStatus);
+                    if (!"TENANT".equals(record.getOwnerScope()) && StringUtils.isNotBlank(record.getUserCode())) {
+                        try {
+                            view.setUserName(ShareCacheUtil.getShareBfmUser(record.getUserCode()).getUserName());
+                        } catch (RuntimeException e) {
+                            log.warn("Failed to resolve sandbox user name from Redis, userCode={}",
+                                record.getUserCode(), e);
+                        }
+                    }
                 }
                 return view;
-            })
-            .collect(Collectors.toList());
+            }).collect(Collectors.toList());
         // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
         // 未配置则保持原始 endpoint（原逻辑）。
         String webBaseUrl = list.stream().anyMatch(record -> "openclaw".equals(record.getSandboxType()))
             ? byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL) : null;
         list.forEach(record -> {
             if (!"openclaw".equals(record.getSandboxType())) return;
-            String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
-                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
-            if (StringUtils.isNotBlank(webBaseUrl)) {
-                record.setEndpoint(OpenClawUiProxyPaths.toProxyUrl(rawEndpoint, webBaseUrl, contextPath));
-            } else {
-                record.setEndpoint(rawEndpoint);
+            Map<String, String> endpoints = SandboxEndpointRecordSupport.parseInstanceEndpoints(record.getEndpoint());
+            String rawEndpoint = endpoints.get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+            if (StringUtils.isNotBlank(webBaseUrl) && StringUtils.isNotBlank(rawEndpoint)) {
+                endpoints.put(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE,
+                    OpenClawUiProxyPaths.toProxyUrl(rawEndpoint, webBaseUrl, contextPath));
             }
+            record.setEndpoint(SandboxEndpointRecordSupport.toStorageValue(endpoints, record.getEndpoint()));
         });
-        int total = sandboxRecordMapper.countByCondition(keyword, status, ownerScope, enterpriseId);
+        int total = sandboxRecordMapper.countInventory(query);
         int totalPage = (total + pageSize - 1) / pageSize;
 
         Map<String, Object> result = new HashMap<>();
@@ -491,24 +592,31 @@ public class SandboxController {
     }
 
     /**
-     * 根据ID释放沙箱（管理端）
+     * 根据ID释放沙箱（管理端）。传入 id 时直接释放；未传 id 时按 sandboxId 查询运行中的个人沙箱记录后再释放。
      *
-     * @param params 请求参数，需包含 id
+     * @param params 请求参数，id 与 sandboxId 二选一，同时传入时优先使用 id
      * @return ResponseUtil
      */
     @PostMapping("/removeSandboxById")
-    @Operation(summary = "根据ID释放沙箱", description = "管理端根据沙箱记录ID释放沙箱")
+    @Operation(summary = "根据ID释放沙箱",
+        description = "管理端根据沙箱记录ID释放沙箱；未传id时按sandboxId查询运行中的个人沙箱后释放")
     public ResponseUtil removeSandboxById(@RequestBody Map<String, Object> params) {
-        Object idObj = params.get("id");
-        if (idObj == null) {
-            return ResponseUtil.fail("id is required");
-        }
-
         Long id;
         try {
-            id = Long.parseLong(idObj.toString());
+            id = MapParamUtil.getLongValue(params, "id", null);
         } catch (NumberFormatException e) {
-            return ResponseUtil.fail("id must be a valid number");
+            return ResponseUtil.failI18n("i18n.error.sandbox.id.invalid");
+        }
+
+        if (id == null) {
+            String sandboxId = MapParamUtil.getStringValue(params, "sandboxId");
+            if (StringUtil.isEmpty(sandboxId)) {
+                return ResponseUtil.fail("id or sandboxId is required");
+            }
+            id = sandboxService.findRecordIdBySandboxId(sandboxId.trim());
+            if (id == null) {
+                return ResponseUtil.fail("sandbox record not found");
+            }
         }
 
         requireUserSandboxRecordAccess(id);
@@ -521,26 +629,26 @@ public class SandboxController {
     public ResponseUtil updateSandbox(@RequestBody Map<String, Object> params) {
         Object idObj = params.get("id");
         if (idObj == null) {
-            return ResponseUtil.fail("id is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.id.required");
         }
 
         Long id;
         try {
             id = Long.parseLong(idObj.toString());
         } catch (NumberFormatException e) {
-            return ResponseUtil.fail("id must be a valid number");
+            return ResponseUtil.failI18n("i18n.error.sandbox.id.invalid");
         }
 
         Object autoReleaseObj = params.get("autoRelease");
         if (autoReleaseObj == null) {
-            return ResponseUtil.fail("autoRelease is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.autoRelease.required");
         }
 
         Integer autoRelease;
         try {
             autoRelease = Integer.parseInt(autoReleaseObj.toString());
         } catch (NumberFormatException e) {
-            return ResponseUtil.fail("autoRelease must be a valid number");
+            return ResponseUtil.failI18n("i18n.error.sandbox.autoRelease.invalid");
         }
 
         requireUserSandboxRecordAccess(id);
@@ -575,8 +683,7 @@ public class SandboxController {
             }
             SsSandboxResizeRecord record = sandboxResizeService.handleResizeRequest(params);
             return ResponseUtil.successResponse(record);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return ResponseUtil.fail(I18nUtil.get("sandbox.resize.failed", e.getMessage()));
         }
     }
@@ -584,7 +691,7 @@ public class SandboxController {
     @PostMapping("/autoscale/alerts")
     @Operation(summary = "Prometheus 沙箱扩缩容告警入口", description = "接收 Alertmanager webhook，生成动态扩缩容审计记录并按目标规格调用 OpenSandbox")
     public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload, HttpServletResponse response,
-        @RequestHeader(value="beyond-token", required=false) String platformToken) {
+                                             @RequestHeader(value = "beyond-token", required = false) String platformToken) {
         try {
             if (!platformBackgroundExecution.isLegacyExecutor()) {
                 return platformAlertForwarder.getObject().forward(payload, platformToken);
@@ -595,8 +702,7 @@ public class SandboxController {
                 return ResponseUtil.fail(I18nUtil.get("sandbox.resize.alert.failed", record.getErrorMessage()));
             }
             return ResponseUtil.successResponse(record);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return ResponseUtil.fail(platformBackgroundExecution.isLegacyExecutor()
                 ? I18nUtil.get("sandbox.resize.alert.failed", e.getMessage()) : I18nUtil.get("sandbox.resize.alert.remote.failed"));
@@ -613,14 +719,16 @@ public class SandboxController {
     @PostMapping("/health/config/getGlobalSwitch")
     @Operation(summary = "查询沙箱健康检测全局开关", description = "查询硬开关和管理端运行期开关状态")
     public ResponseUtil getSandboxHealthGlobalSwitch() {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/config/getGlobalSwitch",java.util.Collections.emptyMap());
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/config/getGlobalSwitch", java.util.Collections.emptyMap());
         return ResponseUtil.successResponse(sandboxHealthConfigService.getGlobalSwitch());
     }
 
     @PostMapping("/health/config/saveGlobalSwitch")
     @Operation(summary = "保存沙箱健康检测全局开关", description = "保存管理端运行期开关；硬开关仍由配置文件控制")
     public ResponseUtil saveSandboxHealthGlobalSwitch(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/config/saveGlobalSwitch",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/config/saveGlobalSwitch", params);
         Object enabledObj = params.get("enabled");
         boolean enabled = enabledObj instanceof Boolean
             ? (Boolean) enabledObj
@@ -632,7 +740,8 @@ public class SandboxController {
     @PostMapping("/health/watermark/list")
     @Operation(summary = "查询沙箱健康水位模型", description = "按服务类型、规格和启用状态查询水位模型")
     public ResponseUtil listSandboxHealthWatermarkModels(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/list",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/watermark/list", params);
         String serviceType = stringParam(params.get("serviceType"));
         String profileKey = stringParam(params.get("profileKey"));
         Integer enabled = params.containsKey("enabled") && params.get("enabled") != null
@@ -644,12 +753,12 @@ public class SandboxController {
     @PostMapping("/health/watermark/save")
     @Operation(summary = "保存沙箱健康水位模型", description = "新增或更新沙箱健康水位模型")
     public ResponseUtil saveSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/save",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/watermark/save", params);
         try {
             return ResponseUtil.successResponse(
                 sandboxHealthWatermarkModelService.save(sandboxHealthWatermarkModelService.fromParams(params)));
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return ResponseUtil.fail(e.getMessage());
         }
     }
@@ -657,10 +766,11 @@ public class SandboxController {
     @PostMapping("/health/watermark/delete")
     @Operation(summary = "删除沙箱健康水位模型", description = "物理删除指定水位模型")
     public ResponseUtil deleteSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/delete",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/watermark/delete", params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
-            return ResponseUtil.fail("id is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.id.required");
         }
         sandboxHealthWatermarkModelService.delete(id);
         return ResponseUtil.successResponse();
@@ -669,10 +779,11 @@ public class SandboxController {
     @PostMapping("/health/watermark/enable")
     @Operation(summary = "启停沙箱健康水位模型", description = "启用或停用指定水位模型")
     public ResponseUtil enableSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/enable",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/watermark/enable", params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
-            return ResponseUtil.fail("id is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.id.required");
         }
         Object enabledObj = params.get("enabled");
         boolean enabled = enabledObj instanceof Boolean
@@ -681,8 +792,7 @@ public class SandboxController {
         try {
             sandboxHealthWatermarkModelService.enable(id, enabled);
             return ResponseUtil.successResponse();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return ResponseUtil.fail(e.getMessage());
         }
     }
@@ -690,7 +800,8 @@ public class SandboxController {
     @PostMapping("/health/watermark/preview")
     @Operation(summary = "预览沙箱健康水位判定", description = "输入 CPU/内存水位，按生效模型返回健康级别")
     public ResponseUtil previewSandboxHealthWatermark(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("health/watermark/preview",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("health/watermark/preview", params);
         String serviceType = stringParam(params.get("serviceType"));
         String profileKey = stringParam(params.get("profileKey"));
         Double cpuRequestRatio = parseDoubleParam(params.get("cpuRequestRatio"));
@@ -702,7 +813,8 @@ public class SandboxController {
     @PostMapping("/listResizeRecords")
     @Operation(summary = "查询沙箱扩缩容记录", description = "按沙箱记录ID、用户编码或 sandboxId 查询扩缩容审计流水")
     public ResponseUtil listResizeRecords(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listResizeRecords",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("listResizeRecords", params);
         Long sandboxRecordId = parseLongParam(params.get("sandboxRecordId"));
         if (sandboxRecordId == null) {
             sandboxRecordId = parseLongParam(params.get("recordId"));
@@ -713,7 +825,7 @@ public class SandboxController {
         limit = Math.max(1, Math.min(limit, 200));
 
         if (sandboxRecordId == null && StringUtils.isBlank(userCode) && StringUtils.isBlank(sandboxId)) {
-            return ResponseUtil.fail("sandboxRecordId, userCode or sandboxId is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.identifier.required");
         }
 
         List<SsSandboxResizeRecord> list = sandboxResizeRecordMapper.selectByCondition(
@@ -728,7 +840,8 @@ public class SandboxController {
     @PostMapping("/listServiceProfiles")
     @Operation(summary = "查询沙箱规格分层", description = "查询同一沙箱类型下可用的资源规格分层")
     public ResponseUtil listServiceProfiles(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listServiceProfiles",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("listServiceProfiles", params);
         String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
@@ -740,7 +853,8 @@ public class SandboxController {
     @PostMapping("/saveServiceProfile")
     @Operation(summary = "保存沙箱服务规格档位", description = "新增或更新同一沙箱服务类型下的规格档位配置")
     public ResponseUtil saveServiceProfile(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("saveServiceProfile",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("saveServiceProfile", params);
         String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         String profileKey = stringParam(params.get("profileKey"));
@@ -750,22 +864,22 @@ public class SandboxController {
         String resizeStrategy = StringUtils.defaultIfBlank(stringParam(params.get("resizeStrategy")), "IN_PLACE");
 
         if (StringUtils.isBlank(profileKey)) {
-            return ResponseUtil.fail("profileKey is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.profileKey.required");
         }
         if (StringUtils.isBlank(resourceRequests)) {
-            return ResponseUtil.fail("resourceRequests is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.resourceRequests.required");
         }
         if (StringUtils.isBlank(resourceLimits)) {
-            return ResponseUtil.fail("resourceLimits is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.resourceLimits.required");
         }
         if (!isJsonObject(resourceRequests)) {
-            return ResponseUtil.fail("resourceRequests must be a valid JSON object");
+            return ResponseUtil.failI18n("i18n.error.sandbox.resourceRequests.invalid");
         }
         if (!isJsonObject(resourceLimits)) {
-            return ResponseUtil.fail("resourceLimits must be a valid JSON object");
+            return ResponseUtil.failI18n("i18n.error.sandbox.resourceLimits.invalid");
         }
         if (StringUtils.isNotBlank(templatePatchJson) && !isJsonObject(templatePatchJson)) {
-            return ResponseUtil.fail("templatePatchJson must be a valid JSON object");
+            return ResponseUtil.failI18n("i18n.error.sandbox.templatePatchJson.invalid");
         }
 
         Long id = parseLongParam(params.get("id"));
@@ -788,8 +902,7 @@ public class SandboxController {
 
         if (creating) {
             sandboxServiceProfileEntityMapper.insertProfile(entity);
-        }
-        else {
+        } else {
             sandboxServiceProfileEntityMapper.updateProfile(entity);
         }
         return ResponseUtil.successResponse();
@@ -798,14 +911,15 @@ public class SandboxController {
     @PostMapping("/deleteServiceProfile")
     @Operation(summary = "禁用沙箱服务规格档位", description = "禁用指定规格档位，避免影响历史扩缩容记录")
     public ResponseUtil deleteServiceProfile(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("deleteServiceProfile",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("deleteServiceProfile", params);
         Long id = parseLongParam(params.get("id"));
         if (id == null) {
             String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
                 SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
             String profileKey = stringParam(params.get("profileKey"));
             if (StringUtils.isBlank(profileKey)) {
-                return ResponseUtil.fail("id or profileKey is required");
+                return ResponseUtil.failI18n("i18n.error.sandbox.profileIdentifier.required");
             }
             SandboxServiceProfileEntity entity =
                 sandboxServiceProfileEntityMapper.selectProfile(serviceType, profileKey);
@@ -814,7 +928,7 @@ public class SandboxController {
             }
         }
         if (id == null) {
-            return ResponseUtil.fail("Service profile not found");
+            return ResponseUtil.failI18n("i18n.error.sandbox.serviceProfile.notFound");
         }
         sandboxServiceProfileEntityMapper.disableProfile(id);
         return ResponseUtil.successResponse();
@@ -830,7 +944,8 @@ public class SandboxController {
     @PostMapping("/listServiceSpec")
     @Operation(summary = "查询沙箱服务规格配置列表", description = "查询所有沙箱服务规格配置")
     public ResponseUtil listServiceSpec() {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("listServiceSpec",java.util.Collections.emptyMap());
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("listServiceSpec", java.util.Collections.emptyMap());
         List<SandboxServiceSpecEntity> list = sandboxServiceSpecEntityMapper.selectList(null);
         List<Map<String, String>> result = list.stream().map(entity -> {
             Map<String, String> map = new HashMap<>();
@@ -856,15 +971,16 @@ public class SandboxController {
     @PostMapping("/getServiceSpec")
     @Operation(summary = "查询沙箱服务规格配置", description = "根据 serviceKey 查询沙箱服务规格配置")
     public ResponseUtil getServiceSpec(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("getServiceSpec",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("getServiceSpec", params);
         String serviceKey = (String) params.get("serviceKey");
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
-            return ResponseUtil.fail("serviceKey is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.serviceKey.required");
         }
 
         SandboxServiceSpecEntity entity = sandboxServiceSpecEntityMapper.selectById(serviceKey);
         if (entity == null) {
-            return ResponseUtil.fail("Service spec not found");
+            return ResponseUtil.failI18n("i18n.error.sandbox.serviceSpec.notFound");
         }
 
         Map<String, String> result = new HashMap<>();
@@ -888,17 +1004,18 @@ public class SandboxController {
     @PostMapping("/saveServiceSpec")
     @Operation(summary = "保存或更新沙箱服务规格配置", description = "保存或更新沙箱服务规格配置，serviceKey 不存在则新增，存在则更新")
     public ResponseUtil saveServiceSpec(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("saveServiceSpec",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("saveServiceSpec", params);
         String serviceKey = (String) params.get("serviceKey");
         String specJson = (String) params.get("specJson");
         String templateJson = (String) params.get("templateJson");
         Integer enabled = parseEnabled(params.get("enabled"));
 
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
-            return ResponseUtil.fail("serviceKey is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.serviceKey.required");
         }
         if (specJson == null || specJson.trim().isEmpty()) {
-            return ResponseUtil.fail("specJson is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.specJson.required");
         }
 
         String serviceKeyTrimmed = serviceKey.trim();
@@ -943,10 +1060,11 @@ public class SandboxController {
     @PostMapping("/deleteServiceSpec")
     @Operation(summary = "删除沙箱服务规格配置", description = "根据 serviceKey 删除沙箱服务规格配置")
     public ResponseUtil deleteServiceSpec(@RequestBody Map<String, Object> params) {
-        if (platformRemote != null && platformRemote.isRemote()) return platformRemote.controller("deleteServiceSpec",params);
+        if (platformRemote != null && platformRemote.isRemote())
+            return platformRemote.controller("deleteServiceSpec", params);
         String serviceKey = (String) params.get("serviceKey");
         if (serviceKey == null || serviceKey.trim().isEmpty()) {
-            return ResponseUtil.fail("serviceKey is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.serviceKey.required");
         }
 
         sandboxServiceSpecEntityMapper.deleteById(serviceKey.trim());
@@ -959,11 +1077,22 @@ public class SandboxController {
      * @param userCode 用户工号
      * @return 首选 serviceKey，未配置时 data 为 null
      */
+    @GetMapping("/browserServiceKey")
+    @Operation(summary = "查询承载当前用户浏览器的沙箱 serviceKey",
+        description = "常驻 DSH 宿主上的用户，浏览器（远程桌面、byCLI）在其工具沙箱里；其他用户返回空，由调用方沿用默认沙箱")
+    public ResponseUtil getBrowserServiceKey() {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail(I18nUtil.get("sandbox.browser.user.required"));
+        }
+        return ResponseUtil.successResponse(sandboxService.browserServiceKey(userCode.trim()));
+    }
+
     @GetMapping("/preferredServiceKey")
     @Operation(summary = "查询用户首选沙箱 serviceKey", description = "查询 Redis 中缓存的用户首选沙箱 serviceKey")
     public ResponseUtil getPreferredServiceKey(@RequestParam("userCode") String userCode) {
         if (StringUtils.isBlank(userCode)) {
-            return ResponseUtil.fail("userCode is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
         }
         String serviceKey = sandboxService.getPreferredServiceKey(userCode.trim());
         return ResponseUtil.successResponse(serviceKey);
@@ -980,7 +1109,7 @@ public class SandboxController {
     public ResponseUtil removePreferredServiceKey(@RequestBody Map<String, Object> params) {
         Object userCodeObj = params.get("userCode");
         if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
-            return ResponseUtil.fail("userCode is required");
+            return ResponseUtil.failI18n("i18n.error.sandbox.userCode.required");
         }
         sandboxService.removePreferredServiceKey(userCodeObj.toString().trim());
         return ResponseUtil.successResponse();
@@ -1000,8 +1129,7 @@ public class SandboxController {
         }
         try {
             return Long.parseLong(value.toString().trim());
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             return null;
         }
     }
@@ -1012,8 +1140,7 @@ public class SandboxController {
         }
         try {
             return Integer.parseInt(value.toString().trim());
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             return defaultValue;
         }
     }
@@ -1024,8 +1151,7 @@ public class SandboxController {
         }
         try {
             return Double.parseDouble(value.toString().trim());
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             return null;
         }
     }
@@ -1034,8 +1160,7 @@ public class SandboxController {
         try {
             Object parsed = objectMapper.readValue(value, Object.class);
             return parsed instanceof Map;
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return false;
         }
     }

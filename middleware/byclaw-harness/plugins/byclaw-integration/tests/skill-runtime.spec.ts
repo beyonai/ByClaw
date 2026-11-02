@@ -29,7 +29,7 @@ afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await 
 async function skill(root: string, code: string, description: string, body = 'Original body', name = code) {
   const path = join(root, code)
   await mkdir(path, { recursive: true })
-  await writeFile(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n${body}`)
+  await writeFile(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description === '' ? '""' : description}\n---\n${body}`)
   return { code, path }
 }
 function template(id: string, skills: DshAgentTemplate['skills']): DshAgentTemplate {
@@ -50,7 +50,10 @@ function agent(id: string, header: Partial<Session['header']> = {}): Agent {
     send() {}, followup() {}, steer() {}, cancel() {}, whenIdle: () => Promise.resolve(),
   } as unknown as Agent
 }
-async function fixture() {
+async function fixture(options: {
+  resolveDeferredTemplate?: (template: DshAgentTemplate) => Promise<DshAgentTemplate>
+  skillDirectories?: { present<T extends { path?: string; resourceBase?: { kind: 'directory'; path: string } }>(definition: T): Promise<T> }
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'byclaw-skills-test-'))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const builtin = join(root, 'builtin')
@@ -68,6 +71,7 @@ async function fixture() {
   await ctx.plugin(toolSkill)
   const { ByClawSkillRuntime } = await import('../src/skill-runtime.ts')
   const runtime = await ByClawSkillRuntime.install(ctx, {
+    ...options,
     builtinSkillDir: builtin,
     agentSkillRoot: join(root, 'agent-skills'),
   })
@@ -126,6 +130,30 @@ it('publishes builtins plus exact associations and retains the ordinary agent ca
   expect(JSON.stringify(await f.propose(f.a, '/html-artifact'))).toContain('Bound HTML body')
   f.runtime.dispose()
   expect((await list(f.a)).map(s => s.name)).toEqual(['html-artifact', 'unrelated-global'])
+})
+
+it('tells the model where a Skill directory is for its commands, keeping the Skill text', async () => {
+  const presented: string[] = []
+  const f = await fixture({ skillDirectories: {
+    async present(definition) {
+      const base = definition.resourceBase?.path
+      if (base === undefined || !base.includes('/cache/')) return definition
+      presented.push(base)
+      const visible = `/by/.byclaw/skills/${base.slice(base.lastIndexOf('/') + 1)}`
+      return { ...definition, path: `${visible}/SKILL.md`, resourceBase: { kind: 'directory', path: visible } }
+    },
+  } })
+  const skill = await f.ctx.skills.get('html-artifact', { scope: f.a })
+  expect(skill?.resourceBase).toEqual({ kind: 'directory', path: '/by/.byclaw/skills/redis-code' })
+  expect(skill?.path).toBe('/by/.byclaw/skills/redis-code/SKILL.md')
+  expect(skill?.content).toContain('Bound HTML body')
+  const listed = (await f.ctx.skills.list({ scope: f.a })).find(s => s.name === 'html-artifact')
+  expect(listed?.resourceBase?.path).toBe('/by/.byclaw/skills/redis-code')
+  // Deployment builtins are on B at the same path already.
+  expect((await f.ctx.skills.get('builtin-help', { scope: f.a }))?.resourceBase?.path).toBe(join(f.builtin, 'builtin-help'))
+  expect(presented).toContain(f.html.path)
+  // The runtime's own record keeps the host path, which the log names.
+  expect(f.runtime.entries('byclaw-employee-1').find(e => e.name === 'html-artifact')?.path).toBe(f.html.path)
 })
 
 it('keeps the skill-creator workflow mandatory for Skill creation and modification', async () => {
@@ -643,4 +671,169 @@ it.each(['create', 'resume'] as const)('binds AgentTeams %s children to the real
   expect((await f.ctx.skills.list({ scope: child })).map(s => s.name)).not.toContain('other-employee')
   await scope.dispose()
   expect(f.runtime.agentId(child)).toBeUndefined()
+})
+
+it('reads employee Skills from the tool environment when the user tree lives there', async () => {
+  const { createFakeToolEnvironment } = await import('../scripts/tool-environment-fakes.mjs')
+  const { toolEnvironmentFiles } = await import('../src/tool-environment-files.ts')
+  const { ByClawSkillRuntime, agentSkillRootFor } = await import('../src/skill-runtime.ts')
+  const b = await createFakeToolEnvironment()
+  cleanups.push(() => b.dispose())
+  const root = await mkdtemp(join(tmpdir(), 'byclaw-skills-remote-'))
+  cleanups.push(() => rm(root, { recursive: true, force: true }))
+  await skill(join(root, 'builtin'), 'builtin-help', 'Shared builtin')
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(SkillRegistry)
+  // The virtual B root does not exist on this host: only `ctx.fs` can serve it.
+  const agentSkillRoot = agentSkillRootFor(join(b.virtual, 'by'))
+  expect(existsSync(agentSkillRoot)).toBe(false)
+  const runtime = await ByClawSkillRuntime.install(ctx, {
+    builtinSkillDir: join(root, 'builtin'), agentSkillRoot, files: toolEnvironmentFiles(b.ctx),
+  })
+  cleanups.push(() => runtime.dispose())
+  const employee = template('byclaw-employee-9', [])
+  ;(await runtime.prepareGeneration([employee], root, root))()
+  const who = agent('remote-a')
+  runtime.bind(ctx.extend({ agent: who }), who, employee)
+  // No employee Skill directory yet: absence on B is not an error.
+  expect((await ctx.skills.list({ scope: who })).map(s => s.name)).toContain('builtin-help')
+  const skills = b.toHost(join(agentSkillRoot, 'workspace-baiying-agent-byclaw-employee-9', 'skills'))
+  await skill(skills, 'remote-local', 'Skill created on B', 'Remote body')
+  await mkdir(join(skills, 'broken'), { recursive: true })
+  await writeFile(join(skills, 'broken', 'SKILL.md'), '---\nname: broken\ndescription: \n---\nx')
+  await writeFile(join(skills, 'stray-file'), 'not a Skill')
+  expect((await ctx.skills.list({ scope: who })).map(s => s.name)).toEqual(expect.arrayContaining(['builtin-help', 'remote-local']))
+  expect((await ctx.skills.list({ scope: who })).map(s => s.name)).not.toContain('broken')
+  const loaded = await ctx.skills.get('remote-local', { scope: who })
+  expect(loaded?.content).toContain('Remote body')
+  expect(loaded?.path).toBe(join(agentSkillRoot, 'workspace-baiying-agent-byclaw-employee-9', 'skills', 'remote-local', 'SKILL.md'))
+  expect(b.calls.fs.some(([operation]: [string]) => operation === 'listDir')).toBe(true)
+  expect(b.calls.fs.some(([operation, path]: [string, string]) => operation === 'readText' && path.endsWith('remote-local/SKILL.md'))).toBe(true)
+  // A Skill published in a staged generation also sees the B overlay.
+  const errors: string[] = []
+  const publish = await runtime.prepareGeneration([employee], root, root, { allowSkillFailure: true, onSkillError: ({ code }) => { errors.push(code) } })
+  publish()
+  expect(errors).toEqual(['broken'])
+  expect((await ctx.skills.list({ scope: who })).map(s => s.name)).toContain('remote-local')
+})
+
+it('defers associated Skill I/O until lookup, coalesces concurrent lookups and rechecks on later reads', async () => {
+  let loads = 0
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    loads++
+    await new Promise(resolve => setTimeout(resolve, 10))
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  const deferred = { ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }
+  ;(await f.runtime.prepareGeneration([deferred], f.cache, f.cache))()
+  expect(loads).toBe(0)
+  await Promise.all([f.ctx.skills.list({ scope: f.a }), f.ctx.skills.get('html-artifact', { scope: f.a })])
+  expect(loads).toBe(1)
+  await f.ctx.skills.get('html-artifact', { scope: f.a })
+  expect(loads).toBe(2)
+})
+
+it('does not publish an in-flight lazy Skill after its authorization generation is replaced', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    entered(); await gate
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  ;(await f.runtime.prepareGeneration([{ ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }], f.cache, f.cache))()
+  const lookup = f.ctx.skills.get('html-artifact', { scope: f.a })
+  const rejected = expect(lookup).rejects.toThrow('generation changed')
+  await started
+  ;(await f.runtime.prepareGeneration([], f.cache, f.cache))()
+  release()
+  await rejected
+  expect(f.runtime.entries('byclaw-employee-1').some(x => x.path === f.html.path)).toBe(false)
+})
+
+it('retains an unrelated employee view and its in-flight lazy Skill during incremental publication', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture({ resolveDeferredTemplate: async t => {
+    entered(); await gate
+    return { ...t, skills: t.skills.map(({ ref: _ref, ...skill }) => skill) }
+  } })
+  const deferred = { ...f.templates[0]!, skills: [{ ...f.html, ref: {
+    id: 'skill-1', code: f.html.code, type: 'hub', versionUrl: '/version', downloadUrl: '/skill.zip',
+  } }] }
+  ;(await f.runtime.prepareGeneration([deferred], f.cache, f.cache))()
+  const lookup = f.ctx.skills.get('html-artifact', { scope: f.a })
+  await started
+  ;(await f.runtime.prepareGeneration([deferred, f.templates[1]!], f.cache, f.cache,
+    { retainTemplateIds: new Set([deferred.id]) }))()
+  release()
+  expect((await lookup)?.content).toContain('Bound HTML body')
+  expect(f.runtime.entries(deferred.id).some(entry => entry.path === f.html.path)).toBe(true)
+  expect(f.runtime.entries(f.templates[1]!.id).some(entry => entry.name === 'other-employee')).toBe(true)
+})
+
+it('discovers new associations for an initially empty lazy employee and observes their removal', async () => {
+  let associations: DshAgentTemplate['skills'] = []
+  const f = await fixture({ resolveDeferredTemplate: async t => ({ ...t, skills: associations }) })
+  const empty = { ...f.templates[0]!, skills: [] }
+  ;(await f.runtime.prepareGeneration([empty], f.cache, f.cache, { deferEmployeeTemplates: true }))()
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toBe('Wrong body')
+  associations = [f.html]
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toContain('Bound HTML body')
+  associations = []
+  expect((await f.ctx.skills.get('html-artifact', { scope: f.a }))?.content).toBe('Wrong body')
+})
+
+it('prepares a cold coordinated root before reading its template and binds its employee Skills', async () => {
+  let associations: DshAgentTemplate['skills'] = []
+  const f = await fixture({ resolveDeferredTemplate: async t => ({ ...t, skills: associations }) })
+  associations = [f.html]
+  ;(await f.runtime.prepareGeneration([], f.cache, f.cache))()
+  const { ByClawGroupCoordinationRuntime } = await import('../src/group-coordination.ts')
+  const catalogDir = join(f.root, 'cold-coordination')
+  const employee = { id: '1', name: 'Employee', code: 'EMP_1', description: '', capabilities: '', persona: '', workerAgentType: 'BYCLAW_DSH', skills: [] }
+  const employeeTemplate = { ...f.templates[0]!, source: { ...f.templates[0]!.source, resourceId: '1' } }
+  const coordination = { schemaVersion: 'byclaw.group-coordination/v1' as const, mode: 'DIRECT' as const,
+    groupSessionId: 'group', taskSessionId: 'task', coordinatorAgentId: '1', allowedAgentIds: ['2'] }
+  const preparations: string[] = []
+  const preparedTemplates = new Map<string, DshAgentTemplate>()
+  const policy = new ByClawGroupCoordinationRuntime({
+    resources: () => ({ employees: [employee, { ...employee, id: '2' }], groups: [], directEmployeeIds: ['1', '2'], watchedResourceIds: ['1', '2'], authHeaders: {},
+      authorization: { userId: 'test', authKey: 'test', resourceIds: ['1', '2'] } }),
+    catalogDir, supportedWorkerTypes: ['BYCLAW_DSH'], resolveModel: async () => ({ provider: 'test', model: 'test' }),
+    prepareEmployee: async id => {
+      preparations.push(id)
+      const selected = { ...employeeTemplate, id: `byclaw-employee-${id}`, source: { ...employeeTemplate.source, resourceId: id } }
+      preparedTemplates.set(id, selected)
+      await writeAgentTemplate(catalogDir, selected)
+      ;(await f.runtime.prepareGeneration([...preparedTemplates.values()], f.cache, f.cache, { deferEmployeeTemplates: true }))()
+    },
+  })
+  const runtime = registerAgentTemplateRuntime(f.ctx, { catalogDir, subagentProvider: 'spawn',
+    resolveModel: async () => ({ provider: 'test', model: 'test' }), groupCoordination: policy,
+    workspaceRegistry: new ByClawSessionWorkspaceRegistry(), skillRuntime: f.runtime })
+  const prepared = await runtime.prepareRoot('byclaw-employee-1', coordination)
+  expect(preparations).toEqual(['1'])
+  const cold = agent('cold-coordinator')
+  const scope = createScope(f.ctx, cold)
+  cleanups.push(() => scope.dispose())
+  await scope.ctx.plugin({ inject: ['systemPrompt'], apply(ctx: Context) { prepared.setup(ctx.extend({ agent: cold }), cold) } })
+  expect((await f.ctx.skills.get('html-artifact', { scope: cold }))?.content).toContain('Bound HTML body')
+  const memberPrepared = await runtime.prepareRoot('byclaw-employee-2', coordination)
+  expect(preparations).toEqual(['1', '1', '2'])
+  const member = agent('cold-direct-member')
+  const memberScope = createScope(f.ctx, member)
+  cleanups.push(() => memberScope.dispose())
+  await memberScope.ctx.plugin({ inject: ['systemPrompt'], apply(ctx: Context) { memberPrepared.setup(ctx.extend({ agent: member }), member) } })
+  expect((await f.ctx.skills.get('html-artifact', { scope: member }))?.content).toContain('Bound HTML body')
 })

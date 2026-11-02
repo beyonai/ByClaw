@@ -565,6 +565,32 @@
   border-bottom: 1px solid #eef0f3;
 }
 
+.localSharedBreadcrumb {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eef0f3;
+  overflow: hidden;
+
+  :global(.ant-breadcrumb) {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.localSharedBreadcrumbButton {
+  padding: 0;
+  border: 0;
+  color: #1677ff;
+  background: transparent;
+  cursor: pointer;
+}
+
 .diffContent {
   height: 100%;
   margin: 0;

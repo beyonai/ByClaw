@@ -16,7 +16,7 @@ import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
  * 承接员工没有独立字段，只能由 resourceList 里最后一次 @ 的数字员工推出，与前端 mention.ts 同规则；
  * 推不出来必须解析成 null 让调度跳过并记日志，而不是带着空 agentId 去建会话——那会在异步 chat 线程里炸。
  */
-class DevloopApplicationServiceChatAutomationTest {
+class DevloopApplicationServiceChatAutomationTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final DevloopApplicationService service = new DevloopApplicationService();
 

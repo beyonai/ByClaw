@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.openapi;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
@@ -227,7 +229,7 @@ public class OpenProjectController {
         String content = MapParamUtil.getStringValue(params, "content");
 
         if (senderUserId == null || receiverUserId == null || StringUtil.isEmpty(content)) {
-            return ResponseUtil.failRes("参数不完整: 需要 senderUserId, receiverUserId, content");
+            return ResponseUtil.failRes(I18nUtil.get("dingtalk.message.parametersRequired"));
         }
 
         try {
@@ -239,7 +241,7 @@ public class OpenProjectController {
             return ResponseUtil.failRes(e.getMessage());
         }
         catch (Exception e) {
-            return ResponseUtil.failRes("钉钉消息发送失败: " + e.getMessage());
+            return ResponseUtil.failRes(I18nUtil.get("dingtalk.message.sendFailed", e.getMessage()));
         }
     }
 
@@ -263,13 +265,13 @@ public class OpenProjectController {
 
         try {
             dingtalkProactiveMessageService.sendUserToUserViaDws(senderUserId, receiverUserId, content);
-            return ResponseUtil.successResponse("发送成功！请检查钉钉单聊。");
+            return ResponseUtil.successResponse(I18nUtil.get("dingtalk.message.sent"));
         }
         catch (IllegalStateException e) {
             return ResponseUtil.failRes(e.getMessage());
         }
         catch (Exception e) {
-            return ResponseUtil.failRes("发送失败: " + e.getMessage());
+            return ResponseUtil.failRes(I18nUtil.get("dingtalk.message.failed", e.getMessage()));
         }
     }
 

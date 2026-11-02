@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.artifact.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,7 +40,7 @@ import org.junit.jupiter.api.condition.OS;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 @DisabledOnOs(OS.WINDOWS)
-class ArtifactApplicationServiceTest {
+class ArtifactApplicationServiceTest extends I18nTestSupport {
 
     private ArtifactMapper mapper;
     private InMemoryStorage storage;

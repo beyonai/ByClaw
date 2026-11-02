@@ -531,7 +531,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
             {pathHistory.length > 0 && (
               <div className={styles.filePathHeader}>
                 <button type="button" className={styles.backButton} onClick={handleBackClick}>
-                  ← 返回上一级
+                  {intl.formatMessage({ id: 'ui.resource.back' })}
                 </button>
               </div>
             )}
@@ -575,7 +575,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
                           handleDownloadFile(file.filePath, file.name);
                         }}
                       >
-                        下载
+                        {intl.formatMessage({ id: 'fileBrowser.action.download' })}
                       </Button>
                     )}
                   </div>

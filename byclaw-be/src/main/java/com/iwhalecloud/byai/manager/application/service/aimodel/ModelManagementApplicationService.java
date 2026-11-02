@@ -56,6 +56,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 模型管理应用服务 编排列表、upsert、删除、setStatus、详情、调试等用例；调用 domain.aimodel，编排事务与审计
@@ -91,6 +93,9 @@ public class ModelManagementApplicationService {
 
     @Autowired
     private ByaiAimodelDomainService byaiAimodelDomainService;
+
+    @Autowired
+    private ModelHealthCache modelHealthCache;
 
     @Autowired
     private ByaiTagRelationService byaiTagRelationService;
@@ -194,6 +199,7 @@ public class ModelManagementApplicationService {
 
         Map<String, String> data = new HashMap<>(1);
         data.put("id", String.valueOf(modelId));
+        updateHealthAfterCommit(entity, modelId.toString(), false);
         return data;
     }
 
@@ -353,7 +359,22 @@ public class ModelManagementApplicationService {
                 logger.info("删除apiKey结果:{}", JSON.toJSONString(voidTokenApiResponse));
             }
         }
+        updateHealthAfterCommit(entity, id, true);
         return Boolean.TRUE;
+    }
+
+    private void updateHealthAfterCommit(ByaiAimodel entity, String id, boolean deleted) {
+        Runnable update = () -> {
+            try {
+                if (deleted) modelHealthCache.evict(entity.getOwnerType(), entity.getCreateBy(), id);
+                else modelHealthCache.invalidatePending(entity.getOwnerType(), entity.getCreateBy(), id);
+            } catch (Exception e) { logger.warn("Model health cache invalidation failed for model {}", id); }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { update.run(); }
+            });
+        } else { update.run(); }
     }
 
     /**

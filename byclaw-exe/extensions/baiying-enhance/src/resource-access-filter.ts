@@ -13,7 +13,8 @@ export function filterControlledResources(
     if (!value || typeof value !== "object") continue;
     const policy = value as Record<string, unknown>;
     const id = String(policy.resourceId ?? "");
-    if (policy.active !== false && (authorizedIds.has(id) || (userId && String(policy.createBy ?? "") === userId))) continue;
+    const creatorAllowed = policy.requiresExplicitUse !== true && userId && String(policy.createBy ?? "") === userId;
+    if (policy.active !== false && (authorizedIds.has(id) || creatorAllowed)) continue;
     if (id) denied.add(id);
     const code = String(policy.resourceCode ?? "");
     if (code && policy.resourceBizType === "SKILL") deniedSkillCodes.add(code);

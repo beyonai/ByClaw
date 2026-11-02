@@ -1,5 +1,6 @@
 /** Dynamic ByClaw AI-model resolution and DSH LLM route registration. */
 
+import type { GroupChatDispositionModelConfig } from './group-chat-disposition-config.ts'
 import { modelFetch } from './model-fetch.ts'
 import { eligibleModel, type ModelCandidate, type ModelRequirements } from '@byclaw/byclaw-model-router'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -18,9 +19,6 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter, type ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import {
-  createProvider,
-  defaultProviderAuthContext,
-  InMemoryCredentialStore,
   type Api,
   type Model,
   type ModelThinkingLevel,
@@ -32,6 +30,8 @@ import {
   type ThinkingBudgets,
   type ThinkingLevelMap,
 } from '@earendil-works/pi-ai'
+import { createProvider } from '@earendil-works/pi-ai/models'
+import { defaultProviderAuthContext, InMemoryCredentialStore } from './pi-ai-runtime.js'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'
@@ -117,6 +117,8 @@ export interface ByClawModelFallback {
 
 /** Model-source options resolved once when the integration starts. */
 export interface ByClawModelRuntimeOptions extends ByClawModelFallback {
+  /** Trusted Gateway credential for one live session turn; never stored in model profiles. */
+  resolveRequestApiKey?: (sessionId: string) => string | undefined
   /** Whether runtime bindings may read and register Redis AI-model routes. */
   redisModelsEnabled?: boolean
   /** Safe final-wire request audit level; omission reads `DSH_LLM_LOG`. */
@@ -341,6 +343,7 @@ export function byClawWireThinking(api: Api, payload: unknown): Readonly<Record<
 type RequestAuditSink = (record: ByClawLlmRequestAuditRecord) => void
 
 const REQUEST_THINKING_MODE = new AsyncLocalStorage<'disabled'>()
+const REQUEST_API_KEY = new AsyncLocalStorage<string | undefined>()
 
 /** Keep both definitions intact while avoiding the Bailian false positive seen for their original order. */
 function orderBailianDevflowTools(payload: unknown): Record<string, unknown> | undefined {
@@ -405,16 +408,44 @@ async function* requestThinkingStream(
 }
 
 class ByClawPiAiAdapter extends PiAiAdapter {
+  constructor(
+    config: ConstructorParameters<typeof PiAiAdapter>[0],
+    private readonly resolveRequestApiKey?: (sessionId: string) => string | undefined,
+  ) {
+    super(config)
+  }
+
+  private async *withRequestApiKey(
+    options: GenerateOptions,
+    dispatch: () => AsyncIterable<StreamChunk>,
+  ): AsyncIterable<StreamChunk> {
+    const supplied = options.sessionId === undefined ? undefined : this.resolveRequestApiKey?.(String(options.sessionId))
+    const apiKey = supplied === undefined || supplied.trim() === '' ? undefined : supplied
+    // Freeze auth for the whole lazy stream, including prepared calls and provider retries.
+    // A shared profile or another conversation must never replace this turn's membership key.
+    // Enter an empty scope too, so a nested ordinary call cannot inherit its caller's credential.
+    const iterator = REQUEST_API_KEY.run(apiKey, () => requestThinkingStream(options, dispatch)[Symbol.asyncIterator]())
+    try {
+      while (true) {
+        const next = await REQUEST_API_KEY.run(apiKey, () => iterator.next())
+        if (next.done === true) return
+        yield next.value
+      }
+    } finally {
+      await REQUEST_API_KEY.run(apiKey, async () => { await iterator.return?.() })
+    }
+  }
+
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const prepared = await super.prepareCall(provider, model, signal)
     return {
       model: prepared.model,
-      stream: options => requestThinkingStream(options, () => prepared.stream(options)),
+      stream: options => this.withRequestApiKey(options, () => prepared.stream(options)),
     }
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return requestThinkingStream(options, () => super.stream(options))
+    return this.withRequestApiKey(options, () => super.stream(options))
   }
 }
 
@@ -768,6 +799,7 @@ function materialize(
   modelId: string,
   resolution: 'explicit' | 'default',
   audit?: RequestAuditSink,
+  route = byClawProviderKey(modelId),
 ): MaterializedModel | undefined {
   if (numericFlag(raw.status) !== 1) return undefined
   const baseUrl = text(raw.url)
@@ -777,7 +809,6 @@ function materialize(
   const instanceParam = record(raw.instanceParam) ?? {}
   const providerAdapter = resolveByClawProviderAdapter(instanceParam)
   const protocol = providerAdapter.api
-  const route = byClawProviderKey(modelId)
   const contextWindow = positiveInt(raw.maxContentToken) ?? DEFAULT_CONTEXT_WINDOW
   const maxTokens = positiveInt(instanceParam['maxTokens']) ?? DEFAULT_MAX_TOKENS
   const abilities = Array.isArray(instanceParam['abilities'])
@@ -941,7 +972,7 @@ export class ByClawDynamicModelRuntime {
     }
     this.adapter = new ByClawPiAiAdapter({
       profiles: () => this.profiles,
-      resolveApiKey: async (_provider, profile) => this.tokens.get(profile),
+      resolveApiKey: async (_provider, profile) => REQUEST_API_KEY.getStore() ?? this.tokens.get(profile),
       auth: {
         credentials: new InMemoryCredentialStore(),
         authContext: defaultProviderAuthContext(),
@@ -952,7 +983,7 @@ export class ByClawDynamicModelRuntime {
         hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
         ref,
       ),
-    })
+    }, options.resolveRequestApiKey)
   }
 
   /** Resolve one root/template/member binding from the configured model source. */
@@ -997,6 +1028,23 @@ export class ByClawDynamicModelRuntime {
       return { ...this.fallback }
     }
     throw new Error(`byclaw-dsh could not resolve an AI model for ${bindingId}, and no fallback is configured`)
+  }
+
+  /** Register the classifier's environment connection independently of Redis and conversation bindings.
+   * @param connection - Validated OpenAI-compatible endpoint, key and model.
+   * @returns The private classifier route, with no credential or Redis model ID.
+   */
+  resolveGroupChatDispositionModel(connection: GroupChatDispositionModelConfig): ByClawModelSelection {
+    const route = 'byclaw-group-chat-disposition:environment'
+    const model = materialize({
+      status: 1, url: connection.baseUrl, modelCode: connection.model, authToken: connection.apiKey,
+      instanceParam: { providerName: 'OpenAI', modelProtocol: 'OpenAI' },
+    }, 'group-chat-disposition', 'explicit', this.requestAudit, route)
+    if (model === undefined) throw new Error('Group-chat disposition model connection is incomplete')
+    // Environment keys are plaintext; Redis token decryption does not apply to this connection.
+    model.token = connection.apiKey
+    model.selection = { provider: route, model: connection.model, protocol: 'openai-completions', resolution: 'local' }
+    return this.publish('group-chat-disposition:environment', model)
   }
 
   /** Identify the configured model behind a registered route without exposing credentials. */

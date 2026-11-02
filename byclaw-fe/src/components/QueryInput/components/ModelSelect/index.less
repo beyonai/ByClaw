@@ -1,6 +1,21 @@
 .select {
   min-width: 180px;
 }
+.healthIcon {
+  flex: 0 0 auto;
+  color: #fa8c16;
+  cursor: pointer;
+  font-size: 15px;
+}
+.healthTooltip {
+  max-width: 280px;
+  line-height: 1.55;
+}
+.healthTooltipTitle {
+  margin-bottom: 2px;
+  color: inherit;
+  font-weight: 600;
+}
 .popup {
   overflow: visible;
 }
@@ -167,11 +182,18 @@
 .option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   width: 100%;
 }
+.optionLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .option :global(.ant-tag) {
+  flex-shrink: 0;
   margin-inline-end: 0;
   color: #597ef7;
   background: #f0f5ff;

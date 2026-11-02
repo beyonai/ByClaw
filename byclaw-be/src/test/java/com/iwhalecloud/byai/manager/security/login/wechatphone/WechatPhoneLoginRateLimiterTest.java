@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -11,7 +13,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.authentication.BadCredentialsException;
 
-class WechatPhoneLoginRateLimiterTest {
+class WechatPhoneLoginRateLimiterTest extends I18nTestSupport {
 
     @Test
     void stopsExcessiveAnonymousAttemptsBeforePhoneExchange() {

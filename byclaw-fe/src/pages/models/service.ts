@@ -1,4 +1,5 @@
 import { GET, POST } from '@/service/common/request';
+import { removeCachedModelHealth } from '@/service/modelHealth';
 
 type Resp<T = any> = { code: number; msg: string; data: T; success?: boolean };
 type PageData<T = any> = { rows?: T[]; list?: T[]; total: number };
@@ -22,7 +23,10 @@ export async function upsertMyModel(params: any) {
 }
 
 export async function deleteMyModel(params: any) {
-  return POST<Resp>('/byaiService/personal/model/delete', { ...params }, withCustomHandle);
+  const response = await POST<Resp>('/byaiService/personal/model/delete', { ...params }, withCustomHandle);
+  if (response?.code === 0 && response?.success !== false && response?.data !== false)
+    await removeCachedModelHealth(params.id);
+  return response;
 }
 
 export async function getMyQuota() {

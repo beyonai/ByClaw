@@ -117,6 +117,12 @@ public class SandboxLaunchContextFactory {
             && StringUtils.isNotBlank(userCode)) {
             String preferred = sandboxService.getPreferredServiceKey(userCode);
             if (StringUtils.isNotBlank(preferred)) {
+                // A cached key whose spec is not open to users (for example a tool sandbox spec that an
+                // earlier build stored here) must not become the user's assistant.
+                if (!sandboxService.isServiceKeyEnabled(preferred)) {
+                    LOGGER.warn("忽略用户缓存的 serviceKey（规格未开放）: userCode={}, serviceKey={}", userCode, preferred);
+                    return routing;
+                }
                 LOGGER.info("使用用户缓存的 serviceKey: userCode={}, serviceKey={}", userCode, preferred);
                 return new SandboxLaunchRouting(preferred, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
             }

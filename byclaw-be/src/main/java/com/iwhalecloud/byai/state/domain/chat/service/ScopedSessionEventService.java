@@ -101,6 +101,11 @@ public class ScopedSessionEventService {
             enrichTeamSnapshot(parentSessionId, dataJson, metadata);
             return false;
         }
+        if ("parent".equals(scope)
+                && "plan".equals(metadata == null ? null : metadata.getString("event_kind"))) {
+            enrichTaskPlan(parentSessionId, dataJson, metadata);
+            return false;
+        }
         if (!SCOPE_CHILD.equals(scope)) {
             return false;
         }
@@ -112,12 +117,85 @@ public class ScopedSessionEventService {
         handleChildBatch(parentSessionId, List.of(dataJson));
     }
 
+    private void enrichTaskPlan(Long parentSessionId, JSONObject dataJson, JSONObject metadata) {
+        JSONObject answerDelta = parseObject(dataJson.getString("data"));
+        JSONObject delta = firstDelta(answerDelta);
+        JSONObject plan = delta == null ? null : parseObject(delta.getString("content"));
+        JSONArray steps = plan == null ? null : plan.getJSONArray("steps");
+        if (steps == null) return;
+        for (int i = 0; i < steps.size(); i++) {
+            JSONObject step = steps.getJSONObject(i);
+            JSONArray subSteps = step == null ? null : step.getJSONArray("sub_steps");
+            if (subSteps == null) continue;
+            for (int j = 0; j < subSteps.size(); j++) {
+                JSONObject task = subSteps.getJSONObject(j);
+                if (task == null) continue;
+                JSONArray executions = task.getJSONArray("executions");
+                if (executions != null) {
+                    for (int k = 0; k < executions.size(); k++) {
+                        JSONObject execution = executions.getJSONObject(k);
+                        JSONArray runs = execution == null ? null : execution.getJSONArray("runs");
+                        if (runs == null) continue;
+                        for (int m = 0; m < runs.size(); m++) {
+                            JSONObject run = runs.getJSONObject(m);
+                            enrichTaskRun(parentSessionId, metadata, task, run);
+                        }
+                    }
+                }
+                if (StringUtils.isNotBlank(task.getString("child_session_id"))
+                        && StringUtils.isNotBlank(task.getString("child_message_id"))) continue;
+                String externalSessionId = StringUtils.trimToNull(task.getString("external_session_id"));
+                String childRunId = StringUtils.trimToNull(task.getString("child_run_id"));
+                if (externalSessionId == null || childRunId == null) continue;
+                JSONObject childMetadata = new JSONObject();
+                childMetadata.put("external_session_id", externalSessionId);
+                childMetadata.put("external_root_session_id", String.valueOf(parentSessionId));
+                childMetadata.put("child_run_id", childRunId);
+                childMetadata.put("child_turn", task.getInteger("child_turn"));
+                childMetadata.put("child_name", StringUtils.defaultIfBlank(task.getString("assignee"), "子 Agent"));
+                ExternalChildSessionBinding binding = childSessionService.ensureRunBinding(parentSessionId, childMetadata);
+                task.put("child_session_id", String.valueOf(binding.session().getSessionId()));
+                task.put("child_message_id", String.valueOf(binding.messageId()));
+                task.remove("external_session_id");
+                task.remove("child_run_id");
+            }
+        }
+        delta.put("content", plan.toJSONString());
+        dataJson.put("data", answerDelta.toJSONString());
+    }
+
+    private void enrichTaskRun(Long parentSessionId, JSONObject metadata, JSONObject task, JSONObject run) {
+        if (run == null || (StringUtils.isNotBlank(run.getString("child_session_id"))
+                && StringUtils.isNotBlank(run.getString("child_message_id")))) return;
+        String externalSessionId = StringUtils.trimToNull(run.getString("external_session_id"));
+        String childRunId = StringUtils.trimToNull(run.getString("child_run_id"));
+        if (externalSessionId == null || childRunId == null) return;
+        JSONObject childMetadata = new JSONObject(new LinkedHashMap<>(metadata));
+        childMetadata.put("session_scope", SCOPE_CHILD);
+        childMetadata.put("external_session_id", externalSessionId);
+        childMetadata.put("child_run_id", childRunId);
+        childMetadata.put("child_turn", run.getInteger("child_turn"));
+        childMetadata.put("child_name", StringUtils.defaultIfBlank(task.getString("assignee"), "子 Agent"));
+        ExternalChildSessionBinding binding = childSessionService.ensureRunBinding(parentSessionId, childMetadata);
+        run.put("child_session_id", String.valueOf(binding.session().getSessionId()));
+        run.put("child_message_id", String.valueOf(binding.messageId()));
+        run.remove("external_session_id");
+    }
+
     /** Called under the processor's session lock; all events belong to the same child and run. */
     public void handleChildBatch(Long parentSessionId, List<JSONObject> events) {
         if (events.isEmpty()) return;
         JSONObject metadata = events.getFirst().getJSONObject("metadata");
-        ExternalChildSessionBinding binding = childSessionService.ensureBinding(parentSessionId, metadata);
-        String contextKey = parentSessionId + ":" + binding.externalSessionId();
+        ExternalChildSessionBinding binding = StringUtils.isBlank(metadata.getString("child_run_id"))
+            ? childSessionService.ensureBinding(parentSessionId, metadata)
+            : childSessionService.ensureRunBinding(parentSessionId, metadata);
+        if (childSessionService.isStaleRun(binding, metadata)) return;
+        for (JSONObject event : events) {
+            JSONObject eventMetadata = event.getJSONObject("metadata");
+            if ("plan".equals(eventMetadata.getString("event_kind"))) enrichTaskPlan(parentSessionId, event, eventMetadata);
+        }
+        String runId = StringUtils.defaultIfBlank(metadata.getString("child_run_id"), "legacy");
+        String contextKey = parentSessionId + ":" + binding.externalSessionId() + ":" + runId;
         boolean restoring = !childMessageContexts.containsKey(contextKey);
         RunningChatSnapshotResponse currentSnapshot = !restoring
             ? childRunSnapshots.get(contextKey)
@@ -186,7 +264,7 @@ public class ScopedSessionEventService {
                 throw new IllegalStateException("external child snapshot was not persisted");
             }
             recentSequences.addAll(acceptedSequences);
-            broadcastChildMessage(contextKey, binding.session(), persisted, watermark, terminal);
+            broadcastChildMessage(parentSessionId + ":" + binding.externalSessionId(), binding.session(), persisted, watermark, terminal);
             childMessageWriteBehind.enqueue("child:" + binding.session().getSessionId() + ":" + binding.messageId(),
                 binding.session().getSessionId(), persisted, terminal);
             if (StringUtils.isNotBlank(watermark)) childStreamWatermarks.put(contextKey, watermark);
@@ -306,7 +384,8 @@ public class ScopedSessionEventService {
         }
         childMessageWriteBehind.enqueue("child:" + binding.session().getSessionId() + ":" + binding.messageId(),
             binding.session().getSessionId(), message, terminal);
-        broadcastChildMessage(contextKey, binding.session(), message, snapshot.getSnapshotStreamId(), terminal);
+        broadcastChildMessage(binding.session().getParentSessionId() + ":" + binding.externalSessionId(), binding.session(), message,
+            snapshot.getSnapshotStreamId(), terminal);
     }
 
     private MessageContext restoreMessageContext(String contextKey, ExternalChildSessionBinding binding,
@@ -335,7 +414,7 @@ public class ScopedSessionEventService {
         return loginInfo;
     }
 
-    private void broadcastChildMessage(String contextKey, ByaiSession child, ByaiMessageHotDtoDto message,
+    private void broadcastChildMessage(String broadcastKey, ByaiSession child, ByaiMessageHotDtoDto message,
             String streamId, boolean terminal) {
         if (child.getCreatorId() == null) {
             return;
@@ -345,7 +424,7 @@ public class ScopedSessionEventService {
         wsMessage.put("sessionId", String.valueOf(child.getSessionId()));
         wsMessage.put("streamId", streamId);
         wsMessage.put("data", JSON.toJSON(message));
-        projectionBroadcaster.enqueue(contextKey, child.getCreatorId(), wsMessage, terminal);
+        projectionBroadcaster.enqueue(broadcastKey, child.getCreatorId(), wsMessage, terminal);
     }
 
     private boolean isTerminal(JSONObject dataJson, JSONObject metadata) {

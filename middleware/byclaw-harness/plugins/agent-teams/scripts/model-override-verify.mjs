@@ -8,6 +8,7 @@ import { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
 import { createAgentTeamsModelOverrideService, taskExecutionModel } from '../src/model-overrides.ts'
 import { installMemberSelectionRuntime, memberLabel, resolveMemberLlmSelection } from '../src/members.ts'
 import { createTeamDir, readTeam } from '../src/state.ts'
+import { resolveTeamStateRoot } from '../src/runtime-state.ts'
 
 const baseline = { provider: 'employee-provider', model: 'employee-model', reasoningEffort: 'high' }
 const override = { provider: 'conversation-provider', model: 'conversation-model' }
@@ -161,7 +162,8 @@ try {
   assert.deepEqual(await resumedConfig(), baseline, 'cold-resumed member must recover descriptor baseline')
   await resumed.dispose()
 
-  const legacy = await readTeam(join(workspace, '.agent-teams'), 'team')
+  // Member setup migrated the workspace-local state into the private runtime root.
+  const legacy = await readTeam(resolveTeamStateRoot(workspace, '.agent-teams'), 'team')
   assert.ok(legacy, 'legacy team tasks without executionModel remain readable')
   const corruptDir = join(workspace, '.agent-teams', 'corrupt')
   await mkdir(join(corruptDir, 'inbox'), { recursive: true })

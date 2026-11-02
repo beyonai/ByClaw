@@ -1,4 +1,4 @@
-import { isChatTerminal, recordChatChain } from '@/utils/chatChainLog';
+import { isChatCheckpoint, isChatTerminal, recordChatChain } from '@/utils/chatChainLog';
 import { applyAgentTeamsStreamSnapshot } from '@/components/MessagesComp/ToolCall/agentTeamsStore';
 import { get, isNil, set, unset } from 'lodash';
 
@@ -355,6 +355,128 @@ const findChatStreamContext = (
 
 export const hasChatStreamContext = (rawMessage: any, res?: any) => !!findChatStreamContext(rawMessage, res);
 
+const mergeResumeAnswerItems = (liveItems: IMessage['messageList'], persistedItems: IMessage['messageList']) => {
+  if (!liveItems?.length) return persistedItems;
+  if (!persistedItems?.length) return liveItems;
+
+  const persistedById = new Map(persistedItems.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+  const liveIds = new Set(liveItems.filter((item) => item.uuid).map((item) => item.uuid));
+  return [
+    ...liveItems.map((item) => {
+      const persistedItem = persistedById.get(item.uuid);
+      return persistedItem ? { ...item, content: persistedItem.content } : item;
+    }),
+    ...persistedItems.filter((item) => !item.uuid || !liveIds.has(item.uuid)),
+  ];
+};
+
+/**
+ * Point a restored stream context at the persisted assistant message selected by Resume.
+ * A refreshed page can reconstruct a synthetic answer from runningStatus before the
+ * persisted ask-user card is available. Resume output must update the persisted message
+ * instead of publishing that synthetic object as a second assistant response.
+ */
+export const rebindChatStreamAnswerMessage = (rawMessage: any, answerMsg: IMessage, res?: any) => {
+  const sessionId = answerMsg.sessionId || getChatStreamSessionId(rawMessage, res);
+  const laneId = answerMsg.laneId || getChatStreamLaneId(rawMessage, res);
+  const sessionContexts = getSessionContexts(sessionId);
+  let candidates = sessionContexts ? Array.from(sessionContexts.values()) : [];
+  if (laneId) {
+    candidates = candidates.filter(
+      (candidate) => `${candidate.laneId || candidate.answerMsg.laneId || ''}` === `${laneId}`
+    );
+  }
+  if (candidates.length > 1 && !laneId) {
+    const distinctLanes = new Set(
+      candidates.map((candidate) => `${candidate.laneId || candidate.answerMsg.laneId || ''}`).filter(Boolean)
+    );
+    if (distinctLanes.size > 0) return false;
+  }
+  if (!candidates.length && !laneId && !sessionContexts?.size) {
+    const fallback = findChatStreamContext(rawMessage, res);
+    if (fallback) candidates = [fallback];
+  }
+  if (!candidates.length) return false;
+
+  candidates.forEach((context) => {
+    const liveAnswer = context.answerMsg;
+    const reboundAnswer = {
+      ...answerMsg,
+      ...liveAnswer,
+      msgId: answerMsg.msgId,
+      messageId: answerMsg.messageId,
+      queryMsgId: answerMsg.queryMsgId,
+      sessionId: answerMsg.sessionId,
+      fromBeyond: answerMsg.fromBeyond,
+      agentId: answerMsg.agentId || liveAnswer.agentId,
+      agentCode: answerMsg.agentCode || liveAnswer.agentCode,
+      agentName: answerMsg.agentName || liveAnswer.agentName,
+      agentType: answerMsg.agentType || liveAnswer.agentType,
+      metadata: answerMsg.metadata || liveAnswer.metadata,
+      messageList: mergeResumeAnswerItems(liveAnswer.messageList, answerMsg.messageList),
+      thinkList: mergeResumeAnswerItems(liveAnswer.thinkList, answerMsg.thinkList),
+    };
+    Object.assign(answerMsg, reboundAnswer);
+    context.answerMsg = context.updateMessage(answerMsg, { isAssign: true });
+  });
+  return true;
+};
+
+const normalizedMessageIdentity = (message: IMessage) =>
+  [message.sessionId, message.messageId, message.queryMsgId].map((value) => `${value ?? ''}`.trim());
+
+const hasSameCompleteMessageIdentity = (left: IMessage, right: IMessage) => {
+  const leftIdentity = normalizedMessageIdentity(left);
+  const rightIdentity = normalizedMessageIdentity(right);
+  return (
+    leftIdentity.every(Boolean) &&
+    rightIdentity.every(Boolean) &&
+    leftIdentity.every((value, index) => value === rightIdentity[index])
+  );
+};
+
+/**
+ * Merge completed interaction cards into the newest answer held by an already-restored stream.
+ * Stream text and other state stay authoritative on the context so queued deltas cannot be lost.
+ */
+export const refreshChatStreamAnswerMessage = (rawMessage: any, answerMsg: IMessage, res?: any) => {
+  const context = findChatStreamContext(rawMessage, res);
+  if (!context || !hasSameCompleteMessageIdentity(context.answerMsg, answerMsg)) return false;
+
+  let interactionMatched = false;
+  const nextAnswerMsg = {
+    ...context.answerMsg,
+    // The live runtime object may be a synthetic placeholder reconstructed after refresh.
+    // Once the persisted interaction answer is available, keep live stream state but switch
+    // the context to the persisted message and employee identity.
+    msgId: answerMsg.msgId,
+    messageId: answerMsg.messageId,
+    queryMsgId: answerMsg.queryMsgId,
+    sessionId: answerMsg.sessionId,
+    fromBeyond: answerMsg.fromBeyond,
+    agentId: answerMsg.agentId || context.answerMsg.agentId,
+    agentCode: answerMsg.agentCode || context.answerMsg.agentCode,
+    agentName: answerMsg.agentName || context.answerMsg.agentName,
+    agentType: answerMsg.agentType || context.answerMsg.agentType,
+    metadata: answerMsg.metadata || context.answerMsg.metadata,
+  };
+  (['thinkList', 'messageList'] as const).forEach((listKey) => {
+    const freshItems = answerMsg[listKey] || [];
+    if (!freshItems.length || !context.answerMsg[listKey]?.length) return;
+    const freshItemsById = new Map(freshItems.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+    nextAnswerMsg[listKey] = context.answerMsg[listKey]?.map((item) => {
+      const freshItem = freshItemsById.get(item.uuid);
+      if (!freshItem) return item;
+      interactionMatched = true;
+      return { ...item, content: freshItem.content };
+    });
+  });
+  if (!interactionMatched) return false;
+
+  context.answerMsg = context.updateMessage(nextAnswerMsg, { isAssign: true });
+  return true;
+};
+
 const shouldApplyParsedStream = (parsed: ParsedChatStreamMessage) => {
   if (!parsed.streamId) return true;
   const targetSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);
@@ -484,24 +606,56 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     scheduleAnswerFlush(context);
   }
   markParsedStreamApplied(context, parsed);
-  if (isChatTerminal(rawMessage))
-    recordChatChain('fe.final_applied', { ...rawMessage, appliedClientRequestId: context.clientRequestId });
+  if (isChatCheckpoint(rawMessage))
+    recordChatChain(isChatTerminal(rawMessage) ? 'fe.final_applied' : 'fe.reply_applied', {
+      ...rawMessage,
+      appliedClientRequestId: context.clientRequestId,
+      appliedSessionId: context.answerMsg.sessionId,
+      appliedTraceId: context.answerMsg.traceId,
+      appliedMessageId: context.answerMsg.messageId,
+    });
 };
 
 export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
-  if (!shouldApplyParsedStream(parsed)) return;
+  if (!shouldApplyParsedStream(parsed)) {
+    if (isChatCheckpoint(parsed.rawMessage)) recordChatChain('fe.reply_deferred', parsed.rawMessage, 'ignored');
+    return;
+  }
   applyAgentTeamsStreamSnapshot(parsed.rawMessage);
 
   const restoredKey = getRestoredKeyByParsed(parsed);
   if (restoringStreamKeys.has(restoredKey)) {
-    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'restoring');
+    if (isChatCheckpoint(parsed.rawMessage))
+      recordChatChain(
+        isChatTerminal(parsed.rawMessage) ? 'fe.final_deferred' : 'fe.reply_deferred',
+        parsed.rawMessage,
+        'restoring'
+      );
     bufferParsedStream(parsed);
     return;
   }
 
   const context = findChatStreamContext(parsed.rawMessage, parsed.res, parsed.eventName);
+  console.info(
+    '[ASK_USER_QUESTION_RESUME_TRACE]',
+    JSON.stringify({
+      stage: 'stream_event_received',
+      eventName: parsed.eventName,
+      clientRequestId: parsed.clientRequestId,
+      sessionId: getChatStreamSessionId(parsed.rawMessage, parsed.res),
+      traceId: getParsedTraceId(parsed),
+      matchedContextClientRequestId: context?.clientRequestId,
+      matchedAnswerMsgId: context?.answerMsg.msgId,
+      matchedAnswerMessageId: context?.answerMsg.messageId,
+    })
+  );
   if (!context) {
-    if (isChatTerminal(parsed.rawMessage)) recordChatChain('fe.final_deferred', parsed.rawMessage, 'missing_context');
+    if (isChatCheckpoint(parsed.rawMessage))
+      recordChatChain(
+        isChatTerminal(parsed.rawMessage) ? 'fe.final_deferred' : 'fe.reply_deferred',
+        parsed.rawMessage,
+        'missing_context'
+      );
     const messageSessionId = getChatStreamSessionId(parsed.rawMessage, parsed.res);
     const runtimeInfo = chatSessionRuntimeManager.getBySession(messageSessionId);
     if (runtimeInfo?.restored) {

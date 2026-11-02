@@ -20,7 +20,20 @@ import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.Session;
 
-class SftpStorageServiceTest {
+class SftpStorageServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void rejectsMissingUploadInputInBothLanguagesBeforeOpeningAConnection() {
+        var session = mock(Session.class);
+        var service = storageService(session);
+        var location = StorageLocation.of("common-file", "byai-feedback", "/用户/文件.txt");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.put(location, null, 0L, "text/plain"))
+            .hasMessage("SFTP 上传输入流不能为空");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.put(location, null, 0L, "text/plain"))
+            .hasMessage("SFTP upload input stream cannot be null");
+        org.mockito.Mockito.verifyNoInteractions(session);
+    }
 
     @Test
     void put_mapsLogicalStorageLocationToConfiguredSftpRoot() throws Exception {

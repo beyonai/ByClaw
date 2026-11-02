@@ -39,6 +39,83 @@ const shouldDropCompletedEmptyAnswer = (message: IMessage) =>
       !hasVisibleMessageContent(message)
   );
 
+const hasSameMessageIdentity = (current: IMessage, incoming: IMessage) => {
+  if (current.messageId && incoming.messageId) {
+    return `${current.messageId}` === `${incoming.messageId}`;
+  }
+  return Boolean(current.msgId && incoming.msgId && `${current.msgId}` === `${incoming.msgId}`);
+};
+
+const hasCompatibleResumeLane = (current: IMessage, incoming: IMessage) => {
+  if (!current.laneId && !incoming.laneId) return true;
+  return Boolean(current.laneId && incoming.laneId && `${current.laneId}` === `${incoming.laneId}`);
+};
+
+const getUniqueResumeTraceIndex = (list: IMessage[], incoming: IMessage) => {
+  if (!incoming.fromBeyond || !incoming.traceId) return -1;
+  const matches = list.reduce<number[]>((indexes, current, index) => {
+    if (
+      current.fromBeyond &&
+      current.traceId &&
+      `${current.traceId}` === `${incoming.traceId}` &&
+      hasCompatibleResumeLane(current, incoming)
+    ) {
+      indexes.push(index);
+    }
+    return indexes;
+  }, []);
+  return matches.length === 1 ? matches[0] : -1;
+};
+
+const getResumeItemKey = (item: NonNullable<IMessage['thinkList']>[number]) => {
+  if (item.uuid) return `uuid:${item.uuid}`;
+  if (item.resumeMessageId) return `resume:${item.resumeMessageId}:${item.contentType}`;
+  if (item.content?.orderId) return `order:${item.content.orderId}:${item.contentType}`;
+  return '';
+};
+
+const mergeResumeTimeline = <T extends NonNullable<IMessage['thinkList']>>(persisted?: T, live?: T): T | undefined => {
+  if (!persisted?.length) return live;
+  if (!live?.length) return persisted;
+
+  const result = [...persisted] as T;
+  const keyedIndexes = new Map<string, number>();
+  result.forEach((item, index) => {
+    const key = getResumeItemKey(item);
+    if (key) keyedIndexes.set(key, index);
+  });
+
+  live.forEach((item) => {
+    const key = getResumeItemKey(item);
+    const existingIndex = key ? keyedIndexes.get(key) : undefined;
+    if (existingIndex !== undefined) {
+      result[existingIndex] = assign({}, result[existingIndex], item);
+      return;
+    }
+    if (!key && result.some((existing) => JSON.stringify(existing) === JSON.stringify(item))) return;
+    result.push(item);
+    if (key) keyedIndexes.set(key, result.length - 1);
+  });
+  return result;
+};
+
+const preservePersistedResumeIdentity = (target: IMessage, merged: IMessage): IMessage => {
+  const persistedIdentity = {
+    msgId: target.msgId || merged.msgId,
+    messageId: target.messageId || merged.messageId,
+    queryMsgId: target.queryMsgId || merged.queryMsgId,
+    sessionId: target.sessionId || merged.sessionId,
+    agentId: target.agentId || merged.agentId,
+    agentCode: target.agentCode || merged.agentCode,
+    agentName: target.agentName || merged.agentName,
+    agentType: target.agentType || merged.agentType,
+    metadata: target.metadata || merged.metadata,
+    thinkList: mergeResumeTimeline(target.thinkList, merged.thinkList),
+    messageList: mergeResumeTimeline(target.messageList, merged.messageList),
+  };
+  return assign(merged, persistedIdentity);
+};
+
 /**
  * 消息管理Hook
  * @param {object} params - 参数对象
@@ -115,12 +192,11 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
           messageList: (messageList: IMessage[]) => {
             let list = [...(messageList || [])];
 
-            const targetIndex = list.findIndex(({ msgId, messageId }: IMessage) => {
-              if (messageId && msg.messageId) {
-                return `${messageId}` === `${msg.messageId}`;
-              }
-              return `${msgId}` === `${msg.msgId}`;
-            });
+            let targetIndex = list.findIndex((current: IMessage) => hasSameMessageIdentity(current, msg));
+            const matchedByResumeTrace = targetIndex === -1;
+            if (matchedByResumeTrace) {
+              targetIndex = getUniqueResumeTraceIndex(list, msg);
+            }
 
             if (targetIndex > -1) {
               const targetMsg = list[targetIndex];
@@ -128,6 +204,9 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
                 newMessage = assign({}, targetMsg, msg);
               } else {
                 newMessage = merge({}, targetMsg, msg);
+              }
+              if (matchedByResumeTrace) {
+                newMessage = preservePersistedResumeIdentity(targetMsg, newMessage);
               }
               newMessage.updateKey = getMsgId();
               if (shouldDropCompletedEmptyAnswer(newMessage)) {

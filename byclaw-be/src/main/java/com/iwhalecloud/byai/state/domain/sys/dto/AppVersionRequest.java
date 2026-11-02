@@ -15,27 +15,27 @@ import lombok.Data;
 public class AppVersionRequest {
 
     @NotBlank
-    @Pattern(regexp = "windows|macos", message = "平台只能是 windows/macos")
+    @Pattern(regexp = "windows|macos", message = "{app.version.platformInvalid}")
     private String platform;
 
     @NotBlank
-    @Pattern(regexp = "x64|arm64|universal", message = "架构只能是 x64/arm64/universal")
+    @Pattern(regexp = "x64|arm64|universal", message = "{app.version.archInvalid}")
     private String arch;
 
     @NotBlank
-    @Pattern(regexp = "stable|beta|dev", message = "渠道只能是 stable/beta/dev")
+    @Pattern(regexp = "stable|beta|dev", message = "{app.version.channelInvalid}")
     private String channel;
 
     @NotBlank
     @Size(max = 32)
-    @Pattern(regexp = "\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?", message = "版本号需形如 0.1.0 或 0.1.1-beta.2")
+    @Pattern(regexp = "\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?", message = "{app.version.numberInvalid}")
     private String appVersion;
 
     @NotBlank
     @Size(max = 1000)
     private String url;
 
-    @Pattern(regexp = "^(full|incremental)?$", message = "更新类型只能是 full/incremental")
+    @Pattern(regexp = "^(full|incremental)?$", message = "{app.version.updateTypeInvalid}")
     private String updateType;
 
     @Size(max = 2000)
@@ -51,12 +51,12 @@ public class AppVersionRequest {
 
     private Long fileSize;
 
-    @Pattern(regexp = "^([0-9a-fA-F]{64})?$", message = "SHA256 需为 64 位十六进制")
+    @Pattern(regexp = "^([0-9a-fA-F]{64})?$", message = "{app.version.shaInvalid}")
     private String sha256;
 
     /**
      * 草稿或直接发布，下线走独立接口。
      */
-    @Pattern(regexp = "^(draft|published)?$", message = "状态只能是 draft/published")
+    @Pattern(regexp = "^(draft|published)?$", message = "{app.version.statusInvalid}")
     private String releaseStatus;
 }

@@ -5,10 +5,11 @@ import { get, concat } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { loginOperationAccount } from '@/service/devloop';
-import { getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
+import { getBrowserServiceKey, getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import { getVNCUrl } from '@/utils/chat';
 import type { OperationAccount, OperationIdentifier } from './types';
+import { browserSandboxServiceKey } from './accountUtils';
 
 // 四个平台复用采集沙箱中的浏览器，登录入口只维护平台地址，不再创建独立 Recorder 会话。
 export const OPERATION_PLATFORM_LOGIN_URLS: Record<string, string> = {
@@ -51,7 +52,7 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
     EventEmitter.emit('beyond-main-driver-open-type', '');
   }, [EventEmitter]);
 
-  // 优先复用采集流程已经启动的沙箱；首次使用尚无沙箱时按当前用户启动默认 openclaw 沙箱。
+  // 优先复用采集流程已经启动的沙箱；尚无带远程桌面的沙箱时拉起承载该用户浏览器的沙箱（常驻宿主用户为工具沙箱，其他用户为 openclaw）。
   const resolveSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
     const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
     const runningSandbox =
@@ -63,7 +64,10 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
       return runningSandbox;
     }
     if (!userInfo?.userCode) throw new Error('missing_user_code');
-    const launchedSandbox = await launchSandboxByUserCode({ userCode: userInfo.userCode, serviceKey: 'openclaw' });
+    const launchedSandbox = await launchSandboxByUserCode({
+      userCode: userInfo.userCode,
+      serviceKey: browserSandboxServiceKey(await getBrowserServiceKey().catch(() => null)),
+    });
     const sandboxInfo: ISandboxesInfo = {
       ...launchedSandbox,
       userCode: userInfo.userCode,

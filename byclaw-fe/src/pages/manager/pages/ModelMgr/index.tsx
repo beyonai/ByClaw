@@ -1,7 +1,10 @@
-import { message, Modal } from 'antd';
+import { Button, message, Modal } from 'antd';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useDispatch, useIntl, useSelector } from '@umijs/max';
+import { useDispatch, useIntl, useSelector, useLocation, useNavigate } from '@umijs/max';
+import useCachedModelHealth from '@/hooks/useCachedModelHealth';
+import { ModelHealthBadge, ModelHealthSummary } from '@/components/ModelHealthStatus';
+import { removeCachedModelHealth } from '@/service/modelHealth';
 
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import commonStyles from '@/pages/manager/less/commonTabList.less';
@@ -39,7 +42,19 @@ const initPagination = {
 
 const ModelMgr: React.FC = () => {
   const intl = useIntl();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const healthModelId = new URLSearchParams(location.search).get('healthModelId') || undefined;
+  const healthTargetRef = useRef(healthModelId);
+  healthTargetRef.current = healthModelId;
+  const clearHealthTarget = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete('healthModelId');
+    navigate(`${location.pathname}${params.toString() ? `?${params}` : ''}`, { replace: true, state: null });
+  }, [location.pathname, location.search, navigate]);
   const dispatch = useDispatch();
+  const currentUser = useSelector(({ user }: any) => user?.userInfo);
+  const healthReport = useCachedModelHealth(currentUser, 'PUBLIC');
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   // 滚动触底加载下一页时加本地锁，避免 loading 状态回写前重复发起请求。
   const loadMoreLockRef = useRef(false);
@@ -74,6 +89,17 @@ const ModelMgr: React.FC = () => {
   const [systemLabelMap, setSystemLabelMap] = useState<Map<string, string>>(new Map());
 
   const [formState, formAction] = useShowModal();
+
+  useEffect(() => {
+    const state = location.state as { editModelId?: string; editModelRequestId?: number; createModel?: boolean } | null;
+    if (!state?.editModelId && !state?.createModel) return;
+    // Consume explicit actions; a positioning URL or page refresh must not reopen the editor.
+    const { editModelId, createModel, ...rest } = state;
+    delete rest.editModelRequestId;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
+    if (editModelId) formAction.handleShow('edit', { id: editModelId });
+    else if (createModel) formAction.handleShow('add');
+  }, [location.state, location.search, location.key]);
 
   const modelTypeOptions = useModelTypeOptions();
   const modelTypeLabelMap = useMemo<Record<string, string>>(
@@ -118,7 +144,9 @@ const ModelMgr: React.FC = () => {
   // 按编码派生选中项，名称晚于模型列表返回时，已选文案也会同步更新。
   const systemSelectedList = useMemo<ITreeData[]>(
     () =>
-      system ? [{ label: systemLabelMap.get(system) || getSystemName(intl, system), key: system, keypath: system }] : [],
+      system
+        ? [{ label: systemLabelMap.get(system) || getSystemName(intl, system), key: system, keypath: system }]
+        : [],
     [intl, system, systemLabelMap]
   );
 
@@ -155,14 +183,20 @@ const ModelMgr: React.FC = () => {
         payload: {
           pageNum,
           pageSize,
-          keyword: nextKeyword?.trim() || undefined,
-          modelType: hasModelType ? params?.modelType : modelType,
-          status: nextStatus,
-          ability: nextAbility,
-          system: nextSystem,
+          modelId: healthModelId,
+          keyword: healthModelId ? undefined : nextKeyword?.trim() || undefined,
+          modelType: healthModelId ? undefined : hasModelType ? params?.modelType : modelType,
+          status: healthModelId ? undefined : nextStatus,
+          ability: healthModelId ? undefined : nextAbility,
+          system: healthModelId ? undefined : nextSystem,
         },
         success: (res: any) => {
+          if (healthTargetRef.current !== healthModelId) return;
           const rows = res?.rows || res?.list || [];
+          if (healthModelId && !rows.length) {
+            void removeCachedModelHealth(healthModelId);
+            clearHealthTarget();
+          }
           const pageIndex = res?.pageIndex ?? pageNum;
           const newPageSize = res?.pageSize ?? pageSize;
           const total = res?.total ?? 0;
@@ -191,7 +225,7 @@ const ModelMgr: React.FC = () => {
         },
       });
     },
-    [dispatch, pagination, keyword, modelType, status, ability, system]
+    [dispatch, pagination, keyword, modelType, status, ability, system, healthModelId, clearHealthTarget]
   );
 
   const fetchOverviewStats = useCallback(() => {
@@ -217,12 +251,21 @@ const ModelMgr: React.FC = () => {
   }, [dispatch]);
 
   const resetAndFetch = useCallback(
-    (override?: Partial<{ keyword: string; modelType?: string; status?: ModelStatus; ability?: string; system?: string }>) => {
+    (
+      override?: Partial<{
+        keyword: string;
+        modelType?: string;
+        status?: ModelStatus;
+        ability?: string;
+        system?: string;
+      }>
+    ) => {
       fetchList({
         pageNum: 1,
         pageSize: pagination.pageSize,
         keyword: override && Object.prototype.hasOwnProperty.call(override, 'keyword') ? override.keyword : keyword,
-        modelType: override && Object.prototype.hasOwnProperty.call(override, 'modelType') ? override.modelType : modelType,
+        modelType:
+          override && Object.prototype.hasOwnProperty.call(override, 'modelType') ? override.modelType : modelType,
         status: override && Object.prototype.hasOwnProperty.call(override, 'status') ? override.status : status,
         ability: override && Object.prototype.hasOwnProperty.call(override, 'ability') ? override.ability : ability,
         system: override && Object.prototype.hasOwnProperty.call(override, 'system') ? override.system : system,
@@ -232,8 +275,11 @@ const ModelMgr: React.FC = () => {
   );
 
   useEffect(() => {
-    // Initial page load.
+    // Position an affected model without entering edit mode.
     fetchList({ pageNum: 1, pageSize: pagination.pageSize });
+  }, [healthModelId]);
+
+  useEffect(() => {
     fetchOverviewStats();
   }, []);
 
@@ -345,6 +391,12 @@ const ModelMgr: React.FC = () => {
       payload: { id: record.id },
       success: () => {
         message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
+        const params = new URLSearchParams(location.search);
+        const editModelId = (location.state as { editModelId?: string } | null)?.editModelId;
+        if (params.get('healthModelId') === `${record.id}` || editModelId === `${record.id}`) {
+          params.delete('healthModelId');
+          navigate(`${location.pathname}${params.toString() ? `?${params}` : ''}`, { replace: true, state: null });
+        }
         fetchList({ pageNum: 1, pageSize: pagination.pageSize });
         fetchOverviewStats();
       },
@@ -467,8 +519,10 @@ const ModelMgr: React.FC = () => {
     (record: any) => {
       return (
         <ModelCardItem
+          className={healthModelId === `${record.id}` ? styles.healthTarget : undefined}
           intl={intl}
           record={record}
+          healthIndicator={<ModelHealthBadge user={currentUser} report={healthReport} modelId={record.id} />}
           abilityLabelMap={abilityLabelMap}
           modelTypeLabelMap={modelTypeLabelMap}
           onSetStatus={setStatusAction}
@@ -479,7 +533,7 @@ const ModelMgr: React.FC = () => {
         />
       );
     },
-    [abilityLabelMap, modelTypeLabelMap, formAction, intl, setDefaultAction]
+    [abilityLabelMap, modelTypeLabelMap, formAction, intl, setDefaultAction, currentUser, healthReport, healthModelId]
   );
 
   const loadNextPage = useCallback(() => {
@@ -508,6 +562,15 @@ const ModelMgr: React.FC = () => {
   return (
     <div className={`${styles.modelMgr} ${commonStyles.commonTabList}`}>
       <div className={classNames(commonStyles.tabContent, styles.pageContent)}>
+        <ModelHealthSummary user={currentUser} report={healthReport} />
+        {healthModelId && list.some((item) => `${item.id}` === healthModelId) && (
+          <div className={styles.healthHint}>
+            {intl.formatMessage({ id: 'modelMgr.health.focused' })}
+            <Button type="link" onClick={clearHealthTarget}>
+              {intl.formatMessage({ id: 'modelMgr.health.showAll' })}
+            </Button>
+          </div>
+        )}
         <ModelHeroPanel
           intl={intl}
           keyword={keyword}

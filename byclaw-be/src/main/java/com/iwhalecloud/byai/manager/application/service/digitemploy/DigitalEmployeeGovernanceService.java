@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.digitemploy;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -105,7 +106,7 @@ public class DigitalEmployeeGovernanceService {
 
     public void requireNotProtected(SsResource resource) {
         if (isProtected(resource)) {
-            throw new BaseException("adminvip 创建的数字员工仅允许 adminvip 维护");
+            throw new BaseException("employee.governance.adminvipOwner");
         }
     }
 
@@ -120,9 +121,15 @@ public class DigitalEmployeeGovernanceService {
             && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
     }
 
+    /** 企业副本下架后允许创建者或管理员注销；仅有管理授权不获得注销资格。 */
+    public boolean canDeleteOfficial(SsResource resource) {
+        return canMaintainOfficial(resource)
+            && Objects.equals(resource.getResourceStatus(), ResourceStatus.OFF_SHELF.getNum());
+    }
+
     public static void requireEnterpriseCreationAllowed(String ownerType) {
         if ("enterprise".equals(org.apache.commons.lang3.StringUtils.trim(ownerType)) && !isAdministrator()) {
-            throw new BaseException("仅 adminvip 和平台管理员可以创建企业数字员工");
+            throw new BaseException("employee.governance.enterpriseAdminOnly");
         }
     }
 
@@ -130,11 +137,11 @@ public class DigitalEmployeeGovernanceService {
         requireNotProtected(resource);
         if (isOfficialCopy(resource)) {
             if (!canAdministerOfficial(resource)) {
-                throw new BaseException("创建者的修改需提交更新审核，审核通过前在用版本保持不变");
+                throw new BaseException("employee.governance.reviewRequired");
             }
             // 调用方已锁定官方副本；申请准备同样锁定副本，避免旧候选版本覆盖直接保存的配置。
             if (publications.active(resource.getPublicationSourceId(), resource.getComAcctId()) != null) {
-                throw new BaseException("该员工已有未完成的更新申请，请先在审核中心处理或撤回申请后再保存");
+                throw new BaseException("employee.governance.pendingUpdate");
             }
         }
     }

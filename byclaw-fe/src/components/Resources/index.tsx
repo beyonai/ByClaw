@@ -1190,23 +1190,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           setCurrentItem(null);
         }}
         onSave={async (values: any) => {
-          // 保存编辑逻辑
-          console.log('保存编辑:', values);
-          try {
-            // 调用编辑接口
-            await updateResource(values);
-            message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
-            refreshList();
-            notifySiderResourceListReload();
-          } catch (error: any) {
-            console.error('保存失败:', error);
-            // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案
-            const beMsg = error?.msg || error?.message || (typeof error === 'string' ? error : '');
-            message.error(beMsg || intl.formatMessage({ id: 'common.saveFailed' }));
-          } finally {
-            setEditModalOpen(false);
-            setCurrentItem(null);
-          }
+          await updateResource(values);
+          message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
+          refreshList();
+          notifySiderResourceListReload();
+          setEditModalOpen(false);
+          setCurrentItem(null);
         }}
       />
       {authDrawerOpen && (

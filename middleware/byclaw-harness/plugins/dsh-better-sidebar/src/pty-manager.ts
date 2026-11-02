@@ -10,9 +10,43 @@ import { chmodSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { userInfo } from 'node:os'
-import type { IPty } from 'node-pty'
-import { loadRequiredNodePty, type NodePtyModule } from './pty-deps.ts'
+import { loadRequiredNodePty } from './pty-deps.ts'
 import { SidebarError } from './wire.ts'
+
+/**
+ * The slice of a node-pty `IPty` the terminal registries use. node-pty's
+ * own handles satisfy it unchanged (default mode); the tool-environment
+ * mode supplies an adapter over `ctx.subprocess.spawnTerminal`.
+ */
+export interface PtyProcess {
+  readonly cols: number
+  readonly rows: number
+  onData(listener: (data: string) => void): { dispose(): void }
+  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void }
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(signal?: string): void
+}
+
+/** Spawn options the registries pass (a subset of node-pty's fork options). */
+export interface PtySpawnOptions {
+  name: string
+  cols: number
+  rows: number
+  cwd: string
+  env: NodeJS.ProcessEnv
+}
+
+/** A terminal process factory: the loaded node-pty module, or a remote adapter. */
+export interface PtySpawner {
+  spawn(file: string, args: string[], options: PtySpawnOptions): PtyProcess
+}
+
+/** Environment a spawned terminal receives. Default mode: the host process environment, as always. */
+export type PtyEnvironment = () => NodeJS.ProcessEnv
+
+/** Today's terminal environment: a copy of the host process environment. */
+export const hostPtyEnvironment: PtyEnvironment = () => ({ ...process.env })
 
 /** Per-terminal transcript bound (bytes kept for replay). */
 const TRANSCRIPT_LIMIT = 1 << 20
@@ -53,7 +87,7 @@ export interface SidebarPty {
    *  the page-load hydrate race can attach the real cwd after the first
    *  connect, and a shell in the wrong directory must not linger). */
   cwd: string
-  pty: IPty
+  pty: PtyProcess
   /** Output accumulated since spawn (bounded; head dropped when over the limit). */
   transcript: string
   /** Whether the top-level process exited (transcript stays replayable). */
@@ -95,8 +129,10 @@ export class PtyManager {
     private readonly shell: string,
     private readonly maxPerSession: number,
     private readonly shellArgs: string[] = [],
-    /** The loaded node-pty module (injected so a broken install degrades instead of crashing the plugin). */
-    private readonly nodePty: NodePtyModule = loadRequiredNodePty(),
+    /** The loaded node-pty module (injected so a broken install degrades instead of crashing the plugin), or a remote terminal spawner. */
+    private readonly nodePty: PtySpawner = loadRequiredNodePty(),
+    /** Environment of each spawned terminal (default: the host process environment). */
+    private readonly environment: PtyEnvironment = hostPtyEnvironment,
   ) {}
 
   /** All live terminal keys of one session. */
@@ -158,7 +194,7 @@ export class PtyManager {
         cols: Math.max(2, Math.floor(cols)),
         rows: Math.max(2, Math.floor(rows)),
         cwd,
-        env: { ...process.env },
+        env: this.environment(),
       }),
       transcript: '',
       exited: false,

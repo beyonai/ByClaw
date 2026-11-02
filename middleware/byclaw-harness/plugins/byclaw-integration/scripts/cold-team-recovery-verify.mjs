@@ -124,9 +124,10 @@ try {
   const template = freshTurn()
   template.observe({ type: 'tool/call', data: { name: 'byclaw_instantiate_template', callId: 'template' } })
   await snapshot()
-  template.observe({ type: 'tool/result', data: { message: { content: [
-    { type: 'tool-result', toolCallId: 'template', isError: true, content: [] },
-  ] } } })
+  // DSH 0.2.1 answers a call with a tool-role message; the call id sits on the message.
+  template.observe({ type: 'tool/result', data: { message: {
+    role: 'tool', source: { kind: 'tool', callId: 'template' }, toolCallId: 'template', isError: true, content: [],
+  } } })
   answer(template, 1)
   assert.equal(template.waiting, false, 'team discovery cannot replace an existing template completion contract')
 

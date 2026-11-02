@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.session;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.dto.session.TemplateSessionQueryRequestDto;
@@ -21,7 +22,14 @@ import java.util.List;
  */
 public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
 
-    ByaiSession selectByIdForUpdate(@Param("sessionId") Long sessionId);
+    /** 写事务内先执行同值更新，再读取会话；并发写入串行处理至事务结束。 */
+    default ByaiSession selectByIdForUpdate(Long sessionId) {
+        serializeById(sessionId);
+        return selectById(sessionId);
+    }
+
+    @RedisTransactionLock(value = "session", parameters = {"sessionId"})
+    int serializeById(@Param("sessionId") Long sessionId);
 
     /**
      * 根据条件查询会话列表
@@ -66,4 +74,13 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
     int updateSessionNameWhenExtExists(@Param("sessionId") Long sessionId,
                                        @Param("sessionName") String sessionName, @Param("extParamCode") String extParamCode,
                                        @Param("updateBy") Long updateBy, @Param("updateTime") Date updateTime);
+
+    /**
+     * 仅在会话尚未产生用户问题时变更项目归属。
+     *
+     * @return 更新记录数；0 表示会话不存在、无权修改或已经开始问答
+     */
+    int updateDraftSessionProject(@Param("sessionId") Long sessionId,
+                                  @Param("projectId") Long projectId,
+                                  @Param("currentUserId") Long currentUserId);
 }

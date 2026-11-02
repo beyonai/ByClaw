@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.state.domain.session.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook;
+import org.springframework.transaction.annotation.Transactional;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.manager.qo.session.SessionByAgentQo;
@@ -15,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 import java.util.Map;
 
@@ -31,15 +35,31 @@ public class SessionMemberService {
     @Autowired
     private ByaiSessionMemberMapper byaiSessionMemberMapper;
 
+    @Autowired
+    private SharedQuotaAdmission quotaAdmission;
+
+    @Autowired
+    private MemberJoinedHook memberJoinedHook;
+
     /**
      * 保存会话成员
      *
      * @param byaiSessionMember 会话信息
      */
+    @Transactional(rollbackFor = Exception.class)
     public int save(ByaiSessionMember byaiSessionMember) {
-        return byaiSessionMemberMapper.insert(byaiSessionMember);
+        // All generic and group-specific writers share this final count-and-write boundary.
+        if (!quotaAdmission.admitPersistedGroupMember(byaiSessionMember.getSessionId(),
+            byaiSessionMember.getMemObjType(), byaiSessionMember.getMemObjId())) return 0;
+        int inserted = byaiSessionMemberMapper.insert(byaiSessionMember);
+
+        if (inserted == 1 && "USER".equals(byaiSessionMember.getMemObjType())) {
+            memberJoinedHook.memberSaved(byaiSessionMember);
+        }
+        return inserted;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public int batchSave(List<ByaiSessionMember> newMembers) {
         int i = 0;
         for (ByaiSessionMember byaiSessionMember : newMembers) {
@@ -59,7 +79,9 @@ public class SessionMemberService {
         byaiSessionMemberMapper.delete(queryWrapper);
     }
 
-    /** 按成员主键删除单条群成员。 */
+    /**
+     * 按成员主键删除单条群成员。
+     */
     public void deleteMember(Long memberId) {
         if (memberId != null) {
             byaiSessionMemberMapper.deleteById(memberId);
@@ -85,6 +107,7 @@ public class SessionMemberService {
         return byaiSessionMemberMapper.selectList(queryWrapper);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void appendSessionMembers(Long sessionId, List<ByaiSessionMember> byaiSessionMembers) {
 
         for (ByaiSessionMember byaiSessionMember : byaiSessionMembers) {
@@ -104,9 +127,9 @@ public class SessionMemberService {
     /**
      * 查询会话成员
      *
-     * @param sessionId 会话标识
+     * @param sessionId  会话标识
      * @param memObjType 成员对象类型
-     * @param memObjId 成员对象ID
+     * @param memObjId   成员对象ID
      * @return SessionMember
      */
     public ByaiSessionMember findSessionMember(Long sessionId, String memObjType, Long memObjId) {

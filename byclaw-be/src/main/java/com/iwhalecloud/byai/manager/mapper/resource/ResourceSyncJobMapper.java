@@ -12,18 +12,21 @@ import org.apache.ibatis.annotations.Update;
 public interface ResourceSyncJobMapper extends BaseMapper<ResourceSyncJob> {
     @Select("""
         SELECT * FROM byai.byai_resource_sync_job
-        WHERE ((status IN ('PENDING', 'PARTIAL', 'FAILED') AND next_retry_time <= CURRENT_TIMESTAMP)
-          OR (status = 'RUNNING' AND update_time < CURRENT_TIMESTAMP - INTERVAL '10 minutes'))
+        WHERE ((status IN ('PENDING', 'PARTIAL', 'FAILED', 'PENDING_V2', 'PARTIAL_V2', 'FAILED_V2')
+            AND next_retry_time <= CURRENT_TIMESTAMP)
+          OR (status IN ('RUNNING', 'RUNNING_V2') AND update_time < CURRENT_TIMESTAMP - INTERVAL '10' MINUTE))
           AND retry_count < 8 ORDER BY create_time LIMIT 20
         """)
     List<ResourceSyncJob> pending();
 
     @Update("""
-        UPDATE byai.byai_resource_sync_job SET status = 'RUNNING', retry_count = retry_count + 1,
+        UPDATE byai.byai_resource_sync_job SET status = 'RUNNING_V2', retry_count = retry_count + 1,
             update_time = CURRENT_TIMESTAMP
         WHERE sync_job_id = #{id} AND retry_count = #{attempt}
-          AND (status IN ('PENDING', 'PARTIAL', 'FAILED')
-            OR (status = 'RUNNING' AND update_time < CURRENT_TIMESTAMP - INTERVAL '10 minutes'))
+          AND retry_count < 8
+          AND ((status IN ('PENDING', 'PARTIAL', 'FAILED', 'PENDING_V2', 'PARTIAL_V2', 'FAILED_V2')
+              AND next_retry_time <= CURRENT_TIMESTAMP)
+            OR (status IN ('RUNNING', 'RUNNING_V2') AND update_time < CURRENT_TIMESTAMP - INTERVAL '10' MINUTE))
         """)
     int claim(@Param("id") Long id, @Param("attempt") Integer attempt);
 }

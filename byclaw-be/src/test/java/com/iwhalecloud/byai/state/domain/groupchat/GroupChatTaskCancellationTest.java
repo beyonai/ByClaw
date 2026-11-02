@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,7 +45,12 @@ import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAu
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 
 /** Uses real Spring transaction boundaries with mocked JDBC; no external services are contacted. */
-class GroupChatTaskCancellationTest {
+class GroupChatTaskCancellationTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private final GroupChatTaskAuthorizationService authorization = mock(GroupChatTaskAuthorizationService.class);
     private final GroupChatPendingPublicationStore pending = mock(GroupChatPendingPublicationStore.class);
@@ -72,7 +79,7 @@ class GroupChatTaskCancellationTest {
         task.setTargetAgentId(4L);
         task.setStatus("ACTIVE");
         task.setTurnStatus("RUNNING");
-        when(tasks.selectForUpdate(60L)).thenReturn(task);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(task);
         when(tasks.cancel(eq(60L), any())).thenReturn(1);
     }
 
@@ -99,11 +106,11 @@ class GroupChatTaskCancellationTest {
         ArgumentCaptor<StopChatDto> dto = ArgumentCaptor.forClass(StopChatDto.class);
         InOrder order = inOrder(authorization, tasks, connection, chat, pending, events);
         order.verify(authorization).requireCanceller(60L);
-        order.verify(tasks).selectForUpdate(60L);
+        order.verify(tasks).selectWithRedisLock(60L);
         order.verify(connection).commit();
         order.verify(chat).stopChat(dto.capture());
         order.verify(authorization).requireCanceller(60L);
-        order.verify(tasks).selectForUpdate(60L);
+        order.verify(tasks).selectWithRedisLock(60L);
         order.verify(tasks).cancel(eq(60L), any());
         order.verify(pending).clear(task, null);
         order.verify(connection).commit();
@@ -165,7 +172,7 @@ class GroupChatTaskCancellationTest {
 
     @Test
     void missingLockedTaskRejectsBeforeStop() {
-        when(tasks.selectForUpdate(60L)).thenReturn(null);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(null);
         assertThatThrownBy(() -> service.cancel(60L)).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(chat, pending, events);
     }

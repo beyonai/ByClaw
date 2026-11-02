@@ -18,6 +18,7 @@
 | `root` | `.devflow/spec` | 调用方未给出 root 时使用的默认 spec 根 |
 | `repoRoot` | `.` | anchor 文件路径解析所依据的仓库根 |
 | `maxNetGrowthBytes` | `8192` | 单次写入的**净**增长上限：新文件大小减去它取代的一切。合并通常为负因而恒过——把聚类合并按纯新增计费，恰恰会拒绝唯一能让集合缩小的动作。它预算的是可评审性而非上下文：正文从不成批到达模型，所以大文档的代价落在必须维护它为真的人身上。 |
+| `workspaceOnToolEnvironment` | `false` | 通过上下文的 `ctx.fs` / `ctx.subprocess` 读写文档与锚点源文件（`git` 也在那里运行），而不是本进程；同时设置绝对路径的 `root` 与 `repoRoot`。 |
 
 默认根位于 **`.devflow/` 之内**，而 `@zhchxiao123/dsh-devflow-fs-guard` 按目录名匹配，已经拒绝文件工具写入该子树。这不是巧合：它让本 store 成为**唯一写路径**，而不只是"本意如此"的写路径，且无需为它增加第二条守卫配置。
 

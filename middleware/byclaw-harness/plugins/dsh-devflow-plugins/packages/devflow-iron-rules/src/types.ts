@@ -30,13 +30,15 @@ declare module '@deepseek-ai/cordis' {
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'devflow-iron-rules': DevflowIronRulesSource
+    /** Check-failure and other non-resident messages this plugin injects. */
+    'plugin:devflow-iron-rules': { kind: 'plugin:devflow-iron-rules' }
   }
 }
 
 /**
  * The typed source stamped on every resident rule message.
  *
- * A dedicated source kind rather than the generic `{ kind: 'plugin' }`: the
+ * A dedicated source kind rather than the plain `{ kind: 'plugin:devflow-iron-rules' }`: the
  * digest has to survive into durable history so a later pre-step can decide
  * whether the visible context already carries the current rules, and a plugin
  * source has nowhere to put it. Model-visible text therefore holds no hidden

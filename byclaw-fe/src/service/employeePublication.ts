@@ -1,6 +1,15 @@
 import { GET, POST } from '@/service/common/request';
 import { getIntl, history } from '@umijs/max';
 
+export interface PublicationTarget {
+  orgId: string;
+  orgName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewerName?: string;
+  reviewedAt?: string;
+  comment?: string;
+  canReview?: boolean;
+}
 export interface Publication {
   requestId: string;
   sourceId: string;
@@ -9,6 +18,8 @@ export interface Publication {
   authorName: string;
   status: string;
   revision: number;
+  scopeUpdate?: boolean;
+  targets?: PublicationTarget[];
   updatedAt: string;
   reviewerName?: string;
   reviewedAt?: string;
@@ -89,7 +100,9 @@ export const publicationEntryLabel = (status?: string, updating = false) => {
 const base = '/byaiService/digitalEmployeePublication';
 export const getPublicationPendingCount = () => GET<number>(`${base}/pendingCount`);
 export const getPublicationCapabilities = () =>
-  GET<{ enabled: boolean; administrator: boolean; canCreateEnterprise: boolean }>(`${base}/capabilities`);
+  GET<{ enabled: boolean; administrator: boolean; reviewer?: boolean; canCreateEnterprise: boolean }>(
+    `${base}/capabilities`
+  );
 export const getPublication = (requestId: string) => GET<PublicationDetail>(`${base}/detail`, { requestId });
 
 /** 统一页面加载入口：只同步个人来源的未提交草稿，历史申请保持原快照。 */
@@ -101,9 +114,9 @@ export const getCurrentPublication = (resourceId: string) =>
 export const listPublications = (review: boolean, page = 1) =>
   GET<{ list: Publication[]; total: number }>(`${base}/list`, { review, page, size: 20 });
 export const publicationAction = (
-  action: 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'refreshTarget',
+  action: 'scope' | 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'refreshTarget',
   publication: Pick<Publication, 'requestId' | 'revision'>,
-  extra: { employee?: any; comment?: string } = {}
+  extra: { employee?: any; comment?: string; targetOrgIds?: string[] } = {}
 ) =>
   POST<PublicationDetail>(`${base}/${action}`, {
     requestId: publication.requestId,
@@ -154,3 +167,6 @@ export const downloadPublicationSkill = async (requestId: string, resourceId: st
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+
+export const getPublicationScopeOptions = () =>
+  GET<Array<{ orgId: string; parentOrgId: string; orgName: string }>>(`${base}/scopeOptions`);

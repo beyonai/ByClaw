@@ -96,7 +96,7 @@ class GroupChatTurnQueueTest extends I18nTestSupport {
         when(turns.selectFirstQueued(anyLong())).thenAnswer(call -> rows.stream()
             .filter(row -> row.getCandidateSessionId().equals(call.getArgument(0)) && "QUEUED".equals(row.getStatus()))
             .min(Comparator.comparing(ByaiGroupChatTurn::getExecutionId)).orElse(null));
-        when(turns.selectForUpdateById(anyLong())).thenAnswer(call -> find(call.getArgument(0)));
+        when(turns.selectCurrentById(anyLong())).thenAnswer(call -> find(call.getArgument(0)));
         when(turns.claim(anyLong(), any())).thenAnswer(call -> {
             ByaiGroupChatTurn row = find(call.getArgument(0));
             if (!"QUEUED".equals(row.getStatus())) { return 0; }
@@ -123,7 +123,7 @@ class GroupChatTurnQueueTest extends I18nTestSupport {
         coordinator.poll();
         assertThat(sent).containsExactly(11L, 13L);
         assertThat(later.getStatus()).isEqualTo("QUEUED");
-        verify(anchors, times(2)).selectForUpdateByCandidateSessionId(60L);
+        verify(anchors, times(2)).selectCurrentByCandidateSessionId(60L);
         first.setStatus("SUCCEEDED");
         coordinator.poll();
         assertThat(sent).containsExactly(11L, 13L, 12L);

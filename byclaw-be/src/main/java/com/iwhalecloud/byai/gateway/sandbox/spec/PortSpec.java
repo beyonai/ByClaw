@@ -18,4 +18,13 @@ public class PortSpec {
      * Endpoint from OpenSandbox may already contain scheme; if not, processor can apply this.
      */
     private String protocol;
+    /** Optional endpoint network: private or public. Null preserves the provider default. */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private String exposure;
+
+    public void setExposure(String exposure) {
+        if (exposure != null && !"private".equals(exposure) && !"public".equals(exposure))
+            throw new IllegalArgumentException("ports[].exposure must be private or public");
+        this.exposure = exposure;
+    }
 }

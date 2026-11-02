@@ -25,6 +25,9 @@ public final class GrantType {
      */
     public static final String ALLOW_MANAGE = "ALLOW_MANAGE";
 
+    /** Management application records never count as an effective permission. */
+    public static final String MANAGE_APPLY = "MANAGE_APPLY";
+
     /**
      * 管理授权
      */

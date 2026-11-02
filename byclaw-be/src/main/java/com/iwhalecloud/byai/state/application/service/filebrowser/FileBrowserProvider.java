@@ -13,6 +13,17 @@ public interface FileBrowserProvider {
 
     List<FileBrowserItemVo> list(String userCode, Long resourceId, String relativePath);
 
+    /** 复制时读取失败必须抛错，不能被当作空目录保存成功。 */
+    default List<FileBrowserItemVo> listForTransfer(String userCode, Long resourceId, String relativePath) {
+        return list(userCode, resourceId, relativePath);
+    }
+
+    /** 对象存储通过父级前缀判断目录；沙箱提供方可直接探测目标，避免依赖根目录可枚举。 */
+    default boolean folderExists(String userCode, Long resourceId, String parentPath, String folderName) {
+        return listForTransfer(userCode, resourceId, parentPath).stream()
+            .anyMatch(item -> item.isDir() && folderName.equals(item.getName()));
+    }
+
     void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception;
 
     InputStream download(String userCode, Long resourceId, String relativePath);

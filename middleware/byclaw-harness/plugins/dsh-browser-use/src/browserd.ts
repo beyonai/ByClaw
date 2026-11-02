@@ -1261,6 +1261,8 @@ export interface BrowserdOptions extends Omit<
   'driver' | 'desktopManager' | 'browserEnvironment' | 'keepBrowserAlive' | 'windowSize'
 > {
   readonly socketPath: string
+  /** Private listener inherited from the supervisor for first-use activation. */
+  readonly listenFd?: number
   readonly socketMode?: number
   readonly downloadRoot?: string
   readonly screenshotRoot?: string
@@ -1788,7 +1790,8 @@ export async function startBrowserd(options: BrowserdOptions): Promise<BrowserdS
       }
       server.once('error', onError)
       server.once('listening', onListening)
-      server.listen(options.socketPath)
+      if (options.listenFd !== undefined) server.listen({ fd: options.listenFd })
+      else server.listen(options.socketPath)
     })
     await chmod(options.socketPath, socketMode)
   } catch (error) {
@@ -1922,9 +1925,11 @@ async function main(): Promise<void> {
   for (const extensionPath of launchConfiguration.invalidExtensionPaths) {
     process.stderr.write(`browserd-extension-not-found:${extensionPath}\n`)
   }
+  const listenFd = readPositiveInteger(process.env.BYCLAW_BROWSER_LISTEN_FD)
   const server = await startBrowserd({
     socketPath,
     secret,
+    ...(listenFd !== undefined ? { listenFd } : {}),
     ...(process.env.BYCLAW_BROWSER_DOWNLOAD_ROOT ? { downloadRoot: process.env.BYCLAW_BROWSER_DOWNLOAD_ROOT } : {}),
     ...(process.env.BYCLAW_BROWSER_SCREENSHOT_ROOT ? { screenshotRoot: process.env.BYCLAW_BROWSER_SCREENSHOT_ROOT } : {}),
     ...(process.env.BYCLAW_BROWSER_EXECUTABLE_PATH ? { executablePath: process.env.BYCLAW_BROWSER_EXECUTABLE_PATH } : {}),
@@ -1953,6 +1958,7 @@ async function main(): Promise<void> {
     ...(desktopReadinessTimeoutMs !== undefined ? { desktopReadinessTimeoutMs } : {}),
     onBrowserLifecycle: event => reportBrowserLifecycle(event, generationFile),
   })
+  if (process.env.BYCLAW_BROWSER_READY_FILE) writeFileSync(process.env.BYCLAW_BROWSER_READY_FILE, "", { mode: 0o600 })
   const stop = () => {
     void server.close().finally(() => process.exit(0))
   }

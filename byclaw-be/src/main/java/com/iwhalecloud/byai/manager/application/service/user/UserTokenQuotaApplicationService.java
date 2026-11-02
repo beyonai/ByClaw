@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import java.util.Date;
 
 import com.alibaba.fastjson.JSON;
@@ -50,10 +51,10 @@ public class UserTokenQuotaApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public void assignQuota(Long userId, Long monthlyQuotaLimit, String remark) {
         if (userId == null || monthlyQuotaLimit == null) {
-            throw new IllegalArgumentException("userId和monthlyQuotaLimit不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("user.quota.required"));
         }
         if (monthlyQuotaLimit < 0) {
-            throw new IllegalArgumentException("月度额度不能小于0");
+            throw new IllegalArgumentException(I18nUtil.get("user.quota.nonnegative"));
         }
 
         Long operatorId = CurrentUserHolder.getCurrentUserId();

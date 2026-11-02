@@ -1,3 +1,4 @@
+import { showNasQuotaError } from '@/utils/nasQuota';
 import { useCallback, useEffect, useRef } from 'react';
 
 // @ts-ignore
@@ -422,7 +423,7 @@ function useHandler(props: IProps) {
         case `${SSEMessageType.error}`: {
           // 处理错误类型消息，设置查询消息为错误状态
           set(newAnswerMsg, 'messageState', IMessageState.Error);
-          set(newAnswerMsg, 'messageTip', get(substance, 'msg', ''));
+          set(newAnswerMsg, 'messageTip', showNasQuotaError(substance) || get(substance, 'msg', ''));
           set(newAnswerMsg, 'traceback', get(substance, 'traceback', ''));
 
           break;

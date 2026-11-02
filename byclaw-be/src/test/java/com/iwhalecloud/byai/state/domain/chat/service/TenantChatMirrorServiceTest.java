@@ -149,6 +149,13 @@ class TenantChatMirrorServiceTest {
         GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
         TenantChatMirrorService service = new TenantChatMirrorService(node, new ObjectMapper(),
             events);
+        var users = mock(com.iwhalecloud.byai.manager.domain.users.service.UserService.class);
+        var user = new com.iwhalecloud.byai.manager.entity.users.Users();
+        user.setUserId(7L);
+        user.setUserName("引用人当前用户名");
+        doReturn(List.of(user)).when(users).findByIds(org.mockito.ArgumentMatchers.anyCollection());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "messageDisplayService",
+            new com.iwhalecloud.byai.manager.domain.tenant.TenantGroupMessageDisplayService(users));
         AssistantChatDto dto = new AssistantChatDto();
         dto.getExtParams().put("tenantGroupTask", "12");
         doReturn(Map.of("publishMessageId", "99", "groupSessionId", "30", "sourceMessageId", "14",
@@ -157,7 +164,7 @@ class TenantChatMirrorServiceTest {
         Map<String, Object> stored = Map.of(
             "messageId", "99", "topicId", "14", "creatorName", "陈舵主的超级助手",
             "kind", "TASK_RESULT", "taskId", "12", "content", "已保存的公开回复",
-            "replyTo", Map.of("messageId", "14", "content", "你好"),
+            "replyTo", Map.of("messageId", "14", "content", "你好", "creatorId", "7", "speaker", Map.of("type", "user")),
             "resourceList", List.of(Map.of("resourceType", "HUMAN", "resourceId", "7")),
             "canAcknowledge", true, "createdAt", 1234L);
         doReturn(Map.of("messages", List.of(stored))).when(node).request(any(), eq("GET"),
@@ -193,9 +200,11 @@ class TenantChatMirrorServiceTest {
         assertThat(groupEvent.getValue().getString("topicId")).isEqualTo("14");
         assertThat(groupEvent.getValue()).containsEntry("kind", "TASK_RESULT")
             .containsEntry("taskId", "12").containsEntry("createdAt", 1234L)
-            .containsEntry("replyTo", stored.get("replyTo"))
             .containsEntry("resourceList", stored.get("resourceList"))
             .doesNotContainKey("canAcknowledge");
+        assertThat(new ObjectMapper().valueToTree(groupEvent.getValue()).path("replyTo").path("speaker")
+            .path("displayName").asText()).isEqualTo("引用人当前用户名");
+        assertThat(new ObjectMapper().valueToTree(stored).path("replyTo").path("speaker").has("displayName")).isFalse();
     }
 
     @Test

@@ -125,10 +125,12 @@ describe("durable schema tasks", () => {
     expect(r.status).toBe("NEEDS_ATTENTION");
     expect(s.execution.execute).not.toHaveBeenCalled();
   });
-  it("resumes after a committed marker without replaying SQL", async () => {
+  it("recovers a legacy fingerprint failure after commit without replaying SQL", async () => {
     const s = setup(),
       r = result();
     r.status = "RECONCILING";
+    r.errorCode = "SCHEMA_FINGERPRINT_MISMATCH";
+    r.failureStage = "VERIFY";
     s.marker({
       protocolVersion: 1,
       enterpriseId: "10",
@@ -139,6 +141,7 @@ describe("durable schema tasks", () => {
     await s.runner.run(r);
     expect(r.status).toBe("VERIFIED");
     expect(s.execution.verify).toHaveBeenCalledOnce();
+    expect(r.errorCode).toBeUndefined();
     expect(s.execution.execute).not.toHaveBeenCalled();
   });
   it("keeps a failed bundle until BE stores its report", async () => {

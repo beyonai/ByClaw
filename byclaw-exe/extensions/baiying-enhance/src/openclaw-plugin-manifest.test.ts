@@ -15,6 +15,7 @@ describe("openclaw plugin manifest", () => {
 
     expect(manifest.contracts?.tools).toEqual([
       "baiying_call",
+      "baiying_skills",
       "updateTaskPlan",
     ]);
     expect(manifest.contracts?.imageGenerationProviders).toEqual([

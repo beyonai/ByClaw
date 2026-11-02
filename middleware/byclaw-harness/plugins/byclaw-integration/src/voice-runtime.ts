@@ -8,6 +8,7 @@ import { transcribeAudio, validateMp3, MAX_ASR_BYTES, type AsrResult } from '@by
 import { generateSpeech } from '@byclaw/byclaw-tts/adapters'
 import type { AgentContext, AskAgentCommand } from '@byclaw/by-framework'
 import { resolveByClawInboundPath } from './inbound-context.ts'
+import { mediaArtifactIo, type ToolEnvironmentFiles } from './tool-environment-files.ts'
 
 export const ASR_NO_SPEECH_MESSAGE = '未识别到语音，请靠近麦克风后重试'
 
@@ -35,18 +36,51 @@ export function decodeVoiceBase64(value: unknown): Buffer {
     || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) throw new Error('ASR_AUDIO_INVALID')
   return validateMp3(Buffer.from(value, 'base64'))
 }
-async function inputAudio(voice: Record<string, unknown>, byRoot: string): Promise<Buffer> {
+async function inputAudio(voice: Record<string, unknown>, byRoot: string, files?: ToolEnvironmentFiles): Promise<Buffer> {
   if (voice['audioBase64'] !== undefined) return decodeVoiceBase64(voice['audioBase64'])
   const source = voice['filePath'] ?? voice['fileUrl']
   if (typeof source !== 'string' || !source.startsWith('/by/')) throw new Error('ASR_LOCAL_AUDIO_REQUIRED')
-  const root = await realpath(byRoot)
-  const path = await realpath(resolveByClawInboundPath(source, byRoot))
+  const canonical = (path: string) => files === undefined ? realpath(path) : files.realpath(path)
+  const root = await canonical(byRoot)
+  const path = await canonical(resolveByClawInboundPath(source, byRoot))
   const suffix = relative(root, path)
   if (!suffix || suffix === '..' || suffix.startsWith('..' + sep) || isAbsolute(suffix)
     || suffix.split(sep).some(part => part.startsWith('.') && part !== '.sessions' && part !== '.shared')) throw new Error('ASR_AUDIO_PATH_REJECTED')
+  if (files !== undefined) {
+    // The canonical path has no symlink left, so its lstat is the file itself.
+    const info = await files.lstat(path)
+    if (info?.type !== 'file' || (info.size ?? 0) > MAX_ASR_BYTES) throw new Error('ASR_AUDIO_SIZE_INVALID')
+    return validateMp3(await files.readBytes(path, MAX_ASR_BYTES))
+  }
   const info = await stat(path)
   if (!info.isFile() || info.size > MAX_ASR_BYTES) throw new Error('ASR_AUDIO_SIZE_INVALID')
   return validateMp3(await readFile(path))
+}
+
+/** Read the ASR transcript cache without following a symlinked cache file (`O_NOFOLLOW`). */
+async function readAsrCache(cached: string, files?: ToolEnvironmentFiles): Promise<AsrResult | undefined> {
+  if (files !== undefined) {
+    const info = await files.lstat(cached).catch(() => { throw new Error('ASR_CACHE_INVALID') })
+    if (info === undefined) return undefined
+    if (info.type !== 'file' || (info.size ?? 0) > 2 * 1024 * 1024) throw new Error('ASR_CACHE_INVALID')
+    let value: AsrResult
+    try { value = JSON.parse(await files.readText(cached)) as AsrResult } catch { throw new Error('ASR_CACHE_INVALID') }
+    if (typeof value.text !== 'string' || !value.text.trim()) throw new Error('ASR_CACHE_INVALID')
+    return value
+  }
+  try {
+    const file = await open(cached, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const info = await file.stat()
+      if (!info.isFile() || info.size > 2 * 1024 * 1024) throw new Error('ASR_CACHE_INVALID')
+      const value = JSON.parse(await file.readFile('utf8')) as AsrResult
+      if (typeof value.text !== 'string' || !value.text.trim()) throw new Error('ASR_CACHE_INVALID')
+      return value
+    } finally { await file.close() }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('ASR_CACHE_INVALID')
+    return undefined
+  }
 }
 export interface VoiceRuntimeOptions {
   byRoot: string
@@ -54,6 +88,11 @@ export interface VoiceRuntimeOptions {
   resolveModel(type: 'ASR' | 'TTS'): Promise<MediaModel>
   transcribe?: typeof transcribeAudio
   speak?: typeof generateSpeech
+  /**
+   * The user tree lives in a separate tool environment: read and write it there
+   * instead of on this host (`workspaceOnToolEnvironment`).
+   */
+  files?: ToolEnvironmentFiles
 }
 export interface PreparedVoice { command: AskAgentCommand; root: string; transcript: string }
 export class ByClawVoiceRuntime {
@@ -62,40 +101,36 @@ export class ByClawVoiceRuntime {
     const voice = byClawVoicePayload(command)
     if (!voice) return
     if (command.header.userCode !== this.options.userCode) throw new Error('ASR_SESSION_IDENTITY')
+    const files = this.options.files
     const root = voiceSessionRoot(this.options.byRoot, sessionId)
-    await mkdir(root, { recursive: true, mode: 0o700 })
-    const canonicalRoot = await realpath(root)
-    const canonicalByRoot = await realpath(this.options.byRoot)
+    const ensureDirectory = (path: string) => files === undefined ? mkdir(path, { recursive: true, mode: 0o700 }) : files.ensureDirectory(path)
+    const canonical = (path: string) => files === undefined ? realpath(path) : files.realpath(path)
+    await ensureDirectory(root)
+    const canonicalRoot = await canonical(root)
+    const canonicalByRoot = await canonical(this.options.byRoot)
     if (canonicalRoot !== join(canonicalByRoot, '.sessions', sessionId)) throw new Error('ASR_SESSION_PATH_REJECTED')
-    await mkdir(join(root, 'asr'), { recursive: true, mode: 0o700 })
-    if (await realpath(join(root, 'asr')) !== join(canonicalRoot, 'asr')) throw new Error('ASR_SESSION_PATH_REJECTED')
-    const bytes = await inputAudio(voice, this.options.byRoot)
+    await ensureDirectory(join(root, 'asr'))
+    if (await canonical(join(root, 'asr')) !== join(canonicalRoot, 'asr')) throw new Error('ASR_SESSION_PATH_REJECTED')
+    const bytes = await inputAudio(voice, this.options.byRoot, files)
     signal.throwIfAborted()
     const digest = createHash('sha256').update(command.header.messageId).update('\0').update(bytes).digest('hex')
     const cached = join(root, 'asr', `${digest}.json`)
-    let result: AsrResult | undefined
-    try {
-      const file = await open(cached, constants.O_RDONLY | constants.O_NOFOLLOW)
-      try {
-        const info = await file.stat()
-        if (!info.isFile() || info.size > 2 * 1024 * 1024) throw new Error('ASR_CACHE_INVALID')
-        const value = JSON.parse(await file.readFile('utf8')) as AsrResult
-        if (typeof value.text !== 'string' || !value.text.trim()) throw new Error('ASR_CACHE_INVALID')
-        result = value
-      } finally { await file.close() }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('ASR_CACHE_INVALID')
-    }
+    let result = await readAsrCache(cached, files)
     let artifact: { path: string; mimeType: string; bytes: number } | undefined
     if (!result) {
-      ;[artifact] = await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }])
+      ;[artifact] = await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }], ...(files === undefined ? [] : [mediaArtifactIo(files)]))
       const model = await this.options.resolveModel('ASR')
       const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(model.timeoutMs)])
       result = await (this.options.transcribe ?? transcribeAudio)(model, bytes, { signal: requestSignal })
       requestSignal.throwIfAborted()
-      const temporary = `${cached}.${randomUUID()}.tmp`
-      await writeFile(temporary, JSON.stringify({ ...result, artifact }), { flag: 'wx', mode: 0o600 })
-      await rename(temporary, cached)
+      if (files === undefined) {
+        const temporary = `${cached}.${randomUUID()}.tmp`
+        await writeFile(temporary, JSON.stringify({ ...result, artifact }), { flag: 'wx', mode: 0o600 })
+        await rename(temporary, cached)
+      } else {
+        // The tool environment's text write is atomic and replaces the whole file.
+        await files.writeText(cached, JSON.stringify({ ...result, artifact }))
+      }
     }
     signal.throwIfAborted()
     const text = `${result.text}\n\n[语音交互：请正常回答，并在末尾用 <voice_summary>简短口语摘要</voice_summary> 提供适合朗读的摘要。]`
@@ -116,7 +151,8 @@ export class ByClawVoiceRuntime {
       const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(model.timeoutMs)])
       const assets = await (this.options.speak ?? generateSpeech)(model, { text: spoken, format: 'mp3' }, { signal: requestSignal })
       requestSignal.throwIfAborted()
-      const [artifact] = await persistAssets(prepared.root, 'tts', assets)
+      const files = this.options.files
+      const [artifact] = await persistAssets(prepared.root, 'tts', assets, ...(files === undefined ? [] : [mediaArtifactIo(files)]))
       signal.throwIfAborted()
       if (!artifact) return normal
       const virtual = '/by/' + relative(this.options.byRoot, artifact.path).split(sep).join('/')

@@ -72,7 +72,7 @@ public class MenTaskController {
         }
         // 检查状态字段是否有效
         if (null != updateQo.getStatusCd() && !MenTaskStatusEnum.isValid(updateQo.getStatusCd())) {
-            return ResponseUtil.fail("statisCd is incorrect");
+            return ResponseUtil.failI18n("i18n.error.menTask.statisCd.invalid");
         }
         return menTaskService.updateTask(updateQo);
     }
@@ -102,7 +102,7 @@ public class MenTaskController {
     @Operation(summary = "创建待办的会话")
     public ResponseUtil createTaskConversation(@RequestBody MenTaskSessionQo taskSessionQo) {
         if (taskSessionQo.getTaskId() == null) {
-            return ResponseUtil.fail("taskId not empty");
+            return ResponseUtil.failI18n("i18n.error.menTask.taskId.required");
         }
         return menTaskService.createTaskConversation(taskSessionQo);
     }
@@ -132,7 +132,7 @@ public class MenTaskController {
     @Operation(summary = "分页查询会话任务列表")
     public ResponseUtil listTasksBySessionPage(@RequestBody MenTaskQueryQo queryQo) {
         if (null == queryQo.getSessionId() && null == queryQo.getPTaskId()) {
-            return ResponseUtil.fail("sessionId or pTaskId not empty");
+            return ResponseUtil.failI18n("i18n.error.menTask.sessionIdOrParent.required");
         }
         return ResponseUtil.successResponse(menTaskService.listTasksByPage(queryQo));
     }
@@ -147,7 +147,7 @@ public class MenTaskController {
     @Operation(summary = "批量获取资源组件")
     public ResponseUtil getResComList(@RequestBody MenResComQueryQo batchQueryQo) {
         if (CollectionUtils.isEmpty(batchQueryQo.getResComIds())) {
-            return ResponseUtil.fail("resComIds not empty");
+            return ResponseUtil.failI18n("i18n.error.menTask.resComIds.required");
         }
         return ResponseUtil.successResponse(menResComService.getResComBatch(batchQueryQo.getResComIds()));
     }

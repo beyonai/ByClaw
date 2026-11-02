@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
-import { IconCloseFill14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseFillRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { FloatWindow, SidebarTab } from './state.ts'
 import { FLOAT_MIN_H, FLOAT_MIN_W } from './state.ts'
 import { t } from './locales.ts'
@@ -264,7 +264,7 @@ export function FreeWindow(props: {
           aria-label={t('close')}
           onClick={(event) => { event.stopPropagation(); onClose() }}
         >
-          <IconCloseFill14 />
+          <IconCloseFillRegular />
         </button>
         <Menu
           open={menu !== null}

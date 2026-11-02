@@ -1,4 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
+
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,14 +27,28 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-class TenantChatRoutingAspectTest {
+class TenantChatRoutingAspectTest extends I18nTestSupport {
 
     private final TenantNodeClient node = mock(TenantNodeClient.class);
-    private final TenantChatRoutingAspect aspect = new TenantChatRoutingAspect(node);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
+    private final TenantChatRoutingAspect aspect = new TenantChatRoutingAspect(node, null, tenantModes);
 
     @AfterEach
     void clear() {
         TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void trialTenantUsesPublicChatWithoutCallingNode() throws Throwable {
+        TenantRequestContextHolder.set(new TenantRequestContext(8L, 456L, "MEMBER"));
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
+        ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
+        Object original = ResponseUtil.successResponse("trial");
+        when(call.proceed()).thenReturn(original);
+
+        assertThat(aspect.route(call)).isSameAs(original);
+        verify(tenantModes).isSharedDataTenant(456L);
+        org.mockito.Mockito.verifyNoInteractions(node);
     }
 
     @Test
@@ -56,6 +73,26 @@ class TenantChatRoutingAspectTest {
         assertThat(result.getData()).isNotNull();
         assertThat(((Page<?>) result.getData()).totalPages()).isEqualTo(3);
         verify(node).request(eq(context), eq("POST"), eq("/internal/v1/sessions/query"), any(), any());
+    }
+
+    @Test
+    void executionLinkUsesTheTenantMessagePositionAndRejectsMissingHistory() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(8L, 123L, "OWNER");
+        TenantRequestContextHolder.set(context);
+        var query = new com.iwhalecloud.byai.state.common.dto.MessageQo();
+        query.setSessionId(456L);
+        query.setMessageId(789L);
+        var target = new TenantNodeModels.MessageOutline("789", "assistant", 2, "run", "run", null,
+            null, 22, 40, false);
+        when(node.request(eq(context), eq("POST"), eq("/internal/v1/assiman/getMessageOutline"), any(), any()))
+            .thenReturn(java.util.List.of(target));
+        var controller = com.iwhalecloud.byai.state.interfaces.controller.showcase.ShowcaseController.class;
+        ResponseUtil<?> result = (ResponseUtil<?>) aspect.route(call(controller, "getMessageCountAndPosition", query));
+        assertThat(result.getData()).isEqualTo(java.util.Map.of("position", 22L, "totalCount", 40L));
+        query.setMessageId(790L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> aspect.route(call(controller, "getMessageCountAndPosition", query)))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
     }
 
     @Test

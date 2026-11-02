@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { Suspense, useState, type ReactNode } from 'react';
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import Markdown from '@/components/Markdown';
+import lazyHandler from '@/components/MessageList/lazyHandler';
+import { SSEMessageType } from '@/constants/message';
 import type { IMessage } from '@/typescript/message';
 import { getFinalAnswerProjection, getFinalContent } from '@/utils/finalAnswer';
 import { groupOrderedItems, isV2Message, mergeOrderedItems } from './ordered';
@@ -18,6 +20,8 @@ export default function FinalAnswerLayout({ msg, children }: Props) {
   const finalContent = msg.fromBeyond ? getFinalContent(msg.finalContent) : undefined;
   const ordered = isV2Message(msg);
   const projection = getFinalAnswerProjection(msg, finalContent, ordered);
+  // 复用注册器，以保留卡片加载完成后通知列表重新测量的行为。
+  const FileChanges = projection.afterFinalItems.length ? lazyHandler.lazyComp(SSEMessageType.fileChanges) : null;
 
   // 按去重前的分组判断：单轮思考与回答沿用原有入口，避免增加重复的折叠层级。
   const showSummary =
@@ -41,10 +45,19 @@ export default function FinalAnswerLayout({ msg, children }: Props) {
         </button>
       )}
       {showSummary && <hr key="final-divider" className={styles.finalDivider} />}
-      {children(projection)}
+      {children({
+        ...projection,
+        hiddenAnswerItems: new Set([...projection.hiddenAnswerItems, ...projection.afterFinalItems]),
+      })}
       {finalContent !== undefined && (
         <div key="final-content" className={styles.finalContent}>
           <Markdown msg={msg} text={finalContent} />
+          {FileChanges &&
+            projection.afterFinalItems.map((item) => (
+              <Suspense key={`${msg.msgId}_final-file-changes_${item.uuid}`}>
+                <FileChanges messageListItemContent={item.content} />
+              </Suspense>
+            ))}
         </div>
       )}
     </>

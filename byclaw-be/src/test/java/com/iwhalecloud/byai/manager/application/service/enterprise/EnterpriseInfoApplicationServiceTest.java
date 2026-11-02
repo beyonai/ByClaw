@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseInfoDTO;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseRemoveDTO;
 import com.iwhalecloud.byai.manager.dto.enterprise.EnterpriseSwitchDTO;
@@ -27,6 +28,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,6 +40,8 @@ class EnterpriseInfoApplicationServiceTest {
 
     private TenantUserMembershipService tenantUserMembershipService;
 
+    private TenantContextService tenantContextService;
+
     private LoginApplicationService loginApplicationService;
 
     private UserService userService;
@@ -48,11 +52,13 @@ class EnterpriseInfoApplicationServiceTest {
     void setUp() {
         enterpriseInfoService = mock(EnterpriseInfoService.class);
         tenantUserMembershipService = mock(TenantUserMembershipService.class);
+        tenantContextService = mock(TenantContextService.class);
         loginApplicationService = mock(LoginApplicationService.class);
         userService = mock(UserService.class);
         service = new EnterpriseInfoApplicationService();
         ReflectionTestUtils.setField(service, "enterpriseInfoService", enterpriseInfoService);
         ReflectionTestUtils.setField(service, "tenantUserMembershipService", tenantUserMembershipService);
+        ReflectionTestUtils.setField(service, "tenantContextService", tenantContextService);
         ReflectionTestUtils.setField(service, "loginApplicationService", loginApplicationService);
         ReflectionTestUtils.setField(service, "userService", userService);
         StaticMessageSource messageSource = new StaticMessageSource();
@@ -108,7 +114,8 @@ class EnterpriseInfoApplicationServiceTest {
 
     @Test
     void removeRejectsNonOwner() {
-        when(tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(7L, 21L)).thenReturn(null);
+        doThrow(new BaseException("enterprise.membership.required"))
+            .when(tenantContextService).validate(7L, 21L);
 
         EnterpriseRemoveDTO removeDTO = new EnterpriseRemoveDTO();
         removeDTO.setEnterpriseId(21L);
@@ -119,21 +126,16 @@ class EnterpriseInfoApplicationServiceTest {
     }
 
     @Test
-    void listUserEnterprisesIncludesDefaultEnterpriseWithoutMembership() {
+    void listUserEnterprisesPreservesCreationOrderIncludingDefaultEnterprise() {
         UserEnterpriseVo tenant = userEnterprise(21L, "Acme", "acme",
             TenantUserMembershipRole.MEMBER, "ACTIVE");
-        when(tenantUserMembershipService.listUserEnterprises(7L)).thenReturn(List.of(tenant));
-        when(enterpriseInfoService.findById(1L)).thenReturn(enterpriseInfo(1L, "Default", "default"));
+        UserEnterpriseVo defaultEnterprise = userEnterprise(1L, "Default", "default",
+            TenantUserMembershipRole.MEMBER, "ACTIVE");
+        when(tenantUserMembershipService.listUserEnterprises(7L))
+            .thenReturn(List.of(tenant, defaultEnterprise));
 
-        List<UserEnterpriseVo> enterprises = service.listUserEnterprises();
-
-        assertThat(enterprises).hasSize(2);
-        assertThat(enterprises.get(0).getEnterpriseId()).isEqualTo(1L);
-        assertThat(enterprises.get(0).getComAcctName()).isEqualTo("Default");
-        assertThat(enterprises.get(0).getComAcctCode()).isEqualTo("default");
-        assertThat(enterprises.get(0).getRole()).isEqualTo(TenantUserMembershipRole.MEMBER);
-        assertThat(enterprises.get(0).getStatus()).isEqualTo("ACTIVE");
-        assertThat(enterprises.get(1)).isSameAs(tenant);
+        assertThat(service.listUserEnterprises()).containsExactly(tenant, defaultEnterprise);
+        verify(enterpriseInfoService, never()).findById(1L);
     }
 
     @Test
@@ -171,7 +173,7 @@ class EnterpriseInfoApplicationServiceTest {
         switchDTO.setEnterpriseId(21L);
         HttpSession session = mock(HttpSession.class);
         when(enterpriseInfoService.findById(21L)).thenReturn(enterpriseInfo(21L, "Acme", "acme"));
-        when(tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(7L, 21L)).thenReturn(null);
+        doThrow(new BaseException("enterprise.membership.required")).when(tenantContextService).validate(7L, 21L);
 
         assertThatThrownBy(() -> service.switchTo(switchDTO, session))
             .isInstanceOf(BaseException.class)

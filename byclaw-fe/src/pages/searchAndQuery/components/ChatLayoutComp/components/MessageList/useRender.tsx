@@ -147,34 +147,37 @@ export default function useRender({
     );
   }, []);
 
-  const attachmentListRender = useCallback((msg: IMessage, canInteract = true) => {
-    const { fromBeyond, fromOtherUser, imageList, fileList, extParams } = msg;
+  const attachmentListRender = useCallback(
+    (msg: IMessage, canInteract = true) => {
+      const { fromBeyond, fromOtherUser, imageList, fileList, extParams } = msg;
 
-    const isLeftSide = fromBeyond || fromOtherUser;
+      const isLeftSide = fromBeyond || fromOtherUser;
 
-    const renderList = compact([
-      uploadFileRender(imageList, msg, canInteract),
-      uploadFileRender(fileList, msg, canInteract),
-      extParamsRender(extParams, msg),
-    ]);
+      const renderList = compact([
+        uploadFileRender(imageList, msg, canInteract),
+        uploadFileRender(fileList, msg, canInteract),
+        extParamsRender(extParams, msg),
+      ]);
 
-    if (isEmpty(renderList)) return null;
+      if (isEmpty(renderList)) return null;
 
-    return (
-      <div
-        className={classnames(
-          {
-            'ub-ps': isLeftSide,
-            'ub-pe': !isLeftSide,
-            'ub-ae': !isLeftSide,
-          },
-          'ub ub-ver full-width'
-        )}
-      >
-        {renderList}
-      </div>
-    );
-  }, [extParamsRender, uploadFileRender]);
+      return (
+        <div
+          className={classnames(
+            {
+              'ub-ps': isLeftSide,
+              'ub-pe': !isLeftSide,
+              'ub-ae': !isLeftSide,
+            },
+            'ub ub-ver full-width'
+          )}
+        >
+          {renderList}
+        </div>
+      );
+    },
+    [extParamsRender, uploadFileRender]
+  );
 
   const renderMessage = useCallback(
     (
@@ -277,7 +280,7 @@ export default function useRender({
                 <InfoCircleOutlined
                   className={classnames(styles.errorIcon, 'pointer')}
                   onClick={() => {
-                    setMyTitle(traceback ? messageTip : 'Error Tips');
+                    setMyTitle(traceback ? messageTip : intl.formatMessage({ id: 'ui.chat.errorDetails' }));
                     setMyContent(traceback || messageTip);
                     setOpen(true);
                   }}

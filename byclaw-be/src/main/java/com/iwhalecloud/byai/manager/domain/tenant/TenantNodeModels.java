@@ -191,10 +191,10 @@ public final class TenantNodeModels {
     public record GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                       List<MessageFileDto> files, String replyToMessageId,
                                       String creatorName, String coordinatorAgentId,
-                                      String coordinatorName, Boolean coordinatorAuthorized) implements CommandPayload {
+                                      String coordinatorName, Boolean coordinatorAuthorized, Boolean mentionAllUsers) implements CommandPayload {
         public GroupMessagePayload(String chatContent, List<ResourceVo> resourceList,
                                    List<MessageFileDto> files, String replyToMessageId, String creatorName) {
-            this(chatContent, resourceList, files, replyToMessageId, creatorName, null, null, null);
+            this(chatContent, resourceList, files, replyToMessageId, creatorName, null, null, null, null);
         }
     }
 

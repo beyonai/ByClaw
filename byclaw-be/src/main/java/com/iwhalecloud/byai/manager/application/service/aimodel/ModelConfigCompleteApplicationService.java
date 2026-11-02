@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.aimodel;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -101,7 +102,7 @@ public class ModelConfigCompleteApplicationService {
                 item.setStatus("SKIPPED");
                 item.setSource("NONE");
                 item.setConfidence("LOW");
-                item.getWarnings().add("未找到可验证的模型参数建议，已跳过");
+                item.getWarnings().add(I18nUtil.get("model.complete.noSuggestions"));
                 return item;
             }
 
@@ -231,11 +232,11 @@ public class ModelConfigCompleteApplicationService {
             suggestion.setConfidence("LOW");
         }
         if (suggestion.getContextTokens() != null && suggestion.getContextTokens() < 1000) {
-            suggestion.getWarnings().add("默认 LLM 返回的 contextTokens 小于 1000，已忽略");
+            suggestion.getWarnings().add(I18nUtil.get("model.complete.contextTooSmall"));
             suggestion.setContextTokens(null);
         }
         if (suggestion.getMaxTokens() != null && suggestion.getMaxTokens() < 1) {
-            suggestion.getWarnings().add("默认 LLM 返回的 maxTokens 小于 1，已忽略");
+            suggestion.getWarnings().add(I18nUtil.get("model.complete.maxTooSmall"));
             suggestion.setMaxTokens(null);
         }
         if (!MODEL_TYPE_LLM.equals(normalizeModelType(model.getModelType()))) {

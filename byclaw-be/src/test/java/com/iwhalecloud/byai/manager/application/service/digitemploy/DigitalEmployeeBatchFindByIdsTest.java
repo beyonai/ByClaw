@@ -60,7 +60,7 @@ import static org.mockito.Mockito.when;
  *         {@code findByIds} 被调用 1 次 (而非 3 次循环 findById).</li>
  * </ol>
  */
-class DigitalEmployeeBatchFindByIdsTest {
+class DigitalEmployeeBatchFindByIdsTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SsResExtToolKitMapper toolKitMapper;
     private SsResExtMcpMapper mcpMapper;

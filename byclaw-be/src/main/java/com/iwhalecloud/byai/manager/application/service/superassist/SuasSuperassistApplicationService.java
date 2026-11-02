@@ -220,6 +220,10 @@ public class SuasSuperassistApplicationService {
     private Long initDigEmployeeByTemplate(LoginInfo loginInfo, Long defaultDatasetId) {
         Long userId = loginInfo.getUserId();
         Long defaultDigEmployeeId = loginInfo.getDefaultDigEmployeeId();
+        // A historical deletion may leave a dangling preference. Keep valid custom defaults.
+        if (defaultDigEmployeeId != null && ssResourceService.findById(defaultDigEmployeeId) == null) {
+            defaultDigEmployeeId = null;
+        }
 
         // 获取初始化模板
         String paramCode = "INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE";
@@ -246,9 +250,19 @@ public class SuasSuperassistApplicationService {
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
             if (ssResource != null) {
+                boolean recoverDefault = defaultDigEmployeeId == null
+                    && (Constants.YES_VALUE_T.equalsIgnoreCase(isDefaultDigEmployee)
+                        || Constants.YES_VALUE_Y.equalsIgnoreCase(isDefaultDigEmployee));
+                if (recoverDefault && (!Objects.equals(String.valueOf(userId), ssResource.getManUserId())
+                    || !Constants.ResourceBizType.DIG_EMPLOYEE.equals(ssResource.getResourceBizType()))) {
+                    // Never repair a user's default by adopting or modifying another owner's resource.
+                    continue;
+                }
                 // 对技能进行对比
                 this.compareDigEmployee(ssResource, jsonObject, loginInfo, Collections.emptyList());
-
+                if (recoverDefault) {
+                    defaultDigEmployeeId = ssResource.getResourceId();
+                }
                 continue;
             }
 

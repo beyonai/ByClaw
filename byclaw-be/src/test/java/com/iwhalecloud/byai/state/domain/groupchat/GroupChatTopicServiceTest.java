@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,7 +25,7 @@ import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTopicService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
-class GroupChatTopicServiceTest {
+class GroupChatTopicServiceTest extends I18nTestSupport {
     private final ByaiMessageMapper messages = mock(ByaiMessageMapper.class);
     private final ByaiGroupChatTopicMapper topics = mock(ByaiGroupChatTopicMapper.class);
     private final SessionService sessions = mock(SessionService.class);

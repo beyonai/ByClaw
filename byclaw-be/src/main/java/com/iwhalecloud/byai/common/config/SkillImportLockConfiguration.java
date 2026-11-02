@@ -23,6 +23,15 @@ public class SkillImportLockConfiguration implements DisposableBean {
         return registry;
     }
 
+    @Bean
+    public RedisLockRegistry businessLockRegistry(RedisConnectionFactory connectionFactory) {
+        // The skill registry initializes the shared renewal scheduler before it is used.
+        skillImportLockRegistry(connectionFactory);
+        RedisLockRegistry registry = new RedisLockRegistry(connectionFactory, "BYAI:BUSINESS:LOCK", 60_000L);
+        registry.setRenewalTaskScheduler(renewalScheduler);
+        return registry;
+    }
+
     @Override
     public void destroy() {
         renewalScheduler.shutdown();

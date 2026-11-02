@@ -33,4 +33,16 @@ class ChatDeliveryLogControllerTest {
             .content(JSON.toJSONString(Map.of("events", List.of(event("be.ws_written"))))))
             .andExpect(status().isBadRequest());
     }
+    @Test
+    void acceptsOnlySafeReplyDiagnosticFields() throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(new TrackLogController()).build();
+        var reply = new java.util.HashMap<>(event("fe.reply_applied"));
+        reply.put("diagnostics", Map.of("invocationId", "inv", "frameId", "frame", "appliedMessageId", "answer"));
+        mvc.perform(post("/trackLogController/chatDelivery").contentType(MediaType.APPLICATION_JSON)
+            .content(JSON.toJSONString(Map.of("events", List.of(reply))))).andExpect(status().isOk());
+        reply.put("diagnostics", Map.of("prompt", "private-prompt"));
+        mvc.perform(post("/trackLogController/chatDelivery").contentType(MediaType.APPLICATION_JSON)
+            .content(JSON.toJSONString(Map.of("events", List.of(reply))))).andExpect(status().isBadRequest());
+    }
+
 }

@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.domain.devloop.service.IntegrationRunMessages;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -814,7 +815,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
      */
     private void applyIntegrationSuiteDto(IntegrationSuite suite, IntegrationSuiteDTO dto) {
         // 保存即过高危闸门:套件 runCommand 会在测试机上执行,含破坏性命令直接拒绝入库。
-        String hit = dangerousScriptGuard.detect("套件命令", dto.getRunCommand());
+        String hit = dangerousScriptGuard.detect(I18nUtil.get("devloop.script.suiteCommand"), dto.getRunCommand());
         if (hit != null) {
             throw new IllegalArgumentException(hit);
         }
@@ -951,7 +952,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         List<IntegrationSuite> enabledSuites = integrationSuiteService.listByProjectId(projectId).stream()
             .filter(s -> "1".equals(s.getEnabled())).collect(java.util.stream.Collectors.toList());
         if (enabledSuites.isEmpty()) {
-            return ResponseUtil.fail("项目下没有启用的测试用例集");
+            return ResponseUtil.fail(I18nUtil.get("devloop.suite.noneEnabled"));
         }
         Long operatorId = CurrentUserHolder.getCurrentUserId();
         List<Long> runIds = new java.util.ArrayList<>();
@@ -1259,7 +1260,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
     public ResponseUtil<Map<String, Object>> getIntegrationRun(Long runId) {
         IntegrationRun run = integrationRunService.getRun(runId);
         if (run == null) {
-            return ResponseUtil.fail("执行记录不存在: " + runId);
+            return ResponseUtil.fail(I18nUtil.get("devloop.integration.runMissing", String.valueOf(runId)));
         }
         List<IntegrationRunStep> steps = integrationRunService.listSteps(runId);
         return ResponseUtil.successResponse(runToResultVo(run, steps));
@@ -1360,7 +1361,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         map.put("totals", totals);
 
         map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
-        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("reason", StringUtils.defaultString(IntegrationRunMessages.localize(run.getReason())));
         map.put("resultDir", StringUtils.defaultString(run.getResultDir()));
         // suites 由 executor 解析 JUnit 后落 suites_json;无报告时为空数组。
         map.put("suites", StringUtils.isNotBlank(run.getSuitesJson()) ? JSON.parseArray(run.getSuitesJson())
@@ -1374,7 +1375,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         Map<String, Object> map = new HashMap<>();
         map.put("seq", s.getSeq());
         map.put("stepType", s.getStepType());
-        map.put("stepName", s.getStepName());
+        map.put("stepName", IntegrationRunMessages.localize(s.getStepName()));
         map.put("exitCode", s.getExitCode());
         map.put("status", s.getStatus());
         map.put("durationSec", s.getDurationSec());
@@ -1401,7 +1402,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         map.put("passed", passed);
         map.put("failed", nvl(run.getFailed()));
         map.put("kickbackTo", StringUtils.defaultString(run.getKickbackTo()));
-        map.put("reason", StringUtils.defaultString(run.getReason()));
+        map.put("reason", StringUtils.defaultString(IntegrationRunMessages.localize(run.getReason())));
         map.put("durationSec", run.getDurationSec());
         map.put("time", formatDateTime(run.getCreateTime()));
         map.put("createByName", resolveUserName(run.getCreateBy()));
@@ -2091,7 +2092,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         Long sessionId = updateTaskStatusDto.getSessionId();
         ByaiSessionExt byaiSessionExt = sessionExtService.findOneByExtParamCode(sessionId, "oploop_task_status");
         if (byaiSessionExt == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "Task not exists");
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("devloop.task.missing"));
         }
 
         byaiSessionExt.setExtParamValue(updateTaskStatusDto.getTaskStatus());
@@ -3163,7 +3164,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             taskType = normalizeTaskTypeFilter(query.getTaskType());
         } catch (IllegalArgumentException e) {
             // DTO 可能在无 Spring 上下文的场景执行，接口返回前统一把校验文案转换为当前语言。
-            String message = "创建时间开始值不能晚于结束值".equals(e.getMessage()) ? I18nUtil.get("devloop.task.date.range.invalid")
+            String message = I18nUtil.get("devloop.task.date.range.invalid").equals(e.getMessage()) ? I18nUtil.get("devloop.task.date.range.invalid")
                 : e.getMessage();
             return ResponseUtil.failRes(message);
         }
@@ -3423,11 +3424,11 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
 
     private DevloopTaskStateDto readTaskState(ByaiSession session) {
         if (session.getCreatorId() == null) {
-            throw new IllegalStateException("会话缺少创建者");
+            throw new IllegalStateException(I18nUtil.get("devloop.session.creatorMissing"));
         }
         LoginInfo owner = loginApplicationService.getLoginInfo(session.getCreatorId());
         if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
-            throw new IllegalStateException("无法解析会话创建者");
+            throw new IllegalStateException(I18nUtil.get("devloop.session.creatorUnresolved"));
         }
         return taskStateReader.read(owner.getUserCode(), session.getSessionId());
     }
@@ -4095,7 +4096,7 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
         if (dto.getTemplateId() != null) {
             requestedTemplate = operationTaskTemplateService.get(dto.getTemplateId());
             if (requestedTemplate == null) {
-                return ResponseUtil.failRes("任务模板不存在");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.template.notFound"));
             }
             effectiveOperationType = requestedTemplate.getTemplateType();
         }

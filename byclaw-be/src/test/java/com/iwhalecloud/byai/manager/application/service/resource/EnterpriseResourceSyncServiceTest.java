@@ -68,7 +68,8 @@ class EnterpriseResourceSyncServiceTest extends I18nTestSupport {
         service.completeImport(10L, request, false, response);
         verifyNoInteractions(grants, writes);
         assertThat(resource.getThirdSyncRevision()).isEqualTo(3L);
-        assertThat(response.get("association")).isEqualTo(java.util.Map.of("status", "PENDING", "jobId", "100"));
+        assertThat((java.util.Map<String, Object>) response.get("association"))
+            .containsEntry("status", "PENDING").containsEntry("jobId", "100").containsEntry("effective", false);
         assertThat(resource.getUseAuthControlled()).isNull();
     }
 
@@ -90,11 +91,78 @@ class EnterpriseResourceSyncServiceTest extends I18nTestSupport {
         verify(writes, never()).save(any());
     }
 
-    @Test void crossTenantResourcesAndDigitalPostsFailBeforeClearingAnything() {
+    @Test void foreignOrMissingTenantRejectsAnExistingEnterpriseResource() {
         resource.setComAcctId(2L);
+        assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
+        resource.setComAcctId(null);
+        assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void personalAndDeletedResourcesAndDigitalPostsStillFailBeforeClearingAnything() {
+        resource.setOwnerType("personal");
+        assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
+        resource.setOwnerType("enterprise"); resource.setResourceStatus(-1);
         assertThatThrownBy(() -> service.validateExisting(resource)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
             new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(), List.of(8L)))))
+            .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void activeUsersAndOrganizationsRequireTenantMappings() {
+        when(subjects.activeTenantUsers(List.of(5L), 1L)).thenReturn(List.of(5L));
+        when(subjects.organization(20L)).thenReturn(1);
+        when(subjects.tenantOrganization(20L, 1L)).thenReturn(1);
+        when(subjects.ordinaryPost(30L)).thenReturn(1);
+        service.validate(new EnterpriseResourceSyncRequest(true, true,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))));
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void missingOrInactiveDirectUsersStillFailBeforeReplacingGrants() {
+        when(subjects.activeTenantUsers(List.of(5L, 6L), 1L)).thenReturn(List.of(5L));
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, true,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L, 6L), List.of(), List.of()))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("授权用户不存在、已停用或不属于当前企业");
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void nonexistentOrganizationsStillFailBeforeReplacingGrants() {
+        assertThatThrownBy(() -> service.validate(new EnterpriseResourceSyncRequest(true, null,
+            new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(20L), List.of()))))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("授权组织不存在");
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void scopeExpansionCountsOnlyActiveTenantMembers() {
+        var userQueries = mock(UsersMapper.class);
+        ReflectionTestUtils.setField(service, "users", userQueries);
+        when(userQueries.findUserIdsByOrgIdListIncludingChildren(List.of(20L))).thenReturn(List.of(5L, 6L));
+        when(userQueries.findUserIdsByPostId(30L)).thenReturn(List.of(6L, 7L));
+        when(subjects.activeTenantUsers(List.of(5L, 6L, 7L), 1L)).thenReturn(List.of(5L, 7L));
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(true, false,
+            new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))), false, response);
+        assertThat(((java.util.Map<?, ?>) response.get("authorization")).get("scopeUserCount")).isEqualTo(2);
+        verify(writes, times(3)).save(any());
+    }
+
+    @Test void principalRequiresAuthenticatedAdministratorAndTenant() {
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(null);
+        assertThatThrownBy(service::requireSyncPrincipal).isInstanceOf(IllegalArgumentException.class);
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(1L);
+        var auth = (AuthApplicationService) ReflectionTestUtils.getField(service, "auth");
+        when(auth.isCurrentUserGlobalResourceManager()).thenReturn(false);
+        assertThatThrownBy(service::requireSyncPrincipal).isInstanceOf(IllegalArgumentException.class);
+        when(auth.isCurrentUserGlobalResourceManager()).thenReturn(true);
+        CurrentUserHolder.getLoginInfo().setUserId(0L);
+        assertThatThrownBy(service::requireSyncPrincipal).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void missingResourceTenantFailsBeforeCreatingJobs() {
+        resource.setComAcctId(null);
+        assertThatThrownBy(() -> service.completeImport(10L, new EnterpriseResourceSyncRequest(false, null, null), false, new HashMap<>()))
             .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(grants, writes);
     }
@@ -116,6 +184,47 @@ class EnterpriseResourceSyncServiceTest extends I18nTestSupport {
         assertThat(saved.getValue().getResultSummary()).contains("20");
         assertThat(saved.getValue().getAuthRefreshUserIds()).contains("7");
         verifyNoInteractions(grants, writes);
+    }
+
+    @Test void dispatchesOnlyAfterCommitAndReturnsTheEffectiveResult() {
+        var dispatcher = mock(ResourceSyncDispatcher.class);
+        ReflectionTestUtils.setField(service, "dispatcher", dispatcher);
+        var completed = java.util.Map.<String, Object>of("status", "COMPLETED", "jobId", "100", "effective", true);
+        when(dispatcher.dispatch(100L)).thenReturn(completed);
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), false, response);
+        verifyNoInteractions(dispatcher);
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCommit());
+        verify(dispatcher).dispatch(100L);
+        assertThat(response.get("association")).isSameAs(completed);
+        verify((AuthApplicationService) ReflectionTestUtils.getField(service, "auth"), never()).syncUsersAuthToRedis(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    void contentOnlyUpdateQueuesRefreshButKeepsExistingGrantsAndBindings(String type) {
+        resource.setResourceBizType(type);
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), true, response);
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
+        assertThat(saved.getValue().getPackageChanged()).isTrue();
+        assertThat(saved.getValue().getAssociationMode()).isEqualTo("NONE");
+        assertThat(saved.getValue().getAuthScope()).isNull();
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        verifyNoInteractions(grants, writes);
+    }
+
+    @Test void rolledBackImportDoesNotDispatchExternalRuntimeWork() {
+        var dispatcher = mock(ResourceSyncDispatcher.class);
+        ReflectionTestUtils.setField(service, "dispatcher", dispatcher);
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), false, new HashMap<>());
+        TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCompletion(
+            org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
+        verifyNoInteractions(dispatcher);
     }
 
     private PrivilegeGrant grant(Long id) {

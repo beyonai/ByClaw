@@ -66,6 +66,19 @@ test('runCommand preserves timeout diagnostics', async () => {
   assert.equal(result.stderr, '');
 });
 
+test('runCommand forwards stderr before process exit and retains both captured streams', async () => {
+  let streamed = false, completed = false;
+  const result = await runCommand(process.execPath, ['-e', `
+    process.stderr.write('processing\\n');
+    setTimeout(() => process.stdout.write('{"ok":true}'), 150);
+  `], 3000, { onStderr: chunk => {
+    assert.equal(completed, false); assert.equal(String(chunk), 'processing\n'); streamed = true;
+  } });
+  completed = true;
+  assert.equal(streamed, true); assert.equal(result.stderr, 'processing\n'); assert.equal(result.stdout, '{"ok":true}');
+  assert.equal(result.exitCode, 0);
+});
+
 test('healthy bridge performs only doctor followed by status without acquiring a lock', async t => {
   const runner = bridgeRunner([ready()]);
   const lockDir = await temporaryLock(t);

@@ -86,7 +86,7 @@ public class WorkgroupTemplateService {
                     WorkgroupTemplateResponse unavailable = new WorkgroupTemplateResponse();
                     unavailable.setTemplate(value);
                     unavailable.setAvailable(false);
-                    unavailable.setUnavailableReason("关联的数字员工资源当前不可用");
+                    unavailable.setUnavailableReason(I18nUtil.get("workgroup.template.resourcesUnavailable"));
                     unavailable.setEmployees(List.of());
                     result.add(unavailable);
                 }
@@ -103,10 +103,10 @@ public class WorkgroupTemplateService {
     public WorkgroupTemplateResponse requireEnabled(Long id, Long expectedVersion) {
         ByaiWorkgroupTemplate value = mapper.selectById(id);
         if (value == null || !ENABLED.equals(value.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工作组模板不存在或已停用");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("workgroup.template.inactive"));
         }
         if (expectedVersion != null && !expectedVersion.equals(value.getVersion())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作组模板已更新，请重新选择");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("workgroup.template.updated"));
         }
         return resolve(value);
     }
@@ -116,13 +116,13 @@ public class WorkgroupTemplateService {
         guard();
         ByaiWorkgroupTemplate value = id == null ? new ByaiWorkgroupTemplate() : mapper.selectById(id);
         if (id != null && value == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工作组模板不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("workgroup.template.notFound"));
         }
         if (id != null && request.getExpectedVersion() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "更新模板时必须提交版本号");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("workgroup.template.versionRequired"));
         }
         if (id != null && !request.getExpectedVersion().equals(value.getVersion())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作组模板已被修改");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("workgroup.template.conflict"));
         }
         SsResourceCatalog catalog = requireCatalog(request.getCatalogId());
         List<Long> resourceIds = request.getResourceIds().stream().distinct().toList();
@@ -163,10 +163,10 @@ public class WorkgroupTemplateService {
         guard();
         ByaiWorkgroupTemplate value = mapper.selectById(id);
         if (value == null || DISABLED.equals(value.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工作组模板不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("workgroup.template.notFound"));
         }
         if (expectedVersion == null || !expectedVersion.equals(value.getVersion())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作组模板已被修改");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("workgroup.template.conflict"));
         }
         value.setStatus(DISABLED);
         value.setVersion(value.getVersion() + 1);
@@ -202,7 +202,7 @@ public class WorkgroupTemplateService {
             runtime.getAgents().forEach(agent -> employees.putIfAbsent(agent.getId(), agent));
         }
         if (resources.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作组模板未配置数字员工资源");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("workgroup.template.resourcesRequired"));
         }
         response.setResources(resources);
         response.setEmployees(new ArrayList<>(employees.values()));
@@ -242,7 +242,7 @@ public class WorkgroupTemplateService {
 
     private void guard() {
         if (!canManage()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "仅开源版 adminvip 可管理工作组模板");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, I18nUtil.get("workgroup.template.adminOnly"));
         }
     }
 }

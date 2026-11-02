@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
 import { getFileUrl } from '@/utils/file';
@@ -33,7 +34,7 @@ export const resolveRelativeFilePath = (filePath: string, resourcePath: string) 
 };
 
 const normalizeResourceBlob = (blob: Blob, resourcePath: string) => {
-  if (!blob.size) throw new Error('Empty relative resource');
+  if (!blob.size) throw new Error(getIntl().formatMessage({ id: 'fileBrowser.preview.empty' }));
   const mimeType = getMimeType(resourcePath);
   return mimeType ? new Blob([blob], { type: mimeType }) : blob;
 };
@@ -77,7 +78,7 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
     requestUrl.searchParams.set('_previewTime', `${Date.now()}`);
 
     const request = fetch(requestUrl.toString(), { cache: 'no-store' }).then(async (response) => {
-      if (!response.ok) throw new Error(response.statusText);
+      if (!response.ok) throw new Error(getIntl().formatMessage({ id: 'common.requestFailed' }));
       const blob = await response.blob();
       return normalizeResourceBlob(blob, resourcePath);
     });
@@ -89,10 +90,10 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
 export const createRelativePathResourceResolver = (
   filePath: string,
   downloadResource: (resolvedPath: string) => Promise<Blob>
-): MarkdownImageResolver => {
+) => {
   const resourceCache = new Map<string, Promise<Blob>>();
 
-  return async (resourcePath) => {
+  return async (resourcePath: string) => {
     if (isExternalResourcePath(resourcePath)) return resourcePath;
 
     const resolvedPath = resolveRelativeFilePath(filePath, resourcePath);

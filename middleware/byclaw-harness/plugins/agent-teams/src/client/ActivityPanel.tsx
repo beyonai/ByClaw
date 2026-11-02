@@ -17,7 +17,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  IconBranchOutline16, IconCloseOutline16,
+  IconBranchOutlineRegular, IconCloseOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -33,6 +33,7 @@ import {
 } from './activity-model.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
 import { OPEN_PANEL_EVENT } from './AgentTeamsCard.tsx'
+import { currentSessionId } from './current-session.ts'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import css from './ActivityPanel.module.css'
 
@@ -308,7 +309,7 @@ function DependencyMap({ tasks }: { readonly tasks: readonly ActivityTask[] }) {
     <section className={css.dependencySection} aria-label="任务依赖链" data-dependency-map>
       <header className={css.sectionHead}>
         <button type="button" className={css.sectionToggleTitle} onClick={() => { setOpen((current) => !current) }} aria-expanded={open}>
-          <Chevron open={open} /><IconBranchOutline16 /> {parallel ? '并行任务' : '任务依赖'}
+          <Chevron open={open} /><IconBranchOutlineRegular size={16} /> {parallel ? '并行任务' : '任务依赖'}
         </button>
         <span className={css.sectionHint}>{pinnedTaskId === null
           ? parallel ? '无前后依赖 · 点击查看详情' : '悬停高亮依赖链 · 点击固定'
@@ -542,8 +543,8 @@ export function ActivityPanel({ sessionsList, openSession }: {
   const [historic, setHistoric] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
   const current = useSyncExternalStore(
     sessionsList.subscribe,
-    sessionsList.getSnapshot,
-  ).current
+    () => currentSessionId(sessionsList.getSnapshot()),
+  )
   const currentRef = useRef(current)
   useEffect(() => { currentRef.current = current }, [current])
   const mountedAtRef = useRef(performance.now())
@@ -715,7 +716,7 @@ export function ActivityPanel({ sessionsList, openSession }: {
               }}
               aria-label="关闭"
             >
-              <IconCloseOutline16 />
+              <IconCloseOutlineRegular size={16} />
             </button>
           </header>
           <div className={css.teams}>

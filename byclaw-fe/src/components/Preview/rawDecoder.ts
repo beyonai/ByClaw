@@ -6,6 +6,8 @@ import { MAX_RAW_BYTES, MAX_RAW_SENSOR_PIXELS } from './rawTypes';
 export async function openRawDocument(buffer: ArrayBuffer): Promise<ImageDocument> {
   if (!buffer.byteLength) throw new BinaryPreviewError('invalid');
   if (buffer.byteLength > MAX_RAW_BYTES) throw new BinaryPreviewError('limit');
+  if (typeof BigInt !== 'function' || typeof BigInt64Array !== 'function' || typeof BigUint64Array !== 'function')
+    throw new BinaryPreviewError('unsupported');
   const { loadRaw } = await import('./loadRaw');
   const decoder = await loadRaw();
   let disposed = false;

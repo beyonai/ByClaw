@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { loadImageReference, describeImageArtifacts, imageReferenceId } from './image-artifacts.js'
 import { persistAssets } from './artifacts.js'
+import { providerErrorMessage } from './provider-error.js'
 
 const imageFields = {
   referenceImage: { type: 'string', minLength: 1, maxLength: 1024, description: '用户要求修改所引用图片时必填：COMMON_FILE 引用的当前会话图片路径 /by/.sessions/<sessionId>/image/<文件名>，也兼容图片文件名；不接受 URL 或跨会话路径。' },
@@ -67,7 +68,8 @@ function connectorConfigurationError(kind, source, cause, connectorCode) {
   const message = effectiveSource === 'user-connector'
     ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; ${connector.name}连接器当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，检查并重新保存连接信息；配置完成前不要再次调用当前工具（原因：${reason}）。`
     : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; 系统默认${connector.name}当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，配置并启用个人连接器；配置完成前不要再次调用当前工具（原因：${reason}）。`
-  const error = new Error(message)
+  const details = kind === 'image' ? providerErrorMessage(cause) : undefined
+  const error = new Error(message + (details ? ` 供应商详情：${details}` : ''))
   error.code = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
   error.capability = kind === 'image' ? 'IMAGE' : 'TTS'
   error.connectorCode = effectiveConnectorCode
@@ -129,11 +131,15 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         }
         const root = current.host.resolveSessionRoot(String(current.agent.id))
         if (typeof root !== 'string' || !isAbsolute(root)) throw new Error('MEDIA_SESSION_ROOT_REQUIRED')
-        const canonical = await realpath(root)
+        // A host whose session tree is not on this machine (the shared DSH host keeps it in the
+        // user's tool sandbox) supplies the file operations; otherwise they are local.
+        const io = current.host.artifactIo
+        const canonical = await (io ?? { realpath }).realpath(root)
         const directory = join(canonical, kind)
-        await mkdir(directory, { recursive: true, mode: 0o700 })
-        if (await realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
-        await access(directory, constants.W_OK)
+        if (io) await io.mkdir(directory)
+        else await mkdir(directory, { recursive: true, mode: 0o700 })
+        if (await (io ?? { realpath }).realpath(directory) !== directory) throw new Error('MEDIA_ARTIFACT_DIRECTORY')
+        if (!io) await access(directory, constants.W_OK)
         exec.signal?.throwIfAborted()
         // Deployment-only compatibility overrides; never accepted from tool arguments.
         const model = await resolveModel()
@@ -142,7 +148,7 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         let assets
         try {
           const referenceImage = kind === 'image' && normalizedArgs.referenceImage !== undefined
-            ? await loadImageReference(root, normalizedArgs.referenceImage) : undefined
+            ? await loadImageReference(root, normalizedArgs.referenceImage, io) : undefined
           assets = await generate(model, normalizedArgs, { signal, ...(referenceImage ? { referenceImage } : {}) })
         } catch (error) {
           if (signal.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError'
@@ -154,8 +160,10 @@ export function mountMediaPlugin(ctx, { kind, generate, describe, modelId, provi
         const media = kind === 'tts' && !Array.isArray(assets) ? assets.assets : assets
         // Only an explicit recoverable control outcome can omit generated files.
         const unsupported = kind === 'tts' && media.length === 0 && warnings.length > 0
-        const artifacts = unsupported ? [] : await persistAssets(root, kind, media)
-        const imageArtifacts = kind === 'image' ? await describeImageArtifacts(root, artifacts, normalizedArgs, current.command.header.sessionId) : undefined
+        const artifacts = unsupported ? [] : await persistAssets(root, kind, media, ...(io ? [io] : []))
+        const imageArtifacts = kind === 'image'
+          ? await describeImageArtifacts(root, artifacts, normalizedArgs, current.command.header.sessionId, io && { io, sources: media })
+          : undefined
         const publicArtifacts = imageArtifacts ? artifacts.map((artifact, index) => ({ ...artifact, path: imageArtifacts[index].path })) : artifacts
         return { ...(imageArtifacts ? { imageArtifacts } : {}), provider: model.provider, model: model.model, artifacts: publicArtifacts,
           ...(kind === 'tts' ? { status: unsupported ? 'unsupported' : 'generated', warnings } : {}) }

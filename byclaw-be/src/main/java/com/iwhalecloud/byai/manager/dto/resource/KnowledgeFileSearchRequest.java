@@ -21,21 +21,21 @@ import lombok.Setter;
 @Setter
 public class KnowledgeFileSearchRequest {
 
-    @NotBlank(message = "检索文本不能为空")
+    @NotBlank(message = "{knowledge.search.textRequired}")
     private String query;
 
-    @NotEmpty(message = "知识库资源标识列表不能为空")
+    @NotEmpty(message = "{knowledge.resourceIds.required}")
     private List<Long> resourceIdList = new ArrayList<>();
 
     /** Agent DSL 过滤 AST。 */
     private Map<String, Object> where;
 
-    @NotBlank(message = "检索模式不能为空")
+    @NotBlank(message = "{knowledge.search.modeRequired}")
     private String searchMode;
 
     private List<String> metadataFieldList = new ArrayList<>();
 
-    @NotNull(message = "返回条数不能为空")
-    @Positive(message = "返回条数必须大于0")
+    @NotNull(message = "{knowledge.search.limitRequired}")
+    @Positive(message = "{knowledge.search.limitPositive}")
     private Integer topK;
 }

@@ -53,7 +53,7 @@ describe('ForwardingSandboxBashExecutor rtk composition', () => {
 
   it('wraps eligible commands before the sandbox confines them', async () => {
     const { bash, calls } = await setup({ mode: 'read-only' })
-    await bash.run(bash.resolve({ command: 'git status' }))
+    await (await bash.execute(bash.resolve({ command: 'git status' }))).result()
     expect(calls).toEqual([{
       argv: ['bash', '-c', 'rtk git status'],
       policy: { mode: 'read-only', workspaceRoot: resolve(process.cwd()) },
@@ -62,19 +62,19 @@ describe('ForwardingSandboxBashExecutor rtk composition', () => {
 
   it('leaves complex commands unchanged before confinement', async () => {
     const { bash, calls } = await setup({ mode: 'read-only' })
-    await bash.run(bash.resolve({ command: 'git status | grep x' }))
+    await (await bash.execute(bash.resolve({ command: 'git status | grep x' }))).result()
     expect(calls[0]?.argv).toEqual(['bash', '-c', 'git status | grep x'])
   })
 
   it('leaves non-whitelisted commands unchanged before confinement', async () => {
     const { bash, calls } = await setup({ mode: 'read-only' })
-    await bash.run(bash.resolve({ command: 'ls -la' }))
+    await (await bash.execute(bash.resolve({ command: 'ls -la' }))).result()
     expect(calls[0]?.argv).toEqual(['bash', '-c', 'ls -la'])
   })
 
   it('stamps sandbox facts on the result', async () => {
     const { bash } = await setup({ mode: 'read-only' })
-    const result = await bash.run(bash.resolve({ command: 'echo hi' }))
+    const result = await (await bash.execute(bash.resolve({ command: 'echo hi' }))).result()
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
   })
 
@@ -113,7 +113,7 @@ describe('ForwardingSandboxBashExecutor rtk composition', () => {
     ;(ctx.subprocess as LocalSubprocessRuntime).internals = { spillDir }
     await ctx.plugin(ForwardingSandboxBashExecutor, { graceMs: 200, rtkAvailable: false })
     const bash = ctx.shell as ForwardingSandboxBashExecutor
-    await bash.run(bash.resolve({ command: 'git status' }))
+    await (await bash.execute(bash.resolve({ command: 'git status' }))).result()
     expect(calls[0]?.argv).toEqual(['bash', '-c', 'git status'])
   })
 })

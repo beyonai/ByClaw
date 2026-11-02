@@ -143,7 +143,8 @@ public class FilesController {
                     bucketName, userCode, expectedBucket);
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json;charset=UTF-8");
-                response.getWriter().write("{\"code\":-1,\"msg\":\"无权访问该文件\"}");
+                response.getWriter().write(com.alibaba.fastjson.JSON.toJSONString(
+                    java.util.Map.of("code", -1, "msg", I18nUtil.get("file.preview.forbidden"))));
                 return;
             }
         }

@@ -33,6 +33,7 @@ export type RunningChatInfo = {
   chatContent?: string;
   runtimeSource?: string;
   runtimeStatus?: SessionRuntimeStatus;
+  runtimeInstanceId?: string;
   activeAgentCount?: number;
   activeChildCount?: number;
   waitingInteractionCount?: number;
@@ -48,6 +49,7 @@ export type SessionRuntimeState = {
   sessionId: string;
   traceId: string;
   source?: string;
+  runtimeInstanceId?: string;
   status: SessionRuntimeStatus;
   activeAgentCount: number;
   activeChildCount: number;
@@ -113,6 +115,7 @@ class ChatSessionRuntimeManager {
         sessionId: `${info.sessionId}`,
         traceId: `${info.traceId}`,
         source: info.runtimeSource,
+        runtimeInstanceId: info.runtimeInstanceId,
         status: info.runtimeStatus,
         activeAgentCount: Number(info.activeAgentCount || 0),
         activeChildCount: Number(info.activeChildCount || 0),
@@ -289,6 +292,7 @@ class ChatSessionRuntimeManager {
       sessionId: `${runtime.sessionId}`,
       traceId: `${runtime.traceId}`,
       source: runtime.source ? `${runtime.source}` : undefined,
+      runtimeInstanceId: runtime.runtimeInstanceId ? `${runtime.runtimeInstanceId}` : undefined,
       activeAgentCount: Number(runtime.activeAgentCount || 0),
       activeChildCount: Number(runtime.activeChildCount || 0),
       waitingInteractionCount: Number(runtime.waitingInteractionCount || 0),
@@ -301,8 +305,10 @@ class ChatSessionRuntimeManager {
     if (current) {
       if (current.status === 'cancelled' && current.traceId === normalized.traceId) return false;
       const sameTurn = current.source === normalized.source && current.traceId === normalized.traceId;
+      const sameRuntimeInstance = current.runtimeInstanceId === normalized.runtimeInstanceId;
       if (
-        (sameTurn && normalized.revision <= current.revision) ||
+        (sameTurn && sameRuntimeInstance && normalized.revision <= current.revision) ||
+        (sameTurn && !sameRuntimeInstance && normalized.changedAt < current.changedAt) ||
         (!sameTurn && normalized.changedAt < current.changedAt)
       ) {
         return false;

@@ -15,9 +15,9 @@ import lombok.Setter;
 @Setter
 public class KnowledgeGlobRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
-    @NotBlank(message = "匹配路径规则不能为空")
+    @NotBlank(message = "{knowledge.glob.patternRequired}")
     private String pathRule;
 }

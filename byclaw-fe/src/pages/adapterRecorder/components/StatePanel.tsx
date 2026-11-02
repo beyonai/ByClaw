@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 // 会话状态 —— 细 chip 带(state / sessionId / 目标 URL)。极简,只留对当前步骤有用的信息。
 import { isFailed } from '../constants/recorder';
 import type { SessionState } from '../types/recorder';
@@ -10,9 +11,10 @@ interface Props {
 }
 
 export default function StatePanel({ state, sessionId, targetUrl }: Props) {
+  const intl = useIntl();
   const failed = isFailed(state);
   return (
-    <div className="wb-statebar" aria-label="会话状态">
+    <div className="wb-statebar" aria-label={intl.formatMessage({ id: 'adapterRecorder.state.title' })}>
       <span className={`wb-chip wb-chip--state${failed ? ' wb-chip--err' : ''}`}>
         <span className="wb-chip__dot" aria-hidden />
         <span className="wb-chip__v">{state}</span>

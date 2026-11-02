@@ -17,7 +17,7 @@ import lombok.Setter;
 @Setter
 public class KnowledgeEntityEnrichRequest {
 
-    @NotNull(message = "知识库资源标识不能为空")
+    @NotNull(message = "{knowledge.resourceId.required}")
     private Long resourceId;
 
     /** KnowledgeEntity 文件路径；传入时优先于 directoryPath。 */
@@ -26,7 +26,7 @@ public class KnowledgeEntityEnrichRequest {
     /** KnowledgeEntity 目录路径，递归处理子目录；未传 filePath 时生效。 */
     private String directoryPath;
 
-    @Positive(message = "证据候选数必须大于 0")
+    @Positive(message = "{knowledge.enrichment.limitPositive}")
     private Integer topK = 20;
 
     private Boolean force = false;

@@ -12,6 +12,8 @@ describe('resolveConfig', () => {
       checkTimeoutMs: 120_000,
       checkOutputMaxChars: 2_000,
       maxRetries: 2,
+      projectRoot: undefined,
+      workspaceOnToolEnvironment: false,
     })
   })
 
@@ -22,7 +24,9 @@ describe('resolveConfig', () => {
       checkTimeoutMs: 5,
       checkOutputMaxChars: 9,
       maxRetries: 0,
-    })).toEqual({ root: '/tmp/rules', maxBytes: 1, checkTimeoutMs: 5, checkOutputMaxChars: 9, maxRetries: 0 })
+      projectRoot: '/by',
+      workspaceOnToolEnvironment: true,
+    })).toEqual({ root: '/tmp/rules', maxBytes: 1, checkTimeoutMs: 5, checkOutputMaxChars: 9, maxRetries: 0, projectRoot: '/by', workspaceOnToolEnvironment: true })
   })
 
   it.each([

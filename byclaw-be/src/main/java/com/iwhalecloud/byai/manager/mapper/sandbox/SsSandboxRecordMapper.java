@@ -243,6 +243,11 @@ public interface SsSandboxRecordMapper {
                          @Param("ownerScope") String ownerScope,
                          @Param("enterpriseId") Long enterpriseId);
 
+    /** Inventory IDs are supplied by the active runtime, never by the browser. */
+    List<SsSandboxRecord> selectInventoryPage(java.util.Map<String, Object> query);
+
+    int countInventory(java.util.Map<String, Object> query);
+
     int countEnterpriseUserSandbox(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
     /**
@@ -258,6 +263,16 @@ public interface SsSandboxRecordMapper {
                                             @Param("sandboxId") String sandboxId);
 
     SsSandboxRecord selectLatestBySandboxIdAnyUser(@Param("sandboxId") String sandboxId);
+
+    /**
+     * 根据沙箱实例ID和状态查询最新一条个人沙箱记录。
+     *
+     * @param sandboxId 沙箱实例ID
+     * @param status 沙箱状态
+     * @return 沙箱记录
+     */
+    SsSandboxRecord selectBySandboxIdAndStatus(@Param("sandboxId") String sandboxId,
+                                               @Param("status") String status);
 
     int updateAutoRelease(@Param("id") Long id,
                           @Param("autoRelease") Integer autoRelease,

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
 import java.util.ArrayList;
@@ -44,14 +46,14 @@ public class GroupChatTopicService {
     public void persistMessage(ByaiMessage message) {
         if (message.getMessageId() == null || message.getSessionId() == null || message.getCreateTime() == null
             || !isPublicMessage(message)) {
-            throw new IllegalArgumentException("Only public group messages can belong to a topic");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.topic.publicOnly"));
         }
         lockGroup(message.getSessionId());
         Long topicId = message.getMessageRef() == null ? message.getMessageId()
             : resolveTopic(message.getSessionId(), message.getMessageRef(), message.getMessageId());
         message.setTopicId(topicId);
         if (messageMapper.insert(message) != 1) {
-            throw new IllegalStateException("Group message was not inserted");
+            throw new IllegalStateException(I18nUtil.get("groupchat.message.saveFailed"));
         }
         if (message.getMessageRef() != null) {
             ByaiGroupChatTopic topic = new ByaiGroupChatTopic();
@@ -73,11 +75,11 @@ public class GroupChatTopicService {
         Long topicId;
         while (true) {
             if (visited.size() > MAX_LEGACY_CHAIN_LENGTH || !visited.add(currentId)) {
-                throw new GroupChatMessageRejectedException("Invalid or excessively deep group reply chain");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.chainInvalid"));
             }
             ByaiMessage current = messageMapper.selectByMessageId(currentId);
             if (current == null || !Objects.equals(sessionId, current.getSessionId()) || !isPublicMessage(current)) {
-                throw new GroupChatMessageRejectedException("Referenced group message not found");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.messageMissing"));
             }
             if (current.getTopicId() != null) {
                 topicId = current.getTopicId();

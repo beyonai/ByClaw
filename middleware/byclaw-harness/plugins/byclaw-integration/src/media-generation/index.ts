@@ -15,16 +15,22 @@ import {
   type ResolvedMediaModel,
 } from './runtime-config.ts'
 import { loadSystemDefaultMediaModel, type MediaModelRedis } from './system-model.ts'
+import type { ToolEnvironmentFiles } from '../tool-environment-files.ts'
 
 interface MediaRuntimeOptions {
   redis: MediaModelRedis
+  /** Connector projection root; defaults to `/by/.connector-auth/.model`. */
+  projectionRoot?: string
+  /** The user tree lives in a separate tool environment (`workspaceOnToolEnvironment`). */
+  files?: ToolEnvironmentFiles
 }
 
 async function mediaModel(options: MediaRuntimeOptions, capability: MediaCapability): Promise<ResolvedMediaModel> {
   return resolveMediaModelFromProjection({
     capability,
-    projectionPath: resolveMediaProjectionPath(capability),
+    projectionPath: resolveMediaProjectionPath(capability, process.env, options.projectionRoot),
     loadSystemDefault: () => loadSystemDefaultMediaModel(options.redis, capability),
+    ...(options.files === undefined ? {} : { files: options.files }),
   })
 }
 
@@ -70,7 +76,7 @@ export function registerMediaGenerationTools(ctx: Context, options: MediaRuntime
         if (model.source === 'system-default') return configurationRequired('IMAGE', error)
         throw error
       }
-      const artifacts = await Promise.all(generated.map(image => saveMediaArtifact(workspace, 'image', image.bytes, image.mimeType)))
+      const artifacts = await Promise.all(generated.map(image => saveMediaArtifact(workspace, 'image', image.bytes, image.mimeType, options.files)))
       return { json: JSON.stringify({ source: model.source, model: model.modelName, artifacts }) }
     },
   }))
@@ -119,11 +125,11 @@ export function registerMediaGenerationTools(ctx: Context, options: MediaRuntime
         throw error
       }
       const [artifact, wordTimingArtifact] = await Promise.all([
-        saveMediaArtifact(workspace, 'audio', generated.bytes, generated.mimeType),
+        saveMediaArtifact(workspace, 'audio', generated.bytes, generated.mimeType, options.files),
         saveWordTimingArtifact(workspace, generated.wordTimings, {
           text: args.text,
           providerRequestId: generated.providerRequestId,
-        }),
+        }, options.files),
       ])
       return { json: JSON.stringify({
         source: model.source,

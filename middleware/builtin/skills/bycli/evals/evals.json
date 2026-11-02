@@ -162,6 +162,36 @@
       "prompt": "修复并升级 byCLI 后，微信 Runner 返回 OPERATION_ALREADY_FINALIZED。删除 Gate state、换输出目录或加 verification-confirmed 能恢复这次操作吗？",
       "expected_output": "不能。工具升级不重置 terminal fingerprint 或重试预算。保留首次结果与现有产物，不删 state、不改参数/输出路径或创建新 fingerprint 绕过终态，也不添加 verification-confirmed。读取已有结果并如实报告 succeeded/partial/failed/unknown；认证等待的旧 TAB 不自动刷新，不确定写不重放。",
       "files": []
+    },
+    {
+      "id": 31,
+      "prompt": "把这份正文和两张图片发到知乎，带封面，内容包含 AI 辅助创作。",
+      "expected_output": "读取 zhihu reference，动态发现 article-draft/article-publish 的实际帮助。按授权准备、保存并重开核对平台草稿，复用本任务 operation，配图顺序与封面按用户输入，AI 声明为 yes。准备不带 user-confirmed。展示具体草稿并等待用户明确发布确认，之后才单独 submit --execute --user-confirmed。prepared 不称为已发布；后续按真实 article ID 查询 content-status/content-stats，不重放未知提交。",
+      "files": []
+    },
+    {
+      "id": 32,
+      "prompt": "视频已经在知乎发表了，后台返回的是 pin，帮我查这七天的数据。",
+      "expected_output": "读取 zhihu reference 并发现 content-stats；保留真实 pin 类型和精确 ID/URL，不改成 zvideo，按该命令帮助构造目标。说明默认七天包含上海今日，按用户要求选择累计或 period 口径；保留 overview、trend、aggregate_scope、缺失指标和采集时间，区分浏览与播放。",
+      "files": []
+    },
+    {
+      "id": 33,
+      "prompt": "查询视频号今天刚发表的 export/精确管理ID 的当前播放和收藏，没有本地发布记录。",
+      "expected_output": "读取 weixin-channels 和 weixin references，动态发现 video-stats，独立查询通过微信 Runner，以精确 export/... ID 查询当前累计值，不要求 operation，不走截至昨日的 posts 日期筛选，不换成公众号 token。保留 collections=null 和 not_exposed_by_verified_backend，不把喜欢当收藏或填零。",
+      "files": []
+    },
+    {
+      "id": 34,
+      "prompt": "视频号发布结果是 submit_unknown、submitted=true，随后我完成了验证码。再点一次发布并查管理 ID 吧。",
+      "expected_output": "保留原 operation 和编辑页，不重按发布、不换路径或删除 Gate 状态。人工验证确认不等于重放提交授权。仅按精确管理 ID 走 video-status 的只读浏览器分支，通过 Runner --selected-mode browser 查询；后台 published、公开链接可见、指标可读分别报告。",
+      "files": []
+    },
+    {
+      "id": 35,
+      "prompt": "把这个视频和两张封面发到百家号，再读取播放互动数据；顺便下载我给的另一个好看公开视频链接。",
+      "expected_output": "读取 baijiahao reference 并动态发现命令。先 video-publish prepare 保存并重开核对平台草稿，保留同一 operation，展示草稿后等待明确确认再单独 submit --execute --user-confirmed。只用 status 核对未知提交，按精确管理 ID 读取 video-stats，不用 nid 代替 id，保留 as_returned 口径和缺失 null。独立 video-download 仅下载正式公开视频到授权目录，拒绝草稿预览和覆盖已有文件；不套微信 Runner。",
+      "files": []
     }
   ]
 }

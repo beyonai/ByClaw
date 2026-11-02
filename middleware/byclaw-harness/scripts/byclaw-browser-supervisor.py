@@ -9,10 +9,12 @@ import os
 from pathlib import Path
 import pwd
 import secrets
+import select
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from typing import Sequence
 
@@ -106,9 +108,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--browserd-command", default="")
     parser.add_argument("--bycli-daemon-command", default="")
     parser.add_argument("--bycli-status-command", default="")
+    parser.add_argument("--bycli-doctor-command", default="")
     parser.add_argument("--bycli-health-interval", type=float, default=30.0)
     parser.add_argument("--bycli-command-timeout", type=float, default=3.0)
     parser.add_argument("--prepare-command", default="")
+    parser.add_argument("--secret-file", default="")
+    # On demand, hold byCLI's TCP port until first use: a client that reaches byCLI over
+    # the network (BE's account login and recorder) starts the browser like the socket does.
+    parser.add_argument("--activation-port", type=int, default=0)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     if options.command[:1] == ["--"]:
@@ -121,6 +128,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error("byCLI health interval must be positive")
     if options.bycli_command_timeout <= 0:
         parser.error("byCLI command timeout must be positive")
+    if not 0 <= options.activation_port <= 65535:
+        parser.error("activation port must be a TCP port")
     return options
 
 
@@ -157,11 +166,27 @@ def secret_pipe(secret: bytes) -> int:
     return read_fd
 
 
+def write_secret_file(path: Path, secret: bytes, account: pwd.struct_passwd) -> None:
+    """Leave the broker secret where SSH sessions of the browser user can read it.
+
+    A tool sandbox serves its browser to commands that arrive over SSH, which
+    cannot inherit the descriptor the supervisor hands to its own child.
+    """
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    try:
+        os.write(fd, secret)
+        os.fchown(fd, account.pw_uid, account.pw_gid)
+    finally:
+        os.close(fd)
+
+
 def spawn(
     command: Sequence[str],
     environment: dict[str, str],
     account: pwd.struct_passwd,
     pass_fd: int | None = None,
+    listen_fd: int | None = None,
 ) -> subprocess.Popen[bytes]:
     child_environment = dict(environment)
     child_environment["HOME"] = account.pw_dir
@@ -173,8 +198,7 @@ def spawn(
         "start_new_session": True,
         "preexec_fn": drop_privileges(account),
     }
-    if pass_fd is not None:
-        kwargs["pass_fds"] = (pass_fd,)
+    kwargs["pass_fds"] = tuple(fd for fd in (pass_fd, listen_fd) if fd is not None)
     return subprocess.Popen(list(command), **kwargs)  # type: ignore[arg-type]
 
 
@@ -195,12 +219,12 @@ def acquire_browser_profile_lock(
     return descriptor
 
 
-def bycli_bridge_ready(
+def bycli_report(
     command: Sequence[str],
     environment: dict[str, str],
     account: pwd.struct_passwd,
     timeout: float,
-) -> bool:
+) -> dict:
     child_environment = dict(environment)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
@@ -217,10 +241,20 @@ def bycli_bridge_ready(
             check=False,
         )
         if result.returncode != 0:
-            return False
+            return {}
         payload = json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, TypeError):
-        return False
+    except (subprocess.TimeoutExpired, ValueError, OSError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def bycli_bridge_ready(
+    command: Sequence[str],
+    environment: dict[str, str],
+    account: pwd.struct_passwd,
+    timeout: float,
+) -> bool:
+    payload = bycli_report(command, environment, account, timeout)
     return bool(
         isinstance(payload, dict)
         and payload.get("state") == "ready"
@@ -232,6 +266,20 @@ def bycli_bridge_ready(
     )
 
 
+def bycli_extension_checks(report: dict) -> dict[str, bool]:
+    capabilities = report.get("extensionCapabilities")
+    connectivity = report.get("connectivity")
+    return {
+        "daemonRunning": report.get("daemonRunning") is True,
+        "extensionConnected": report.get("extensionConnected") is True,
+        "daemonCurrent": report.get("daemonStale") is not True,
+        "connectivity": isinstance(connectivity, dict) and connectivity.get("ok") is True,
+        "extensionBuildVerified": report.get("extensionBuildVerified") is True,
+        "uploadReady": report.get("uploadReady") is True,
+        "dialog-policy-v1": isinstance(capabilities, list) and "dialog-policy-v1" in capabilities,
+    }
+
+
 def wait_for_bycli_bridge(
     command: Sequence[str],
     environment: dict[str, str],
@@ -239,8 +287,10 @@ def wait_for_bycli_bridge(
     browser_process: subprocess.Popen[bytes],
     timeout: float,
     command_timeout: float,
+    doctor_command: Sequence[str] | None = None,
 ) -> None:
     deadline = time.monotonic() + timeout
+    checks = None
     while time.monotonic() < deadline:
         returncode = browser_process.poll()
         if returncode is not None:
@@ -249,8 +299,25 @@ def wait_for_bycli_bridge(
         if bycli_bridge_ready(
             command, environment, account, min(command_timeout, max(remaining, 0.01))
         ):
-            return
+            if doctor_command is None:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            doctor = bycli_report(
+                doctor_command, environment, account, min(max(command_timeout, 10.0), remaining)
+            )
+            current_checks = bycli_extension_checks(doctor)
+            # Keep the last structured result if a final probe exhausts the deadline.
+            if doctor or checks is None:
+                checks = current_checks
+            if all(current_checks.values()) and time.monotonic() <= deadline and browser_process.poll() is None:
+                report_bycli_status("local extension verified " + json.dumps(checks, sort_keys=True))
+                return
         time.sleep(min(0.05, max(deadline - time.monotonic(), 0)))
+    if checks is not None:
+        failed = ",".join(name for name, ready in checks.items() if not ready) or "deadline"
+        raise RuntimeError(f"browser-supervisor-bycli-extension-verification-timeout:{failed}")
     raise RuntimeError("browser-supervisor-bycli-readiness-timeout")
 
 
@@ -317,6 +384,55 @@ def wait_for_broker(
     raise RuntimeError("browser-supervisor-browserd-readiness-timeout")
 
 
+def accept_pending(listener: socket.socket) -> list[socket.socket]:
+    """Every connection already waiting on a non-blocking listener."""
+    accepted = []
+    while True:
+        try:
+            connection, _address = listener.accept()
+        except (BlockingIOError, InterruptedError):
+            return accepted
+        connection.setblocking(True)
+        accepted.append(connection)
+
+
+def relay_to_port(client: socket.socket, port: int, timeout: float) -> None:
+    """In the background, hand a held connection to whatever now listens on `port`."""
+
+    def pump(source: socket.socket, target: socket.socket) -> None:
+        try:
+            while data := source.recv(65536):
+                target.sendall(data)
+        except OSError:
+            pass
+        finally:
+            try:
+                target.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    def run() -> None:
+        deadline = time.monotonic() + timeout
+        upstream = None
+        while upstream is None:
+            try:
+                upstream = socket.create_connection(("127.0.0.1", port), timeout=1)
+            except OSError:
+                if time.monotonic() >= deadline:
+                    client.close()
+                    return
+                time.sleep(0.05)
+        upstream.settimeout(None)
+        back = threading.Thread(target=pump, args=(upstream, client), daemon=True)
+        back.start()
+        pump(client, upstream)
+        back.join()
+        client.close()
+        upstream.close()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def normalized_returncode(returncode: int | None) -> int:
     if returncode is None:
         return 1
@@ -326,11 +442,21 @@ def normalized_returncode(returncode: int | None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    startup_started = time.monotonic()
     enable_child_subreaper()
     options = parse_args(sys.argv[1:] if argv is None else argv)
     browser_account = identity(options.browser_user)
     dsh_account = identity(options.dsh_user)
     socket_path = Path(options.socket_path)
+    startup = os.environ.get("BYCLAW_BROWSER_STARTUP", "eager")
+    if startup not in {"eager", "on-demand"}:
+        raise RuntimeError("browser-supervisor-invalid-startup")
+    activation_socket: socket.socket | None = None
+    activation_listener: socket.socket | None = None
+    ready_path = Path(str(socket_path) + ".ready")
+    activated_path = Path(str(socket_path) + ".activated")
+    ready_path.unlink(missing_ok=True)
+    activated_path.unlink(missing_ok=True)
     viewer = os.environ.get("BYCLAW_BROWSER_VIEWER", "none")
     if viewer not in {"none", "novnc", "shared-novnc"}:
         raise RuntimeError("browser-supervisor-invalid-viewer")
@@ -402,26 +528,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if prepare_code != 0:
                 return normalized_returncode(prepare_code)
 
-        if viewer != "novnc":
-            dsh_home = Path(
-                base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh"))
-            )
-            configured_profile = base_environment.get(
-                "BYCLAW_BROWSER_USER_DATA_DIR", ""
-            ).strip()
-            browser_profile = (
-                Path(configured_profile)
-                if configured_profile
-                else dsh_home / "browser" / "user-data"
-            )
-            browser_profile_lock_fd = acquire_browser_profile_lock(
-                browser_profile,
-                base_environment,
-                browser_account,
-            )
-            base_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
-
+        sys.stderr.write(
+            "byclaw-browser-supervisor: startup phase=prepared; "
+            f"elapsedMs={round((time.monotonic() - startup_started) * 1000)}\n"
+        )
+        sys.stderr.flush()
         secret.extend(secrets.token_urlsafe(32).encode("ascii"))
+        if options.secret_file:
+            write_secret_file(Path(options.secret_file), bytes(secret), browser_account)
         bycli_enabled = base_environment.get("BYCLAW_BYCLI_ENABLED", "false") in {
             "true",
             "1",
@@ -436,6 +550,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if options.bycli_status_command
             else [DEFAULT_BYCLI_DAEMON_COMMAND, "daemon", "status", "--json"]
         )
+        bycli_doctor_command = (
+            [options.bycli_doctor_command]
+            if options.bycli_doctor_command
+            else [DEFAULT_BYCLI_DAEMON_COMMAND, "doctor", "--json"]
+        )
 
         def restart_bycli() -> int:
             process = spawn(bycli_command, base_environment, browser_account)
@@ -444,49 +563,110 @@ def main(argv: Sequence[str] | None = None) -> int:
             children.remove(process)
             return normalized_returncode(code)
 
-        if bycli_enabled:
-            bycli_code = restart_bycli()
-            if received_signal:
-                return 128 + received_signal
-            if bycli_code != 0:
-                return normalized_returncode(bycli_code)
+        monitor_bycli = False
+        browser_generation = None
 
-        browser_environment = dict(base_environment)
-        # Browserd owns DISPLAY lifecycle. Shared noVNC starts one headed
-        # process-lifetime browser; the other modes retain their existing
-        # headless default or per-lease headed override.
-        browser_environment["BYCLAW_BROWSER_HEADLESS"] = (
-            "false" if viewer == "shared-novnc" else "true"
-        )
-        browser_environment["BYCLAW_BROWSER_SOCKET_MODE"] = "0600"
-        browser_environment.pop("DISPLAY", None)
-        browser_secret_fd = secret_pipe(secret)
-        browser_environment["BYCLAW_BROWSER_SECRET_FD"] = str(browser_secret_fd)
-        browser_command = (
-            [options.browserd_command]
-            if options.browserd_command
-            else ["node", DEFAULT_BROWSERD_ENTRY]
-        )
-        try:
-            browserd = spawn(
-                browser_command, browser_environment, browser_account, browser_secret_fd
+        def start_browser() -> None:
+            nonlocal browserd, activation_socket, monitor_bycli, browser_generation
+            nonlocal browser_profile_lock_fd
+            # The persistent profile may live on NAS. Lock it only at browser
+            # activation, before any daemon can access it; eager mode still gates DSH.
+            if viewer != "novnc":
+                dsh_home = Path(
+                    base_environment.get("DSH_HOME", str(Path(browser_account.pw_dir) / ".dsh"))
+                )
+                configured_profile = base_environment.get(
+                    "BYCLAW_BROWSER_USER_DATA_DIR", ""
+                ).strip()
+                browser_profile = (
+                    Path(configured_profile)
+                    if configured_profile
+                    else dsh_home / "browser" / "user-data"
+                )
+                browser_profile_lock_fd = acquire_browser_profile_lock(
+                    browser_profile,
+                    base_environment,
+                    browser_account,
+                )
+                base_environment["BYCLAW_BROWSER_PROFILE_EXCLUSIVE"] = "true"
+
+            if bycli_enabled:
+                bycli_code = restart_bycli()
+                if received_signal:
+                    raise RuntimeError("browser-supervisor-interrupted")
+                if bycli_code != 0:
+                    raise RuntimeError(f"browser-supervisor-bycli-exited:{bycli_code}")
+
+            browser_environment = dict(base_environment)
+            # Browserd owns DISPLAY lifecycle. Shared noVNC starts one headed
+            # process-lifetime browser; the other modes retain their existing
+            # headless default or per-lease headed override.
+            browser_environment["BYCLAW_BROWSER_HEADLESS"] = (
+                "false" if viewer == "shared-novnc" else "true"
             )
-        finally:
-            os.close(browser_secret_fd)
-        children.append(browserd)
-        wait_for_broker(socket_path, browserd, options.readiness_timeout)
-        monitor_bycli = bycli_enabled and viewer == "shared-novnc"
-        if monitor_bycli:
-            wait_for_bycli_bridge(
-                bycli_status_command,
-                base_environment,
-                browser_account,
-                browserd,
-                options.readiness_timeout,
-                options.bycli_command_timeout,
+            browser_environment["BYCLAW_BROWSER_SOCKET_MODE"] = "0600"
+            browser_environment.pop("DISPLAY", None)
+            browser_secret_fd = secret_pipe(secret)
+            browser_environment["BYCLAW_BROWSER_SECRET_FD"] = str(browser_secret_fd)
+            browser_command = (
+                [options.browserd_command]
+                if options.browserd_command
+                else ["node", DEFAULT_BROWSERD_ENTRY]
             )
-            report_bycli_status("connected")
-        browser_generation = read_browser_generation(browser_generation_path)
+            if activation_socket is not None:
+                browser_environment["BYCLAW_BROWSER_LISTEN_FD"] = str(activation_socket.fileno())
+                browser_environment["BYCLAW_BROWSER_READY_FILE"] = str(ready_path)
+            try:
+                browserd = spawn(
+                    browser_command, browser_environment, browser_account, browser_secret_fd,
+                    activation_socket.fileno() if activation_socket is not None else None
+                )
+            finally:
+                os.close(browser_secret_fd)
+            children.append(browserd)
+            if activation_socket is not None:
+                deadline = time.monotonic() + options.readiness_timeout
+                while not ready_path.exists():
+                    if browserd.poll() is not None or received_signal:
+                        raise RuntimeError("browser-supervisor-browserd-activation-failed")
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("browser-supervisor-browserd-readiness-timeout")
+                    time.sleep(0.02)
+                activation_socket.close()
+                activation_socket = None
+            else:
+                wait_for_broker(socket_path, browserd, options.readiness_timeout)
+            monitor_bycli = bycli_enabled and viewer == "shared-novnc"
+            if monitor_bycli:
+                wait_for_bycli_bridge(
+                    bycli_status_command,
+                    base_environment,
+                    browser_account,
+                    browserd,
+                    options.readiness_timeout,
+                    options.bycli_command_timeout,
+                    doctor_command=bycli_doctor_command,
+                )
+                report_bycli_status("connected")
+            browser_generation = read_browser_generation(browser_generation_path)
+
+            activated_path.touch(mode=0o600)
+            os.chown(activated_path, browser_account.pw_uid, browser_account.pw_gid)
+
+        if startup == "on-demand":
+            activation_socket = socket.socket(socket.AF_UNIX)
+            activation_socket.bind(str(socket_path))
+            os.chmod(socket_path, 0o600)
+            os.chown(socket_path, browser_account.pw_uid, browser_account.pw_gid)
+            activation_socket.listen(32)
+            if options.activation_port and bycli_enabled:
+                activation_listener = socket.create_server(
+                    ("0.0.0.0", options.activation_port), backlog=32
+                )
+                activation_listener.setblocking(False)
+            sys.stderr.write("byclaw-browser-supervisor: browser/byCLI on-demand; DSH starting\n")
+        else:
+            start_browser()
 
         dsh_environment = dict(base_environment)
         dsh_environment["BYCLAW_BROWSER_OWNS_RUNTIME"] = "false"
@@ -499,7 +679,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             os.close(dsh_secret_fd)
         children.append(dsh)
-        secret[:] = b"\0" * len(secret)
+        sys.stderr.write(
+            "byclaw-browser-supervisor: startup phase=cli-spawned; "
+            f"elapsedMs={round((time.monotonic() - startup_started) * 1000)}\n"
+        )
+        sys.stderr.flush()
+        if startup == "eager":
+            secret[:] = b"\0" * len(secret)
         next_bycli_check = time.monotonic() + options.bycli_health_interval
         consecutive_bycli_failures = 0
 
@@ -514,6 +700,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if browserd is not None:
                     terminate(browserd)
                 return normalized_returncode(dsh_code)
+            if browserd is None:
+                waiting = [
+                    listener
+                    for listener in (activation_socket, activation_listener)
+                    if listener is not None
+                ]
+                if waiting and select.select(waiting, [], [], 0.02)[0]:
+                    # byCLI binds its own port while starting: take the clients that
+                    # came first, and let it go.
+                    held: list[socket.socket] = []
+                    if activation_listener is not None:
+                        held = accept_pending(activation_listener)
+                        activation_listener.close()
+                        activation_listener = None
+                    try:
+                        start_browser()
+                    except BaseException:
+                        for connection in held:
+                            connection.close()
+                        raise
+                    for connection in held:
+                        relay_to_port(connection, options.activation_port, options.readiness_timeout)
+                    secret[:] = b"\0" * len(secret)
+                    next_bycli_check = time.monotonic() + options.bycli_health_interval
+                else:
+                    continue
             browser_code = browserd.poll()
             if browser_code is not None:
                 terminate(dsh)
@@ -547,10 +759,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         browserd,
                         options.readiness_timeout,
                         options.bycli_command_timeout,
+                        doctor_command=bycli_doctor_command,
                     )
                 except RuntimeError as error:
                     if str(error).startswith("browser-supervisor-browserd-exited"):
                         raise
+                    report_bycli_status(str(error))
                     raise RuntimeError(
                         "browser-supervisor-bycli-bridge-unrecoverable"
                     ) from error
@@ -610,6 +824,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         secret[:] = b"\0" * len(secret)
         if browser_profile_lock_fd is not None:
             os.close(browser_profile_lock_fd)
+        if activation_socket is not None:
+            activation_socket.close()
+        ready_path.unlink(missing_ok=True)
+        activated_path.unlink(missing_ok=True)
         socket_path.unlink(missing_ok=True)
         browser_generation_path.unlink(missing_ok=True)
         for signum, handler in previous.items():

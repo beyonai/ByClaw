@@ -59,6 +59,20 @@ describe('utils/messgae', () => {
     expect(initAnswerMessage(message).finalContent).toBe('**最终答复**');
   });
 
+  it('uses the scoped child name as the response agent name', () => {
+    const message = fetchMessageHandler({
+      usage: '2',
+      messageId: 'child-answer',
+      metadata: JSON.stringify({
+        session_scope: 'child',
+        child_name: '质量哨兵·严求真',
+        external_session_id: 'child-session-id',
+      }),
+    });
+
+    expect(message.agentName).toBe('质量哨兵·严求真');
+  });
+
   it.each(['', '  ', '[DONE]', { title: 'card' }])('rejects invalid historical final bodies: %s', (finalContent) => {
     const message = fetchMessageHandler({ usage: '2', messageId: 'empty', finalContent });
     expect(message.finalContent).toBeUndefined();
@@ -212,13 +226,21 @@ describe('utils/messgae', () => {
       messageId: 'm2',
       messageStruct,
       inferLog,
-      metadata: '{"agentId":"a1"}',
+      metadata: JSON.stringify({
+        agentId: 'a1',
+        resourceId: 'a1',
+        resourceName: 'Agent One',
+        resourceCode: 'agent-one',
+      }),
       relatedResources,
       createTime: '101',
       sessionId: 's1',
     });
 
     expect(message.fromBeyond).toBe(true);
+    expect(message.agentId).toBe('a1');
+    expect(message.agentCode).toBe('agent-one');
+    expect(message.agentName).toBe('Agent One');
     expect(message.thinkDone).toBe(true);
     expect(message.thinkList).toHaveLength(2);
     expect(message.messageList).toHaveLength(2);

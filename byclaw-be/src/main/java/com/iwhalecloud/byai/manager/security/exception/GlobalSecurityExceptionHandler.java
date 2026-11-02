@@ -48,7 +48,7 @@ public class GlobalSecurityExceptionHandler extends OncePerRequestFilter {
         }
         catch (AuthenticationException | AccessDeniedException e) {
             logger.error(e.getMessage(), e);
-            ResponseUtil responseUtil = ResponseUtil.fail(e.getMessage());
+            ResponseUtil responseUtil = ResponseUtil.failI18n("i18n.error.auth.accessDenied");
             response.setContentType(MediaType.APPLICATION_JSON_UTF8_VALUE);
             response.setStatus(HttpStatus.FORBIDDEN.value());
             PrintWriter writer = response.getWriter();
@@ -60,7 +60,7 @@ public class GlobalSecurityExceptionHandler extends OncePerRequestFilter {
             logger.error(e.getMessage(), e);
             // 未知异常
 
-            ResponseUtil responseUtil = ResponseUtil.fail("system error:" + e.getMessage());
+            ResponseUtil responseUtil = ResponseUtil.failI18n("i18n.error.system.unexpected");
             response.setContentType(MediaType.APPLICATION_JSON_UTF8_VALUE);
             response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
             PrintWriter writer = response.getWriter();

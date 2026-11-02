@@ -189,7 +189,7 @@ describe('sidechat.start', () => {
     // context, no wake), the question is the follow-up that wakes the driver.
     expect(child.inject).toHaveBeenCalledTimes(1)
     const injection = child.inject.mock.calls[0]![0] as { content: Array<{ type: string; text: string }>; source: { kind: string; plugin: string } }
-    expect(injection.source).toEqual({ kind: 'plugin', plugin: SIDE_INJECTION_PLUGIN })
+    expect(injection.source).toEqual({ kind: `plugin:${SIDE_INJECTION_PLUGIN}` })
     expect(injection.content[0]!.text.startsWith(SIDE_BOUNDARY_PROMPT)).toBe(true)
     expect(injection.content[0]!.text).not.toContain('explain the event flow')
     expect(child.followup).toHaveBeenCalledTimes(1)
@@ -273,7 +273,7 @@ describe('sidechat.start', () => {
     await api['sidechat.prompt']({ childId, text: 'explain the event flow' })
     expect(child.inject).toHaveBeenCalledTimes(1)
     const injection = child.inject.mock.calls[0]![0] as { content: Array<{ text: string }>; source: { kind: string } }
-    expect(injection.source.kind).toBe('plugin')
+    expect(injection.source.kind).toBe(`plugin:${SIDE_INJECTION_PLUGIN}`)
     expect(injection.content[0]!.text.startsWith(SIDE_BOUNDARY_PROMPT)).toBe(true)
     expect(injection.content[0]!.text).toContain('`bash` (executing)')
     expect(child.followup).toHaveBeenCalledTimes(1)

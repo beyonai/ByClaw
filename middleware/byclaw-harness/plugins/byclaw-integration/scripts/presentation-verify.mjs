@@ -170,13 +170,13 @@ assert.equal(childPlan.options.metadata.session_scope, 'child')
 assert.equal(JSON.parse(childPlan.content).steps[0].sub_steps[1].tool_metadata.status, 'in_progress')
 
 assert.deepEqual(teamTaskPlanTodos([
-  { subject: '等待依赖', status: 'pending', state: 'blocked' },
-  { subject: '正在实现', status: 'in_progress', state: 'running' },
-  { subject: '已经完成', status: 'completed', state: 'completed' },
+  { id: 't1', subject: '等待依赖', status: 'pending', state: 'blocked' },
+  { id: 't2', subject: '正在实现', status: 'in_progress', state: 'running' },
+  { id: 't3', subject: '已经完成', status: 'completed', state: 'completed' },
 ]), [
-  { content: '等待依赖', status: 'pending' },
-  { content: '正在实现', status: 'in_progress' },
-  { content: '已经完成', status: 'completed' },
+  { taskId: 't1', content: '等待依赖', status: 'pending' },
+  { taskId: 't2', content: '正在实现', status: 'in_progress' },
+  { taskId: 't3', content: '已经完成', status: 'completed' },
 ], 'Agent Teams visual states must map to ByClaw task-plan statuses')
 
 const contextDetail = detailProjection({

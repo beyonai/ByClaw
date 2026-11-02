@@ -5,8 +5,23 @@ vi.mock("./utils.js", async () => {
   return { ...actual, generateRandomId: () => "mock-message-id" };
 });
 
+// The channel delivery fixture supplies its emitter and does not initialize the OpenClaw runtime.
+vi.mock("./runtime.js", () => ({
+  getByaiRuntime: () => ({ config: { loadConfig: () => ({}) } }),
+  getOptionalByaiRuntime: () => undefined,
+}));
+
 vi.mock("./diagnostics.js", () => ({
   emitByaiSdkFirstResponse: vi.fn(),
+}));
+
+// Account registration belongs to the host SDK; this fixture exercises the real in-band delivery path.
+vi.mock("openclaw/plugin-sdk/core", () => ({
+  buildChannelConfigSchema: (schema: unknown) => ({ schema }),
+  DEFAULT_ACCOUNT_ID: "default",
+  deleteAccountFromConfigSection: vi.fn(),
+  formatPairingApproveHint: vi.fn(),
+  setAccountEnabledInConfigSection: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk/routing", () => ({
@@ -125,6 +140,22 @@ describe("byai-channel outbound.sendText dedupe", () => {
       expect(emitted).toEqual([]);
       // 抑制时不能伪造平台 id：core 会据此写投递镜像并记为已送达。
       expect(result?.messageId).toBe("suppressed");
+    } finally {
+      clearActiveSdkRequestRecord(request);
+    }
+  });
+
+  it("suppresses a final delivery already contained in the streamed parent answer", async () => {
+    const { accountId, emitted, request, to } = setupInbandChannel("partial-final");
+    try {
+      const text = "已完成转换。节日主题 HTML 页面已保存到会话目录，支持手机和电脑预览。";
+      await streamAssistant({ request, runId: "run-partial", seq: 1, text });
+      emitted.length = 0;
+      const result = await sendText({ to, accountId, text: "节日主题 HTML 页面已保存到会话目录" });
+      expect(result?.messageId).toBe("suppressed");
+      expect(emitted).toEqual([]);
+      await sendText({ to, accountId, text: "另附一份新的补充说明。" });
+      expect(emitted.map((event) => event.text)).toContain("另附一份新的补充说明。");
     } finally {
       clearActiveSdkRequestRecord(request);
     }

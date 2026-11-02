@@ -55,17 +55,33 @@ function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): bool
 }
 
 /**
+ * Whether a parsed authority names the listener's own bind address (mirror
+ * of the DSH 0.2.1 gateway fence: the bind IP literal is accepted on any
+ * port independently of `trustedHosts`, ignoring any `%zone` id).
+ */
+function isBindAddressAuthority(hostUrl: URL, bindHost: string | undefined): boolean {
+  if (bindHost === undefined) return false
+  const zoneAt = bindHost.indexOf('%')
+  const address = zoneAt === -1 ? bindHost : bindHost.slice(0, zoneAt)
+  const bindUrl = parseAuthority(address.includes(':') ? `[${address}]` : address)
+  return bindUrl !== undefined && bindUrl.hostname === hostUrl.hostname
+}
+
+/**
  * Decide whether one sidebar request may reach the plugin routes.
  * @param request - node HTTP request facts (headers).
  * @param trustedHosts - non-loopback authorities this deployment serves.
- * @returns true when the Host is ours (loopback or trusted) and browser markers are same-origin.
+ * @param bindHost - the listener's own bind IP literal, accepted on any port.
+ * @returns true when the Host is ours (loopback, the bind address, or trusted) and browser markers are same-origin.
  */
-export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: readonly string[]): boolean {
+export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: readonly string[], bindHost?: string): boolean {
   const host = header(request.headers, 'host')
   if (host === undefined) return false
   const hostUrl = parseAuthority(host)
   if (hostUrl === undefined) return false
-  if (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false
+  if (!isLoopbackHostname(hostUrl.hostname)
+    && !isTrustedAuthority(hostUrl, trustedHosts)
+    && !isBindAddressAuthority(hostUrl, bindHost)) return false
   if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false
   // Origin fence: when a browser attaches an Origin it must name this
   // hostname (the Host fence above already bound the authority, so the port

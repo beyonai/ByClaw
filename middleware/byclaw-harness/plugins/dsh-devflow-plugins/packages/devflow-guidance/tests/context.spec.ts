@@ -92,6 +92,15 @@ async function bootWiring(store: object): Promise<{ ctx: Context; fiber: { dispo
 }
 
 describe('the devflow-board runtime context', () => {
+  it.each([false, true])('honors the optional automatic discovery policy: %s', async (enabled) => {
+    const store = storeDouble(() => [])
+    const { ctx } = await bootWiring(store)
+    ctx.provide('byclawWorkspacePolicy', { automaticDiscoveryEnabled: enabled })
+    const decision = await preStep(ctx, agentWith(ctx, 'policy', '/tmp/policy-workspace'))
+    expect(decision).toEqual({ kind: 'enter', messages: [] })
+    expect(store.list).toHaveBeenCalledTimes(enabled ? 1 : 0)
+  })
+
   it('refreshes on pre-step from the caller workspace and serves the snapshot to that workspace', async () => {
     const store = storeDouble(
       () => [{ id: '01-parser', title: 'Parser rewrite', stage: 'developing' }],

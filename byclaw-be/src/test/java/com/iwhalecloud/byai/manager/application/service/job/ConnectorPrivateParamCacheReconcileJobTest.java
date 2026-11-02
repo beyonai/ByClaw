@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 
-class ConnectorPrivateParamCacheReconcileJobTest {
+class ConnectorPrivateParamCacheReconcileJobTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void reconcilesConnectorManagedUsersWithConfiguredBatchSize() {

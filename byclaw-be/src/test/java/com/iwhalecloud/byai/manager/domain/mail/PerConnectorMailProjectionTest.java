@@ -24,7 +24,7 @@ class PerConnectorMailProjectionTest {
     void writesIndependentSchemaTwoDocumentsAndPreservesUntouchedConnector() throws Exception {
         Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
         var workspace = mock(ConnectorCredentialWorkspaceService.class);
-        when(workspace.resolveProjectionFile(any(), any())).thenAnswer(call ->
+        when(workspace.resolveLocalProjectionFile(any(), any())).thenAnswer(call ->
             directory.resolve(Path.of((String) call.getArgument(1)).getFileName()));
         var state = mock(MailAccountProjectionStateService.class);
         var resolver = mock(MailCredentialResolver.class);

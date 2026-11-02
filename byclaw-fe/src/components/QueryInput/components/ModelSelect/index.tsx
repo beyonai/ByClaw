@@ -2,6 +2,7 @@ import { useIntl, useSelector } from '@umijs/max';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppstoreOutlined, CloudOutlined, LaptopOutlined, UserOutlined } from '@ant-design/icons';
 import { Select, Slider, Spin, Tabs, Tag, Empty, Tooltip } from 'antd';
+import useCachedModelHealth from '@/hooks/useCachedModelHealth';
 import { getMyModels, getPublicModels } from '@/pages/models/service';
 import {
   THINKING_LEVEL_DEFAULT_SIGNAL,
@@ -11,6 +12,7 @@ import {
   type ModelReasoningConfig,
 } from '@/utils/thinkingLevel';
 import styles from './index.less';
+import ModelHealthWarning from './ModelHealthWarning';
 
 type Props = {
   value?: string | number;
@@ -83,6 +85,7 @@ type Model = {
 };
 const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level, onLevelChange }) => {
   const intl = useIntl();
+  const currentUser = useSelector(({ user }: any) => user?.userInfo);
   const authIdentity = useSelector(({ user }: any) => {
     const userInfo = user?.userInfo;
     return userInfo ? `${userInfo.sessionId || userInfo.userId || userInfo.id || 'authenticated'}` : '';
@@ -214,16 +217,24 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
         value: item.id,
         label: (
           <span className={styles.option}>
-            <span>{item.label}</span>
+            <ModelHealthWarning user={currentUser} model={item} />
+            <span className={styles.optionLabel}>{item.label}</span>
             {item.provider && <Tag bordered={false}>{item.provider}</Tag>}
           </span>
         ),
       })),
-    [activeTab, groups]
+    [activeTab, currentUser, groups]
   );
 
   const isDefaultChoice = current === undefined || explicitDefault;
   const selectedModel = allModels.find((item) => item.id === current);
+  const selectedHealth = useCachedModelHealth(
+    enabled && selectedModel && selectedModel.source !== 'local' ? currentUser : undefined,
+    selectedModel?.source === 'public' ? 'PUBLIC' : 'PERSONAL'
+  );
+  const selectedFailed = selectedHealth?.models.some(
+    (item) => item.modelId === selectedModel?.id && item.status === 'FAILED'
+  );
   // 右栏展示悬停中的模型，否则展示当前会话模型；两种状态都可直接调整。
   const previewModel = previewModelId ? allModels.find((item) => item.id === previewModelId) : undefined;
   const reasoningPanelModel = previewModel && previewModel.id !== current ? previewModel : selectedModel;
@@ -331,6 +342,7 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
   return (
     <Select
       className={styles.select}
+      status={selectedFailed ? 'error' : undefined}
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
@@ -342,7 +354,8 @@ const ModelSelect: React.FC<Props> = ({ value, onChange, allowWeb = false, level
       labelRender={() =>
         selectedModel ? (
           <span className={styles.option}>
-            <span>{selectedModel.label}</span>
+            <ModelHealthWarning user={currentUser} model={selectedModel} />
+            <span className={styles.optionLabel}>{selectedModel.label}</span>
             {selectedModel.provider && <Tag bordered={false}>{selectedModel.provider}</Tag>}
           </span>
         ) : (

@@ -1,0 +1,3 @@
+- insert:
+    - id: byclaw-invariants
+      name: '@byclaw/dsh-invariants'

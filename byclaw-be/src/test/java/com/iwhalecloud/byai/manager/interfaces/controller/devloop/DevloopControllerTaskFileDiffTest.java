@@ -11,7 +11,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class DevloopControllerTaskFileDiffTest {
+class DevloopControllerTaskFileDiffTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void passesRepoIdToTaskChangesService() {

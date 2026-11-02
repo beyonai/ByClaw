@@ -1,6 +1,6 @@
 /** Read-only repository-grouped worktree inventory and navigation actions. */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconCopyOutline16, IconRefreshOutline16, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCopyOutlineRegular, IconRefreshOutlineRegular, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, type GitTarget, type GitWorkspaceInventory, type SessionScope } from './api.ts'
 import { IconTerminalOutline16 } from './icons.tsx'
 import { t } from './locales.ts'
@@ -63,7 +63,7 @@ export function WorktreesView({ scope, onOpenTerminal }: WorktreesViewProps) {
           disabled={loading}
           onClick={() => { load(true) }}
         >
-          <IconRefreshOutline16 size={14} />
+          <IconRefreshOutlineRegular size={14} />
         </button>
       </header>
       {loading && inventory === null && <div className={css.worktreesMessage}>{t('loading')}</div>}
@@ -102,7 +102,7 @@ export function WorktreesView({ scope, onOpenTerminal }: WorktreesViewProps) {
                       title={t('copyWorktreePath')}
                       onClick={() => { void writeClipboard(worktree.path) }}
                     >
-                      <IconCopyOutline16 size={14} />
+                      <IconCopyOutlineRegular size={14} />
                     </button>
                     <button
                       type="button"

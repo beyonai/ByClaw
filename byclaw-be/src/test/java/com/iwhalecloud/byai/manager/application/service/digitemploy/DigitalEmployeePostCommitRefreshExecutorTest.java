@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-class DigitalEmployeePostCommitRefreshExecutorTest {
+class DigitalEmployeePostCommitRefreshExecutorTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
     private DigitalEmployeePostCommitRefreshExecutor executor;

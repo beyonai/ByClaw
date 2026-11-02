@@ -259,7 +259,7 @@ public class ByaiAimodelDomainService {
     /**
      * ByaiAimodel 转 ModelDto（供 Redis 存储，与现有消费者格式一致；Token 解密后写入供调用方使用）
      */
-    private ModelDto toModelDto(ByaiAimodel entity) {
+    public ModelDto toModelDto(ByaiAimodel entity) {
         ModelDto dto = new ModelDto();
         dto.setInstanceId(String.valueOf(entity.getModelId()));
         dto.setUrl(entity.getUrl());
@@ -283,7 +283,9 @@ public class ByaiAimodelDomainService {
         return dto;
     }
 
-    /** 解析模型是否为默认模型标记。 */
+    /**
+     * 解析模型是否为默认模型标记。
+     */
     private Integer resolveDefaultFlag(ByaiAimodel entity) {
         if (entity.getIsDefault() != null) {
             return entity.getIsDefault();
@@ -295,7 +297,9 @@ public class ByaiAimodelDomainService {
             .anyMatch(rel -> entity.getModelId().equals(rel.getObjId())) ? 1 : 0;
     }
 
-    /** 将默认模型排到列表前面，并保证默认标记唯一。 */
+    /**
+     * 将默认模型排到列表前面，并保证默认标记唯一。
+     */
     private List<ModelDto> normalizeDefaultOrder(List<ModelDto> models) {
         if (models == null || models.isEmpty()) {
             return List.of();

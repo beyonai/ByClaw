@@ -40,7 +40,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
-class WorkgroupTemplateServiceTest {
+class WorkgroupTemplateServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private final ByaiWorkgroupTemplateMapper mapper = mock(ByaiWorkgroupTemplateMapper.class);
     private final ByaiWorkgroupTemplateResourceMapper relations = mock(ByaiWorkgroupTemplateResourceMapper.class);
     private final SequenceService sequence = mock(SequenceService.class);

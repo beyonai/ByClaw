@@ -38,6 +38,10 @@ export interface LoadAuthorizedByClawResourcesOptions {
   timeoutMs?: number
   snapshotConcurrency?: number
   excludedResourceIds?: ReadonlySet<string>
+  /** Restrict snapshot reads to these directly authorized IDs (never widens grants). */
+  resourceIds?: ReadonlySet<string>
+  /** Discovery needs only group summaries; dependencies are loaded at execution time. */
+  includeGroupMembers?: boolean
   onResourceLoadError?: (resourceId: string, error: unknown) => void
 }
 
@@ -218,7 +222,8 @@ export async function loadAuthorizedByClawResources(
     throw new Error('ByClaw snapshotConcurrency must be a positive integer')
   }
   const authorization = await resolveByClawAuthorization(options.redis, userCode)
-  const effectiveResourceIds = authorization.resourceIds.filter(id => !options.excludedResourceIds?.has(id))
+  const effectiveResourceIds = authorization.resourceIds.filter(id => !options.excludedResourceIds?.has(id)
+    && (options.resourceIds === undefined || options.resourceIds.has(id)))
   const reportResourceError = (resourceId: string, error: unknown): void => {
     options.onResourceLoadError?.(resourceId, error)
   }
@@ -241,9 +246,8 @@ export async function loadAuthorizedByClawResources(
     else if (resource.employee !== undefined) employees.push(resource.employee)
   }
 
-  const directEmployeeIds = employees.map(employee => employee.id)
   const directlyLoadedIds = new Set(effectiveResourceIds)
-  const supplementaryMemberIds = [...new Set(groups.flatMap(group => group.members.map(member => member.employeeId)))]
+  const supplementaryMemberIds = options.includeGroupMembers === false ? [] : [...new Set(groups.flatMap(group => group.members.map(member => member.employeeId)))]
     .filter(memberId => !directlyLoadedIds.has(memberId) && !options.excludedResourceIds?.has(memberId))
   const supplementaryEmployees = await mapConcurrentAvailable(
     supplementaryMemberIds,
@@ -258,9 +262,13 @@ export async function loadAuthorizedByClawResources(
     reportResourceError,
   )
   employees.push(...supplementaryEmployees)
+  // Targeted group loads still preserve a member's independent direct grant.
+  const authorizedIds = new Set(authorization.resourceIds)
+  const directEmployeeIds = employees.filter(employee => authorizedIds.has(employee.id)).map(employee => employee.id)
 
   const availableEmployeeIds = new Set(employees.map(employee => employee.id))
   const availableGroups = groups.filter(group => {
+    if (options.includeGroupMembers === false) return true
     const missingMemberIds = group.members
       .map(member => member.employeeId)
       .filter(memberId => !availableEmployeeIds.has(memberId))

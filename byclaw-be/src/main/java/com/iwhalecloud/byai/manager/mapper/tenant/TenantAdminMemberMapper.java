@@ -10,7 +10,7 @@ public interface TenantAdminMemberMapper {
 
     List<TenantMemberRow> selectMembers(@Param("enterpriseId") long enterpriseId);
 
-    String selectPackageSnapshotForUpdate(@Param("enterpriseId") long enterpriseId);
+    int countEnterprise(@Param("enterpriseId") long enterpriseId);
 
     String selectProvisionState(@Param("enterpriseId") long enterpriseId);
 

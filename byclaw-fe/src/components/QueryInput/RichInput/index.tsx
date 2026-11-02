@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { createEditor, Descendant, Transforms, Editor, Element, Range, Path } from 'slate';
 import { Slate, Editable, withReact, ReactEditor } from 'slate-react';
-import { withHistory } from 'slate-history';
+import { HistoryEditor, withHistory } from 'slate-history';
 import { useIntl } from '@umijs/max';
 import { chatModeMap } from '@/constants/query';
 import MentionPopover from './mentionPopover';
@@ -33,8 +33,8 @@ import { setAgentCache } from './agentCache';
 import useDefaultAgentElement from './useDefaultAgentElement';
 import useOnPaste from './useOnPaste';
 import useGlobal from '@/hooks/useGlobal';
-import { agentTypeMap } from '@/constants/agent';
 import type { MentionElementType } from './elements/mention';
+import { getEmployeeResourceReplacementTab, isEmployeeResourceAvailable } from './utils/employeeResourceCompatibility';
 
 type SetTextParams = string | Parameters<typeof getDescendantValueByDefaultValue>[0];
 
@@ -61,7 +61,7 @@ const isSameAgent = (node: { agentId?: string | number; resourceCode?: string },
   getAgentIdentityKeys(node).some((identityKey) => selectedIdentityKeys.has(identityKey));
 
 /**
- * 数字员工组与普通数字员工互斥：保留被替换节点供用户识别，但标记为不参与本轮调度。
+ * 数字员工单选：选择新员工时删除旧员工及其关联技能，普通文本保持原位。
  * 返回已存在的同一数字员工路径，调用方可避免重复插入。
  */
 const applyExclusiveDigitalEmployeeSelection = (editor: Editor, selectedNode: MentionElementType): Path | undefined => {
@@ -73,44 +73,63 @@ const applyExclusiveDigitalEmployeeSelection = (editor: Editor, selectedNode: Me
   const selectableEntries = Array.from(
     Editor.nodes(editor, {
       at: [],
-      match: (node) => isDigitalEmployeeMentionNode(node) || isAgentToolNode(node),
+      match: (node) => isDigitalEmployeeMentionNode(node),
     })
   );
-  const selectedIsGroup = selectedNode.agentType === agentTypeMap.employeeGroup;
-  let existingSelectedPath: Path | undefined;
+  let hasExistingSelected = false;
+  const pathsToRemove: Path[] = [];
 
   Editor.withoutNormalizing(editor, () => {
     selectableEntries.forEach(([node, path]) => {
       if (isDigitalEmployeeMentionNode(node)) {
         const isSelectedAgent = isSameAgent(node, selectedIdentityKeys);
         if (isSelectedAgent) {
-          existingSelectedPath = path;
+          hasExistingSelected = true;
           Transforms.setNodes(editor, { isInactiveAgentSelection: false }, { at: path });
           return;
         }
 
-        const shouldDeactivate =
-          selectedIsGroup ||
-          (selectedNode.agentType !== agentTypeMap.employeeGroup && node.agentType === agentTypeMap.employeeGroup);
-        if (shouldDeactivate && !node.isInactiveAgentSelection) {
-          Transforms.setNodes(editor, { isInactiveAgentSelection: true }, { at: path });
-        }
+        pathsToRemove.push(path);
         return;
       }
-
-      if (isAgentToolNode(node)) {
-        if (selectedIsGroup) {
-          if (!node.isInactiveAgentSelection) {
-            Transforms.setNodes(editor, { isInactiveAgentSelection: true }, { at: path });
-          }
-        } else if (isSameAgent(node, selectedIdentityKeys) && node.isInactiveAgentSelection) {
-          Transforms.setNodes(editor, { isInactiveAgentSelection: false }, { at: path });
-        }
-      }
     });
+
+    pathsToRemove
+      .sort((left, right) => Path.compare(right, left))
+      .forEach((path) => Transforms.removeNodes(editor, { at: path }));
   });
 
-  return existingSelectedPath;
+  if (!hasExistingSelected) return undefined;
+  const existingSelectedEntry = Array.from(
+    Editor.nodes(editor, {
+      at: [],
+      match: (node) => isDigitalEmployeeMentionNode(node) && isSameAgent(node, selectedIdentityKeys),
+    })
+  )[0];
+  return existingSelectedEntry?.[1];
+};
+
+const insertDigitalEmployeeAtStart = (editor: Editor, node: MentionElementType) => {
+  const caretRef =
+    editor.selection && Range.isCollapsed(editor.selection)
+      ? Editor.pointRef(editor, editor.selection.anchor, { affinity: 'forward' })
+      : undefined;
+  const replaceEmployee = () => {
+    const existingSelectedPath = applyExclusiveDigitalEmployeeSelection(editor, node);
+    if (!existingSelectedPath) {
+      Transforms.insertNodes(editor, node, { at: [0, 0] });
+    }
+  };
+  if (HistoryEditor.isHistoryEditor(editor)) {
+    HistoryEditor.withNewBatch(editor, replaceEmployee);
+  } else {
+    replaceEmployee();
+  }
+
+  const caretPoint = caretRef?.unref();
+  if (caretPoint) {
+    Transforms.select(editor, caretPoint);
+  }
 };
 
 /** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
@@ -126,6 +145,7 @@ export interface RichInputRef {
   appendText: (text: string) => void;
   insertItem: (item: any, type: IResourceType) => any;
   getPayload: () => PayloadType;
+  undo: () => void;
 }
 
 type RichInputResourceList = Resource[];
@@ -157,7 +177,72 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
   const insertItemRef = useRef<RichInputRef['insertItem']>(() => undefined);
+  const resourceValidationSequenceRef = useRef(0);
   const { EventEmitter } = useGlobal();
+
+  const validateEmployeeResources = useCallback(
+    async (selectedAgentId: string) => {
+      const resources = Array.from(
+        Editor.nodes(editor, {
+          at: [],
+          match: (node) =>
+            node.type === ELEMENT_RESOURCE &&
+            Boolean(getEmployeeResourceReplacementTab((node as ResourceElementType).resourceType)),
+        })
+      ) as Array<[ResourceElementType, Path]>;
+      if (!resources.length) return;
+
+      const sequence = resourceValidationSequenceRef.current + 1;
+      resourceValidationSequenceRef.current = sequence;
+      HistoryEditor.withoutSaving(editor as Editor & HistoryEditor, () => {
+        Editor.withoutNormalizing(editor, () => {
+          resources.forEach(([, path]) => {
+            Transforms.setNodes(editor, { isAgentResourceValidationPending: true }, { at: path });
+          });
+        });
+      });
+
+      const availability = new Map<string, boolean>();
+      await Promise.all(
+        resources.map(async ([resource]) => {
+          const key = `${resource.resourceType}:${resource.id}`;
+          try {
+            availability.set(key, await isEmployeeResourceAvailable(selectedAgentId, resource, props.userCode));
+          } catch (error) {
+            availability.set(key, false);
+          }
+        })
+      );
+      if (resourceValidationSequenceRef.current !== sequence) return;
+
+      HistoryEditor.withoutSaving(editor as Editor & HistoryEditor, () => {
+        Editor.withoutNormalizing(editor, () => {
+          Array.from(
+            Editor.nodes(editor, {
+              at: [],
+              match: (node) =>
+                node.type === ELEMENT_RESOURCE &&
+                Boolean(getEmployeeResourceReplacementTab((node as ResourceElementType).resourceType)),
+            })
+          ).forEach(([node, path]) => {
+            const resource = node as ResourceElementType;
+            const isAvailable = availability.get(`${resource.resourceType}:${resource.id}`) === true;
+            Transforms.setNodes(
+              editor,
+              {
+                ownerAgentId: isAvailable ? selectedAgentId : resource.ownerAgentId,
+                isAgentResourceValidationPending: false,
+                requiresAgentResourceReplacement: !isAvailable,
+                resourceReplacementType: getEmployeeResourceReplacementTab(resource.resourceType),
+              },
+              { at: path }
+            );
+          });
+        });
+      });
+    },
+    [editor, props.userCode]
+  );
 
   /**
    * 在专家模式下，通过@切换某个agent后，需要显示一个默认的agent在输入框的最左侧
@@ -178,6 +263,17 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       type: 'paragraph',
     },
   ]);
+  const activeDigitalEmployeeId = useMemo(
+    () => getResourceList(value).find((resource) => resource.resourceType === ResourceType.digitalEmployee)?.resourceId,
+    [value]
+  );
+  const lastValidatedEmployeeIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!activeDigitalEmployeeId || lastValidatedEmployeeIdRef.current === activeDigitalEmployeeId) return;
+    lastValidatedEmployeeIdRef.current = activeDigitalEmployeeId;
+    void validateEmployeeResources(activeDigitalEmployeeId);
+  }, [activeDigitalEmployeeId, validateEmployeeResources]);
 
   useEffect(() => {
     // 更新输入框的内容
@@ -526,6 +622,32 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         node.children = [{ text: getElementDisplayText({ resourceType: type, data: { name: node.resourceName } }) }];
       }
     }
+    if (node.type === ELEMENT_RESOURCE && getEmployeeResourceReplacementTab(node.resourceType)) {
+      const selectedEmployee = getResourceList(value).find(
+        (resource) => resource.resourceType === ResourceType.digitalEmployee
+      );
+      node = {
+        ...node,
+        ownerAgentId: selectedEmployee?.resourceId || props.resourceAgentIds?.split(',').find(Boolean),
+        isAgentResourceValidationPending: false,
+        requiresAgentResourceReplacement: false,
+        resourceReplacementType: getEmployeeResourceReplacementTab(node.resourceType),
+      };
+      if (item.replaceResourceId) {
+        const replacementEntry = Array.from(
+          Editor.nodes(editor, {
+            at: [],
+            match: (candidate) =>
+              candidate.type === ELEMENT_RESOURCE &&
+              `${(candidate as ResourceElementType).id}` === `${item.replaceResourceId}` &&
+              (candidate as ResourceElementType).requiresAgentResourceReplacement === true,
+          })
+        )[0];
+        if (replacementEntry) {
+          Transforms.removeNodes(editor, { at: replacementEntry[1] });
+        }
+      }
+    }
     const willReRenderInput =
       // @ts-ignore
       !!node.isDefaultAgent && checkIfCanAt(true) && node.agentType !== agentType;
@@ -565,11 +687,9 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       return;
     }
     if (type === ResourceType.digitalEmployee && isDigitalEmployeeMentionNode(node)) {
-      const existingSelectedPath = applyExclusiveDigitalEmployeeSelection(editor, node);
-      if (existingSelectedPath) {
-        handleCloseMention();
-        return;
-      }
+      insertDigitalEmployeeAtStart(editor, node);
+      handleCloseMention();
+      return;
     }
     const originalPoint = editor.selection?.anchor;
     Transforms.insertNodes(editor, node);
@@ -630,10 +750,8 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         isInactiveAgentSelection: false,
       };
       if (insertNode.resourceType === ResourceType.digitalEmployee && isDigitalEmployeeMentionNode(insertNode)) {
-        const existingSelectedPath = applyExclusiveDigitalEmployeeSelection(editor, insertNode);
-        if (existingSelectedPath) {
-          return;
-        }
+        insertDigitalEmployeeAtStart(editor, insertNode);
+        return;
       }
     }
     if (node.type === ELEMENT_RESOURCE) {
@@ -664,6 +782,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       Transforms.insertText(editor, text);
     },
     getPayload,
+    undo: () => HistoryEditor.undo(editor as Editor & HistoryEditor),
   }));
 
   const onPaste = useOnPaste({

@@ -1,3 +1,4 @@
 - insert:
     - id: byclaw-employee-selector
       name: '@byclaw/dsh-employee-selector'
+      inject: [byclawWorkspacePresets]

@@ -6,15 +6,20 @@ const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
-function setup(ready = true) {
+function setup(ready = true, requireExecution?: () => Promise<void>) {
   const execute = vi.fn(async () => ({ committed: true }));
   const apply = vi.fn(async () => undefined);
   const groupNameCheck = vi.fn(async () => ({ exists: false }));
   const groupProjectAccess = vi.fn(async () => ({ bound: true, canRead: true }));
   const services = {
     commands: { execute },
+    requireExecution,
     mirror: { apply },
-    history: { detail: vi.fn(async () => ({ sessionId: "30" })), groupNameCheck, groupProjectAccess },
+    history: {
+      detail: vi.fn(async () => ({ sessionId: "30" })),
+      groupNameCheck,
+      groupProjectAccess,
+    },
     sessions: {},
     schema: { accept: vi.fn(async () => ({ status: "PENDING" })) },
     connected: () => true,
@@ -30,6 +35,87 @@ function setup(ready = true) {
 }
 const headers = { "x-enterprise-id": "10", "x-tenant-generation": "7", "x-actor-user-id": "20" };
 describe("protected tenant HTTP", () => {
+  it("keeps POST history and permission queries available when execution is disabled", async () => {
+    const { app, groupNameCheck } = setup(true, async () => {
+      throw new Error("execution denied");
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/name-check",
+      headers,
+      payload: { name: "Existing group" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(groupNameCheck).toHaveBeenCalled();
+  });
+  it("blocks direct HTTP mutations with the commercial policy guard", async () => {
+    const { app, execute } = setup(true, async () => {
+      const { DomainError } = await import("../src/domain/errors.js");
+      throw new DomainError("POLICY_EXECUTION_DISABLED");
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/welcome",
+      headers,
+      payload: command({ operation: "CLAIM_WELCOME", payload: {} }),
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("POLICY_EXECUTION_DISABLED");
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("routes welcome claims and rejects a different group, tenant or actor", async () => {
+    const { app, execute } = setup();
+    const payload = command({ operation: "CLAIM_WELCOME", payload: {} });
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/welcome",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledWith(payload);
+    // 逐个请求验证身份边界，确认失败请求不会进入业务写入。
+    for (const invalid of [
+      { url: "/internal/v1/group-chats/31/welcome", headers },
+      {
+        url: "/internal/v1/group-chats/30/welcome",
+        headers: { ...headers, "x-actor-user-id": "21" },
+      },
+      {
+        url: "/internal/v1/group-chats/30/welcome",
+        headers: { ...headers, "x-enterprise-id": "11" },
+      },
+    ]) {
+      const denied = await app.inject({ method: "POST", payload, ...invalid });
+      expect(denied.statusCode).toBeGreaterThanOrEqual(400);
+    }
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("routes recall undo and rejects a mismatched message path", async () => {
+    const s = setup();
+    const payload = command({
+      operation: "UNDO_RECALL_MESSAGE",
+      payload: { messageId: "90", recalledAt: 1000 },
+    });
+    const response = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/messages/90/recall/undo",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(s.execute).toHaveBeenCalledWith(payload);
+    const denied = await s.app.inject({
+      method: "POST",
+      url: "/internal/v1/group-chats/30/messages/91/recall/undo",
+      headers,
+      payload,
+    });
+    expect(denied.statusCode).toBe(409);
+    expect(s.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("checks project cloud access using the authenticated actor and tenant", async () => {
     const s = setup();
     const response = await s.app.inject({

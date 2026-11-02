@@ -38,7 +38,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class FeishuUserServiceTest {
+class FeishuUserServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private final UserService userService = mock(UserService.class);
     private final UserExternalSystemService externalSystemService = mock(UserExternalSystemService.class);

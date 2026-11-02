@@ -9,7 +9,11 @@ let mockSession: any = {
   actions: {},
 };
 
-jest.mock('@umijs/max', () => ({ useSelector: () => null }));
+jest.mock('@umijs/max', () => ({
+  useSelector: () => null,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
 jest.mock('./models/useRecorderSession', () => () => mockSession);
 jest.mock('./components/StepRail', () => () => <div />);
 jest.mock('./components/UserIdentityBar', () => () => null);

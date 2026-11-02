@@ -410,15 +410,28 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
   const hasUsePermission = permissions?.hasUsePermission === true;
   const canApplyUse = permissions?.canApplyUse === true;
   const isApplyPending = permissions?.useApplyPending === true;
+  const handleApplyManage = async () => {
+    if (!employeeResourceId || !permissions?.canApplyManage || applyLoading) return;
+    setApplyLoading(true);
+    try {
+      await applyResourceUse({ resourceId: String(employeeResourceId), permissionType: 'MANAGE' });
+      setPermissions((current: any) => ({ ...current, canApplyManage: false, manageApplyPending: true }));
+      message.success(intl.formatMessage({ id: 'digitalEmployees.manageApplySubmitted' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.saveFailed' }));
+    } finally {
+      setApplyLoading(false);
+    }
+  };
   const handleApplyUse = async () => {
     if (!employeeResourceId || !canApplyUse || applyLoading || isApplyPending) return;
     setApplyLoading(true);
     try {
       await applyResourceUse({ resourceId: `${employeeResourceId}` });
       setPermissions((current: any) => ({ ...(current || {}), canApplyUse: false, useApplyPending: true }));
-      message.success('申请已提交，等待授权通过');
+      message.success(intl.formatMessage({ id: 'resource.useApplication.submitted' }));
     } catch (error: any) {
-      message.error(error?.message || '使用申请失败');
+      message.error(error?.message || intl.formatMessage({ id: 'resource.useApplication.failed' }));
     } finally {
       setApplyLoading(false);
     }
@@ -475,7 +488,7 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
       { key: 'TOOL', label: intl.formatMessage({ id: 'digitalEmployees.tool' }) },
       { key: 'KG_DOC', label: intl.formatMessage({ id: 'digitalEmployees.knowledge' }) },
     ];
-  }, [detail?.agentType]);
+  }, [detail?.agentType, intl]);
   const [resourceTab, setResourceTab] = useState('SKILL');
   const currentResources = resources.filter((item: any) => {
     const type = `${item?.resourceBizType || item?.bizType || item?.resourceType || ''}`.toUpperCase();
@@ -584,6 +597,15 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
                   </Typography.Title>
                   <EmployeeTypeTag ownerType={detail.ownerType} agentType={detail.agentType} />
                 </div>
+                {(permissions?.canApplyManage || permissions?.manageApplyPending) && (
+                  <Button loading={applyLoading} disabled={permissions.manageApplyPending} onClick={handleApplyManage}>
+                    {intl.formatMessage({
+                      id: permissions.manageApplyPending
+                        ? 'digitalEmployees.manageApplyPending'
+                        : 'digitalEmployees.applyManage',
+                    })}
+                  </Button>
+                )}
                 {hasUsePermission ? (
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateTask?.()}>
                     {intl.formatMessage({ id: 'digitalEmployees.newTask' })}
@@ -650,7 +672,11 @@ export function EmployeePreviewModal({ employee, onClose, onCreateTask }: any) {
             <div className={styles.previewResourceList}>
               {resourceTab === 'WORK_STANDARD' ? (
                 <div className={styles.previewWorkStandard}>
-                  {workStandard ? <MdPreview content={workStandard} /> : '暂无工作规范'}
+                  {workStandard ? (
+                    <MdPreview content={workStandard} />
+                  ) : (
+                    intl.formatMessage({ id: 'employee.noWorkStandard' })
+                  )}
                 </div>
               ) : resourceTab === 'MEMBERS' ? (
                 groupMembers.length ? (

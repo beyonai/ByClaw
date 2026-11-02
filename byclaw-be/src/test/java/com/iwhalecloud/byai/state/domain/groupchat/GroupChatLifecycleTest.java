@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -26,7 +28,7 @@ import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 
-class GroupChatLifecycleTest {
+class GroupChatLifecycleTest extends I18nTestSupport {
     private final SessionService sessions = mock(SessionService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final SessionExtService extensions = mock(SessionExtService.class);

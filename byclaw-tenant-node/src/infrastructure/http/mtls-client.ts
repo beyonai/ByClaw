@@ -18,7 +18,7 @@ export class MtlsClient {
   private readonly agent: HttpAgent | HttpsAgent;
   constructor(
     tls: SecureContextOptions | undefined,
-    private readonly token?: string,
+    private readonly token: string,
   ) {
     this.agent = tls
       ? new HttpsAgent({ ...tls, rejectUnauthorized: true, keepAlive: true })
@@ -37,7 +37,7 @@ export class MtlsClient {
             ...(bytes
               ? { "content-type": "application/json", "content-length": bytes.length }
               : {}),
-            ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+            authorization: `Bearer ${this.token}`,
           },
         },
         (res) => {
@@ -53,6 +53,8 @@ export class MtlsClient {
           res.on("error", () => reject(new DomainError("UPSTREAM_UNAVAILABLE")));
           res.on("end", () => {
             if (res.statusCode === 204) return resolve(undefined as T);
+            if (res.statusCode === 401 || res.statusCode === 403)
+              return reject(new DomainError("UPSTREAM_AUTHENTICATION_FAILED"));
             if (res.statusCode !== 200) return reject(new DomainError("UPSTREAM_REJECTED"));
             try {
               resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as T);

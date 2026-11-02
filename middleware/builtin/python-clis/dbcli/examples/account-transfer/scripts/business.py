@@ -111,8 +111,8 @@ def main(argv: list[str]) -> int:
             "request_id already exists with different parameters or incomplete state",
         )
 
-    locked = execute_sql(session_id, datasource_code, "lock-accounts.sql", params)
-    if locked.get("rowCount") != 2:
+    accounts = execute_sql(session_id, datasource_code, "check-accounts.sql", params)
+    if accounts.get("rowCount") != 2:
         raise BusinessError(
             "ACCOUNT_NOT_AVAILABLE", "both accounts must exist and be active", 31
         )

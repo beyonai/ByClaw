@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.infrastructure;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import java.io.BufferedWriter;
@@ -247,14 +248,17 @@ public class GroupChatSessionContextFileService {
         // 查询层先过滤保证窗口完整；导出层防御性过滤，避免未来投影变化泄露事件。
         snapshot.getMessages().removeIf(message -> Integer.valueOf(5).equals(message.getUsage()));
         for (GroupChatContextResponse.Message message : snapshot.getMessages()) {
-            message.setContent(GroupChatMessagePreview.format(message.getContent(), message.getResourceList()));
+            boolean passive = ForwardRuntimeProjection.isSnapshotOnly(message.getForward())
+                || "FORWARD_SINGLE".equals(message.getKind()) || "FORWARD_MERGED".equals(message.getKind());
+            if (!passive) message.setContent(GroupChatMessagePreview.format(message.getContent(), message.getResourceList()));
             GroupChatContextResponse.ReplyReference reply = message.getReplyTo();
             if (reply != null && Integer.valueOf(5).equals(reply.getUsage())) {
                 message.setReplyTo(null);
             }
-            else if (reply != null) {
+            else if (reply != null && !ForwardRuntimeProjection.isSnapshotOnly(reply.getForward())) {
                 reply.setContent(GroupChatMessagePreview.format(reply.getContent(), reply.getResourceList()));
             }
+            ForwardRuntimeProjection.agentMessage(message);
         }
         if (snapshot.getSnapshot() != null) {
             List<GroupChatContextResponse.Message> exported = snapshot.getMessages();
@@ -337,9 +341,10 @@ public class GroupChatSessionContextFileService {
                 }
                 body.put("createdAt", message.getCreateTime() == null ? null : message.getCreateTime().getTime());
                 // 普通用户消息的成员快照在 related_resources，群来源旧记录可从 metadata 补充。
-                String content = GroupChatMessagePreview.fromMetadata(message.getMessageContent(),
-                    message.getRelatedResources());
-                body.put("content", GroupChatMessagePreview.fromMetadata(content, message.getMetadata()));
+                boolean passive = ForwardRuntimeProjection.isSnapshotOnly(message.getMetadata());
+                String content = passive ? ForwardRuntimeProjection.projectMetadata(message.getMessageContent(), message.getMetadata())
+                    : GroupChatMessagePreview.fromMetadata(message.getMessageContent(), message.getRelatedResources());
+                body.put("content", passive ? content : GroupChatMessagePreview.fromMetadata(content, message.getMetadata()));
                 writer.write(objectMapper.writeValueAsString(body));
                 writer.newLine();
             }

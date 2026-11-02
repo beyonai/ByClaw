@@ -50,6 +50,8 @@ export type TaskFailure =
 
 /** One task of a team's task list. */
 export interface TeamTask {
+  /** Durable attempts; only the owning agent may bind its actual execution turns. */
+  executions?: TaskExecution[]
   /** Original attempt is suspended until its linked assistance result returns. */
   externalExecution?: GroupExternalExecution
   waitingAssistance?: string
@@ -97,6 +99,21 @@ export interface TeamTask {
   reassigning?: boolean
   createdAt: number
   updatedAt: number
+}
+
+export interface TaskExecution {
+  attempt: number
+  attemptId: string
+  assignee: string
+  status: TaskStatus
+  startedAt: number
+  runs: Array<{
+    externalSessionId?: string
+    childTurn?: number
+    byclawSessionId?: string
+    byclawMessageId?: string
+  }>
+  externalExecution?: GroupExternalExecution
 }
 
 /** A conversation-scoped route frozen onto one asynchronously executed DAG. */

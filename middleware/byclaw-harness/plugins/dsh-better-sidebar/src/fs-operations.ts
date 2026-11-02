@@ -19,6 +19,7 @@ import type { SidebarHttpRequest } from './context-types.ts'
 import { requireAbsolute } from './fs-tree.ts'
 import { ensureWorkspacePath, ensureWorkspaceWritePath } from './path-security.ts'
 import { SidebarError } from './wire.ts'
+import type { ToolEnvironmentWorkspace } from './workspace-host.ts'
 
 /** Inputs of one upload: the session scope plus the request body stream. */
 export interface WorkspaceUploadInput {
@@ -32,6 +33,8 @@ export interface WorkspaceUploadInput {
   chunks: AsyncIterable<string | Uint8Array>
   /** Byte cap; an oversized upload is refused without touching the target. */
   limit: number
+  /** The tool-environment workspace; omitted = this host's filesystem. */
+  workspace?: ToolEnvironmentWorkspace
 }
 
 /**
@@ -46,9 +49,9 @@ export interface WorkspaceUploadInput {
  * failures; the temp file is always removed on failure.
  */
 export async function writeWorkspaceUpload(input: WorkspaceUploadInput): Promise<{ path: string; size: number }> {
-  const { cwd, dir, relativePath, chunks, limit } = input
+  const { cwd, dir, relativePath, chunks, limit, workspace } = input
   const base = requireAbsolute(dir)
-  await ensureWorkspacePath(cwd, base)
+  await ensureWorkspacePath(cwd, base, workspace)
   if (relativePath === '' || relativePath.startsWith('/') || relativePath.startsWith('\\')) {
     throw new SidebarError('bad-request', 'relativePath must stay below the upload directory', 400)
   }
@@ -57,8 +60,13 @@ export async function writeWorkspaceUpload(input: WorkspaceUploadInput): Promise
     throw new SidebarError('bad-request', 'relativePath must stay below the upload directory', 400)
   }
   const target = join(base, ...segments)
-  const safeTarget = await ensureWorkspaceWritePath(cwd, target)
+  const safeTarget = await ensureWorkspaceWritePath(cwd, target, workspace)
   const tmp = join(dirname(safeTarget), `.${basename(safeTarget)}.dsh-upload-${randomUUID()}.tmp`)
+  if (workspace !== undefined) {
+    const size = await workspace.writeStream(safeTarget, tmp, chunks, limit,
+      () => new SidebarError('too-large', `upload exceeds the ${limit} byte limit`, 413))
+    return { path: target, size }
+  }
   await mkdir(dirname(safeTarget), { recursive: true })
   const stream = createWriteStream(tmp, { flags: 'wx' })
   // Resolves once the stream fully closes; created up front so a stream that

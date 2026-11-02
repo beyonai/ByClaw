@@ -29,7 +29,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
-class WeixinCredentialAuthorizationLifecycleTest {
+class WeixinCredentialAuthorizationLifecycleTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void successfulWeixinVerificationPersistsOnlyManagedEnvironment() {

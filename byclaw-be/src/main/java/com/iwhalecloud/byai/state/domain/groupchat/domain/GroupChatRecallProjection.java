@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.domain;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,11 +18,12 @@ import lombok.extern.slf4j.Slf4j;
 /** 每次查询独立创建，统一屏蔽撤回内容并复用同一操作人的 Redis 名称读取。 */
 @Slf4j
 public final class GroupChatRecallProjection {
-    public static final String RECALLED_REFERENCE = "消息已撤回";
+    // 保存消息键，避免静态常量固定为首次加载时的语言。
+    public static final String RECALLED_REFERENCE = "groupchat.message.recalled";
     private final Map<Long, String> names = new HashMap<>();
 
     public String operatorName(Long userId) {
-        if (userId == null) return "未知用户";
+        if (userId == null) return I18nUtil.get("groupchat.unknownUser");
         return names.computeIfAbsent(userId, id -> {
             try {
                 ShareBfmUser user = ShareCacheUtil.getShareBfmUser(id);
@@ -32,12 +35,12 @@ public final class GroupChatRecallProjection {
                 // 不记录缓存载荷；用户名缓存故障不能让原消息内容重新出现。
                 log.warn("撤回操作人缓存读取失败, userId={}, errorType={}", id, error.getClass().getSimpleName());
             }
-            return "用户（" + id + "）";
+            return I18nUtil.get("groupchat.userFallback", String.valueOf(id));
         });
     }
 
     public String content(Long operatorId) {
-        return operatorName(operatorId) + " 撤回了一条消息";
+        return I18nUtil.get("groupchat.recalledBy", operatorName(operatorId));
     }
 
     public GroupChatContextResponse.Recall recall(Date time, Long operatorId) {
@@ -92,6 +95,6 @@ public final class GroupChatRecallProjection {
 
     /** 引用消息只返回固定占位，不需要查询操作人信息。 */
     public static String referenceContent(ByaiMessage source) {
-        return source.isRecalled() ? RECALLED_REFERENCE : source.getMessageContent();
+        return source.isRecalled() ? I18nUtil.get(RECALLED_REFERENCE) : source.getMessageContent();
     }
 }

@@ -25,11 +25,14 @@ export function errorStatus(error: DomainError): number {
       "AUTHORITY_CHANGED",
       "LEASE_EXPIRED",
       "UPSTREAM_UNAVAILABLE",
+      "QUOTA_UNAVAILABLE",
     ].includes(error.code)
   )
     return 503;
   if (
+    error.code === "FORWARD_INVALID_REQUEST" ||
     error.code.startsWith("INVALID_") ||
+    error.code === "FORWARD_INVALID_REQUEST" ||
     error.code.endsWith("_DIGEST_MISMATCH") ||
     error.code === "HASH_MISMATCH"
   )

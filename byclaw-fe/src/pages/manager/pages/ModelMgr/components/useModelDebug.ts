@@ -12,6 +12,7 @@ type Params = {
   intl: IntlShape;
   open: boolean;
   currentModelType?: any;
+  currentModelName?: string;
   currentProviderName?: any;
   currentModelProtocol?: any;
   getCurrentModelId: () => string | number | undefined;
@@ -19,6 +20,7 @@ type Params = {
   formatDebugError?: (error: any) => string | undefined;
   runDebugRequest: (params: {
     modelId: string | number;
+    modelName?: string;
     input: string;
     modelType?: any;
     signal: AbortSignal;
@@ -32,6 +34,7 @@ const useModelDebug = ({
   intl,
   open,
   currentModelType,
+  currentModelName,
   currentProviderName,
   currentModelProtocol,
   getCurrentModelId,
@@ -173,6 +176,7 @@ const useModelDebug = ({
     setDebugOutputLoading(true);
     runDebugRequest({
       modelId: `${currentModelId}`,
+      modelName: currentModelName,
       input: `${debugInput}`,
       modelType: currentModelType,
       signal: abortRef.current.signal,
@@ -270,6 +274,7 @@ const useModelDebug = ({
   }, [
     abortDebug,
     currentModelType,
+    currentModelName,
     currentProviderName,
     currentModelProtocol,
     debugInput,

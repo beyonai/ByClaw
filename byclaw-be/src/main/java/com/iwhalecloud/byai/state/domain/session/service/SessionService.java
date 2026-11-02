@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import cn.hutool.core.convert.Convert;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -185,7 +187,20 @@ public class SessionService {
      * @return MemoryResponse
      */
     public ByaiSession createSessionMembers(SessionMembersDto sessionMembersDto) {
+        // User-bound generic chat DTOs cannot create workgroups or overwrite their ownership marker.
+        if (SessionType.HS_AS.getCode().equalsIgnoreCase(sessionMembersDto.getSessionType())) {
+            throw new IllegalArgumentException("groupchat.creation.endpoint.required");
+        }
+        if (sessionMembersDto.getSessionExts() != null && sessionMembersDto.getSessionExts().stream()
+            .anyMatch(ext -> ext != null && SharedQuotaAdmission.BUSINESS_ENTERPRISE_EXT.equals(ext.getExtParamCode()))) {
+            throw new IllegalArgumentException("groupchat.enterprise.marker.reserved");
+        }
 
+        if (sessionMembersDto.getMembers() != null && sessionMembersDto.getMembers().stream()
+            .anyMatch(member -> member == null || !java.util.Objects.equals(sessionMembersDto.getSessionId(), member.getSessionId()))) {
+            // A nested client DTO must never attach members to a different persisted workgroup.
+            throw new IllegalArgumentException("session.member.scope.invalid");
+        }
         ByaiSession byaiSession = new ByaiSession();
         BeanUtil.copyProperties(sessionMembersDto, byaiSession);
         this.save(byaiSession);

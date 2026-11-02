@@ -576,6 +576,12 @@ public class AssistantChatApplicationService {
      */
     public SessionUploadResult uploadFiles(MultipartFile[] multipartFiles, Long sessionId, String sessionType,
                                            Long agentId, Long projectId) throws Exception {
+        return uploadFiles(multipartFiles, sessionId, sessionType, agentId, projectId, null);
+    }
+
+    /** Server-owned subdirectories let independent copies reuse normal uploads without overwriting sibling files. */
+    public SessionUploadResult uploadFiles(MultipartFile[] multipartFiles, Long sessionId, String sessionType,
+                                           Long agentId, Long projectId, String uploadDirectory) throws Exception {
 
         // 检查文件是否合法
         this.checkUploadInfo(multipartFiles, agentId);
@@ -627,7 +633,8 @@ public class AssistantChatApplicationService {
 
             String userCode = CurrentUserHolder.getCurrentUserCode();
             StorageLocation location = conversationStoragePathResolver.conversationFile(userCode,
-                String.valueOf(sessionId), convertFileName);
+                String.valueOf(sessionId), StringUtils.isBlank(uploadDirectory) ? convertFileName
+                    : uploadDirectory + "/" + convertFileName);
 
             byte[] bytes = multipartFile.getBytes();
             String contentType = multipartFile.getContentType();
@@ -638,6 +645,12 @@ public class AssistantChatApplicationService {
             fileUrl = fileUrl.replace("{bucketName}", location.getBucketOrRoot()).replace("{filePath}",
                 location.getPath());
 
+            if (StringUtils.isNotBlank(uploadDirectory)) {
+                fileUrl = "/commonFile/preview?style=minio&bucketName="
+                    + java.net.URLEncoder.encode(location.getBucketOrRoot(), java.nio.charset.StandardCharsets.UTF_8)
+                    + "&filePath=" + java.net.URLEncoder.encode(location.getPath(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+
             // 记录文件信息
             Files byaiFiles = filesService.createUploadFile(originalFilename, convertFileName, contentType, null, -1L, sessionId,
                 fileUrl);
@@ -647,9 +660,14 @@ public class AssistantChatApplicationService {
             uploadItem.setFileName(byaiFiles.getConvertFileName());
             uploadItem.setFilePath(conversationStoragePathResolver.normalizeDisplayFilePath(location.getPath()));
             uploadItem.setFileUrl(fileUrl);
+            uploadItem.setSuccess(true);
             sessionUploadResult.getUploadItems().add(uploadItem);
         }
 
+        // This path is all-or-throw: only persisted files are returned as successful uploads.
+        sessionUploadResult.getSummary().setTotal(multipartFiles.length);
+        sessionUploadResult.getSummary().setSucceeded(sessionUploadResult.getUploadItems().size());
+        sessionUploadResult.getSummary().setFailed(0);
         return sessionUploadResult;
     }
 

@@ -419,6 +419,10 @@ export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/pro
 export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
   POST<any>('/byaiService/project/session/listByQo', data, config);
 
+// 附件上传会提前创建会话；首条问题发送前切换项目时同步修正该草稿会话的归属。
+export const changeDraftSessionProject = (data: { sessionId: string | number; projectId: string | number }) =>
+  POST<void>('/byaiService/project/session/changeDraftProject', data, { responseCfg: { hideErrorTips: true } });
+
 // 项目资源 tab 的共享文件空间使用项目维度文件接口，不再读取当前数字员工的 /.shared/ 目录。
 export const listProjectSpaceFiles = (projectId: number) =>
   POST<DevloopProjectSpaceFile[]>('/byaiService/project/share/listSpaceFiles', { projectId });

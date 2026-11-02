@@ -25,9 +25,10 @@ assert.equal(idle.status, 'idle')
 assert.equal(idle.rootActive, false)
 assert.equal(idle.acceptingInput, true)
 
-const tracker = new ByClawSessionActivityTracker('root-session', () => ++now)
+const tracker = new ByClawSessionActivityTracker('root-session', () => ++now, 'runtime-instance-1')
 
 assert.deepEqual(tracker.observeTurnActive(true), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: true,
   acceptingInput: false,
@@ -43,6 +44,7 @@ assert.equal(tracker.observeAgentStatus('root-session', true), undefined,
   'repeated DSH agent/status must not duplicate the Redis runtime event')
 
 assert.deepEqual(tracker.observeAgentStatus('child-a', true), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: true,
   acceptingInput: false,
@@ -55,6 +57,7 @@ assert.deepEqual(tracker.observeAgentStatus('child-a', true), {
 assert.equal(tracker.observeTeamActive(true), undefined,
   'team activation without a visible state/count change must not duplicate the runtime event')
 assert.deepEqual(tracker.observeAgentStatus('root-session', false), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -65,6 +68,7 @@ assert.deepEqual(tracker.observeAgentStatus('root-session', false), {
   changedAt: 1003,
 })
 assert.deepEqual(tracker.observeAgentStatus('child-a', false), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -76,6 +80,7 @@ assert.deepEqual(tracker.observeAgentStatus('child-a', false), {
 }, 'a retained team keeps the ByClaw session running while the captain is idle')
 
 assert.deepEqual(tracker.observeTeamActivity(true, 3), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -86,6 +91,7 @@ assert.deepEqual(tracker.observeTeamActivity(true, 3), {
   changedAt: 1005,
 }, 'team snapshots provide a durable fallback for active child counts')
 assert.deepEqual(tracker.observeTeamActivity(true, 0), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -97,6 +103,7 @@ assert.deepEqual(tracker.observeTeamActivity(true, 0), {
 })
 
 assert.deepEqual(tracker.observeWaitingInteraction('root-session', true), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -107,6 +114,7 @@ assert.deepEqual(tracker.observeWaitingInteraction('root-session', true), {
   changedAt: 1007,
 })
 assert.deepEqual(tracker.observeTeamActive(false), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'waiting_user',
   rootActive: false,
   acceptingInput: true,
@@ -118,6 +126,7 @@ assert.deepEqual(tracker.observeTeamActive(false), {
 })
 assert.equal(tracker.observeTurnActive(false), undefined)
 assert.deepEqual(tracker.observeWaitingInteraction('root-session', false), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'idle',
   rootActive: false,
   acceptingInput: true,
@@ -128,6 +137,7 @@ assert.deepEqual(tracker.observeWaitingInteraction('root-session', false), {
   changedAt: 1009,
 })
 assert.deepEqual(tracker.observeRootFailure(), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'failed',
   rootActive: false,
   acceptingInput: true,
@@ -150,6 +160,7 @@ const context = {
   messageIdPrefix: 'answer-message',
 }
 const projection = sessionRuntimeProjection({
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,
@@ -169,8 +180,10 @@ assert.equal(projection.options.metadata.active_agent_count, 3)
 assert.equal(projection.options.metadata.active_child_count, 2)
 assert.equal(projection.options.metadata.waiting_interaction_count, 0)
 assert.equal(projection.options.metadata.runtime_revision, 9)
+assert.equal(projection.options.metadata.runtime_instance_id, 'runtime-instance-1')
 assert.equal(projection.options.metadata.runtime_changed_at, 1010)
 assert.deepEqual(JSON.parse(projection.content), {
+  runtimeInstanceId: 'runtime-instance-1',
   status: 'running',
   rootActive: false,
   acceptingInput: true,

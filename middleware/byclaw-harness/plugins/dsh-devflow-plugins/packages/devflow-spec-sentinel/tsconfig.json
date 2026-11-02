@@ -9,6 +9,9 @@
   ],
   "references": [
     {
+      "path": "../devflow"
+    },
+    {
       "path": "../devflow-spec"
     }
   ]

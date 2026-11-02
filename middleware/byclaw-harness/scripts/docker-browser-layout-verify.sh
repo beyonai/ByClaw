@@ -26,7 +26,8 @@ else
 fi
 node scripts/docker-plugin-layout.mjs bundles plugins | grep -E '/plugins/dsh-browser-use/package.json$'
 
-grep -F 'FROM python:3.12-slim-trixie AS dsh-base' Dockerfile.base >/dev/null
+grep -Fx 'ARG PYTHON_IMAGE' Dockerfile.base >/dev/null
+grep -Fx 'FROM ${PYTHON_IMAGE} AS dsh-base' Dockerfile.base >/dev/null
 grep -F 'ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn' Dockerfile.base >/dev/null
 grep -F 'Acquire::Retries "5";' Dockerfile.base >/dev/null
 grep -F 'Acquire::http::Timeout "30";' Dockerfile.base >/dev/null
@@ -79,6 +80,7 @@ grep -F "ignoreDefaultArgs: ['--disable-extensions', '--no-startup-window']" plu
 grep -F '每次执行 raw browser 命令或 COOKIE/INTERCEPT/UI Adapter 命令前' builtin/skills/bycli/SKILL.md >/dev/null
 grep -F -- '--browser-user byclaw' docker-entrypoint.sh >/dev/null
 grep -F -- '--dsh-user byclaw' docker-entrypoint.sh >/dev/null
+node scripts/docker-framework-layout-verify.mjs "${dockerfiles[@]}"
 node scripts/docker-plugin-dependencies-verify.mjs
 node scripts/prune-dsh-profile.test.mjs
 

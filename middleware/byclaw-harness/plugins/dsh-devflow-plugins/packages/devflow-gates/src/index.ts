@@ -166,13 +166,14 @@ export function apply(ctx: Context, config: Config): void {
     // directory — the parent of the card's devflow root — unless the edge
     // names somewhere else.
     const workdir = policy.workdir ?? dirname(attempt.root)
-    const run = (command: string): Promise<Attempted> => ctx.shell
-      .run(ctx.shell.resolve({
+    const run = async (command: string): Promise<Attempted> => {
+      const execution = await ctx.shell.execute(ctx.shell.resolve({
         command,
         workdir,
         ...policy.timeoutMs !== undefined ? { timeoutMs: policy.timeoutMs } : {},
       }))
-      .then(result => ({ command, result }))
+      return { command, result: await execution.result() }
+    }
 
     const failed = policy.parallel === true
       ? (await Promise.all(commands.map(run))).filter(attempted => attempted.result.exitCode !== 0)

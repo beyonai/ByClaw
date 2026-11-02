@@ -11,6 +11,7 @@
  */
 
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
+import { getIntl } from '@umijs/max';
 import { getMsgId } from '@/utils/messgae';
 import { isDevelopment } from '../common';
 
@@ -177,11 +178,11 @@ export class OpenClawWebSocketClient {
     }
 
     if (!this.isValidWsUrl(this.url)) {
-      return Promise.reject(new Error('Invalid WebSocket URL'));
+      return Promise.reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.invalidUrl' })));
     }
 
     if (!this.token && !this.password) {
-      return Promise.reject(new Error('Token or password is required for WebSocket connect'));
+      return Promise.reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.credentialsRequired' })));
     }
 
     // 仅在非重连时才重置重连状态（重连时保持计数器）
@@ -217,7 +218,7 @@ export class OpenClawWebSocketClient {
       this.ensureConnected()
         .then(() => {
           if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            reject(new Error('WebSocket not open'));
+            reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.notOpen' })));
             return;
           }
 
@@ -274,7 +275,7 @@ export class OpenClawWebSocketClient {
               if (cancelled) return;
               cancelled = true;
               this.clearCurrentChat();
-              reject(new Error('WebSocket chat timeout'));
+              reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.chatTimeout' })));
             }, timeoutMs);
           }
         })
@@ -297,7 +298,7 @@ export class OpenClawWebSocketClient {
   public async request<T = unknown>(method: string, params?: unknown): Promise<T> {
     await this.ensureConnected();
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket not open');
+      throw new Error(getIntl().formatMessage({ id: 'openClaw.websocket.notOpen' }));
     }
     const id = this.uuid();
     const frame = { type: 'req' as const, id, method, params };
@@ -359,7 +360,7 @@ export class OpenClawWebSocketClient {
     }
     this.ws = null;
     this.clearCurrentChat();
-    this.rejectAllPending(new Error('WebSocket closed'));
+    this.rejectAllPending(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.closed' })));
     this.cleanupReadyPromise();
   }
 
@@ -497,7 +498,7 @@ export class OpenClawWebSocketClient {
           if (obj.ok) {
             pendingReq.resolve(obj.payload);
           } else {
-            pendingReq.reject(new Error(obj.error?.message || 'request failed'));
+            pendingReq.reject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.requestFailed' })));
           }
         }
 
@@ -541,7 +542,7 @@ export class OpenClawWebSocketClient {
       }
       this.ready = false;
       this.clearCurrentChat();
-      this.rejectAllPending(new Error('WebSocket closed'));
+      this.rejectAllPending(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.closed' })));
       this.cleanupReadyPromise();
       this.ws = null;
     };
@@ -789,7 +790,7 @@ export class OpenClawWebSocketClient {
       // 超出最大重连次数，不再继续重连
       // 如果外层有人在等待 ensureConnected 的 readyPromise，则给一个明确错误
       if (this.readyReject) {
-        this.readyReject(new Error('WebSocket reconnect attempts exceeded'));
+        this.readyReject(new Error(getIntl().formatMessage({ id: 'openClaw.websocket.reconnectFailed' })));
       }
       // 触发重连失败回调
       if (this.onReconnectFailed) {

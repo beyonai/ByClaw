@@ -81,7 +81,7 @@ describe('optional model provider compatibility', () => {
     const TestForm = () => {
       [form] = Form.useForm();
       return (
-        <ConfigProvider theme={{ token: { motion: false } }}>
+        <ConfigProvider virtual={false} theme={{ token: { motion: false } }}>
           <ModelFormFields
             form={form}
             modalTitle="model"

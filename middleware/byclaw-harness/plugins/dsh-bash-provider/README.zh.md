@@ -21,7 +21,7 @@ bundle 会停用发行版的 `bash-sandbox` 运行项，并以相同的 60 秒�
 
 ## 繁忙时 Enter 发送行为
 
-本包原名为 `dsh-env-forward`，当前源码目录为 `dsh-bash-provider`。bundle 还会用 `byclaw-settings` 替换发行版的 `settings` 运行项；它继承文件设置提供方，为会话提供环境变量默认值，并在所有平台启用。如果 profile 自定义了设置文件路径或 watcher 选项，请将这部分配置移到 `byclaw-settings`。
+本包原名为 `dsh-env-forward`，当前源码目录为 `dsh-bash-provider`。bundle 用启动环境为 Web profile 的 `ui-conversation` 运行项设置默认值；发行版的 `settings` 运行项保持不变。
 
 在 DSH 启动环境或其 `.env` 文件中设置：
 
@@ -29,9 +29,9 @@ bundle 会停用发行版的 `bash-sandbox` 运行项，并以相同的 60 秒�
 BYCLAW_DSH_BUSY_ENTER=queue
 ```
 
-`queue` 表示排队发送，也是未设置变量时的默认值；`steer` 表示插话发送。其他值（包括空字符串）会导致插件加载失败。设置提供方启动时读取该值，修改后需重启 DSH。透传给 Bash 的 Redis 参数不会配置 Host 界面。
+`queue` 表示排队发送，也是未设置变量时的默认值；`steer` 表示插话发送。其他值（包括空字符串）无法通过校验，`ui-conversation` 运行项不会加载。profile 加载时读取该值，修改后需重启 DSH。透传给 Bash 的 Redis 参数不会配置 Host 界面。
 
-此值作为 `ui-conversation.busyEnter` 的基础配置，不写入设置文件。已保存的界面偏好优先；从设置文档删除该字段后，会重新继承环境变量默认值。界面修改仍即时生效。智能体繁忙时，Enter 使用选中的行为，Cmd/Ctrl+Enter 使用另一种行为；鼠标发送按钮仍然排队。插话会在下一个可用步骤边界送达，不会中断正在执行的操作。
+此值是 `ui-conversation` 运行项的 `busyEnter` 默认值，不写入任何文件。界面保存的偏好写入 profile 的 `cordis.patch.yml`，其中的 `ui-conversation` 条目会替换这份配置，因此优先；删除该条目即可重新继承环境变量默认值。界面修改仍即时生效。智能体繁忙时，Enter 使用选中的行为，Cmd/Ctrl+Enter 使用另一种行为；鼠标发送按钮仍然排队。插话会在下一个可用步骤边界送达，不会中断正在执行的操作。
 
 ## 命令压缩（rtk）
 
@@ -63,7 +63,7 @@ BYCLAW_DSH_BUSY_ENTER=queue
 4. Redis 登录 Hash，映射为 `BEYOND_TOKEN`、`SSO_TOKEN`、`WHALE_AGENT_AUTHORIZATION`、`USER_CODE`、`USER_ID` 和 `USER_NAME`。
 5. `dsh-shell-env` 为当前执行生成的受管 `DSH_*` 快照。
 
-后面的层级优先。因此，Redis 运行态值会覆盖同名本地变量和调用方变量，而 `DSH_SESSION_ID` 等受管当前值仍不会被覆盖。前台命令会在执行前立即刷新 Redis；后台命令使用启动时及每 5 秒刷新的 last-good 缓存。每次刷新只尝试连接一次，硬超时为 1 秒，单次刷新内部不重试。key 不存在按正常空结果处理；连接/命令异常、非法 JSON 和错误 payload 结构只记录不含 Redis value 的错误，并保留上一份成功缓存；没有缓存时 Bash 继续使用本地环境和调用方环境。
+后面的层级优先。因此，Redis 运行态值会覆盖同名本地变量和调用方变量，而 `DSH_SESSION_ID` 等受管当前值仍不会被覆盖。前台和后台命令都会在执行前立即刷新 Redis（缓存另在启动时及每 5 秒刷新）。每次刷新只尝试连接一次，硬超时为 1 秒，单次刷新内部不重试。key 不存在按正常空结果处理；连接/命令异常、非法 JSON 和错误 payload 结构只记录不含 Redis value 的错误，并保留上一份成功缓存；没有缓存时 Bash 继续使用本地环境和调用方环境。
 
 透传作用于模型侧 `bash` 工具及其他经过 `ctx.shell` 的调用，不影响持久终端、PowerShell、MCP/LSP transport、subagent，也不影响直接调用 `ctx.subprocess` 的其他 consumer。
 

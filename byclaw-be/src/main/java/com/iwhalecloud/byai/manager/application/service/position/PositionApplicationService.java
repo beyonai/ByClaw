@@ -8,6 +8,9 @@ import com.iwhalecloud.byai.manager.entity.position.Position;
 import com.iwhalecloud.byai.manager.qo.position.PositionQo;
 import com.iwhalecloud.byai.manager.qo.position.PositionUsersQo;
 import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.manager.domain.users.service.UsersOrganizationService;
+import com.iwhalecloud.byai.manager.dto.position.PositionUserBindDTO;
 import com.iwhalecloud.byai.manager.vo.position.PositionUsersVo;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.dto.position.PositionDelDTO;
@@ -21,9 +24,11 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 岗位应用服务
@@ -39,6 +44,44 @@ public class PositionApplicationService {
 
     @Autowired
     private PositionService positionService;
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private UsersOrganizationService usersOrganizationService;
+
+    @Transactional(rollbackFor = Exception.class)
+    public void addPositionUsers(PositionUserBindDTO request) {
+        List<Long> userIds = validatePositionMembers(request);
+        usersOrganizationService.addPositionUsers(request.getPositionId(), userIds);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void removePositionUsers(PositionUserBindDTO request) {
+        List<Long> userIds = validatePositionMembers(request);
+        usersOrganizationService.removePositionUsers(request.getPositionId(), userIds);
+    }
+
+    private List<Long> validatePositionMembers(PositionUserBindDTO request) {
+        if (!CurrentUserHolder.isPlatformManager()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("position.members.nopermission"));
+        }
+        Position position = positionService.findById(request.getPositionId());
+        if (position == null || !Integer.valueOf(0).equals(position.getIsDigitalPosition())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("position.not.exist"));
+        }
+        if (request.getUserIds() == null || request.getUserIds().isEmpty()
+            || request.getUserIds().stream().anyMatch(Objects::isNull)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.userid.notnull"));
+        }
+        List<Long> userIds = request.getUserIds().stream().distinct().toList();
+        var users = userService.findByIds(userIds);
+        if (users.size() != userIds.size() || users.stream().anyMatch(user -> "X".equals(user.getState()))) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.not.exist"));
+        }
+        return userIds;
+    }
 
     /**
      * 查询岗位列表

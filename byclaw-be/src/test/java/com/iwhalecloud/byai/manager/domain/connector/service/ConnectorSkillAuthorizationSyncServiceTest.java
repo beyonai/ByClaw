@@ -29,7 +29,7 @@ import com.iwhalecloud.byai.manager.domain.connector.manifest.InvalidConnectorMa
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorSkillAuthorizationSyncDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class ConnectorSkillAuthorizationSyncServiceTest {
+class ConnectorSkillAuthorizationSyncServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
     void resolvesImaSkillAliasToImaOpenApiProvider() {

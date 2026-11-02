@@ -48,6 +48,12 @@ import { qryConversations } from '@/service/layout';
 import { isExternalChildSession } from '@/utils/scopedSession';
 import { useChatResourceProject } from './ChatResourceWorkspace/useChatResourceProject';
 import { getLatestDigitalEmployeeMessage } from '@/utils/chatVnc';
+import { changeDraftSessionProject } from '@/service/devloop';
+import {
+  buildDraftSessionProjectPatch,
+  shouldPersistDraftSessionProject,
+  type DraftSessionProject,
+} from './draftSessionProject';
 
 type IProps = {
   sessionId: string;
@@ -191,14 +197,17 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [dispatch]
   );
 
-  const openDrawerSourceFromInfo = useCallback((infoList: IResourceFromItem[]) => {
-    EventEmitter.emit('beyond-main-driver-open-type', {
-      width: '25vw',
-      title: intl.formatMessage({ id: 'sourceDrawer.title' }),
-      canClose: true,
-      drawerType: <ReferenceSource drawerSourceFromInfo={infoList} />,
-    });
-  }, []);
+  const openDrawerSourceFromInfo = useCallback(
+    (infoList: IResourceFromItem[]) => {
+      EventEmitter.emit('beyond-main-driver-open-type', {
+        width: '25vw',
+        title: intl.formatMessage({ id: 'sourceDrawer.title' }),
+        canClose: true,
+        drawerType: <ReferenceSource drawerSourceFromInfo={infoList} />,
+      });
+    },
+    [intl]
+  );
 
   const onBeforeSend = useCallback(async (param = {}) => {
     void getSandboxesInfoUrl();
@@ -228,8 +237,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [addSession, currentSession, sessionId]);
 
   const sessionProjectId = useMemo(() => {
-    // 路由状态在刷新或非项目列表入口时可能丢失，优先从当前会话的后端归属字段恢复。
-    const candidateProjectId = projectId ?? currentSession?.projectId;
+    // 已创建会话以会话缓存（由后端归属同步）为准，避免新任务切换项目后继续使用页面进入时的旧项目。
+    const candidateProjectId = currentSession?.projectId ?? projectId;
     const normalizedProjectId = Number(candidateProjectId);
     return Number.isFinite(normalizedProjectId) && (normalizedProjectId === -1 || normalizedProjectId > 0)
       ? normalizedProjectId
@@ -244,6 +253,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     selectedProject?.cloudResourceId ||
     inputSelectedProject?.cloudResourceId ||
     sessionProject?.cloudResourceId;
+  const sessionProjectName = currentSession?.projectName || selectedProject?.projectName || projectName;
 
   const notificationSession = isNotificationSession(currentSession);
   const externalChildSession = isExternalChildSession(currentSession);
@@ -696,6 +706,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     userInfo && queryInputProps.enableTaskTemplate !== false && (!sessionId || (preserveNewSessionView && !isBottom))
   );
   const projectSelectorSessionId = preserveNewSessionView && !isBottom ? '' : sessionId;
+  const handleNewTaskProjectChange = useCallback(
+    async (project: DraftSessionProject) => {
+      if (shouldPersistDraftSessionProject({ preserveNewSessionView, isBottom, sessionId })) {
+        await changeDraftSessionProject({ sessionId, projectId: project.projectId });
+        updateSession(buildDraftSessionProjectPatch(sessionId, project));
+      }
+      setSelectedProject(project);
+    },
+    [isBottom, preserveNewSessionView, sessionId, updateSession]
+  );
 
   return (
     <ChatLayoutCompContext.Provider
@@ -716,7 +736,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
-                projectName={projectName}
+                projectName={sessionProjectName}
                 // 按钮底色只反映右侧资源小面板状态，文件预览单独打开时保持无底色。
                 resourceWorkspaceOpen={resourceListOpen}
                 // 会话标题按钮关闭资源工作区时，需要同时关闭列表和全部多 Tab 预览。
@@ -727,7 +747,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
               <div className={classnames(styles.messageList, 'ub-f1 overflow-hidden')}>
                 {sessionMessageLoadState === 'loading' && (
                   <div className={styles.sessionMessageLoadNotice} role="status">
-                    <Spin size="small" /> 正在同步会话消息…
+                    <Spin size="small" />
+                    {intl.formatMessage({ id: 'chatLayout.syncing' })}
                   </div>
                 )}
                 {sessionMessageLoadState === 'error' && (
@@ -736,7 +757,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     className={styles.sessionMessageLoadError}
                     onClick={() => void retrySessionMessageLoad()}
                   >
-                    会话消息加载失败，点击重试
+                    {intl.formatMessage({ id: 'chatLayout.loadFailedRetry' })}
                   </button>
                 )}
                 <MessageList
@@ -791,7 +812,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     <TaskTemplateEntry
                       projectId={sessionProjectId}
                       sessionId={projectSelectorSessionId}
-                      onProjectChange={setSelectedProject}
+                      skipInitialProjectChange={Boolean(sessionId)}
+                      onProjectChange={handleNewTaskProjectChange}
                       onApply={() => undefined}
                     />
                   </div>
@@ -802,11 +824,12 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             {externalChildSession && (
               <div className={styles.childSessionReadOnlyNotice}>
                 <span className={styles.childSessionReadOnlyCopy}>
-                  <LockOutlined />子 Agent 会话为只读，消息由外部执行器持续同步
+                  <LockOutlined />
+                  {intl.formatMessage({ id: 'chat.childSessionReadOnly' })}
                 </span>
                 <button type="button" onClick={() => setGlobalSessionId?.(`${currentSession?.parentSessionId || ''}`)}>
                   <ArrowLeftOutlined />
-                  返回主会话继续任务
+                  {intl.formatMessage({ id: 'chat.returnToParent' })}
                 </button>
               </div>
             )}

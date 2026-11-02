@@ -38,24 +38,27 @@ public class TenantNodeSchemaService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final Path bundlePath;
-    private final String sandboxBaseUrl;
-    private final String sandboxApiKey;
     private final String internalToken;
+    private final TenantNodeClient nodeClient;
     // OpenSandbox's HTTP proxy cannot stream multipart uploads during an h2c upgrade.
     private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(5)).build();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
-                                   @Value("${BYCLAW_TENANT_BASELINE_BUNDLE:}") String bundlePath,
-                                   @Value("${BYCLAW_SANDBOX_BASE_URL:}") String sandboxBaseUrl,
-                                   @Value("${BYCLAW_SANDBOX_API_KEY:}") String sandboxApiKey,
-                                   @Value("${BYCLAW_TENANT_INTERNAL_TOKEN:}") String internalToken) {
+                                   TenantRuntimeIdentity identity, TenantNodeClient nodeClient) {
+        this(jdbc, objectMapper, "", identity.internalToken(), nodeClient);
+    }
+
+    public TenantNodeSchemaService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                   String bundlePath,
+                                   String internalToken,
+                                   TenantNodeClient nodeClient) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.bundlePath = bundlePath == null || bundlePath.isBlank() ? null : Path.of(bundlePath);
-        this.sandboxBaseUrl = sandboxBaseUrl;
-        this.sandboxApiKey = sandboxApiKey;
         this.internalToken = internalToken;
+        this.nodeClient = nodeClient;
     }
 
     public boolean initialized(long enterpriseId) {
@@ -68,9 +71,28 @@ public class TenantNodeSchemaService {
         return count != null && count > 0;
     }
 
+    /** Recovery only acknowledges the original request's verified target; it never creates a replacement audit. */
+    public boolean verifiedRecoveryAudit(long enterpriseId, String requestId, long dbRecordId) {
+        String version;
+        try { version=metadata(readBundle()).version(); }
+        catch (IOException failure) { throw new IllegalStateException("cannot read tenant baseline bundle",failure); }
+        Integer count=jdbc.queryForObject("SELECT count(*) FROM byai.tenant_schema_audit "
+            + "WHERE enterprise_id=? AND request_id=? AND db_sandbox_record_id=? AND generation=1 "
+            + "AND operation_type='INIT' AND trigger_type='AUTO_PROVISION' AND is_current=TRUE "
+            + "AND status='VERIFIED' AND observed_version=? AND target_version=?",
+            Integer.class,enterpriseId,requestId,dbRecordId,version,version);
+        return count!=null && count==1;
+    }
+
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId) throws Exception {
-        if (internalToken == null || internalToken.isBlank() || sandboxBaseUrl == null || sandboxBaseUrl.isBlank()) {
+        initialize(enterpriseId, generation, dbRecordId, node, requestId, 1L);
+    }
+
+    public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
+                           String requestId, long fencingToken) throws Exception {
+        if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
+        if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
         }
         byte[] bundle = readBundle();
@@ -93,7 +115,8 @@ public class TenantNodeSchemaService {
         task.put("enterpriseId", Long.toString(enterpriseId));
         task.put("dbSandboxRecordId", Long.toString(dbRecordId));
         task.put("generation", Long.toString(generation));
-        task.put("fencingToken", "1");
+        // A reclaimed durable command must use its current authority rather than the original attempt's fence.
+        task.put("fencingToken", Long.toString(fencingToken));
         task.put("operationType", "INIT");
         task.put("triggerType", "AUTO_PROVISION");
         task.put("byclawReleaseVersion", metadata.version());
@@ -109,18 +132,17 @@ public class TenantNodeSchemaService {
         script.put("sha256", metadata.sqlDigest());
 
         try {
-            URI base = nodeUri(node.endpoint());
-            waitForDatabase(base, enterpriseId, generation);
+            URI base = waitForDatabase(enterpriseId, generation, dbRecordId);
             String boundary = "byclaw-" + auditId;
             byte[] upload = multipart(boundary, objectMapper.writeValueAsBytes(task), bundle);
-            HttpResponse<byte[]> accepted = send(base.resolve(base.getPath() + "/internal/v1/schema-tasks"),
+            HttpResponse<byte[]> accepted = send(base.resolve(base.getRawPath() + "/internal/v1/schema-tasks"),
                 "POST", upload, "multipart/form-data; boundary=" + boundary, enterpriseId, generation,
                 Map.of("Idempotency-Key", auditId + ":" + attemptNo));
             if (accepted.statusCode() != 202) {
                 throw new IllegalStateException("tenant Node rejected schema initialization: HTTP " + accepted.statusCode());
             }
             Instant deadline = Instant.now().plus(Duration.ofMinutes(8));
-            URI taskUrl = base.resolve(base.getPath() + "/internal/v1/schema-tasks/" + auditId);
+            URI taskUrl = base.resolve(base.getRawPath() + "/internal/v1/schema-tasks/" + auditId);
             while (Instant.now().isBefore(deadline)) {
                 Thread.sleep(2000);
                 HttpResponse<byte[]> response = send(taskUrl, "GET", null, null, enterpriseId, generation, Map.of());
@@ -186,40 +208,108 @@ public class TenantNodeSchemaService {
 
     private URI nodeUri(String endpoint) {
         if (endpoint == null || endpoint.isBlank()) throw new IllegalStateException("tenant Node endpoint is missing");
-        String value = endpoint.startsWith("/")
-            ? sandboxBaseUrl.replaceAll("/+$", "") + endpoint : endpoint;
-        URI uri = URI.create(value);
-        if (!"http".equals(uri.getScheme()) || uri.getHost() == null) {
+        URI uri = URI.create(endpoint.replaceAll("/+$", ""));
+        if ((!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) || uri.getHost() == null) {
             throw new IllegalStateException("tenant Node HTTP endpoint is invalid");
         }
         return uri;
     }
 
-    private void waitForDatabase(URI base, long enterpriseId, long generation) throws Exception {
-        URI health = base.resolve(base.getPath() + "/internal/v1/health/db");
+    private URI waitForDatabase(long enterpriseId, long generation, long dbRecordId) throws Exception {
         Instant deadline = Instant.now().plus(Duration.ofSeconds(90));
         while (Instant.now().isBefore(deadline)) {
             try {
-                if (send(health, "GET", null, null, enterpriseId, generation, Map.of()).statusCode() == 200) return;
+                // The provider endpoint may be a public sandbox gateway. Internal tenant APIs use
+                // the registered address, just like normal tenant requests, including during bootstrap.
+                URI base = nodeUri(nodeClient.schemaEndpoint(enterpriseId, generation, dbRecordId).toString());
+                URI health = base.resolve(base.getRawPath() + "/internal/v1/health/db");
+                HttpResponse<byte[]> response = send(health, "GET", null, null, enterpriseId, generation, Map.of());
+                if (response.statusCode() == 200) {
+                    JsonNode result = objectMapper.readTree(response.body());
+                    if (result == null || !Long.toString(enterpriseId).equals(result.path("enterpriseId").asText())
+                        || !Long.toString(generation).equals(result.path("generation").asText())
+                        || !Long.toString(dbRecordId).equals(result.path("dbSandboxRecordId").asText())) {
+                        throw new IllegalStateException("tenant Node database health identity mismatch");
+                    }
+                    if (result.path("dbWritable").asBoolean(false)) return base;
+                }
+            }
+            catch (org.springframework.web.server.ResponseStatusException unavailable) {
+                if (!"tenant.node.registration.unavailable".equals(unavailable.getReason())) throw unavailable;
+                // Wait for the first live registration; never fall back to an unverified gateway.
             }
             catch (IOException ignored) {
-                // The sandbox can be reachable before Node starts listening.
+                // The sandbox can be registered before Node starts listening.
             }
             Thread.sleep(2000);
         }
         throw new IllegalStateException("tenant Node database health check timed out");
     }
 
+    /** Publish Redis READY first, then wait for consumers before completing durable provisioning. */
+    public void awaitBusinessReady(long enterpriseId, long generation, long dbRecordId,
+                                   TenantSandboxView node) throws Exception {
+        awaitBusinessReady(enterpriseId, generation, dbRecordId, node,
+            Duration.ofSeconds(120), Duration.ofSeconds(2));
+    }
+
+    void awaitBusinessReady(long enterpriseId, long generation, long dbRecordId,
+                            TenantSandboxView node, Duration budget, Duration pollDelay) throws Exception {
+        if (node == null || node.recordId() <= 0 || internalToken == null || internalToken.isBlank()
+            || budget.isNegative() || budget.isZero() || budget.compareTo(Duration.ofSeconds(120)) > 0
+            || pollDelay.isNegative()) {
+            throw new IllegalArgumentException("invalid tenant business readiness configuration");
+        }
+        long deadline = System.nanoTime() + budget.toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                // Bootstrap discovery permits ADMIN_ONLY; requestBound would deadlock on DB READY.
+                URI base = nodeUri(nodeClient.schemaEndpoint(enterpriseId, generation, dbRecordId).toString());
+                URI health = base.resolve(base.getRawPath() + "/internal/v1/health/ready");
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) break;
+                HttpResponse<byte[]> response = send(health, "GET", null, null, enterpriseId, generation,
+                    Map.of(), Duration.ofNanos(Math.min(Duration.ofSeconds(15).toNanos(), remaining)));
+                if (response.statusCode() == 200) {
+                    JsonNode result = objectMapper.readTree(response.body());
+                    if (result == null || !Long.toString(enterpriseId).equals(result.path("enterpriseId").asText())
+                        || !Long.toString(generation).equals(result.path("generation").asText())
+                        || !Long.toString(dbRecordId).equals(result.path("dbSandboxRecordId").asText())) {
+                        throw new IllegalStateException("tenant Node business health identity mismatch");
+                    }
+                    if (result.path("businessReady").isBoolean()
+                        && result.path("businessReady").booleanValue() && System.nanoTime() < deadline) return;
+                }
+            } catch (org.springframework.web.server.ResponseStatusException unavailable) {
+                if (!"tenant.node.registration.unavailable".equals(unavailable.getReason())
+                    && !"tenant.node.registration.mismatch".equals(unavailable.getReason())) throw unavailable;
+                // An old registration can remain during handoff. No unverified endpoint is used.
+            } catch (IOException ignored) {
+                // Startup and transient network failures remain bounded by the same total budget.
+            }
+            long remaining = deadline - System.nanoTime();
+            if (remaining > 0) {
+                java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(pollDelay.toNanos(), remaining));
+            }
+        }
+        throw new IllegalStateException("tenant Node business health check timed out");
+    }
+
     private HttpResponse<byte[]> send(URI uri, String method, byte[] body, String contentType,
                                       long enterpriseId, long generation, Map<String, String> extra)
         throws IOException, InterruptedException {
-        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15))
+        return send(uri, method, body, contentType, enterpriseId, generation, extra, Duration.ofSeconds(15));
+    }
+
+    private HttpResponse<byte[]> send(URI uri, String method, byte[] body, String contentType,
+                                      long enterpriseId, long generation, Map<String, String> extra,
+                                      Duration timeout) throws IOException, InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(timeout)
             .header("X-Byclaw-Internal-Token", internalToken)
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation));
-        if (sandboxApiKey != null && !sandboxApiKey.isBlank()) {
-            request.header("OPEN-SANDBOX-API-KEY", sandboxApiKey);
-        }
+        if(uri.getHost()!=null && uri.getHost().endsWith("-vpc.sandbox.aliyuncs.com"))
+            nodeClient.privateHeaders(request,enterpriseId,uri);
         if (contentType != null) request.header("Content-Type", contentType);
         extra.forEach(request::header);
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()

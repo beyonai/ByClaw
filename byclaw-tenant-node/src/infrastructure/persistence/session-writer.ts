@@ -1,3 +1,4 @@
+import { lockBusiness } from "./session-locks.js";
 import {
   objectJson,
   recallIdentity,
@@ -6,10 +7,11 @@ import {
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { first, insert, nextId, camel } from "./sql-utils.js";
+import { first, insert, camel } from "./sql-utils.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 import { groupNameExists } from "./group-name.js";
 import { workgroupName } from "../../domain/workgroup-name.js";
+import { requireGroupMemberCapacity } from "./group-quota.js";
 
 /** 创建个人或群会话；群成员与默认设置在外层命令事务内一并写入，项目编排由 BE 负责。 */
 export async function createSession(context: CommandContext): Promise<void> {
@@ -21,9 +23,7 @@ export async function createSession(context: CommandContext): Promise<void> {
   if (!name.trim()) throw new DomainError("INVALID_SESSION_NAME");
   if (group) {
     // Different session IDs can still compete for one name; serialize the availability check and insert.
-    await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-      `group-name:${command.enterpriseId}:${command.userId}:${name}`,
-    ]);
+    await lockBusiness(db, `group-name:${command.enterpriseId}:${command.userId}:${name}`);
     if (await groupNameExists(db, command.enterpriseId, command.userId, name))
       throw new DomainError("GROUP_NAME_EXISTS");
   }
@@ -70,7 +70,7 @@ export async function createSession(context: CommandContext): Promise<void> {
   }
 }
 async function createMembers(context: CommandContext): Promise<void> {
-  const { command, db } = context,
+  const { command } = context,
     members = command.payload.members;
   if (
     !Array.isArray(members) ||
@@ -100,8 +100,10 @@ async function createMembers(context: CommandContext): Promise<void> {
     )
       throw new DomainError("INVALID_GROUP_MEMBERS");
     seen.add(key);
-    await insert(db, "byai_session_member", {
-      byai_session_member_id: await nextId(db, command.enterpriseId),
+  }
+  await requireGroupMemberCapacity(context, members);
+  for (const member of members) {
+    await context.saveMember({
       session_id: command.sessionId,
       mem_obj_type: member.memObjType,
       mem_obj_id: member.memObjId,
@@ -176,13 +178,25 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
   if (message.usage !== 1 || message.creatorId !== command.userId)
     await context.requireRole(["OWNER", "ADMIN"]);
   const metadata = objectJson(message.metadata);
+  const previousRecall = objectJson(metadata.recallUndo).recalledAt;
+  // 毫秒时间也是撤销请求的版本，同一毫秒再次撤回必须前进，不能复用旧版本。
+  const minimumRecallTime = new Date(
+    Number.isSafeInteger(previousRecall) && previousRecall > 0 ? previousRecall + 1 : 0,
+  );
   metadata.recall = {
     operatorId: command.userId,
     operatorName: (await context.member())?.memName || command.userId,
   };
   await db.query(
-    "UPDATE byai.byai_message SET recalled_at=COALESCE(recalled_at,CURRENT_TIMESTAMP),recalled_by=COALESCE(recalled_by,$1),metadata=CASE WHEN recalled_at IS NULL THEN $5 ELSE metadata END WHERE message_id=$2 AND session_id=$3 AND enterprise_id=$4",
-    [command.userId, messageId, command.sessionId, command.enterpriseId, JSON.stringify(metadata)],
+    "UPDATE byai.byai_message SET recalled_at=COALESCE(recalled_at,GREATEST(CURRENT_TIMESTAMP::timestamp,$6::timestamp)),recalled_by=COALESCE(recalled_by,$1),metadata=CASE WHEN recalled_at IS NULL THEN $5 ELSE metadata END WHERE message_id=$2 AND session_id=$3 AND enterprise_id=$4",
+    [
+      command.userId,
+      messageId,
+      command.sessionId,
+      command.enterpriseId,
+      JSON.stringify(metadata),
+      minimumRecallTime,
+    ],
   );
   // 按源消息取消任务；重复撤回仍返回取消任务，供 BE 重试未完成的外部停止。
   await db.query(
@@ -213,4 +227,56 @@ export async function recallMessage(context: CommandContext): Promise<Record<str
       content: recallContent(saved!),
     },
   };
+}
+
+/** 仅恢复原消息展示；取消过的执行、任务和停止补偿保持原状态。调用方持有会话事务锁。 */
+export async function undoRecallMessage(context: CommandContext): Promise<Record<string, any>> {
+  const { command, db } = context;
+  const messageId = requireId(command.payload.messageId);
+  const recalledAt = command.payload.recalledAt;
+  if (!Number.isSafeInteger(recalledAt) || recalledAt <= 0)
+    throw new DomainError("INVALID_RECALLED_AT");
+  if (Object.keys(command.payload).some((key) => !["messageId", "recalledAt"].includes(key)))
+    throw new DomainError("INVALID_COMMAND");
+  const session = await context.session();
+  if (session?.sessionType !== "hs_as" || !(await context.member()))
+    throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  const message = await first(
+    db,
+    "SELECT usage,recalled_at,recalled_by,metadata,clock_timestamp()::timestamp AS server_now FROM byai.byai_message WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3 AND archived_at IS NULL",
+    [command.sessionId, messageId, command.enterpriseId],
+  );
+  if (!message || ![1, 2].includes(message.usage)) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  const metadata = objectJson(message.metadata);
+  const data = { messageId, recalled: false, recall: null };
+  if (message.recalledAt == null) {
+    const receipt = objectJson(metadata.recallUndo);
+    if (receipt.recalledAt !== recalledAt) throw new DomainError("RECALL_UNDO_CONFLICT");
+    if (receipt.operatorId !== command.userId) throw new DomainError("RECALL_UNDO_FORBIDDEN");
+    return { data: { ...data, changed: false } };
+  }
+  if (String(message.recalledBy) !== command.userId) throw new DomainError("RECALL_UNDO_FORBIDDEN");
+  const savedAt = new Date(message.recalledAt).getTime();
+  if (savedAt !== recalledAt) throw new DomainError("RECALL_UNDO_CONFLICT");
+  // 与无时区的 recalled_at 使用同一数据库时钟，避免 Node 与数据库时区不同影响窗口。
+  const now = new Date(message.serverNow).getTime();
+  if (savedAt > now || now - savedAt > 120000) throw new DomainError("RECALL_UNDO_EXPIRED");
+  // 保留一次恢复凭据以识别重试；后续撤回仍先比较当前撤回时间，不会被旧请求恢复。
+  metadata.recallUndo = { operatorId: command.userId, recalledAt };
+  delete metadata.recall;
+  const updated = await db.query(
+    "UPDATE byai.byai_message SET recalled_at=NULL,recalled_by=NULL,metadata=$4,update_time=$7 WHERE session_id=$1 AND message_id=$2 AND enterprise_id=$3 AND recalled_by=$5 AND recalled_at=$6 AND recalled_at >= $8 AND recalled_at <= $7 AND archived_at IS NULL AND usage IN(1,2) RETURNING message_id",
+    [
+      command.sessionId,
+      messageId,
+      command.enterpriseId,
+      JSON.stringify(metadata),
+      command.userId,
+      new Date(message.recalledAt),
+      new Date(now),
+      new Date(now - 120000),
+    ],
+  );
+  if (updated.length !== 1) throw new DomainError("RECALL_UNDO_CONFLICT");
+  return { data: { ...data, changed: true } };
 }

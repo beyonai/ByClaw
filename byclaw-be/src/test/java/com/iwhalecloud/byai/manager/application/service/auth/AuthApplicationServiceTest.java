@@ -88,6 +88,183 @@ import org.mockito.InOrder;
 class AuthApplicationServiceTest {
 
     @Test
+    void synchronizedToolsUseExplicitGrantsConsistentlyAndKeepRevocationAndTenantIsolation() {
+        for (String bizType : List.of("AGENT", "TOOLKIT", "MCP")) {
+            for (Long tenant : java.util.Arrays.asList(null, 1L, 2L)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setResourceBizType(bizType); resource.setComAcctId(tenant); resource.setCreateBy(3L);
+                var grants = new ArrayList<PrivilegeGrant>();
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType(bizType); grant.setGrantType(GrantType.FORCE_USE); grants.add(grant);
+                var service = newExplicitUserPermissionService(grants);
+                prepareOperationPermissionQueries(service, resource);
+                if (!java.util.Objects.equals(tenant, 1L)) {
+                    assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                    assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                    continue;
+                }
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isTrue();
+                grant.setGrantType(GrantType.ALLOW_VIEW);
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantType(GrantType.FORCE_USE); grant.setExpDate(new java.util.Date(0));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setExpDate(null); grant.setStatusCd("P");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setEffDate(null); grant.setGrantToType(Color.BLACK);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                grant.setGrantToType(Color.RED); resource.setResourceStatus(3);
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                resource.setResourceStatus(2); grants.clear(); login.setUserCode("adminvip");
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+                    .isHasUsePermission()).isFalse();
+                grants.add(grant); login.setUserCode("user3");
+                resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+                assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+            }
+        }
+    }
+
+    @Test
+    void synchronizedSkillUsesEffectiveExplicitGrantsInBothRuntimeAndListWithinCurrentTenant() {
+        for (Long tenant : java.util.Arrays.asList(null, 0L, 1L, 2L)) {
+            for (String type : List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE, GrantType.ALLOW_MANAGE)) {
+                var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+                var resource = synchronizedSkillResource();
+                resource.setComAcctId(tenant);
+                var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+                grant.setGrantObjType("SKILL"); grant.setGrantType(type);
+                var service = newExplicitUserPermissionService(List.of(grant));
+                prepareOperationPermissionQueries(service, resource);
+                if (!java.util.Objects.equals(tenant, 1L)) {
+                    assertThat(service.hasResourceUsePermission(resource)).isFalse();
+                    assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+                    continue;
+                }
+                assertThat(service.hasResourceUsePermission(resource)).isTrue();
+                assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+                assertThat(service.hasResourceViewPermission(resource)).isTrue();
+                assertThat(service.queryResourceOperationPermissions(607L).isHasUsePermission()).isTrue();
+                var row = service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L);
+                assertThat(row.isHasUsePermission()).isTrue();
+                assertThat(row.isHasViewPermission()).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void synchronizedSkillViewOnlyGrantNeverAllowsContentAccess() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grant.setGrantType(GrantType.ALLOW_VIEW);
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceViewPermission(resource)).isTrue();
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        for (var permission : List.of(service.queryResourceOperationPermissions(607L),
+            service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L))) {
+            assertThat(permission.isHasViewPermission()).isTrue();
+            assertThat(permission.isHasUsePermission()).isFalse();
+            assertThat(permission.isCanViewDetail()).isFalse();
+        }
+    }
+
+    @Test
+    void synchronizedSkillRevocationExpiryAndOffShelfCannotBeBypassedByCreatorOrAdmin() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setCreateBy(3L); resource.setComAcctId(1L);
+        var grants = new ArrayList<PrivilegeGrant>();
+        var service = newExplicitUserPermissionService(grants);
+        prepareOperationPermissionQueries(service, resource);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL"); grants.add(grant);
+        assertThat(service.hasResourceAccessPermission(resource)).isTrue();
+        grant.setExpDate(new java.util.Date(0));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setExpDate(null); grant.setStatusCd("P");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setStatusCd("A"); grant.setEffDate(new java.util.Date(Long.MAX_VALUE));
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        grant.setEffDate(null); resource.setResourceStatus(3);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        resource.setResourceStatus(2);
+        grants.clear();
+        login.setUserCode("adminvip");
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void synchronizedSkillUseBlacklistStillOverridesUseGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        var allow = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        var deny = useGrant(607L, 3L, GrantToObjType.USER, Color.BLACK, "A");
+        allow.setGrantObjType("SKILL"); deny.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(allow, deny));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    @Test
+    void ordinaryControlledSkillStillRequiresMatchingEnterpriseEvenWithExplicitGrant() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = synchronizedSkillResource();
+        resource.setThirdSyncRevision(null); resource.setComAcctId(2L);
+        var grant = useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A");
+        grant.setGrantObjType("SKILL");
+        var service = newExplicitUserPermissionService(List.of(grant));
+        prepareOperationPermissionQueries(service, resource);
+        assertThat(service.hasResourceUsePermission(resource)).isFalse();
+        assertThat(service.hasResourceAccessPermission(resource)).isFalse();
+        assertThat(service.hasResourceViewPermission(resource)).isFalse();
+        assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L)
+            .isHasUsePermission()).isFalse();
+    }
+
+    private SsResource synchronizedSkillResource() {
+        var resource = enterpriseResource(607L, 1L);
+        resource.setResourceBizType("SKILL"); resource.setResourceCode("external-skill");
+        resource.setSystemCode("BYAI"); resource.setThirdSyncRevision(1L);
+        resource.setComAcctId(1L); resource.setUseAuthControlled(true); resource.setViewAuthControlled(true);
+        return resource;
+    }
+
+    @Test
+    void synchronizationUseCheckKeepsGrantRequirementsAndRestoresOrdinaryEnterpriseIsolation() {
+        var login = loginInfo(3L); login.setEnterpriseId(1L); CurrentUserHolder.setLoginInfo(login);
+        var resource = enterpriseResource(607L, 1L);
+        resource.setComAcctId(2L); resource.setUseAuthControlled(true);
+        var granted = newExplicitUserPermissionService(List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        var ungranted = newExplicitUserPermissionService(List.of());
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isFalse();
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> ungranted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(3);
+        assertThat(com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext
+            .checkUsePermission(resource, () -> granted.hasResourceUsePermission(resource, 3L))).isFalse();
+        resource.setResourceStatus(2);
+        assertThat(granted.hasResourceUsePermission(resource, 3L)).isFalse();
+    }
+
+    @Test
     void pendingEnterpriseSkillCannotBeManagedToBypassPublicationReview() {
         var service = new AuthApplicationService();
         SsResource skill = new SsResource();
@@ -110,6 +287,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "skillPublicationService", publications);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         LoginInfo login = new LoginInfo();
         login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);
@@ -159,19 +337,22 @@ class AuthApplicationServiceTest {
         var resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         SsResource target = enterpriseResource(601L, 1L);
         target.setResourceBizType(bizType);
+        target.setComAcctId(1L);
+        CurrentUserHolder.setLoginInfo(loginInfo(2L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(1L);
         var row = new com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo();
         row.setResourceId(601L);
-        row.setAuditType("USE");
+        row.setAuditType("USE"); row.setUserId(3L);
         when(resources.selectBatchIds(any())).thenReturn(List.of(target));
         for (boolean history : List.of(false, true)) {
             when(grants.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
                 .thenReturn(List.of(row));
             // 命中名称的记录也必须通过使用审核权限校验，待审核和历史使用相同口径。
-            doReturn(false).when(service).hasResourceUseSettingPermission(target);
+            doReturn(false).when(service).canAuditApplicant(target, 3L);
             assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务")).isEmpty();
-            doReturn(true).when(service).hasResourceUseSettingPermission(target);
+            doReturn(true).when(service).canAuditApplicant(target, 3L);
             assertThat(service.queryDigitalEmployeeUseApplyAudit(history, List.of(bizType), "财务"))
                 .containsExactly(row);
         }
@@ -235,6 +416,7 @@ class AuthApplicationServiceTest {
         var publicationMapper = mock(com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper.class);
         var governance = mock(com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "employeePublications", publicationMapper);
         ReflectionTestUtils.setField(service, "employeeGovernance", governance);
         SsResource own = enterpriseResource(601L, 1L); own.setResourceBizType("DIG_EMPLOYEE"); own.setOwnerType("personal");
@@ -313,6 +495,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resources = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResExtSkillService",
             mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class));
@@ -412,6 +595,7 @@ class AuthApplicationServiceTest {
         SsResourceService resources = mock(SsResourceService.class);
         var skills = mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResExtSkillService", skills);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(source));
@@ -676,6 +860,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(220L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
         assertThat(service.queryResourceOperationPermissions(220L).isCanOnShelf()).isFalse();
@@ -722,6 +907,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resources = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         LoginInfo login = loginInfo(2L);
         login.setUserCode(identity);
@@ -757,11 +943,54 @@ class AuthApplicationServiceTest {
         }
     }
 
+    /** 部署模式不改变知识库的管理权：单条详情和批量列表必须一致。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"", "WHALE_AGENT", "external"})
+    void knowledgeMaintenanceUsesResourcePermissionAcrossDeploymentModes(String mode) {
+        for (String bizType : List.of("KG_DOC", "KG_QA", "KG_TERM")) {
+            for (String identity : List.of("creator", "manager", "useOnly", "none", "blocked", "inactive")) {
+                List<PrivilegeGrant> grants = new ArrayList<>();
+                if (List.of("manager", "blocked", "inactive").contains(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.RED,
+                        "inactive".equals(identity) ? "P" : "A"));
+                }
+                if ("blocked".equals(identity)) {
+                    grants.add(manageGrant(620L, 2L, GrantToObjType.USER, Color.BLACK, "A"));
+                }
+                if ("useOnly".equals(identity)) {
+                    grants.add(useGrant(620L, 2L, GrantToObjType.USER, Color.RED, "A"));
+                }
+                grants.forEach(grant -> grant.setGrantObjType(bizType));
+                AuthApplicationService service = newExplicitUserPermissionService(grants);
+                ReflectionTestUtils.setField(service, "datasetSystem", mode);
+                CurrentUserHolder.setLoginInfo(loginInfo(2L));
+                SsResource resource = enterpriseResource(620L, "creator".equals(identity) ? 2L : 1L);
+                resource.setResourceBizType(bizType);
+                prepareOperationPermissionQueries(service, resource);
+                boolean manageable = List.of("creator", "manager").contains(identity);
+                for (String owner : List.of(OwnerType.PERSONAL, OwnerType.ENTERPRISE, OwnerType.PERSONAL_DEFAULT)) {
+                    resource.setOwnerType(owner);
+                    for (int status : List.of(0, 2, 3, -1)) {
+                        resource.setResourceStatus(status);
+                        var detail = service.queryResourceOperationPermissions(620L);
+                        var row = service.queryResourceOperationPermissionsBatch(List.of(620L)).get(620L);
+                        assertThat(row).as("%s/%s/%s/%s/%s", mode, bizType, identity, owner, status)
+                            .usingRecursiveComparison().isEqualTo(detail);
+                        boolean editable = manageable && status != -1 && !OwnerType.PERSONAL_DEFAULT.equals(owner);
+                        assertThat(detail.isCanEdit()).isEqualTo(editable);
+                        assertThat(detail.isCanDelete()).isEqualTo(editable
+                            && (OwnerType.PERSONAL.equals(owner) || status == 0 || status == 3));
+                    }
+                }
+            }
+        }
+    }
+
     /**
-     * WHALE_AGENT 模式下知识/工具由外部智能体发布，本系统不允许编辑基础信息或注销。
+     * WHALE_AGENT 模式下工具仍由外部智能体发布，知识库权限调整不能放开工具维护。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsWhaleAgentKnowledgeAndToolEditDeleteActions() {
+    void queryResourceOperationPermissions_rejectsWhaleAgentToolEditDeleteActions() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
@@ -797,6 +1026,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource personalAssistant = new SsResource();
         personalAssistant.setResourceId(203L);
@@ -823,6 +1053,7 @@ class AuthApplicationServiceTest {
                 SsResourceMapper resources = mock(SsResourceMapper.class);
                 PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
                 ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
                 ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
                 SsResource resource = enterpriseResource(203L, 1L);
                 resource.setOwnerType(owner); resource.setResourceBizType(bizType);
@@ -866,6 +1097,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(203L)).thenReturn(resource);
         when(mapper.selectById(203L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
@@ -896,6 +1128,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.findById(203L)).thenReturn(resource);
         when(mapper.selectBatchIds(any())).thenReturn(List.of(resource));
         for (ResourceOperationPermissionsVo permission : List.of(service.queryResourceOperationPermissions(203L),
@@ -914,6 +1147,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource personalObject = new SsResource();
         personalObject.setResourceId(204L);
@@ -940,6 +1174,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService",
@@ -980,6 +1215,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
         DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
         doNothing().when(service).handleAuth(any(AuthRedBlackDTO.class));
@@ -1034,6 +1270,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper grants = mock(PrivilegeGrantMapper.class);
         DigitalEmployeeGroupAuthorizationService groups = mock(DigitalEmployeeGroupAuthorizationService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", grants);
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", groups);
         doNothing().when(service).handleAuth(any());
@@ -1124,6 +1361,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         UsersMapper usersMapper = mock(UsersMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
 
@@ -1218,6 +1456,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(302L);
@@ -1252,6 +1491,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(601L);
@@ -1291,6 +1531,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
 
         SsResource resource = new SsResource();
         resource.setResourceId(602L);
@@ -1540,16 +1781,17 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
 
         LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserId(2L);
+        loginInfo.setUserId(2L); loginInfo.setEnterpriseId(1L);
         // 此用例验证业务规则，使用仍保留管理权限的 adminvip 账号。
         loginInfo.setUserCode("adminvip");
         CurrentUserHolder.setLoginInfo(loginInfo);
 
-        SsResource resource = new SsResource();
+        SsResource resource = new SsResource(); resource.setComAcctId(1L);
         resource.setResourceId(300L);
         resource.setResourceBizType(ResourceBizTypeEnum.AGENT.name());
         resource.setCreateBy(1L);
@@ -1573,10 +1815,11 @@ class AuthApplicationServiceTest {
         qo.setResourceId(300L);
         qo.setApplyUserId(1001L);
 
+        when(privilegeGrantMapper.update(any(), any())).thenReturn(1);
         service.approveUseApply(qo);
 
         verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
-        verify(privilegeGrantService).update(eq(pendingApply));
+        verify(privilegeGrantMapper).update(any(), any());
     }
 
     @Test
@@ -1607,6 +1850,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         mockEmptyUsePermissionDependencies(service);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1637,6 +1881,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         LoginInfo login = loginInfo(2L);
         login.setUserCode(identity);
@@ -1795,6 +2040,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1816,6 +2062,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1839,6 +2086,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1860,6 +2108,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1873,12 +2122,13 @@ class AuthApplicationServiceTest {
     }
 
     @Test
-    void applyUseIfNeeded_locksBeforePendingCheck() {
+    void applyUseIfNeeded_readsResourceWithoutQueryLockBeforePendingCheck() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1890,11 +2140,13 @@ class AuthApplicationServiceTest {
         assertThat(service.applyUseIfNeeded(605L)).isEqualTo(UseApplyOutcome.PENDING);
 
         ArgumentCaptor<LambdaQueryWrapper<SsResource>> lockCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        InOrder order = inOrder(ssResourceMapper, privilegeGrantMapper);
+        var locks = (com.iwhalecloud.byai.common.lock.TransactionalRedisLockService) ReflectionTestUtils.getField(service, "businessLocks");
+        InOrder order = inOrder(locks, ssResourceMapper, privilegeGrantMapper);
+        order.verify(locks).acquire("resource:605");
         order.verify(ssResourceMapper).selectOne(lockCaptor.capture());
         order.verify(privilegeGrantMapper).selectOne(any());
         assertThat(String.valueOf(ReflectionTestUtils.getField(lockCaptor.getValue(), "lastSql")))
-            .containsIgnoringCase("FOR UPDATE");
+            .doesNotContainIgnoringCase("FOR UPDATE");
         verify(privilegeGrantService, never()).save(any());
     }
 
@@ -1904,6 +2156,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         mockEmptyUsePermissionDependencies(service);
         PrivilegeGrantService privilegeGrantService =
@@ -1938,6 +2191,7 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
         CurrentUserHolder.setLoginInfo(loginInfo(2L));
@@ -1947,6 +2201,17 @@ class AuthApplicationServiceTest {
 
         verify(privilegeGrantMapper, never()).selectOne(any());
         verify(privilegeGrantService, never()).save(any());
+    }
+
+    @Test
+    void forwardingResourceReadUsesExplicitActorAndStrictTenantWithoutAmbientDefaults() {
+        AuthApplicationService service = newExplicitUserPermissionService(
+            List.of(useGrant(607L, 3L, GrantToObjType.USER, Color.RED, "A")));
+        SsResource resource = enterpriseResource(607L, 1L); resource.setComAcctId(10L);
+        LoginInfo ambient = loginInfo(2L); ambient.setEnterpriseId(11L); CurrentUserHolder.setLoginInfo(ambient);
+        assertThat(service.hasResourceForwardReadPermission(resource, 3L, 10L)).isTrue();
+        assertThat(service.hasResourceForwardReadPermission(resource, 3L, 11L)).isFalse();
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(2L);
     }
 
     @Test
@@ -2009,6 +2274,7 @@ class AuthApplicationServiceTest {
         SsResource resource = enterpriseResource(607L, 1L);
         SsResourceMapper resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         when(resources.selectBatchIds(any())).thenReturn(List.of(resource));
         assertThat(service.hasResourceUsePermission(resource, 3L)).isFalse();
         assertThat(service.queryResourceOperationPermissionsBatch(List.of(607L)).get(607L).isHasUsePermission()).isFalse();
@@ -2023,21 +2289,23 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper mapper = mock(PrivilegeGrantMapper.class);
         PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mapper);
         ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
-        CurrentUserHolder.setLoginInfo(loginInfo(1L));
-        SsResource employee = enterpriseResource(607L, 1L); employee.setResourceBizType("DIG_EMPLOYEE");
+        CurrentUserHolder.setLoginInfo(loginInfo(1L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(1L);
+        SsResource employee = enterpriseResource(607L, 1L); employee.setResourceBizType("DIG_EMPLOYEE"); employee.setComAcctId(1L);
         when(resources.selectById(607L)).thenReturn(employee);
         PrivilegeGrant pending = useGrant(607L, 3L, "USER", Color.RED, "P");
         when(mapper.selectOne(any())).thenReturn(pending);
+        when(mapper.update(any(), any())).thenReturn(1);
         doNothing().when(service).syncUserAuthToRedis(3L);
-        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronize(employee, null);
+        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronizeApprovedApplicant(employee, 3L);
         ResourceUseApplyApproveQo request = new ResourceUseApplyApproveQo(); request.setResourceId(607L); request.setApplyUserId(3L);
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             if (fail) assertThatThrownBy(() -> service.approveUseApply(request)).hasMessage("resource denied");
             else service.approveUseApply(request);
-            verify(synchronization).synchronize(employee, null);
+            verify(synchronization).synchronizeApprovedApplicant(employee, 3L);
             verify(service, never()).syncUserAuthToRedis(3L);
             if (!fail) {
                 org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
@@ -2058,6 +2326,9 @@ class AuthApplicationServiceTest {
         doReturn(false).when(service).hasResourceUseSettingPermission(bound);
         assertThatThrownBy(() -> service.validateDigitalEmployeeResourceUseGrant(bound, 3L))
             .hasMessage("auth.employee.resources.no.grant.permission");
+        // 已审核员工的内部补授权不要求关联资源管理权，仍复用目标与黑名单校验。
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.validateEmployeeResourceGrantTarget(bound, 3L))
+            .doesNotThrowAnyException();
     }
 
     @ParameterizedTest
@@ -2072,6 +2343,25 @@ class AuthApplicationServiceTest {
         doReturn(true).when(service).hasResourceUseSettingPermission(bound);
         assertThatThrownBy(() -> service.validateDigitalEmployeeResourceUseGrant(bound, 3L))
             .hasMessage("auth.employee.resources.user.blacklisted");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"tenant", "personal", "off-shelf", "deleted", "blacklisted"})
+    void approvedResourceGrantStillRejectsInvalidScopeAndBlacklists(String invalid) {
+        mockI18n();
+        PrivilegeGrant blacklist = useGrant(607L, 3L, "USER", Color.BLACK, "A");
+        AuthApplicationService service = newExplicitUserPermissionService("blacklisted".equals(invalid) ? List.of(blacklist) : List.of());
+        CurrentUserHolder.setLoginInfo(loginInfo(1L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(10L);
+        SsResource bound = enterpriseResource(607L, 2L); bound.setComAcctId(10L);
+        switch (invalid) {
+            case "tenant" -> bound.setComAcctId(20L);
+            case "personal" -> bound.setOwnerType(OwnerType.PERSONAL);
+            case "off-shelf" -> bound.setResourceStatus(ResourceStatus.OFF_SHELF.getNum());
+            case "deleted" -> bound.setResourceStatus(ResourceStatus.DELETE.getNum());
+            default -> { }
+        }
+        assertThatThrownBy(() -> service.validateEmployeeResourceGrantTarget(bound, 3L))
+            .hasMessage("blacklisted".equals(invalid) ? "auth.employee.resources.user.blacklisted" : "auth.employee.resources.invalid");
     }
 
     @Test
@@ -2102,12 +2392,15 @@ class AuthApplicationServiceTest {
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             service.appendDigitalEmployeeResourceUsePrivileges(bound, List.of(2L, 3L, 3L));
-            ArgumentCaptor<PrivilegeGrant> captured = ArgumentCaptor.forClass(PrivilegeGrant.class);
-            verify(grants, times(1)).save(captured.capture());
-            assertThat(captured.getValue().getGrantToObjId()).isEqualTo(3L);
-            assertThat(captured.getValue().getGrantType()).isEqualTo(GrantType.FORCE_USE);
-            assertThat(captured.getValue().getGrantToType()).isEqualTo(Color.RED);
-            assertThat(captured.getValue().getStatusCd()).isEqualTo("A");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<PrivilegeGrant>> captured = ArgumentCaptor.forClass(List.class);
+            verify(grants, times(1)).saveBatch(captured.capture());
+            assertThat(captured.getValue()).singleElement().satisfies(grant -> {
+                assertThat(grant.getGrantToObjId()).isEqualTo(3L);
+                assertThat(grant.getGrantType()).isEqualTo(GrantType.FORCE_USE);
+                assertThat(grant.getGrantToType()).isEqualTo(Color.RED);
+                assertThat(grant.getStatusCd()).isEqualTo("A");
+            });
             verify(grants, never()).findPrivilegeGrant(any(), any(), any(), any());
             verify(grants, never()).remove(any());
             verify(grants, never()).update(any());
@@ -2127,11 +2420,36 @@ class AuthApplicationServiceTest {
     }
 
     @Test
+    void retryOfCommittedBoundResourceGrantDoesNotInsertAgain() {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        PrivilegeGrantService grants = mock(PrivilegeGrantService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
+        ReflectionTestUtils.setField(service, "authRedisSyncService", mock(AuthRedisSyncService.class));
+        SsResource resource = enterpriseResource(607L, 1L);
+        Set<Long> persisted = new java.util.HashSet<>(Set.of(2L));
+        org.mockito.Mockito.doAnswer(call -> persisted.contains(call.getArgument(1)))
+            .when(service).hasResourceUsePermission(eq(resource), any(Long.class));
+        doNothing().when(service).validateDigitalEmployeeResourceUseGrant(eq(resource), any(Long.class));
+        org.mockito.Mockito.doAnswer(call -> {
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            batch.forEach(grant -> persisted.add(grant.getGrantToObjId()));
+            return null;
+        }).when(grants).saveBatch(any());
+        mockRedisSetWrite();
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        service.appendDigitalEmployeeResourceUsePrivileges(resource, List.of(2L, 3L, 3L));
+        verify(grants).saveBatch(argThat(batch -> batch.size() == 1 && batch.getFirst().getGrantToObjId().equals(3L)));
+        assertThat(persisted).containsExactlyInAnyOrder(2L, 3L);
+    }
+
+    @Test
     void employeeAuthorizationLocksBeforeWritingAndSynchronizesAfterTheFinalList() {
         AuthApplicationService service = spy(new AuthApplicationService());
         DigitalEmployeeResourceAuthorizationService boundResources = mockEmployeeResourceSynchronization(service);
         SsResourceMapper resources = mock(SsResourceMapper.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
         doNothing().when(service).handleAuth(any());
@@ -2169,6 +2487,7 @@ class AuthApplicationServiceTest {
         var cache = mock(AuthRedisSyncService.class);
         ReflectionTestUtils.setField(service, "employeeResourceAuthorizationService", synchronization);
         ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "privilegeGrantService", grants);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
@@ -2202,11 +2521,13 @@ class AuthApplicationServiceTest {
             return null;
         }).when(service).handleAuth(any());
         org.mockito.Mockito.doAnswer(call -> {
-            PrivilegeGrant grant = call.getArgument(0);
-            if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
-            jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            List<PrivilegeGrant> batch = call.getArgument(0);
+            for (PrivilegeGrant grant : batch) {
+                if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
+                jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
+            }
             return null;
-        }).when(grants).save(any());
+        }).when(grants).saveBatch(any());
         mockRedisSetWrite();
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.setProxyTargetClass(true);
@@ -2225,7 +2546,7 @@ class AuthApplicationServiceTest {
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(6);
             assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3 ORDER BY resource_id", Long.class))
                 .containsExactly(100L, 200L, 201L);
-            verify(cache, times(2)).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
+            verify(cache).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
         }
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants WHERE user_id=999", Integer.class)).isEqualTo(1);
     }
@@ -2321,6 +2642,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_inheritsParentOrganizationAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2362,6 +2684,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_descendantOrganizationBlacklistOverridesParentAuthorization() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2408,6 +2731,7 @@ class AuthApplicationServiceTest {
     void buildUserAuthResources_excludesRemovedResources() {
         AuthApplicationService service = new AuthApplicationService();
         ReflectionTestUtils.setField(service, "ssResourceMapper", mock(SsResourceMapper.class));
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
         PositionService positionService = mock(PositionService.class);
@@ -2458,6 +2782,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2504,6 +2829,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2550,6 +2876,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2583,6 +2910,7 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "positionService", positionService);
         ReflectionTestUtils.setField(service, "stationService", stationService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "usersOrganizationMapper", usersOrganizationMapper);
 
         when(organizationService.findEffectiveOrganizationIdsByUserId(1001L)).thenReturn(Set.of());
@@ -2735,6 +3063,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "ssResExtSkillService", mock(SsResExtSkillService.class));
@@ -2819,6 +3148,7 @@ class AuthApplicationServiceTest {
         SsResourceMapper mapper = mock(SsResourceMapper.class);
         SsResourceService resourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceMapper", mapper);
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "ssResourceService", resourceService);
         when(mapper.selectBatchIds(any())).thenReturn(resources);
         Map<Long, ResourceOperationPermissionsVo> result = service.queryResourceOperationPermissionsBatch(

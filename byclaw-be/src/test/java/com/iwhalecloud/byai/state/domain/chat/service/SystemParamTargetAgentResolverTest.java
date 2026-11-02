@@ -75,6 +75,19 @@ class SystemParamTargetAgentResolverTest {
     }
 
     @Test
+    void exposesEffectivePersonalDisableForFrontend() {
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_DSH")).thenReturn("0");
+        assertThat(resolver.resolveEffectiveEnableDsh("user-a")).isEqualTo("0");
+    }
+
+    @Test
+    void exposesEffectiveGlobalEnableWhenPersonalValueIsBlank() {
+        when(privateParamCacheReader.getValue("user-a", "ENABLE_DSH")).thenReturn(" ");
+        when(systemConfigService.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn("1");
+        assertThat(resolver.resolveEffectiveEnableDsh("user-a")).isEqualTo("1");
+    }
+
+    @Test
     void keepsCurrentTargetWhenUserCodeIsBlank() {
         assertThat(resolver.resolve("DEFAULT_WORKER", " ")).isEqualTo("DEFAULT_WORKER");
     }

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,7 +56,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 成员和系统消息共用真实 Spring 事务边界，外部数据库通过 JDBC 连接替身观察提交结果。 */
-class GroupChatMemberSystemEventTest {
+class GroupChatMemberSystemEventTest extends I18nTestSupport {
     private final SessionService sessions = mock(SessionService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
     private final GroupChatAuthorizationService authorization = mock(GroupChatAuthorizationService.class);
@@ -69,6 +71,7 @@ class GroupChatMemberSystemEventTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        when(members.save(any())).thenReturn(1);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         CurrentUserHolder.setLoginInfo(login);
@@ -95,6 +98,7 @@ class GroupChatMemberSystemEventTest {
         GroupChatApplicationService target = new GroupChatApplicationService(sessions, sequence, authorization, members,
             mock(ProjectApplicationService.class), mock(ProjectMemberService.class), messages, coordinator, events,
             mock(SessionExtService.class));
+        ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));
         ReflectionTestUtils.setField(target, "invitationService", invitations);
         ReflectionTestUtils.setField(target, "tenantUserMembershipService",
             mock(com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService.class));
@@ -170,7 +174,7 @@ class GroupChatMemberSystemEventTest {
     @Test
     void duplicateDirectInviteAndUnauthorizedInviteDoNotWriteEvents() {
         when(members.findSessionMember(200L, "USER", 20L)).thenReturn(member(20L, "USER", "小李"));
-        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("Member already exists");
+        assertThatThrownBy(() -> service.invite(200L, "USER", 20L)).hasMessage("成员已存在");
         doThrow(new IllegalArgumentException("Admin required")).when(authorization).requireInvite(200L, "AGENT");
         assertThatThrownBy(() -> service.invite(200L, "AGENT", 30L)).hasMessage("Admin required");
         verifyNoInteractions(messages, events, coordinator);

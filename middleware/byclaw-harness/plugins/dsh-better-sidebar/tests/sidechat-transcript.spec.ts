@@ -34,7 +34,7 @@ describe('transcriptRows', () => {
     const entries = [
       entry(ev('user/message', 0, { content: textBlocks('inherited'), source: { kind: 'user' } })),
       entry(ev('session/end-seed', 1)),
-      entry(ev('user/message', 2, { content: textBlocks(`${SIDE_BOUNDARY_PREFIX}\n\nmode`), source: { kind: 'plugin', plugin: SIDE_INJECTION_PLUGIN } })),
+      entry(ev('user/message', 2, { content: textBlocks(`${SIDE_BOUNDARY_PREFIX}\n\nmode`), source: { kind: `plugin:${SIDE_INJECTION_PLUGIN}` } })),
       entry(ev('user/message', 3, { content: textBlocks('the side question'), source: { kind: 'user' } })),
     ]
     const rows = transcriptRows(entries)
@@ -64,7 +64,7 @@ describe('transcriptRows', () => {
   it('renders any plugin-sourced context message as an injection row, boundary prefix or not', () => {
     const entries = [
       entry(ev('session/end-seed', 0)),
-      entry(ev('user/message', 1, { content: textBlocks('runtime context'), source: { kind: 'plugin', plugin: 'other-plugin' } })),
+      entry(ev('user/message', 1, { content: textBlocks('runtime context'), source: { kind: 'plugin:other-plugin' } })),
       entry(ev('user/message', 2, { content: textBlocks('q'), source: { kind: 'user' } })),
     ]
     const rows = transcriptRows(entries)

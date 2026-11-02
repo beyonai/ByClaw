@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,7 +27,7 @@ import com.iwhalecloud.byai.common.storage.ArchiveFS;
 import com.iwhalecloud.byai.state.domain.session.dto.WorkspaceArchiveDto;
 
 @ExtendWith(MockitoExtension.class)
-class WorkspaceArchiveApplicationServiceTest {
+class WorkspaceArchiveApplicationServiceTest extends I18nTestSupport {
 
     @Mock
     private ArchiveFS archiveFS;

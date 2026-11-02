@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.infrastructure.wechat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,7 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
-class JdkWechatMiniappPhoneClientTest {
+class JdkWechatMiniappPhoneClientTest extends I18nTestSupport {
 
     private final HttpClient http = mock(HttpClient.class);
     private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
@@ -171,5 +173,16 @@ class JdkWechatMiniappPhoneClientTest {
         when(result.statusCode()).thenReturn(status);
         when(result.body()).thenReturn(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
         return result;
+    }
+
+    @Test
+    void invalidPhoneAuthorizationUsesTheRequestLanguageWithoutCallingTheProvider() {
+        WechatMiniappProperties properties = new WechatMiniappProperties();
+        JdkWechatMiniappPhoneClient client = new JdkWechatMiniappPhoneClient(http, redis, properties);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        assertThatThrownBy(() -> client.exchangePhoneCode(" ")).hasMessage("Invalid WeChat phone authorization");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
+        assertThatThrownBy(() -> client.exchangePhoneCode(" ")).hasMessage("微信手机号授权无效");
+        verifyNoInteractions(http, redis);
     }
 }

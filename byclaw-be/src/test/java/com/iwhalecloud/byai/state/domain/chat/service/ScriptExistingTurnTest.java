@@ -52,7 +52,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskChatGuard;
 
-class ScriptExistingTurnTest {
+class ScriptExistingTurnTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private ScriptService script;
     private RouteService route;
     private ScopedMessageWriteBehind writeBehind;

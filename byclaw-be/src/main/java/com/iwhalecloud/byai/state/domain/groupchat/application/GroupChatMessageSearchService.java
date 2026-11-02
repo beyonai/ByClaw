@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -40,7 +42,7 @@ public class GroupChatMessageSearchService {
         GroupChatMessageSearchRequest input = request == null ? new GroupChatMessageSearchRequest() : request;
         String keyword = StringUtils.trimToNull(input.getKeyword());
         if (keyword != null && keyword.length() > 100) {
-            throw new IllegalArgumentException("Keyword must not exceed 100 characters");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.search.keywordTooLong"));
         }
         String scope = normalize(input.getScope(), "ALL", List.of("ALL", "MINE", "MENTIONED_ME"));
         String senderType = normalize(input.getSenderType(), "ALL", List.of("ALL", "USER", "AGENT"));
@@ -50,7 +52,7 @@ public class GroupChatMessageSearchService {
         Date startTime = input.getStartTime() == null ? null : new Date(input.getStartTime());
         Date endTime = input.getEndTime() == null ? null : new Date(input.getEndTime());
         if (startTime != null && endTime != null && startTime.after(endTime)) {
-            throw new IllegalArgumentException("startTime must not be after endTime");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.search.timeInvalid"));
         }
         Long userId = CurrentUserHolder.getCurrentUserId();
         List<ByaiMessage> rows = messageMapper.searchVisibleGroupMessages(sessionId, escapeLike(keyword), scope,
@@ -68,7 +70,7 @@ public class GroupChatMessageSearchService {
     public GroupChatContextResponse around(Long sessionId, Long messageId) {
         authorization.requireCurrentUserMember(sessionId);
         ByaiMessage target = messageMapper.selectVisibleGroupMessage(sessionId, messageId);
-        if (target == null) throw new IllegalArgumentException("Group message not found");
+        if (target == null) throw new IllegalArgumentException(I18nUtil.get("groupchat.message.notFound"));
         List<ByaiMessage> before = messageMapper.selectVisibleBeforeMessageId(sessionId, messageId + 1, CONTEXT_SIDE_SIZE + 2);
         List<ByaiMessage> after = messageMapper.selectVisibleAfterMessageId(sessionId, messageId, CONTEXT_SIDE_SIZE);
         List<ByaiMessage> ordered = new ArrayList<>();
@@ -93,7 +95,7 @@ public class GroupChatMessageSearchService {
 
     private String normalize(String value, String fallback, List<String> allowed) {
         String normalized = StringUtils.defaultIfBlank(value, fallback).toUpperCase();
-        if (!allowed.contains(normalized)) throw new IllegalArgumentException("Invalid search filter");
+        if (!allowed.contains(normalized)) throw new IllegalArgumentException(I18nUtil.get("groupchat.search.filterInvalid"));
         return normalized;
     }
 
@@ -103,7 +105,7 @@ public class GroupChatMessageSearchService {
             return Long.valueOf(value);
         }
         catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("Invalid message cursor");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.search.cursorInvalid"));
         }
     }
 

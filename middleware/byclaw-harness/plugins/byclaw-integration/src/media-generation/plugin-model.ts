@@ -2,6 +2,7 @@ import { resolveMediaModel, type MediaModel } from '@byclaw/media-runtime'
 
 import { loadProjectedMediaModel, resolveMediaProjectionPath, type MediaCapability } from './runtime-config.ts'
 import type { MediaModelRedis } from './system-model.ts'
+import type { ToolEnvironmentFiles } from '../tool-environment-files.ts'
 
 // Projection files have a protocol, not a separate provider. Only unambiguous
 // native protocols can select an adapter; never infer a vendor from its URL.
@@ -37,6 +38,10 @@ export interface PluginMediaModelOptions {
   modelId?: string
   /** Controlled tests only; production uses resolveMediaProjectionPath. */
   projectionPath?: string
+  /** Connector projection root; defaults to `/by/.connector-auth/.model`. */
+  projectionRoot?: string
+  /** Read projections from the separate tool environment holding the user tree. */
+  files?: ToolEnvironmentFiles
 }
 
 class UserConnectorModelError extends Error {
@@ -61,10 +66,10 @@ export async function resolvePluginMediaModel(
   if (type === 'ASR' || options.modelId) return resolveMediaModel(redis, type, options)
 
   const capability: MediaCapability = type === 'IMAGE_GENERATION' ? 'IMAGE' : 'TTS'
-  const projectionPath = options.projectionPath ?? resolveMediaProjectionPath(capability)
+  const projectionPath = options.projectionPath ?? resolveMediaProjectionPath(capability, process.env, options.projectionRoot)
   let projected
   try {
-    projected = await loadProjectedMediaModel(projectionPath, capability)
+    projected = await loadProjectedMediaModel(projectionPath, capability, undefined, options.files)
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
       return resolveMediaModel(redis, type, options)

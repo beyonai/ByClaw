@@ -49,7 +49,7 @@ describe('EPUB reader', () => {
     const old = worker;
     worker = {
       request: jest.fn(async (operation) =>
-        operation === 'openEpub' ? { title: 'new', chapters: [{ name: 'new' }] } : '<p>new</p>'
+        operation === 'openEpub' ? { title: 'new', chapters: [{ name: 'new chapter' }] } : '<p>new</p>'
       ),
       dispose: jest.fn(),
     };

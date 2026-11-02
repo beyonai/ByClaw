@@ -289,7 +289,7 @@ public class TemplateFileProcessingService {
 
             if (uploadResult == null || uploadResult.getUploadItems().isEmpty()) {
                 log.error("文件上传失败，无返回结果 - sessionId: {}", sessionId);
-                throw new BdpRuntimeException(I18nUtil.get("template.file.upload.failed", sessionId, "无返回结果"));
+                throw new BdpRuntimeException(I18nUtil.get("template.file.upload.failed", sessionId, I18nUtil.get("template.file.noResult")));
             }
 
             UploadItem item = uploadResult.getUploadItems().get(0);

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialFormVerification;
@@ -37,7 +39,7 @@ abstract class AbstractMediaModelCredentialFormProvider implements ConnectorCred
             String userId, ConnectorInfo connector, Map<String, String> credentials) {
         if (connector == null || !providerCode.equals(connector.getConnectorCode())
                 || !providerCode.equals(connector.getProviderCode())) {
-            throw new IllegalArgumentException("Media connector template mismatch");
+            throw new IllegalArgumentException(I18nUtil.get("connector.media.templateMismatch"));
         }
         MediaModelConfig config = parser.parse(credentials, modelType, providerCode);
         verifierRegistry.require(modelType, config.modelProtocol()).verify(config);

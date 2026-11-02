@@ -17,9 +17,21 @@ export function imageReferenceId(reference, sessionId) {
   return id
 }
 
-/** References are opaque filenames in this session, never arbitrary paths or URLs. */
-export async function loadImageReference(root, id) {
+/**
+ * References are opaque filenames in this session, never arbitrary paths or URLs.
+ * `io` reads a session tree that is not on this machine (see the tool's `host.artifactIo`).
+ */
+export async function loadImageReference(root, id, io) {
   if (typeof id !== 'string' || !referencePattern.test(id)) throw new Error('IMAGE_REFERENCE_INVALID')
+  if (io) {
+    try {
+      const directory = join(await io.realpath(root), 'image')
+      if (await io.realpath(directory) !== directory) throw new Error('directory')
+      const bytes = Buffer.from(await io.readBytes(join(directory, id), MAX_REFERENCE_BYTES))
+      if (bytes.length < 12) throw new Error('size')
+      return { bytes, mimeType: referenceMimeType(id) }
+    } catch { throw new Error('IMAGE_REFERENCE_INVALID') }
+  }
   let handle
   try {
     const canonical = await realpath(root)
@@ -35,10 +47,13 @@ export async function loadImageReference(root, id) {
       if (!read.bytesRead) throw new Error('truncated')
       offset += read.bytesRead
     }
-    const mimeType = /\.png$/i.test(id) ? 'image/png' : /\.webp$/i.test(id) ? 'image/webp' : 'image/jpeg'
-    return { bytes, mimeType }
+    return { bytes, mimeType: referenceMimeType(id) }
   } catch { throw new Error('IMAGE_REFERENCE_INVALID') }
   finally { await handle?.close() }
+}
+
+function referenceMimeType(id) {
+  return /\.png$/i.test(id) ? 'image/png' : /\.webp$/i.test(id) ? 'image/webp' : 'image/jpeg'
 }
 
 function dimensions(bytes, mimeType) {
@@ -67,23 +82,35 @@ function dimensions(bytes, mimeType) {
   return {}
 }
 
-/** A sidecar persists version lineage independently of the model's final prose. */
-export async function describeImageArtifacts(root, artifacts, args, sessionId) {
+/**
+ * A sidecar persists version lineage independently of the model's final prose.
+ * `remote` writes it into a session tree that is not on this machine; the image
+ * bytes it just stored there (`sources`, in artifact order) give the dimensions.
+ */
+export async function describeImageArtifacts(root, artifacts, args, sessionId, remote) {
   const result = []
-  for (const artifact of artifacts) {
+  for (const [index, artifact] of artifacts.entries()) {
     const id = basename(artifact.path)
-    // Generated images may exceed the reference limit; read only enough for metadata.
-    const handle = await open(artifact.path, constants.O_RDONLY | constants.O_NOFOLLOW)
     let size
-    try {
-      const buffer = Buffer.alloc(65536)
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-      size = dimensions(buffer.subarray(0, bytesRead), artifact.mimeType)
-    } finally { await handle.close() }
+    if (remote) size = dimensions(Buffer.from(remote.sources[index].bytes).subarray(0, 65536), artifact.mimeType)
+    else {
+      // Generated images may exceed the reference limit; read only enough for metadata.
+      const handle = await open(artifact.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const buffer = Buffer.alloc(65536)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+        size = dimensions(buffer.subarray(0, bytesRead), artifact.mimeType)
+      } finally { await handle.close() }
+    }
     const metadata = { schemaVersion: 1, id,
       path: sessionId ? `/by/.sessions/${sessionId}/image/${id}` : artifact.path,
       title: args.prompt.trim().slice(0, 120), mimeType: artifact.mimeType, bytes: artifact.bytes, ...size,
       ...(args.referenceImage ? { parentId: args.referenceImage } : {}) }
+    if (remote) {
+      await remote.io.writeReplace(join(await remote.io.realpath(root), 'image', `${id}.artifact.json`), Buffer.from(JSON.stringify(metadata)))
+      result.push(metadata)
+      continue
+    }
     const target = join(await realpath(root), 'image', `${id}.artifact.json`)
     const temporary = `${target}.${randomUUID()}.tmp`
     try {

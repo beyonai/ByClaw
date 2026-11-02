@@ -60,4 +60,67 @@ describe('chat delivery diagnostics', () => {
     expect(() => logger.recordChatChain('fe.final_applied', { requestId: 'root' })).not.toThrow();
     spy.mockRestore();
   });
+  it('retains origin, actual routing, frame and applied identities while excluding content', async () => {
+    const frame = {
+      sessionId: 'actual-session',
+      streamId: '1-0',
+      clientRequestId: 'actual-client',
+      chatChain: {
+        requestId: 'root',
+        invocationId: 'origin-invocation',
+        replyEventId: 'reply-1',
+        frameId: 'frame-1',
+        checkpoint: true,
+        startupId: 'startup-1',
+        tenantId: '101',
+        targetMessageId: 'actual-answer',
+        eventMessageId: 'origin-answer',
+        prompt: 'private-prompt',
+      },
+      data: { content: 'private-answer' },
+    };
+    expect(logger.isChatCheckpoint(frame)).toBe(true);
+    logger.recordChatChain('fe.reply_received', frame);
+    jest.advanceTimersByTime(15);
+    logger.recordChatChain('fe.reply_applied', {
+      ...frame,
+      appliedMessageId: 'ui-answer',
+      appliedSessionId: 'ui-session',
+    });
+    await logger.flushChatChainLogs();
+    const applied = mockPost.mock.calls[0][0].find((item: any) => item.stage === 'fe.reply_applied');
+    expect(applied.diagnostics).toMatchObject({
+      invocationId: 'origin-invocation',
+      startupId: 'startup-1',
+      frameId: 'frame-1',
+      replyEventId: 'reply-1',
+      targetMessageId: 'actual-answer',
+      eventMessageId: 'origin-answer',
+      appliedMessageId: 'ui-answer',
+      appliedSessionId: 'ui-session',
+      applyDelayMs: '15',
+    });
+    expect(JSON.stringify(mockPost.mock.calls)).not.toMatch(/private-prompt|private-answer/);
+  });
+  it('extracts nested child projection metadata and revalidates saved diagnostics', async () => {
+    const frame = {
+      type: 'NEW_MESSAGE',
+      sessionId: 'child',
+      data: {
+        metadata: JSON.stringify({
+          chatChain: { invocationId: 'inv', requestId: 'root', checkpoint: true, externalSessionId: 'external-child' },
+        }),
+      },
+    };
+    expect(logger.isChatCheckpoint(frame)).toBe(true);
+    logger.recordChatChain('fe.reply_applied', frame);
+    const saved = JSON.parse(localStorage.getItem('byclaw.chat-chain.v1')!);
+    saved[0].diagnostics.token = 'private-token';
+    localStorage.setItem('byclaw.chat-chain.v1', JSON.stringify(saved));
+    jest.resetModules();
+    logger = require('../chatChainLog');
+    await logger.flushChatChainLogs();
+    expect(mockPost.mock.calls[0][0][0].diagnostics.externalSessionId).toBe('external-child');
+    expect(JSON.stringify(mockPost.mock.calls)).not.toContain('private-token');
+  });
 });

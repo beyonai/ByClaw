@@ -4,6 +4,12 @@
 
 这个仓库维护 ByClaw 面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的插件套件。插件通过 DSH 服务、事件、工具、系统提示词和 bundle 层接入，不修改 DSH 核心源码。
 
+## Docker 中的框架优化
+
+`Dockerfile` 和 `Dockerfile.extensions` 都包含仓库内固定的 `@byclaw/by-framework@1.7.0-byclaw.1`，构建时校验 SHA-256，并覆盖构建工作区及最终 profile 的旧版本依赖。无需发布 npm 包，也不依赖本地框架源码路径。框架移除了任务完成前阻塞消费循环的并发上限，保留停止时等待在途任务和消费健康检查。两阶段均执行 64 个等待任务与后续 Resume 的回归探针；它验证调度行为，不代表 Redis 集群或实际模型的吞吐能力。
+
+从仓库根目录构建即可包含优化；构建、镜像内验证命令与源码来源见 [框架包说明](vendor/by-framework/README.md)。
+
 ## 插件目录
 
 | 插件 | 包名 | 作用 | 详细文档 |
@@ -16,6 +22,7 @@
 | Diff Viewer | `@byclaw/dsh-diff-viewer` | 为 write/edit 工具提供可扩展的单栏或双栏可视化 diff | [README](./plugins/dsh-diff-viewer/README.md) |
 | CodeGraph | `@byclaw/dsh-codegraph` | 装配 CodeGraph MCP，并向根 Agent 与委派 Agent 注册使用策略 | [中文](./plugins/dsh-codegraph/README.zh.md) · [English](./plugins/dsh-codegraph/README.md) |
 | LAN Web | `@byclaw/dsh-lan-web` | 启用显式的 `dsh web --host 0.0.0.0` LAN 监听；ByClaw integration 可选关闭 Web token 鉴权 | [中文](./plugins/dsh-lan-web/README.zh.md) · [English](./plugins/dsh-lan-web/README.md) |
+| 工具执行环境 | `@byclaw/dsh-tool-env` | 可选：通过 SSH 把 DSH 的文件、进程、终端、PTC、沙箱放到单独的工具沙箱里运行；工具沙箱由 OpenSandbox 直接管理，或经 ByClaw BE 的沙箱接口创建（`BYCLAW_DSH_TOOL_ENV`） | [中文](./plugins/dsh-tool-env/README.zh.md) · [English](./plugins/dsh-tool-env/README.md) |
 | Iron Rules | `@byclaw/dsh-iron-rules` | 把仓库携带的开发铁律送进模型上下文，并在产生代码改动的 turn 结束时运行各铁律的校验脚本 | [中文](./plugins/iron-rules/README.zh.md) · [English](./plugins/iron-rules/README.md) |
 | 环境变量透传 | `@byclaw/dsh-bash-provider` | 把宿主全部环境变量（包括凭据命名变量）透传给模型侧 Bash 命令；同时把符合条件的命令路由给 rtk（Rust Token Killer）压缩工具输出、节省 token | [中文](./plugins/dsh-bash-provider/README.zh.md) · [English](./plugins/dsh-bash-provider/README.md) |
 | Browser Use | `@byclaw/dsh-browser-use` | 提供一个有状态的 `browser` 工具；每个 session 单一 owner，并可启用完全独立的 Chromium/noVNC 桌面 | [中文](./plugins/dsh-browser-use/README.zh.md) · [English](./plugins/dsh-browser-use/README.md) |
@@ -44,6 +51,8 @@ DSH profile
 │   └── codegraph:usage-policy：根与委派 Agent 继承的系统提示词
 ├── @byclaw/dsh-lan-web
 │   └── 替换 Web startup provider，保留 DSH 原生安全链
+├── @byclaw/dsh-tool-env
+│   └── 可选：fs/subprocess/sandbox/PTC 改走 SSH 到独立工具沙箱（OpenSandbox 租约、空闲暂停、恢复）
 ├── @byclaw/dsh-bash-provider
 │   ├── 替换 sandboxed Bash provider，显式透传宿主环境
 │   ├── 叠加把符合条件的 Bash 命令路由给 rtk 压缩输出（合并自原 dsh-bash-rtk 插件）
@@ -161,7 +170,9 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 | `BYCLAW_DSH_BUSY_ENTER` | 可选；需启用 Bash provider bundle | 繁忙时 Enter 默认行为：`queue`（默认，排队发送）或 `steer`（插话发送）；已保存的界面设置优先，修改后重启 DSH |
 | `BYCLAW_BROWSER_VIEWER` | 可选；Docker Browser Use | Docker 默认 `shared-novnc`，常驻一个持久 Chromium/VNC 桌面；`none` 为无头共享模式；`novnc` 保留旧的每会话独立桌面 |
 | `BYCLAW_BROWSER_IDLE_MS` | 可选；Docker Browser Use | `none` 模式最后一个 Context 关闭后的 Chromium 保温时间；`shared-novnc` 随 browserd 常驻 |
-| `BYCLAW_BYCLI_ENABLED` | 可选；Docker Browser Use | 默认 `true`；在 `shared-novnc` 下启动前强制等待 byCLI 扩展连接，并在运行期监控和自愈桥接 |
+| `BYCLAW_BYCLI_ENABLED` | 可选；Docker Browser Use | 默认 `true`；首次使用浏览器时等待扩展连接，之后监控和自愈桥接 |
+| `BYCLAW_BROWSER_STARTUP` | 可选；Docker Browser Use | 镜像默认 `on-demand`，首次调用再启动浏览器与 byCLI；`eager` 恢复启动前等待 |
+| `BYCLAW_DSH_CLI_ENTRY` | 可选；容器入口 | 默认 `apps/cli/lib/bin.js`，直接运行构建产物；源码回归可设 `apps/cli/src/bin.ts` |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Redis 动态模型模式必需 | 解密 ByClaw 模型鉴权；只保存在进程环境中 |
 | `BYCLAW_LLM_IDLE_TIME` | 可选 | 动态模型连接空闲超时秒数，默认 `600` |
 
@@ -186,7 +197,6 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
     userCode: !!js process.env.USER_CODE
     baseUrl: 'http://123.56.153.229:8080'
     stateDir: .agent-teams
-    maxConcurrency: 8
     subagentProvider: spawn
     agentPreset: standard
 
@@ -211,9 +221,20 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 - [ByClaw Integration 配置与架构](./plugins/byclaw-integration/README.zh.md#配置)
 - [Browser Use 工具、隔离、Docker 与 noVNC](./plugins/dsh-browser-use/README.zh.md)
 
+## 共享 DSH 宿主
+
+`scripts/byclaw-multi-host.mjs` 用一个进程服务多个用户（每用户一个 DSH 上下文，7300 端口同时提供管理 API 和 `/u/{user}/` 网关；BE 用 `byclaw.sandbox.shared-dsh-host.*` 指向它）。镜像已自带启动器，用入口脚本的 `multi-host` 模式启动，无论容器以 root 还是普通用户启动，它都会以 DSH 用户（`byclaw`）运行：
+
+```sh
+docker run -d --name byclaw-multi-host --env-file host.env \
+  -v /data/byclaw-multi-host:/data/multi-host byclaw/dsh:<tag> multi-host
+```
+
+环境变量见启动器文件头部注释。以非 root 用户直接跑镜像默认的 `web` 入口会报 "root entrypoint required for private browser runtime"，那个模式是给单用户沙箱用的。
+
 ## 验证与启动
 
-AgentTeams、ByClaw Integration、Better Sidebar 和 Iron Rules 已在 DSH `0.1.3-alpha.2`（`c389f96`）上验证当前会话、子代理和提示词接口；相关 peer 依赖声明了所需接口的最低版本。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
+插件面向 DSH `0.2.1-rc.2`，即 `Dockerfile.base` 固定的版本（`DSH_REF`）；peer 依赖固定为该版本。因此业务镜像（`Dockerfile`、`Dockerfile.extensions`）必须用本分支 `Dockerfile.base` 构建出的基础镜像，通过 `--build-arg BASE_IMAGE=` 传入；用旧基础镜像（DSH 0.1.x，标签 `2026.9.8`）会在 plugin-builder 阶段提前报错，因为缺少 0.2.1 的工作区包（如 `@deepseek-ai/dsh-agent-preset-registry`）。面向 0.1.5 的模块路径源码补丁（`scripts/prepare-dsh-local-modules.mjs`）不再应用：DSH 0.2.1 自己已把模块目录解析为规范路径。兼容代码全部位于插件中，不修改 DSH 源码。使用源码工作区验证时，插件的依赖与启动的 DSH 必须来自同一个检出目录。
 
 当前运行时端到端检查会使用独立的 `DSH_HOME` 和本地确定性模型适配器，两次启动官方 headless profile，验证 FIFO 后续任务、实时输出、模板配置、会话落盘与冷恢复，无需 Redis 或 API Key。先构建插件，再执行：
 
@@ -238,6 +259,8 @@ dsh --profile web --dump-config
 dsh web --host 0.0.0.0 --no-open
 ```
 
+DSH 0.2 拒绝通配监听地址，因此 `@byclaw/dsh-lan-web` 把 `--host 0.0.0.0` 绑定到第一个非内部 IPv4 地址，不再监听 127.0.0.1。镜像入口会在 127.0.0.1 上镜像同一 Web 端口（`scripts/dsh-loopback-forward.mjs`），容器内的客户端（例如 OpenSandbox execd 的 `/proxy/<port>` 路由）仍可访问 DSH。
+
 `--dump-config` 应显示 `agent-teams`、`byclaw-dsh`、`better-sidebar`、`dsh-diff-viewer`、`codegraph-mcp`、`dsh-codegraph`、`byclaw-lan-web-startup`、`byclaw-bash-provider`、`byclaw-browser-use`，以及从 `devflow` 到 `devflow-ui` 的 Devflow 运行项。Browser Use 只向模型暴露一个有状态的 `browser` 工具，私有租约与 capability 不进入模型上下文。Integration 启动时会先完成 Redis 订阅和一次阻塞式资源同步，再上线 Worker。
 
 Browser Use 包含真实 Chromium E2E、每会话桌面管理器及 noVNC 路由测试。`novnc` 模式下每个活跃 session 拥有独立 Chromium/X display/VNC 目标，8081 按可选 `sessionId` 路由；省略时默认选择最近创建且仍存活的 session。开发主机没有 Docker CLI，完整镜像和 Linux VNC 联调需在 Docker/CI 执行。`Dockerfile.base` 已包含 Xvfb/x11vnc/noVNC，必须先重建基础镜像再构建业务镜像。
@@ -255,3 +278,23 @@ CodeGraph 运行态检查要求使用 `plugins/dsh-codegraph/package.json` 声�
 ## 开发
 
 所有维护插件都从 DSH 根工作区执行验证。修改后运行覆盖对应包的最小命令；文档和包级行为应与包元数据、服务注入列表和 bundle patch 保持一致。
+
+### 启动与 Skill 懒加载
+
+镜像构建阶段编译 DSH 和全部插件，运行时直接执行编译后的 CLI。浏览器、桌面和 byCLI 桥接默认在首次私有 browser 请求或受管 byCLI 浏览器命令时激活；首次请求等待激活完成，后续复用。
+
+Integration 在 Worker 上线前同步授权员工、专家团、模型和 Skill 关联索引。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，刷新后的旧代际结果不能重新发布。
+
+依赖缓存（`profiles/node_modules`、web 的 `.dsh-module-fallback`）由镜像提供并在容器本地修复，NAS 上只保留指向当前镜像的链接。模块解析先转换为真实路径，避免每个依赖反复穿过 NAS；完整性检查、缺失链接修复和用户包优先级仍保留。web 的 `cordis.patch.yml`、会话、凭据和业务资源继续按原路径持久化。无需新增 `.env` 配置；基础 DSH 版本或源码结构不匹配时构建会明确失败，避免静默套用补丁。
+
+资源投影先校验旧目录，只复制需要保留的用户模板及未知文件；ByClaw 托管模板按当前授权重新生成，避免“整目录复制后再删除”的重复 NAS IO。发布仍在原代际锁下完成，保留失败回滚、撤权清理和 Skill 版本检查。启动日志单独记录 `session-metadata-ready`，区分元数据恢复与内置 Skill 加载。
+
+内置 Skill 仍从镜像本地加载；专家团临时作用域员工在实际调用时准备。`allowSkillSyncFailure` 决定单个 Skill 失败时跳过还是拒绝查询，之后可重试。首次 Skill 查询承担网络耗时，Worker ready 不代表所有 Skill 已预热。
+
+构建默认使用 `NPM_REGISTRY=https://registry.npmmirror.com`。企业微信/飞书 CLI 在独立 `connector-tools` 阶段缓存；飞书二进制改为阿里镜像优先、GitHub 兜底，仍执行官方 SHA-256 校验。插件变更不会使这个下载阶段失效。
+
+Web 插件组成图现在复用未变化的 JS/source map 产物，插件新增时不重复解码所有旧 bundle；内容或 map 更新仍使缓存失效。构建阶段编译固定版本的 client-modules，运行时不新增编译步骤。
+
+[CLI → integration 新一轮对照：本地 6.30 → 4.36 秒，ACS 待复测](docs/startup-2026-10-22/client-composition-report.md) · [此前启动优化记录](docs/startup-2026-10-22/report.md)
+
+`SEARXNG_WHEELHOUSE` 只是可选的构建参数，不需要写进 `.env`。正常构建无需增加参数或挂载，仍使用原来的清华/PyPI 在线安装路径。仅显式传入该参数并挂载 wheel 目录时启用离线安装；目录缺包会报错，不会偷偷切换版本。该参数不写入运行时 ENV，镜像启动不依赖构建机器上的 wheel 目录。

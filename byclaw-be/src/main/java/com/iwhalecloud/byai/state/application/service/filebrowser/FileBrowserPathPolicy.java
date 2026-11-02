@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.filebrowser;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
@@ -17,14 +19,14 @@ public final class FileBrowserPathPolicy {
     public static void assertBrowsable(String path) {
         String normalized = normalize(path);
         if (isProtected(normalized)) {
-            throw new IllegalArgumentException("该目录属于系统凭据目录，禁止访问");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.path.credentialDirectory"));
         }
     }
 
     static void assertNoProtectedIntersection(String path) {
         String normalized = normalize(path);
         if (isProtected(normalized) || PROTECTED_ROOTS.stream().anyMatch(root -> isAncestor(normalized, root))) {
-            throw new IllegalArgumentException("该操作涉及系统凭据目录，禁止执行");
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.path.credentialOperation"));
         }
     }
 
@@ -37,7 +39,7 @@ public final class FileBrowserPathPolicy {
     static String normalize(String path) {
         String normalized = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
         if (StringUtils.contains(normalized, "..")) {
-            throw new IllegalArgumentException("非法路径: " + path);
+            throw new IllegalArgumentException(I18nUtil.get("filebrowser.path.invalid", path));
         }
         if (!normalized.startsWith("/")) {
             normalized = "/" + normalized;

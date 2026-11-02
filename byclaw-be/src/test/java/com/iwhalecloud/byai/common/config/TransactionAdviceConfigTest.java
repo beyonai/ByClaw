@@ -22,7 +22,55 @@ import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
-class TransactionAdviceConfigTest {
+class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void tenantProviderObservationDoesNotJoinOrPoisonTheCallerTransaction() {
+        var ds = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+            "jdbc:h2:mem:tenantObservation;DB_CLOSE_DELAY=-1", "sa", "");
+        var manager = new DataSourceTransactionManager(ds);
+        var config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", manager);
+        var client = mock(com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient.class);
+        org.mockito.Mockito.when(client.getSandboxIfExists("tenant-id")).thenAnswer(inv -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            // Downstream failure is contained by providerStatus, even within a real caller transaction.
+            new org.springframework.transaction.support.TransactionTemplate(manager).execute(status -> {
+                throw new IllegalStateException("provider unavailable");
+            });
+            return null;
+        });
+        var service = new com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService(
+            mock(com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade.class), client,
+            mock(com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository.class),
+            mock(com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper.class),
+            new com.fasterxml.jackson.databind.ObjectMapper(), "/tmp", "redis", "6379", "0",
+            "default", "", "http://be", "", "host");
+        var factory = new ProxyFactory(service);
+        factory.addAdvice(config.getAdvisor());
+        var proxy = (com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService) factory.getProxy();
+        var record = new com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord();
+        record.setSandboxId("tenant-id");
+        new org.springframework.transaction.support.TransactionTemplate(manager).execute(status -> {
+            assertThat(proxy.providerStatus(record)).isEqualTo("UNKNOWN");
+            assertThat(status.isRollbackOnly()).isFalse();
+            return null;
+        });
+    }
+
+    @Test
+    void forwardingTransportSuspendsAnActualCallerTransaction() {
+        var ds=new org.springframework.jdbc.datasource.DriverManagerDataSource("jdbc:h2:mem:forwardAdvice;DB_CLOSE_DELAY=-1","sa","");
+        var manager=new DataSourceTransactionManager(ds);var config=new TransactionAdviceConfig();ReflectionTestUtils.setField(config,"transactionManager",manager);
+        var node=mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class);
+        org.mockito.Mockito.when(node.request(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.eq("GET"),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.isNull(),org.mockito.ArgumentMatchers.any())).thenAnswer(inv->{
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardOperation(3,com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardOperationState.SUCCEEDED,java.util.List.of());
+        });
+        var target=new com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService(node,mock(com.iwhalecloud.byai.state.domain.groupchat.forward.application.ForwardPlatformPolicy.class),new com.iwhalecloud.byai.state.domain.groupchat.forward.config.GroupChatForwardProperties());
+        var factory=new ProxyFactory(target);factory.setProxyTargetClass(true);factory.addAdvice(config.getAdvisor());var proxy=(com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService)factory.getProxy();
+        new org.springframework.transaction.support.TransactionTemplate(manager).execute(status->{assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();proxy.status(new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(1,2),4,3);assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();return null;});
+    }
 
     @Test
     void commonFileFallbackCannotMarkTheCallingChatRollbackOnly() throws Exception {

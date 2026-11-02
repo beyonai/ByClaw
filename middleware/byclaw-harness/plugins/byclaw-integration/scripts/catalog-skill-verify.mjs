@@ -380,6 +380,24 @@ try {
   if (!(await readFile(join(readOnlySkill, 'SKILL.md'), 'utf8')).includes('extracted permissions')) {
     throw new Error('Skill ZIP with a read-only root was not published')
   }
+  // An unchanged version avoids archive I/O; a changed version OR missing payload must download.
+  for (const missingPayload of [false, true]) {
+    if (missingPayload) await rm(join(readOnlySkill, 'SKILL.md'))
+    const calls = []
+    await syncByClawSkill({
+      ref: { id: 'read-only-skill', code: 'read-only-skill', type: 'hub', versionUrl: '/read-only-version', downloadUrl: '/read-only-skill.zip' },
+      baseUrl: 'http://byclaw.test', headers: {}, cacheRoot: join(root, 'cache'),
+      fetchImpl: async url => {
+        calls.push(String(url))
+        return String(url).endsWith('/read-only-version')
+          ? new Response(JSON.stringify({ data: { version: 'v2' } }), { status: 200 })
+          : new Response(readOnlyZipBytes, { status: 200 })
+      },
+    })
+    if (calls.length !== 2 || (await readCachedByClawSkill(readOnlySkill))?.metadata.version !== 'v2') {
+      throw new Error(`Skill changed-version/missing-payload refresh failed: missing=${missingPayload}`)
+    }
+  }
   const backslashSource = join(root, 'backslash-source')
   const backslashZip = join(root, 'backslash-skill.zip')
   const backslashEntry = 'windows-skill\\SKILL.md'
@@ -566,6 +584,18 @@ try {
       skippedUnmodeledEmployee,
       skippedUnmodeledGroup,
     })}`)
+  }
+  let eagerFetches = 0
+  const deferredRef = { id: 'lazy', code: 'lazy-skill', type: 'SKILL', versionUrl: '/version', downloadUrl: '/zip' }
+  const deferredProjection = await projectByClawResourcesToTemplates({
+    resources: { ...resources, groups: [], directEmployeeIds: ['1'],
+      employees: [{ ...resources.employees.find(employee => employee.id === '1'), skills: [deferredRef] }] },
+    agentTemplateDir: join(root, 'deferred-agents'), teamCatalogDir: join(root, 'deferred-teams'),
+    cacheRoot: join(root, 'deferred-cache'), baseUrl: 'http://byclaw.test', deferSkillSync: true,
+    syncSkill: async () => { eagerFetches++; throw new Error('cold start must not download') },
+  })
+  if (eagerFetches !== 0 || deferredProjection.agents[0]?.skills[0]?.ref?.code !== 'lazy-skill') {
+    throw new Error('deferred projection did not preserve authorized associations without network I/O')
   }
   const mismatchedGroupErrors = []
   const mismatchedProjection = await projectByClawResourcesToTemplates({

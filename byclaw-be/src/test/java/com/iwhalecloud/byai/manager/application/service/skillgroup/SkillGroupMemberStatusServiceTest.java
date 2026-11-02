@@ -32,7 +32,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
-class SkillGroupMemberStatusServiceTest {
+class SkillGroupMemberStatusServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final Long EMPLOYEE_ID = 100L;
     private static final Long SKILL_ID = 200L;

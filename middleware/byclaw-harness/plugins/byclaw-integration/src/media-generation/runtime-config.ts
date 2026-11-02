@@ -1,4 +1,5 @@
 import { lstat, readFile } from 'node:fs/promises'
+import type { ToolEnvironmentFiles } from '../tool-environment-files.ts'
 import { isIP } from 'node:net'
 import { basename, isAbsolute, normalize, relative } from 'node:path'
 
@@ -49,10 +50,13 @@ export interface ResolvedMediaModel {
 }
 
 const MAX_PROJECTION_BYTES = 64 * 1024
-const MEDIA_PROJECTION_ROOT = '/by/.connector-auth/.model'
-const DEFAULT_PROJECTION_PATHS: Record<MediaCapability, string> = {
-  IMAGE: `${MEDIA_PROJECTION_ROOT}/image.json`,
-  TTS: `${MEDIA_PROJECTION_ROOT}/tts.json`,
+/** Default connector projection root inside the user tree. */
+export const MEDIA_PROJECTION_ROOT = '/by/.connector-auth/.model'
+const PROJECTION_FILES: Record<MediaCapability, string> = { IMAGE: 'image.json', TTS: 'tts.json' }
+
+/** Connector projection root beneath a user tree (`byRoot`). */
+export function mediaProjectionRoot(byRoot: string): string {
+  return normalize(`${byRoot}/.connector-auth/.model`)
 }
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u
 const FORBIDDEN_HEADERS = new Set(['connection', 'content-length', 'host', 'transfer-encoding'])
@@ -81,15 +85,16 @@ export function mediaConfigurationRequiredResult(
 export function resolveMediaProjectionPath(
   capability: MediaCapability,
   environment: Record<string, string | undefined> = process.env,
+  root: string = MEDIA_PROJECTION_ROOT,
 ): string {
   const variable = capability === 'IMAGE'
     ? 'BYCLAW_IMAGE_MODEL_CONFIG_PATH'
     : 'BYCLAW_TTS_MODEL_CONFIG_PATH'
   const configured = environment[variable]?.trim()
-  if (configured === undefined || configured === '') return DEFAULT_PROJECTION_PATHS[capability]
+  if (configured === undefined || configured === '') return `${normalize(root)}/${PROJECTION_FILES[capability]}`
   const path = normalize(configured)
-  const fromRoot = relative(MEDIA_PROJECTION_ROOT, path)
-  const expectedFile = capability === 'IMAGE' ? 'image.json' : 'tts.json'
+  const fromRoot = relative(normalize(root), path)
+  const expectedFile = PROJECTION_FILES[capability]
   if (!isAbsolute(path) || fromRoot === '' || fromRoot.startsWith('..') || isAbsolute(fromRoot)
       || basename(path) !== expectedFile) {
     throw new Error(`MEDIA_PROJECTION_PATH_INVALID: ${variable}`)
@@ -206,12 +211,24 @@ export async function loadProjectedMediaModel(
   projectionPath: string,
   expectedType: MediaCapability,
   expectedRevision?: string,
+  files?: ToolEnvironmentFiles,
 ): Promise<ResolvedMediaModel> {
-  const info = await lstat(projectionPath)
-  if (info.isSymbolicLink()) throw new Error('CONNECTOR_CONFIG_INVALID: symbolic link')
-  if (!info.isFile()) throw new Error('CONNECTOR_CONFIG_INVALID: projection is not a regular file')
-  if (info.size > MAX_PROJECTION_BYTES) throw new Error('CONNECTOR_CONFIG_INVALID: projection exceeds 64 KiB')
-  const model = parseMediaModelConfig(await readFile(projectionPath, 'utf8'), expectedType)
+  let raw: string
+  if (files !== undefined) {
+    const info = await files.lstat(projectionPath)
+    if (info === undefined) throw Object.assign(new Error(`ENOENT: no such file or directory, lstat '${projectionPath}'`), { code: 'ENOENT' })
+    if (info.type === 'symlink') throw new Error('CONNECTOR_CONFIG_INVALID: symbolic link')
+    if (info.type !== 'file') throw new Error('CONNECTOR_CONFIG_INVALID: projection is not a regular file')
+    if ((info.size ?? 0) > MAX_PROJECTION_BYTES) throw new Error('CONNECTOR_CONFIG_INVALID: projection exceeds 64 KiB')
+    raw = await files.readText(projectionPath)
+  } else {
+    const info = await lstat(projectionPath)
+    if (info.isSymbolicLink()) throw new Error('CONNECTOR_CONFIG_INVALID: symbolic link')
+    if (!info.isFile()) throw new Error('CONNECTOR_CONFIG_INVALID: projection is not a regular file')
+    if (info.size > MAX_PROJECTION_BYTES) throw new Error('CONNECTOR_CONFIG_INVALID: projection exceeds 64 KiB')
+    raw = await readFile(projectionPath, 'utf8')
+  }
+  const model = parseMediaModelConfig(raw, expectedType)
   if (expectedRevision !== undefined && model.revision !== expectedRevision) {
     throw new Error('CONNECTOR_CONFIG_REVISION_MISMATCH')
   }
@@ -222,9 +239,10 @@ export async function resolveMediaModelFromProjection(options: {
   capability: MediaCapability
   projectionPath: string
   loadSystemDefault: () => Promise<ResolvedMediaModel>
+  files?: ToolEnvironmentFiles
 }): Promise<ResolvedMediaModel> {
   try {
-    return await loadProjectedMediaModel(options.projectionPath, options.capability)
+    return await loadProjectedMediaModel(options.projectionPath, options.capability, undefined, options.files)
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error
       ? String((error as NodeJS.ErrnoException).code)

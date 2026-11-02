@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -139,11 +141,11 @@ public class DigitalEmployeeGroupApplicationService {
         validateGroupResource(group, input);
         String prompt = StringUtils.trimToEmpty(input.getCorePersonaDefinition());
         if (StringUtils.isBlank(prompt)) {
-            throw invalidConfig("数字员工组 Prompt 不能为空");
+            throw invalidConfig(I18nUtil.get("employee.group.promptRequired"));
         }
         String modelId = extractModelId(input.getPrologue());
         if (StringUtils.isBlank(modelId)) {
-            throw invalidConfig("数字员工组模型不能为空");
+            throw invalidConfig(I18nUtil.get("employee.group.modelRequired"));
         }
 
         List<EmployeeGroupMemberDTO> requested = normalizeMembers(input.getEmployeeGroupMembers());
@@ -196,18 +198,18 @@ public class DigitalEmployeeGroupApplicationService {
         SsResource group = ssResourceService.findById(groupId);
         SsResExtDigEmployee groupExt = ssResExtDigEmployeeService.findById(groupId);
         if (!isVisibleGroup(group, groupExt)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数字员工组不存在或不可见");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("employee.group.notVisible"));
         }
         if (!authApplicationService.hasResourceUsePermission(group)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前用户无数字员工组使用权限");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, I18nUtil.get("employee.group.runtimeUseDenied"));
         }
         if (group.getResourceRVerid() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组尚无可运行配置");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.noRuntimeConfig"));
         }
         SsResourceVersion version = ssResourceVersionMapper.selectById(group.getResourceRVerid());
         if (version == null || version.getVersionStatus() == null || version.getVersionStatus() != 3
             || StringUtils.isBlank(version.getExtInfo())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组在用配置不完整");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.runtimeConfigIncomplete"));
         }
 
         JSONObject snapshot;
@@ -215,25 +217,25 @@ public class DigitalEmployeeGroupApplicationService {
             snapshot = JSON.parseObject(version.getExtInfo());
         }
         catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组在用配置格式错误", e);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.runtimeConfigInvalid"), e);
         }
         if (!SNAPSHOT_SCHEMA.equals(snapshot.getString("schemaVersion"))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组在用配置版本不受支持");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.runtimeVersionUnsupported"));
         }
         String prompt = StringUtils.trimToEmpty(snapshot.getString("prompt"));
         String modelId = StringUtils.trimToEmpty(snapshot.getString("modelId"));
         if (StringUtils.isAnyBlank(prompt, modelId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组 Prompt 或模型配置不完整");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.promptModelIncomplete"));
         }
         ModelDto model;
         try {
             model = aiModelService.getModel(modelId);
         }
         catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "模型配置服务不可用", e);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, I18nUtil.get("employee.group.modelServiceUnavailable"), e);
         }
         if (model == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组模型不存在或已停用");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.modelUnavailable"));
         }
 
         List<EmployeeGroupMemberDTO> configuredMembers = parseSnapshotMembers(snapshot.getJSONArray("members"));
@@ -248,7 +250,7 @@ public class DigitalEmployeeGroupApplicationService {
             agents.add(toRuntimeAgent(fact, configured.getTeamRole()));
         }
         if (agents.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组没有有效成员");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.noValidMembers"));
         }
         return buildRuntime(group, version, prompt, modelId, model, agents);
     }
@@ -263,7 +265,7 @@ public class DigitalEmployeeGroupApplicationService {
             || !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(resource.getResourceBizType())
             || !Objects.equals(ResourceStatus.ON_SHELF.getNum(), resource.getResourceStatus())
             || !Objects.equals(CurrentUserHolder.getEnterpriseId(), resource.getComAcctId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数字员工资源不存在或不可见");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("employee.group.resourceUnavailable"));
         }
         if (isGroup(ext.getAgentType())) {
             OrchestratorRuntimeRequestDTO request = new OrchestratorRuntimeRequestDTO();
@@ -273,11 +275,11 @@ public class DigitalEmployeeGroupApplicationService {
             return resolveRuntime(request);
         }
         if (!authApplicationService.hasResourceUsePermission(resource)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前用户无数字员工使用权限");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, I18nUtil.get("employee.group.useDenied"));
         }
         ResourceExtDigEmployeeDto fact = loadMemberFacts(List.of(resourceId)).get(resourceId);
         if (fact == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工配置不完整");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.configIncomplete"));
         }
 
         OrchestratorRuntimeDTO result = new OrchestratorRuntimeDTO();
@@ -296,10 +298,10 @@ public class DigitalEmployeeGroupApplicationService {
 
     private void validateGroupResource(SsResource group, DigitalEmployeeDTO input) {
         if (group == null || input == null || !isGroup(input.getAgentType())) {
-            throw invalidConfig("数字员工组类型必须为 017");
+            throw invalidConfig(I18nUtil.get("employee.group.typeInvalid"));
         }
         if (!isSupportedGroupWorkerAgentType(group.getWorkerAgentType())) {
-            throw invalidConfig("数字员工组运行类型必须为 BY_SUPER 或 HARNESS");
+            throw invalidConfig(I18nUtil.get("employee.group.runtimeInvalid"));
         }
     }
 
@@ -310,26 +312,26 @@ public class DigitalEmployeeGroupApplicationService {
 
     private List<EmployeeGroupMemberDTO> normalizeMembers(List<EmployeeGroupMemberDTO> input) {
         if (CollectionUtils.isEmpty(input)) {
-            throw invalidConfig("数字员工组至少需要一个成员");
+            throw invalidConfig(I18nUtil.get("employee.group.memberRequired"));
         }
         if (input.size() > MAX_MEMBER_COUNT) {
-            throw invalidConfig("数字员工组成员不能超过 " + MAX_MEMBER_COUNT + " 个");
+            throw invalidConfig(I18nUtil.get("employee.group.memberLimit", MAX_MEMBER_COUNT));
         }
         Set<Long> seen = new HashSet<>();
         List<EmployeeGroupMemberDTO> normalized = new ArrayList<>();
         for (int i = 0; i < input.size(); i++) {
             EmployeeGroupMemberDTO source = input.get(i);
             if (source == null || source.getResourceId() == null || !seen.add(source.getResourceId())) {
-                throw invalidConfig("数字员工组成员不能为空或重复");
+                throw invalidConfig(I18nUtil.get("employee.group.memberInvalid"));
             }
             EmployeeGroupMemberDTO member = new EmployeeGroupMemberDTO();
             member.setResourceId(source.getResourceId());
             member.setTeamRole(StringUtils.trimToEmpty(source.getTeamRole()));
             if (StringUtils.isBlank(member.getTeamRole())) {
-                throw invalidConfig("数字员工组成员的团队角色不能为空");
+                throw invalidConfig(I18nUtil.get("employee.group.roleRequired"));
             }
             if (member.getTeamRole().length() > MAX_TEAM_ROLE_LENGTH) {
-                throw invalidConfig("数字员工组成员的团队角色不能超过 " + MAX_TEAM_ROLE_LENGTH + " 个字符");
+                throw invalidConfig(I18nUtil.get("employee.group.roleLimit", MAX_TEAM_ROLE_LENGTH));
             }
             member.setSortOrder(i + 1);
             normalized.add(member);
@@ -339,11 +341,11 @@ public class DigitalEmployeeGroupApplicationService {
 
     private void validateMember(SsResource group, ResourceExtDigEmployeeDto fact, boolean checkManagePermission) {
         if (!isEligibleMember(group, fact)) {
-            throw invalidConfig("数字员工组包含不可用或配置不完整的成员");
+            throw invalidConfig(I18nUtil.get("employee.group.memberUnavailable"));
         }
         if (checkManagePermission && !authApplicationService.hasResourceManagePermission(fact)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                "无权把数字员工加入当前数字员工组: " + fact.getResourceName());
+                I18nUtil.get("employee.group.memberManageDenied", fact.getResourceName()));
         }
     }
 
@@ -508,7 +510,7 @@ public class DigitalEmployeeGroupApplicationService {
             return array.toJavaList(EmployeeGroupMemberDTO.class);
         }
         catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "数字员工组成员快照格式错误", e);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, I18nUtil.get("employee.group.memberSnapshotInvalid"), e);
         }
     }
 
@@ -564,7 +566,7 @@ public class DigitalEmployeeGroupApplicationService {
     private void validateRuntimeRequest(OrchestratorRuntimeRequestDTO request) {
         if (request == null || !REQUEST_SCHEMA.equals(request.getSchemaVersion())
             || !ORCHESTRATOR_KIND.equals(request.getKind()) || StringUtils.isBlank(request.getOrchestratorId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "数字员工组运行时请求不合法");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, I18nUtil.get("employee.group.runtimeRequestInvalid"));
         }
     }
 
@@ -573,7 +575,7 @@ public class DigitalEmployeeGroupApplicationService {
             return Long.valueOf(id);
         }
         catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数字员工组不存在或不可见");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, I18nUtil.get("employee.group.notVisible"));
         }
     }
 
@@ -588,7 +590,7 @@ public class DigitalEmployeeGroupApplicationService {
             return StringUtils.defaultIfBlank(modelId, json.getString("modelId"));
         }
         catch (Exception e) {
-            throw invalidConfig("数字员工组模型配置格式错误");
+            throw invalidConfig(I18nUtil.get("employee.group.modelConfigInvalid"));
         }
     }
 

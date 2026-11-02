@@ -14,20 +14,21 @@ export interface CheckerCall {
   prompt: string
   label: string | undefined
   agentOptions: SubagentStartRequest['agentOptions']
-  toolFilter: SubagentStartRequest['toolFilter']
   cwd: string | undefined
   parentAgentsAvailable: boolean
   signal: AbortSignal
   disposed: () => boolean
 }
 
-/** A scripted reply; `hang` never settles the child result. */
+/**
+ * A scripted reply; `hang` settles the child result only once the run is
+ * cancelled, as a real backend does when the runtime aborts its start signal.
+ */
 export type ScriptedReply = SubagentResult | 'hang'
 
 interface CheckerOptions {
   name?: string
   agentOptions?: boolean
-  toolFilter?: boolean
   /** Consumed in dispatch order, or derived from the prompt when a function. */
   replies: ScriptedReply[] | ((prompt: string) => ScriptedReply)
   /** Throws instead of starting, to exercise a rejected dispatch. */
@@ -43,8 +44,7 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
       agentOptions: options.agentOptions ?? true,
       outputSchema: false,
       depthLimit: false,
-      toolFilter: options.toolFilter ?? false,
-      persona: false,
+      agentPreset: false,
     },
     inheritsParentContext: false,
     start(request) {
@@ -54,7 +54,6 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
         prompt,
         label: request.label,
         agentOptions: request.agentOptions,
-        toolFilter: request.toolFilter,
         cwd: request.parent.session.header.cwd,
         parentAgentsAvailable: request.parent.ctx.agents !== undefined,
         signal: request.signal,
@@ -66,7 +65,7 @@ export function checkerProvider(options: CheckerOptions, calls: CheckerCall[]): 
       return Promise.resolve({
         id: SessionId(`checker-child-${++seq}`),
         localAgent: undefined,
-        result: reply === 'hang' ? new Promise<SubagentResult>(() => {}) : Promise.resolve(reply),
+        result: reply === 'hang' ? cancelled(request.signal) : Promise.resolve(reply),
         dispose: () => {
           disposed = true
           return Promise.resolve()
@@ -97,4 +96,13 @@ export function findingReply(
     skipped: [],
     comments: [{ path: reviewed[0], content, severity, category: 'bug', start_line: 3, end_line: 3 }],
   })}\n\`\`\`\n`)
+}
+
+/** The result of a run that only ends when it is cancelled. */
+function cancelled(signal: AbortSignal): Promise<SubagentResult> {
+  return new Promise<SubagentResult>((resolve) => {
+    const settle = (): void => { resolve({ output: [], stopReason: 'aborted' }) }
+    if (signal.aborted) settle()
+    else signal.addEventListener('abort', settle, { once: true })
+  })
 }

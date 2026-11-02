@@ -13,6 +13,7 @@ import { requestSoloAssistance, resolveSoloAssistance, soloAssistanceForChild } 
 import { registerAgentTemplateRuntime } from '../lib/template-runtime.js'
 import { ByClawSessionWorkspaceRegistry } from '../lib/session-workspace.js'
 import { ByClawAsyncTeamGate } from '../lib/session-runtime.js'
+import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 
 const workspace = await mkdtemp(join(tmpdir(), 'byclaw-group-robustness-'))
 const previousHome = process.env.DSH_HOME
@@ -31,7 +32,7 @@ const employee={id:'member',status:'idle',session:{header:{cwd:businessWorkspace
 const agents=new Map([['captain',captain],['member',employee]])
 const definitions=new Map()
 const ctx={get:()=>policy,effect:fn=>fn(),on:()=>()=>{},agents:{get:id=>agents.get(id),withoutInitiator:fn=>fn()},
-  subagents:{registerContinuableSetup(){},listChildren:async()=>[],listDescendants:async()=>[],followup:async()=>{},getProvider:()=>({prepareContinuable(){},capabilities:{persona:true}})},
+  subagents:{registerContinuableSetup(){},listChildren:async()=>[],listDescendants:async()=>[],[deliverSubagentPrompt]:async()=>'accepted',getProvider:()=>({prepareContinuable(){},capabilities:{persona:true}})},
   tools:{register:def=>definitions.set(def.name,def)},logger:{warn(){},debug(){}},llm:{resolveCallConfig:async value=>value}}
 const policy={get:id=>scopes.get(id),inputRevision:()=>revision,getContext:()=>undefined,isLocalWorker:()=>true}
 const signal=new AbortController().signal
@@ -177,8 +178,8 @@ try {
   const oldRevisionMethod=policy.inputRevision;policy.inputRevision=()=>undefined
   const coldCached=await requestGroupMemberAssistance(ctx,employee,'.agent-teams','cold inputs')
   assert.equal(coldCached.status,'completed');assert.equal(coldCached.result,'cold actual inputs')
-  const oldFollowup=ctx.subagents.followup;let continuedOriginal=0
-  ctx.subagents.followup=async (_parent,id)=>{assert.equal(id,'member');continuedOriginal++;employee.status='running'}
+  const oldFollowup=ctx.subagents[deliverSubagentPrompt];let continuedOriginal=0
+  ctx.subagents[deliverSubagentPrompt]=async (_parent,id)=>{assert.equal(id,'member');continuedOriginal++;employee.status='running';return 'accepted'}
   const coldScheduler=installTeamScheduler(ctx,{stateDir:'.agent-teams',maxTaskAttempts:999})
   await coldScheduler.kickTeam(businessWorkspace,coldTeam.id,captain)
   ledger=await readTeam(stateRoot,coldTeam.id)
@@ -207,7 +208,7 @@ try {
   const leasedMail=await readMailbox(stateRoot,leasedTeam.id,'a')
   assert.equal(continuedOriginal,1);assert.equal(ledger.tasks[0].attemptId,'cold-original-attempt')
   assert.equal(leasedMail.length,1);assert.equal(leasedMail[0].id,returnId);assert.ok(leasedMail[0].readAt);assert.equal(leasedMail[0].deliveryClaimedAt,undefined)
-  policy.inputRevision=oldRevisionMethod;ctx.subagents.followup=oldFollowup;employee.status='idle'
+  policy.inputRevision=oldRevisionMethod;ctx.subagents[deliverSubagentPrompt]=oldFollowup;employee.status='idle'
   await rm(join(stateRoot,leasedTeam.id),{recursive:true})
 
   // DIRECT requests use the same durable child/result protocol and support multiple phases.
@@ -230,10 +231,11 @@ try {
   policy.resolveTemplate=async()=>helperTemplate
   policy.bind=(id,employee,parent)=>scopes.set(id,{coordination:scopes.get(parent).coordination,employeeId:employee,role:'coordinator',templateId:'scoped'})
   let starts=0;let concludes=0
-  ctx.sessionPersistence={list:async()=>[]}
-  ctx.subagents.startContinuable=async ({childId,request})=>{
+  ctx.sessionPersistence={list:async()=>[],stat:async()=>undefined}
+  ctx.subagents.startActivation=async ({childId,request,delivery})=>{
+    assert.equal(delivery,'parent')
     starts++;const child={id:childId,status:'running',session:{header:{cwd:businessWorkspace,parentSession:request.parent.id},events:[]}}
-    agents.set(childId,child);policy.bind(childId,'helper',request.parent.id);return{childId}
+    agents.set(childId,child);policy.bind(childId,'helper',request.parent.id);return{childId,result:new Promise(()=>{}),dispose:async()=>{}}
   }
   const registry=new ByClawSessionWorkspaceRegistry()
   const directRuntime=registerAgentTemplateRuntime(ctx,{catalogDir:workspace,subagentProvider:'fake',resolveModel:async()=>({provider:'fake',model:'fake'}),groupCoordination:policy,workspaceRegistry:registry})
@@ -241,6 +243,24 @@ try {
   await assert.rejects(()=>definitions.get('byclaw_instantiate_template').execute({template_id:'byclaw-employee-helper',task:'bypass'},{agent:directParent,signal}),/scoped AgentTeams task ledger/)
   const requestTool=definitions.get('group_request_assistance')
   const started=await requestTool.execute({objective:'find script'},directExec)
+  const rendered=requestTool.output.render({},started)
+  const presentationMeta=requestTool.output.presentationMeta({},started)
+  assert.equal(presentationMeta.instance_session_id,started.instance_session_id,'native assistance must expose the child session')
+  assert.ok(rendered.some(block=>block.type==='text'&&block.text.includes(`\nAssistance session: ${started.instance_session_id}\n`)),'PTC assistance must expose the child session in rendered text')
+  for(const mode of ['native','ptc']){
+    const gate=new ByClawAsyncTeamGate()
+    gate.observe({type:mode==='native'?'tool/call':'tool/ptc-dispatch-start',data:{name:'group_request_assistance',callId:'live',subCallId:'live'}})
+    gate.observe(mode==='native'
+      ?{type:'tool/result',data:{meta:presentationMeta,message:{role:'tool',source:{kind:'tool',callId:'live'},toolCallId:'live',content:rendered}}}
+      :{type:'tool/ptc-dispatch',data:{name:'group_request_assistance',subCallId:'live',isError:false,content:rendered}})
+    gate.observe({type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
+    assert.equal(gate.waiting,true,`${mode}: pending assistance must retain the command`)
+    gate.observe({type:'user/message',data:{source:{kind:'subagent-settled',senderSessionId:started.instance_session_id},content:[]}})
+    assert.equal(gate.waiting,true,`${mode}: child settlement must wait for the final parent turn`)
+    gate.observe({type:'turn/end',data:{turn:2,reason:{kind:'completed'}}})
+    assert.equal(gate.waiting,false,`${mode}: real assistance output must release the completed command`)
+    gate.dispose()
+  }
   await definitions.get('group_resolve_assistance').execute({status:'completed',result:'actual script'},{agent:agents.get(started.instance_session_id),signal})
   const same=await requestTool.execute({objective:'find script'},directExec)
   assert.equal(same.status,'completed');assert.equal(same.result,'actual script');assert.equal(starts,1);assert.equal(concludes,1,'synchronous result must not conclude and wait forever')
@@ -254,17 +274,18 @@ try {
   const resumed=await requestTool.execute({objective:'recover original'},{...directExec,agent:coldParent})
   assert.equal(resumed.request_id,cold.record.id);assert.equal(resumed.instance_session_id,cold.record.childId);assert.equal(starts,3)
 
-  // Both native and Code Mode cached returns settle the async gate with no child report.
-  for (const status of ['completed','blocked']) for (const mode of ['native','code']) {
+  // Both native and PTC cached returns settle the async gate with no child report.
+  for (const status of ['completed','blocked']) for (const mode of ['native','ptc']) {
     const gate=new ByClawAsyncTeamGate(1000,5)
     gate.observe({type:'turn/start',data:{turn:1}})
     if(mode==='native'){
       gate.observe({type:'tool/call',data:{name:'group_request_assistance',callId:'cached'}})
-      gate.observe({type:'tool/result',data:{message:{content:[{type:'tool-result',toolCallId:'cached',content:[{type:'text',text:`Assistance status: ${status}\nactual return`}],meta:{byclaw_assistance_status:status}}]}}})
+      gate.observe({type:'tool/result',data:{message:{role:'tool',source:{kind:'tool',callId:'cached'},toolCallId:'cached',content:[{type:'text',text:`Assistance status: ${status}\nactual return`}]},meta:{byclaw_assistance_status:status}}})
     }else{
-      gate.observe({type:'tool/code-dispatch-start',data:{name:'group_request_assistance',subCallId:'cached'}})
-      gate.observe({type:'tool/code-dispatch',data:{name:'group_request_assistance',subCallId:'cached',isError:false,content:[{type:'text',text:`Assistance status: ${status}\nactual return`}]}})
+      gate.observe({type:'tool/ptc-dispatch-start',data:{name:'group_request_assistance',subCallId:'cached'}})
+      gate.observe({type:'tool/ptc-dispatch',data:{name:'group_request_assistance',subCallId:'cached',isError:false,content:[{type:'text',text:`Assistance status: ${status}\nactual return`}]}})
     }
+    assert.equal(gate.waiting,true,`${mode} ${status} must wait for the parent response`)
     gate.observe({type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
     assert.equal(gate.waiting,false,`${mode} ${status} must settle without a new child`)
   }

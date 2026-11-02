@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.oauth2;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -84,7 +86,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             String redirectUri = validRedirectUri(secretResolver.resolve(redirectUriEnv));
             String scope = required(config, "scope");
             if (!containsAllScopes(scope, requiredAccessTokenScopes())) {
-                throw new IllegalArgumentException("OAuth2配置缺少必要scope");
+                throw new IllegalArgumentException(I18nUtil.get("connector.oauth.scopeMissing"));
             }
             String state = OAuth2State.create(context.authorizationId());
             String verifier = randomValue(64);
@@ -112,7 +114,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
                 objectMapper.writeValueAsString(providerState), null, null);
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
             return new AuthorizationStartResult(AuthorizationStatus.FAILED, null, null, null, null,
-                "OAUTH_PROVIDER_CONFIG_INVALID", displayName() + " OAuth2未配置完整，请联系管理员");
+                "OAUTH_PROVIDER_CONFIG_INVALID", I18nUtil.get("connector.oauth.configIncomplete", displayName()));
         }
     }
 
@@ -124,18 +126,18 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
     @Override
     public AuthorizationStatusResult handleCallback(AuthorizationSessionContext session, AuthorizationCallback callback) {
         if (callback == null || StringUtils.hasText(callback.error())) {
-            return failure("OAUTH_DENIED", "用户拒绝或平台取消授权");
+            return failure("OAUTH_DENIED", I18nUtil.get("connector.oauth.denied"));
         }
         Map<String, String> state;
         try {
             state = readState(session.providerState());
         } catch (RuntimeException e) {
-            return failure("OAUTH_STATE_INVALID", "OAuth2回调state无效");
+            return failure("OAUTH_STATE_INVALID", I18nUtil.get("connector.oauth.stateInvalid"));
         }
         if (!StringUtils.hasText(callback.code()) || !StringUtils.hasText(callback.state())
                 || !callback.state().equals(state.get("oauthState"))
                 || !session.authorizationId().equals(OAuth2State.authorizationId(callback.state()))) {
-            return failure("OAUTH_STATE_INVALID", "OAuth2回调state无效");
+            return failure("OAUTH_STATE_INVALID", I18nUtil.get("connector.oauth.stateInvalid"));
         }
         try {
             MailOAuth2Client.Token token = client.exchange(new MailOAuth2Client.ExchangeRequest(mailProvider(),
@@ -145,10 +147,10 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             if (!StringUtils.hasText(savedScopes)) {
                 savedScopes = state.get("scope");
             } else if (!hasRequiredScopes(state.get("scope"), savedScopes)) {
-                return failure("OAUTH_SCOPE_INSUFFICIENT", "OAuth2授权范围不足");
+                return failure("OAUTH_SCOPE_INSUFFICIENT", I18nUtil.get("connector.oauth.scopeInsufficient"));
             }
             if (requiresRefreshToken() && !StringUtils.hasText(token.refreshToken())) {
-                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth2令牌交换失败");
+                return failure("OAUTH_TOKEN_EXCHANGE_FAILED", I18nUtil.get("connector.oauth.exchangeFailed"));
             }
             MailOAuth2Client.Profile profile = requireProfile(client.loadProfile(mailProvider(), token.accessToken()));
             String reference = secretStore.save(ConnectorCredentialSecret.forOAuth2(providerCode(), session.userId(),
@@ -157,7 +159,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             return connected(profile, token.accessExpiresAt(), token.refreshExpiresAt(), reference,
                 StringUtils.hasText(token.refreshToken()));
         } catch (RuntimeException e) {
-            return failure("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth2令牌交换失败");
+            return failure("OAUTH_TOKEN_EXCHANGE_FAILED", I18nUtil.get("connector.oauth.exchangeFailed"));
         }
     }
 
@@ -170,7 +172,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             return connected(profile, secret.accessExpiresAt(), secret.refreshExpiresAt(),
                 secret.credentialReference(), StringUtils.hasText(secret.refreshToken()));
         } catch (RuntimeException e) {
-            return failure("CONNECTOR_CREDENTIAL_INVALID", "连接器凭证验证失败");
+            return failure("CONNECTOR_CREDENTIAL_INVALID", I18nUtil.get("connector.credential.verificationFailed"));
         }
     }
 
@@ -180,12 +182,12 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
         try {
             old = secretStore.findActive(userId.toString(), connector.getConnectorId(), providerCode()).orElse(null);
         } catch (RuntimeException e) {
-            return failure("OAUTH_REFRESH_RETRYABLE", "OAuth2凭证稍后重试");
+            return failure("OAUTH_REFRESH_RETRYABLE", I18nUtil.get("connector.oauth.retryLater"));
         }
         Date now = new Date();
         if (old == null || !StringUtils.hasText(old.refreshToken())
                 || old.refreshExpiresAt() != null && !old.refreshExpiresAt().after(now)) {
-            return failure("OAUTH_REFRESH_UNAVAILABLE", "OAuth2凭证需要重新授权");
+            return failure("OAUTH_REFRESH_UNAVAILABLE", I18nUtil.get("connector.oauth.reauthorize"));
         }
         String clientId;
         String clientSecret;
@@ -194,7 +196,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             clientId = secretResolver.resolve(required(config, "clientIdEnv"));
             clientSecret = secretResolver.resolve(required(config, "clientSecretEnv"));
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
-            return failure("OAUTH_REFRESH_UNAVAILABLE", "OAuth2凭证需要重新授权");
+            return failure("OAUTH_REFRESH_UNAVAILABLE", I18nUtil.get("connector.oauth.reauthorize"));
         }
         try {
             MailOAuth2Client.Token refreshed = client.refresh(new MailOAuth2Client.RefreshRequest(mailProvider(),
@@ -205,7 +207,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
                 ? refreshed.refreshExpiresAt() : old.refreshExpiresAt();
             String scopes = StringUtils.hasText(refreshed.scopes()) ? refreshed.scopes() : old.grantedScopes();
             if (StringUtils.hasText(refreshed.scopes()) && !hasRequiredScopes(old.grantedScopes(), scopes)) {
-                return failure("OAUTH_REFRESH_UNAVAILABLE", "OAuth2凭证需要重新授权");
+                return failure("OAUTH_REFRESH_UNAVAILABLE", I18nUtil.get("connector.oauth.reauthorize"));
             }
             String tokenType = StringUtils.hasText(refreshed.tokenType())
                 ? refreshed.tokenType() : old.tokenType();
@@ -218,18 +220,18 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
             return connected(profile, refreshed.accessExpiresAt(), refreshExpiry, old.credentialReference(), true);
         } catch (MailOAuth2ClientException e) {
             return failure(e.retryable() ? "OAUTH_REFRESH_RETRYABLE" : "OAUTH_REFRESH_UNAVAILABLE",
-                e.retryable() ? "OAuth2凭证稍后重试" : "OAuth2凭证需要重新授权");
+                e.retryable() ? I18nUtil.get("connector.oauth.retryLater") : I18nUtil.get("connector.oauth.reauthorize"));
         } catch (com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRenewalConflictException e) {
-            return failure("OAUTH_REFRESH_RETRYABLE", "OAuth2凭证稍后重试");
+            return failure("OAUTH_REFRESH_RETRYABLE", I18nUtil.get("connector.oauth.retryLater"));
         } catch (RuntimeException e) {
-            return failure("OAUTH_REFRESH_RETRYABLE", "OAuth2凭证稍后重试");
+            return failure("OAUTH_REFRESH_RETRYABLE", I18nUtil.get("connector.oauth.retryLater"));
         }
     }
 
     @Override
     public void revoke(String userId, ConnectorInfo connector) {
         ConnectorCredentialSecret secret = secretStore.findActive(userId, connector.getConnectorId(), providerCode())
-            .orElseThrow(() -> new IllegalArgumentException("OAuth2凭证不存在"));
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("connector.oauth.credentialsMissing")));
         revokeRemote(secret.accessToken());
         secretStore.revoke(secret.credentialReference());
     }
@@ -250,7 +252,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
 
     private MailOAuth2Client.Profile requireProfile(MailOAuth2Client.Profile profile) {
         if (profile == null || !StringUtils.hasText(profile.accountId()) || !StringUtils.hasText(profile.accountName())) {
-            throw new IllegalStateException("OAuth2 profile invalid");
+            throw new IllegalStateException(I18nUtil.get("connector.oauth.profileInvalid"));
         }
         return profile;
     }
@@ -270,7 +272,7 @@ public abstract class AbstractMailOAuth2AuthorizationProvider implements Connect
         try {
             return objectMapper.readValue(json, new TypeReference<Map<String, String>>() { });
         } catch (Exception e) {
-            throw new IllegalArgumentException("OAuth2 state invalid", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.oauth.parsedStateInvalid"), e);
         }
     }
 

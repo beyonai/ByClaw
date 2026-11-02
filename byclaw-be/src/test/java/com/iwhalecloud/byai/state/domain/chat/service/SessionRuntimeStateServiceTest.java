@@ -72,6 +72,35 @@ class SessionRuntimeStateServiceTest {
     }
 
     @Test
+    void acceptsLowerRevisionFromANewerRuntimeInstanceAfterSandboxRestart() {
+        SessionRuntimeState current = state("integration-a", "trace-1", "waiting_user", 19L, 2000L);
+        current.setRuntimeInstanceId("sandbox-old");
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(current));
+
+        JSONObject restarted = runtimeEvent("integration-a", "trace-1", "idle", 2L, 0L, 0L, 0L, 3000L);
+        restarted.getJSONObject("metadata").put("runtime_instance_id", "sandbox-new");
+
+        SessionRuntimeState applied = service.applyEvent(10L, restarted);
+
+        assertThat(applied).isNotNull();
+        assertThat(applied.getRuntimeInstanceId()).isEqualTo("sandbox-new");
+        assertThat(applied.getStatus()).isEqualTo("idle");
+        assertThat(applied.getWaitingInteractionCount()).isZero();
+    }
+
+    @Test
+    void rejectsDelayedSnapshotFromAnOlderRuntimeInstance() {
+        SessionRuntimeState current = state("integration-a", "trace-1", "idle", 2L, 3000L);
+        current.setRuntimeInstanceId("sandbox-new");
+        when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(current));
+
+        JSONObject delayed = runtimeEvent("integration-a", "trace-1", "waiting_user", 20L, 0L, 0L, 1L, 2000L);
+        delayed.getJSONObject("metadata").put("runtime_instance_id", "sandbox-old");
+
+        assertThat(service.applyEvent(10L, delayed)).isNull();
+    }
+
+    @Test
     void ignoresAnOlderTurnSnapshotEvenWhenItClaimsTheSessionIsIdle() {
         SessionRuntimeState current = state("integration-a", "trace-new", "running", 2L, 4000L);
         when(valueOperations.get("byai:chat:session-runtime:10")).thenReturn(JSON.toJSONString(current));

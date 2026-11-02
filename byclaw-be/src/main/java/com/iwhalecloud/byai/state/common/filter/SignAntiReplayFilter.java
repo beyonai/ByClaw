@@ -92,6 +92,13 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
         throws ServletException, IOException {
         log.debug("SignAntiReplayFilter start");
+        // Service identity has already verified the complete request with shared replay protection.
+        if (request.getAttribute(com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal.ATTRIBUTE)
+            instanceof com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // This read-only skill uses the caller's Beyond-Token plus its own server-side allowlist.
         if (this.isExactPostRequestPath(request, ConversationSearchConstants.QUERY_PATH)) {
             filterChain.doFilter(request, response);

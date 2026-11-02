@@ -140,7 +140,11 @@ class LoginApplicationServiceTest {
         ReflectionTestUtils.setField(service, "authRedisSyncService", authRedisSyncService);
         doThrow(new IllegalStateException("submit failed")).when(autoStartService).trigger("user001");
 
-        ReflectionTestUtils.invokeMethod(service, "doAsyncJobAfterLogin", "user001", 1L);
+        LoginInfo login = new LoginInfo(); login.setUserCode("user001"); login.setUserId(1L); login.setEnterpriseId(2L);
+        var storage = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedUserStoragePreparation.class);
+        ReflectionTestUtils.setField(service, "sharedUserStoragePreparation", storage);
+        ReflectionTestUtils.invokeMethod(service, "doAsyncJobAfterLogin", login);
+        verify(storage).trigger(login);
 
         verify(autoStartService).trigger("user001");
         verify(authRedisSyncService).asyncSyncUserAuthToRedis(1L);

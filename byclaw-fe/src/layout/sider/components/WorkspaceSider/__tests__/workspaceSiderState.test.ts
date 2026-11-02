@@ -42,6 +42,34 @@ describe('workspace session activity ordering', () => {
     ).toEqual(sessions);
   });
 
+  it('promotes a newly sent timestamp ahead of cached Beijing dates', () => {
+    const cachedSessions = [
+      { sessionId: 'newer', sessionName: 'Newer', updateTime: '2026-11-02 17:24:11' },
+      { sessionId: 'history', sessionName: 'History', updateTime: '2026-11-02 16:33:25' },
+    ];
+    const updateTime = String(Date.parse('2026-11-02T09:25:00Z'));
+    const result = syncWorkspaceSessionActivity(cachedSessions, [
+      { sessionId: 'history', updateTime, sessionContent: 'New message' },
+    ]);
+
+    expect(result.map((session) => session.sessionId)).toEqual(['history', 'newer']);
+    expect(result[0].updateTime).toBe(updateTime);
+    expect(cachedSessions[1].updateTime).toBe('2026-11-02 16:33:25');
+  });
+
+  it('keeps the same order after live timestamps are replaced by refreshed API dates', () => {
+    const history = { sessionId: 'history', sessionName: 'History', updateTime: '2026-11-02 16:33:25' };
+    const recent = { sessionId: 'recent', sessionName: 'Recent', updateTime: '2026-11-02 17:24:11' };
+    const live = { ...history, updateTime: String(Date.parse('2026-11-02T09:25:00Z')) };
+    const refreshed = { ...history, updateTime: '2026-11-02 17:25:00' };
+
+    expect(sortWorkspaceSessions([recent, live]).map((session) => session.sessionId)).toEqual(['history', 'recent']);
+    expect(sortWorkspaceSessions([recent, refreshed]).map((session) => session.sessionId)).toEqual([
+      'history',
+      'recent',
+    ]);
+  });
+
   it('keeps current activity ahead of a stale list response and preserves the project metadata', () => {
     const liveSessions = [{ sessionId: 'history', updateTime: '2026-10-15T00:00:00Z' }];
     const refreshed = sessions.map((session) => ({ ...session, sessionName: `${session.sessionName} renamed` }));

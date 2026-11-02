@@ -213,7 +213,7 @@ class ScopedSessionEventServiceTest {
         JSONObject event = streamEvent("reasoningLogDelta", "同轮次终态后的晚到输出", metadata);
         event.put("stream_id", "2-0");
         ByaiSession child = childSession(200L, 100L, 900L);
-        when(childSessionService.ensureBinding(100L, metadata))
+        when(childSessionService.ensureRunBinding(100L, metadata))
             .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
 
         RunningChatSnapshotResponse completedSnapshot = new RunningChatSnapshotResponse();
@@ -255,7 +255,7 @@ class ScopedSessionEventServiceTest {
         JSONObject event = streamEvent("reasoningLogDelta", "第二轮分析", metadata);
         event.put("stream_id", "3-0");
         ByaiSession child = childSession(200L, 100L, 900L);
-        when(childSessionService.ensureBinding(100L, metadata))
+        when(childSessionService.ensureRunBinding(100L, metadata))
             .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
 
         RunningChatSnapshotResponse completedRunOne = new RunningChatSnapshotResponse();
@@ -295,7 +295,7 @@ class ScopedSessionEventServiceTest {
         JSONObject event = streamEvent("answerDelta", "第一轮晚到终态", metadata);
         event.put("stream_id", "4-0");
         ByaiSession child = childSession(200L, 100L, 900L);
-        when(childSessionService.ensureBinding(100L, metadata))
+        when(childSessionService.ensureRunBinding(100L, metadata))
             .thenReturn(new ExternalChildSessionBinding(child, "worker-child-1", 201L));
 
         RunningChatSnapshotResponse runningRunTwo = new RunningChatSnapshotResponse();
@@ -509,6 +509,38 @@ class ScopedSessionEventServiceTest {
         });
         service.handleIfNecessary(100L, event);
         verify(values).get("byai:chat:running:snapshot:200:external-child-200");
+    }
+
+    @Test
+    void taskPlanResolvesEachExecutionToItsOwnHistoricalMessage() {
+        JSONObject metadata = new JSONObject();
+        metadata.put("session_scope", "parent");
+        metadata.put("event_kind", "plan");
+        JSONObject plan = JSON.parseObject("""
+            {"steps":[{"sub_steps":[{"id":"t1","assignee":"Engineer","executions":[
+              {"attempt":1,"runs":[{"external_session_id":"member","child_run_id":"member:1","child_turn":1}]},
+              {"attempt":2,"runs":[{"external_session_id":"member","child_run_id":"member:2","child_turn":2}]}
+            ]}]}]}
+            """);
+        JSONObject event = streamEvent("answerDelta", plan.toJSONString(), metadata);
+        when(childSessionService.ensureRunBinding(eq(100L), any())).thenAnswer(call -> {
+            JSONObject run = call.getArgument(1);
+            return new ExternalChildSessionBinding(childSession(200L, 100L, 900L), "member",
+                run.getLong("child_turn") == 1L ? 201L : 202L);
+        });
+        assertThat(service.handleIfNecessary(100L, event)).isFalse();
+        JSONObject answer = JSON.parseObject(event.getString("data"));
+        JSONObject enriched = JSON.parseObject(answer.getJSONArray("choices").getJSONObject(0)
+            .getJSONObject("delta").getString("content"));
+        JSONArray executions = enriched.getJSONArray("steps").getJSONObject(0)
+            .getJSONArray("sub_steps").getJSONObject(0).getJSONArray("executions");
+        JSONObject first = executions.getJSONObject(0).getJSONArray("runs").getJSONObject(0);
+        JSONObject second = executions.getJSONObject(1).getJSONArray("runs").getJSONObject(0);
+        assertThat(first.getString("child_session_id")).isEqualTo("200");
+        assertThat(first.getString("child_message_id")).isEqualTo("201");
+        assertThat(second.getString("child_message_id")).isEqualTo("202");
+        assertThat(second.getString("child_run_id")).isEqualTo("member:2");
+        verify(childSessionService, never()).isStaleRun(any(), any());
     }
 
     @Test

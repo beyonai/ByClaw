@@ -70,4 +70,11 @@ class GroupChatMessagePreviewTest {
         resource.setResourceName(name);
         return resource;
     }
+
+    @Test
+    void snapshotPreviewUsesOpaqueKeysWithoutReparsingReplacementText() {
+        String metadata = "{\"kind\":\"FORWARD_SINGLE\",\"resourceList\":[{\"id\":\"opaque\",\"resourceType\":\"COMMON_FILE\",\"resourceId\":\"/private/path\",\"resourceName\":\"需求{{HUMAN_21}}\"},{\"id\":\"HUMAN_21\",\"resourceType\":\"HUMAN\",\"resourceId\":\"21\",\"resourceName\":\"不应展开\"}]}";
+        assertThat(GroupChatMessagePreview.fromMetadata("{{opaque}} {{ordinary}}", metadata)).isEqualTo("需求{{HUMAN_21}} {{ordinary}}");
+    }
+
 }

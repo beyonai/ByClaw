@@ -88,7 +88,7 @@ class GroupChatTurnProjectionTest {
         turn.setStatus("RUNNING"); turn.setPhase("NORMAL"); turn.setDisposition("UNKNOWN");
         when(turns.selectByTrace("current-trace")).thenReturn(turn);
         when(turns.selectById(10L)).thenReturn(turn);
-        when(turns.selectForUpdateById(10L)).thenReturn(turn);
+        when(turns.selectCurrentById(10L)).thenReturn(turn);
         when(turns.decideDisposition(any(), any(), any(), any(), any())).thenReturn(1);
         when(turns.markSucceeded(any(), any(), any())).thenReturn(1);
         Users user = new Users(); user.setUserCode("user-7");
@@ -126,7 +126,7 @@ class GroupChatTurnProjectionTest {
         ByaiGroupChatTurn cancelled = new ByaiGroupChatTurn();
         BeanUtils.copyProperties(turn, cancelled);
         cancelled.setStatus("CANCELLED");
-        when(turns.selectForUpdateById(10L)).thenReturn(cancelled);
+        when(turns.selectCurrentById(10L)).thenReturn(cancelled);
         if (reconcile) handler.reconcileTurn(10L);
         else handler.afterPersisted(context);
         verifyNoInteractions(tasks, parser, publisher, coordinator);
@@ -213,7 +213,7 @@ class GroupChatTurnProjectionTest {
         ByaiGroupChatTurn persisted = new ByaiGroupChatTurn();
         BeanUtils.copyProperties(turn, persisted);
         // 普通查询保留加锁前的缓存快照，锁定查询读取竞争者提交后的最新状态。
-        when(turns.selectForUpdateById(10L)).thenAnswer(call -> {
+        when(turns.selectCurrentById(10L)).thenAnswer(call -> {
             ByaiGroupChatTurn current = new ByaiGroupChatTurn();
             BeanUtils.copyProperties(persisted, current);
             return current;
@@ -281,7 +281,7 @@ class GroupChatTurnProjectionTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return null;
         });
-        when(turns.selectForUpdateById(10L)).thenAnswer(call -> {
+        when(turns.selectCurrentById(10L)).thenAnswer(call -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
             return turn;
         });
@@ -303,7 +303,7 @@ class GroupChatTurnProjectionTest {
         GroupChatDisposition classified = new GroupChatDisposition();
         classified.setKind("CHAT");
         when(reader.read(any(), any(), any())).thenReturn(classified);
-        when(turns.selectForUpdateById(10L)).thenAnswer(call -> {
+        when(turns.selectCurrentById(10L)).thenAnswer(call -> {
             ByaiGroupChatTurn locked = new ByaiGroupChatTurn();
             BeanUtils.copyProperties(turn, locked);
             return locked;
@@ -324,7 +324,7 @@ class GroupChatTurnProjectionTest {
     void missingClassificationFileNeedsNoProjectionLocks() {
         assertThat(handler.observe(10L, true, "current-trace")).isTrue();
         verify(turns, never()).lockGroup(any());
-        verify(turns, never()).selectForUpdateById(any());
+        verify(turns, never()).selectCurrentById(any());
         verifyNoInteractions(tasks, publisher);
     }
 

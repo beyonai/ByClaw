@@ -5,7 +5,7 @@
  * @module dsh-better-sidebar/config
  */
 
-import z from 'schemastery'
+import z from '@deepseek-ai/schemastery'
 import {
   SIDEBAR_PREFS_DEFAULTS,
   SIDEBAR_PREFS_NS,
@@ -66,10 +66,19 @@ export interface SidebarConfig {
    * the existing default behavior is kept.
    */
   shellArgs?: string[]
+  /**
+   * The user workspace lives in a separate tool environment (the shared
+   * host: `ctx.fs` / `ctx.subprocess` point at the user's tool sandbox), not
+   * on this host. When true, the explorer, editor reads/writes, uploads,
+   * media/HTML previews and Git run through `ctx.fs` / `ctx.subprocess`, and
+   * terminals through `ctx.subprocess.spawnTerminal` without the host
+   * process environment. Default false: node-pty, host fs and host git.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
-/** Schemastery schema for the plugin configuration. */
-export const Config: z<SidebarConfig> = z.object({
+/** Schemastery schema for the ordinary (restart-applied) host settings. */
+const HostConfig: z<SidebarConfig> = z.object({
   readLimit: z.number().step(1).min(1).default(512 * 1024),
   mediaLimit: z.number().step(1).min(1).default(20 * 1024 * 1024),
   uploadLimit: z.number().step(1).min(1).default(128 * 1024 * 1024),
@@ -78,6 +87,7 @@ export const Config: z<SidebarConfig> = z.object({
   reconnectGraceMs: z.number().step(1).min(0).default(30_000),
   shell: z.string().default(''),
   shellArgs: z.array(z.string()).default([]),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** Fully defaulted sidebar host settings. */
@@ -92,6 +102,8 @@ export interface ResolvedSidebarConfig {
   shell: string
   /** Explicit shell arguments; empty means use the platform defaults. */
   shellArgs: string[]
+  /** Workspace operations run in the tool environment (`ctx.fs` / `ctx.subprocess`). */
+  workspaceOnToolEnvironment: boolean
 }
 
 /**
@@ -110,6 +122,7 @@ export function resolveSidebarConfig(config: SidebarConfig | undefined): Resolve
     reconnectGraceMs: config?.reconnectGraceMs ?? 30_000,
     shell: config?.shell?.trim() ?? '',
     shellArgs: config?.shellArgs ?? [],
+    workspaceOnToolEnvironment: config?.workspaceOnToolEnvironment ?? false,
   }
 }
 
@@ -153,3 +166,47 @@ export const PrefsSchema: z<SidebarPrefs> = z.object({
   // keys as unknown schema fields.
   pluginSettings: z.dict(z.dict(z.any())).default({}),
 })
+
+/**
+ * One side card preference as the Loader hands it to `apply`: a live config
+ * reference (DSH 0.2.1 volatile field) whose `.get()` reads the committed
+ * value, or a plain value from a direct caller.
+ */
+export type SidebarPrefsConfig = { [K in keyof SidebarPrefs]?: { get(): SidebarPrefs[K] } | SidebarPrefs[K] }
+
+/**
+ * Schemastery schema for the plugin row configuration: the ordinary host
+ * settings plus every side card preference as a top-level `.volatile()`
+ * field. DSH 0.2.1 removed `settings.register(ns, schema)`; the settings
+ * service now edits a plugin's volatile Config fields (keyed by its profile
+ * entry id) and the Loader commits edits into the running references
+ * without a remount. Declaring the preferences here keeps the 0.1.5
+ * behavior: the same fields, defaults, live application and revisioned
+ * writes through `ctx.settings`.
+ */
+export const Config: z<SidebarConfig & SidebarPrefsConfig> = z.object({
+  ...HostConfig.dict,
+  ...Object.fromEntries(Object.entries(PrefsSchema.dict ?? {}).map(([key, field]) => [key, field.volatile()])),
+}) as unknown as z<SidebarConfig & SidebarPrefsConfig>
+
+/**
+ * Read the current side card preferences from the row config: volatile
+ * references resolve through `.get()`, plain values pass through, and absent
+ * fields keep the preference defaults (direct callers that bypass the
+ * Loader).
+ *
+ * @param config - The config `apply` received.
+ * @returns The current preferences.
+ */
+export function readSidebarPrefs(config: (SidebarConfig & SidebarPrefsConfig) | undefined): SidebarPrefs {
+  const record = (config ?? {}) as Record<string, unknown>
+  const prefs: Record<string, unknown> = { ...SIDEBAR_PREFS_DEFAULTS }
+  for (const key of Object.keys(PrefsSchema.dict ?? {})) {
+    const field = record[key]
+    const value = field !== null && typeof field === 'object' && typeof (field as { get?: unknown }).get === 'function'
+      ? (field as { get(): unknown }).get()
+      : field
+    if (value !== undefined) prefs[key] = value
+  }
+  return prefs as unknown as SidebarPrefs
+}

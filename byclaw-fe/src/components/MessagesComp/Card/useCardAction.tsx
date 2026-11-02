@@ -9,10 +9,11 @@ import { ICardAction, CardActionType } from './types';
 import { message } from 'antd';
 import { getResponseAgentInfo } from '@/components/MessageList/utils';
 import useResourceDetail from '@/hooks/useResourceDetail';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { get } from 'lodash';
 import { request } from '@/service/common/request';
+import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 function sleep(time = 0) {
   return new Promise((resolve) => {
@@ -23,6 +24,7 @@ function sleep(time = 0) {
 }
 
 export function useCardAction({ setPortalContainer }: { setPortalContainer: (container: React.ReactNode) => void }) {
+  const intl = useIntl();
   const { EventEmitter, setSessionId } = useGlobal();
   const { setSiderCollapsed } = useAppStore();
   const { agentList, employeesList } = useSelector(({ employees }: { employees: UseEmployeesIState }) => employees);
@@ -88,7 +90,7 @@ export function useCardAction({ setPortalContainer }: { setPortalContainer: (con
       const { url, ...rest } = action;
 
       if (!url) {
-        message.error('url is required');
+        message.error(intl.formatMessage({ id: 'ui.card.urlRequired' }));
         return;
       }
 
@@ -106,95 +108,102 @@ export function useCardAction({ setPortalContainer }: { setPortalContainer: (con
       // 收起侧边栏
       setSiderCollapsed(true);
     },
-    [EventEmitter, setSiderCollapsed]
+    [EventEmitter, setSiderCollapsed, intl]
   );
 
   /**
    * 处理fetch操作
    */
-  const handleFetchAction = useCallback(async (action: Extract<ICardAction, { type: CardActionType.FETCH }>) => {
-    const { url, method = 'POST', headers = {}, params, body, toast, successExpression } = action;
+  const handleFetchAction = useCallback(
+    async (action: Extract<ICardAction, { type: CardActionType.FETCH }>) => {
+      const { url, method = 'POST', headers = {}, params, body, toast, successExpression } = action;
 
-    if (!url) {
-      console.error('Fetch action requires url');
-      return;
-    }
+      if (!url) {
+        console.error('Fetch action requires url');
+        return;
+      }
 
-    try {
-      const payload = body || params || {};
-      const isInternalByClawApi = url.startsWith('/byaiService/');
-      let result: any;
+      try {
+        const payload = body || params || {};
+        const isInternalByClawApi = url.startsWith('/byaiService/');
+        let result: any;
 
-      if (isInternalByClawApi) {
-        result = await request(
-          url,
-          payload,
-          {
+        if (isInternalByClawApi) {
+          result = await request(
+            url,
+            payload,
+            {
+              headers: {
+                ...headers,
+              },
+              responseCfg: {
+                customHandle: true,
+              },
+            },
+            method
+          );
+        } else {
+          const requestUrl =
+            method === 'GET' && params
+              ? `${url}${url.includes('?') ? '&' : '?'}${new URLSearchParams(params as Record<string, string>)}`
+              : url;
+          const response = await fetch(requestUrl, {
+            method,
             headers: {
+              ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
               ...headers,
             },
-            responseCfg: {
-              customHandle: true,
-            },
-          },
-          method
-        );
-      } else {
-        const requestUrl =
-          method === 'GET' && params
-            ? `${url}${url.includes('?') ? '&' : '?'}${new URLSearchParams(params as Record<string, string>)}`
-            : url;
-        const response = await fetch(requestUrl, {
-          method,
-          headers: {
-            ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
-            ...headers,
-          },
-          body: method === 'GET' ? undefined : JSON.stringify(payload),
-        });
-        const contentType = response.headers.get('content-type') || '';
-        result = contentType.includes('application/json') ? await response.json() : await response.text();
-        if (!response.ok) {
-          throw new Error(typeof result === 'string' ? result : result?.message || response.statusText);
-        }
-      }
-
-      // 计算接口是否成功
-      let isSuccess = get(result, 'code') === undefined || `${get(result, 'code')}` === '0';
-      if (successExpression) {
-        const expr = successExpression.trim();
-
-        // 仅支持非常简单的「路径 (= 或 ==) 值」形式
-        const match = expr.match(/^(.+?)(=)(.+)$/);
-        if (match) {
-          const [, rawPath, , rawExpected] = match;
-          const path = rawPath.trim().replace(/^result\./, ''); // 兼容 'result.xxx' 和 'xxx'
-          const expectedRaw = rawExpected.trim();
-
-          let expected: any = expectedRaw;
-          // 去掉首尾引号
-          if (expectedRaw === 'true' || expectedRaw === 'false') {
-            expected = expectedRaw === 'true';
+            body: method === 'GET' ? undefined : JSON.stringify(payload),
+          });
+          const contentType = response.headers.get('content-type') || '';
+          result = contentType.includes('application/json') ? await response.json() : await response.text();
+          if (!response.ok) {
+            throw new Error(typeof result === 'string' ? result : result?.message || response.statusText);
           }
+        }
 
-          const actual = get(result, path);
-          // eslint-disable-next-line eqeqeq
-          isSuccess = actual == expected;
+        // 计算接口是否成功
+        let isSuccess = get(result, 'code') === undefined || `${get(result, 'code')}` === '0';
+        if (successExpression) {
+          const expr = successExpression.trim();
+
+          // 仅支持非常简单的「路径 (= 或 ==) 值」形式
+          const match = expr.match(/^(.+?)(=)(.+)$/);
+          if (match) {
+            const [, rawPath, , rawExpected] = match;
+            const path = rawPath.trim().replace(/^result\./, ''); // 兼容 'result.xxx' 和 'xxx'
+            const expectedRaw = rawExpected.trim();
+
+            let expected: any = expectedRaw;
+            // 去掉首尾引号
+            if (expectedRaw === 'true' || expectedRaw === 'false') {
+              expected = expectedRaw === 'true';
+            }
+
+            const actual = get(result, path);
+            // eslint-disable-next-line eqeqeq
+            isSuccess = actual == expected;
+          }
+        }
+
+        if (isSuccess && toast?.success) {
+          message.success(toast.success);
+        }
+        if (!isSuccess && toast?.fail) {
+          message.error(
+            localizeErrorMessage(toast.fail, intl.formatMessage({ id: 'common.requestFailed' }), intl.locale)
+          );
+        }
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          message.error(
+            localizeErrorMessage(error.message, intl.formatMessage({ id: 'common.requestFailed' }), intl.locale)
+          );
         }
       }
-
-      if (isSuccess && toast?.success) {
-        message.success(toast.success);
-      }
-      if (!isSuccess && toast?.fail) {
-        message.error(toast.fail);
-      }
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        message.error(error.message);
-      }
-    }
-  }, []);
+    },
+    [intl]
+  );
 
   /**
    * 处理链接操作
@@ -210,25 +219,28 @@ export function useCardAction({ setPortalContainer }: { setPortalContainer: (con
     window.open(url, target);
   }, []);
 
-  const handlePopupAction = useCallback((action: Extract<ICardAction, { type: CardActionType.POPUP }>) => {
-    const { url, ...rest } = action;
+  const handlePopupAction = useCallback(
+    (action: Extract<ICardAction, { type: CardActionType.POPUP }>) => {
+      const { url, ...rest } = action;
 
-    if (!url) {
-      message.error('url is required');
-      return;
-    }
+      if (!url) {
+        message.error(intl.formatMessage({ id: 'ui.card.urlRequired' }));
+        return;
+      }
 
-    EventEmitter.emit('beyond-fullscreen-modal-open-type', {
-      canClose: true,
-      ...rest,
-      drawerType: 'iframe',
-    });
+      EventEmitter.emit('beyond-fullscreen-modal-open-type', {
+        canClose: true,
+        ...rest,
+        drawerType: 'iframe',
+      });
 
-    // 传递iframe数据
-    EventEmitter.emit('beyond-fullscreen-modal-message', {
-      url,
-    });
-  }, []);
+      // 传递iframe数据
+      EventEmitter.emit('beyond-fullscreen-modal-message', {
+        url,
+      });
+    },
+    [EventEmitter, intl]
+  );
 
   const handleCustomAction = useCallback((action: Extract<ICardAction, { type: CardActionType.CUSTOM }>) => {
     console.log('handleCustomAction', action);

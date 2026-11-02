@@ -1,8 +1,9 @@
 /** Independent transport-connect and first-response deadlines for LLM requests. */
-import { Agent } from 'undici'
 
 export function modelFetch(connectTimeoutMs: number | undefined, firstResponseTimeoutMs: number): typeof globalThis.fetch {
   return async (input, init = {}) => {
+    // Model transport is needed on the first request, not while registering the Worker.
+    const { Agent } = await import('undici')
     // A fetch resolves at response headers, not at TCP/TLS connection time.
     // Delegate connection timing to the transport instead of aborting fetch
     // while a connected model is still preparing its first response.

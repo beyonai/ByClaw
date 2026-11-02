@@ -1,12 +1,13 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.dingtalk.api.DefaultDingTalkClient;
 import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiV2UserGetRequest;
 import com.dingtalk.api.response.OapiV2UserGetResponse;
@@ -54,6 +55,8 @@ public class DingtalkUserService {
     private DingtalkTokenService dingtalkTokenService;
     @Autowired
     private DingtalkReplyDispatcher dingtalkReplyDispatcher;
+    @Autowired
+    private DingtalkHttpClientFactory httpClientFactory;
 
     public OapiV2UserGetResponse.UserGetResponse getUserDetail(String accessToken, String userId) {
         if (!StringUtils.hasText(accessToken)) {
@@ -64,7 +67,7 @@ public class DingtalkUserService {
         }
 
         try {
-            DingTalkClient client = new DefaultDingTalkClient(USER_GET_URL);
+            DingTalkClient client = httpClientFactory.legacyClient(USER_GET_URL);
             OapiV2UserGetRequest request = new OapiV2UserGetRequest();
             request.setUserid(userId);
             request.setLanguage(DEFAULT_LANGUAGE);
@@ -110,12 +113,12 @@ public class DingtalkUserService {
             boolean bindingMatches = saveUserExternalSystem(unionId, userInfo.getUserId(), userDetail);
             if (!bindingMatches) {
                 CurrentUserHolder.clearLoginInfo();
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定发生冲突，请重新发送消息。");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.bindingConflict"));
                 return null;
             }
             if (extractSelectedUserCode(textContent) != null) {
                 CurrentUserHolder.clearLoginInfo();
-                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "账号绑定成功，请重新发送您的问题。");
+                dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.bound"));
                 return null;
             }
         }
@@ -177,7 +180,7 @@ public class DingtalkUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable DingTalk bound user. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);
@@ -211,7 +214,7 @@ public class DingtalkUserService {
         if (isUserUnavailable(matchedUser)) {
             logger.warn("Rejected unavailable DingTalk user before binding. userId={}, state={}, isLocked={}",
                     matchedUser.getUserId(), matchedUser.getState(), matchedUser.getIsLocked());
-            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, "系统账号已停用或锁定，请联系管理员。");
+            dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, I18nUtil.get("channel.account.disabled"));
             return null;
         }
         return buildLoginInfo(matchedUser);

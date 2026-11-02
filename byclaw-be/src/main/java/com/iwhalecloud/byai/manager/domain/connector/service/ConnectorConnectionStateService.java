@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -131,11 +133,11 @@ public class ConnectorConnectionStateService {
         UserIdentity user = requireUser(userId);
         ConnectorAuth auth = findActiveAuthorization(userId, connectorId);
         if (auth == null) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorization.missing"));
         }
         ConnectorInfo connector = connectorInfoMapper.selectById(connectorId);
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
         boolean manifestChanged = enabled
             ? manifestService.upsertAndEnable(user.userId(), connector)
@@ -155,15 +157,15 @@ public class ConnectorConnectionStateService {
         ConnectorAuth auth = findActiveAuthorization(userId, connectorId);
         ConnectorInfo connector = connectorInfoMapper.selectById(connectorId);
         if (connector == null) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
 
         boolean credentialConnector = "AK_SK".equals(connector.getAuthMode());
         if (!credentialConnector && !"00A".equals(connector.getStatusCd())) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
         if (auth == null && !credentialConnector) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorization.missing"));
         }
         boolean manifestChanged;
         if (credentialConnector) {
@@ -199,7 +201,7 @@ public class ConnectorConnectionStateService {
     public void updateCredentialLifecycle(
             String userId, ConnectorInfo connector, AuthorizationStatusResult statusResult) {
         if (connector == null || connector.getConnectorId() == null || statusResult == null) {
-            throw new IllegalArgumentException("连接器凭证生命周期参数无效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.credential.lifecycleInvalid"));
         }
         ConnectorAuth auth = connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
             .select(ConnectorAuth::getAuthId)
@@ -210,7 +212,7 @@ public class ConnectorConnectionStateService {
             .orderByDesc(ConnectorAuth::getUpdateTime)
             .last("LIMIT 1"));
         if (auth == null) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorization.missing"));
         }
         Date now = new Date();
         LambdaUpdateWrapper<ConnectorAuth> update = new LambdaUpdateWrapper<ConnectorAuth>(ConnectorAuth.class)
@@ -259,7 +261,7 @@ public class ConnectorConnectionStateService {
 
     private ConnectorAuth lifecycleAuthId(String userId, ConnectorInfo connector) {
         if (connector == null || connector.getConnectorId() == null) {
-            throw new IllegalArgumentException("连接器凭证生命周期参数无效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.credential.lifecycleInvalid"));
         }
         ConnectorAuth auth = connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
             .select(ConnectorAuth::getAuthId)
@@ -270,7 +272,7 @@ public class ConnectorConnectionStateService {
             .orderByDesc(ConnectorAuth::getUpdateTime)
             .last("LIMIT 1"));
         if (auth == null) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorization.missing"));
         }
         return auth;
     }
@@ -413,14 +415,14 @@ public class ConnectorConnectionStateService {
         try {
             numericUserId = Long.valueOf(userId);
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("userId必须为正整数", e);
+            throw new IllegalArgumentException(I18nUtil.get("connector.userId.invalid"), e);
         }
         if (numericUserId <= 0) {
-            throw new IllegalArgumentException("userId必须为正整数");
+            throw new IllegalArgumentException(I18nUtil.get("connector.userId.invalid"));
         }
         Users user = userService.findById(numericUserId);
         if (user == null || !StringUtils.hasText(user.getUserCode())) {
-            throw new IllegalArgumentException("用户不存在或用户编码为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.user.unavailable"));
         }
         return new UserIdentity(numericUserId, user.getUserCode());
     }

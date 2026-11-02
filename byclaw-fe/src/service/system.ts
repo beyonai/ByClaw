@@ -1,5 +1,7 @@
 import { ConfigType, POST } from '@/service/common/request';
 
+export const getEffectiveEnableDsh = () => POST<string>('/byaiService/system/staticdata/getEffectiveEnableDsh', {});
+
 // 批量获取系统配置
 export function bathQryPropertyKey(params: any) {
   return POST<any>('/byaiService/system/property/bathQryPropertyKey', params);

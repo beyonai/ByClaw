@@ -33,6 +33,7 @@ public class MetaPromptGenerateRequest {
     private String lang;
     private String language;
     private String modelCode;
+    private String modelId;
     private Long resourceId;
 
     public String resolvedLang() {

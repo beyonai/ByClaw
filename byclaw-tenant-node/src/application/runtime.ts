@@ -1,5 +1,6 @@
 import type { ConnectionManager } from "./connection-manager.js";
 import type { SchemaTaskService } from "./schema/task-service.js";
+import { DomainError } from "../domain/errors.js";
 
 export interface RuntimePorts {
   checkSchema(): Promise<void>;
@@ -30,6 +31,9 @@ export class TenantRuntime {
   private timer?: ReturnType<typeof setInterval>;
   private recovered = false;
   private stopped = false;
+  private schemaRevision = -1;
+  private nextSchemaCheckAt = 0;
+  private schemaFailures = 0;
   constructor(
     private readonly connection: ConnectionManager,
     private readonly tasks: SchemaTaskService,
@@ -87,14 +91,7 @@ export class TenantRuntime {
       }
       await this.tasks.retryReports();
       await this.tasks.reconcile();
-      if (!this.connection.upgrading) {
-        try {
-          await this.ports.checkSchema();
-        } catch {
-          this.connection.setSchemaReady(false);
-          this.ports.warn("SCHEMA_VERIFICATION_DEFERRED");
-        }
-      }
+      if (!this.connection.upgrading) await this.checkSchema();
       await this.ports.worker.update(true);
       await this.ports.streams.start();
       await this.ports.streams.sample();
@@ -110,6 +107,29 @@ export class TenantRuntime {
       if (!this.connection.connected) {
         await Promise.allSettled([this.ports.worker.close(), this.ports.discovery.close()]);
       }
+    }
+  }
+  /** 连接池或 Schema 任务变化立即核验；稳定态低频检查，失败时保持门禁并退避。 */
+  private async checkSchema(): Promise<void> {
+    const revision = this.connection.schemaRevision;
+    if (revision !== this.schemaRevision) {
+      this.schemaRevision = revision;
+      this.nextSchemaCheckAt = 0;
+      this.schemaFailures = 0;
+    }
+    if (Date.now() < this.nextSchemaCheckAt) return;
+    try {
+      await this.ports.checkSchema();
+      this.schemaFailures = 0;
+      this.nextSchemaCheckAt = Date.now() + (this.ports.schemaState().verified ? 60000 : 5000);
+    } catch (error) {
+      this.connection.setSchemaReady(false);
+      const authFailed =
+        error instanceof DomainError && error.code === "UPSTREAM_AUTHENTICATION_FAILED";
+      const delay = authFailed ? 300000 : Math.min(300000, 10000 * 2 ** this.schemaFailures);
+      this.schemaFailures = Math.min(this.schemaFailures + 1, 5);
+      this.nextSchemaCheckAt = Date.now() + delay;
+      this.ports.warn(authFailed ? "SCHEMA_AUTHENTICATION_FAILED" : "SCHEMA_VERIFICATION_DEFERRED");
     }
   }
   /** 先关闭业务门禁，再停止消费者并等待 Schema 任务；保持连接直到任务收尾。 */

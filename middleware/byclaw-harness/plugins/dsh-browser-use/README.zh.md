@@ -123,7 +123,7 @@ Playwright 驱动使用原子 DOM 快照：一次浏览器内执行同步读取�
 | `BYCLAW_BROWSER_VNC_WEB_PORT` | `8081` | 按 `sessionId` 路由的统一 noVNC 网关。 |
 | `BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS` | `0.0.0.0` | noVNC 网关地址；默认免鉴权，应限制在可信网络或外层代理后。 |
 
-root Supervisor 创建私有运行目录后，会先取得持久 Chromium profile 的排他咨询锁，再以 `byclaw` 用户依次启动 byCLI daemon 和 browserd。持锁期间，browserd 会在每次启动前清理非正常退出遗留的 Chromium singleton 文件；若另一个容器正在使用同一 profile，则第二个容器会直接失败，不会删除活动实例的文件。`shared-novnc` 下，只有 `bycli daemon status --json` 同时报告 `state=ready`、daemon `running`、extension `connected` 后才会启动 DSH。运行期每 30 秒被动检查一次；一次失败按瞬时抖动处理，连续两次失败会重启 daemon 并等待扩展重连，恢复超时则让容器非零退出，交给容器编排器重启。browserd 同时会在常驻 Chromium 意外断开后，以 0.5–5 秒退避自动重建同一持久 profile；启动失败日志会保留 Playwright 原始错误的单行限长摘要。随机 secret 仍通过两个独立继承 FD 分别一次性交付。
+root Supervisor 创建私有运行目录后，会先取得持久 Chromium profile 的排他咨询锁，再以 `byclaw` 用户依次启动 byCLI daemon 和 browserd。持锁期间，browserd 会在每次启动前清理非正常退出遗留的 Chromium singleton 文件；若另一个容器正在使用同一 profile，则第二个容器会直接失败，不会删除活动实例的文件。`shared-novnc` 下，每次 Chromium 启动都从本地扩展目录加载代码，扩展连接后由 supervisor 自动运行 `bycli doctor --json`，确认 `extensionBuildVerified: true`、`uploadReady: true`、`dialog-policy-v1` 及正常连通性；不联网升级。默认按需模式在首次浏览器调用时完成校验后才标记浏览器就绪；eager 模式在通过校验后才启动 DSH。运行期每 30 秒被动检查一次；一次失败按瞬时抖动处理，连续两次失败会重启 daemon 并等待扩展重连，恢复超时则让容器非零退出，交给容器编排器重启。browserd 同时会在常驻 Chromium 意外断开后，以 0.5–5 秒退避自动重建同一持久 profile；启动失败日志会保留 Playwright 原始错误的单行限长摘要。随机 secret 仍通过两个独立继承 FD 分别一次性交付。
 
 `shared-novnc` 使用稳定入口 `http://HOST:8081/?hideHeader=true&sessionId=shared`，省略 `sessionId` 会重定向到该地址；单个租约关闭不会拆除路由或桌面。Browser 工具通过 broker 操作该 Chromium 的持久 Context，byCLI 通过加载在同一 Chromium 中的扩展操作页面，所以两类工具的页面跳转、点击和输入都会显示在这个 VNC 桌面中；byCLI 不应另起浏览器或使用独立 profile。旧 `novnc` 仍按编码后的 DSH session ID 选择独立桌面。外层 Sandbox 代理需要 token 时可继续透传。browserd 默认不验证 token；任何能访问 8081 的客户端都能控制共享桌面，因此生产环境必须限制网络入口。
 
@@ -248,3 +248,11 @@ noVNC 顶部显示运行状态及暂停/继续/取消。为在服务端隔离人
 - `finished`：最终状态、原因、步骤数、总耗时。
 
 目标日志按 runId/sessionId 关联；辅助文字模型的 text_model 日志按 sessionId 关联。不记录原始目标、网页正文、输入值、密钥或 Cookie。`jev_response` 不能证明动作成功；以 action_completed、finished、页面成功条件及真实业务结果逐层核对。真实 Jev 渠道、真实文本模型和 Docker/noVNC 部署仍需部署环境验证，本地模拟不能证明生产调用成功或性能收益。
+
+## 工具沙箱浏览器（slim 部署）
+
+配置 `workspaceOnToolEnvironment: true`（镜像变量 `BYCLAW_BROWSER_ON_TOOL_ENV=1`）后，浏览器通过当前上下文的 SSH subprocess 在工具沙箱运行；这个分支优先于 `ownsRuntime`，也适用于 multi-host。默认关闭，因此原有本地部署不变。
+
+B 运行浏览器监督进程时（完整工具镜像 `Dockerfile.tools` 的 `tools` 入口），桥接接入这个浏览器而不是另起一个：与用户自己的沙箱一样，一个带 byCLI 扩展的 Chromium、一份 profile、一个桌面。桥接经监督进程的 socket（`BYCLAW_BROWSER_SOCKET`）触发按需启动，从监督进程放在旁边的文件读取 broker 密钥（`broker.secret`，仅浏览器用户可读；`BYCLAW_BROWSER_SECRET_FILE` 可改路径；B 上的命令也以这个用户运行，因此能直接操作用户自己的浏览器，影响不出该用户的沙箱），校验 A 的密钥后换成监督进程的密钥再转发。桌面是监督进程的共享 noVNC（8081，B 的 `vnc` 实例），byCLI 守护进程监听 19825（B 的 `bycli` 实例）；下面的视口设置不适用。
+
+B 上没有监督进程时（slim 工具镜像），桥接自己起浏览器。截图和下载路径属于 B，goal 下载也在 B 内复制。原生浏览器默认端口 8082，与 B 上 byCLI 的 8081 和登录态分开。配置 `BYCLAW_TOOL_BROWSER_VIEWER` / `BYCLAW_TOOL_BROWSER_VIEWER_PORT` 调整桌面；连接断开不重放操作，空闲且没有 lease/请求时释放远程进程。A/B 必须使用配套构建产物。完整构建与部署说明见 [README.slim.md](../../README.slim.md)。

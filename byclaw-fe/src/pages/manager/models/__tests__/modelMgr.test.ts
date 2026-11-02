@@ -38,6 +38,20 @@ describe('manager/models/modelMgr', () => {
     call: (fn: any, ...args: any[]) => ({ type: 'call', fn, args }),
   };
 
+  it.each([
+    { code: -1, success: false, msg: 'upstream failed' },
+    { code: 50010, msg: 'upstream failed' },
+    { code: 0, success: false, msg: 'upstream failed' },
+  ])('never resolves a failed LLM debug result through the success callback', (response) => {
+    const success = jest.fn();
+    const fail = jest.fn();
+    const iterator = effects.debugModel({ payload: { id: '42' }, success, fail }, sagaHelpers);
+    iterator.next();
+    iterator.next(response);
+    expect(success).not.toHaveBeenCalled();
+    expect(fail).toHaveBeenCalledWith(response);
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });

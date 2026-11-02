@@ -9,4 +9,7 @@ public interface SourceSystemMapper extends BaseMapper<SourceSystem> {
 
     List<SourceSystem> getSourceSystemList();
 
+    @org.apache.ibatis.annotations.Select("SELECT app_secret FROM po_source_system WHERE system_code='BYAI_PLATFORM'")
+    List<String> selectPlatformIdentitySecrets();
+
 }

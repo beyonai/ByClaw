@@ -18,8 +18,10 @@
  * @module @zhchxiao123/dsh-devflow-iron-rules
  */
 
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { workspaceIo } from '@zhchxiao123/dsh-devflow'
 import { applyCheck } from './check.ts'
 import { applyInject } from './inject.ts'
 import { applyRecord } from './record.ts'
@@ -53,6 +55,18 @@ export interface Config {
   checkOutputMaxChars?: number
   /** Consecutive forced continuations before the plugin hands control back. */
   maxRetries?: number
+  /**
+   * Workspace root used by callers whose session names no working directory,
+   * and the base a relative `root` resolves against. Unset, this process's
+   * cwd; a host serving several workspaces sets it per context.
+   */
+  projectRoot?: string
+  /**
+   * Read and write rules through the context's tool environment (`ctx.fs` /
+   * `ctx.subprocess`) rather than this process's filesystem. Check scripts
+   * already run through `ctx.shell`, so they follow the shell provider.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Defaults chosen for a repository with a handful of rules and a fast check suite. */
@@ -62,6 +76,8 @@ export const Config: z<Config> = z.object({
   checkTimeoutMs: z.number().default(120_000),
   checkOutputMaxChars: z.number().default(2_000),
   maxRetries: z.number().default(2),
+  projectRoot: z.string(),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** A configuration with every default resolved, passed to the internal modules. */
@@ -71,6 +87,9 @@ export interface ResolvedConfig {
   readonly checkTimeoutMs: number
   readonly checkOutputMaxChars: number
   readonly maxRetries: number
+  /** Absolute fallback workspace root; `undefined` means this process's cwd. */
+  readonly projectRoot?: string | undefined
+  readonly workspaceOnToolEnvironment?: boolean
 }
 
 /** Bounds that would misbehave silently if they were zero or fractional. */
@@ -93,6 +112,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
     checkTimeoutMs: config.checkTimeoutMs ?? 120_000,
     checkOutputMaxChars: config.checkOutputMaxChars ?? 2_000,
     maxRetries: config.maxRetries ?? 2,
+    projectRoot: config.projectRoot === undefined ? undefined : resolve(config.projectRoot),
+    workspaceOnToolEnvironment: config.workspaceOnToolEnvironment ?? false,
   }
   assertPositiveInteger('maxBytes', resolved.maxBytes)
   assertPositiveInteger('checkTimeoutMs', resolved.checkTimeoutMs)
@@ -113,12 +134,13 @@ export function resolveConfig(config: Config): ResolvedConfig {
  */
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
+  const io = workspaceIo(ctx, resolved.workspaceOnToolEnvironment)
   // Injection and recording need no executor, so they mount unconditionally.
-  applyInject(ctx, resolved)
-  applyRecord(ctx, resolved)
+  applyInject(ctx, resolved, io)
+  applyRecord(ctx, resolved, io)
   // Enforcement runs check scripts, so it activates only where a shell exists
   // and unwinds with it.
   ctx.inject(['shell'], (shellCtx) => {
-    applyCheck(shellCtx, resolved)
+    applyCheck(shellCtx, resolved, io)
   })
 }

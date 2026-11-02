@@ -108,6 +108,9 @@ public class LoginApplicationService {
     private SandboxLoginAutoStartService sandboxLoginAutoStartService;
 
     @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedUserStoragePreparation sharedUserStoragePreparation;
+
+    @Autowired
     private AuthRedisSyncService authRedisSyncService;
 
     /**
@@ -282,7 +285,7 @@ public class LoginApplicationService {
             ensureSuperassistInfo(loginInfo, httpSession);
 
             // 异步启动用户沙箱（不阻塞接口响应）
-            doAsyncJobAfterLogin(loginInfo.getUserCode(), loginInfo.getUserId());
+            doAsyncJobAfterLogin(loginInfo);
 
             return ResponseUtil.successResponse("Ok", loginInfo);
         }
@@ -297,7 +300,7 @@ public class LoginApplicationService {
             ensureSuperassistInfo(loginInfo, httpSession);
 
             // 异步启动用户沙箱（不阻塞接口响应）
-            doAsyncJobAfterLogin(loginInfo.getUserCode(), loginInfo.getUserId());
+            doAsyncJobAfterLogin(loginInfo);
 
             return ResponseUtil.successResponse("Ok", loginInfo);
         }
@@ -347,7 +350,14 @@ public class LoginApplicationService {
     }
 
     /** 登录后的异步任务只负责分发，任务之间互不影响。 */
-    private void doAsyncJobAfterLogin(String userCode, Long userId) {
+    private void doAsyncJobAfterLogin(LoginInfo loginInfo) {
+        String userCode = loginInfo.getUserCode();
+        Long userId = loginInfo.getUserId();
+        try {
+            sharedUserStoragePreparation.trigger(loginInfo);
+        } catch (RuntimeException failure) {
+            logger.warn("提交用户 NAS 准备任务失败，用户编码：{}，类型：{}", userCode, failure.getClass().getSimpleName());
+        }
         if (StringUtil.isEmpty(userCode)) {
             return;
         }

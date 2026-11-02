@@ -18,6 +18,10 @@ import org.springframework.stereotype.Component;
 /** Safely materializes a private connector payload into a user's mounted workspace. */
 @Component
 public class ConnectorPrivateFileProjectionWriter {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformPrivateFileSystemRouting platformPrivateFiles;
+
+
 
     public static final long MAX_PROJECTION_BYTES = 64 * 1024L;
     private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -31,6 +35,10 @@ public class ConnectorPrivateFileProjectionWriter {
         byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_PROJECTION_BYTES) {
             throw new IllegalArgumentException("Connector projection exceeds 64 KiB");
+        }
+        if (platformPrivateFiles.isRemote()) {
+            platformPrivateFiles.writeAtomic(target, bytes, ".connector-projection-");
+            return;
         }
         if (Files.isSymbolicLink(target)) {
             throw new IllegalStateException("Connector projection target must not be a symbolic link");
@@ -72,6 +80,7 @@ public class ConnectorPrivateFileProjectionWriter {
         if (target == null) {
             throw new IllegalArgumentException("Projection target is required");
         }
+        if (platformPrivateFiles.isRemote()) { platformPrivateFiles.delete(target); return; }
         try {
             Files.deleteIfExists(target);
         } catch (IOException | SecurityException e) {

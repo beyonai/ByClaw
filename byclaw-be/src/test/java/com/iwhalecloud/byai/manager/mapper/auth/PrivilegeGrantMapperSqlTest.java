@@ -199,7 +199,7 @@ class PrivilegeGrantMapperSqlTest {
                 .contains("and pg.status_cd in ('X', 'R')")
                 .contains("pg.grant_type = 'SKILL_PUBLICATION'")
                 .contains("end as auditType")
-                .contains("pg.grant_type = 'AVAILABLE_USE'")
+                .contains("pg.grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')")
                 .contains("resourceBizTypeList")
                 .contains("r.resource_biz_type in");
         }

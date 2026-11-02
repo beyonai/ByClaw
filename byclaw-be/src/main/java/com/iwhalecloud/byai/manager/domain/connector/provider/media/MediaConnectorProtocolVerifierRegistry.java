@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.media;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.util.List;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +18,6 @@ public class MediaConnectorProtocolVerifierRegistry {
         return verifiers.stream()
             .filter(verifier -> verifier.supports(modelType, modelProtocol))
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("Unsupported media model protocol"));
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("connector.media.protocolUnsupported")));
     }
 }

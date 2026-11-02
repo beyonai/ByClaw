@@ -15,8 +15,7 @@
  * to unify across them). Relinking just the packages this plugin's own
  * source imports or augments (`cordis`, `dsh-bash-sandbox`, `dsh-shell`,
  * `dsh-bash-local` — for the `declare module` that adds `rtkAvailable` to
- * `Config` — plus `dsh-settings`, `dsh-settings-file`, and `schemastery`
- * for the settings provider subclass, and credentials packages for the Redis
+ * `Config` — plus `dsh-settings` and `schemastery`, and credentials packages for the Redis
  * credential provider) is enough: each of those resolves its own
  * further transitive dependencies from within the checkout it now lives in,
  * not from this plugin's `node_modules`.
@@ -71,7 +70,6 @@ const CHECKOUT_PATHS = {
   'dsh-web': 'packages/web/web',
   'dsh-web-search-deepseek': 'packages/web/web-search-deepseek',
   'dsh-settings': 'packages/settings/settings',
-  'dsh-settings-file': 'packages/settings/settings-file',
   // The build guard registers `tools/pre-execute` / `tools/post-execute`
   // listeners and a status tool, so it needs the same `ToolRuntime` event
   // declarations — and the same `Context` augmentation carrying `ctx.tools` —

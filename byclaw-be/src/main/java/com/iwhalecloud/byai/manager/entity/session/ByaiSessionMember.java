@@ -89,4 +89,22 @@ public class ByaiSessionMember {
      * 所属企业
      */
     private Long comAcctId;
+
+    /**
+     * 成员模型调用凭据，仅供服务端出站认证，不进入公开成员 JSON。
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @com.alibaba.fastjson.annotation.JSONField(serialize = false)
+    private String apiKey;
+
+    /**
+     * 更新时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date updateDate;
+
+    /**
+     * 状态：00A有效，00X无效
+     */
+    private String state;
 }

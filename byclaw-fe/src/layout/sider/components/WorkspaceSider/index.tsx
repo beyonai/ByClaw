@@ -7,6 +7,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   AuditOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
@@ -14,6 +15,7 @@ import classNames from 'classnames';
 import dayjs from 'dayjs';
 import { Badge, Tag } from 'antd';
 import useApprovalPendingCounts from '@/hooks/useApprovalPendingCounts';
+import ModelHealthMenuBadge from '@/components/ModelHealthStatus/ModelHealthMenuBadge';
 import AntdIcon from '@/components/AntdIcon';
 import { hydrateRunningSessions } from '@/hooks/useChat/chatRuntime';
 import useGlobal from '@/hooks/useGlobal';
@@ -27,6 +29,7 @@ import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/pro
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
+import getSessionTimestamp from '@/utils/getSessionTimestamp';
 import WorkspaceSiderHeader from './WorkspaceSiderHeader';
 import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
@@ -132,11 +135,12 @@ const getSessionsCreatedDuringRequest = (
 };
 
 const formatSessionTime = (value: string | number | undefined, intl: ReturnType<typeof useIntl>): string => {
-  if (!value) return '';
+  const timestamp = getSessionTimestamp(value);
+  if (!timestamp) {
+    return '';
+  }
 
-  const dateValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
-  const time = dayjs(dateValue);
-  if (!time.isValid()) return '';
+  const time = dayjs(timestamp);
 
   const minuteDiff = dayjs().diff(time, 'minute');
   if (minuteDiff < 60) {
@@ -890,6 +894,11 @@ const WorkspaceSider: React.FC<WorkspaceSiderProps> = ({ className, style }) => 
         >
           <AntdIcon type="icon-ziyuan" className={styles.primaryIcon} />
           <span>{intl.formatMessage({ id: 'workspaceSider.resourceCenter' })}</span>
+          <ModelHealthMenuBadge className={styles.approvalBadge} />
+        </button>
+        <button type="button" className={styles.primaryItem} onClick={() => navigate('/sandbox/market')}>
+          <ToolOutlined className={styles.primaryIcon} />
+          <span>{intl.formatMessage({ id: 'workspaceSider.toolSandboxMarket' })}</span>
         </button>
         <button
           type="button"

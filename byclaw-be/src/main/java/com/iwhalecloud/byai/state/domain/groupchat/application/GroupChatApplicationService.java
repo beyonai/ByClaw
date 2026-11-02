@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardRuntimeProjection;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 
@@ -13,6 +16,9 @@ import java.util.List;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import com.iwhalecloud.byai.common.quota.QuotaSnapshot;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
 import java.util.Set;
 
 import com.alibaba.fastjson.JSON;
@@ -26,6 +32,9 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 
 import org.springframework.stereotype.Service;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -36,6 +45,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
@@ -63,6 +73,10 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 /** 群聊资源创建和成员管理用例。 */
 @Service
 public class GroupChatApplicationService {
+    /** Immutable server-owned scope marker; NONE distinguishes personal groups from storage fallback IDs. */
+    public static final String BUSINESS_ENTERPRISE_EXT = SharedQuotaAdmission.BUSINESS_ENTERPRISE_EXT;
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks workgroupHooks;
     @Autowired
     private GroupWorkAssistantService workAssistantService;
     @Autowired
@@ -75,6 +89,8 @@ public class GroupChatApplicationService {
     private AuthApplicationService authApplicationService;
     @Autowired
     private TenantUserMembershipService tenantUserMembershipService;
+    @Autowired
+    private SharedQuotaAdmission quotaAdmission;
     @Autowired
     private GroupChatSettingsService settingsService;
     @Autowired
@@ -127,7 +143,7 @@ public class GroupChatApplicationService {
     public GroupChatDetailResponse create(GroupChatCreateRequest request) {
         Long operatorId = CurrentUserHolder.getCurrentUserId();
         if (operatorId == null || operatorId <= 0) {
-            throw new IllegalArgumentException("Login required");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
         }
         Set<Long> agentIds = new LinkedHashSet<>();
         if (request.getAgentIds() != null) agentIds.addAll(request.getAgentIds());
@@ -147,19 +163,27 @@ public class GroupChatApplicationService {
                 throw new BaseException("error.resource.not.exist");
             }
         }
+        Set<Long> userIds = new LinkedHashSet<>();
+        if (request.getUserIds() != null) userIds.addAll(request.getUserIds());
+        userIds.remove(operatorId);
+        Long sessionId = sequenceService.nextVal();
+        Long enterpriseId = businessEnterpriseId();
+        Optional<QuotaSnapshot> workgroupQuota = enterpriseId == null ? Optional.empty()
+            : quotaAdmission.beginWorkgroup(enterpriseId);
+        if (workgroupQuota.isPresent()) quotaAdmission.checkWorkgroupCapacity(workgroupQuota, enterpriseId, 1);
+        Optional<QuotaSnapshot> initialQuota = enterpriseId == null ? Optional.empty()
+            : quotaAdmission.beginGroup(enterpriseId, sessionId);
+        // Validate the entire initial batch before project workspace or authorization side effects.
+        if (initialQuota.isPresent()) quotaAdmission.checkInitialGroup(initialQuota, userIds.size() + 1, agentIds.size());
         // 复用项目创建用例，云盘、工作目录和项目 owner 均使用现有初始化流程。
         ProjectDTO projectRequest = new ProjectDTO();
         projectRequest.setProjectName(request.getName());
-        projectRequest.setDescription(request.getGoal());
+        // 工作目标选填，缺省及空白统一不设置项目描述。
+        projectRequest.setDescription(StringUtils.trimToNull(request.getGoal()));
         Project project = projectApplicationService.createGroupChatProject(projectRequest);
-        Set<Long> userIds = new LinkedHashSet<>();
-        if (request.getUserIds() != null) {
-            userIds.addAll(request.getUserIds());
-        }
-        userIds.remove(operatorId);
         projectMemberService.addMembers(project.getProjectId(), new ArrayList<>(userIds), MemberRole.MEMBER);
         ByaiSession session = new ByaiSession();
-        session.setSessionId(sequenceService.nextVal());
+        session.setSessionId(sessionId);
         session.setProjectId(project.getProjectId());
         session.setSessionName(project.getProjectName());
         session.setSessionType(SessionType.HS_AS.getCode());
@@ -168,6 +192,8 @@ public class GroupChatApplicationService {
         session.setCreateTime(new Date());
         session.setUpdateTime(new Date());
         sessionService.save(session);
+        // The final member writer resolves this marker before admitting the initial batch.
+        initializeBusinessEnterprise(session.getSessionId(), enterpriseId);
 
         ArrayList<ByaiSessionMember> members = new ArrayList<>();
         // OWNER 是群管理员权限的上位角色，同时保留转让群主和退出群聊的既有规则。
@@ -189,11 +215,33 @@ public class GroupChatApplicationService {
         initializeMemberPermissions(session.getSessionId());
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
+        response.setEnterpriseId(enterpriseId);
         members.forEach(this::fillMemberPresentation);
         response.setMembers(members);
         response.setCoordinatorAgentId(coordinatorId == null ? null : coordinatorId.toString());
         if (settingsService != null) response.setSettings(settingsService.settings(session.getSessionId()));
+        // 工作组及初始成员、权限全部创建完成后登记通知，回滚时不会发送 HTTP。
+        // 事件携带真实企业归属，不将项目存储默认企业或个人账号的 comAcctId 当作业务企业。
+        var tenantContext = TenantRequestContextHolder.get();
+        var loginInfo = CurrentUserHolder.getLoginInfo();
+        Long eventEnterpriseId = loginInfo == null ? null : loginInfo.getEnterpriseId();
+        if (tenantContext != null) {
+            eventEnterpriseId = tenantContext.enterpriseId();
+        }
+        workgroupHooks.created(session.getSessionId().toString(), session.getSessionName(), eventEnterpriseId,
+            session.getProjectId(), operatorId);
         return response;
+    }
+
+    /** Preserve business ownership independently of legacy project storage and routing defaults. */
+    private void initializeBusinessEnterprise(Long sessionId, Long enterpriseId) {
+        ByaiSessionExt ext = new ByaiSessionExt();
+        ext.setExtId(sequenceService.nextVal());
+        ext.setSessionId(sessionId);
+        ext.setExtParamCode(BUSINESS_ENTERPRISE_EXT);
+        ext.setExtParamName(BUSINESS_ENTERPRISE_EXT);
+        ext.setExtParamValue(enterpriseId == null ? "NONE" : enterpriseId.toString());
+        sessionExtService.save(ext);
     }
 
     /** 仅在建群事务中开启两项成员权限，存量群及后续手动关闭的设置保持不变。 */
@@ -263,6 +311,7 @@ public class GroupChatApplicationService {
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("clientRequestId", command.getClientRequestId());
         metadata.put("resourceList", command.getResourceList());
+        metadata.put("mentionAllUsers", Boolean.TRUE.equals(command.getMentionAllUsers()));
         message.setMetadata(JSON.toJSONString(metadata));
         message.setCreateTime(new Date());
         message.setUpdateTime(new Date());
@@ -270,7 +319,8 @@ public class GroupChatApplicationService {
         topicService.persistMessage(message);
         if (mentionService != null) {
             mentionService.indexHumanMentions(session.getSessionId(), messageId,
-                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(), command.getResourceList());
+                CurrentUserHolder.getCurrentUserId(), CurrentUserHolder.getCurrentUserId(),
+                mentionResources(session.getSessionId(), command));
         }
         JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
@@ -284,6 +334,7 @@ public class GroupChatApplicationService {
         event.put("creatorId", CurrentUserHolder.getCurrentUserId());
         event.put("creatorName", senderName);
         event.put("resourceList", command.getResourceList());
+        event.put("mentionAllUsers", Boolean.TRUE.equals(command.getMentionAllUsers()));
         // 与发送端请求关联，广播早于 ACK 时也能合并待发送消息。
         event.put("clientRequestId", command.getClientRequestId());
         Map<String, Object> speaker = new HashMap<>();
@@ -343,6 +394,8 @@ public class GroupChatApplicationService {
         authorizationService.requireCurrentUserMember(sessionId);
         GroupChatDetailResponse response = new GroupChatDetailResponse();
         response.setSession(session);
+        response.setEnterpriseId(groupBusinessEnterpriseId(session,
+            sessionExtService.findOneByExtParamCode(sessionId, BUSINESS_ENTERPRISE_EXT)));
         List<ByaiSessionMember> members = memberService.findOrderedGroupMembers(sessionId);
         fillMemberPresentations(members);
         response.setMembers(members);
@@ -366,11 +419,17 @@ public class GroupChatApplicationService {
         Long coordinatorId = binding == null ? workAssistantService.resolveDefaultCoordinatorId()
             : Long.valueOf(binding.getExtParamValue());
         if (memberService.findSessionMember(groupId, "AGENT", coordinatorId) == null) {
-            ArrayList<ByaiSessionMember> added = new ArrayList<>();
-            addMember(added, groupId, "AGENT", coordinatorId, UserRole.MEMBER.name());
-            memberService.batchSave(added);
-            memberService.findSessionMembers(groupId, "USER", null).forEach(member ->
-                authApplicationService.grantDigitalEmployeesToUser(Set.of(coordinatorId), member.getMemObjId()));
+            ByaiSession group = authorizationService.requireGroup(groupId);
+            var quota = groupQuota(group);
+            // A second writer may have filled the coordinator while this transaction waited.
+            if (memberService.findSessionMember(groupId, "AGENT", coordinatorId) == null) {
+                if (quota.isPresent()) quotaAdmission.checkGroupMembers(quota, groupId, "AGENT", 1);
+                ArrayList<ByaiSessionMember> added = new ArrayList<>();
+                addMember(added, groupId, "AGENT", coordinatorId, UserRole.MEMBER.name());
+                memberService.batchSave(added);
+                memberService.findSessionMembers(groupId, "USER", null).forEach(member ->
+                    authApplicationService.grantDigitalEmployeesToUser(Set.of(coordinatorId), member.getMemObjId()));
+            }
         }
         if (binding == null) workAssistantService.bindCoordinator(groupId, coordinatorId);
         return coordinatorId;
@@ -397,7 +456,7 @@ public class GroupChatApplicationService {
         }
         for (ResourceVo resource : resourceList) {
             if (resource == null || resource.getResourceType() == null) {
-                throw new GroupChatMessageRejectedException("Invalid group member resource");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceInvalid"));
             }
             String memberType;
             if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
@@ -410,15 +469,15 @@ public class GroupChatApplicationService {
                 continue;
             }
             else {
-                throw new GroupChatMessageRejectedException("Unsupported group member resource type");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceTypeUnsupported"));
             }
             Long memberId = parseResourceId(resource.getResourceId());
             String existingMemberType = referencedMemberTypes.putIfAbsent(memberId, memberType);
             if (existingMemberType != null && !existingMemberType.equals(memberType)) {
-                throw new GroupChatMessageRejectedException("Conflicting group member resource types");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceTypeConflict"));
             }
             if (memberService.findSessionMember(sessionId, memberType, memberId) == null) {
-                throw new GroupChatMessageRejectedException("Referenced resource is not a group member");
+                throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceNotMember"));
             }
             if (MemObjType.AGENT.name().equals(memberType)) {
                 agentIds.add(memberId);
@@ -434,15 +493,29 @@ public class GroupChatApplicationService {
             || AgentMetaEnum.KG_DOC_FOLDER.equals(resourceType);
     }
 
+    /** Resolve notification recipients from the authorized group snapshot, never agent resources. */
+    private List<ResourceVo> mentionResources(Long sessionId, ChatMessage command) {
+        if (!Boolean.TRUE.equals(command.getMentionAllUsers())) return command.getResourceList();
+        List<ResourceVo> resources = new ArrayList<>();
+        if (command.getResourceList() != null) resources.addAll(command.getResourceList());
+        for (ByaiSessionMember member : memberService.findSessionMembers(sessionId, "USER", null)) {
+            ResourceVo resource = new ResourceVo();
+            resource.setResourceType(AgentMetaEnum.HUMAN);
+            resource.setResourceId(String.valueOf(member.getMemObjId()));
+            resources.add(resource);
+        }
+        return resources;
+    }
+
     private Long parseResourceId(String resourceId) {
         if (resourceId == null || resourceId.isBlank()) {
-            throw new GroupChatMessageRejectedException("Invalid group member resource ID");
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceIdInvalid"));
         }
         try {
             return Long.valueOf(resourceId);
         }
         catch (NumberFormatException exception) {
-            throw new GroupChatMessageRejectedException("Invalid group member resource ID", exception);
+            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.member.resourceIdInvalid"), exception);
         }
     }
 
@@ -463,8 +536,14 @@ public class GroupChatApplicationService {
         reply.put("role", systemEvent ? "event" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "ASSISTANT");
         Map<String, Object> speaker = new HashMap<>();
         speaker.put("type", systemEvent ? "system" : Integer.valueOf(1).equals(referenced.getUsage()) ? "USER" : "AGENT");
-        speaker.put("displayName", systemEvent ? "系统" : referenced.getCreatorName());
+        speaker.put("displayName", systemEvent ? I18nUtil.get("groupchat.system") : referenced.getCreatorName());
         reply.put("speaker", speaker);
+        if (!referenced.isRecalled() && ForwardRuntimeProjection.isSnapshotOnly(referenced.getMetadata())) {
+            reply.put("resourceList", ForwardRuntimeProjection.displayResources(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+            reply.put("forward", ForwardRuntimeProjection.publicForward(ForwardRuntimeProjection.metadata(referenced.getMetadata())));
+            reply.put("acknowledgements", java.util.List.of());
+            reply.put("canAcknowledge", false);
+        }
         return reply;
     }
 
@@ -475,6 +554,8 @@ public class GroupChatApplicationService {
         ByaiSession group = invitationService.validateForMemberInvitation(sessionId, token);
         ByaiSessionMember existing = memberService.findSessionMember(group.getSessionId(), "USER", CurrentUserHolder.getCurrentUserId());
         if (existing != null) {
+            // 历史群成员可能缺少组织关系；重复接受邀请也需补齐，且不能恢复已停用关系。
+            ensureEnterpriseMembership(group, CurrentUserHolder.getCurrentUserId());
             fillMemberPresentation(existing);
             return existing;
         }
@@ -489,10 +570,10 @@ public class GroupChatApplicationService {
         authorizationService.requireInvite(sessionId, type);
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberId == null) {
-            throw new IllegalArgumentException("Invalid group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.invalid"));
         }
         if (memberService.findSessionMember(sessionId, type, memberId) != null) {
-            throw new IllegalArgumentException("Member already exists");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.exists"));
         }
         ByaiSessionMember member = insertMember(session, type, memberId);
         recordMemberEvent(session, member, CurrentUserHolder.getCurrentUserId(), "MEMBER_INVITED");
@@ -507,13 +588,16 @@ public class GroupChatApplicationService {
         ByaiSession session = authorizationService.requireGroup(sessionId);
         if (!MemObjType.isValid(type) || memberIds == null || memberIds.isEmpty()
             || memberIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("Invalid group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.invalid"));
         }
         List<Long> distinctIds = memberIds.stream().distinct().toList();
+        var quota = groupQuota(session);
+        // Validate the complete batch before writing project members or granting employee access.
+        if (quota.isPresent()) quotaAdmission.checkGroupMembers(quota, sessionId, type, distinctIds.size());
         // 全部检查通过后才开始写入，保持与原单成员接口相同的重复成员规则。
         for (Long memberId : distinctIds) {
             if (memberService.findSessionMember(sessionId, type, memberId) != null) {
-                throw new IllegalArgumentException("Member already exists");
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.member.exists"));
             }
         }
         List<ByaiSessionMember> result = new ArrayList<>();
@@ -527,13 +611,20 @@ public class GroupChatApplicationService {
 
     /** 两种入口在各自完成授权和重复成员检查后，共用事务内写入逻辑。 */
     private ByaiSessionMember insertMember(ByaiSession session, String type, Long memberId) {
+        var quota = groupQuota(session);
+        // The database guard is held through the actual group-member write and outer commit.
+        if (quota.isPresent()) {
+            if (memberService.findSessionMember(session.getSessionId(), type, memberId) != null) {
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.member.exists"));
+            }
+            quotaAdmission.checkGroupMembers(quota, session.getSessionId(), type, 1);
+        }
+        if (MemObjType.USER.name().equals(type)) {
+            ensureEnterpriseMembership(session, memberId);
+        }
         // 邀请真人时补齐项目成员关系；已有成员的角色不变，数字员工不加入项目成员表。
         if (MemObjType.USER.name().equals(type) && session.getProjectId() != null && !projectMemberService.isMember(session.getProjectId(), memberId)) {
             projectMemberService.addMember(session.getProjectId(), memberId, MemberRole.MEMBER);
-        }
-        if (MemObjType.USER.name().equals(type) && session.getEnterpriseId() != null) {
-            tenantUserMembershipService.add(memberId, session.getEnterpriseId(), TenantUserMembershipRole.MEMBER,
-                CurrentUserHolder.getCurrentUserId());
         }
         if (MemObjType.USER.name().equals(type)) {
             // 群成员中的 AGENT 标识即数字员工 resourceId；授权与项目、群成员写入共用外层事务。
@@ -556,6 +647,9 @@ public class GroupChatApplicationService {
         member.setSessionId(session.getSessionId());
         member.setMemObjType(type);
         member.setMemObjId(memberId);
+        if (member.getByaiSessionMemberId() == null || member.getByaiSessionMemberId() <= 0) {
+            throw new IllegalStateException("groupchat.member.id.unconfirmed");
+        }
         member.setUserRole(UserRole.MEMBER.name());
         member.setCreatorId(CurrentUserHolder.getCurrentUserId());
         member.setCreateTime(new Date());
@@ -563,9 +657,62 @@ public class GroupChatApplicationService {
             member.setLastReadMessageId(messageMapper.selectLatestMessageId(session.getSessionId()));
             member.setLastReadTime(new Date());
         }
-        memberService.save(member);
+        if (memberService.save(member) != 1) {
+            throw new IllegalStateException("groupchat.member.insert.unconfirmed");
+        }
         fillMemberPresentation(member);
         return member;
+    }
+
+    /**
+     * 按工作组的服务端归属幂等补齐普通组织成员，个人工作组不建立组织关系。
+     *
+     * @param session 已通过邀请权限校验的工作组
+     * @param memberId 待加入或已有的真人成员标识
+     */
+    private void ensureEnterpriseMembership(ByaiSession session, Long memberId) {
+        Long membershipEnterpriseId = groupBusinessEnterpriseId(session,
+            sessionExtService.findOneByExtParamCode(session.getSessionId(), BUSINESS_ENTERPRISE_EXT));
+        if (membershipEnterpriseId != null) {
+            tenantUserMembershipService.add(memberId, membershipEnterpriseId, TenantUserMembershipRole.MEMBER,
+                CurrentUserHolder.getCurrentUserId());
+        }
+    }
+
+    /** Use the business tenant instead of the project-storage fallback enterprise. */
+    private Long businessEnterpriseId() {
+        var tenant = TenantRequestContextHolder.get();
+        if (tenant != null) return tenant.enterpriseId();
+        var login = CurrentUserHolder.getLoginInfo();
+        return login == null || login.getEnterpriseId() == null || login.getEnterpriseId() <= 0 ? null : login.getEnterpriseId();
+    }
+
+    private Optional<QuotaSnapshot> groupQuota(ByaiSession session) {
+        ByaiSessionExt ownership = sessionExtService.findOneByExtParamCode(session.getSessionId(), BUSINESS_ENTERPRISE_EXT);
+        Long enterpriseId = groupBusinessEnterpriseId(session, ownership);
+        if (enterpriseId == null) return Optional.empty();
+        var quota = quotaAdmission.beginGroup(enterpriseId, session.getSessionId());
+        // Historical enterprise IDs may be storage fallbacks; confirm ownership before charging a package.
+        if (ownership == null && quota.isPresent()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "groupchat.quota.enterprise.unconfirmed");
+        }
+        return quota;
+    }
+
+    private Long groupBusinessEnterpriseId(ByaiSession session, ByaiSessionExt ownership) {
+        if (ownership == null) return session.getEnterpriseId() == null || session.getEnterpriseId() <= 0 ? null : session.getEnterpriseId();
+        if ("NONE".equals(ownership.getExtParamValue())) return null;
+        try {
+            String value = ownership.getExtParamValue();
+            if (value == null || !value.matches("[1-9][0-9]*")) throw new IllegalArgumentException();
+            Long enterpriseId = Long.valueOf(value);
+            if (!Objects.equals(enterpriseId, session.getEnterpriseId())) throw new IllegalArgumentException();
+            return enterpriseId;
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "groupchat.quota.enterprise.unconfirmed");
+        }
     }
 
     /** 使用当前用户资料和数字员工资源补齐接口返回的成员展示信息。 */
@@ -635,7 +782,7 @@ public class GroupChatApplicationService {
         authorizationService.requireAdmin(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, type, memberId);
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
-            throw new IllegalArgumentException("Group member cannot be removed");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.removeDenied"));
         }
         ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(target.getByaiSessionMemberId());
@@ -648,11 +795,11 @@ public class GroupChatApplicationService {
         authorizationService.requireOwner(sessionId);
         if (!MemObjType.USER.name().equals(type) || memberId == null || (!UserRole.ADMIN.name().equals(role)
             && !UserRole.MEMBER.name().equals(role))) {
-            throw new IllegalArgumentException("Invalid member role");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.roleInvalid"));
         }
         ByaiSessionMember target = memberService.findSessionMember(sessionId, type, memberId);
         if (target == null || UserRole.OWNER.name().equals(target.getUserRole())) {
-            throw new IllegalArgumentException("Member cannot be assigned this role");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.roleDenied"));
         }
         if (UserRole.ADMIN.name().equals(role) && !role.equals(target.getUserRole())) {
             recordAdminAppointment(sessionId, target);
@@ -668,7 +815,7 @@ public class GroupChatApplicationService {
         ByaiSessionMember current = authorizationService.requireCurrentUserMember(sessionId);
         ByaiSessionMember target = memberService.findSessionMember(sessionId, MemObjType.USER.name(), newOwnerUserId);
         if (target == null || Objects.equals(current.getMemObjId(), newOwnerUserId)) {
-            throw new IllegalArgumentException("New owner must be another group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.ownerInvalid"));
         }
         recordAdminAppointment(sessionId, current);
         current.setUserRole(UserRole.ADMIN.name());
@@ -749,7 +896,7 @@ public class GroupChatApplicationService {
             ownershipEvent.put("eventId", String.valueOf(sequenceService.nextVal()));
             ownershipEvent.put("sessionId", String.valueOf(sessionId));
             ownershipEvent.put("recipientUserId", String.valueOf(successor.getMemObjId()));
-            ownershipEvent.put("groupName", group == null ? "工作组" : group.getSessionName());
+            ownershipEvent.put("groupName", group == null ? I18nUtil.get("groupchat.workgroup") : group.getSessionName());
         }
         ByaiSession group = authorizationService.requireGroup(sessionId);
         memberService.deleteMember(current.getByaiSessionMemberId());
@@ -772,10 +919,10 @@ public class GroupChatApplicationService {
         }
         String operatorName = memberDisplayName(operator);
         String content = switch (eventType) {
-            case "MEMBER_INVITED" -> operatorName + " 邀请 " + memberName + " 加入工作组";
-            case "MEMBER_LEFT" -> memberName + " 离开了工作组";
-            case "MEMBER_REMOVED" -> operatorName + " 将 " + memberName + " 移出工作组";
-            default -> throw new IllegalArgumentException("Unsupported membership event");
+            case "MEMBER_INVITED" -> I18nUtil.get("groupchat.memberInvited", operatorName, memberName);
+            case "MEMBER_LEFT" -> I18nUtil.get("groupchat.memberLeft", memberName);
+            case "MEMBER_REMOVED" -> I18nUtil.get("groupchat.memberRemoved", operatorName, memberName);
+            default -> throw new IllegalArgumentException(I18nUtil.get("groupchat.member.eventUnsupported"));
         };
         JSONObject detail = new JSONObject();
         detail.put("eventType", eventType);
@@ -824,7 +971,7 @@ public class GroupChatApplicationService {
         event.put("createdAt", now.getTime());
         event.put("creatorId", String.valueOf(operatorId));
         event.put("creatorName", operatorName);
-        event.put("speaker", Map.of("type", "system", "displayName", "系统"));
+        event.put("speaker", Map.of("type", "system", "displayName", I18nUtil.get("groupchat.system")));
         event.put("systemEvent", detail);
         publishAfterCommit(group.getSessionId(), event);
     }
@@ -864,7 +1011,7 @@ public class GroupChatApplicationService {
         ByaiSession group = authorizationService.requireGroup(groupSessionId);
         authorizationService.requireCurrentUserMember(groupSessionId);
         if (memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId) == null) {
-            throw new IllegalArgumentException("Agent is not a group member");
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.member.agentMissing"));
         }
         ByaiSession direct = new ByaiSession();
         direct.setSessionId(sequenceService.nextVal());

@@ -29,8 +29,83 @@ const env = {
   REDIS_USERNAME: "tenant",
   REDIS_PASSWORD: "test",
   REDIS_TLS: "true",
+  INTERNAL_API_TOKEN: "test-internal-token",
 };
 describe("fixed tenant configuration", () => {
+  it("accepts cluster-only configuration and gives REDIS_CLUSTER_HOST precedence", () => {
+    const cluster = readConfig({
+      ...env,
+      REDIS_HOST: undefined,
+      REDIS_MODE: "standalone",
+      REDIS_CLUSTER_HOST: "redis-a:6379, redis-b:6380",
+      REDIS_KEY_SCHEMA_VERSION: "v2",
+    });
+    expect(cluster.redis).toMatchObject({
+      mode: "cluster",
+      db: 0,
+      clusterNodes: [
+        { host: "redis-a", port: 6379 },
+        { host: "redis-b", port: 6380 },
+      ],
+    });
+    expect(cluster.redis.host).toBeUndefined();
+    expect(readConfig(env).redis.mode).toBe("standalone");
+  });
+  it.each(["sentinel", "cluser", ""])("rejects unsupported Redis mode %s", (mode) => {
+    expect(() => readConfig({ ...env, REDIS_MODE: mode })).toThrow("Invalid REDIS_MODE");
+  });
+  it.each([
+    undefined,
+    "",
+    "redis",
+    "redis:0",
+    "redis:65536",
+    "redis:abc",
+    "redis:6379oops",
+    ":6379",
+    "redis:6379,",
+    "redis host:6379",
+  ])("rejects invalid cluster nodes %s", (nodes) => {
+    expect(() =>
+      readConfig({
+        ...env,
+        REDIS_MODE: "cluster",
+        REDIS_CLUSTER_HOST: nodes,
+        REDIS_KEY_SCHEMA_VERSION: "v2",
+      }),
+    ).toThrow();
+  });
+  it("requires Cluster schema v2 and database zero", () => {
+    const cluster = { ...env, REDIS_CLUSTER_HOST: "redis:6379" };
+    expect(readConfig(cluster).redis.mode).toBe("cluster");
+    expect(() =>
+      readConfig({ ...env, REDIS_MODE: "cluster", REDIS_CLUSTER_NODES: "redis:6379" }),
+    ).toThrow("REDIS_KEY_SCHEMA_VERSION=v2");
+    expect(() => readConfig({ ...cluster, REDIS_KEY_SCHEMA_VERSION: "v1" })).toThrow(
+      "REDIS_KEY_SCHEMA_VERSION=v2",
+    );
+    expect(() =>
+      readConfig({ ...cluster, REDIS_KEY_SCHEMA_VERSION: "v2", REDIS_DATABASE: "1" }),
+    ).toThrow("REDIS_DATABASE=0");
+    expect(() => readConfig({ ...env, REDIS_HOST: undefined })).toThrow("REDIS_HOST");
+  });
+
+  it("defaults the shared quota reader to an environment-independent key and ALLOW on Redis failure", () => {
+    expect(readConfig(env).quota).toEqual({
+      keyPrefix: "byclaw:shared:quota:v1:",
+      failurePolicy: "ALLOW",
+    });
+    expect(
+      readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "quota:", QUOTA_REDIS_FAILURE_POLICY: "REJECT" })
+        .quota,
+    ).toEqual({ keyPrefix: "quota:", failurePolicy: "REJECT" });
+    expect(() => readConfig({ ...env, QUOTA_REDIS_FAILURE_POLICY: "ignore" })).toThrow(
+      "Invalid QUOTA_REDIS_FAILURE_POLICY",
+    );
+    expect(() => readConfig({ ...env, QUOTA_REDIS_KEY_PREFIX: "" })).toThrow(
+      "Invalid QUOTA_REDIS_KEY_PREFIX",
+    );
+  });
   it.each([undefined, "", "host.containers.internal"])(
     "advertises Kubernetes Pod IP instead of an unresolvable hostname when launch host is %s",
     (advertiseHost) => {
@@ -59,11 +134,21 @@ describe("fixed tenant configuration", () => {
     "DB_SANDBOX_RECORD_ID",
     "REDIS_USERNAME",
     "TLS_KEY_FILE",
+    "INTERNAL_API_TOKEN",
   ])("requires %s", (key) => {
     expect(() => readConfig({ ...env, [key]: "" })).toThrow();
   });
   it("rejects plain HTTP unless explicitly selected", () => {
     expect(() => readConfig({ ...env, KMS_DECRYPT_URL: "http://kms" })).toThrow();
+  });
+  it("preserves the BE callback token with HTTPS and still requires client certificates", () => {
+    const config = readConfig(env);
+    expect(config.internalToken).toBe("test-internal-token");
+    expect(config.transport).toBe("https");
+    expect(config.tls?.certFile).toBe("/cert");
+    expect(() => readConfig({ ...env, INTERNAL_API_TOKEN: "   " })).toThrow(
+      "Missing configuration: INTERNAL_API_TOKEN",
+    );
   });
   it("allows explicitly selected HTTP with an internal token and plain Redis", () => {
     const { TLS_CERT_FILE, TLS_KEY_FILE, TLS_CA_FILE, BE_CLIENT_IDENTITY, ...withoutTls } = env;
@@ -76,6 +161,7 @@ describe("fixed tenant configuration", () => {
       REDIS_TLS: "false",
     });
     expect(local.transport).toBe("http");
+    expect(local.internalToken).toBe("test-internal-token");
     expect(local.tls).toBeUndefined();
     expect(local.redis.tls).toBeUndefined();
   });

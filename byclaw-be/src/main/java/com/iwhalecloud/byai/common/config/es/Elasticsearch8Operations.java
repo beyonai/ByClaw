@@ -77,7 +77,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
                     .document(document)
             );
         } catch (Exception e) {
-            throw new BaseException("Error indexing document", e);
+            throw new BaseException("i18n.error.search.index.failed", e);
         }
     }
 
@@ -121,14 +121,10 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
             BulkResponse response = client.bulk(b -> b.operations(operations));
             
             if (response.errors()) {
-                throw new BaseException("Bulk indexing encountered errors: " +
-                    response.items().stream()
-                        .filter(item -> item.error() != null)
-                        .map(item -> item.error().reason())
-                        .collect(Collectors.joining(", ")));
+                throw new BaseException("i18n.error.search.bulkIndex.failed");
             }
         } catch (Exception e) {
-            throw new BaseException("Error bulk indexing documents", e);
+            throw new BaseException("i18n.error.search.bulkIndex.failed", e);
         }
     }
 
@@ -142,7 +138,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
             );
             return response.source();
         } catch (Exception e) {
-            throw new BaseException("Error getting document by id", e);
+            throw new BaseException("i18n.error.search.getDocument.failed", e);
         }
     }
 
@@ -166,7 +162,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
             
             return null;
         } catch (Exception e) {
-            throw new BaseException("Error searching documents", e);
+            throw new BaseException("i18n.error.search.query.failed", e);
         }
     }
 
@@ -180,7 +176,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
                     Map.class
             );
         } catch (Exception e) {
-            throw new BaseException("Error updating document", e);
+            throw new BaseException("i18n.error.search.update.failed", e);
         }
     }
 
@@ -192,7 +188,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
                     .id(id)
             );
         } catch (Exception e) {
-            throw new BaseException("Error deleting document", e);
+            throw new BaseException("i18n.error.search.delete.failed", e);
         }
     }
 
@@ -201,7 +197,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
         try {
             return client.indices().exists(e -> e.index(index)).value();
         } catch (Exception e) {
-            throw new BaseException("Error checking index existence", e);
+            throw new BaseException("i18n.error.search.checkIndex.failed", e);
         }
     }
 
@@ -217,7 +213,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
 //                    .mappings(m -> m.properties(propertyMap))
             );
         } catch (Exception e) {
-            throw new BaseException("Error creating index", e);
+            throw new BaseException("i18n.error.search.createIndex.failed", e);
         }
     }
 
@@ -226,7 +222,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
         try {
             client.indices().delete(d -> d.index(index));
         } catch (Exception e) {
-            throw new BaseException("Error deleting index", e);
+            throw new BaseException("i18n.error.search.deleteIndex.failed", e);
         }
     }
 
@@ -267,7 +263,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
                     })
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            throw new BaseException("Error performing full search", e);
+            throw new BaseException("i18n.error.search.fullSearch.failed", e);
         }
     }
 
@@ -277,7 +273,7 @@ public class Elasticsearch8Operations implements ElasticsearchOperations {
                 restClient.close();
             }
         } catch (IOException e) {
-            throw new BaseException("Error closing client", e);
+            throw new BaseException("i18n.error.search.closeClient.failed", e);
         }
     }
 }

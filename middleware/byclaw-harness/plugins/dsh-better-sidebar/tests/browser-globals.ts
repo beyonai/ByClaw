@@ -58,6 +58,10 @@ if (g.window === undefined) {
     // desktop-env.ts reads the shell's URL stamps from location.search
     // (Sidebar renders with parseDesktopEnv even in specs).
     location: { search: '' },
+    // DSH 0.2.1 ui-primitives (input-modality.ts) subscribes to window
+    // pointer/key events at module load.
+    addEventListener: () => {},
+    removeEventListener: () => {},
   }
 }
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -24,7 +25,8 @@ import static org.mockito.Mockito.*;
 class WorkgroupNameServiceTest extends I18nTestSupport {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiSessionMapper sessions = mock(ByaiSessionMapper.class);
-    private final WorkgroupNameService service = new WorkgroupNameService(node, sessions);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
+    private final WorkgroupNameService service = new WorkgroupNameService(node, sessions, tenantModes);
     private String originalEnvironment;
 
     @BeforeEach
@@ -41,6 +43,20 @@ class WorkgroupNameServiceTest extends I18nTestSupport {
         TenantRequestContextHolder.clear();
         if (originalEnvironment == null) System.clearProperty("BE_ENV");
         else System.setProperty("BE_ENV", originalEnvironment);
+    }
+
+    @Test
+    void trialTenantChecksSharedStorageWithinItsOwnEnterprise() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(sessions.selectCount(any())).thenReturn(1L);
+
+        assertThat(service.exists("Team", 88L, 456L)).isTrue();
+        ArgumentCaptor<LambdaQueryWrapper<ByaiSession>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(sessions).selectCount(query.capture());
+        assertThat(query.getValue().getSqlSegment()).contains("enterprise_id =");
+        assertThat(query.getValue().getParamNameValuePairs()).containsValue(456L);
+        verifyNoInteractions(node);
     }
 
     @Test
@@ -89,6 +105,31 @@ class WorkgroupNameServiceTest extends I18nTestSupport {
         assertThat(query.getSqlSegment()).contains("creator_id =", "enterprise_id =", "session_type =", "state <>", "state IS NULL");
         assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(88L, "Team", "hs_as", 10L, "GROUP_DISSOLVED");
         verifyNoInteractions(node);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0L, 1L})
+    void trialTenantChecksPublicGroupNamesWithoutCallingNode(long count) {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        when(tenantModes.isTrialTenant(456L)).thenReturn(true);
+        when(sessions.selectCount(any())).thenReturn(count);
+
+        assertThat(service.exists("Team", 88L, 456L)).isEqualTo(count > 0);
+
+        LambdaQueryWrapper<ByaiSession> query = query();
+        assertThat(query.getSqlSegment()).contains("enterprise_id =", "creator_id =", "state <>")
+            .doesNotContain("enterprise_id IS NULL");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder(88L, "Team", "hs_as", 456L, "GROUP_DISSOLVED");
+        verifyNoInteractions(node);
+    }
+
+    @Test
+    void trialTenantStillRejectsAnotherUserOrEnterpriseScope() {
+        TenantRequestContextHolder.set(new TenantRequestContext(88L, 456L, "MEMBER"));
+        assertThatThrownBy(() -> service.exists("Team", 89L, 456L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.exists("Team", 88L, 10L)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(node, sessions);
     }
 
     @Test

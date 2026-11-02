@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
 import { SettingsConflictError, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { apply, mediaTypeForPath } from '../src/index.ts'
+import { PrefsSchema } from '../src/config.ts'
 import { encodeHtmlUrl } from '../src/html-route.ts'
 import * as git from '../src/git.ts'
 import { listDirectory } from '../src/fs-tree.ts'
@@ -38,7 +39,7 @@ function testPtyManager(maxPerSession: number): PtyManager {
 }
 
 interface FakeContext {
-  webRuntime: { trustedHosts: readonly string[] }
+  webStartup: { trustedHosts: readonly string[] }
   webServer: {
     register: (route: SidebarWebRoute) => () => void
     registerUpgrade: (route: SidebarWebUpgradeRoute) => () => void
@@ -90,7 +91,7 @@ describe('host plugin smoke', () => {
     const upgrades: SidebarWebUpgradeRoute[] = []
     const effects: Array<() => void | (() => void)> = []
     const ctx: FakeContext = {
-      webRuntime: { trustedHosts: [] },
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route) => { routes.push(route); return () => {} },
         registerUpgrade: (route) => { upgrades.push(route); return () => {} },
@@ -130,7 +131,7 @@ describe('host plugin smoke', () => {
     const routes: SidebarWebRoute[] = []
     const effects: Array<() => void | (() => void)> = []
     const ctx: FakeContext = {
-      webRuntime: { trustedHosts: [] },
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route) => { routes.push(route); return () => {} },
         registerUpgrade: () => () => {},
@@ -501,7 +502,7 @@ describe('session cwd resolution over the API route', () => {
   const mountAll = (overrides: CtxOverrides = {}): SidebarWebRoute[] => {
     const routes: SidebarWebRoute[] = []
     const ctx = {
-      webRuntime: { trustedHosts: [] },
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route: SidebarWebRoute) => { routes.push(route); return () => {} },
         registerUpgrade: (route: SidebarWebUpgradeRoute) => { void route; return () => {} },
@@ -1049,13 +1050,21 @@ describe('session cwd resolution over the API route', () => {
 })
 
 describe('side card settings routes', () => {
-  /** A minimal settings seam: register/describe/update with the revision guard. */
+  /** The plugin's profile entry id (the bundle patch row id). */
+  const ENTRY_ID = 'better-sidebar'
+  /**
+   * A minimal DSH 0.2.1 settings seam: describe/update with the revision
+   * guard over profile entries. The sidebar's own entry projects its
+   * volatile preference fields (PrefsSchema), like the real service does
+   * from the row Config.
+   */
   const createFakeSettings = (pre?: Record<string, Record<string, unknown>>) => {
     const namespaces = new Map<string, {
       schema: unknown
       value: Record<string, unknown> | undefined
       revision: number
     }>()
+    namespaces.set(ENTRY_ID, { schema: PrefsSchema, value: undefined, revision: 0 })
     for (const [ns, value] of Object.entries(pre ?? {})) {
       namespaces.set(ns, { schema: (input: unknown) => input, value, revision: 0 })
     }
@@ -1064,10 +1073,6 @@ describe('side card settings routes', () => {
       return entry.value === undefined ? schema(undefined) : schema(entry.value)
     }
     return {
-      register(ns: string, schema: unknown) {
-        namespaces.set(ns, { schema, value: undefined, revision: 0 })
-        return { get: () => ({}), watch: () => () => {}, update: async () => {}, replace: async () => {} }
-      },
       describe() {
         return [...namespaces.entries()].map(([ns, entry]) => ({
           ns,
@@ -1091,7 +1096,9 @@ describe('side card settings routes', () => {
   const mountWithSettings = (settings?: unknown): SidebarWebRoute => {
     const routes: SidebarWebRoute[] = []
     const ctx = {
-      webRuntime: { trustedHosts: [] },
+      fiber: { entry: { options: { id: ENTRY_ID } } },
+      on: () => () => {},
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route: SidebarWebRoute) => { routes.push(route); return () => {} },
         registerUpgrade: (route: SidebarWebUpgradeRoute) => { void route; return () => {} },
@@ -1099,8 +1106,8 @@ describe('side card settings routes', () => {
       sessions: { get: () => undefined },
       tools: { register: () => () => {} },
       effect: (fn: () => void | (() => void)) => { fn() },
-      inject: (deps: string[], callback: (sctx: { settings: unknown }) => void) => {
-        if (deps.includes('settings') && settings !== undefined) callback({ settings })
+      inject: (deps: string[], callback: (sctx: { settings: unknown; effect: (fn: () => unknown) => void }) => void) => {
+        if (deps.includes('settings') && settings !== undefined) callback({ settings, effect: (fn) => { fn() } })
         return () => {}
       },
       // No jobs/agents services: the jobs routes degrade to a 503.
@@ -1303,19 +1310,14 @@ describe('agent terminal tool gating', () => {
     const watcherRef: { current: (() => void) | null } = { current: null }
     let enabled = false
     const settings = {
-      register() {
-        return {
-          get: () => ({ agentTerminalTools: enabled }),
-          watch: (callback: () => void) => { watcherRef.current = callback; return () => {} },
-          update: async () => {},
-          replace: async () => {},
-        }
-      },
       describe: () => [],
       async update() {},
     }
+    // The preference is a volatile row-config reference; the Loader announces
+    // a committed change with `loader/volatile-update` on the plugin context.
+    const config = { agentTerminalTools: { get: () => enabled } }
     const ctx = {
-      webRuntime: { trustedHosts: [] },
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route: SidebarWebRoute) => { void route; return () => {} },
         registerUpgrade: (route: SidebarWebUpgradeRoute) => { void route; return () => {} },
@@ -1323,14 +1325,18 @@ describe('agent terminal tool gating', () => {
       sessions: { get: () => undefined },
       tools: { register: () => { registered += 1; return () => { disposed += 1 } } },
       effect: (fn: () => void | (() => void)) => { fn() },
-      inject: (deps: readonly string[], callback: (sctx: { settings: unknown }) => void) => {
-        if (deps.includes('settings')) callback({ settings })
+      on: (event: string, callback: () => void) => {
+        if (event === 'loader/volatile-update') watcherRef.current = callback
+        return () => {}
+      },
+      inject: (deps: readonly string[], callback: (sctx: { settings: unknown; effect: (fn: () => unknown) => void }) => void) => {
+        if (deps.includes('settings')) callback({ settings, effect: (fn) => { fn() } })
         return () => {}
       },
       // No jobs/agents services: the jobs routes degrade to a 503.
       get: () => undefined,
     }
-    apply(ctx as never)
+    apply(ctx as never, config as never)
     // Default off: no tools are registered even though the settings service is mounted.
     expect(live()).toBe(0)
     // Flipping the setting on registers all eight tools.
@@ -1360,19 +1366,12 @@ describe('agent sidebar-open tool gating', () => {
     const watcherRef: { current: (() => void) | null } = { current: null }
     let enabled = false
     const settings = {
-      register() {
-        return {
-          get: () => ({ agentOpenTools: enabled, tabsEnabled: {} }),
-          watch: (callback: () => void) => { watcherRef.current = callback; return () => {} },
-          update: async () => {},
-          replace: async () => {},
-        }
-      },
       describe: () => [],
       async update() {},
     }
+    const config = { agentOpenTools: { get: () => enabled }, tabsEnabled: { get: () => ({}) } }
     const ctx = {
-      webRuntime: { trustedHosts: [] },
+      webStartup: { trustedHosts: [] },
       webServer: {
         register: (route: SidebarWebRoute) => { void route; return () => {} },
         registerUpgrade: (route: SidebarWebUpgradeRoute) => { void route; return () => {} },
@@ -1380,13 +1379,17 @@ describe('agent sidebar-open tool gating', () => {
       sessions: { get: () => undefined },
       tools: { register: () => { registered += 1; return () => { disposed += 1 } } },
       effect: (fn: () => void | (() => void)) => { fn() },
-      inject: (deps: readonly string[], callback: (sctx: { settings: unknown }) => void) => {
-        if (deps.includes('settings')) callback({ settings })
+      on: (event: string, callback: () => void) => {
+        if (event === 'loader/volatile-update') watcherRef.current = callback
+        return () => {}
+      },
+      inject: (deps: readonly string[], callback: (sctx: { settings: unknown; effect: (fn: () => unknown) => void }) => void) => {
+        if (deps.includes('settings')) callback({ settings, effect: (fn) => { fn() } })
         return () => {}
       },
       get: () => undefined,
     }
-    apply(ctx as never)
+    apply(ctx as never, config as never)
     // Default off: no open tool is registered even though the settings service is mounted.
     expect(live()).toBe(0)
     // Flipping the setting on registers the single sidebar_open tool.

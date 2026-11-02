@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,6 +21,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeModels.CommandResult;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
@@ -33,20 +36,56 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 /** 合并回归：租户路由和统一回执边界必须同时保留。 */
-class GroupChatWebSocketMergeTest {
+class GroupChatWebSocketMergeTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final GroupChatApplicationService legacy = mock(GroupChatApplicationService.class);
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiGroupChatMentionMapper memberships = mock(ByaiGroupChatMentionMapper.class);
     private final GroupChatEventPublisher events = mock(GroupChatEventPublisher.class);
     private final TenantGroupAgentDispatcher dispatcher = mock(TenantGroupAgentDispatcher.class);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final ChannelHandlerContext channel = mock(ChannelHandlerContext.class);
     private final TenantRequestContext tenant = new TenantRequestContext(7L, 10L, "MEMBER");
     private final GroupChatWebSocketService service =
-        new GroupChatWebSocketService(legacy, node, memberships, events, dispatcher);
+        new GroupChatWebSocketService(legacy, node, memberships, events, dispatcher, tenantModes);
 
     @AfterEach
     void clearContext() {
         TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void trialTenantMessageUsesPublicServiceAndKeepsEnterpriseContext() {
+        assertSharedTenantMessage(11389605L);
+    }
+
+    @Test
+    void defaultEnterpriseMessageUsesPublicService() {
+        assertSharedTenantMessage(1L);
+    }
+
+    private void assertSharedTenantMessage(long enterpriseId) {
+        TenantRequestContext shared = new TenantRequestContext(10L, enterpriseId, "MEMBER");
+        TenantRequestContextHolder.set(shared);
+        when(tenantModes.isSharedDataTenant(enterpriseId)).thenReturn(true);
+        ChatMessage message = message();
+        when(legacy.acceptUserMessage(message)).thenAnswer(invocation -> {
+            assertThat(TenantRequestContextHolder.get()).isSameAs(shared);
+            return 9004L;
+        });
+
+        service.send(channel, message);
+
+        JSONObject ack = response();
+        assertThat(ack.getString("type")).isEqualTo("GROUP_CHAT_ACCEPTED");
+        assertThat(ack.getString("messageId")).isEqualTo("9004");
+        assertThat(ack.getString("enterpriseId")).isEqualTo(String.valueOf(enterpriseId));
+        verify(legacy).acceptUserMessage(message);
+        verifyNoInteractions(node, events, dispatcher);
     }
 
     @Test

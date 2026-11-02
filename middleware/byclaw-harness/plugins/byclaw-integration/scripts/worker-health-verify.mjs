@@ -1,25 +1,32 @@
-/** Regression verification for the upstream worker saturation health contract. */
+/** Regression verification for worker health with uncapped task admission. */
 
 import assert from 'node:assert/strict'
-import { WorkerRunner } from '@byclaw/by-framework'
+import { pathToFileURL } from 'node:url'
+
+const { WorkerRunner } = await import(process.argv[2]
+  ? pathToFileURL(process.argv[2]).href
+  : '@byclaw/by-framework')
 
 const runner = new WorkerRunner({
-  workerId: 'saturated-health-probe',
+  workerId: 'unbounded-health-probe',
   getAgentTypes: () => ['probe'],
   handleMessage: async () => undefined,
   registry: {},
   heartbeatLeaseTtlSeconds: 15,
 }, {
   redisClient: {},
-  maxConcurrency: 2,
+  maxConcurrency: Number.POSITIVE_INFINITY,
 })
 
-runner.lastConsumerTick = Date.now() - 60_000
+runner.lastConsumerTick = Date.now()
 runner.lastRenewOkAt = Date.now()
 runner.inFlight = new Set([Promise.resolve(), Promise.resolve()])
 
 assert.equal(
   runner.isHealthy(),
   true,
-  'a saturated worker with long-running tasks must remain healthy',
+  'unfinished tasks with a live consumer loop must remain healthy',
 )
+
+runner.lastConsumerTick = Date.now() - 60_000
+assert.equal(runner.isHealthy(), false, 'unfinished tasks must not hide a stalled consumer loop')

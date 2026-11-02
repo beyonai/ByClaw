@@ -10,9 +10,9 @@
  * @module @byclaw/dsh-iron-rules/rules
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { ResolvedConfig } from './index.ts'
+import { localRuleFiles, type RuleFiles } from './files.ts'
 
 /** Who owns a rule, which decides how it is presented to the model. */
 export type RuleOwner = 'admin' | 'local'
@@ -156,26 +156,16 @@ export interface WatchStatus {
  *
  * @param rule - the rule to measure.
  * @param projectRoot - absolute root the declared prefixes resolve against.
+ * @param files - where the project lives: this host, or the tool environment.
  * @returns the counts, or `undefined` when the rule declared no paths —
  *   staleness is unknowable without a declaration, and "unknown" must not read
  *   as "stale".
  */
-export async function watchStatus(rule: IronRule, projectRoot: string): Promise<WatchStatus | undefined> {
+export async function watchStatus(rule: IronRule, projectRoot: string, files: RuleFiles = localRuleFiles): Promise<WatchStatus | undefined> {
   if (rule.watches === undefined || rule.watches.length === 0) return undefined
-  const present = await Promise.all(rule.watches.map(async watch => await pathExists(join(projectRoot, watch))))
+  const present = await Promise.all(rule.watches.map(async watch => await files.exists(join(projectRoot, watch))))
   const missing = present.filter(exists => !exists).length
   return { declared: present.length, missing, stale: missing === present.length }
-}
-
-/** Whether `path` exists at all, following no symlink of the final component. */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    // stat is the try's only operation, so a missing path is the only failure.
-    return false
-  }
 }
 
 /**
@@ -183,12 +173,13 @@ async function pathExists(path: string): Promise<boolean> {
  * `.git`, else the starting directory. This matches how `dsh-skill-filesystem`
  * resolves a project root, so "project" means the same thing across the runtime.
  * @param cwd - the agent's session workspace.
+ * @param files - where the project lives: this host, or the tool environment.
  * @returns the absolute project root.
  */
-export async function resolveProjectRoot(cwd: string): Promise<string> {
+export async function resolveProjectRoot(cwd: string, files: RuleFiles = localRuleFiles): Promise<string> {
   let current = resolve(cwd)
   for (;;) {
-    if (await pathExists(join(current, '.git'))) return current
+    if (await files.exists(join(current, '.git'))) return current
     const parent = dirname(current)
     if (parent === current) return resolve(cwd)
     current = parent
@@ -205,15 +196,15 @@ interface LoadedRule {
 }
 
 /** Read and parse one rule directory. */
-async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
+async function loadRule(rulesDir: string, id: string, files: RuleFiles): Promise<LoadedRule> {
   const dir = join(rulesDir, id)
   const rulePath = join(dir, 'RULE.md')
 
   let text: string
   try {
-    text = await readFile(rulePath, 'utf8')
+    text = await files.readText(rulePath)
   } catch {
-    // readFile is the try's only operation; a directory without RULE.md is not
+    // The read is the try's only operation; a directory without RULE.md is not
     // a rule, which is ordinary (a stray directory) rather than an error.
     return { warning: `${id}: no RULE.md, skipped` }
   }
@@ -225,7 +216,7 @@ async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
   }
 
   const checkScript = join(dir, 'check.sh')
-  const hasCheck = await pathExists(checkScript)
+  const hasCheck = await files.exists(checkScript)
   // A rule authored before `enforcement` existed still has to load. The script
   // on disk is the honest answer to "what enforces this" for those.
   const declared = frontmatter.enforcement
@@ -263,20 +254,18 @@ async function loadRule(rulesDir: string, id: string): Promise<LoadedRule> {
  *
  * @param projectRoot - the absolute project root from {@link resolveProjectRoot}.
  * @param config - the resolved plugin configuration supplying the directory name.
+ * @param files - where the project lives: this host, or the tool environment.
  * @returns the parsed rules in directory-name order plus any skip reasons.
  */
-export async function loadRules(projectRoot: string, config: ResolvedConfig): Promise<RuleSet> {
+export async function loadRules(projectRoot: string, config: ResolvedConfig, files: RuleFiles = localRuleFiles): Promise<RuleSet> {
   const rulesDir = join(projectRoot, config.rulesDir)
   const warnings: string[] = []
 
   let entries: string[]
   try {
-    entries = (await readdir(rulesDir, { withFileTypes: true }))
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .sort()
+    entries = (await files.subdirectories(rulesDir)).sort()
   } catch {
-    // readdir is the try's only operation. No rule directory is valid empty
+    // The listing is the try's only operation. No rule directory is valid empty
     // state, not a failure — the plugin is simply inert in this repository.
     return { projectRoot, rulesDir, rules: [], warnings }
   }
@@ -288,7 +277,7 @@ export async function loadRules(projectRoot: string, config: ResolvedConfig): Pr
       warnings.push(`${diagnostic}, skipped`)
       continue
     }
-    const { rule, warning } = await loadRule(rulesDir, id)
+    const { rule, warning } = await loadRule(rulesDir, id, files)
     if (warning !== undefined) warnings.push(warning)
     if (rule !== undefined) rules.push(rule)
   }

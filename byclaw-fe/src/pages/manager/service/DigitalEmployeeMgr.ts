@@ -325,3 +325,23 @@ export async function saveTool(params: any) {
     }
   );
 }
+
+export interface SkillRuntimeStatus {
+  employeeId: string;
+  liveInstances: number;
+  skills: Array<{
+    resourceId: string;
+    skillCode: string;
+    name: string;
+    state: 'READY' | 'PREPARING' | 'FAILED' | 'WAITING_RUNTIME' | 'BUILT_IN';
+    errorCode?: string;
+  }>;
+}
+
+export async function querySkillRuntimeStatus(resourceId: string | number) {
+  return POST('/byaiService/digitalEmployeeController/querySkillRuntimeStatus', { resourceId });
+}
+
+export async function prepareEmployeeSkills(resourceId: string | number) {
+  return POST('/byaiService/digitalEmployeeController/prepareSkills', { resourceId });
+}

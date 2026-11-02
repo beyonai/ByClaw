@@ -30,7 +30,7 @@ function database(scope?: Record<string, unknown>) {
       return [{ message_id: "40", message_ref: null, topic_id: "40", usage: 1 }];
     return [];
   });
-  return { query };
+  return { query, lock: async () => {} };
 }
 
 describe("tenant group task answer", () => {

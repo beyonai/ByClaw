@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TaskExecutionModel, TaskStatus, TeamMember, TeamMessage, TeamState, TeamTask } from './types.ts'
+import { syncTaskExecution } from './task-executions.ts'
 
 /** Mailbox key of the captain. */
 export const CAPTAIN_KEY = 'captain'
@@ -127,6 +128,7 @@ export function transitionError(current: TaskStatus, next: TaskStatus): string |
 
 /** Activate the task's current generation for one owner and return its capability id. */
 export function activateTaskAttempt(task: TeamTask, assignee: string): string {
+  syncTaskExecution(task)
   const attemptId = randomUUID()
   task.status = 'claimed'
   task.assignee = assignee
@@ -140,6 +142,7 @@ export function activateTaskAttempt(task: TeamTask, assignee: string): string {
   task.receipts = []
   task.lastFailure = undefined
   task.updatedAt = Date.now()
+  syncTaskExecution(task)
   return attemptId
 }
 
@@ -183,6 +186,7 @@ export function validateControlledTaskGraph(team: TeamState): string[] {
 
 /** Start a fresh task generation for one owner. */
 export function beginTaskAttempt(task: TeamTask, assignee: string): string {
+  syncTaskExecution(task)
   task.attempt = (task.attempt ?? 0) + 1
   return activateTaskAttempt(task, assignee)
 }
@@ -210,6 +214,8 @@ export function invalidateTaskAttempt(
   nextAssignee?: string,
   reassigning = false,
 ): void {
+  const execution = syncTaskExecution(task)
+  if (execution !== undefined && !['completed', 'failed', 'cancelled'].includes(execution.status)) execution.status = 'cancelled'
   task.attemptId = undefined
   task.externalExecution = undefined
   task.waitingAssistance = undefined
@@ -285,6 +291,7 @@ export function readTeamSync(stateRoot: string, teamId: string): TeamState | und
  * @param state - the record to persist.
  */
 export async function writeTeam(stateRoot: string, state: TeamState): Promise<void> {
+  for (const task of state.tasks) syncTaskExecution(task)
   await atomicWriteText(join(stateRoot, state.id, 'team.json'), JSON.stringify(state, null, 2))
 }
 
@@ -656,6 +663,7 @@ function isTeamTask(value: unknown): value is TeamTask {
     && (value['attempt'] === undefined
       || (Number.isSafeInteger(value['attempt']) && (value['attempt'] as number) >= 0))
     && isOptionalString(value['attemptId'])
+    && (value['executions'] === undefined || (Array.isArray(value['executions']) && value['executions'].every(isTaskExecution)))
     && isOptionalString(value['handoffId'])
     && (value['reassigning'] === undefined || typeof value['reassigning'] === 'boolean')
     && isFiniteNumber(value['createdAt'])
@@ -668,6 +676,24 @@ function isToolReceipt(value: unknown): boolean {
     && typeof value['tool'] === 'string'
     && typeof value['callId'] === 'string'
     && isFiniteNumber(value['recordedAt'])
+}
+
+function isTaskExecution(value: unknown): boolean {
+  return isRecord(value) && Number.isSafeInteger(value['attempt']) && (value['attempt'] as number) > 0
+    && typeof value['attemptId'] === 'string' && value['attemptId'] !== ''
+    && typeof value['assignee'] === 'string' && typeof value['status'] === 'string'
+    && ['pending', 'claimed', 'in_progress', 'completed', 'failed', 'cancelled'].includes(value['status'])
+    && isFiniteNumber(value['startedAt'])
+    && (value['externalExecution'] === undefined || (isRecord(value['externalExecution'])
+      && typeof value['externalExecution']['sessionId'] === 'string'
+      && typeof value['externalExecution']['messageId'] === 'string'
+      && typeof value['externalExecution']['traceId'] === 'string'
+      && typeof value['externalExecution']['workerAgentType'] === 'string'))
+    && Array.isArray(value['runs']) && value['runs'].every(run => isRecord(run)
+      && ((typeof run['externalSessionId'] === 'string' && run['externalSessionId'] !== ''
+        && Number.isSafeInteger(run['childTurn']) && (run['childTurn'] as number) > 0)
+        || (typeof run['byclawSessionId'] === 'string' && run['byclawSessionId'] !== ''
+          && typeof run['byclawMessageId'] === 'string' && run['byclawMessageId'] !== '')))
 }
 
 function isTaskFailure(value: unknown): boolean {

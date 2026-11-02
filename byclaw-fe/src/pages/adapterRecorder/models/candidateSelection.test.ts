@@ -1,3 +1,9 @@
+jest.mock('@umijs/max', () => ({
+  useSelector: () => null,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
+
 import { selectCandidateData } from './candidateSelection';
 import type { InitResult, RankCandidate } from '../types/recorder';
 

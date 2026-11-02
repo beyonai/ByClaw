@@ -1,3 +1,4 @@
+import { useIntl } from '@umijs/max';
 /* eslint-disable lines-around-comment */
 // Step 3 · 采集 A/B 样本 —— 「开始 / 结束」两步录制。
 // 点「开始 X 录制」才新建 byCLI 标签页(A=页面 a / B=页面 b)+ 导航打开目标 URL + capture/start 开窗;
@@ -46,13 +47,14 @@ function SampleColumn({
   onStart,
   onStop,
 }: ColumnProps) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const done = !!sample;
   const pageName = name.toLowerCase(); // 页面 a / 页面 b
 
   const entryColumns: ColumnsType<NetworkEntry> = [
     {
-      title: '方法',
+      title: intl.formatMessage({ id: 'adapterRecorder.request.method' }),
       dataIndex: 'method',
       width: 60,
       render: (m, r) =>
@@ -86,7 +88,7 @@ function SampleColumn({
       },
     },
     {
-      title: '状态',
+      title: intl.formatMessage({ id: 'settings.params.status' }),
       width: 64,
       // 兼容嵌套(canonical)与扁平(原始扩展)两种响应状态形状。
       render: (_, r) => {
@@ -100,13 +102,14 @@ function SampleColumn({
       },
     },
     {
-      title: '耗时',
+      title: intl.formatMessage({ id: 'projectSpace.detail.runBoard.col.duration' }),
       dataIndex: ['timing', 'durationMs'],
       width: 76,
       render: (d: number, r) =>
         r.kind === 'cdp-websocket' ? (
           <Text className="code" type="secondary">
-            {r.webSocketFrames?.length ?? 0} 帧
+            {r.webSocketFrames?.length ?? 0}
+            {intl.formatMessage({ id: 'adapterRecorder.trace.frames' })}
           </Text>
         ) : (
           <Text className="code" type="secondary">
@@ -121,24 +124,27 @@ function SampleColumn({
   const httpCount = done ? sample!.entries.length - wsCount : 0;
   const statusTag = done ? (
     <Tag icon={<CheckCircleFilled />} color="success">
-      已完成 · {httpCount} 个接口{wsCount ? ` · ${wsCount} 个 WS` : ''}
+      {intl.formatMessage({ id: 'adapterRecorder.capture.completedPrefix' })}
+      {httpCount}
+      {intl.formatMessage({ id: 'adapterRecorder.capture.apiCount' })}
+      {wsCount ? intl.formatMessage({ id: 'adapterRecorder.capture.websocketCount' }, { v0: wsCount }) : ''}
     </Tag>
   ) : recording ? (
     <Tag icon={<VideoCameraOutlined />} color="processing">
-      录制中
+      {intl.formatMessage({ id: 'adapterRecorder.capture.recording' })}
     </Tag>
   ) : (
-    <Tag color="default">待录制</Tag>
+    <Tag color="default">{intl.formatMessage({ id: 'adapterRecorder.capture.pending' })}</Tag>
   );
   const seedInput = (
     <Input
       size="small"
       value={seed}
       onChange={(e) => onSeedChange(e.target.value)}
-      placeholder="本次搜索的关键词(用于评分识别;A/B 填不同词更准,如 A=apple、B=banana)"
+      placeholder={intl.formatMessage({ id: 'adapterRecorder.capture.keywordHint' })}
       prefix={
         <Text type="secondary" style={{ fontSize: 12 }}>
-          关键词
+          {intl.formatMessage({ id: 'projectSpace.detail.source.field.keyword' })}
         </Text>
       }
       allowClear
@@ -153,8 +159,11 @@ function SampleColumn({
     done && actions.length ? (
       <div style={{ marginBottom: 10 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          用户操作 · {actions.length}
-          {sample?.actionsDropped ? ` (+${sample.actionsDropped} 溢出)` : ''}
+          {intl.formatMessage({ id: 'adapterRecorder.capture.actions' })}
+          {actions.length}
+          {sample?.actionsDropped
+            ? intl.formatMessage({ id: 'adapterRecorder.capture.overflow' }, { v0: sample.actionsDropped })
+            : ''}
         </Text>
         <div
           style={{
@@ -204,19 +213,24 @@ function SampleColumn({
                   return (
                     <Text key={i} className="code" style={{ fontSize: 11 }} ellipsis={{ tooltip: f.payloadPreview }}>
                       <Text type={f.direction === 'sent' ? 'warning' : 'success'}>
-                        {f.direction === 'sent' ? '▲ 发送' : '▼ 接收'}
+                        {f.direction === 'sent'
+                          ? intl.formatMessage({ id: 'adapterRecorder.capture.sent' })
+                          : intl.formatMessage({ id: 'adapterRecorder.capture.received' })}
                       </Text>{' '}
                       <Tag color={binary ? 'geekblue' : 'default'} style={{ marginInlineEnd: 4 }}>
                         {binary ? 'binary' : 'text'}
                       </Tag>
                       {f.payloadPreview}
-                      {f.payloadTruncated ? <Text type="secondary"> …(截断)</Text> : null}
+                      {f.payloadTruncated ? (
+                        <Text type="secondary">{intl.formatMessage({ id: 'adapterRecorder.capture.truncated' })}</Text>
+                      ) : null}
                     </Text>
                   );
                 })}
                 {r.webSocketFramesDropped ? (
                   <Text type="secondary" style={{ fontSize: 11 }}>
-                    +{r.webSocketFramesDropped} 帧溢出丢弃
+                    +{r.webSocketFramesDropped}
+                    {intl.formatMessage({ id: 'adapterRecorder.capture.droppedFrames' })}
                   </Text>
                 ) : null}
               </div>
@@ -242,14 +256,25 @@ function SampleColumn({
       <div style={{ padding: '24px 8px', textAlign: 'center' }}>
         <LoadingOutlined style={{ fontSize: 24, color: token.colorPrimary }} />
         <Paragraph type="secondary" style={{ margin: '12px 0 0' }}>
-          正在打开页面 {pageName}…
+          {intl.formatMessage({ id: 'adapterRecorder.capture.opening' })}
+          {pageName}…
         </Paragraph>
       </div>
     );
   } else if (locked) {
-    body = <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先完成 A 录制" />;
+    body = (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={intl.formatMessage({ id: 'adapterRecorder.capture.finishA' })}
+      />
+    );
   } else {
-    body = <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`尚未录制,点下方「开始 ${name} 录制」`} />;
+    body = (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={intl.formatMessage({ id: 'adapterRecorder.capture.notStarted' }, { v0: name })}
+      />
+    );
   }
 
   // 底部按钮:已完成(禁用) / 结束录制(danger) / 开始录制(primary)
@@ -257,19 +282,19 @@ function SampleColumn({
   if (done) {
     footer = (
       <Button block disabled icon={<CheckCircleFilled />}>
-        样本 {name} 已完成
+        {intl.formatMessage({ id: 'adapterRecorder.capture.sampleCompleted' }, { name })}
       </Button>
     );
   } else if (recording) {
     footer = (
       <Button block danger type="primary" loading={busy} onClick={onStop}>
-        结束 {name} 录制
+        {intl.formatMessage({ id: 'adapterRecorder.capture.stopSample' }, { name })}
       </Button>
     );
   } else {
     footer = (
       <Button block type="primary" icon={<VideoCameraOutlined />} loading={busy} disabled={!canStart} onClick={onStart}>
-        开始 {name} 录制
+        {intl.formatMessage({ id: 'adapterRecorder.capture.startSample' }, { name })}
       </Button>
     );
   }
@@ -282,14 +307,20 @@ function SampleColumn({
         recording ? (
           <div className={styles.recordingHeader}>
             <Space className={styles.recordingHeaderMeta}>
-              <span>样本 {name}</span>
+              <span>
+                {intl.formatMessage({ id: 'adapterRecorder.trace.sample' })}
+                {name}
+              </span>
               {statusTag}
             </Space>
             <div className={styles.recordingSeed}>{seedInput}</div>
           </div>
         ) : (
           <Space>
-            <span>样本 {name}</span>
+            <span>
+              {intl.formatMessage({ id: 'adapterRecorder.trace.sample' })}
+              {name}
+            </span>
             {statusTag}
           </Space>
         )
@@ -346,6 +377,7 @@ export default function CaptureStep({
   onStartB,
   onStopB,
 }: Props) {
+  const intl = useIntl();
   const { token } = theme.useToken();
   const rec = recording ?? null;
 
@@ -397,7 +429,9 @@ export default function CaptureStep({
       {/* 单行紧凑头:阶段说明 + 目标 URL(去掉外层重复 Card 标题 + 大段说明 + 独立 URL 块)。 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <Text type="secondary" style={{ fontSize: 13 }}>
-          {phase === 'A' ? '录制第一段操作(开始→操作→结束冻结)' : '录制第二段操作(换不同关键词,便于 diff 识别动态参数)'}
+          {phase === 'A'
+            ? intl.formatMessage({ id: 'adapterRecorder.capture.firstTitle' })
+            : intl.formatMessage({ id: 'adapterRecorder.capture.secondTitle' })}
         </Text>
         {targetUrl && (
           <>

@@ -2,6 +2,9 @@
     - id: byclaw-browser-use
       name: '@byclaw/dsh-browser-use'
       config:
+        workspaceOnToolEnvironment: !!js "process.env.BYCLAW_BROWSER_ON_TOOL_ENV === '1'"
+        viewer: !!js "process.env.BYCLAW_BROWSER_ON_TOOL_ENV === '1' ? (process.env.BYCLAW_TOOL_BROWSER_VIEWER || 'none') : undefined"
+        viewerPort: !!js "process.env.BYCLAW_BROWSER_ON_TOOL_ENV === '1' ? Number(process.env.BYCLAW_TOOL_BROWSER_VIEWER_PORT || 8082) : undefined"
         maxContexts: 4
         maxQueue: 32
         idleBrowserMs: 30000

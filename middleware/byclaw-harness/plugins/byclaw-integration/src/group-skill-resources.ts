@@ -5,15 +5,20 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { canonicalRuntimePath, isPathWithin } from '@byclaw/dsh-agent-teams'
 
-export function memberSkillProjectionRoot(): string {
-  const home = process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh')
+/** The DSH home this context runs under: explicit config, else `DSH_HOME`, else `~/.dsh`. */
+export function resolveByClawDshHome(configured?: string): string {
+  return configured?.trim() || process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh')
+}
+
+export function memberSkillProjectionRoot(dshHome?: string): string {
+  const home = resolveByClawDshHome(dshHome)
   return canonicalRuntimePath(join(dirname(resolve(home)), '.byclaw-member-skills'))
 }
 
-export function memberSkillRoot(agentId: string): string {
-  const home = process.env['DSH_HOME']?.trim() || join(homedir(), '.dsh')
+export function memberSkillRoot(agentId: string, dshHome?: string): string {
+  const home = resolveByClawDshHome(dshHome)
   const identity = createHash('sha256').update(JSON.stringify([canonicalRuntimePath(home), agentId])).digest('hex')
-  return join(memberSkillProjectionRoot(), identity)
+  return join(memberSkillProjectionRoot(home), identity)
 }
 
 interface ResourceDefinition { name: string; path?: string; resourceBase?: { kind: 'directory'; path: string } }
@@ -21,8 +26,8 @@ const projections = new Map<string, Promise<string>>()
 const activeRoots = new Map<string, string[]>()
 
 /** Future tool calls see only the current effective view; old copies carry no authority. */
-export function setActiveMemberSkillRoots(agentId: string, roots: readonly string[]): void {
-  const own = memberSkillRoot(agentId)
+export function setActiveMemberSkillRoots(agentId: string, roots: readonly string[], dshHome?: string): void {
+  const own = memberSkillRoot(agentId, dshHome)
   const canonical = roots.map(canonicalRuntimePath)
   if (canonical.some(root => root === own || !isPathWithin(root, own))) throw new Error('Member Skill view must be contained in its own version directory')
   activeRoots.set(agentId, [...new Set(canonical)])
@@ -39,7 +44,7 @@ async function ownerOnlyTree(root: string): Promise<void> {
 }
 
 /** Copy only an effective Skill directory. No employee/catalog metadata or escaping symlink is copied. */
-export async function projectMemberSkill<T extends ResourceDefinition>(agentId: string, definition: T, revision: string): Promise<T> {
+export async function projectMemberSkill<T extends ResourceDefinition>(agentId: string, definition: T, revision: string, dshHome?: string): Promise<T> {
   const source = definition.resourceBase?.path
   if (source === undefined) return structuredClone(definition)
   const cacheMetadata = await readFile(join(source, '.byclaw-hub-skill.json'), 'utf8').catch((error: NodeJS.ErrnoException) => {
@@ -47,7 +52,7 @@ export async function projectMemberSkill<T extends ResourceDefinition>(agentId: 
     return ''
   })
   const version = createHash('sha256').update(JSON.stringify([definition.name, source, revision, cacheMetadata])).digest('hex')
-  const target = join(memberSkillRoot(agentId), version)
+  const target = join(memberSkillRoot(agentId, dshHome), version)
   let projection = projections.get(target)
   if (projection === undefined) {
     projection = (async () => {

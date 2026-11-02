@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.mapper.datasource;
 
+import com.iwhalecloud.byai.common.lock.RedisTransactionLock;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.datasource.Datasource;
 import org.apache.ibatis.annotations.Mapper;
@@ -12,8 +13,9 @@ import com.iwhalecloud.byai.manager.dto.datasource.SessionResourceQueryDto;
 
 @Mapper
 public interface DataSourceMapper extends BaseMapper<Datasource> {
-    // 普通 UPDATE 获取事务写锁，避免不同数据库的 SELECT 锁定语法差异。
-    @Update("UPDATE byai_datasource SET datasource_id = datasource_id WHERE datasource_id = #{id}")
+    // Redis 锁覆盖事务；查询只确认记录是否存在。
+    @Select("SELECT count(*) FROM byai_datasource WHERE datasource_id = #{id}")
+    @RedisTransactionLock(value = "datasource", parameters = {"id"})
     int lockRow(@Param("id") Long id);
 
     default Datasource lockById(Long id) {

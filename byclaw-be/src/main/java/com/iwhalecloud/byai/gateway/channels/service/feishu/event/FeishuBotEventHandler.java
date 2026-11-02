@@ -59,9 +59,9 @@ public class FeishuBotEventHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(FeishuBotEventHandler.class);
     private static final String MESSAGE_RECEIVE_EVENT = "im.message.receive_v1";
-    private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
-    private static final String UNSUPPORTED_MESSAGE_REPLY = "暂不支持该类型消息";
-    private static final String THINKING_REPLY = "正在思考...";
+    private static final String DEFAULT_FALLBACK_REPLY_KEY = "channel.error.retry";
+    private static final String UNSUPPORTED_MESSAGE_REPLY_KEY = "channel.message.unsupported";
+    private static final String THINKING_REPLY_KEY = "channel.message.thinking";
     private static final String MESSAGE_DEDUP_KEY_PREFIX = "feishu:event:msg:";
     private static final long MESSAGE_DEDUP_TTL_SECONDS = 30 * 60L;
 
@@ -139,7 +139,7 @@ public class FeishuBotEventHandler {
         }
 
         if (!isSupportedMessageType(message.getMessageType())) {
-            replyTextQuietly(message, UNSUPPORTED_MESSAGE_REPLY);
+            replyTextQuietly(message, I18nUtil.get(UNSUPPORTED_MESSAGE_REPLY_KEY));
             return;
         }
 
@@ -161,7 +161,7 @@ public class FeishuBotEventHandler {
 
             AuthDigitEmployVo digitEmployVo = findAuthorizedDigitEmploy(userInfo.getUserId(), message.getAppId());
             if (digitEmployVo == null) {
-                replyText(message, "对不起，您可能没有数字员工的权限");
+                replyText(message, I18nUtil.get("channel.employee.accessDenied"));
                 return;
             }
 
@@ -171,7 +171,7 @@ public class FeishuBotEventHandler {
         } catch (Exception e) {
             logger.error("Failed to reply Feishu bot message. eventId={}, messageId={}, appId={}",
                     message.getEventId(), message.getMessageId(), message.getAppId(), e);
-            replyTextQuietly(message, "消息异常：" + e.getMessage());
+            replyTextQuietly(message, I18nUtil.get("channel.message.failed", e.getMessage()));
         } finally {
             CurrentUserHolder.clearLoginInfo();
         }
@@ -271,7 +271,7 @@ public class FeishuBotEventHandler {
             throw new BdpRuntimeException(I18nUtil.get("assistant.chat.request.invalid"));
         }
         if (!StringUtils.hasText(message.getAppId())) {
-            replyText(message, "飞书应用 appId 未配置，暂无法回复。");
+            replyText(message, I18nUtil.get("channel.feishu.appIdMissing"));
             return;
         }
 
@@ -281,7 +281,7 @@ public class FeishuBotEventHandler {
                 tenantAccessToken,
                 message.getMessageId(),
                 cardTitle,
-                THINKING_REPLY
+                I18nUtil.get(THINKING_REPLY_KEY)
         );
         FeishuBufferedOutputStream outputStream = StringUtils.hasText(streamMessageId)
                 ? new FeishuStreamingOutputStream(
@@ -301,12 +301,12 @@ public class FeishuBotEventHandler {
         if (outputStream instanceof FeishuStreamingOutputStream streamingOutputStream) {
             streamingOutputStream.finish();
             if (streamingOutputStream.hasUpdateFailed()) {
-                replyText(message, StringUtils.hasText(replyContent) ? replyContent : DEFAULT_FALLBACK_REPLY);
+                replyText(message, StringUtils.hasText(replyContent) ? replyContent : I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY));
             }
             return;
         }
 
-        replyText(message, StringUtils.hasText(replyContent) ? replyContent : DEFAULT_FALLBACK_REPLY);
+        replyText(message, StringUtils.hasText(replyContent) ? replyContent : I18nUtil.get(DEFAULT_FALLBACK_REPLY_KEY));
     }
 
     private boolean isStreamEnabled() {

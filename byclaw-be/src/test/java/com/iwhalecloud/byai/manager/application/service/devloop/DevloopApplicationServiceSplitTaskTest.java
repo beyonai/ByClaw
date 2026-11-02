@@ -55,7 +55,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
  */
 @ExtendWith(MockitoExtension.class)
 @DisabledOnOs(OS.WINDOWS)
-class DevloopApplicationServiceSplitTaskTest {
+class DevloopApplicationServiceSplitTaskTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Mock
     private ScanRequireItemMapper scanRequireItemMapper;

@@ -29,7 +29,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.RedisAuthoriz
 
 import java.util.Optional;
 
-class ConnectorAuthServiceTest {
+class ConnectorAuthServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ConnectorAuthMapper connectorAuthMapper;
     private ConnectorInfoMapper connectorInfoMapper;

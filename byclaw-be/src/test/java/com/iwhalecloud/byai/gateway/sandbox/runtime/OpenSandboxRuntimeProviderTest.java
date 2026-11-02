@@ -15,6 +15,25 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient.OpenSandbox
 class OpenSandboxRuntimeProviderTest {
 
     @Test
+    void persistedCorrelationSurvivesProviderRuntimeMetadata() {
+        var client = mock(OpenSandboxClient.class);
+        var provider = new OpenSandboxRuntimeProvider(client);
+        var request = com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest.builder()
+            .metadata(Map.of("providerRequestKey", "command-41:NODE_CREATE", "ownerScope", "TENANT"))
+            .build();
+        var response = new com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxResponse();
+        response.setId("sandbox-41");
+        when(client.createSandbox(request, "existing-idempotency-key")).thenReturn(response);
+        provider.create(request, new com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec(),
+            "tenant-node-12", "tenant-data-node", "existing-idempotency-key");
+        var sent = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest.class);
+        verify(client).createSandbox(sent.capture(), org.mockito.ArgumentMatchers.eq("existing-idempotency-key"));
+        org.assertj.core.api.Assertions.assertThat(sent.getValue().getMetadata())
+            .containsEntry("providerRequestKey", "command-41:NODE_CREATE")
+            .containsEntry("ownerScope", "TENANT");
+    }
+
+    @Test
     void listSandboxesByMetadataPropagatesStrictListFailure() {
         OpenSandboxClient openSandboxClient = mock(OpenSandboxClient.class);
         OpenSandboxRuntimeProvider provider = new OpenSandboxRuntimeProvider(openSandboxClient);

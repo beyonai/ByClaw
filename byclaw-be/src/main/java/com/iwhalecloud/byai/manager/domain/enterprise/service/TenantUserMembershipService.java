@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.manager.domain.enterprise.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.quota.SharedQuotaAdmission;
+import org.springframework.transaction.annotation.Transactional;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipStatus;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
@@ -30,6 +32,9 @@ public class TenantUserMembershipService {
     @Autowired
     private SequenceService sequenceService;
 
+    @Autowired
+    private SharedQuotaAdmission quotaAdmission;
+
     /**
      * 新增有效成员关系；同一企业下用户已存在有效关系则直接返回。
      *
@@ -39,6 +44,7 @@ public class TenantUserMembershipService {
      * @param createdBy 操作人
      * @return 成员关系
      */
+    @Transactional(rollbackFor = Exception.class)
     public TenantUserMembership add(Long userId, Long enterpriseId, String role, Long createdBy) {
         if (userId == null || enterpriseId == null || createdBy == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
@@ -49,10 +55,19 @@ public class TenantUserMembershipService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 "role must be OWNER, ADMIN or MEMBER");
         }
-        TenantUserMembership existing = findActiveByUserIdAndEnterpriseId(userId, enterpriseId);
+        var quota = quotaAdmission.beginEnterprise(enterpriseId);
+        // Read after the database guard so a concurrent admission cannot consume the same seat.
+        TenantUserMembership existing = tenantUserMembershipMapper.selectOne(new LambdaQueryWrapper<TenantUserMembership>()
+            .eq(TenantUserMembership::getUserId, userId)
+            .eq(TenantUserMembership::getEnterpriseId, enterpriseId).last("LIMIT 1"));
         if (existing != null) {
+            if (!TenantUserMembershipStatus.ACTIVE.equals(existing.getStatus())) {
+                // Group invitations must not reactivate a membership disabled by an administrator.
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "tenant.member.disabled");
+            }
             return existing;
         }
+        quotaAdmission.checkMembers(quota, 1);
         Date now = new Date();
         TenantUserMembership membership = new TenantUserMembership();
         membership.setMembershipId(sequenceService.nextVal());

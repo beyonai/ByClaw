@@ -8,6 +8,7 @@ export interface AgentTeamsMember {
   id: string;
   byclawSessionId?: string;
   name: string;
+  employeeId?: string;
   role?: string;
   status?: string;
   activity?: 'working' | 'idle' | 'unknown';

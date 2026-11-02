@@ -10,7 +10,16 @@ import { pathToFileURL } from 'node:url';
 
 const SCHEMA_VERSION = '1.0';
 const MAX_CONFIRMED_RERUNS = 10;
-const CHANNELS_COMMANDS = new Set(['overview', 'trend', 'sources', 'posts', 'post-detail']);
+export const CHANNELS_COMMAND_ACCESS = Object.freeze({
+  overview: 'read',
+  trend: 'read',
+  sources: 'read',
+  posts: 'read',
+  'post-detail': 'read',
+  'video-stats': 'read',
+  'video-status': 'read',
+  'video-publish': 'write',
+});
 const EXCLUDED_OPTIONS = new Map([
   ['--output', true],
   ['--adapter-session', true],
@@ -39,6 +48,9 @@ const LEGACY_TYPED_ERROR_CODES = [
   'ARGUMENT',
   'EMPTY_RESULT',
   'COMMAND_EXEC',
+  'COVER_NOT_READY',
+  'UPLOAD_NOT_STARTED',
+  'UPLOAD_RESULT_UNKNOWN',
   'AUTH_REQUIRED',
   'TIMEOUT',
   'CAPTCHA',
@@ -80,7 +92,7 @@ function canonicalCommand(argv) {
     || !['weixin', 'weixin-channels'].includes(argv[1])) {
     throw new Error('gate command must begin with: bycli weixin <command>');
   }
-  if (argv[1] === 'weixin-channels' && !CHANNELS_COMMANDS.has(argv[2])) {
+  if (argv[1] === 'weixin-channels' && !Object.hasOwn(CHANNELS_COMMAND_ACCESS, argv[2])) {
     throw new Error('unsupported weixin-channels command');
   }
   const canonical = ['bycli', argv[1], String(argv[2])];
@@ -120,7 +132,13 @@ function parseJson(value) {
 }
 
 function structuredErrorCode(value) {
-  const parsed = parseJson(value);
+  // The CLI writes progress to stderr before its final JSON error. Classify
+  // only a complete trailing error document, never words inside progress logs.
+  let parsed = parseJson(value);
+  if (!parsed && typeof value === 'string') {
+    const start = value.lastIndexOf('\n{');
+    if (start >= 0) parsed = parseJson(value.slice(start + 1));
+  }
   const code = parsed?.error?.code;
   return typeof code === 'string' && code.trim() ? code.trim().toUpperCase() : null;
 }
@@ -291,7 +309,15 @@ export async function runGate({
   const lockPath = join(stateDir, `${fingerprint}.lock`);
   await mkdir(lockPath, { mode: 0o700 });
   try {
-    const state = await readState(statePath);
+    let state = await readState(statePath);
+    // Channels' operation journal owns upload/save/submit idempotency. This
+    // gate owns authentication only; an explicit invocation may inspect or
+    // recover after success, argument errors, stale pages or unknown results.
+    if (site === 'weixin-channels' && ['complete', 'terminal'].includes(state?.phase)
+      && !HUMAN_GATE_CODES.has(state.lastCode)
+      && state.lastCode !== 'INTERRUPTED_AFTER_RERUN_CONSUMPTION') {
+      state = { ...state, phase: 'initial' };
+    }
     const consumedReruns = confirmedRerunCount(state);
     if (state?.phase === 'terminal') {
       const terminalAuthCode = HUMAN_GATE_CODES.has(state.lastCode)

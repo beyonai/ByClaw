@@ -74,6 +74,39 @@ class AIServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void instanceIdUsesItsOwnEndpointAndProviderModelCodeInsteadOfTheDisplayName() {
+        RequestFixture fixture = fixture("OpenAI", "shared-provider-code");
+        AiModelService models = org.mockito.Mockito.mock(AiModelService.class);
+        org.mockito.Mockito.when(models.getModel("selected-id")).thenReturn(fixture.model());
+        ReflectionTestUtils.setField(fixture.service(), "aiModelService", models);
+        fixture.server().expect(requestTo("https://model.example/chat/completions"))
+            .andExpect(content().json("{\"model\":\"shared-provider-code\"}", false))
+            .andRespond(withSuccess("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}", MediaType.APPLICATION_JSON));
+
+        assertThat(fixture.service().generateText("system", "user", "Display name", "selected-id", 100))
+            .isEqualTo("ok");
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getModelList();
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getDefaultChatModel();
+        fixture.server().verify();
+    }
+
+    @Test
+    void unavailableInstanceIdDoesNotFallBackToAModelWithTheSameCode() {
+        AIService service = new AIService();
+        AiModelService models = org.mockito.Mockito.mock(AiModelService.class);
+        ReflectionTestUtils.setField(service, "aiModelService", models);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.generateText("system", "user", "shared-code", "missing-id", 100))
+            .isInstanceOf(AIService.ModelSelectionException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.generateTextStream("system", "user", "shared-code", "missing-id", 100, chunk -> {}))
+            .isInstanceOf(AIService.ModelSelectionException.class);
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getModelList();
+        org.mockito.Mockito.verify(models, org.mockito.Mockito.never()).getDefaultChatModel();
+    }
+
+    @Test
     void deepSeekJsonRequestsUseNativeThinkingSwitchAndIgnoreReasoningContent() {
         RequestFixture fixture = fixture("DeepSeek", "deepseek-v4");
         fixture.server().expect(requestTo("https://model.example/chat/completions"))

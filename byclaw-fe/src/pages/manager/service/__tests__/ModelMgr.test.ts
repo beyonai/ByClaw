@@ -131,7 +131,7 @@ describe('manager/service/ModelMgr', () => {
     expect((mockPOST.mock.calls[0][2] as any).cancelToken.signal.aborted).toBe(true);
   });
 
-  it('debugModelStream sends signed fetch request and returns json for non-stream response', async () => {
+  it('debugModelStream sends a signed request and rejects a non-stream response without model output', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       headers: {
@@ -141,7 +141,7 @@ describe('manager/service/ModelMgr', () => {
     });
 
     const payload = { modelCode: 'gpt-4o', signal: 'signal' as any };
-    await expect(debugModelStream(payload)).resolves.toEqual({ code: 0, data: { success: true } });
+    await expect(debugModelStream(payload)).rejects.toThrow();
 
     expect(global.fetch).toHaveBeenCalledWith('/byaiService/new/model/debugModelStream', {
       method: 'POST',
@@ -268,6 +268,9 @@ describe('manager/service/ModelMgr', () => {
   it.each([
     { type: 'response.failed', response: { error: { message: 'upstream failed' } } },
     { type: 'error', message: 'upstream failed' },
+    { code: -1, data: null, msg: 'upstream failed', success: false },
+    { success: false, msg: 'upstream failed' },
+    { error: { message: 'upstream failed' } },
   ])('rejects an upstream stream error instead of reporting empty success: $type', async (event) => {
     const encoder = new TextEncoder();
     (global.fetch as jest.Mock).mockResolvedValue({
@@ -283,6 +286,61 @@ describe('manager/service/ModelMgr', () => {
       },
     });
     await expect(debugModelStream({})).rejects.toThrow('upstream failed');
+  });
+
+  it.each([debugModelStream, debugPersonalModelStream])(
+    'rejects the HTTP 200 business error envelope',
+    async (debug) => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ code: -1, data: null, msg: 'upstream failed', success: false }),
+      });
+      await expect(debug({ id: '42' })).rejects.toThrow('upstream failed');
+    }
+  );
+
+  it.each([
+    '',
+    'data: upstream failed\n\n',
+    'data: {\ndata: "code": -1,\ndata: "success": false\ndata: }\n\n',
+    'data: [DONE]\n\n',
+    'event: error\ndata: {"message":"upstream failed"}\n\n',
+    'data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"code":-1,"success":false}\n\n',
+  ])('rejects empty and failed streams and releases their reader: %s', async (data) => {
+    const reader = {
+      read: jest
+        .fn()
+        .mockResolvedValueOnce({ value: new TextEncoder().encode(data), done: false })
+        .mockResolvedValue({ done: true }),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: { getReader: () => reader },
+    });
+    await expect(debugPersonalModelStream({ id: '42' })).rejects.toThrow();
+    expect(reader.cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
+  it('parses a valid JSON event split across multiple SSE data lines', async () => {
+    const data = 'data: {\ndata: "choices": [{"delta":{"content":"OK"}}]\ndata: }\n\ndata: [DONE]\n\n';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: new TextEncoder().encode(data), done: false })
+            .mockResolvedValue({ done: true }),
+        }),
+      },
+    });
+    await expect(debugModelStream({})).resolves.toMatchObject({ data: { output: 'OK', success: true } });
   });
 
   it('debugModelStream parses Anthropic content_block_delta events', async () => {
@@ -357,7 +415,7 @@ describe('manager/service/ModelMgr', () => {
     expect(onDelta).toHaveBeenNthCalledWith(2, 'B');
   });
 
-  it('debugModelStream falls back to success payload when stream reader is missing', async () => {
+  it('debugModelStream rejects an unreadable stream instead of returning empty success', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       headers: {
@@ -366,13 +424,7 @@ describe('manager/service/ModelMgr', () => {
       body: {},
     });
 
-    await expect(debugModelStream({})).resolves.toEqual({
-      code: 0,
-      data: {
-        output: '',
-        success: true,
-      },
-    });
+    await expect(debugModelStream({})).rejects.toThrow();
   });
 });
 

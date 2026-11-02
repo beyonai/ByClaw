@@ -33,7 +33,7 @@ async function setup(cfg: Record<string, unknown> = {}) {
 
 /** Actually execute a command end to end and collect what the caller would see. */
 async function run(bash: ForwardingSandboxBashExecutor, command: string) {
-  const result = await bash.run(bash.resolve({ command, workdir }))
+  const result = await (await bash.execute(bash.resolve({ command, workdir }))).result()
   return {
     exitCode: result.exitCode,
     stdout: result.stdout.text.trim(),

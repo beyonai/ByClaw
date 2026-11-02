@@ -14,6 +14,10 @@ import {
 } from '../src/client/DiffViewer.tsx'
 import { callTimeDiffs, diffCardModel } from '../src/client/diffcard-contract.ts'
 import { defaultOpenFor, MutationRow } from '../src/client/mutation-row.tsx'
+import type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-chat/client'
+
+/** DSH 0.2 argument view stand-in; these fixtures read only the frozen raw arguments. */
+const ARGS = {} as ToolCallBlock['args']
 
 afterEach(cleanup)
 
@@ -715,10 +719,10 @@ describe('diffCardModel', () => {
   // Frozen call slices in the two lifecycle forms, shaped like the
   // conversation projection hands them to the toolview owner.
   const running = (name: string, argsRaw: string) => ({
-    callId: 'c1', name, argsRaw, turn: 1, step: 1, time: 0, subCalls: [],
+    callId: 'c1', name, phase: 'start' as const, args: ARGS, argsRaw, turn: 1, step: 1, time: 0, subCalls: [],
   })
   const settled = (name: string, argsRaw: string, opts: { isError?: boolean; meta?: unknown } = {}) => ({
-    kind: 'tool-result', seq: 1, time: 0, callId: 'c1',
+    kind: 'tool-result' as const, seq: 1, time: 0, callId: 'c1', name, args: ARGS,
     call: { name, argsRaw }, callTime: 0, content: [],
     isError: opts.isError ?? false, meta: opts.meta, subCalls: [],
   })
@@ -728,6 +732,11 @@ describe('diffCardModel', () => {
       file_path: 'a.ts', old_string: 'x', new_string: 'y',
     })) as Parameters<typeof diffCardModel>[0])
     expect(model).toEqual({ card: { diffs: [{ path: 'a.ts', oldText: 'x', newText: 'y' }] } })
+  })
+
+  it('renders no card while a call is still preparing its arguments', () => {
+    const preparing = { callId: 'c1', name: 'edit', phase: 'preparing' as const, args: ARGS, turn: 1, step: 1, time: 0, subCalls: [] }
+    expect(diffCardModel(preparing)).toBeNull()
   })
 
   it('derives the call-time diff from args for a running code-dispatch child', () => {
@@ -784,9 +793,9 @@ describe('diffCardModel', () => {
 })
 
 describe('defaultOpenFor', () => {
-  const running = (name: string) => ({ callId: 'c1', name, argsRaw: '{}', turn: 1, step: 1, time: 0, callView: null, subCalls: [] })
+  const running = (name: string) => ({ callId: 'c1', name, phase: 'start' as const, args: ARGS, argsRaw: '{}', turn: 1, step: 1, time: 0, callView: null, subCalls: [] })
   const settled = (name: string, isError = false) => ({
-    kind: 'tool-result', seq: 1, time: 0, callId: 'c1',
+    kind: 'tool-result' as const, seq: 1, time: 0, callId: 'c1', name, args: ARGS,
     call: { name, argsRaw: '{}' }, callTime: 0, content: [],
     isError, callView: null, resultView: null, subCalls: [],
   })
@@ -806,12 +815,12 @@ describe('defaultOpenFor', () => {
 describe('MutationRow default-open lifecycle', () => {
   it('expands once when a running edit row settles', () => {
     const runningBlock = {
-      callId: 'c1', name: 'edit',
+      callId: 'c1', name: 'edit', phase: 'start' as const, args: ARGS,
       argsRaw: JSON.stringify({ file_path: 'a.ts', old_string: 'x', new_string: 'y' }),
       turn: 1, step: 1, time: 0, callView: null, subCalls: [],
     }
     const settledBlock = {
-      kind: 'tool-result', seq: 1, time: 0, callId: 'c1',
+      kind: 'tool-result', seq: 1, time: 0, callId: 'c1', name: 'edit', args: ARGS,
       call: { name: 'edit', argsRaw: runningBlock.argsRaw }, callTime: 0, content: [],
       isError: false, callView: null, resultView: null, subCalls: [],
     }
@@ -830,7 +839,7 @@ describe('MutationRow default-open lifecycle', () => {
 
   it('stays collapsed when a settled write row mounts', () => {
     const block = {
-      kind: 'tool-result', seq: 1, time: 0, callId: 'c1',
+      kind: 'tool-result', seq: 1, time: 0, callId: 'c1', name: 'write', args: ARGS,
       call: { name: 'write', argsRaw: JSON.stringify({ file_path: 'b.ts', content: 'z' }) },
       callTime: 0, content: [], isError: false, callView: null, resultView: null, subCalls: [],
     }

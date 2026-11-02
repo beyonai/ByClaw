@@ -69,6 +69,12 @@ public class TransactionAdviceConfig {
         RuleBasedTransactionAttribute notSurpportedTx = new RuleBasedTransactionAttribute();
         notSurpportedTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
 
+        // The JSON facade schedules Redis in the business transaction and delegates file I/O to NOT_SUPPORTED.
+        RuleBasedTransactionAttribute resourceJsonFacadeTx = new RuleBasedTransactionAttribute();
+        resourceJsonFacadeTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_SUPPORTS);
+        resourceJsonFacadeTx.setRollbackRules(Collections.singletonList(
+            new org.springframework.transaction.interceptor.NoRollbackRuleAttribute(Throwable.class)));
+
         Map<String, TransactionAttribute> txMap = new LinkedHashMap<String, TransactionAttribute>(10);
         // select,count开头的方法,开启只读,提高数据库访问性能
         txMap.put("select*", readOnlyTx);
@@ -129,6 +135,29 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Tenant coordinators explicitly commit reservation/intent before remote work and recover duplicate receipts after rollback.
+                if (targetClass != null) {
+                    String owner = ClassUtils.getUserClass(targetClass).getName();
+                    if ("com.iwhalecloud.byai.manager.domain.tenant.integration.TenantCommandService".equals(owner)
+                        || "com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService".equals(owner)
+                        || ("com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService".equals(owner)
+                            && "provisionDurably".equals(method.getName()))) {
+                        return notSurpportedTx;
+                    }
+                }
+                // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
+                if (targetClass != null && java.util.Set.of(
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardRecoveryService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardQueryService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardExecutionContextService",
+                    "com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.forward.attachment.GroupChatForwardAttachmentService")
+                    .contains(ClassUtils.getUserClass(targetClass).getName())) return notSurpportedTx;
+                // Each downstream I/O service can start REQUIRED independently of the suspended coordinator.
+                // Keep exclusions on the exact owning methods so final publication and unrelated writes remain atomic.
+                if (isForwardIoMethod(method, targetClass)) return notSurpportedTx;
+
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.state.application.service.chat.ChatFileArtifactApplicationService")
                     && "resolve".equals(method.getName())) {
@@ -138,10 +167,23 @@ public class TransactionAdviceConfig {
                 }
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService")
-                    && "openCommonFileInputStream".equals(method.getName())) {
-                    // Legacy paths may fail before the UserFS fallback succeeds. Suspend the caller's
-                    // database transaction so a recovered storage miss cannot mark a chat rollback-only.
+                    && ("openCommonFileInputStream".equals(method.getName()) || "preview".equals(method.getName()))) {
+                    // File preview and legacy paths may fail before the UserFS fallback succeeds. Suspend the
+                    // caller's database transaction so storage I/O cannot mark it rollback-only.
                     return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.domain.resource.service.ResourceJsonCacheService")) {
+                    return resourceJsonFacadeTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.runner.InitResourceJsonCacheRunner")) {
+                    return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService")
+                    && "publishResourceJson".equals(method.getName())) {
+                    return resourceJsonFacadeTx;
                 }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
@@ -152,6 +194,12 @@ public class TransactionAdviceConfig {
                 // 外层不得再包裹 REQUIRED 事务，否则这些阶段会合并，失败状态也会被回滚。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationApplicationService")) {
+                    return notSurpportedTx;
+                }
+                // 资源同步任务先提交领取状态和各员工关联，再刷新外部运行态。
+                // 外层 REQUIRED 会让 TransactionTemplate 加入同一事务，刷新时读到旧关联并等待自身写锁。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncReconcileService")) {
                     return notSurpportedTx;
                 }
                 // 回滚补偿是尽力恢复外部运行态；它的失败不能污染用于记录 FAILED 的事务。
@@ -172,11 +220,21 @@ public class TransactionAdviceConfig {
                     // The Node callback must see the PENDING audit row while initialize waits for its result.
                     return notSurpportedTx;
                 }
+                // Provider observation contains remote failures and has no database writes. Suspend caller
+                // transactions so a handled provider/logging failure cannot turn the list into rollback-only.
                 if (targetClass != null
                     && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
                         .equals(ClassUtils.getUserClass(targetClass).getName())
-                    && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName()))) {
+                    && ("providerStatus".equals(method.getName()) || "inspectRecovery".equals(method.getName()))) {
+                    return notSurpportedTx;
+                }
+                if (targetClass != null
+                    && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
+                        .equals(ClassUtils.getUserClass(targetClass).getName())
+                    && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName())
+                        || "deleteTenantResources".equals(method.getName()))) {
                     // Persist the retired record before inserting its replacement and calling OpenSandbox.
+                    // Deletion also commits each release before asynchronous NAS cleanup may request a retry.
                     return notSurpportedTx;
                 }
                 return super.getTransactionAttribute(method, targetClass);
@@ -186,6 +244,23 @@ public class TransactionAdviceConfig {
         TransactionInterceptor txAdvice = new TransactionInterceptor(transactionManager, source);
         logger.info("Transaction advice configured successfully.");
         return txAdvice;
+    }
+
+    private static boolean isForwardIoMethod(Method method, Class<?> targetClass) {
+        if (targetClass == null) return false;
+        String owner = ClassUtils.getUserClass(targetClass).getName();
+        String name = method.getName();
+        return switch (owner) {
+            case "com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService" ->
+                "forwardMetadata".equals(name) || "forwardOpen".equals(name);
+            case "com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService" ->
+                "hasResourceForwardReadPermission".equals(name);
+            case "com.iwhalecloud.byai.manager.domain.tenant.TenantProjectCloudAccessService" ->
+                "canRead".equals(name) && method.getParameterCount() == 3;
+            case "com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService" ->
+                "fileDownloadForActor".equals(name) || "listDirForActor".equals(name);
+            default -> false;
+        };
     }
 
     private static boolean isStreamProjectionMethod(Method method, Class<?> targetClass) {

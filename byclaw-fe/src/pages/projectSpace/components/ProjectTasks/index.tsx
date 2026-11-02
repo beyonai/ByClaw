@@ -187,7 +187,7 @@ const sortTasks = (items: DevloopTaskItem[]) =>
 
 const ProjectTasks: React.FC<Props> = ({
   project,
-  keyword = '',
+  keyword: initialKeyword = '',
   onOpenSession,
   onToolbarChange,
   onRefreshToolbarChange,
@@ -196,13 +196,17 @@ const ProjectTasks: React.FC<Props> = ({
   const { EventEmitter } = useGlobal();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [searchVersion, setSearchVersion] = useState(0);
+  const searchImmediatelyRef = useRef(false);
+  const queryVersionRef = useRef(0);
+
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   // 任务统一使用普通卡片列表；保留 viewMode 参数兼容旧调用方。
   const requestingRef = useRef(false);
-  const initialLoadKeyRef = useRef<string | null>(null);
   const [templateTask, setTemplateTask] = useState<DevloopTaskItem | null>(null);
   // 研发项目和运营项目都支持按当前登录用户筛选任务，默认保持只看我的视图。
   const [onlyMine, setOnlyMine] = useState(project.projectType === 'develop' || project.projectType === 'operation');
@@ -220,6 +224,11 @@ const ProjectTasks: React.FC<Props> = ({
   const [taskSaving, setTaskSaving] = useState(false);
   const [memberOptions, setMemberOptions] = useState<Array<{ label: string; value: string | number }>>([]);
   const currentUserId = userInfo.userId ?? userInfo.id;
+
+  useEffect(() => {
+    setKeyword(initialKeyword);
+  }, [initialKeyword, project.projectId]);
+
   useEffect(() => {
     // 切换项目类型时同步筛选开关，避免沿用上一个项目的任务筛选状态。
     setOnlyMine(project.projectType === 'develop' || project.projectType === 'operation');
@@ -250,6 +259,7 @@ const ProjectTasks: React.FC<Props> = ({
     async (nextPage = 1) => {
       if (!project.projectId || (nextPage > 1 && requestingRef.current)) return;
       if (nextPage > 1) requestingRef.current = true;
+      const queryVersion = queryVersionRef.current;
       if (nextPage === 1) setLoading(true);
       else setLoadingMore(true);
       try {
@@ -276,6 +286,7 @@ const ProjectTasks: React.FC<Props> = ({
             taskName: keyword.trim() || undefined,
           });
         }
+        if (queryVersion !== queryVersionRef.current) return;
         const rows = getArrayData(response) as DevloopTaskItem[];
         setTasks((current) => sortTasks(nextPage === 1 ? rows : [...current, ...rows]));
         setPage(nextPage);
@@ -283,12 +294,15 @@ const ProjectTasks: React.FC<Props> = ({
         // 部分环境不返回 total，满页时保留一个未知余量，确保底部哨兵仍会请求下一页。
         setTotal(getPageTotal(response, loadedCount + (rows.length === PAGE_SIZE ? 1 : 0)));
       } catch (error: any) {
+        if (queryVersion !== queryVersionRef.current) return;
         message.error(error?.message || intl.formatMessage({ id: 'projectSpace.tasks.loadFailed' }));
         if (nextPage === 1) setTasks([]);
       } finally {
-        if (nextPage > 1) requestingRef.current = false;
-        if (nextPage === 1) setLoading(false);
-        else setLoadingMore(false);
+        if (queryVersion === queryVersionRef.current) {
+          if (nextPage > 1) requestingRef.current = false;
+          if (nextPage === 1) setLoading(false);
+          else setLoadingMore(false);
+        }
       }
     },
     [dateRange, intl, keyword, onlyMine, project.projectId, project.projectType]
@@ -300,20 +314,23 @@ const ProjectTasks: React.FC<Props> = ({
   }, [loadTasks]);
 
   useEffect(() => {
+    queryVersionRef.current += 1;
+    requestingRef.current = false;
+    setLoadingMore(false);
     setPage(0);
     setTotal(0);
-    const loadKey = `${project.projectId}:${
-      project.projectType
-    }:${keyword}:${onlyMine}:${dateRange[0].valueOf()}:${dateRange[1].valueOf()}`;
-    // React 严格模式会重复执行 effect，同一筛选条件只加载一次首屏任务数据。
-    if (initialLoadKeyRef.current === loadKey) return undefined;
+    const delay = searchImmediatelyRef.current ? 0 : 250;
+    searchImmediatelyRef.current = false;
+    setLoading(true);
     const timer = window.setTimeout(() => {
-      initialLoadKeyRef.current = loadKey;
       void loadTasksRef.current(1);
-    }, 250);
-    // 项目或顶部搜索条件变化时重置分页，避免把旧查询结果追加到当前列表。
-    return () => window.clearTimeout(timer);
-  }, [dateRange, keyword, onlyMine, project.projectId, project.projectType]);
+    }, delay);
+    // 筛选改变时使旧请求失效，避免旧结果覆盖新搜索。
+    return () => {
+      window.clearTimeout(timer);
+      queryVersionRef.current += 1;
+    };
+  }, [dateRange, keyword, onlyMine, project.projectId, project.projectType, searchVersion]);
 
   useEffect(() => {
     onToolbarChange?.(null);
@@ -534,7 +551,13 @@ const ProjectTasks: React.FC<Props> = ({
         <Input.Search
           placeholder={intl.formatMessage({ id: 'projectSpace.tasks.keywordPlaceholder' })}
           value={keyword}
-          readOnly
+          allowClear
+          onChange={(event) => setKeyword(event.target.value)}
+          onSearch={(value) => {
+            searchImmediatelyRef.current = true;
+            setKeyword(value);
+            setSearchVersion((version) => version + 1);
+          }}
         />
       </div>
       <Spin spinning={loading}>

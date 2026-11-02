@@ -142,6 +142,22 @@ describe("answer-text-ledger", () => {
     expect(deliveredAnswerTextCovers(SK, "子任务原文的一部分")).toBe(false);
   });
 
+  it("suppresses a partial final delivery already covered by the parent stream or a pushed message", () => {
+    streamParent(SK, RUN, "已完成转换。节日主题 HTML 页面已保存到会话目录，支持手机和电脑预览。");
+    expect(deliveredAnswerTextCovers(SK, "节日主题 HTML 页面已保存到会话目录")).toBe(true);
+    recordPushedAnswerText(SK, "下载地址：[report.html]({{file_preview_prefix}}/by/.sessions/101/report.html)");
+    expect(deliveredAnswerTextCovers(SK, "[report.html]({{file_preview_prefix}}/by/.sessions/101/report.html)")).toBe(true);
+    expect(deliveredAnswerTextCovers(SK, "另附一份不同的补充材料")).toBe(false);
+  });
+
+  it("never applies parent substring or long-prefix rules to a child report", () => {
+    const report = "子任务报告：完整文件已经生成并归档，本报告包含详细的设计说明、数据来源和完整下载路径。";
+    streamChild(SK, OTHER_RUN, report);
+    expect(deliveredAnswerTextCovers(SK, report)).toBe(true);
+    expect(deliveredAnswerTextCovers(SK, "完整文件已经生成并归档")).toBe(false);
+    expect(deliveredAnswerTextCovers(SK, report + "父会话还提供了新的说明。")).toBe(false);
+  });
+
   it("keeps ledgers isolated per sessionKey and clears them on teardown", () => {
     streamParent("sk-a", RUN, "A 的答案");
 

@@ -1,6 +1,6 @@
 ---
 name: bycli
-description: Use when a task opens, reads, searches within, collects from, scrapes, or operates any concrete website, webpage, or URL; when a task has already been routed to byCLI; or when the user explicitly asks for byCLI, Adapter, or browser execution.
+description: Use when a task touches a specific website or URL — reading (open, search within, collect, scrape, extract) or writing (publish, save draft, post, upload, comment, like, follow, fill forms, delete). Applies to every site byCLI has an Adapter for, and per-site coverage is discovered by running `bycli list` — never inferred from platform connectors; do that before declaring a site operation unavailable. Also use when a task is already routed to byCLI, or the user asks for byCLI / Adapter / browser execution.
 allowed-tools: Bash(bycli:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 ---
 
@@ -10,7 +10,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 本 skill 是 byCLI 的浏览器与 Adapter 执行层——根据已路由的站点任务选择命令、驱动浏览器、发现或修复 Adapter，并返回执行结果。
 
-常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
+常见触发：`bycli`、浏览器操作、驱动浏览器、打开网站、访问网页、登录、操作网站、搜索、查找、采集、抓取、爬取、知乎、视频号、百家号、写爬虫、adapter 坏了、写 adapter、修复命令、`browser open`、`open cli`、`autofix`、`scrape`、`crawl`、`browse`、`open URL`。
 
 ## 路由边界
 
@@ -81,7 +81,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - `--adapter-session` 仅用于 structured help 同时暴露该选项和 `adapterConcurrency.isolatedTabs: true` 的命令；是否允许并行仍由 workflow-specific reference 决定。任一 capability signal 缺失或调用未传该选项时，保持 legacy shared mode，不得猜测版本能力或自行并行
-- 每个 `bycli weixin` 或 `bycli weixin-channels` 命令、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com`、`weixin.sogou.com` 或 `channels.weixin.qq.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则。视频号适用该文档的“视频号统计与鉴权”段，不能套用公众号 token 或登录 TIMEOUT 判定。
+- 每个 `bycli weixin` 或 `bycli weixin-channels` 命令、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT`，以及 `mp.weixin.qq.com`、`weixin.sogou.com` 或 `channels.weixin.qq.com` 的登录、认证或环境验证任务，都必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则。视频号适用该文档的“视频号执行与鉴权”段及 [weixin-channels.md](./references/weixin-channels.md)，不能套用公众号 token 或登录 TIMEOUT 判定。
 - 独立执行 browser-backed `weixin` / `weixin-channels` 命令必须经过 `scripts/weixin-browser-runner.mjs`，状态放在当前已初始化任务目录下。Runner 内部持有登录 Gate 与桥接恢复预算，Agent 不得直接调用底层浏览器命令或 Gate CLI。`knowledge-collection acquire-weixin-channels` 是获准编排入口：它内部复用同一 Gate、统一持有一次桥接预检，外层不得再套 Runner。仅用户明确完成验证后的新确认可传 `--verification-confirmed true`，“再试试”不算确认。
 - If the Runner returns `details.bridgeCode=BRIDGE_UNAVAILABLE` or `BRIDGE_RECOVERY_BUSY`, the outer Agent must not run bridge-bootstrap, doctor, browser start, or daemon restart again. Report the final state; a write retry after `BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL` requires separate explicit user approval and must not use `--verification-confirmed`.
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
@@ -93,7 +93,11 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
+| 登录某站点 / 站点命令报 `AUTH_REQUIRED`（非微信） | `bycli auth` 登录入口 | 下方「非微信站点登录入口」 |
 | 微信公众号账号/文章搜索、历史文章、批量保存或认证失败 | weixin 检索、认证与凭据 | [references/weixin.md](./references/weixin.md) |
+| 知乎搜索、回答/文章读取、草稿、发布或创作数据 | `zhihu` Adapter | [zhihu.md](./references/zhihu.md) |
+| 视频号发布、草稿恢复、状态或账号/视频数据 | `weixin-channels` Adapter 与微信 Runner | [weixin-channels.md](./references/weixin-channels.md) + [weixin.md](./references/weixin.md) |
+| 百家号视频下载、视频/图文/文章发布或作品数据 | `baijiahao` Adapter | [baijiahao.md](./references/baijiahao.md) |
 | 抖音作品、分享链接或视频文件归档 | 现成 douyin Adapter；委派采集由 `acquire-douyin` 持有 | 下方「抖音作品读取与下载」 |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | 截图素材归档 / 章节截图加说明 ZIP | 编排器的独立 screenshot-collection；byCLI 只读执行 | [browser.md 的截图素材委派](./references/browser.md#截图素材委派) |
@@ -169,6 +173,16 @@ bycli douyin download "<同一作品目标>" --output "<授权输出目录>" --m
 
 抖音采集 Runner 默认给下载子进程 300 秒内层预算、给字幕读取 60 秒；显式 `BYCLI_BROWSER_COMMAND_TIMEOUT` 会覆盖两个默认值，外层预算分别至少为内层加 60 秒且不短于 300/120 秒。长视频可在 `acquire-douyin` 命令前设置 `BYCLI_BROWSER_COMMAND_TIMEOUT=900`，外层自动至少为 960 秒；`KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS` 的显式外层值也须满足余量，非法或过短值在执行前拒绝。执行工具预算还须覆盖整次预检、下载、读取和清理。超时结果不确定时保留现场，不自动改超时、item ID、URL 或目录重试。文件落盘和归档成功不等于网页可下载或预览，后两项仅按实际验证结果报告。
 
+### 知乎、视频号与百家号发布
+
+按上方路由读取所需平台 reference，再用 `bycli list -f json` 与目标命令的 `--help -f json` 核对已安装能力。reference 是选型指引，不替代动态发现；缺少命令或参数时报告实际能力，不拼造命令。
+
+这三个平台的发布 Adapter 采用「保存平台草稿 → 重开核对 → 展示给用户确认 → 单独提交 → 查询状态/数据」。用户提出发布任务后先完成授权范围内的准备，展示已保存草稿的账号、标题/描述、正文、视频/图片、封面和 AI/原创声明，取得对当前具体草稿的明确发布确认，才单独执行 `--mode submit --execute --user-confirmed`。准备阶段不得设置 `--user-confirmed`；创建草稿成功不能称为已发布。AI 与原创声明按实际素材和用户提供的信息填写，不猜测版权或代用户接受协议。
+
+同一作品始终使用同一个 `--operation` 本地记录，父目录须已存在；保留记录、源文件及哈希，不换路径或删除记录规避防重。串行完成同一账号的准备、核对与提交，Adapter 自主管理编辑 TAB，不用 raw browser 操作 Adapter TAB。仅平台命令明确支持并要求绑定的恢复模式可使用已人工核对的页面及会话，不能据此泛化 TAB 管理权限。
+
+上传成功、`prepared`、提交尝试、后台已发表、公开可见和数据可读分别报告。根据真实作品类型、精确 ID 和返回的 URL 核验；不把上传 ID、草稿 ID、预览 URL 或后台状态当作公开链接。`submitted=true`、未知提交、验证码或连接中断后先保留现场；不自动重放提交，只在允许继续时执行相应只读状态查询。指标缺失保留 `null` 与原因，真实零保留 `0`，不得跨平台混用指标或日期口径。
+
 ### 通用 flag
 
 | flag | 说明 |
@@ -218,6 +232,19 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 只使用已经返回的结果：报告错误类型、已知 session name 与已返回 URL；若 URL 未返回，明确说明“URL 未提供”。提示用户亲自完成验证后
 结束本轮，等待其明确确认。微信任务优先遵循 [references/weixin.md](./references/weixin.md) 的专属规则。
 
+### 非微信站点登录入口（`bycli auth`）
+
+`bycli auth sites -f json` 列出有配方的平台（PUBLIC，不需要桥接）；`bycli auth login <platform>` 在指定平台的持久 adapter 租约里
+打开官方登录页（前台窗口）并等待人工完成扫码 / 短信；`bycli auth status <platform>` 用独立页面做一次性只读确认，不打断已保留的
+登录页。`login` / `status` 是 COOKIE 策略，遵守桥接预检与恢复规则。
+
+- `login` 只开页并轮询，不读取、不输入、不提交凭据；扫码、短信与 SSO 跳转属于人。默认等 180 秒（`--timeout` 30–900），超时后登录页**保留**，直接重跑 `login` 会复用该页而不刷新二维码；每个平台各自持有独立租约，互不覆盖。
+- 结果是三态：`logged-in`、`logged-out`、`unknown` + `reason`。`unknown`（`login-in-progress`、`account-model-unavailable`、`probe-unavailable` 等）**不是未登录**：不得据此重跑 `login`、加长 `--timeout`，或改用 `bycli browser` 补查；按 `reason` 报告，等用户指示后再 `status` 重查或请其查看浏览器。
+- `auth sites` 报告 `verification` 为未验证（如 `needs-live-validation`）时：登录页看起来已完成而 `status` 仍报 `logged-out` / `unknown`，按配方未验证上报，不进 AutoFix、不改 adapter、不新增登录命令。
+- 同一平台的发布面和读取面可能各自登录（小红书：`xiaohongshu` 是 www、`xiaohongshu-creator` 是创作中心）。`status` 只代表配方声明的 `surface`；一个面 `logged-in` 不代表另一个面可用，写操作前按对应面的平台名预检。
+- `auth` 的登录页由 adapter 租约持有：不得用 `bycli browser ... state/tab list/get url` 检查、导航、bind 或关闭；继续确认只用 `bycli auth status`。
+- 微信相关登录 / 验证仍走 [references/weixin.md](./references/weixin.md)，不进入 `bycli auth`。
+
 ## 错误处理
 
 | 错误类型 | Agent 行为 |
@@ -226,7 +253,7 @@ session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、
 | Weixin `AUTH_RETRY_EXHAUSTED` | 验证确认预算已耗尽；这是不可重试终态，不得再次提示登录、添加 `--verification-confirmed`、修改参数或创建新 fingerprint |
 | Weixin `COMMAND_TIMEOUT_UNCERTAIN` / `COMMAND_EXEC_UNCERTAIN` | Runner 未取得最终结构化结果；这不是登录状态，不得添加 `--verification-confirmed`。先检查返回的进程诊断和已有本地产物；`download-publish-data` 仅按 `references/weixin.md` 的单次诊断重试规则请求独立授权 |
 | Weixin `OPERATION_ALREADY_FINALIZED` | 同一逻辑操作此前已终结，本次未执行底层命令；读取首次执行时保存的结果或产物，禁止解释成登录失败、修改 `--limit`/日期/输出路径绕过 gate，或声称前次业务结果一定成功 |
-| AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
+| AUTH_REQUIRED (exit 77，非 Weixin) | 该平台在 `bycli auth sites` 里有配方时，按「非微信站点登录入口」处理：`login` 打开官方登录页等人完成，`status` 只读确认；无配方时 STOP，提示用户登录 |
 | BROWSER_CONNECT (exit 69) | 不得因随机 profile 名称推断需要用户操作。未经过 Runner 的通用命令调用 `node /app/skills/bycli/scripts/bridge-bootstrap.mjs --format json`；Runner 已返回最终 bridgeCode 时不得再次执行恢复。只有 `BRIDGE_UNAVAILABLE` 才请求用户检查托管 Chromium 与扩展 |
 | CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |

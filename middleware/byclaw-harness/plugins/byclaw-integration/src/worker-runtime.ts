@@ -1,5 +1,6 @@
 /** WorkerRunner lifecycle for the BYCLAW_DSH plugin. */
 
+import { ManagedAdmission, type ManagedAdmissionLease } from './managed-admission.ts'
 import { WorkerRegistry, WorkerRunner, createRedis } from '@byclaw/by-framework'
 import { ByClawDshGatewayWorker } from './worker.ts'
 import type { ByClawDshSessionRuntime } from './session-runtime.ts'
@@ -45,7 +46,8 @@ export class ByClawDshWorkerRuntime {
   private readonly registry: WorkerRegistry
   private readonly worker: ByClawDshGatewayWorker
   private readonly redis: ReturnType<typeof createRedis>
-  private readonly maxConcurrency: number
+  readonly admission: ManagedAdmission | undefined
+  private admissionTimer: ReturnType<typeof setInterval> | undefined
   private runner: WorkerRunner | undefined
   private run: Promise<void> | undefined
   private lifecycle: AbortController | undefined
@@ -55,26 +57,36 @@ export class ByClawDshWorkerRuntime {
     workerId: string
     agentTypes: string[]
     sessions: ByClawDshSessionRuntime
-    maxConcurrency: number
+    admission?: ManagedAdmissionLease
+    startupId?: string
   }) {
+    this.admission = options.admission === undefined ? undefined : new ManagedAdmission(options.admission, () => this.stopAdmission())
     this.registry = new WorkerRegistry(options.redis)
     this.redis = options.redis
-    this.maxConcurrency = options.maxConcurrency
     this.worker = new ByClawDshGatewayWorker({
       workerId: options.workerId,
       agentTypes: options.agentTypes,
       sessions: options.sessions,
       redis: options.redis,
       registry: this.registry,
+      admission: this.admission,
+      startupId: options.startupId,
     })
   }
 
   async start(workerId: string, timeoutMs = 10_000): Promise<void> {
+    if (this.admission && !this.admission.check()) throw new Error('Managed lease expired before worker startup')
     this.lifecycle = new AbortController()
+    if (this.admission) {
+      this.admissionTimer = setInterval(() => { if (!this.admission?.check()) this.runner?.stop() }, 100)
+      this.admissionTimer.unref()
+    }
     this.run = superviseWorker(() => {
       const runner = new WorkerRunner(this.worker, {
         redisClient: this.redis,
-        maxConcurrency: this.maxConcurrency,
+        // Published framework versions default to 50. Disable that legacy cap
+        // so waiting requests cannot prevent their Resume messages from running.
+        maxConcurrency: Number.POSITIVE_INFINITY,
       })
       this.runner = runner
       return runner
@@ -82,6 +94,7 @@ export class ByClawDshWorkerRuntime {
       const detail = error === undefined ? 'health exit' : String(error)
       console.warn(`BYCLAW_DSH Worker runner exited (${detail}); restarting`)
     })
+    void this.run.finally(() => { if (this.admissionTimer) clearInterval(this.admissionTimer) })
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       if (await this.registry.isWorkerOnline(workerId)) return
@@ -93,9 +106,14 @@ export class ByClawDshWorkerRuntime {
     throw new Error(`BYCLAW_DSH Worker did not become online within ${timeoutMs}ms`)
   }
 
-  async close(): Promise<void> {
+  stopAdmission(): void {
     this.lifecycle?.abort()
     this.runner?.stop()
+  }
+
+  async close(): Promise<void> {
+    this.stopAdmission()
     await this.run?.catch(() => undefined)
+    if (this.admissionTimer) clearInterval(this.admissionTimer)
   }
 }

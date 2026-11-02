@@ -11,7 +11,7 @@ const runtime = {
 }
 const outcome = await deliverToMember({ subagents: runtime, logger: { warn() {} } }, captain, 'child', 'first task', signal)
 assert.deepEqual(outcome, { ok: true }, 'current runtime must accept host FIFO dispatch')
-assert.deepEqual(calls, [[captain, 'child', [{ type: 'text', text: 'first task' }], { kind: 'plugin', plugin: 'dsh-agent-teams' }, signal, 'queue']])
+assert.deepEqual(calls, [[captain, 'child', [{ type: 'text', text: 'first task' }], { kind: 'plugin:dsh-agent-teams' }, signal, 'queue']])
 console.log('PASS current runtime queues team dispatch with host attribution')
 
 const { mkdtemp, rm } = await import('node:fs/promises')
@@ -25,6 +25,8 @@ const { createTeamDir, recordRetiredMemberIds } = await import('../src/state.ts'
 const workspace = await mkdtemp(join(tmpdir(), 'agent-teams-current-runtime-'))
 const root = new Context()
 try {
+  // DSH 0.2.1: the subagent service requires the working-directory collaborator.
+  root.provide('workingDirectory', { get: () => workspace })
   await root.plugin(SubagentRuntime)
   const hostRuntime = root.subagents[symbols.original]
   const original = {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.taskplan;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -70,7 +72,7 @@ public class TaskPlanController {
     /** 直接将指定执行的活动计划取消；计划状态统一由 BE 维护。 */
     @PostMapping("/cancel")
     public ResponseUtil<TaskPlanSnapshot> cancel(@RequestBody TaskPlanLookupRequest request) {
-        String message = StringUtils.defaultIfBlank(request == null ? null : request.getReason(), "用户已停止执行");
+        String message = StringUtils.defaultIfBlank(request == null ? null : request.getReason(), I18nUtil.get("taskplan.execution.stoppedByUser"));
         TaskPlanSnapshot cancelled = taskPlanService.cancel(request, "USER_STOPPED", message);
         publisher.broadcast(CurrentUserHolder.getCurrentUserId(), cancelled, null);
         return ResponseUtil.successResponse(cancelled);

@@ -14,13 +14,51 @@ import { join } from 'node:path'
 
 import { resolveConfig } from '../lib/index.js'
 import { renderFailures, renderGiveUp, renderZombies } from '../lib/check.js'
-import { buildAddition, buildBaseline, digestRules, renderRules } from '../lib/inject.js'
+import { applyInject, buildAddition, buildBaseline, digestRules, renderRules } from '../lib/inject.js'
 import { EMPTY_LIST_TEXT, recordRule, renderCaptureTask, renderListTask, triageDiagnostic } from '../lib/record.js'
 import { loadRules, parseRuleFile, resolveProjectRoot, rulesByteSize, validateRuleId, watchStatus } from '../lib/rules.js'
+import { toolEnvironmentRuleFiles } from '../lib/files.js'
+import { spawn } from 'node:child_process'
+import { readFile as readHostFile, readdir as readHostDir, stat as statHost, writeFile as writeHostFile } from 'node:fs/promises'
 
 const checks = []
 /** Register one named assertion group. */
 function test(name, fn) { checks.push([name, fn]) }
+
+test('workspace policy skips automatic repository reads without skipping the remaining pre-step chain', async () => {
+  let preStep
+  const reads = []
+  const ctx = {
+    on: (event, listener) => { assert.equal(event, 'agent/pre-step'); preStep = listener },
+    get: name => name === 'byclawWorkspacePolicy' ? { automaticDiscoveryEnabled: false } : undefined,
+    logger: { warn() {}, info() {} },
+  }
+  applyInject(ctx, resolveConfig({}), {
+    exists: async path => { reads.push(path); return false },
+    subdirectories: async path => { reads.push(path); return [] },
+  })
+  const decision = { kind: 'enter', messages: [{ retained: true }] }
+  assert.equal(await preStep({ agent: { session: { header: { cwd: '/by/.sessions/chat' } } } }, async () => decision), decision)
+  assert.deepEqual(reads, [])
+})
+
+for (const policy of [undefined, { automaticDiscoveryEnabled: true }]) {
+  test(`workspace discovery retains standalone and opt-in behavior: ${JSON.stringify(policy)}`, async () => {
+    let preStep
+    const reads = []
+    applyInject({
+      on: (_event, listener) => { preStep = listener },
+      get: () => policy,
+      logger: { warn() {}, info() {} },
+    }, resolveConfig({}), {
+      exists: async path => { reads.push(path); return false },
+      subdirectories: async () => [],
+    })
+    const decision = { kind: 'enter', messages: [] }
+    assert.equal(await preStep({ agent: { session: { header: { cwd: '/by/.sessions/chat' } } } }, async () => decision), decision)
+    assert.ok(reads.some(path => path.endsWith('/.git')))
+  })
+}
 
 // --- config -----------------------------------------------------------------
 
@@ -648,6 +686,69 @@ test('renderListTask reports partial erosion separately from rot', () => {
   assert.match(text, /3\/10/u)
   assert.doesNotMatch(text, /不可能失败/u, 'erosion must not be dressed up as rot')
   assert.doesNotMatch(renderListTask([RULE('a')], [], []), /部分监视路径/u)
+})
+
+// --- tool environment (shared DSH host) ---------------------------------------
+
+/**
+ * A tool environment whose project tree exists only behind `ctx.fs` / `ctx.subprocess`:
+ * paths under a virtual prefix that does not exist on this machine map to `root`.
+ */
+function toolEnvironment(root) {
+  const virtual = `/iron-rules-tool-env-${String(process.pid)}`
+  const host = path => {
+    if (path !== virtual && !path.startsWith(`${virtual}/`)) throw new Error(`not a tool-environment path: ${path}`)
+    return root + path.slice(virtual.length)
+  }
+  const fs = {
+    resolve: async path => ({ targetKey: path, displayPath: path }),
+    stat: async target => {
+      try {
+        const info = await statHost(host(target.targetKey))
+        return { type: info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other' }
+      } catch (error) { if (error.code === 'ENOENT') return undefined; throw error }
+    },
+    readText: target => readHostFile(host(target.targetKey), 'utf8'),
+    listDir: async target => (await readHostDir(host(target.targetKey), { withFileTypes: true }))
+      .map(entry => ({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' })),
+    writeText: (target, content) => writeHostFile(host(target.targetKey), content),
+  }
+  const subprocess = {
+    spawn(spec) {
+      const argv = spec.argv.map(value => value.startsWith(virtual) ? host(value) : value)
+      const child = spawn(argv[0], argv.slice(1), { cwd: '/', stdio: 'ignore' })
+      return { done: new Promise(resolve => child.once('close', code => resolve({ exitCode: code }))), collected: {} }
+    },
+  }
+  return { virtual, files: toolEnvironmentRuleFiles({ get: name => name === 'fs' ? fs : name === 'subprocess' ? subprocess : undefined }) }
+}
+
+test('rules are discovered, recorded and replaced in the tool environment, not on this host', async () => {
+  await withProject(async (root) => {
+    const { virtual, files } = toolEnvironment(root)
+    await writeRule(root, 'existing', { title: 'Existing', check: 'exit 0', watches: 'src/' })
+    assert.equal(await resolveProjectRoot(join(virtual, 'sub', 'dir'), files), virtual, 'the .git marker is found through the tool environment')
+    const set = await loadRules(virtual, CONFIG, files)
+    assert.deepEqual(set.rules.map(rule => rule.id), ['existing'])
+    assert.equal(set.rules[0].checkScript, join(virtual, '.iron-rules', 'existing', 'check.sh'), 'check.sh paths name the tool environment')
+    assert.deepEqual(await watchStatus(set.rules[0], virtual, files), { declared: 1, missing: 1, stale: true })
+
+    const { ctx, agent } = doubles(virtual)
+    const outcome = await recordRule(ctx, agent, { id: 'replacement', title: 'R', body: 'B', enforcement: 'script', check: 'exit 0', watches: ['src/'], replaces: ['existing'] }, CONFIG, files)
+    assert.equal(outcome.ok, true, outcome.text)
+    assert.match(await readHostFile(join(root, '.iron-rules', 'replacement', 'RULE.md'), 'utf8'), /title: R/u)
+    assert.equal(await readHostFile(join(root, '.iron-rules', 'replacement', 'check.sh'), 'utf8'), 'exit 0\n')
+    await assert.rejects(statHost(join(root, '.iron-rules', 'existing')), { code: 'ENOENT' })
+  })
+})
+
+test('a tool environment that cannot answer is not mistaken for a project without rules', async () => {
+  const unreachable = { resolve: async path => ({ targetKey: path, displayPath: path }), stat: async () => { throw new Error('tool sandbox unreachable') } }
+  const files = toolEnvironmentRuleFiles({ get: name => name === 'fs' ? unreachable : undefined })
+  await assert.rejects(files.exists('/by/.iron-rules'), /unreachable/u)
+  await assert.rejects(files.subdirectories('/by/.iron-rules'), /unreachable/u)
+  const absent = { resolve: async path => ({ targetKey: path, displayPath: path }), stat: async () => undefined }
+  assert.equal(await toolEnvironmentRuleFiles({ get: name => name === 'fs' ? absent : undefined }).exists('/by/.iron-rules'), false)
 })
 
 // --- run ---------------------------------------------------------------------

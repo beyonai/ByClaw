@@ -8,6 +8,7 @@ import type { MentionElementType } from '../elements/mention';
 import type { DefaultValueSchema } from '../types';
 
 let mockDefaultAgentElement: MentionElementType | undefined;
+const mockIsEmployeeResourceAvailable = jest.fn();
 
 const mockEventEmitter = {
   emit: jest.fn(),
@@ -27,11 +28,21 @@ jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: mockEventEmitter }))
 jest.mock('../mentionPopover', () => () => null);
 jest.mock('../useDefaultAgentElement', () => () => mockDefaultAgentElement);
 jest.mock('../useDefaultAgentPlaceholder', () => () => ({ agentPlaceholder: null, isComposing: { current: false } }));
+jest.mock('../utils/employeeResourceCompatibility', () => ({
+  getEmployeeResourceReplacementTab: (resourceType?: string) => {
+    if (resourceType === 'SKILL') return 'skill';
+    if (['KG_DOC', 'KG_QA'].includes(resourceType || '')) return 'knowledge';
+    if (['AGENT', 'MCP', 'TOOL', 'TOOLKIT'].includes(resourceType || '')) return 'tool';
+    return undefined;
+  },
+  isEmployeeResourceAvailable: (...args: any[]) => mockIsEmployeeResourceAvailable(...args),
+}));
 
 describe('RichInput', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockDefaultAgentElement = undefined;
+    mockIsEmployeeResourceAvailable.mockResolvedValue(true);
   });
 
   const historyEmployee = (agentId = 'history-agent'): MentionElementType => ({
@@ -346,19 +357,28 @@ describe('RichInput', () => {
     expect(mockEventEmitter.emit).not.toHaveBeenCalledWith('queryInput-set-schema', expect.anything());
   });
 
-  it('keeps all mentioned digital employees after sending and clears only the question text', async () => {
+  it('keeps only the latest mentioned digital employee after sending', async () => {
     const inputRef = createRef<RichInputRef>();
 
-    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+    const { container } = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
 
     await act(async () => {
       inputRef.current?.insertItem({ agentId: 'agent-1', name: 'Employee One' }, ResourceType.digitalEmployee);
+      inputRef.current?.appendText('Please handle this task @');
       inputRef.current?.insertItem({ agentId: 'agent-2', name: 'Employee Two' }, ResourceType.digitalEmployee);
-      inputRef.current?.appendText('Please handle this task');
+      inputRef.current?.appendText(' continues here');
     });
 
     await waitFor(() => {
-      expect(inputRef.current?.getPayload().resourceList).toHaveLength(2);
+      const payload = inputRef.current?.getPayload();
+      expect(payload?.resourceList.map((item) => item.resourceId)).toEqual(['agent-2']);
+      expect(payload?.displayText).not.toContain('@Employee One');
+      expect(payload?.displayText).toContain('@Employee Two');
+      expect(payload?.displayText).toContain('Please handle this task  continues here');
+      expect(payload?.displayText.indexOf('@Employee Two')).toBeLessThan(
+        payload?.displayText.indexOf('Please handle this task') ?? -1
+      );
+      expect(container.textContent).not.toContain('Employee One');
     });
 
     await act(async () => {
@@ -367,10 +387,11 @@ describe('RichInput', () => {
 
     await waitFor(() => {
       const payload = inputRef.current?.getPayload();
-      expect(payload?.resourceList.map((item) => item.resourceId)).toEqual(['agent-1', 'agent-2']);
-      expect(payload?.displayText).toContain('@Employee One');
+      expect(payload?.resourceList.map((item) => item.resourceId)).toEqual(['agent-2']);
+      expect(payload?.displayText).not.toContain('@Employee One');
       expect(payload?.displayText).toContain('@Employee Two');
       expect(payload?.displayText).not.toContain('Please handle this task');
+      expect(payload?.displayText).not.toContain('continues here');
     });
   });
 
@@ -425,7 +446,7 @@ describe('RichInput', () => {
     });
   });
 
-  it('keeps replaced employees visible but sends only the active digital employee group', async () => {
+  it('removes the replaced employee when a digital employee group is selected', async () => {
     const inputRef = createRef<RichInputRef>();
     const { container } = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
 
@@ -447,26 +468,20 @@ describe('RichInput', () => {
       expect(payload?.displayText).toContain('@Employee Group');
       expect(payload?.displayText).not.toContain('@Employee One');
 
-      const inactiveNode = container.querySelector('[data-inactive-agent-selection="true"]');
-      expect(inactiveNode).not.toBeNull();
-      expect(inactiveNode?.textContent).toContain('Employee One');
+      expect(container.textContent).not.toContain('Employee One');
+      expect(container.querySelector('[data-inactive-agent-selection="true"]')).toBeNull();
     });
 
     const draft = inputRef.current?.getPersistentMentionDraft();
     expect(draft).toBeDefined();
-    expect(draft?.resourceList).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ resourceId: 'agent-1', isInactiveAgentSelection: true }),
-        expect.objectContaining({ resourceId: 'group-1', isInactiveAgentSelection: false }),
-      ])
-    );
+    expect(draft?.resourceList.map((item) => item.resourceId)).toEqual(['group-1']);
 
     await act(async () => {
       inputRef.current?.clearAfterSend();
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-inactive-agent-selection="true"]')?.textContent).toContain('Employee One');
+      expect(container.textContent).not.toContain('Employee One');
       expect(inputRef.current?.getPayload().resourceList.map((item) => item.resourceId)).toEqual(['group-1']);
     });
 
@@ -478,13 +493,11 @@ describe('RichInput', () => {
 
     await waitFor(() => {
       expect(restoredRef.current?.getPayload().resourceList.map((item) => item.resourceId)).toEqual(['group-1']);
-      expect(restored.container.querySelector('[data-inactive-agent-selection="true"]')?.textContent).toContain(
-        'Employee One'
-      );
+      expect(restored.container.textContent).not.toContain('Employee One');
     });
   });
 
-  it('deactivates an active group when an ordinary employee is selected', async () => {
+  it('removes an active group when an ordinary employee is selected', async () => {
     const inputRef = createRef<RichInputRef>();
     const { container } = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
 
@@ -504,9 +517,86 @@ describe('RichInput', () => {
       expect(payload?.resourceList.map((item) => item.resourceId)).toEqual(['agent-1']);
       expect(payload?.displayText).toContain('@Employee One');
       expect(payload?.displayText).not.toContain('@Employee Group');
-      expect(container.querySelector('[data-inactive-agent-selection="true"]')?.textContent).toContain(
-        'Employee Group'
+      expect(container.textContent).not.toContain('Employee Group');
+      expect(container.querySelector('[data-inactive-agent-selection="true"]')).toBeNull();
+    });
+  });
+
+  it('marks an unavailable employee resource for replacement and exposes replacement actions on hover', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+    const { container, getByText } = view;
+
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-1', name: 'Employee One' }, ResourceType.digitalEmployee);
+      inputRef.current?.insertItem(
+        { resourceId: 'skill-1', resourceName: 'Old Skill', resourceBizType: 'SKILL' },
+        ResourceType.SKILL
       );
+      inputRef.current?.appendText('run it');
+    });
+    mockIsEmployeeResourceAvailable.mockResolvedValue(false);
+
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-2', name: 'Employee Two' }, ResourceType.digitalEmployee);
+    });
+
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().resourceList).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            resourceId: 'skill-1',
+            requiresAgentResourceReplacement: true,
+            resourceReplacementType: 'skill',
+          }),
+        ])
+      );
+      expect(container.querySelector('[data-agent-resource-replacement="skill"]')).not.toBeNull();
+    });
+
+    fireEvent.click(getByText('Old Skill'));
+    expect(mockEventEmitter.emit).toHaveBeenCalledWith('queryInput-open-resource-picker', {
+      tabKey: 'skill',
+      resourceId: 'skill-1',
+    });
+
+    fireEvent.mouseOver(getByText('Old Skill'));
+    expect(await view.findByText('该技能不适用于当前数字员工，点击选择替换，或点击 × 移除')).toBeInTheDocument();
+
+    fireEvent.mouseDown(container.querySelector('[aria-label="remove-incompatible-resource"]')!);
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().resourceList.some((resource) => resource.resourceId === 'skill-1')).toBe(
+        false
+      );
+    });
+  });
+
+  it('undoes the employee switch instead of only undoing the resource compatibility state', async () => {
+    const inputRef = createRef<RichInputRef>();
+    const view = render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-1', name: 'Employee One' }, ResourceType.digitalEmployee);
+      inputRef.current?.insertItem(
+        { resourceId: 'skill-1', resourceName: 'Old Skill', resourceBizType: 'SKILL' },
+        ResourceType.SKILL
+      );
+      inputRef.current?.appendText('run it');
+    });
+    mockIsEmployeeResourceAvailable.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-2', name: 'Employee Two' }, ResourceType.digitalEmployee);
+    });
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-agent-resource-replacement="skill"]')).not.toBeNull();
+    });
+
+    act(() => inputRef.current?.undo());
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('Employee One');
+      expect(view.container.textContent).not.toContain('Employee Two');
+      expect(view.container.querySelector('[data-agent-resource-replacement="skill"]')).toBeNull();
     });
   });
 });

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
@@ -31,17 +32,17 @@ public class DevloopPhaseService {
     public static final List<String> PHASE_ORDER =
         Arrays.asList("issue", "req", "design", "coder", "reviewer", "tester", "pr");
 
-    /** 环节中文名，供前端直接展示，避免前端硬编码另一份映射造成口径漂移 */
+    /** 环节文案键，在生成快照时按当前语言解析；协议中的环节标识不变 */
     private static final Map<String, String> PHASE_LABELS = new LinkedHashMap<>();
 
     static {
-        PHASE_LABELS.put("issue", "需求来源");
-        PHASE_LABELS.put("req", "需求分析");
-        PHASE_LABELS.put("design", "方案设计");
-        PHASE_LABELS.put("coder", "编码");
-        PHASE_LABELS.put("reviewer", "代码审查");
-        PHASE_LABELS.put("tester", "测试");
-        PHASE_LABELS.put("pr", "提交PR");
+        PHASE_LABELS.put("issue", "devloop.phase.issue");
+        PHASE_LABELS.put("req", "devloop.phase.req");
+        PHASE_LABELS.put("design", "devloop.phase.design");
+        PHASE_LABELS.put("coder", "devloop.phase.coder");
+        PHASE_LABELS.put("reviewer", "devloop.phase.reviewer");
+        PHASE_LABELS.put("tester", "devloop.phase.tester");
+        PHASE_LABELS.put("pr", "devloop.phase.pr");
     }
 
     // 环节状态：未开始 / 进行中 / 通过 / 被打回
@@ -105,7 +106,16 @@ public class DevloopPhaseService {
             return null;
         }
         try {
-            return MAPPER.readValue(json, PhaseSnapshot.class);
+            PhaseSnapshot snapshot = MAPPER.readValue(json, PhaseSnapshot.class);
+            // 历史快照只缓存业务状态，已知环节标签按查看者语言重新解析。
+            if (snapshot != null && snapshot.getPhases() != null) {
+                for (PhaseState phase : snapshot.getPhases()) {
+                    if (phase != null && PHASE_LABELS.containsKey(phase.getKey())) {
+                        phase.setLabel(I18nUtil.get(PHASE_LABELS.get(phase.getKey())));
+                    }
+                }
+            }
+            return snapshot;
         } catch (Exception e) {
             log.warn("[DevloopPhase] 快照反序列化失败: {}", json, e);
             return null;
@@ -249,7 +259,7 @@ public class DevloopPhaseService {
     private List<PhaseState> initPhaseStates() {
         List<PhaseState> states = new ArrayList<>();
         for (String p : PHASE_ORDER) {
-            states.add(new PhaseState(p, PHASE_LABELS.get(p), ST_PENDING));
+            states.add(new PhaseState(p, I18nUtil.get(PHASE_LABELS.get(p)), ST_PENDING));
         }
         return states;
     }
@@ -257,7 +267,7 @@ public class DevloopPhaseService {
     private List<PhaseState> toPhaseStates(Map<String, String> statusByPhase) {
         List<PhaseState> states = new ArrayList<>();
         for (String p : PHASE_ORDER) {
-            states.add(new PhaseState(p, PHASE_LABELS.get(p), statusByPhase.getOrDefault(p, ST_PENDING)));
+            states.add(new PhaseState(p, I18nUtil.get(PHASE_LABELS.get(p)), statusByPhase.getOrDefault(p, ST_PENDING)));
         }
         return states;
     }

@@ -20,7 +20,7 @@ const childSession = { id: 'child', header: { cwd: '/tmp/.sessions/root', parent
 const sessions = new Map([['root', rootSession], ['child', childSession]])
 let idle = Promise.resolve()
 const input = []
-const agent = { id: 'root', session: rootSession, status: 'idle',
+const agent = { id: 'root', session: rootSession, status: 'idle', ctx: { on() { return () => {} } },
   followup(message) {
     assert.equal(registry.getTurn('root')?.messageId, 'greeting')
     assert.equal(registry.getTurn('child')?.messageId, 'original-task', 'foreground input must not replace background member context')
@@ -54,6 +54,8 @@ const runtime = new ByClawDshSessionRuntime({
   root: { on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) },
     sessions: { get(id) { return sessions.get(id) } } },
   agents: { get(id) { return id === 'root' ? agent : undefined } },
+  // No optional services (team model overrides, group policy) are provided in this host.
+  get() { return undefined },
 }, { byRoot: '/tmp', sourceAgentType: 'BYCLAW_DSH', agentTemplateDir: '', workspaceRegistry: registry,
   emitter: { async emitChunk(...args) { output.push(args) } } })
 const owner = { rootSessionId: 'root', responseSessionId: 'root', rootMessageId: 'original-task', rootLabel: '队长',

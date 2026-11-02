@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  * 集成测试「成功」的判定标准。重点覆盖:命令退出码 0 但报告没取到时不能判 passed,
  * 否则「一个用例都没跑」和「全部通过」在前端看到的是同一个绿色结果。
  */
-class IntegrationRunVerdictTest {
+class IntegrationRunVerdictTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static IntegrationSuite suite(String reportPath) {
         IntegrationSuite suite = new IntegrationSuite();

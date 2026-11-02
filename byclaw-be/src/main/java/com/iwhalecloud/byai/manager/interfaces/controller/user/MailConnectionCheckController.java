@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.application.service.user.UserMailAccountApplicationService;
 import com.iwhalecloud.byai.manager.dto.users.MailConnectionCheckRequestDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -20,7 +22,7 @@ public class MailConnectionCheckController {
     @PostMapping("/userMailAccount/check")
     public ResponseUtil<MailConnectionCheckResultVO> check(
             @Valid @RequestBody MailConnectionCheckRequestDTO request) {
-        return ResponseUtil.successResponse("邮箱连接检查完成",
+        return ResponseUtil.successResponse(I18nUtil.get("mail.connection.completed"),
             userMailAccountApplicationService.check(request.getAccountId()));
     }
 }

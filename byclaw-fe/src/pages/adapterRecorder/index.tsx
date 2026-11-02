@@ -4,7 +4,7 @@
 import { useRef, useEffect } from 'react';
 import { Result, Spin, Typography } from 'antd';
 import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import useRecorderSession from './models/useRecorderSession';
 import styles from './index.module.less';
 import StepRail from './components/StepRail';
@@ -22,6 +22,7 @@ import { isActiveRecordingLayout } from './recordingLayout';
 const { Text } = Typography;
 
 export default function Workbench() {
+  const intl = useIntl();
   const userInfo = useSelector(({ user }) => user.userInfo);
   const { state, data, loading, error, actions } = useRecorderSession();
 
@@ -151,8 +152,8 @@ export default function Workbench() {
         <Result
           status="success"
           icon={<CheckCircleOutlined />}
-          title="录制完成"
-          subTitle="adapter 草稿已生成并通过 verify。raw capture 与临时文件已清理,仅保留脱敏报告。"
+          title={intl.formatMessage({ id: 'adapterRecorder.recording.complete' })}
+          subTitle={intl.formatMessage({ id: 'adapterRecorder.recording.completeDescription' })}
         />
       );
     }
@@ -163,7 +164,7 @@ export default function Workbench() {
           <div style={{ padding: '32px 8px 24px', textAlign: 'center' }}>
             <Spin indicator={<LoadingOutlined style={{ fontSize: 28 }} spin />} />
             <div style={{ marginTop: 12 }}>
-              <Text type="secondary">正在分析录制痕迹、提取候选接口…</Text>
+              <Text type="secondary">{intl.formatMessage({ id: 'adapterRecorder.recording.analyzing' })}</Text>
             </div>
           </div>
           <AnalysisEvidencePanel sampleA={data.sampleA} sampleB={data.sampleB} defaultOpen />
@@ -185,16 +186,16 @@ export default function Workbench() {
       <div className={styles.shell}>
         <header className={styles.head}>
           <div className={styles.heading}>
-            <h1 className={styles.title}>录制工作台</h1>
-            <p className={styles.subtitle}>把浏览器操作整理成可复用的 OpenCLI adapter</p>
+            <h1 className={styles.title}>{intl.formatMessage({ id: 'adapterRecorder.title' })}</h1>
+            <p className={styles.subtitle}>{intl.formatMessage({ id: 'adapterRecorder.subtitle' })}</p>
           </div>
         </header>
 
         <div className={styles.body}>
-          <aside className={styles.sidebar} aria-label="录制流程和用户信息">
+          <aside className={styles.sidebar} aria-label={intl.formatMessage({ id: 'adapterRecorder.sidebar.title' })}>
             <div className={styles.sidebarIntro}>
               <span className={styles.sidebarEyebrow}>WORKFLOW</span>
-              <span className={styles.sidebarHint}>按步骤完成一次录制</span>
+              <span className={styles.sidebarHint}>{intl.formatMessage({ id: 'adapterRecorder.sidebar.steps' })}</span>
             </div>
             <StepRail steps={railSteps} current={railCurrent} failed={failed} />
             <UserIdentityBar userInfo={userInfo} />

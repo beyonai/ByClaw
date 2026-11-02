@@ -19,6 +19,7 @@ export const config: Config = {
   beUrl: "https://be.test/byaiService",
   kmsUrl: "https://kms.test/decrypt",
   beClientIdentity: "byclaw-be",
+  internalToken: "test-internal-token",
   tls: { certFile: "cert", keyFile: "key", caFile: "ca" },
   redis: {
     host: "redis.test",
@@ -47,6 +48,7 @@ export function snapshot(overrides: Partial<TenantSnapshot> = {}): TenantSnapsho
 export function database(): TenantDatabase {
   const db: TenantDatabase = {
     query: vi.fn(async () => []),
+    lock: vi.fn(async () => {}),
     verifyIdentity: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
     fresh: vi.fn(async () => db),

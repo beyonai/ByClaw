@@ -6,6 +6,7 @@ import { persistAssets, type MediaModel } from '@byclaw/media-runtime'
 import { mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ASR_NO_SPEECH_MESSAGE, decodeVoiceBase64, voiceSessionRoot } from './voice-runtime.ts'
+import { mediaArtifactIo, type ToolEnvironmentFiles } from './tool-environment-files.ts'
 
 export interface VoiceWebHost { register(route: { kind: 'exact'; path: string; handler(request: IncomingMessage, response: ServerResponse): Promise<void> }): () => void }
 export function sameToken(actual: unknown, expected: string): boolean {
@@ -18,6 +19,8 @@ export function createVoiceHttpHandler(options: {
   authHeaders(): Promise<Record<string, string>>
   resolveModel(): Promise<MediaModel>
   transcribe?: typeof transcribeAudio
+  /** Persist audio in the separate tool environment that holds the user tree. */
+  files?: ToolEnvironmentFiles
 }) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const send = (status: number, body: unknown) => { response.statusCode = status; response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(body)) }
@@ -42,9 +45,16 @@ export function createVoiceHttpHandler(options: {
       const bytes = decodeVoiceBase64(body['audioBase64'])
       if (body['sessionId'] !== undefined) {
         const root = voiceSessionRoot(options.byRoot, String(body['sessionId']))
-        await mkdir(root, { recursive: true, mode: 0o700 })
-        if (await realpath(root) !== join(await realpath(options.byRoot), '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
-        await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }])
+        const files = options.files
+        if (files === undefined) {
+          await mkdir(root, { recursive: true, mode: 0o700 })
+          if (await realpath(root) !== join(await realpath(options.byRoot), '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
+          await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }])
+        } else {
+          await files.ensureDirectory(root)
+          if (await files.realpath(root) !== join(await files.realpath(options.byRoot), '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
+          await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }], mediaArtifactIo(files))
+        }
       }
       let model: MediaModel
       if (body['model'] !== undefined) {

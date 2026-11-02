@@ -4,6 +4,36 @@
 
 <mapper namespace="com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper">
 
+    <sql id="batchGrantValues">
+        #{grant.privilegeGrantId,jdbcType=BIGINT}, #{grant.grantType,jdbcType=VARCHAR}, #{grant.operType,jdbcType=VARCHAR},
+        #{grant.grantObjType,jdbcType=VARCHAR}, #{grant.grantObjId,jdbcType=BIGINT}, #{grant.effDate,jdbcType=TIMESTAMP},
+        #{grant.expDate,jdbcType=TIMESTAMP}, #{grant.statusCd,jdbcType=VARCHAR}, #{grant.createStaff,jdbcType=BIGINT},
+        #{grant.createDate,jdbcType=TIMESTAMP}, #{grant.updateStaff,jdbcType=BIGINT}, #{grant.updateDate,jdbcType=TIMESTAMP},
+        #{grant.grantToType,jdbcType=VARCHAR}, #{grant.grantToObjId,jdbcType=BIGINT}, #{grant.grantToObjType,jdbcType=VARCHAR},
+        #{grant.allowUnsubscribe,jdbcType=VARCHAR}
+    </sql>
+
+    <insert id="insertBatch">
+        INSERT INTO au_privilege_grant (
+            privilege_grant_id, grant_type, oper_type, grant_obj_type, grant_obj_id,
+            eff_date, exp_date, status_cd, create_staff, create_date, update_staff, update_date,
+            grant_to_type, grant_to_obj_id, grant_to_obj_type, allow_unsubscribe
+        )
+        <choose>
+            <when test="dbType != null and dbType.equalsIgnoreCase('oracle')">
+                <foreach collection="grants" item="grant" separator=" UNION ALL ">
+                    SELECT <include refid="batchGrantValues"/> FROM dual
+                </foreach>
+            </when>
+            <otherwise>
+                VALUES
+                <foreach collection="grants" item="grant" separator=",">
+                    (<include refid="batchGrantValues"/>)
+                </foreach>
+            </otherwise>
+        </choose>
+    </insert>
+
     <resultMap id="privilegeGrantResultMap" type="com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant">
         <result column="privilege_grant_id" property="privilegeGrantId"/>
         <result column="grant_type" property="grantType"/>
@@ -147,7 +177,8 @@
     <select id="queryDigitalEmployeeUseApplyAudit"
             resultType="com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeUseApplyAuditVo">
         select pg.privilege_grant_id as privilegeGrantId,
-               case when pg.grant_type = 'SKILL_PUBLICATION' then 'SKILL_PUBLICATION' else 'USE' end as auditType,
+               case when pg.grant_type = 'SKILL_PUBLICATION' then 'SKILL_PUBLICATION'
+                    when pg.grant_type = 'MANAGE_APPLY' then 'MANAGE' else 'USE' end as auditType,
                pg.grant_to_obj_id as userId,
                coalesce(u.user_name, cast(pg.grant_to_obj_id as varchar)) as userName,
                pg.create_date as applyTime,
@@ -183,12 +214,13 @@
                    r.resource_biz_type = 'DIG_EMPLOYEE'
                </otherwise>
            </choose>
-           and (pg.grant_type = 'AVAILABLE_USE'
+           and (pg.grant_type IN ('AVAILABLE_USE', 'MANAGE_APPLY')
                 or (pg.grant_type = 'SKILL_PUBLICATION' and r.resource_biz_type = 'SKILL'
                     and r.owner_type = 'enterprise'))
            and pg.grant_to_obj_type = 'USER'
            and pg.grant_to_type = 'RED'
-           and pg.oper_type = 'READ'
+           and ((pg.grant_type = 'MANAGE_APPLY' AND pg.oper_type = 'WRITE')
+                OR (pg.grant_type != 'MANAGE_APPLY' AND pg.oper_type = 'READ'))
            <!-- 参数化包含匹配，百分号和下划线按普通字符搜索，不扩展为 LIKE 通配符。 -->
            <if test="keyword != null and keyword != ''">
                and position(lower(#{keyword}) in lower(coalesce(r.resource_name, ''))) > 0

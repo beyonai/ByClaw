@@ -93,6 +93,18 @@ async function indexText(ctx: Context, agent: Agent): Promise<string | undefined
 }
 
 describe('the devflow-spec-map runtime context', () => {
+  it.each([false, true])('honors the optional automatic discovery policy: %s', async (enabled) => {
+    const cwd = await tempWorkspace()
+    const seam = seamDouble(() => [])
+    const { ctx } = await boot(seam)
+    ctx.provide('byclawWorkspacePolicy', { automaticDiscoveryEnabled: enabled })
+    const agent = agentWith('policy', cwd)
+    touch(ctx, agent, 'read', 'src/example.ts')
+    expect(await preStep(ctx, agent)).toEqual({ kind: 'enter', messages: [] })
+    expect(seam.list).toHaveBeenCalledTimes(enabled ? 1 : 0)
+    expect(await indexText(ctx, agent)).toBeUndefined()
+  })
+
   it('lists a stale anchor-hit document with its failing anchors after a write, delegating first', async () => {
     const cwd = await tempWorkspace()
     const seam = seamDouble(

@@ -13,7 +13,27 @@ public class DingtalkStreamProperties {
 
     private boolean showReasoning;
 
+    private Dispatch dispatch = new Dispatch();
+
+    private Http http = new Http();
+
     private Lifecycle lifecycle = new Lifecycle();
+
+    @Data
+    public static class Dispatch {
+        private int preparationWorkers = 8;
+        private int preparationQueueCapacity = 32;
+        private int chatWorkers = 32;
+        private int chatQueueCapacity = 64;
+    }
+
+    @Data
+    public static class Http {
+        private int connectTimeoutMillis = 3_000;
+        private int readTimeoutMillis = 10_000;
+        private int requestTimeoutMillis = 15_000;
+        private int fileTimeoutMillis = 120_000;
+    }
 
     @Data
     public static class Lifecycle {

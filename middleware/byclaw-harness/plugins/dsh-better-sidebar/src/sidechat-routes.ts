@@ -45,6 +45,13 @@ import {
 } from './sidechat-core.ts'
 import { requireString, SidebarError } from './wire.ts'
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** The Side Chat context injection (boundary prompt + parked snapshot). */
+    'plugin:dsh-better-sidebar': { kind: 'plugin:dsh-better-sidebar' }
+  }
+}
+
 /** The five Side Chat routes of the sidebar API (wire method names). */
 export interface SidechatRoutes {
   /** Create a side thread child seeded with the parent's log up to now.
@@ -65,15 +72,6 @@ export interface SidechatRoutes {
 /** Timeout guarding the create call (the registry detaches it before the
  *  handle becomes visible, so the child is never cancelled by it). */
 const CREATE_TIMEOUT_MS = 15_000
-
-/** Per-activation disposers of created thread agents (the dispose route
- *  releases them; the session and its history always stay persisted). */
-const threadDisposers = new Map<string, () => Promise<void>>()
-
-/** The in-progress-turn snapshot captured at creation of an EMPTY thread,
- *  waiting to ride the first prompt (lost on a host restart — the boundary
- *  prompt is then delivered alone, a logged degradation). */
-const pendingSnapshots = new Map<string, string>()
 
 /** Resolve the parent's preset and build the child's composition setup
  *  (mirror of api-proxy's composeAgent minus the model-selection install —
@@ -143,13 +141,15 @@ function admitFollowup(agent: Agent, blocks: ContentBlock[]): void {
  * log therefore records two user/message events (injection, then question)
  * instead of one wrapped blob: the transcript shows the question as a user
  * bubble and collapses the injection as a context row. The injection source
- * is stamped `kind: 'plugin'` so recognition is structural; its text still
- * opens with SIDE_BOUNDARY_PREFIX, keeping boundaryDelivered intact.
+ * is stamped `kind: 'plugin:dsh-better-sidebar'` (DSH 0.2.1 plugin-owned
+ * source kind; 0.1.5 logs' `{ kind: 'plugin', plugin }` convert to it on
+ * load) so recognition is structural; its text still opens with
+ * SIDE_BOUNDARY_PREFIX, keeping boundaryDelivered intact.
  */
 function admitFirstContact(agent: Agent, injectionText: string, question: string): void {
   agent.inject(createUserMessage({
     content: textPrompt(injectionText),
-    source: { kind: 'plugin', plugin: SIDE_INJECTION_PLUGIN },
+    source: { kind: `plugin:${SIDE_INJECTION_PLUGIN}` },
   }))
   admitFollowup(agent, textPrompt(question))
 }
@@ -164,6 +164,15 @@ function liveThreadAgent(ctx: Context, childId: string): Agent | undefined {
  *  error the tab surfaces inline). The record keys are the FULL wire method
  *  names the /sidebar/api dispatcher looks up (`api[method]`). */
 export function buildSidechatApi(ctx: Context): SidechatRoutes {
+  // Per-plugin-instance state (never module-level: a shared host runs one
+  // instance per user context, and thread ids must not cross between them).
+  /** Disposers of created thread agents (the dispose route releases them;
+   *  the session and its history always stay persisted). */
+  const threadDisposers = new Map<string, () => Promise<void>>()
+  /** The in-progress-turn snapshot captured at creation of an EMPTY thread,
+   *  waiting to ride the first prompt (lost on a host restart — the boundary
+   *  prompt is then delivered alone, a logged degradation). */
+  const pendingSnapshots = new Map<string, string>()
   return {
     'sidechat.start': async (payload: unknown) => {
       const sessionId = requireString(payload, 'sessionId')

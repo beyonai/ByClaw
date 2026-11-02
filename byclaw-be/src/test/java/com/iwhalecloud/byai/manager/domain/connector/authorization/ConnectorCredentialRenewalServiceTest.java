@@ -22,7 +22,7 @@ import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 
-class ConnectorCredentialRenewalServiceTest {
+class ConnectorCredentialRenewalServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-31T00:00:00Z"), ZoneOffset.UTC);
 
     @Test

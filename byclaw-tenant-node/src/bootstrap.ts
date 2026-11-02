@@ -1,5 +1,8 @@
+import { requireExecutionPolicy } from "./application/execution-policy.js";
+import MemberGroupRemoval from "./application/MemberGroupRemoval.js";
+import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
 import { join } from "node:path";
-import { Redis } from "ioredis";
+import { createRedis } from "@byclaw/by-framework";
 import type { Config } from "./config.js";
 import { ConnectionManager } from "./application/connection-manager.js";
 import { CommandService } from "./application/command-service.js";
@@ -8,6 +11,8 @@ import { SessionQueries } from "./application/session-queries.js";
 import { MirrorService } from "./application/mirror-service.js";
 import { SchemaTaskService } from "./application/schema/task-service.js";
 import { TenantRuntime } from "./application/runtime.js";
+import { RedisLeases } from "./infrastructure/coordination/redis-leases.js";
+import { RedisSharedQuotaReader } from "./infrastructure/coordination/shared-quota-reader.js";
 import { Database } from "./infrastructure/persistence/database.js";
 import { SqlCommandTransactions } from "./infrastructure/persistence/command-repository.js";
 import { SqlMirrorTransactions } from "./infrastructure/persistence/mirror-repository.js";
@@ -15,7 +20,7 @@ import { SqlSessionRepository } from "./infrastructure/persistence/session-repos
 import { SqlHistoryRepository } from "./infrastructure/persistence/history-repository.js";
 import { JsonStore } from "./infrastructure/files/json-store.js";
 import { readTenantSnapshot } from "./infrastructure/connection/redis-config.js";
-import { decryptPassword } from "./infrastructure/connection/kms-decryptor.js";
+import { decryptCredentials } from "./infrastructure/connection/kms-decryptor.js";
 import { MtlsClient, loadTls } from "./infrastructure/http/mtls-client.js";
 import { BeSchemaClient } from "./infrastructure/schema/be-schema-client.js";
 import { SchemaTaskFiles } from "./infrastructure/schema/task-files.js";
@@ -24,19 +29,27 @@ import { SchemaReadiness } from "./infrastructure/schema/readiness.js";
 import { StreamSupervisor } from "./infrastructure/stream/stream-supervisor.js";
 import { Discovery } from "./infrastructure/discovery/by-framework-discovery.js";
 import { TenantWorker } from "./infrastructure/discovery/tenant-worker.js";
+import { SqlGroupForwardStore } from "./infrastructure/persistence/group-forward-prepare.js";
 import { createApp } from "./interfaces/http/app.js";
+import OperationsQueries from "./application/OperationsQueries.js";
 
 /** 组装应用端口与基础设施；连接池、Redis、HTTPS 客户端的关闭由这里统一负责。 */
 export async function bootstrap(config: Config) {
   const tls = await loadTls(config),
     client = new MtlsClient(tls, config.internalToken);
-  const redis = new Redis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
+  const redis = createRedis({ ...config.redis, lazyConnect: true, maxRetriesPerRequest: 1 });
   redis.on("error", () => {});
   const state = new JsonStore(config.stateDir);
+  const transports = new WeakMap<object, { url: string; trafficToken: string }>();
   const connection = new ConnectionManager(config, {
     snapshot: () => readTenantSnapshot(redis, config.enterpriseId),
-    decrypt: (snapshot) => decryptPassword(client, config.kmsUrl, snapshot),
-    open: Database.open,
+    decrypt: async (snapshot) => {
+      const credentials = await decryptCredentials(client, config.kmsUrl, snapshot);
+      if (credentials.transport) transports.set(snapshot, credentials.transport);
+      return credentials.password;
+    },
+    open: (snapshot, password) =>
+      Database.open(snapshot, password, new RedisLeases(redis), transports.get(snapshot)),
     readAuthority: () => state.read("authority.json"),
     saveAuthority: (snapshot) =>
       state.write("authority.json", {
@@ -52,7 +65,15 @@ export async function bootstrap(config: Config) {
     config.enterpriseId,
     new SqlHistoryRepository(read, config.enterpriseId),
   );
-  const commands = new CommandService(new SqlCommandTransactions(connection));
+  const quotas = new RedisSharedQuotaReader(redis, {
+    ...config.quota,
+    commercialManaged: config.commercialManaged,
+    warn: (code, enterpriseId) =>
+      app.log.warn({ code, enterpriseId }, "Shared quota Redis read failed"),
+  });
+  const commands = new CommandService(new SqlCommandTransactions(connection, quotas), () =>
+    requireExecutionPolicy(redis, config.enterpriseId, config.commercialManaged ?? false, quotas),
+  );
   const be = new BeSchemaClient(config, client),
     schemaState = new SchemaReadiness(connection, be);
   const schema = new SchemaTaskService(
@@ -87,10 +108,37 @@ export async function bootstrap(config: Config) {
     config,
     {
       commands,
+      requireExecution: () =>
+        requireExecutionPolicy(
+          redis,
+          config.enterpriseId,
+          config.commercialManaged ?? false,
+          quotas,
+        ),
+      forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,
+      forwardSources: {
+        readMessage: (actor, group, message) =>
+          connection.write((db) =>
+            new SqlForwardSourceAuthorityReader(db, config.enterpriseId).readMessage(
+              actor,
+              group,
+              message,
+            ),
+          ),
+        requireUploadSession: (actor, session) =>
+          connection.write((db) =>
+            new SqlForwardSourceAuthorityReader(db, config.enterpriseId).requireUploadSession(
+              actor,
+              session,
+            ),
+          ),
+      },
       schema,
       sessions: new SessionQueries(new SqlSessionRepository(read, config.enterpriseId)),
+      operations: new OperationsQueries(read, config.enterpriseId),
+      memberGroupRemoval: new MemberGroupRemoval(connection, config.enterpriseId),
       connected: () => connection.connected,
       ready: (): boolean => runtime.ready,
       provisioned: () => runtime.provisioned,

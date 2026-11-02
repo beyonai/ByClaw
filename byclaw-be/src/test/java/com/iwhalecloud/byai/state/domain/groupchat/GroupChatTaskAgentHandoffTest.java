@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -15,6 +17,8 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -31,7 +35,12 @@ import com.iwhalecloud.byai.state.domain.resource.bo.AuthContextBo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 
-class GroupChatTaskAgentHandoffTest {
+class GroupChatTaskAgentHandoffTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiGroupChatTaskMapper tasks = mock(ByaiGroupChatTaskMapper.class);
     private final GroupChatAuthorizationService groups = mock(GroupChatAuthorizationService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);
@@ -95,12 +104,25 @@ class GroupChatTaskAgentHandoffTest {
         verify(lifecycle, never()).startTurn(60L);
     }
 
-    @Test
-    void terminalTaskAndConcurrentTurnAreRejected() {
-        task.setStatus("PUBLISHED");
+    @ParameterizedTest
+    @ValueSource(strings = {"PUBLISHED", "CANCELLED"})
+    void terminalTaskCannotStartAnotherTurn(String status) {
+        task.setStatus(status);
         assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
         verify(lifecycle, never()).startTurn(60L);
-        task.setStatus("ACTIVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RUNNING", "WAITING_USER", "FAILED"})
+    void activeTaskDoesNotAddARunningStatusGate(String turnStatus) {
+        task.setTurnStatus(turnStatus);
+        assertThat(guard.beforeTurn(60L, 41L, null)).isEqualTo(101L);
+        // 普通发送流程决定是否接收输入，群任务不另查 Redis 运行态作为准入条件。
+        verify(running, never()).getRunning(60L);
+    }
+
+    @Test
+    void taskEndingDuringTurnRegistrationIsRejected() {
         when(lifecycle.startTurn(60L)).thenReturn((Long) null);
         assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("does not accept");
     }

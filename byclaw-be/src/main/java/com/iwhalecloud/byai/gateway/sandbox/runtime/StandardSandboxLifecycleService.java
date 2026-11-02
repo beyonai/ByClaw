@@ -71,6 +71,11 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
     }
 
     @Override
+    public boolean isForeignSandbox(String sandboxId) {
+        return runtimeProvider.isForeignSandbox(sandboxId);
+    }
+
+    @Override
     public SandboxResponse<SandboxLaunchData> launchSandbox(SandboxLaunchRequest request) {
         try {
             log.info("生命周期服务开始启动沙箱，provider={}，user={}，type={}",
@@ -344,7 +349,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
      */
     private static final Set<String> SYSTEM_ENV_KEYS = Set.of(
         "BYAI_SERVICE_BASE_URL",
-        "BYAI_WORKER_ID"
+        "BYAI_WORKER_ID",
+        "COMMERCIAL_MANAGED"
     );
 
     private static void mergeSystemEnvs(CreateSandboxRequest request, Map<String, String> launchEnvs) {

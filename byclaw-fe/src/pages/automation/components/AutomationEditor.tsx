@@ -378,7 +378,7 @@ const AutomationEditor: React.FC<AutomationEditorProps> = ({
                     <Form.Item name="periodDateTime" noStyle>
                       <DatePicker
                         className={styles.scheduleYearlyDateTimeField}
-                        format="MM月DD日 HH:mm"
+                        format={intl.formatMessage({ id: 'notice.messageList.dateFormat.short' })}
                         showTime={{ format: 'HH:mm' }}
                         allowClear={false}
                       />

@@ -15,6 +15,7 @@ const mockAppState = {
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
+  getIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
 }));
 jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: mockEventEmitter }));
 jest.mock('@/models/common/useAppStore', () => ({
@@ -61,6 +62,8 @@ describe('chat VNC reopening', () => {
     mockEventEmitter = new EventEmitter$Cls();
     mockAppState.sandboxesInfo = [{ status: 'RUNNING', instanceEndpoints: { vnc: '/v1/sandboxes/test/proxy/8081' } }];
     mockAppState.getSandboxesInfoUrl.mockResolvedValue([]);
+    // The opener probes the desktop before showing it; here it always answers.
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({ type: 'basic', status: 200 });
   });
 
   it('keeps the icon after a new answer and real drawer close, then reopens the desktop', async () => {
@@ -90,6 +93,8 @@ describe('chat VNC reopening', () => {
         await jest.runAllTimersAsync();
       });
 
+      // The click is answered with a notice instead of an empty drawer.
+      expect(await screen.findByText('common.remoteComputerUnavailable')).toBeInTheDocument();
       view.rerender(<ChatDesktop latestMessage={nextAnswer} />);
       expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
       expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();

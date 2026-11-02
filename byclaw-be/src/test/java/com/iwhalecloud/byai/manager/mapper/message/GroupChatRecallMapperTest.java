@@ -66,6 +66,23 @@ class GroupChatRecallMapperTest {
             assertThat(mapper.searchVisibleGroupMessages(10L, null, "ALL", "ALL", "ALL", 7L, null, null, null, 1))
                 .extracting(ByaiMessage::getMessageId).containsExactly(2L);
             assertThat(mapper.selectVisibleGroupMessagesByIds(10L, List.of(1L)).get(0).isRecalled()).isTrue();
+            // SQL 自身校验身份、撤回版本和时间窗口，不能只依赖读取后的 Java 判断。
+            assertThat(mapper.undoRecallGroupMessage(10L, 1L, 8L, new Date(5000),
+                new Date(125000), new Date(5000), "{}")).isZero();
+            assertThat(mapper.undoRecallGroupMessage(10L, 1L, 7L, new Date(4999),
+                new Date(125000), new Date(5000), "{}")).isZero();
+            assertThat(mapper.undoRecallGroupMessage(10L, 1L, 7L, new Date(5000),
+                new Date(125001), new Date(5001), "{}")).isZero();
+            assertThat(mapper.undoRecallGroupMessage(10L, 1L, 7L, new Date(5000),
+                new Date(125000), new Date(5000), "{\"retained\":true}")).isEqualTo(1);
+            ByaiMessage restored = mapper.selectByMessageId(1L);
+            assertThat(restored.isRecalled()).isFalse();
+            assertThat(restored.getRecalledBy()).isNull();
+            assertThat(restored.getMessageContent()).isEqualTo("SECRET");
+            assertThat(restored.getTopicId()).isEqualTo(1L);
+            assertThat(restored.getMetadata()).isEqualTo("{\"retained\":true}");
+            assertThat(mapper.undoRecallGroupMessage(10L, 1L, 7L, new Date(5000),
+                new Date(125000), new Date(5000), "{}")).isZero();
         }
     }
 }

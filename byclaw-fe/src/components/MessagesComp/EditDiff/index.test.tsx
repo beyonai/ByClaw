@@ -10,6 +10,7 @@ jest.mock('@umijs/max', () => ({
         'editDiff.title': '文件修改',
         'editDiff.phase.applied': '已应用',
         'common.copy': '复制',
+        'fileChanges.collapse': '收起',
       }[id] || id),
   }),
 }));

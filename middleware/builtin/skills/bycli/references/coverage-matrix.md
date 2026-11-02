@@ -45,7 +45,7 @@ skill 明确承诺能搞定什么、搞不定什么。动手前先看一眼这�
 
 | 场景 | 原因 | 绕开方案 |
 |------|------|---------|
-| 首次登录获取 token | 需要用户真实输入账密 | 让用户先在 browser session 里手动登录，adapter 拿 cookie 就行 |
+| 自动获取 token / 代填账密 | 凭据必须由人扫码或输入，skill 不代持 | 有配方时 `bycli auth login <platform>` 打开官方登录页等人完成，`bycli auth status <platform>` 确认后 adapter 复用同一 profile 的登录态；无配方时请用户自行登录 |
 | 复杂 anti-bot（captcha） | 反爬拒流量 | 放弃，换同数据的其他站点 |
 | 加密字段（客户端 crypto） | 要破解 bundle 逆向 | 换 endpoint；实在不行发请求到 intercept 让页面自己解 |
 | WebSocket 流式数据 | 状态管理复杂 | 退回 HTTP 轮询版本（多数站都有） |

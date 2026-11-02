@@ -20,6 +20,7 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture, { WORKING_DIRECTORY_FIXTURE } from './working-directory-fixture'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
 import type { CardLocation, DevActor, ServiceClass, TransitionResult } from '@zhchxiao123/dsh-devflow'
 import FilesystemDevflowStore from '@zhchxiao123/dsh-devflow-filesystem'
@@ -83,6 +84,7 @@ async function boot(composition: (base: string, devflowRoot: string) => Promise<
     '  config:',
     '    provider: test-provider',
     '    model: test-model',
+    `- name: '${WORKING_DIRECTORY_FIXTURE}'`,
     "- name: '@deepseek-ai/dsh-subagent'",
     await composition(base, devflowRoot),
   ].join('\n'))
@@ -95,6 +97,7 @@ async function boot(composition: (base: string, devflowRoot: string) => Promise<
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-default-model', AgentDefaultModelConfig],
+    [WORKING_DIRECTORY_FIXTURE, WorkingDirectoryFixture],
     ['@deepseek-ai/dsh-subagent', SubagentRuntime],
     ['@zhchxiao123/dsh-devflow-filesystem', FilesystemDevflowStore],
     ['@zhchxiao123/dsh-devflow-artifact-gate', DevflowArtifactGate],

@@ -67,7 +67,7 @@ try {
   const gate = begin()
   await tick()
   assert.deepEqual(wakes.map(wake => wake.id), ['captain'], 'nested recovery must wake the owning captain, never an unrelated team or routing root')
-  assert.deepEqual(wakes[0].message.source, { kind: 'plugin', plugin: 'byclaw-integration' })
+  assert.deepEqual(wakes[0].message.source, { kind: 'plugin:byclaw-integration' })
   assert.ok(wakes[0].message.content[0].text.includes('team-captain'))
   assert.ok(JSON.stringify(sessions.get('captain').snapshotEvents()).includes('ByClaw 内部运行巡检'),
     'the recovery instruction must enter the durable DSH inbox')

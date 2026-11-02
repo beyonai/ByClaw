@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -54,6 +56,7 @@ public class TenantGroupMemberService {
         requireInvite(context, sessionId, type);
     }
 
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public List<Map<String, Object>> invite(TenantRequestContext context, Long sessionId,
         GroupChatMemberRequest request) {
         if (request == null || !("AGENT".equals(request.getType()) || "USER".equals(request.getType()))
@@ -94,15 +97,16 @@ public class TenantGroupMemberService {
             }
         }
         TenantGroupMembershipEvents.publish(events, context, sessionId, added);
-        return rows(nodeDetail(context, sessionId).get("members")).stream()
+        List<Map<String, Object>> result = rows(nodeDetail(context, sessionId).get("members")).stream()
             .filter(member -> type.equals(member.get("memObjType"))
                 && request.getId().stream().anyMatch(idValue -> idValue.toString().equals(member.get("memObjId"))))
             .toList();
+        return result;
     }
 
     public List<TenantNodeModels.InvitedMember> prepareMembers(TenantRequestContext context, String type, List<Long> ids) {
         if (ids == null || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0))
-            throw new IllegalArgumentException("Invalid group members");
+            throw new IllegalArgumentException(I18nUtil.get("tenant.group.membersInvalid"));
         return ids.stream().distinct().map(id -> {
             if ("USER".equals(type)) {
                 Users user = users.selectById(id);

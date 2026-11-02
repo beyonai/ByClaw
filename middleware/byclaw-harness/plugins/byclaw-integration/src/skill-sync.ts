@@ -1,6 +1,7 @@
 /** Safe ByClaw Hub Skill download cache, adapted from baiying-enhance. */
 
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { privateGenerationRoot } from './generation-paths.ts'
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -116,7 +117,8 @@ export async function writeCachedByClawSkill(options: {
   metadata: ByClawSkillMetadata
 }): Promise<void> {
   await mkdir(dirname(options.targetDir), { recursive: true })
-  const suffix = `${process.pid}-${Date.now()}`
+  // Several user contexts may share one process, so pid and clock can collide.
+  const suffix = randomUUID()
   const generations = privateGenerationRoot(options.targetDir)
   await mkdir(generations, { recursive: true, mode: 0o700 })
   const swap = join(generations, `skill.tmp-${suffix}`)

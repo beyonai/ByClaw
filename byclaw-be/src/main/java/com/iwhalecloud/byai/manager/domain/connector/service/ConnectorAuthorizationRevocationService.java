@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import java.time.Duration;
 import java.util.Optional;
 
@@ -49,37 +51,37 @@ public class ConnectorAuthorizationRevocationService {
     @Transactional(rollbackFor = Exception.class)
     public void revoke(Long connectorId, String userId) {
         if (connectorId == null) {
-            throw new IllegalArgumentException("connectorId不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("connector.id.required"));
         }
         ConnectorInfo connector = connectorInfoService.findById(connectorId);
         if (connector == null) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
         if ("AK_SK".equals(connector.getAuthMode())) {
             revokeCredentialConnector(connectorId, userId);
             return;
         }
         if (!"00A".equals(connector.getStatusCd())) {
-            throw new IllegalArgumentException("连接器不存在或已失效");
+            throw new IllegalArgumentException(I18nUtil.get("connector.unavailable"));
         }
 
         if (connectionStateService.findActiveAuthorization(userId, connectorId) == null) {
-            throw new IllegalArgumentException("连接器授权记录不存在");
+            throw new IllegalArgumentException(I18nUtil.get("connector.authorization.missing"));
         }
 
         Optional<String> lockToken = sessionRepository.tryAcquireStartLock(userId, connectorId, REVOCATION_LOCK_TTL);
         if (lockToken.isEmpty()) {
-            throw new IllegalStateException("当前连接器已有进行中的授权任务");
+            throw new IllegalStateException(I18nUtil.get("connector.authorization.active"));
         }
         boolean releaseDeferred = deferLockReleaseUntilTransactionCompletion(
             userId, connectorId, lockToken.get());
         try {
             if (sessionRepository.hasActiveSession(userId, connectorId)) {
-                throw new IllegalStateException("当前连接器已有进行中的授权任务");
+                throw new IllegalStateException(I18nUtil.get("connector.authorization.active"));
             }
             ConnectorAuthorizationProvider provider = providerRegistry.get(connector.getProviderCode());
             if (!(provider instanceof ConnectorCredentialRevoker revoker)) {
-                throw new IllegalStateException("当前连接器不支持取消授权");
+                throw new IllegalStateException(I18nUtil.get("connector.authorization.revokeUnsupported"));
             }
             revoker.revoke(userId, connector);
             connectionStateService.revokeAuthorization(userId, connectorId);
@@ -93,7 +95,7 @@ public class ConnectorAuthorizationRevocationService {
     private void revokeCredentialConnector(Long connectorId, String userId) {
         Optional<String> lockToken = sessionRepository.tryAcquireStartLock(userId, connectorId, REVOCATION_LOCK_TTL);
         if (lockToken.isEmpty()) {
-            throw new IllegalStateException("当前连接器已有进行中的授权任务");
+            throw new IllegalStateException(I18nUtil.get("connector.authorization.active"));
         }
         boolean releaseDeferred = deferLockReleaseUntilTransactionCompletion(
             userId, connectorId, lockToken.get());

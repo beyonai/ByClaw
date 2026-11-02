@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +40,7 @@ public class GroupChatPendingPublicationStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void checkpoint(Long id, Long cloudResourceId, String json) {
         if (mapper.checkpoint(id, cloudResourceId, json) != 1) {
-            throw new IllegalStateException("Pending publication changed during upload");
+            throw new IllegalStateException(I18nUtil.get("groupchat.publication.changedDuringUpload"));
         }
     }
 

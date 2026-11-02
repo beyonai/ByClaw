@@ -106,7 +106,9 @@ public final class PlatformRoutedStorage implements ObjectStorage {
         if (!remote()) return legacy.get(value);
         feign.Response response = gateway.safe(() -> files.getObject().get(location(value)));
         if (response.status() < 200 || response.status() >= 300 || response.body() == null) {
+            boolean busy = isStorageBusy(response);
             response.close();
+            if (busy) throw new com.iwhalecloud.byai.state.common.exception.StorageBusyException();
             throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException(
                     "Platform file download failed");
         }
@@ -125,6 +127,19 @@ public final class PlatformRoutedStorage implements ObjectStorage {
             response.close();
             throw new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException(
                     "Platform file download failed");
+        }
+    }
+
+    private boolean isStorageBusy(feign.Response response) {
+        if (response.status() != 503 || response.body() == null) return false;
+        try {
+            byte[] body = response.body().asInputStream().readNBytes(65537);
+            if (body.length > 65536) return false;
+            com.fasterxml.jackson.databind.JsonNode error = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(body);
+            return error != null && "STORAGE_BUSY".equals(error.path("data").path("errorType").asText());
+        } catch (IOException invalidResponse) {
+            return false;
         }
     }
 

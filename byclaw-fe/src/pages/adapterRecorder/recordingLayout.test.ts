@@ -1,3 +1,9 @@
+jest.mock('@umijs/max', () => ({
+  useSelector: () => null,
+  useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+  getIntl: () => require('@/testUtils/localeIntl').getLocaleIntl(),
+}));
+
 import { isActiveRecordingLayout } from './recordingLayout';
 
 describe('isActiveRecordingLayout', () => {

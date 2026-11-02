@@ -157,9 +157,9 @@ async function runProbe(ctx) {
 }
 
 async function main() {
-  if (!process.env.DSH_ROOT) throw new Error('Set DSH_ROOT to the built dsh-v0.1.5-rc.2 checkout')
+  if (!process.env.DSH_ROOT) throw new Error('Set DSH_ROOT to the built dsh-v0.2.1-rc.2 checkout')
   const dshRoot = resolve(process.env.DSH_ROOT)
-  assert.equal(JSON.parse(await readFile(join(dshRoot, 'package.json'), 'utf8')).version, '0.1.5-rc.2')
+  assert.equal(JSON.parse(await readFile(join(dshRoot, 'package.json'), 'utf8')).version, '0.2.1-rc.2')
   const root = await mkdtemp(join(tmpdir(), 'byclaw-media-actual-dsh-'))
   const home = join(root, 'home')
   const profile = join(home, 'profiles/headless')

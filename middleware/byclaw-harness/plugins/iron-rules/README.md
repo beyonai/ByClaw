@@ -56,6 +56,8 @@ One malformed rule is skipped with a warning and leaves the rest armed — a sin
 
 ## Resident injection
 
+In ByClaw managed profiles, the optional `byclawWorkspacePolicy` service can disable automatic pre-step rule discovery. `BYCLAW_DSH_WORKSPACE_DISCOVERY_ENABLED=1` opts in; standalone use without that service retains the behavior below. Explicit rule tools and post-mutation enforcement are unaffected.
+
 Rule bodies are injected in full on `agent/pre-step`, with the `admin` group first and labelled non-negotiable.
 
 This deliberately avoids a catalog with on-demand loading. A catalog is right for a capability the model reaches for when relevant — that is what skills are — but a rule is an obligation, and one the model never opened is one it never followed.
@@ -222,6 +224,7 @@ On `agent/turn-stopping`, behind three controls:
 | `checkOutputMaxChars` | `2000` | Per-violation cap on script output quoted back to the model, so a runaway script cannot flood the context |
 | `maxRetries` | `2` | Consecutive forced continuations. `0` reports once and never forces a retry |
 | `requireApproval` | `false` | Reserved: require approval before executing a check script. Not yet honored |
+| `workspaceOnToolEnvironment` | `false` | Read and write rules through the context's tool environment (`ctx.fs` / `ctx.subprocess`) instead of this process's filesystem; the shared DSH host sets it, because its users' projects live in their tool sandboxes |
 
 ## Install
 

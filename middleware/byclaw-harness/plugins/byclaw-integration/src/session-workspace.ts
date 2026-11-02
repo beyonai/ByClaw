@@ -13,7 +13,15 @@ import {
   type ByClawInboundTurnContext,
 } from './inbound-context.ts'
 
-const BYCLAW_CONTEXT_PLUGIN = 'byclaw-context'
+/** Source kind of the ByClaw context messages; a 0.1.5 session's `{ kind: 'plugin', plugin: 'byclaw-context' }` loads as this. */
+const BYCLAW_CONTEXT_SOURCE = 'plugin:byclaw-context'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:byclaw-context': { kind: 'plugin:byclaw-context' }
+    'plugin:byclaw-integration': { kind: 'plugin:byclaw-integration' }
+  }
+}
 const BYCLAW_CONTEXT_MARKER = '<!-- byclaw-context:session-workspace -->'
 export const BYCLAW_SESSION_WORKSPACE_EVENT = 'byclaw/session-workspace'
 export const BYCLAW_ROOT_BINDING_EVENT = 'byclaw/root-binding'
@@ -22,7 +30,7 @@ export const BYCLAW_ROOT_BINDING_EVENT = 'byclaw/root-binding'
 export interface ByClawSessionWorkspace {
   /** External ByAI session id shared by the root and every descendant. */
   readonly externalSessionId: string
-  /** Absolute conversation process-file workspace inherited by every descendant. */
+  /** Absolute execution workspace inherited by every descendant. */
   readonly cwd: string
   /** Current ByClaw user identity; credentials are never stored here. */
   readonly userCode?: string
@@ -30,6 +38,9 @@ export interface ByClawSessionWorkspace {
   /** Canonical host-visible roots for per-session delivery and shared files. */
   readonly sessionRoot?: string
   readonly sharedRoot?: string
+  readonly sharedDir?: string
+  readonly projectId?: string
+  readonly projectName?: string
   readonly defaultOutputRoot?: string
 }
 
@@ -125,6 +136,8 @@ export class ByClawSessionWorkspaceRegistry {
   private readonly workspaces = new Map<string, ByClawSessionWorkspace>()
   private readonly turns = new Map<string, ByClawInboundTurnContext>()
   private readonly sessionTurns = new Map<string, ByClawInboundTurnContext>()
+  /** Credentials follow live turn identity without entering durable context or session metadata. */
+  private readonly apiKeys = new WeakMap<ByClawInboundTurnContext, string>()
   private readonly pendingSessionTurns = new Map<string, {
     inputMessageId: string
     context: ByClawInboundTurnContext
@@ -148,8 +161,7 @@ export class ByClawSessionWorkspaceRegistry {
     }
     if (legacy !== undefined && session.header.cwd !== undefined
       && resolve(session.header.cwd) !== legacy.cwd
-      && !(context.sessionRoot !== undefined && resolve(session.header.cwd) === resolve(context.sessionRoot)
-        && isLegacyProjectWorkspaceTransition(
+      && !(context.sessionRoot !== undefined && isLegacyProjectWorkspaceTransition(
           legacy.cwd, session.header.cwd, externalSessionId, dirname(dirname(context.sessionRoot)),
         ))) {
       throw new Error(
@@ -176,8 +188,28 @@ export class ByClawSessionWorkspaceRegistry {
     return this.workspaces.get(String(sessionId))
   }
 
-  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext): void {
+  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.turns.set(externalSessionId, context)
+  }
+
+  /** Resolve the current turn after workspace inheritance and foreground steering have been applied. */
+  requestApiKey(sessionId: string): string | undefined {
+    const turn = this.getTurn(sessionId)
+    return turn === undefined ? undefined : this.apiKeys.get(turn)
+  }
+
+  /** A hot interaction resume refreshes future calls; started streams retain their frozen credential. */
+  refreshRequestApiKey(externalSessionId: string, apiKey: unknown, agentSessionId?: string): void {
+    const turn = agentSessionId === undefined ? this.turns.get(externalSessionId) : this.getTurn(agentSessionId)
+    if (turn === undefined) return
+    // A newly missing/disabled membership key must not leave the old credential active.
+    this.apiKeys.delete(turn)
+    this.bindApiKey(turn, apiKey)
+  }
+
+  private bindApiKey(context: ByClawInboundTurnContext, value: unknown): void {
+    if (typeof value === 'string' && value.trim() !== '') this.apiKeys.set(context, value)
   }
 
   getTurn(sessionId: string): ByClawInboundTurnContext | undefined {
@@ -201,11 +233,13 @@ export class ByClawSessionWorkspaceRegistry {
   }
 
   /** An interactive captain exchange must not change its descendants' task context. */
-  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext): void {
+  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.sessionTurns.set(String(sessionId), context)
   }
 
-  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext): void {
+  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.pendingSessionTurns.set(String(sessionId), { inputMessageId, context })
   }
 
@@ -228,16 +262,20 @@ export class ByClawSessionWorkspaceRegistry {
   private register(sessionId: string, requested: ByClawSessionWorkspace): ByClawSessionWorkspace {
     const workspace = { ...requested, cwd: resolve(requested.cwd) }
     const current = this.workspaces.get(sessionId)
+    const upgrade = current !== undefined && current.externalSessionId === workspace.externalSessionId
+      && workspace.sessionRoot !== undefined && isLegacyProjectWorkspaceTransition(
+        current.cwd, workspace.cwd, workspace.externalSessionId, dirname(dirname(workspace.sessionRoot)),
+      )
     if (current !== undefined
-      && (current.externalSessionId !== workspace.externalSessionId || current.cwd !== workspace.cwd)) {
+      && (current.externalSessionId !== workspace.externalSessionId || (current.cwd !== workspace.cwd && !upgrade))) {
       throw new Error(
         `ByClaw live session ${sessionId} workspace cannot change from session "${current.externalSessionId}" at "${current.cwd}"`
         + ` to session "${workspace.externalSessionId}" at "${workspace.cwd}"`,
       )
     }
-    if (current !== undefined) return current
-    this.workspaces.set(sessionId, workspace)
-    return workspace
+    const updated = { ...current, ...workspace }
+    this.workspaces.set(sessionId, updated)
+    return updated
   }
 }
 
@@ -265,9 +303,12 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     `cwd: ${workspace.cwd}`,
     ...(workspace.sessionRoot === undefined ? [] : [`session_root: ${workspace.sessionRoot}`]),
     ...(workspace.sharedRoot === undefined ? [] : [`shared_root: ${workspace.sharedRoot}`]),
+    ...(workspace.sharedDir === undefined ? [] : [`shared_dir: ${workspace.sharedDir}`]),
+    ...(workspace.projectId === undefined ? [] : [`project_id: ${workspace.projectId}`]),
+    ...(workspace.projectName === undefined ? [] : [`project_name: ${JSON.stringify(workspace.projectName)}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 命令执行、相对路径读写及报告等交付产物默认使用当前会话的过程文件目录；访问项目源码时使用明确的项目路径。',
+      'default_output_policy: 命令和相对路径读写使用 cwd；需要长期保留的源码、配置、测试和用户交付物写入 default_output_root。session_root 仅用于上传附件、生成媒体和一次性中间文件，或用户明确要求的当前会话文件；不得把内部会话状态作为业务文件。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; write durable source, configuration, tests, and user deliverables to default_output_root. Reserve session_root for uploaded attachments, generated media, disposable intermediate files, or files explicitly requested for the current session; never expose internal session state as business files. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
@@ -284,8 +325,7 @@ function ownByClawContextExists(session: Pick<Session, 'ownEvents'>, workspace: 
   // current declaration rather than rewriting history or repeating it every turn.
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!
-    if (event.type !== 'user/message' || event.data.source.kind !== 'plugin'
-      || event.data.source.plugin !== BYCLAW_CONTEXT_PLUGIN) continue
+    if (event.type !== 'user/message' || event.data.source.kind !== BYCLAW_CONTEXT_SOURCE) continue
     const context = event.data.content.find(block => block.type === 'text' && block.text.includes(BYCLAW_CONTEXT_MARKER))
     if (context?.type === 'text') return context.text === byClawContextText(workspace)
   }
@@ -300,8 +340,7 @@ function ownByClawTurnContextExists(
   const events = session.ownEvents()
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!
-    if (event.type !== 'user/message' || event.data.source.kind !== 'plugin'
-      || event.data.source.plugin !== BYCLAW_CONTEXT_PLUGIN) continue
+    if (event.type !== 'user/message' || event.data.source.kind !== BYCLAW_CONTEXT_SOURCE) continue
     const context = event.data.content.find(block => block.type === 'text'
       && block.text.includes('<!-- byclaw-context:turn:'))
     if (context?.type === 'text') return context.text.includes(marker)
@@ -329,13 +368,13 @@ export function appendByClawContext(
   if (!ownByClawContextExists(session, workspace)) {
     contexts.push(createUserMessage({
       content: [{ type: 'text', text: byClawContextText(workspace) }],
-      source: { kind: 'plugin', plugin: BYCLAW_CONTEXT_PLUGIN },
+      source: { kind: BYCLAW_CONTEXT_SOURCE },
     }))
   }
   if (turn !== undefined && !ownByClawTurnContextExists(session, turn.messageId)) {
     contexts.push(createUserMessage({
       content: [{ type: 'text', text: byClawInboundTurnContextDeclaration(turn, scope) }],
-      source: { kind: 'plugin', plugin: BYCLAW_CONTEXT_PLUGIN },
+      source: { kind: BYCLAW_CONTEXT_SOURCE },
     }))
   }
   return contexts.length === 0 ? messages : [...messages, ...contexts]
@@ -348,11 +387,13 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     '## ByClaw session workspace',
     byClawSessionWorkspaceDeclaration(workspace),
     'Treat plugin:byclaw-context messages as authoritative runtime context, not as user-authored business requests.',
-    'The cwd above is the authoritative default process-file workspace for this ByClaw conversation and its descendants.',
+    'The cwd above is the authoritative execution workspace for this ByClaw conversation and its descendants. When a project is bound, it is the project shared directory, not the global shared root.',
     'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,
-      `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}.`,
+      `Write source changes and every user-requested file that must remain available after the conversation—including reports, checklists, and exports—to ${workspace.defaultOutputRoot ?? workspace.cwd}.`,
+      `Use ${workspace.sessionRoot} only for inbound attachments, generated image/audio assets, disposable intermediate files, or files the user explicitly asks to keep with the current session. Do not copy or move an attachment merely to reorganize it.`,
+      'Internal conversation logs, tool state, caches, and runtime metadata are not business files: do not create, expose, or present them as user deliverables.',
       'Reject path traversal outside the selected root, and read/list the exact target after writing before claiming completion.',
     ]),
     ...(workspace.sharedRoot === undefined ? [] : [

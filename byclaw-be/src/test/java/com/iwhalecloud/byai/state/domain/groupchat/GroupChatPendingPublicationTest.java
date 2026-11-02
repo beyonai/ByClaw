@@ -119,7 +119,7 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
         task.setInitiatorUserId(10L);
         task.setStatus("ACTIVE");
         task.setTurnStatus("WAITING_USER");
-        when(tasks.selectForUpdate(60L)).thenReturn(task);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(task);
         // 发布流程先读取任务所属群并加锁，再校验发起人权限。
         when(authorization.requireTask(60L)).thenReturn(task);
         when(authorization.requireInitiator(60L)).thenReturn(task);
@@ -130,6 +130,8 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
         ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
         ReflectionTestUtils.setField(datasets, "authApplicationService", auth);
         ReflectionTestUtils.setField(datasets, "feignPythonBuildService", cloud);
+        ReflectionTestUtils.setField(datasets, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(cloud));
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
         completion = new GroupChatTaskService(tasks, publications, executions, messages, sequence, null, authorization,
             null, sessions, projects, resources,
@@ -185,7 +187,7 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
             ArgumentCaptor.forClass(ByaiGroupChatPendingPublication.class);
         var order = inOrder(authorization, tasks, store);
         order.verify(authorization).requireInitiator(60L);
-        order.verify(tasks).selectForUpdate(60L);
+        order.verify(tasks).selectWithRedisLock(60L);
         order.verify(store).find(60L);
         order.verify(store).replace(eq(task), saved.capture());
         assertThat(saved.getValue().getUploadedFilesJson()).isEqualTo("{}");
@@ -221,7 +223,7 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
 
     @Test
     void editRejectsMissingTaskAfterAuthorization() {
-        when(tasks.selectForUpdate(60L)).thenReturn(null);
+        when(tasks.selectWithRedisLock(60L)).thenReturn(null);
         assertRejectedEdit(99L, "not active");
         verify(store, never()).find(any());
     }

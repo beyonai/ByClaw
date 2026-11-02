@@ -475,7 +475,7 @@ public class MessageShareService {
             messages.addAll(resMes);
         }
         catch (Exception e) {
-            throw new BaseException("memory error", e);
+            throw new BaseException("i18n.error.messageShare.memory.failed", e);
         }
         response.setMessages(messages);
         return response;

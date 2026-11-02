@@ -1,3 +1,4 @@
+import { getIntl } from '@umijs/max';
 import { useEffect, useState } from 'react';
 import { Form, Input, Select, Col, Dropdown, Tag, DatePicker, Button, Tooltip } from 'antd';
 import { isString, concat, isEqual } from 'lodash';
@@ -43,9 +44,9 @@ type PreviewTextAreaProps = TextAreaProps & {
 const PreviewTextArea = ({ onPreview, ...textareaProps }: PreviewTextAreaProps) => (
   <div className={styles.textareaPreview}>
     <TextArea {...textareaProps} className={styles.textareaInput} />
-    <Tooltip title="查看更多">
+    <Tooltip title={getIntl().formatMessage({ id: 'personnelModel.viewMore' })}>
       <Button
-        aria-label="查看更多"
+        aria-label={getIntl().formatMessage({ id: 'personnelModel.viewMore' })}
         className={styles.textareaPreviewAction}
         disabled={false}
         icon={<FullscreenOutlined />}

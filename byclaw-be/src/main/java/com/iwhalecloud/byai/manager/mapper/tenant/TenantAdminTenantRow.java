@@ -12,4 +12,7 @@ public class TenantAdminTenantRow {
     private String openedAt;
     private String failureReason;
     private Long createdBy;
+    private String commandStatus;
+    private String commandStage;
+    private String commandErrorCode;
 }

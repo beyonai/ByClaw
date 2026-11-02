@@ -23,13 +23,21 @@ import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-shell'
 import type { ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './index.ts'
+import { localRuleFiles, type RuleFiles } from './files.ts'
 import { loadRules, resolveProjectRoot, watchStatus, type IronRule } from './rules.ts'
 
 /**
  * Stamped on every message this plugin contributes so the durable record can
  * never be mistaken for something the user typed.
  */
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'iron-rules' }
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin:iron-rules' }
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Session format v4 per-plugin source; 0.1.5 `{ kind: 'plugin', plugin: 'iron-rules' }` converts to it on load. */
+    'plugin:iron-rules': { kind: 'plugin:iron-rules' }
+  }
+}
 
 /** First-party tools whose success means the turn produced a code change. */
 const MUTATING_TOOLS = new Set(['write', 'edit'])
@@ -151,7 +159,7 @@ async function runCheckScript(
       timeoutMs: config.checkTimeoutMs,
       signal,
     })
-    const result = await ctx.shell.run(spec)
+    const result = await (await ctx.shell.execute(spec)).result()
     // exitCode is `number | null`; null means the process died by signal, which
     // for a check means no verdict was produced — treat it as a violation
     // rather than a pass so a killed script cannot silently approve the tree.
@@ -185,8 +193,9 @@ function checkableRules(rules: readonly IronRule[]): CheckableRule[] {
  *
  * @param ctx - the cordis context the plugin is mounted on.
  * @param config - the resolved plugin configuration.
+ * @param files - where the project lives: this host, or the tool environment.
  */
-export function applyCheck(ctx: Context, config: ResolvedConfig): void {
+export function applyCheck(ctx: Context, config: ResolvedConfig, files: RuleFiles = localRuleFiles): void {
   /** Agents whose current turn has landed a file change. */
   const dirty = new WeakSet<Agent>()
   /** Consecutive forced continuations per agent. */
@@ -203,8 +212,8 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
     const attempt = (retries.get(agent) ?? 0) + 1
     // A session header carries no cwd when the deployment never set one; the
     // launch directory is the only workspace such a session has.
-    const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd())
-    const { rules, warnings } = await loadRules(projectRoot, config)
+    const projectRoot = await resolveProjectRoot(agent.session.header.cwd ?? process.cwd(), files)
+    const { rules, warnings } = await loadRules(projectRoot, config, files)
     for (const warning of warnings) ctx.logger.warn(`iron-rules: ${warning}`)
 
     const checkable = checkableRules(rules)
@@ -233,7 +242,7 @@ export function applyCheck(ctx: Context, config: ResolvedConfig): void {
     const watched = await Promise.all(
       outcomes
         .filter(({ outcome }) => outcome.passed)
-        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot) })),
+        .map(async ({ rule }) => ({ id: rule.id, status: await watchStatus(rule, projectRoot, files) })),
     )
     const zombies = watched.filter(({ status }) => status?.stale === true).map(({ id }) => id)
     if (zombies.length > 0) {

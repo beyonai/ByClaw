@@ -177,6 +177,9 @@ async function boot(rootLine: string, options: BootOptions = {}): Promise<Contex
   } as unknown as NonNullable<typeof ctx.loader.internal>
   await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
   await ctx.loader.await()
+  // The Loader settles every entry without rejecting; a row whose config
+  // or apply failed surfaces through its own fiber.
+  for (const entry of ctx.loader.entries()) await entry.fiber?.await()
   return ctx
 }
 

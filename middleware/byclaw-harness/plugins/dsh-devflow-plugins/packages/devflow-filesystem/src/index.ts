@@ -10,12 +10,11 @@
  * @module @zhchxiao123/dsh-devflow-filesystem
  */
 
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import DevflowStore, { DEFAULT_SERVICE_CLASS, decodeJournalEntry, DevflowCardId, foldArtifactRecords, foldJournal, isCardLocation, isLegalTransition, isReworkEdge } from '@zhchxiao123/dsh-devflow'
+import DevflowStore, { DEFAULT_SERVICE_CLASS, workspaceIo, decodeJournalEntry, DevflowCardId, foldArtifactRecords, foldJournal, isCardLocation, isLegalTransition, isReworkEdge } from '@zhchxiao123/dsh-devflow'
 import type {
   AbandonRequest,
   AbandonResult,
@@ -48,6 +47,7 @@ import type {
   TransitionRequest,
   TransitionResult,
   TransitionSpec,
+  WorkspaceIo,
 } from '@zhchxiao123/dsh-devflow'
 
 type PendingJournalEntry = DevflowJournalEntry extends infer Entry
@@ -76,12 +76,20 @@ export interface Config {
    * so it is a configured value rather than a fixed one.
    */
   pageSize?: number
+  /**
+   * Keep the board on the context's tool environment: card files go through
+   * `ctx.fs` and directory moves through `ctx.subprocess` instead of this
+   * process's filesystem. Set it, together with an absolute `root`, when the
+   * workspace lives in a separate tool sandbox.
+   */
+  workspaceOnToolEnvironment?: boolean
 }
 
 /** Schemastery validator supplying the provider defaults. */
 export const Config: z<Config> = z.object({
   root: z.string().default('.devflow'),
   pageSize: z.natural().default(50),
+  workspaceOnToolEnvironment: z.boolean().default(false),
 })
 
 /** Card directory names: `<seq>-<slug>`, stable from creation. */
@@ -124,8 +132,10 @@ const SWEEP_ACTOR: DevActor = { kind: 'command', name: 'devflow archive' }
 /**
  * Filesystem-backed `ctx.devflow` implementation (read side).
  *
- * File access goes through plain node filesystem calls — the devflow root is
- * workspace state the harness itself owns, like session persistence. Journal
+ * File access goes through {@link WorkspaceIo}: plain node filesystem calls by
+ * default — the devflow root is workspace state the harness itself owns, like
+ * session persistence — or the tool environment's providers when
+ * `workspaceOnToolEnvironment` is set. Journal
  * commits serialize per card both in-process and through `commit.lock` across
  * processes; the claim lease owns work assignment, not journal safety.
  */
@@ -134,6 +144,7 @@ export class FilesystemDevflowStore extends DevflowStore {
 
   private readonly defaultRoot: string
   private readonly pageSize: number
+  private readonly io: WorkspaceIo
   private readonly cardChains = new Map<string, Promise<unknown>>()
   private readonly createChains = new Map<string, Promise<unknown>>()
 
@@ -141,6 +152,7 @@ export class FilesystemDevflowStore extends DevflowStore {
     super(ctx)
     this.defaultRoot = resolve(config.root ?? '.devflow')
     this.pageSize = config.pageSize ?? 50
+    this.io = workspaceIo(ctx, config.workspaceOnToolEnvironment)
   }
 
   /**
@@ -217,7 +229,7 @@ export class FilesystemDevflowStore extends DevflowStore {
 
   private async commitValidCreate(spec: CreateSpec): Promise<CreateResult> {
     const tasksDir = join(spec.root, 'tasks')
-    await mkdir(tasksDir, { recursive: true })
+    await this.io.mkdir(tasksDir, { recursive: true })
     let id: DevflowCardId | undefined
     for (let attempt = 0; attempt < CREATE_ATTEMPTS && id === undefined; attempt++) {
       const sequence = await this.nextSequence(spec.root)
@@ -225,7 +237,7 @@ export class FilesystemDevflowStore extends DevflowStore {
       try {
         // Exclusive: a plain (non-recursive) mkdir throws EEXIST instead of
         // adopting a directory another creator reserved first.
-        await mkdir(join(tasksDir, candidate))
+        await this.io.mkdir(join(tasksDir, candidate))
         id = candidate
       } catch (error) {
         if (!hasErrorCode(error, 'EEXIST')) throw error
@@ -254,7 +266,7 @@ export class FilesystemDevflowStore extends DevflowStore {
         ? { serviceClass: spec.serviceClass }
         : {},
     }
-    await writeFile(join(tasksDir, id, 'journal.jsonl'), JSON.stringify(entry) + '\n')
+    await this.io.writeFile(join(tasksDir, id, 'journal.jsonl'), JSON.stringify(entry) + '\n')
     const card: DevCard = {
       id,
       root: spec.root,
@@ -286,7 +298,7 @@ export class FilesystemDevflowStore extends DevflowStore {
    */
   private async rejectIllegalParent(root: string, parent: DevflowCardId): Promise<Extract<CreateResult, { ok: false }> | undefined> {
     const journalPath = join(root, 'tasks', parent, 'journal.jsonl')
-    const journal = await readOptional(journalPath)
+    const journal = await readOptional(this.io, journalPath)
     if (journal === undefined) {
       return await this.isArchived(root, parent)
         ? { ok: false, code: 'parent-settled', message: `devflow: card ${parent} is archived and takes no new sub-requirements` }
@@ -308,8 +320,8 @@ export class FilesystemDevflowStore extends DevflowStore {
 
   /** Whether one root's archive holds a card directory of this id. */
   private async isArchived(root: string, id: DevflowCardId): Promise<boolean> {
-    for (const month of await listDirectories(join(root, 'archive'))) {
-      if ((await listDirectories(join(root, 'archive', month))).includes(id)) return true
+    for (const month of await listDirectories(this.io, join(root, 'archive'))) {
+      if ((await listDirectories(this.io, join(root, 'archive', month))).includes(id)) return true
     }
     return false
   }
@@ -321,9 +333,9 @@ export class FilesystemDevflowStore extends DevflowStore {
       const match = /^([0-9]+)-/.exec(name)?.[1]
       if (match !== undefined) highest = Math.max(highest, Number.parseInt(match, 10))
     }
-    for (const name of await listDirectories(join(root, 'tasks'))) consider(name)
-    for (const month of await listDirectories(join(root, 'archive'))) {
-      for (const name of await listDirectories(join(root, 'archive', month))) consider(name)
+    for (const name of await listDirectories(this.io, join(root, 'tasks'))) consider(name)
+    for (const month of await listDirectories(this.io, join(root, 'archive'))) {
+      for (const name of await listDirectories(this.io, join(root, 'archive', month))) consider(name)
     }
     return highest + 1
   }
@@ -354,16 +366,16 @@ export class FilesystemDevflowStore extends DevflowStore {
     const now = new Date().toISOString()
     const record = JSON.stringify({ owner, at: now, heartbeatAt: now }, null, 2) + '\n'
     try {
-      await writeFile(claimPath, record, { flag: 'wx' })
+      await this.io.writeFile(claimPath, record, { exclusive: true })
     } catch (error) {
       if (!hasErrorCode(error, 'EEXIST')) throw error
-      const observed = await readClaim(claimPath)
+      const observed = await readClaim(this.io, claimPath)
       if (!isStaleClaim(observed, options?.staleAfterMs)) {
         return { ok: false, holder: observed.owner, message: `devflow: card ${id} is already claimed by ${describeActor(observed.owner)}` }
       }
 
       const takeover = await this.committingJournal<Extract<ClaimResult, { ok: false }> | undefined>(root, id, async (_state, append) => {
-        const held = await readClaim(claimPath)
+        const held = await readClaim(this.io, claimPath)
         if (!isStaleClaim(held, options?.staleAfterMs)) {
           return { ok: false, holder: held.owner, message: `devflow: card ${id} is already claimed by ${describeActor(held.owner)}` }
         }
@@ -377,7 +389,7 @@ export class FilesystemDevflowStore extends DevflowStore {
           by: owner,
         }
         await append(entry)
-        await atomicReplace(claimPath, record)
+        await atomicReplace(this.io, claimPath, record)
         return undefined
       })
       if (!takeover.taken) {
@@ -396,12 +408,12 @@ export class FilesystemDevflowStore extends DevflowStore {
       heartbeat: async () => {
         if (released) throw new Error(`devflow: lease on card ${id} was released`)
         const beat = JSON.stringify({ owner, at: now, heartbeatAt: new Date().toISOString() }, null, 2) + '\n'
-        await atomicReplace(claimPath, beat)
+        await atomicReplace(this.io, claimPath, beat)
       },
       release: async () => {
         if (released) return
         released = true
-        await rm(claimPath, { force: true })
+        await this.io.rm(claimPath, { force: true })
       },
     }
     return { ok: true, handle }
@@ -524,8 +536,8 @@ export class FilesystemDevflowStore extends DevflowStore {
    */
   private async fileUnderArchive(root: string, id: DevflowCardId, bucket: string): Promise<void> {
     const destinationDir = join(root, 'archive', bucket)
-    await mkdir(destinationDir, { recursive: true })
-    await rename(join(root, 'tasks', id), join(destinationDir, id))
+    await this.io.mkdir(destinationDir, { recursive: true })
+    await this.io.rename(join(root, 'tasks', id), join(destinationDir, id))
   }
 
   archive(request: ArchiveRequest): Promise<ArchiveResult> {
@@ -676,8 +688,8 @@ export class FilesystemDevflowStore extends DevflowStore {
       }
     }
     if (commit.value !== undefined) return commit.value
-    await mkdir(join(root, 'tasks'), { recursive: true })
-    await rename(position.dir, join(root, 'tasks', request.id))
+    await this.io.mkdir(join(root, 'tasks'), { recursive: true })
+    await this.io.rename(position.dir, join(root, 'tasks', request.id))
     const card = await this.loadCard(root, request.id, { warnDrift: false })
     this.ctx.emit('devflow/card-restored', card)
     return { ok: true, card }
@@ -686,7 +698,7 @@ export class FilesystemDevflowStore extends DevflowStore {
   /** Whether the card's journal already states its archiving, rather than only its directory. */
   private async journalEndsArchived(position: CardPosition): Promise<boolean> {
     const journalPath = join(position.dir, 'journal.jsonl')
-    const entries = decodeJournalFile(journalPath, await readRequired(journalPath, journalPath))
+    const entries = decodeJournalFile(journalPath, await readRequired(this.io, journalPath, journalPath))
     return entries.at(-1)?.type === 'archived'
   }
 
@@ -755,8 +767,8 @@ export class FilesystemDevflowStore extends DevflowStore {
       // re-check leaves a file no journal entry references — invisible to
       // readers, and overwritten (temp + rename) by a same-revision retry.
       const name = `${current.stageRevision + 1}-${request.kind}.md`
-      await mkdir(join(root, 'tasks', request.id, 'artifacts'), { recursive: true })
-      await atomicReplace(join(root, 'tasks', request.id, 'artifacts', name), request.content)
+      await this.io.mkdir(join(root, 'tasks', request.id, 'artifacts'), { recursive: true })
+      await atomicReplace(this.io, join(root, 'tasks', request.id, 'artifacts', name), request.content)
       registration = { path: `artifacts/${name}`, kind: request.kind }
     }
     const entry: PendingJournalEntry = {
@@ -900,11 +912,11 @@ export class FilesystemDevflowStore extends DevflowStore {
     try {
       let raw: string | undefined
       try {
-        raw = await readFile(card.path, 'utf8')
+        raw = await this.io.readFile(card.path)
       } catch (error) {
         if (!isAbsentPathError(error)) throw error
       }
-      await atomicReplace(card.path, renderProjection(raw, card))
+      await atomicReplace(this.io, card.path, renderProjection(raw, card))
     } catch (error) {
       this.ctx.logger.warn(`devflow: failed to rewrite the projection for card ${card.id}: ${message(error)}; the journal remains authoritative`)
     }
@@ -955,7 +967,7 @@ export class FilesystemDevflowStore extends DevflowStore {
     const lockPath = join(dir ?? join(root, 'tasks', id), 'commit.lock')
     for (let attempt = 0; attempt < COMMIT_LOCK_ATTEMPTS; attempt++) {
       try {
-        await writeFile(lockPath, `${process.pid}\n`, { flag: 'wx' })
+        await this.io.writeFile(lockPath, `${process.pid}\n`, { exclusive: true })
       } catch (error) {
         if (!hasErrorCode(error, 'EEXIST')) throw error
         await new Promise(resolve => setTimeout(resolve, COMMIT_LOCK_RETRY_MS))
@@ -964,7 +976,7 @@ export class FilesystemDevflowStore extends DevflowStore {
       try {
         return { taken: true, value: await operation() }
       } finally {
-        await rm(lockPath, { force: true })
+        await this.io.rm(lockPath, { force: true })
       }
     }
     return { taken: false }
@@ -991,13 +1003,13 @@ export class FilesystemDevflowStore extends DevflowStore {
   ): Promise<{ taken: true; value: T } | { taken: false }> {
     const journalPath = join(dir ?? join(root, 'tasks', id), 'journal.jsonl')
     return this.committing(root, id, async () => {
-      const state = foldJournalFile(journalPath, await readRequired(journalPath, `card ${id}`))
+      const state = foldJournalFile(journalPath, await readRequired(this.io, journalPath, `card ${id}`))
       // A restore appends two entries in one commit, so the revision advances
       // per append rather than once per commit.
       let revision = state.revision
       const append = async (entry: PendingJournalEntry): Promise<void> => {
         revision += 1
-        await appendFile(journalPath, JSON.stringify({ rev: revision, ...entry }) + '\n')
+        await this.io.appendFile(journalPath, JSON.stringify({ rev: revision, ...entry }) + '\n')
       }
       return await operation(state, append)
     }, dir)
@@ -1013,7 +1025,7 @@ export class FilesystemDevflowStore extends DevflowStore {
     assertUsablePredicates(filter)
     const resolved = this.resolveRoot(root)
     const cards: DevCard[] = []
-    for (const id of await activeCardIds(resolved)) {
+    for (const id of await activeCardIds(this.io, resolved)) {
       const card = await this.loadCard(resolved, id)
       // Abandoned and archived cards are off the board from their journal
       // append onward, not from the directory move, so a crash between the two
@@ -1070,18 +1082,18 @@ export class FilesystemDevflowStore extends DevflowStore {
     resume: DecodedCursor | undefined,
   ): AsyncGenerator<{ id: DevflowCardId; at: CardPosition }> {
     if (set !== 'archived' && (resume === undefined || resume.set === 'active')) {
-      for (const id of await activeCardIds(root)) {
+      for (const id of await activeCardIds(this.io, root)) {
         if (resume?.set === 'active' && id.localeCompare(resume.id) < 0) continue
         yield { id, at: { set: 'active', dir: join(root, 'tasks', id) } }
       }
     }
     if (set === 'active') return
-    const months = (await listDirectories(join(root, 'archive')))
+    const months = (await listDirectories(this.io, join(root, 'archive')))
       .filter(name => MONTH_BUCKET.test(name) && (month === undefined || name === month))
       .sort((left, right) => right.localeCompare(left))
     for (const bucket of months) {
       if (resume?.set === 'archived' && bucket.localeCompare(resume.month) > 0) continue
-      const ids = (await listDirectories(join(root, 'archive', bucket)))
+      const ids = (await listDirectories(this.io, join(root, 'archive', bucket)))
         .filter(name => CARD_DIRECTORY.test(name))
         .sort((left, right) => right.localeCompare(left))
       for (const name of ids) {
@@ -1113,11 +1125,11 @@ export class FilesystemDevflowStore extends DevflowStore {
    */
   private async locate(root: string, id: DevflowCardId): Promise<CardPosition | undefined> {
     const active = join(root, 'tasks', id)
-    if (await readOptional(join(active, 'journal.jsonl')) !== undefined) {
+    if (await readOptional(this.io, join(active, 'journal.jsonl')) !== undefined) {
       return { set: 'active', dir: active }
     }
-    for (const month of await listDirectories(join(root, 'archive'))) {
-      if (!(await listDirectories(join(root, 'archive', month))).includes(id)) continue
+    for (const month of await listDirectories(this.io, join(root, 'archive'))) {
+      if (!(await listDirectories(this.io, join(root, 'archive', month))).includes(id)) continue
       return { set: 'archived', dir: join(root, 'archive', month, id), month }
     }
     return undefined
@@ -1165,7 +1177,7 @@ export class FilesystemDevflowStore extends DevflowStore {
   async history(id: DevflowCardId, root?: string): Promise<DevflowJournalEntry[]> {
     const resolved = this.resolveRoot(root)
     const journalPath = join((await this.locateRequired(resolved, id)).dir, 'journal.jsonl')
-    const entries = decodeJournalFile(journalPath, await readRequired(journalPath, `card ${id}`))
+    const entries = decodeJournalFile(journalPath, await readRequired(this.io, journalPath, `card ${id}`))
     try {
       foldJournal(entries)
     } catch (error) {
@@ -1188,7 +1200,7 @@ export class FilesystemDevflowStore extends DevflowStore {
     // unclaimed one — `read` is where a missing card becomes a failure.
     if (found === undefined) return undefined
     try {
-      return await readClaim(join(found.dir, 'claim.json'))
+      return await readClaim(this.io, join(found.dir, 'claim.json'))
     } catch (error) {
       if (isAbsentPathError(error)) return undefined
       throw error
@@ -1202,11 +1214,11 @@ export class FilesystemDevflowStore extends DevflowStore {
   ): Promise<DevCard> {
     const directory = options.at?.dir ?? join(root, 'tasks', id)
     const journalPath = join(directory, 'journal.jsonl')
-    const entries = decodeJournalFile(journalPath, await readRequired(journalPath, `card ${id}`))
+    const entries = decodeJournalFile(journalPath, await readRequired(this.io, journalPath, `card ${id}`))
     const state = foldDecodedJournal(journalPath, entries)
     const cardPath = join(directory, 'card.md')
     let parsed: ParsedCardFile
-    const rawCard = await readOptional(cardPath)
+    const rawCard = await readOptional(this.io, cardPath)
     if (rawCard === undefined) {
       // The card file is a projection: a lost one degrades to a journal-only
       // view (the title is frontmatter-owned and irrecoverable) instead of
@@ -1421,10 +1433,10 @@ function deriveSlug(title: string): string {
 }
 
 /** Names of `path`'s subdirectories; an absent `path` lists none. */
-async function listDirectories(path: string): Promise<string[]> {
+async function listDirectories(io: WorkspaceIo, path: string): Promise<string[]> {
   let entries
   try {
-    entries = await readdir(path, { withFileTypes: true, encoding: 'utf8' })
+    entries = await io.readdir(path)
   } catch (error) {
     if (isAbsentPathError(error)) return []
     throw error
@@ -1432,12 +1444,12 @@ async function listDirectories(path: string): Promise<string[]> {
   return entries.filter(entry => entry.isDirectory()).map(entry => entry.name)
 }
 
-async function atomicReplace(path: string, content: string): Promise<void> {
+async function atomicReplace(io: WorkspaceIo, path: string, content: string): Promise<void> {
   const temp = join(dirname(path), `.${process.pid}.tmp`)
-  await writeFile(temp, content)
+  await io.writeFile(temp, content)
   for (let attempt = 1; attempt <= ATOMIC_REPLACE_ATTEMPTS; attempt++) {
     try {
-      await rename(temp, path)
+      await io.rename(temp, path)
       return
     } catch (error) {
       if (!isTransientReplaceError(error) || attempt === ATOMIC_REPLACE_ATTEMPTS) throw error
@@ -1446,8 +1458,8 @@ async function atomicReplace(path: string, content: string): Promise<void> {
   }
 }
 
-async function readClaim(path: string): Promise<{ owner: DevActor; heartbeatAt: string }> {
-  const raw = await readFile(path, 'utf8')
+async function readClaim(io: WorkspaceIo, path: string): Promise<{ owner: DevActor; heartbeatAt: string }> {
+  const raw = await io.readFile(path)
   let value: unknown
   try {
     value = JSON.parse(raw)
@@ -1484,9 +1496,9 @@ function describeActor(actor: DevActor): string {
   }
 }
 
-async function readRequired(path: string, owner: string): Promise<string> {
+async function readRequired(io: WorkspaceIo, path: string, owner: string): Promise<string> {
   try {
-    return await readFile(path, 'utf8')
+    return await io.readFile(path)
   } catch (error) {
     if (isAbsentPathError(error)) {
       throw new Error(`devflow: ${owner} is missing its required file ${path}`)
@@ -1495,9 +1507,9 @@ async function readRequired(path: string, owner: string): Promise<string> {
   }
 }
 
-async function readOptional(path: string): Promise<string | undefined> {
+async function readOptional(io: WorkspaceIo, path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, 'utf8')
+    return await io.readFile(path)
   } catch (error) {
     if (isAbsentPathError(error)) return undefined
     throw error
@@ -1532,8 +1544,8 @@ function monthOf(at: string): string {
 }
 
 /** Card ids under `<root>/tasks`, ascending; a root without the directory has none. */
-async function activeCardIds(root: string): Promise<DevflowCardId[]> {
-  return (await listDirectories(join(root, 'tasks')))
+async function activeCardIds(io: WorkspaceIo, root: string): Promise<DevflowCardId[]> {
+  return (await listDirectories(io, join(root, 'tasks')))
     .filter(name => CARD_DIRECTORY.test(name))
     .sort((left, right) => left.localeCompare(right))
     .map(name => DevflowCardId(name))

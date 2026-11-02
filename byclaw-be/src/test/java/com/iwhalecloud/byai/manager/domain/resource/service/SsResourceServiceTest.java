@@ -36,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class SsResourceServiceTest {
+class SsResourceServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private SequenceService sequenceService;
     private SsResourceMapper ssResourceMapper;
@@ -51,6 +51,7 @@ class SsResourceServiceTest {
         ssResourceMapper = mock(SsResourceMapper.class);
 
         service = new SsResourceService();
+        ReflectionTestUtils.setField(service, "businessLocks", mock(com.iwhalecloud.byai.common.lock.TransactionalRedisLockService.class));
         ReflectionTestUtils.setField(service, "skillImportLockService", mock(SkillImportLockService.class));
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
@@ -98,11 +99,12 @@ class SsResourceServiceTest {
     }
 
     @Test
-    void lifecycleReadLocksTheRequestedResource() {
+    void lifecycleReadFiltersTheRequestedResourceWithoutQueryLock() {
         service.findByIdForUpdate(100L);
+        verify((com.iwhalecloud.byai.common.lock.TransactionalRedisLockService) ReflectionTestUtils.getField(service, "businessLocks")).acquire("resource:100");
         ArgumentCaptor<LambdaQueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(ssResourceMapper).selectOne(captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("resource_id", "FOR UPDATE");
+        assertThat(captor.getValue().getSqlSegment()).contains("resource_id").doesNotContainIgnoringCase("FOR UPDATE");
         assertThat(captor.getValue().getParamNameValuePairs().values()).containsExactly(100L);
     }
 

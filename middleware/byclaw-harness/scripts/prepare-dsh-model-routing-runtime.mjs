@@ -10,19 +10,20 @@ import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const supportedDshVersion = '0.1.5-rc.2'
+export const supportedDshVersion = '0.2.1-rc.2'
 export const runtimePackages = ['packages/core/agent', 'packages/core/agent-loop']
 const capability = 'byclawRequestReassembly'
 
+// The release refreshes and admits runtime context on every attempt of a step; what it keeps is the
+// step's prompt and tools. A reassembling retry rebuilds those and starts a new request series.
 const loopEdits = [
   [
     `    const { assembly } = decision
     const renderedPrompt = renderPrompt(assembly)
     let firstAttempt = true`,
-    `    // byclaw-request-reassembly-v1: one step keeps its admitted input and tools' results.
+    `    // byclaw-request-reassembly-v2: one step keeps its admitted input and tools' results.
     let { assembly } = decision
     let renderedPrompt = renderPrompt(assembly)
-    let recoveryContext: UserMessage | undefined
     let recoverySeries = false
     let firstAttempt = true`,
   ],
@@ -32,14 +33,10 @@ const loopEdits = [
   ],
   [
     `      firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, startsRequestSeries, signal)
+      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
       const live = new AssistantStreamAttempt(`,
-    `      if (recoveryContext !== undefined) {
-        this.session.append('user/message', recoveryContext, { surfaceOp: 'append' })
-        recoveryContext = undefined
-      }
-      firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, startsRequestSeries, signal)
+    `      firstAttempt = false
+      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
       recoverySeries = false
       const live = new AssistantStreamAttempt(`,
   ],
@@ -55,8 +52,6 @@ const loopEdits = [
             assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
             signal.throwIfAborted()
             renderedPrompt = renderPrompt(assembly)
-            const sections = renderContextSections(assembly)
-            recoveryContext = this.runtimeContext.project(joinContextSections(sections), sections)
             recoverySeries = true
           }
           continue`,
@@ -73,8 +68,8 @@ const typeEdits = [[
 ]]
 
 const entryEdits = [[
-  `import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'\n\n`,
-  `import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'\n\n/** This build supports retrying one admitted step with fresh model-dependent assembly. */
+  `import type {} from './runtime-context.ts'\n\n`,
+  `import type {} from './runtime-context.ts'\n\n/** This build supports retrying one admitted step with fresh model-dependent assembly. */
 export const byclawRequestReassembly = true
 
 `,
@@ -83,7 +78,7 @@ export const byclawRequestReassembly = true
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']`,
   `export class AgentLoop extends Service implements AgentFactory {
   /** Capability of this live factory, independent of other installed module copies. */
-  readonly byclawRequestReassembly = true
+  readonly byclawRequestReassembly: true = true
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']`,
 ]]
 
@@ -105,10 +100,10 @@ function transform(source, edits, label) {
 export function prepareRuntimeSources({ loop, types, entry }) {
   for (const anchor of [
     'private async step(decision:',
-    'UserMessage',
     'renderContextSections',
     'joinContextSections',
     'assembleContextFor',
+    'this.loopCtx.systemPrompt.refreshContext(assembly, assembleContextFor(this, signal))',
     'this.systemPrompt.project(renderedPrompt,',
     "this.dispatch.emit('agent/assistant-stream', { frame })",
   ]) {

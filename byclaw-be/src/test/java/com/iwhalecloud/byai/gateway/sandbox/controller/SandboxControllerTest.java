@@ -2,9 +2,11 @@ package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.Date;
@@ -22,6 +24,7 @@ import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxRecordView;
@@ -38,7 +41,102 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
-class SandboxControllerTest {
+class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+
+    @Test
+    void launchByUserCode_passesAutoReleaseAndKeepsItOptional() {
+        for (Object value : java.util.Arrays.asList(0, 1, "0", "1", null)) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            Integer expected = value == null ? null : Integer.valueOf(value.toString());
+            com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData data =
+                new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("created-sandbox");
+            data.setEndpointHeaders(Map.of("e2b-traffic-access-token","fixture-private-traffic"));
+            when(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected)).thenReturn(data);
+            Map<String, Object> params = new java.util.HashMap<>();
+            params.put("userCode", " user001 ");
+            params.put("serviceKey", "byclaw-dsh-tools");
+            if (value != null) params.put("autoRelease", value);
+
+            ResponseUtil response = controller.launchByUserCode(params);
+            assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+            assertThat(((Map<?, ?>) response.getData()).get("sandboxId")).isEqualTo("created-sandbox");
+            assertThat(((Map<?, ?>) response.getData()).get("endpointHeaders")).isEqualTo(data.getEndpointHeaders());
+            verify(service).launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", expected);
+
+            params.put("autoRelease", null);
+            when(service.launchSandboxWithServiceKey("user001", "byclaw-dsh-tools", null)).thenReturn(data);
+            assertThat(controller.launchByUserCode(params).getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        }
+    }
+
+    @Test
+    void launchByUserCode_rejectsInvalidAutoReleaseBeforeLaunching() {
+        SandboxService service = mock(SandboxService.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        for (Object invalid : List.of(-1, 2, true, 0.5, "", "false")) {
+            ResponseUtil response = controller.launchByUserCode(
+                Map.of("userCode", "user001", "autoRelease", invalid));
+            assertThat(response.getCode()).isEqualTo(ResponseUtil.FAIL);
+            assertThat(response.getMsg()).contains("autoRelease");
+        }
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void explicitOnDemandLaunchDoesNotWriteOrClearMainServicePreference() {
+        for (String key : List.of("byclaw-dsh-tools", "openclaw")) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            var data = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("tool-fixture");
+            when(service.launchSandboxWithServiceKey("user001", key, null)).thenReturn(data);
+            when(service.isServiceKeyEnabled(key)).thenReturn(true);
+            when(service.isServiceKeyAutoStartEnabled(key)).thenReturn(false);
+
+            assertThat(controller.launchByUserCode(Map.of("userCode", "user001", "serviceKey", key)).getCode())
+                .isEqualTo(ResponseUtil.SUCCESS);
+            verify(service).launchSandboxWithServiceKey("user001", key, null);
+            verify(service, never()).savePreferredServiceKey(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+            verify(service, never()).removePreferredServiceKey(org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Test
+    void regularLaunchKeepsDefaultPreferenceSaveAndClearBehavior() {
+        for (String key : List.of("byclaw-dsh", "openclaw")) {
+            SandboxService service = mock(SandboxService.class);
+            SandboxController controller = controllerWithInventory();
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+                new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                    mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+            var data = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+            data.setSandboxId("business-fixture");
+            when(service.launchSandboxWithServiceKey("user001", key, null)).thenReturn(data);
+            when(service.isServiceKeyEnabled(key)).thenReturn(true);
+            when(service.isServiceKeyAutoStartEnabled(key)).thenReturn(true);
+
+            assertThat(controller.launchByUserCode(Map.of("userCode", "user001", "serviceKey", key)).getCode())
+                .isEqualTo(ResponseUtil.SUCCESS);
+            if ("openclaw".equals(key)) {
+                verify(service).removePreferredServiceKey("user001");
+            } else {
+                verify(service).savePreferredServiceKey("user001", key);
+            }
+        }
+    }
 
     @AfterEach
     void tearDown() {
@@ -49,7 +147,7 @@ class SandboxControllerTest {
     void getSandboxInfo_returnsGatewayToken() {
         SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
 
@@ -58,6 +156,7 @@ class SandboxControllerTest {
             .sandboxType("openclaw")
             .endpoints(List.of("http://host/proxy/18789/chat?token=0123456789abcdef0123456789abcdef"))
             .gatewayToken("0123456789abcdef0123456789abcdef")
+            .endpointHeaders(Map.of("e2b-traffic-access-token","fixture-info-traffic"))
             .build()));
 
         // Mock database record to return RUNNING status
@@ -74,14 +173,39 @@ class SandboxControllerTest {
         assertThat(data).hasSize(1);
         assertThat(data.get(0))
             .containsEntry("token", "0123456789abcdef0123456789abcdef")
+            .containsEntry("endpointHeaders", Map.of("e2b-traffic-access-token","fixture-info-traffic"))
             .containsEntry("status", "RUNNING")
             .doesNotContainKey("gatewayToken");
     }
 
     @Test
+    void getSandboxInfo_sharedContextUsesItsOwnHeartbeatWithoutAnExclusiveRecord() {
+        SandboxService sandboxService = mock(SandboxService.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", records);
+        when(sandboxService.sandboxInfo("alice")).thenReturn(List.of(SandboxInfo.builder()
+            .userCode("alice").sandboxType("custom-assistant").serviceKey("shared-host")
+            .sandboxId("shared-1").isShared(true).mappingId("mapping-1")
+            .workerId("current-generation-worker").workerOnline(true)
+            .workerLastSeen(5_000L).workerLeaseTtlSeconds(30L).build()));
+
+        ResponseUtil response = controller.getSandboxIdByUserCode(Map.of("userCode", "alice"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.getData();
+        assertThat(data).hasSize(1);
+        assertThat(data.get(0)).containsEntry("status", "RUNNING").containsEntry("isShared", true)
+            .containsEntry("serviceKey", "shared-host").containsEntry("mappingId", "mapping-1")
+            .containsEntry("workerId", "current-generation-worker").containsEntry("workerOnline", true)
+            .containsEntry("workerLastSeen", 5_000L).containsEntry("workerLeaseTtlSeconds", 30L);
+        verifyNoInteractions(records);
+    }
+
+    @Test
     void renewSandbox_returnsRenewedSandboxInfo() {
         SandboxService sandboxService = mock(SandboxService.class);
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
         when(sandboxService.renewSandbox("user001", 123L)).thenReturn(SandboxInfo.builder()
             .sandboxId("sandbox-1")
@@ -107,7 +231,7 @@ class SandboxControllerTest {
     @Test
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
         setPlatformManager();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         ByaiSystemConfigService byaiSystemConfigService = mock(ByaiSystemConfigService.class);
@@ -117,21 +241,30 @@ class SandboxControllerTest {
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
+        record.setUserCode("user001");
+        record.setSandboxId("live-id");
         record.setSandboxType("openclaw");
         record.setEndpoint(
             "{\"openclaw\":\"http://host/proxy/18789/chat?token=abc\",\"ui\":\"http://host/proxy/3000?token=abc\"}");
         record.setCreateTime(new Date());
-        when(sandboxRecordMapper.selectByPage(null, null, "USER", null, 0, 20)).thenReturn(List.of(record));
+        when(sandboxRecordMapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(record));
         SandboxRecordView view = new SandboxRecordView();
         view.setId(1L);
+        view.setUserCode("user001");
         view.setSandboxType("openclaw");
         view.setEndpoint(record.getEndpoint());
         view.setWorkerOnline(false);
         when(sandboxService.buildRecordView(record)).thenReturn(view);
-        when(sandboxRecordMapper.countByCondition(null, null, "USER", null)).thenReturn(1);
+        when(sandboxRecordMapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
         when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
-        ResponseUtil response = controller.listRecords(Map.of());
+        ResponseUtil response;
+        try (var redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_CODE_user001")).thenReturn("1001");
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_1001"))
+                .thenReturn("{\"userId\":1001,\"userCode\":\"user001\",\"userName\":\"Test User\"}");
+            response = controller.listRecords(Map.of());
+        }
 
         assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
         @SuppressWarnings("unchecked")
@@ -139,14 +272,17 @@ class SandboxControllerTest {
         @SuppressWarnings("unchecked")
         List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
         assertThat(list).hasSize(1);
-        assertThat(list.get(0).getEndpoint()).isEqualTo("http://host/proxy/18789/chat?token=abc");
+        assertThat(list.get(0).getUserName()).isEqualTo("Test User");
+        assertThat(com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport.parseInstanceEndpoints(
+            list.get(0).getEndpoint())).containsEntry("openclaw", "http://host/proxy/18789/chat?token=abc")
+            .containsEntry("ui", "http://host/proxy/3000?token=abc");
         assertThat(list.get(0).getWorkerOnline()).isFalse();
     }
 
     @Test
     void listRecords_filtersTenantSandboxRecordsByEnterprise() {
         setPlatformManager();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxService sandboxService = mock(SandboxService.class);
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         ByaiSystemConfigService configService = mock(ByaiSystemConfigService.class);
@@ -157,12 +293,13 @@ class SandboxControllerTest {
         ReflectionTestUtils.setField(controller, "tenantSandboxService", tenantSandboxService);
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(2L);
+        record.setSandboxId("live-id");
         record.setSandboxType("tenant-opengauss");
         record.setOwnerScope("TENANT");
         record.setEnterpriseId(11220513L);
         record.setStatus("RUNNING");
-        when(mapper.selectByPage(null, null, "TENANT", 11220513L, 0, 20)).thenReturn(List.of(record));
-        when(mapper.countByCondition(null, null, "TENANT", 11220513L)).thenReturn(1);
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(record));
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
         SandboxRecordView view = new SandboxRecordView();
         view.setId(2L);
         view.setSandboxType("tenant-opengauss");
@@ -170,7 +307,7 @@ class SandboxControllerTest {
         view.setEnterpriseId(11220513L);
         view.setEndpoint("tcp://db-host:5432");
         when(sandboxService.buildRecordView(record)).thenReturn(view);
-        when(tenantSandboxService.providerStatus(record)).thenReturn("MISSING");
+
 
         ResponseUtil response = controller.listRecords(Map.of("ownerScope", "TENANT", "enterpriseId", "11220513"));
 
@@ -181,8 +318,144 @@ class SandboxControllerTest {
         List<SandboxRecordView> list = (List<SandboxRecordView>) data.get("list");
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getEndpoint()).isEqualTo("tcp://db-host:5432");
-        assertThat(list.get(0).getProviderStatus()).isEqualTo("MISSING");
-        verify(mapper).countByCondition(null, null, "TENANT", 11220513L);
+        assertThat(list.get(0).getProviderStatus()).isEqualTo("RUNNING");
+        verify(mapper).countInventory(org.mockito.ArgumentMatchers.argThat(q -> "TENANT".equals(q.get("ownerScope")) && Long.valueOf(11220513L).equals(q.get("enterpriseId"))));
+        verifyNoInteractions(tenantSandboxService);
+    }
+
+    @Test
+    void emptyCurrentRuntimeReturnsZeroWithoutQueryingHistoricalRecordsOrTenantProvider() {
+        setPlatformManager();
+        SandboxController controller = controllerWithInventory();
+        var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
+        when(inventory.current()).thenReturn(Map.of());
+        var mapper = mock(SsSandboxRecordMapper.class);
+        var tenants = mock(TenantSandboxService.class);
+        ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "tenantSandboxService", tenants);
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of());
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(0);
+        var response = controller.listRecords(Map.of("ownerScope", "TENANT", "providerStatus", "RUNNING"));
+        assertThat(((Map<?, ?>) response.getData()).get("total")).isEqualTo(0);
+        assertThat(((Map<?, ?>) response.getData()).get("list")).isEqualTo(List.of());
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q ->
+            q.get("status") == null && ((List<?>) q.get("sandboxIds")).isEmpty()));
+        verifyNoInteractions(tenants);
+    }
+
+    @Test
+    void listRecords_includesPersistedStatusesAbsentFromTheRunningInventory() {
+        setPlatformManager();
+        SandboxController controller = new SandboxController();
+        var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
+        when(inventory.current()).thenReturn(Map.of("released-id", "RUNNING"));
+        var mapper = mock(SsSandboxRecordMapper.class);
+        var service = mock(SandboxService.class);
+        var config = mock(ByaiSystemConfigService.class);
+        ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", config);
+
+        SsSandboxRecord released = new SsSandboxRecord();
+        released.setId(9L);
+        released.setSandboxId("released-id");
+        released.setSandboxType("openclaw");
+        released.setOwnerScope("USER");
+        released.setStatus("RELEASED");
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q ->
+            "RELEASED".equals(q.get("status")) && q.get("sandboxIds") == null)))
+            .thenReturn(List.of(released));
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
+        SandboxRecordView view = new SandboxRecordView();
+        view.setId(9L);
+        view.setSandboxType("openclaw");
+        when(service.buildRecordView(released)).thenReturn(view);
+        when(config.getDcSystemConfigValueByCode(org.mockito.ArgumentMatchers.anyString())).thenReturn("");
+
+        ResponseUtil response = controller.listRecords(Map.of("status", "RELEASED"));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        @SuppressWarnings("unchecked")
+        List<SandboxRecordView> list = (List<SandboxRecordView>) ((Map<?, ?>) response.getData()).get("list");
+        assertThat(list).hasSize(1);
+        assertThat(list.get(0).getStatus()).isEqualTo("RELEASED");
+        assertThat(list.get(0).getProviderStatus()).isEqualTo("RUNNING");
+        assertThat(released.getStatus()).isEqualTo("RELEASED");
+    }
+
+    @Test
+    void listRecords_keepsPersistedStatusWhenSandboxIdIsMissing() {
+        setPlatformManager();
+        SandboxController controller = new SandboxController();
+        var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
+        when(inventory.current()).thenReturn(Map.of());
+        var mapper = mock(SsSandboxRecordMapper.class);
+        var service = mock(SandboxService.class);
+        var config = mock(ByaiSystemConfigService.class);
+        ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", config);
+
+        SsSandboxRecord released = new SsSandboxRecord();
+        released.setId(11L);
+        released.setStatus("RELEASED");
+        released.setSandboxType("openclaw");
+        released.setOwnerScope("USER");
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(released));
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(1);
+        SandboxRecordView view = new SandboxRecordView();
+        view.setId(11L);
+        view.setSandboxType("openclaw");
+        view.setStatus("RELEASED");
+        when(service.buildRecordView(released)).thenReturn(view);
+        when(config.getDcSystemConfigValueByCode(org.mockito.ArgumentMatchers.anyString())).thenReturn("");
+
+        ResponseUtil response = controller.listRecords(Map.of("status", "RELEASED"));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        @SuppressWarnings("unchecked")
+        List<SandboxRecordView> list = (List<SandboxRecordView>) ((Map<?, ?>) response.getData()).get("list");
+        assertThat(list).hasSize(1);
+        assertThat(list.get(0).getStatus()).isEqualTo("RELEASED");
+    }
+
+    @Test
+    void listRecords_filtersPersistedStatusIndependentlyFromProviderStatus() {
+        setPlatformManager();
+        SandboxController controller = controllerWithInventory();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of());
+        when(mapper.countInventory(org.mockito.ArgumentMatchers.anyMap())).thenReturn(0);
+
+        controller.listRecords(Map.of("status", "RELEASED", "providerStatus", "RUNNING"));
+
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q ->
+            "RELEASED".equals(q.get("status")) && List.of("live-id").equals(q.get("sandboxIds"))));
+        verify(mapper).countInventory(org.mockito.ArgumentMatchers.argThat(q ->
+            "RELEASED".equals(q.get("status")) && List.of("live-id").equals(q.get("sandboxIds"))));
+    }
+
+    @Test void unknownObservationIncludesRecordsMissingFromInventory() {
+        setPlatformManager();SandboxController controller=controllerWithInventory();
+        var mapper=mock(SsSandboxRecordMapper.class);ReflectionTestUtils.setField(controller,"sandboxRecordMapper",mapper);
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of());
+        controller.listRecords(Map.of("providerStatus","UNKNOWN"));
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q ->
+            q.get("sandboxIds")==null && List.of("live-id").equals(q.get("observedSandboxIds"))));
+    }
+
+    private SandboxController controllerWithInventory() {
+        SandboxController controller = new SandboxController();
+        var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
+        when(inventory.current()).thenReturn(Map.of("live-id", "RUNNING"));
+        ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
+        return controller;
     }
 
     private void setPlatformManager() {
@@ -195,30 +468,31 @@ class SandboxControllerTest {
     }
 
     @Test
-    void businessManagerListDefaultsToItsOwnEnterpriseAndCannotOverrideIt() {
+    void businessManagerSeesTheSameUserResourcesAsPlatformManagerButNotTenantResources() {
         setBusinessManager();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
-        when(mapper.selectByPage(null, null, "USER", 123L, 0, 20)).thenReturn(List.of());
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of());
 
         assertThat(controller.listRecords(Map.of("ownerScope", "USER")).getCode())
             .isEqualTo(ResponseUtil.SUCCESS);
-        verify(mapper).selectByPage(null, null, "USER", 123L, 0, 20);
-        verify(mapper).countByCondition(null, null, "USER", 123L);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
-            Map.of("ownerScope", "USER", "enterpriseId", "456")))
-            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-            .hasMessageContaining("sandbox.enterprise.denied");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
-            Map.of("ownerScope", "TENANT")))
-            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q -> "USER".equals(q.get("ownerScope")) && q.get("enterpriseId") == null));
+        verify(mapper).countInventory(org.mockito.ArgumentMatchers.argThat(q -> q.get("enterpriseId") == null));
+        assertThat(controller.listRecords(Map.of("ownerScope", "USER", "enterpriseId", "456")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q -> Long.valueOf(456L).equals(q.get("enterpriseId"))));
+        for (String scope : List.of("TENANT", "ALL")) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(
+                Map.of("ownerScope", scope)))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        }
     }
 
     @Test
     void businessManagerCannotModifyAnotherEnterpriseSandboxByRecordId() {
         setBusinessManager();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         SandboxService service = mock(SandboxService.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
@@ -250,7 +524,7 @@ class SandboxControllerTest {
     @Test
     void businessManagerCanModifyAnAccessibleUserSandbox() {
         setBusinessManager();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         SandboxService service = mock(SandboxService.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
@@ -262,12 +536,65 @@ class SandboxControllerTest {
         assertThat(controller.removeSandboxById(Map.of("id", 7L)).getCode()).isEqualTo(ResponseUtil.SUCCESS);
         verify(service).updateSandboxById(7L, 1);
         verify(service).removeSandboxById(7L);
+        verify(service, never()).findRecordIdBySandboxIdAndStatus(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void removeSandboxById_prefersRecordIdWhenSandboxIdIsAlsoPresent() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(mapper.countEnterpriseUserSandbox(7L, 123L)).thenReturn(1);
+
+        assertThat(controller.removeSandboxById(Map.of("id", 7L, "sandboxId", "sandbox-other")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(service).removeSandboxById(7L);
+        verify(service, never()).findRecordIdBySandboxIdAndStatus(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void removeSandboxById_resolvesRunningRecordFromSandboxId() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        when(service.findRecordIdBySandboxId("sandbox-9")).thenReturn(9L);
+        when(mapper.countEnterpriseUserSandbox(9L, 123L)).thenReturn(1);
+
+        assertThat(controller.removeSandboxById(Map.of("sandboxId", "sandbox-9")).getCode())
+            .isEqualTo(ResponseUtil.SUCCESS);
+        verify(service).removeSandboxById(9L);
+    }
+
+    @Test
+    void removeSandboxById_requiresIdOrSandboxIdAndRejectsUnknownRunningSandbox() {
+        setBusinessManager();
+        SandboxController controller = new SandboxController();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+
+        assertThat(controller.removeSandboxById(Map.of()).getMsg()).isEqualTo("id or sandboxId is required");
+        assertThat(controller.removeSandboxById(Map.of("id", "abc", "sandboxId", "sandbox-9")).getMsg())
+            .isEqualTo("id 必须是有效数字");
+        when(service.findRecordIdBySandboxId("missing")).thenReturn(null);
+        assertThat(controller.removeSandboxById(Map.of("sandboxId", "missing")).getMsg())
+            .isEqualTo("sandbox record not found");
+        verify(service, never()).removeSandboxById(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void userResourcesStillRequireAnAdministrativeRole() {
         CurrentUserHolder.clearLoginInfo();
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.listRecords(Map.of()))
@@ -277,7 +604,7 @@ class SandboxControllerTest {
 
     @Test
     void saveServiceSpec_defaultsAutoStartToEnabledForLegacyClients() {
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         ReflectionTestUtils.setField(controller, "sandboxServiceSpecEntityMapper", mapper);
         when(mapper.selectById("openclaw")).thenReturn(null);
@@ -294,7 +621,7 @@ class SandboxControllerTest {
 
     @Test
     void saveServiceSpec_updatesExplicitAutoStartValue() {
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         ReflectionTestUtils.setField(controller, "sandboxServiceSpecEntityMapper", mapper);
         SandboxServiceSpecEntity existing = new SandboxServiceSpecEntity();
@@ -313,7 +640,7 @@ class SandboxControllerTest {
 
     @Test
     void removeSandbox_targetsOneServiceWhenSandboxTypeIsProvided() {
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxService sandboxService = mock(SandboxService.class);
         ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
 
@@ -327,8 +654,97 @@ class SandboxControllerTest {
     }
 
     @Test
+    void removeSandbox_exactTargetReturnsRemoteAbsenceConfirmation() {
+        SandboxController controller = controllerWithInventory();
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        prepareExactReleaseCaller(controller, "user001", UserType.ORD_USER);
+        Map<String, Object> confirmation = Map.of("sandboxId", "old-b", "releaseConfirmed", true,
+            "remoteAbsentConfirmed", true);
+        when(service.removeSandbox("user001", null, "byclaw-tools-media", "old-b")).thenReturn(confirmation);
+        ResponseUtil response = controller.removeSandbox(Map.of("userCode", "user001",
+            "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b"));
+        assertThat(response.getData()).isEqualTo(confirmation);
+        verify(service, never()).removeSandbox("user001", null, "byclaw-tools-media");
+    }
+
+    @Test
+    void removeSandbox_exactTargetDoesNotFallBackAfterTargetChanged() {
+        SandboxController controller = controllerWithInventory();
+        SandboxService service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        prepareExactReleaseCaller(controller, "user001", UserType.ORD_USER);
+        when(service.removeSandbox("user001", null, "byclaw-tools-media", "old-b"))
+            .thenThrow(new IllegalStateException("SANDBOX_TARGET_CHANGED"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(Map.of(
+            "userCode", "user001", "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b")))
+            .hasMessage("SANDBOX_TARGET_CHANGED");
+        verify(service, never()).removeSandbox("user001", null, "byclaw-tools-media");
+    }
+
+    private void prepareExactReleaseCaller(SandboxController controller, String caller, String role) {
+        UsersOrganization organization = new UsersOrganization();
+        organization.setUserType(role);
+        LoginInfo info = new LoginInfo();
+        info.setUserCode(caller);
+        info.setUsersOrganizations(List.of(organization));
+        CurrentUserHolder.setLoginInfo(info);
+        ReflectionTestUtils.setField(controller, "sandboxUserContextRunner",
+            new com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner(
+                mock(com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService.class)));
+    }
+
+    @Test
+    void removeSandbox_exactTargetAuthorizesBeforeSwitchingIdentity() {
+        for (String role : List.of(UserType.ORD_USER, UserType.ORG_MAN, UserType.PLAT_MAN, UserType.PLAT_DEVOPS)) {
+            SandboxController controller = controllerWithInventory();
+            SandboxService service = mock(SandboxService.class);
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            prepareExactReleaseCaller(controller, "another-user", role);
+            Map<String, Object> params = Map.of("userCode", "user001", "sandboxType", "byclaw-tools-media",
+                "expectedSandboxId", "old-b");
+            if (role.equals(UserType.PLAT_MAN) || role.equals(UserType.PLAT_DEVOPS)) {
+                controller.removeSandbox(params);
+                verify(service).removeSandbox("user001", null, "byclaw-tools-media", "old-b");
+            } else {
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(params))
+                    .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                    .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                        .getStatusCode().value()).isEqualTo(403));
+                verifyNoInteractions(service);
+            }
+            assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("another-user");
+        }
+        SandboxController anonymous = controllerWithInventory();
+        CurrentUserHolder.clearLoginInfo();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> anonymous.removeSandbox(Map.of(
+            "userCode", "user001", "sandboxType", "byclaw-tools-media", "expectedSandboxId", "old-b")))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                .getStatusCode().value()).isEqualTo(401));
+    }
+
+    @Test
+    void removeSandbox_invalidExactTargetNeverFallsBackToLegacy() {
+        for (Object value : java.util.Arrays.asList(null, "", "  ", 123L, Map.of("id", "old-b"))) {
+            SandboxController controller = controllerWithInventory();
+            SandboxService service = mock(SandboxService.class);
+            ReflectionTestUtils.setField(controller, "sandboxService", service);
+            Map<String, Object> params = new java.util.HashMap<>();
+            params.put("userCode", "user001");
+            params.put("sandboxType", "byclaw-tools-media");
+            params.put("expectedSandboxId", value);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.removeSandbox(params))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(error -> assertThat(((org.springframework.web.server.ResponseStatusException) error)
+                    .getStatusCode().value()).isEqualTo(400));
+            verifyNoInteractions(service);
+        }
+    }
+
+    @Test
     void navigateBrowser_logsUnexpectedFailureWithRequestContextAndStackTrace() {
-        SandboxController controller = new SandboxController();
+        SandboxController controller = controllerWithInventory();
         SandboxBrowserNavigationService navigationService = mock(SandboxBrowserNavigationService.class);
         ReflectionTestUtils.setField(controller, "sandboxBrowserNavigationService", navigationService);
         LoginInfo loginInfo = new LoginInfo();

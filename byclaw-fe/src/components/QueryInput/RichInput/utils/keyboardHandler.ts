@@ -1,4 +1,5 @@
 import { Editor, Element, Range, Transforms } from 'slate';
+import { HistoryEditor } from 'slate-history';
 import { ELEMENT_EDITABLE } from './constants';
 import { PayloadType } from '../types';
 
@@ -30,6 +31,14 @@ export const createKeyboardHandler = ({
   canSend,
 }: KeyboardHandlerParams) => {
   return (event: React.KeyboardEvent) => {
+    if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+      event.preventDefault();
+      if (HistoryEditor.isHistoryEditor(editor)) {
+        HistoryEditor.undo(editor);
+      }
+      return;
+    }
+
     const { selection } = editor;
 
     // 处理左右箭头键导航

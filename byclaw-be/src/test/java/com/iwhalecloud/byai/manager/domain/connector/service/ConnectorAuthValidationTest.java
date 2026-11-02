@@ -26,7 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.alibaba.fastjson.JSON;
 
-class ConnectorAuthValidationTest {
+class ConnectorAuthValidationTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private ConnectorAuthMapper connectorAuthMapper;
     private ConnectorInfoMapper connectorInfoMapper;

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,7 +36,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
-class ImaDisabledCredentialSyncTest {
+class ImaDisabledCredentialSyncTest extends I18nTestSupport {
 
     private UserPrivateParam client;
     private UserPrivateParam apiKey;

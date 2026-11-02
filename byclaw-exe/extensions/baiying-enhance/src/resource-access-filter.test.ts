@@ -33,6 +33,15 @@ describe("shared employee resource use isolation", () => {
     const off = { ...raw, controlledResources: [{ ...raw.controlledResources[0], active: false }] };
     expect((filterControlledResources(off, new Set(["10"]), "1") as typeof raw).relSkills).toEqual([{ skillCode: "builtin" }]);
   });
+  it("requires explicit rights for synchronized capabilities even when the user created the resource", () => {
+    const synced = {
+      controlledResources: [{ resourceId: "10", resourceBizType: "AGENT", createBy: "1", active: true, requiresExplicitUse: true }],
+      relResourceList: [{ resourceId: "10" }],
+    };
+    expect((filterControlledResources(synced, new Set(), "1") as typeof synced).relResourceList).toEqual([]);
+    expect((filterControlledResources(synced, new Set(["10"]), "1") as typeof synced).relResourceList)
+      .toEqual(synced.relResourceList);
+  });
   it("keeps legacy employee JSON unchanged and parses child use rights independently", () => {
     const legacy = { relTools: ["legacy"] };
     expect(filterControlledResources(legacy, new Set(), "")).toBe(legacy);

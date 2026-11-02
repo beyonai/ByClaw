@@ -10,6 +10,7 @@ jest.mock('@tanstack/react-query', () => ({
 
 jest.mock('@/service/sandbox', () => ({
   getSandboxInfo: jest.fn(),
+  getSharedUserStorageStatus: jest.fn(),
   removeSandbox: jest.fn(),
   launchSandboxByUserCode: jest.fn(),
 }));

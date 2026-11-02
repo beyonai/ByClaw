@@ -4,9 +4,11 @@ Load this reference for every `bycli weixin` or `bycli weixin-channels` command;
 
 This reference follows the Weixin command surface provided by the environment's installed `@sovovs/bycli`. Treat `bycli weixin --help -f yaml` and `bycli weixin <command> --help -f yaml` as the source of truth. This reference only defines Weixin command execution, authentication gates, session handling, and returned records. When a caller delegates the task, return all requested records, bodies, and file metadata to that caller without choosing a canonical artifact name or storage layout.
 
-## 视频号统计与鉴权
+## 视频号执行与鉴权
 
-本段适用于 `weixin-channels`；后续公众号命令、token 和登录 TIMEOUT 规则仅适用于 `weixin`。视频号的 `overview`、`trend`、`sources`、`posts`、`post-detail` 均为 `channels.weixin.qq.com` 的只读浏览器统计查询。先读取实际 `bycli list -f json` 与 `bycli weixin-channels --help -f json`，核对站点、命令、只读权限和日期/样本参数。视频号复用已连接浏览器中该域的登录态，不能借用公众号 token、环境 Cookie 或认证来源。
+本段适用于 `weixin-channels`；后续公众号命令、token 和登录 TIMEOUT 规则仅适用于 `weixin`。先读 [weixin-channels.md](./weixin-channels.md) 选择发布、状态或数据命令，再读取实际 `bycli list -f json` 与目标命令的 `--help -f json`，核对站点、访问权限、浏览器能力和参数。视频号复用已连接浏览器中 `channels.weixin.qq.com` 的登录态，不能借用公众号 token、环境 Cookie 或认证来源。
+
+Runner 接受只读 `overview`、`trend`、`sources`、`posts`、`post-detail`、`video-stats`、`video-status` 和写入 `video-publish`。除 `video-status` 的 conditional 浏览器分支须显式传 Runner 的 `--selected-mode browser` 外，浏览器命令须暴露 `browser: true`；域和逐命令 read/write 必须匹配。本地快照 `video-status --operation` 直接执行，不套 Runner 或做浏览器预检。发布须先保存并重开核对草稿、向用户展示并取得对该草稿的明确确认，才单独 `--mode submit --execute --user-confirmed`；准备不带确认参数。
 
 独立调用使用共享 Runner，例如：
 
@@ -18,6 +20,8 @@ node /app/skills/bycli/scripts/weixin-browser-runner.mjs \
 ```
 
 明确 `AUTH_REQUIRED`、CAPTCHA、MFA 或环境验证进入人工 Gate，保留现有 TAB 与浏览器并立即停止，提示用户完成扫码/验证后明确回复。每次新确认仅允许原参数的一次重跑，最多十次；确认重跑不另做桥接或页面预检。`TIMEOUT` 本身及其中的“finish login”建议不是认证证据，不能添加确认参数或自动重跑。`AUTH_RETRY_EXHAUSTED`、`OPERATION_ALREADY_FINALIZED` 是不可重试终态，不得改参数、换目录或删除状态重置预算。
+
+发布返回行中的 `requires_user_action` 或未知提交并不自动转换成登录 Gate；即使退出码为 0，也须读取业务状态与 `submitted`。已经尝试提交或结果未知时保留原记录，仅在获准继续后用只读状态查询，不确认重跑 submit。桥接恢复仅对只读命令允许一次重试；`video-publish` 返回 `BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL` 后停止，不能自动重放，也不能把人工验证确认当成写操作重试批准。Gate 的 complete/previousOutcome 只描述命令执行，不能作为发表成功证明。
 
 通过 `knowledge-collection` 采集时只调用其 `acquire-weixin-channels`：该入口内部直接复用同一 Gate，并为整次串行采集统一持有一次桥接预检，外层不能再套 Runner。暂停时保留原会话、item ID、source URL、days、limit 与已保存 JSON；只有用户明确完成登录/验证后，才对原命令添加 `--verification-confirmed true`。未确认的原命令仅返回等待状态，不访问网站；确认只继续当前暂停步骤，成功前缀不再采集。后续步骤若再次鉴权，须等待下一次新确认。checkpoint、Gate 或 JSON 缺失/被修改、并发锁残留或执行中断均停止，不能扫描旧 raw、手工修改或清锁接管。
 

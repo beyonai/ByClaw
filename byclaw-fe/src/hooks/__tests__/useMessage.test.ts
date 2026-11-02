@@ -397,6 +397,56 @@ describe('hooks/useChat/useMessage', () => {
     expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1', 'm2', 'm3', 'm4']);
   });
 
+  it('merges a resumed assistant stream into the persisted answer with the same trace', () => {
+    sessionListMap.set('resume-session', {
+      list: [
+        {
+          msgId: '11382392',
+          messageId: '11382392',
+          sessionId: 'resume-session',
+          traceId: 'resume-trace',
+          fromBeyond: true,
+          agentId: '11221954',
+          agentName: 'zht',
+          text: '原回答',
+          thinkList: [{ uuid: 'old-thinking', text: '原来的思考过程' }],
+        },
+      ],
+      pageNum: 1,
+      pageSize: 20,
+      total: 1,
+      pageRange: [1, 1],
+    });
+    const { result } = renderHook(() => useMessage({}));
+
+    act(() => {
+      result.current.updateMessage(
+        {
+          msgId: 'runtime:resume-session:trace',
+          sessionId: 'resume-session',
+          traceId: 'resume-trace',
+          fromBeyond: true,
+          agentName: '鲸智百应',
+          thinkList: [{ text: '个人助理正在启动中，请等待' }],
+        } as any,
+        { isAssign: true }
+      );
+    });
+
+    expect(sessionListMap.get('resume-session').list).toHaveLength(1);
+    expect(sessionListMap.get('resume-session').list[0]).toMatchObject({
+      msgId: '11382392',
+      messageId: '11382392',
+      agentId: '11221954',
+      agentName: 'zht',
+      traceId: 'resume-trace',
+      thinkList: [
+        { uuid: 'old-thinking', text: '原来的思考过程' },
+        { text: '个人助理正在启动中，请等待' },
+      ],
+    });
+  });
+
   it('updateMessage removes completed empty answer messages', async () => {
     const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },

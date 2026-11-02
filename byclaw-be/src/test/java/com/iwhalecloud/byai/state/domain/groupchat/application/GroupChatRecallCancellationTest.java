@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.application;
 
+import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,7 +29,12 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatSessionSendGate;
 
-class GroupChatRecallCancellationTest {
+class GroupChatRecallCancellationTest extends I18nTestSupport {
+    @org.junit.jupiter.api.BeforeEach
+    void useEnglishMessages() {
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+    }
+
     private final ByaiGroupChatRecallMapper recalls = mock(ByaiGroupChatRecallMapper.class);
     private final ByaiGroupChatTurnMapper turns = mock(ByaiGroupChatTurnMapper.class);
     private final ByaiGroupChatExecutionMapper executions = mock(ByaiGroupChatExecutionMapper.class);
@@ -75,8 +82,8 @@ class GroupChatRecallCancellationTest {
         queued.setTraceId(null);
         var running = turn(2, 100, null);
         when(recalls.turns(10L)).thenReturn(List.of(queued, running));
-        when(turns.selectForUpdateById(1L)).thenReturn(queued);
-        when(turns.selectForUpdateById(2L)).thenReturn(running);
+        when(turns.selectCurrentById(1L)).thenReturn(queued);
+        when(turns.selectCurrentById(2L)).thenReturn(running);
         TransactionSynchronizationManager.initSynchronization();
         service.cancel(10L, 100L);
         var records = ArgumentCaptor.forClass(ByaiGroupChatRecallStop.class);
@@ -93,7 +100,7 @@ class GroupChatRecallCancellationTest {
         var finished = turn(1, 100, null);
         finished.setStatus("SUCCEEDED");
         when(recalls.turns(10L)).thenReturn(List.of(finished));
-        when(turns.selectForUpdateById(1L)).thenReturn(finished);
+        when(turns.selectCurrentById(1L)).thenReturn(finished);
         var task = new ByaiGroupChatTask();
         task.setTurnStatus("RUNNING");
         when(tasks.cancelForRecall(20L, 1L)).thenReturn(task);
@@ -113,7 +120,7 @@ class GroupChatRecallCancellationTest {
         task.setTurnStatus("WAITING_USER");
         when(tasks.cancelForRecall(20L, 1L)).thenReturn(task);
         when(recalls.turns(10L)).thenReturn(List.of(finished));
-        when(turns.selectForUpdateById(1L)).thenReturn(finished);
+        when(turns.selectCurrentById(1L)).thenReturn(finished);
         TransactionSynchronizationManager.initSynchronization();
         service.cancel(10L, 100L);
         var record = ArgumentCaptor.forClass(ByaiGroupChatRecallStop.class);

@@ -1,8 +1,8 @@
+import { extractHubSkillZip } from "./skill-archive.js";
+export { validateHubSkillZipEntryName } from "./skill-archive.js";
 import { createWriteStream, promises as fs } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AdaptedManagedAgent, BaiyingHubSkillRef } from "./agent-adapter.js";
@@ -16,7 +16,6 @@ import {
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import { resolveStateDir } from "./workspace-paths.js";
 
-const execFileAsync = promisify(execFile);
 const HUB_SKILL_METADATA_FILE = ".baiying-hub-skill.json";
 const SKILL_DOC_FILE = "SKILL.md";
 
@@ -45,6 +44,29 @@ export type HubSkillSyncResult = {
   skipped: string[];
   failed: string[];
 };
+
+export type HubSkillDownloadState = {
+  state: "PREPARING" | "DOWNLOADED" | "FAILED";
+  version?: string;
+  errorCode?: string;
+  checkedAt: number;
+};
+const downloadStates = new Map<string, HubSkillDownloadState>();
+export function getHubSkillDownloadState(skillCode: string): HubSkillDownloadState | undefined {
+  return downloadStates.get(skillCode);
+}
+export function hubSkillVersionSignature(refs: BaiyingHubSkillRef[] = []): string {
+  return refs.map(ref => `${ref.skillCode}:${downloadStates.get(ref.skillCode)?.version ?? ""}`).sort().join("|");
+}
+export function classifyHubSkillFailure(error: unknown): string {
+  if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "RUNTIME_DEPENDENCY_MISSING";
+  const message = error instanceof Error ? error.message : String(error);
+  if (/HTTP (401|403)/.test(message)) return "DOWNLOAD_UNAUTHORIZED";
+  if (/HTTP 404/.test(message)) return "PACKAGE_NOT_FOUND";
+  if (/timeout|abort/i.test(message)) return "DOWNLOAD_TIMEOUT";
+  if (/zip|SKILL.md|package name/i.test(message)) return "INVALID_PACKAGE";
+  return "DOWNLOAD_FAILED";
+}
 
 function nonEmptyString(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
@@ -218,6 +240,11 @@ async function fetchHubSkillVersion(params: {
   }
   const parsed = parseVersionResponse(parseJsonBody(bodyText));
   if (!parsed) {
+    const json = parseJsonBody(bodyText);
+    if (json && typeof json === "object" && !Array.isArray(json) && !responseSucceeded(json)) {
+      const failure = json as Record<string, unknown>;
+      throw new Error(`version request rejected code=${String(failure.code)}: ${String(failure.msg ?? failure.message ?? "unknown error")}`);
+    }
     throw new Error(`version response missing data.version: ${bodyText.slice(0, 200)}`);
   }
   return parsed;
@@ -254,29 +281,6 @@ async function hasSkillDoc(skillDir: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-export function validateHubSkillZipEntryName(name: string): void {
-  const normalized = name.replace(/\\/g, "/");
-  if (!normalized || normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) {
-    throw new Error(`unsafe zip entry path: ${name}`);
-  }
-  const parts = normalized.split("/");
-  if (parts.some((part) => part === "..")) {
-    throw new Error(`unsafe zip entry path: ${name}`);
-  }
-}
-
-async function validateZipEntries(zipPath: string): Promise<void> {
-  const { stdout } = await execFileAsync("unzip", ["-Z", "-1", zipPath], {
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  for (const line of stdout.split(/\r?\n/)) {
-    const entry = line.trim();
-    if (entry) {
-      validateHubSkillZipEntryName(entry);
-    }
   }
 }
 
@@ -378,10 +382,7 @@ async function installDownloadedSkill(params: {
       timeoutMs: params.timeoutMs,
       filePath: zipPath,
     });
-    await validateZipEntries(zipPath);
-    await execFileAsync("unzip", ["-q", zipPath, "-d", extractDir], {
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    await extractHubSkillZip(zipPath, extractDir);
     const skillRoot = await findExtractedSkillRoot({ extractDir, skillCode: params.skillCode });
     await atomicReplaceSkillDir({ sourceDir: skillRoot, targetDir: params.targetDir });
     const metadata: HubSkillMetadata = {
@@ -413,14 +414,20 @@ export async function syncHubSkillsForManagedAgents(params: {
   if (!hasAnyHubSkills) {
     return { changed: false, checked: 0, downloaded: [], skipped: [], failed: [] };
   }
-  const baseUrl =
-    params.baseUrl?.replace(/\/+$/g, "") ||
-    (await discoverBackendBaseUrl({ logger: params.logger })).replace(/\/+$/g, "");
-  if (!baseUrl) {
-    throw new Error("backend service discovery returned no usable instance");
+  let baseUrl: string;
+  let headers: Record<string, string>;
+  try {
+    baseUrl = params.baseUrl?.replace(/\/+$/g, "") ||
+      (await discoverBackendBaseUrl({ logger: params.logger })).replace(/\/+$/g, "");
+    if (!baseUrl) throw new Error("backend service discovery returned no usable instance");
+    headers = await buildHubSkillAuthHeaders({ redisJsonStore: params.redisJsonStore });
+  } catch (error) {
+    for (const agent of params.managed) for (const ref of agent.hubSkills ?? []) {
+      downloadStates.set(ref.skillCode, { state: "FAILED", errorCode: "BACKEND_UNAVAILABLE", checkedAt: Date.now() });
+    }
+    throw error;
   }
   const timeoutMs = Math.max(1000, params.timeoutMs ?? 30_000);
-  const headers = await buildHubSkillAuthHeaders({ redisJsonStore: params.redisJsonStore });
   const skillsRoot = path.join(params.stateDir ?? resolveStateDir(), "skills");
   const downloaded: string[] = [];
   const skipped: string[] = [];
@@ -434,6 +441,7 @@ export async function syncHubSkillsForManagedAgents(params: {
       }
       processed.add(ref.skillCode);
 
+      downloadStates.set(ref.skillCode, { state: "PREPARING", checkedAt: Date.now() });
       try {
         const versionUrl = resolveHubSkillApiUrl(baseUrl, ref.versionUrl);
         const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
@@ -442,6 +450,7 @@ export async function syncHubSkillsForManagedAgents(params: {
         const local = await readLocalMetadata(targetDir);
         const localSkillDocExists = await hasSkillDoc(targetDir);
         if (local?.skillUrl === downloadUrl && local?.version === version.version && localSkillDocExists) {
+          downloadStates.set(ref.skillCode, { state: "DOWNLOADED", version: version.version, checkedAt: Date.now() });
           skipped.push(ref.skillCode);
           continue;
         }
@@ -454,16 +463,18 @@ export async function syncHubSkillsForManagedAgents(params: {
           timeoutMs,
           targetDir,
         });
+        downloadStates.set(ref.skillCode, { state: "DOWNLOADED", version: version.version, checkedAt: Date.now() });
         downloaded.push(ref.skillCode);
         params.logger?.info?.(
           `baiying-enhance: hub skill synced skillCode=${ref.skillCode} version=${version.version}`,
         );
       } catch (err) {
+        downloadStates.set(ref.skillCode, { state: "FAILED", errorCode: classifyHubSkillFailure(err), checkedAt: Date.now() });
         failed.push(ref.skillCode);
         params.logger?.warn?.(
           `baiying-enhance: hub skill sync failed skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        break;
+        continue;
       }
     }
   }

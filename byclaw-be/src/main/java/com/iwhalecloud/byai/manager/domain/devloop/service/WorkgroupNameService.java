@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -18,10 +19,12 @@ import org.springframework.stereotype.Service;
 public class WorkgroupNameService {
     private final TenantNodeClient node;
     private final ByaiSessionMapper sessions;
+    private final TenantModeService tenantModes;
 
-    public WorkgroupNameService(TenantNodeClient node, ByaiSessionMapper sessions) {
+    public WorkgroupNameService(TenantNodeClient node, ByaiSessionMapper sessions, TenantModeService tenantModes) {
         this.node = node;
         this.sessions = sessions;
+        this.tenantModes = tenantModes;
     }
 
     public boolean exists(String name, Long creatorId, Long enterpriseId) {
@@ -31,12 +34,14 @@ public class WorkgroupNameService {
                 || !Long.valueOf(tenant.enterpriseId()).equals(enterpriseId)) {
                 throw new IllegalArgumentException(I18nUtil.get("workgroup.name.scopeMismatch"));
             }
-            NameCheck result = node.request(tenant, "POST", "/internal/v1/group-chats/name-check",
-                Map.of("name", name), new TypeReference<NameCheck>() { });
-            if (result == null || result.exists() == null) {
-                throw new IllegalStateException(I18nUtil.get("workgroup.name.checkUnavailable"));
+            if (!tenantModes.isTrialTenant(tenant.enterpriseId())) {
+                NameCheck result = node.request(tenant, "POST", "/internal/v1/group-chats/name-check",
+                    Map.of("name", name), new TypeReference<NameCheck>() { });
+                if (result == null || result.exists() == null) {
+                    throw new IllegalStateException(I18nUtil.get("workgroup.name.checkUnavailable"));
+                }
+                return result.exists();
             }
-            return result.exists();
         }
         long tenantId = enterpriseId == null ? 1L : enterpriseId;
         LambdaQueryWrapper<ByaiSession> query = new LambdaQueryWrapper<>();

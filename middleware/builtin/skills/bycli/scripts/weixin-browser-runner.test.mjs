@@ -108,7 +108,7 @@ test('initial Weixin capability lookup supplies the site to injected loaders', a
 });
 
 test('Channels statistics commands run with site-specific read-only browser capability', async (t) => {
-  for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail']) {
+  for (const name of ['overview', 'trend', 'sources', 'posts', 'post-detail', 'video-stats', 'video-status']) {
     const argv = channelsCommand(name);
     const events = [];
     const outcome = await runWeixinBrowser({
@@ -153,6 +153,98 @@ test('unknown Channels commands fail before capability, bridge, execution, or Ga
     }), /command/);
   }
   assert.deepEqual(await readdir(directory), []);
+});
+
+test('Channels remote status requires an explicit browser selection for conditional capability', async (t) => {
+  const capability = { ...channelsCapability, browser: 'conditional' };
+  for (const selectedMode of [null, 'browser']) {
+    let executions = 0;
+    const outcome = await runWeixinBrowser({
+      stateDir: await stateDir(t),
+      argv: [...channelsCommand('video-status'), '--operation', '/task/video.json', '--management-id', 'export/exact-id'],
+      selectedMode,
+      loadCapability: async () => capability,
+      ensureBridge: async () => {
+        assert.equal(selectedMode, 'browser');
+        return ready;
+      },
+      execute: async () => { executions += 1; return success(); },
+    });
+    assert.equal(outcome.exitCode, selectedMode === 'browser' ? 0 : 2);
+    assert.equal(executions, selectedMode === 'browser' ? 1 : 0);
+  }
+});
+
+test('Channels publishing accepts only write capability on the Channels browser domain', async (t) => {
+  for (const capability of [
+    { ...channelsCapability, access: 'write' },
+    channelsCapability,
+    { ...channelsCapability, access: 'write', domain: 'mp.weixin.qq.com' },
+    { ...channelsCapability, access: 'write', browser: false },
+    { ...channelsCapability, access: 'write', browser: 'conditional' },
+  ]) {
+    const allowed = capability.access === 'write' && capability.domain === 'channels.weixin.qq.com' && capability.browser === true;
+    let executions = 0;
+    const outcome = await runWeixinBrowser({
+      stateDir: await stateDir(t),
+      argv: [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'prepare', '--execute'],
+      selectedMode: 'browser',
+      loadCapability: async () => capability,
+      ensureBridge: async () => { assert.equal(allowed, true); return ready; },
+      execute: async () => { executions += 1; return success('[{"status":"prepared","submitted":false}]'); },
+    });
+    assert.equal(outcome.exitCode, allowed ? 0 : 2);
+    assert.equal(executions, allowed ? 1 : 0);
+  }
+});
+
+test('Channels submit bridge failure never automatically replays the write', async (t) => {
+  let executions = 0;
+  const directory = await stateDir(t);
+  const argv = [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'submit', '--execute', '--user-confirmed'];
+  const outcome = await runWeixinBrowser({
+    stateDir: directory,
+    argv,
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => { executions += 1; return typedError(69, 'BROWSER_CONNECT'); },
+  });
+  assert.equal(executions, 1);
+  assert.equal(JSON.parse(outcome.stderr).error.details.bridgeCode, 'BRIDGE_RECOVERED_RETRY_REQUIRES_APPROVAL');
+  assert.deepEqual(await readdir(directory), []); // Recovery approval is separate from authentication state.
+});
+
+test('Channels explicit replay reaches the adapter journal instead of a second Gate deduplication', async (t) => {
+  const directory = await stateDir(t);
+  const argv = [...channelsCommand('video-publish'), '--operation', '/task/video.json', '--mode', 'submit', '--execute', '--user-confirmed'];
+  const outcome = await runWeixinBrowser({
+    stateDir: directory, argv,
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => success('[{"status":"submit_unknown","submitted":true}]'),
+  });
+  assert.equal(JSON.parse(outcome.stdout)[0].status, 'submit_unknown');
+  const replay = await runWeixinBrowser({
+    stateDir: directory, argv, verificationConfirmed: true,
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }),
+    ensureBridge: async () => ready,
+    execute: async () => success('[{"status":"submit_unknown","submitted":true}]'),
+  });
+  assert.equal(replay.executed, true);
+  assert.equal(JSON.parse(replay.stdout)[0].submitted, true);
+});
+
+test('Channels video stats retries a recovered bridge once', async (t) => {
+  let executions = 0;
+  const outcome = await runWeixinBrowser({
+    stateDir: await stateDir(t),
+    argv: [...channelsCommand('video-stats'), 'export/exact-id'],
+    loadCapability: async () => channelsCapability,
+    ensureBridge: async () => ready,
+    execute: async () => ++executions === 1 ? typedError(69, 'BROWSER_CONNECT') : success(),
+  });
+  assert.equal(executions, 2);
+  assert.equal(outcome.exitCode, 0);
 });
 
 test('Channels capability rejects writes, wrong domains, and non-browser commands before side effects', async (t) => {
@@ -245,6 +337,8 @@ test('command execution timeout includes the command timeout plus a safety margi
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', '60']), 90_000);
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout=180']), 210_000);
   assert.equal(commandExecutionTimeoutMs([...command(), '--timeout', 'invalid']), 30_000);
+  assert.equal(commandExecutionTimeoutMs(channelsCommand('video-publish')), 210_000);
+  assert.equal(commandExecutionTimeoutMs([...channelsCommand('video-publish'), '--timeout', '300']), 330_000);
 });
 
 test('timeout without structured output becomes a diagnosable non-authentication result', async (t) => {
@@ -296,6 +390,65 @@ test('empty unknown process failure becomes a diagnosable non-authentication res
   assert.equal(error.code, 'COMMAND_EXEC_UNCERTAIN');
   assert.equal(outcome.stateDisposition, 'no-auth-state');
   assert.equal(error.details.durationMs, 321);
+});
+
+test('progress-only output cannot hide a killed command or create an authentication gate', async t => {
+  const directory = await stateDir(t);
+  const result = normalizeCommandResult({ exitCode: 1, stdout: '', stderr: 'processing 25%\n',
+    timedOut: true, signal: 'SIGTERM', durationMs: 930000 });
+  assert.equal(JSON.parse(result.stderr).error.code, 'COMMAND_TIMEOUT_UNCERTAIN');
+  const outcome = await runWeixinBrowser({ stateDir: directory, argv: channelsCommand('video-publish'),
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }), ensureBridge: async () => ready,
+    execute: async () => result });
+  assert.equal(outcome.phase, 'initial'); assert.deepEqual(await readdir(directory), []);
+});
+
+test('progress before a final structured verification error still pauses the authentication gate', async t => {
+  let attempts = 0;
+  const outcome = await runWeixinBrowser({ stateDir: await stateDir(t), argv: channelsCommand('video-publish'),
+    loadCapability: async () => ({ ...channelsCapability, access: 'write' }), ensureBridge: async () => ready,
+    execute: async () => { attempts++; return normalizeCommandResult({ exitCode: 77, stdout: '',
+      stderr: `processing 25%\n${JSON.stringify({ ok: false, error: { code: 'AUTH_REQUIRED', exitCode: 77 } }, null, 2)}\n` }); } });
+  assert.equal(outcome.phase, 'waiting-confirmation'); assert.equal(attempts, 1);
+});
+
+test('runner CLI streams progress before completion without duplicating stderr or corrupting JSON stdout', async t => {
+  const root = await stateDir(t, 'weixin-stream-'), bin = join(root, 'bin'), release = join(root, 'release');
+  await mkdir(bin);
+  const script = join(bin, 'bycli');
+  await writeFile(script, `#!${process.execPath}
+const { existsSync } = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'list') console.log(JSON.stringify([{site:'weixin-channels',name:'video-publish',browser:true,access:'write',domain:'channels.weixin.qq.com'}]));
+else if (args[0] === 'doctor') {}
+else if (args[0] === 'daemon') console.log('Daemon: running\\nExtension: connected');
+else {
+  process.stderr.write('upload progress 25%\\n');
+  const timer = setInterval(() => { if (existsSync(${JSON.stringify(release)})) { clearInterval(timer); console.log('{"status":"prepared","submitted":false}'); } }, 10);
+}
+`);
+  await chmod(script, 0o700);
+  const child = spawn(process.execPath, [new URL('./weixin-browser-runner.mjs', import.meta.url).pathname,
+    '--state-dir', join(root, 'gate'), '--', ...channelsCommand('video-publish')], {
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, BYCLI_CONFIG_DIR: join(root, 'config') }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  let stdout = '', stderr = '', exited = false;
+  const completed = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => { exited = true; resolve(code); }); });
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`progress was buffered: ${stderr}`)), 5000);
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+      if (stderr.includes('upload progress 25%\n')) { clearTimeout(timer); resolve(); }
+    });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+  assert.equal(exited, false); assert.equal(stdout, '');
+  await writeFile(release, 'continue');
+  assert.equal(await completed, 0, stderr);
+  assert.deepEqual(JSON.parse(stdout), { status: 'prepared', submitted: false });
+  assert.equal(stderr, 'upload progress 25%\n');
 });
 
 test('initial browser command runs capability check, bridge, then command', async (t) => {
@@ -628,3 +781,10 @@ exit 2
   assert.equal(stateFiles.length, 1);
   assert.equal(JSON.parse(await readFile(join(gateState, stateFiles[0]), 'utf8')).phase, 'complete');
 });
+
+for (const code of ['UPLOAD_NOT_STARTED', 'UPLOAD_RESULT_UNKNOWN']) {
+  test(`preserves the typed ${code} error instead of wrapping it as an unclassified process failure`, () => {
+    const original = { exitCode: 1, stdout: '', stderr: `ok: false\nerror:\n  code: ${code}\n  message: native upload result\n` };
+    assert.equal(normalizeCommandResult(original), original);
+  });
+}

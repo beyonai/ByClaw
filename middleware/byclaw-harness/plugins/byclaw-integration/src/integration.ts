@@ -1,17 +1,18 @@
 /** Projection from authorized ByClaw resources to reusable DSH templates. */
 
+import { mapConcurrent } from './startup-concurrency.ts'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
-  deleteTeamTemplate,
+  teamTemplateFileName,
   listTeamTemplates,
   writeTeamTemplate,
   type ExpertTeamTemplate,
   type ExpertTemplateMember,
 } from '@byclaw/dsh-agent-teams/catalog'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
-import { deleteAgentTemplate, listAgentTemplates, writeAgentTemplate, type DshAgentTemplate } from './agent-template.ts'
+import { agentTemplateFileName, listAgentTemplates, writeAgentTemplate, type DshAgentTemplate } from './agent-template.ts'
 import { privateGenerationRoot } from './generation-paths.ts'
 import { loadByClawExpertGroupRuntime, type AuthorizedByClawResources } from './catalog.ts'
 import type { GenerationLease } from './generation-lease.ts'
@@ -50,13 +51,26 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
-async function copyDirectory(source: string, target: string): Promise<void> {
-  try {
-    await cp(source, target, { recursive: true, force: true })
-  } catch (error: unknown) {
-    if (!isMissing(error)) throw error
-    await mkdir(target, { recursive: true })
+/** Copy only entries the previous generation would retain. Managed templates
+ * are regenerated below; copying and then deleting them doubles NAS IO.
+ * Unknown files, invalid team JSON, directories and symlinks retain cp semantics.
+ */
+async function copyRetainedEntries(source: string, target: string, excluded: ReadonlySet<string>, concurrency: number): Promise<void> {
+  await mkdir(target, { recursive: true })
+  let entries
+  try { entries = await readdir(source, { withFileTypes: true }) } catch (error: unknown) {
+    if (isMissing(error)) return
+    throw error
   }
+  // The former unlink pass rejected a directory at an excluded filename.
+  // Preserve that failure instead of silently discarding an unrelated subtree.
+  for (const entry of entries) {
+    if (excluded.has(entry.name) && !entry.isFile() && !entry.isSymbolicLink()) {
+      throw new Error(`Refusing to replace non-file template entry: ${join(source, entry.name)}`)
+    }
+  }
+  await mapConcurrent(entries.filter(entry => !excluded.has(entry.name)), concurrency,
+    entry => cp(join(source, entry.name), join(target, entry.name), { recursive: true, force: true }))
 }
 
 async function createStageDirectories(prefixes: readonly string[]): Promise<string[]> {
@@ -240,6 +254,12 @@ export async function projectByClawResourcesToTemplates(options: {
   resolveModel?: (bindingId: string, modelId?: string) => Promise<ProjectedByClawModelSelection>
   generationLease?: GenerationLease
   projectionConcurrency?: number
+  deferSkillSync?: boolean
+  /** Incremental publication retains only explicitly authorized templates prepared by this context. */
+  retainTemplateIds?: ReadonlySet<string>
+  /** On-demand callers must not publish a partial generation missing their target. */
+  requiredTemplateId?: string
+  onPhase?: (phase: string, elapsedMs: number) => void
   allowSkillSyncFailure?: boolean
   skillSyncTimeoutMs?: number
   skillSyncAttempts?: number
@@ -248,8 +268,10 @@ export async function projectByClawResourcesToTemplates(options: {
   onEmployeeProjectionError?: (employeeId: string, error: unknown) => void
   onGroupProjectionError?: (groupId: string, error: unknown) => void
   /** Prepare a complete in-memory Skill view from the atomically updated cache; commit it after template publication. */
-  prepareSkillGeneration?: (templates: readonly DshAgentTemplate[], skillRoot: string) => Promise<() => void>
+  prepareSkillGeneration?: (templates: readonly DshAgentTemplate[], skillRoot: string, retainedTemplateIds: ReadonlySet<string>) => Promise<() => void>
 }): Promise<ProjectedByClawTemplates> {
+  const startedAt = performance.now()
+  const phase = (name: string): void => options.onPhase?.(name, Math.round(performance.now() - startedAt))
   const liveAgentTemplates = join(resolve(options.agentTemplateDir), 'templates')
   const liveTeamTemplates = join(resolve(options.teamCatalogDir), 'templates')
   const liveSkillCache = resolve(options.cacheRoot)
@@ -274,19 +296,32 @@ export async function projectByClawResourcesToTemplates(options: {
   const stagedAgentTemplates = join(stagedAgentCatalog, 'templates')
   const stagedTeamTemplates = join(stagedTeamCatalog, 'templates')
   const project = async (): Promise<ProjectedByClawTemplates> => {
-    await Promise.all([
-      copyDirectory(liveAgentTemplates, stagedAgentTemplates),
-      copyDirectory(liveTeamTemplates, stagedTeamTemplates),
+    // Read/validate the live generation while holding the same publication
+    // lease. Compute the exact filenames the old delete pass would remove.
+    const [previousAgents, previousTeams] = await Promise.all([
+      listAgentTemplates(options.agentTemplateDir),
+      listTeamTemplates(options.teamCatalogDir),
     ])
-    for (const template of await listAgentTemplates(stagedAgentCatalog)) {
-      if (template.source.system === 'byclaw') await deleteAgentTemplate(stagedAgentCatalog, template.id)
-    }
-    for (const template of await listTeamTemplates(stagedTeamCatalog)) {
-      if (template.id.startsWith('byclaw-team-') || template.id.startsWith('byclaw-group-')) {
-        await deleteTeamTemplate(stagedTeamCatalog, template.id)
-      }
-    }
+    const replacingIds = new Set([
+      ...options.resources.employees.map(employee => `byclaw-employee-${employee.id}`),
+      ...options.resources.groups.map(group => `byclaw-group-${group.id}`),
+    ])
+    const retainedAgents = previousAgents.filter(template => template.source.system === 'byclaw'
+      && options.retainTemplateIds?.has(template.id) && !replacingIds.has(template.id))
+    const retainedIds = new Set(retainedAgents.map(template => template.id))
+    const retainedTeamIds = new Set(retainedAgents.flatMap(template =>
+      template.expertTeam === undefined ? [] : [template.expertTeam.agentTeamsTemplateId]))
+    const excludedAgents = new Set(previousAgents.filter(template => template.source.system === 'byclaw' && !retainedIds.has(template.id))
+      .map(template => agentTemplateFileName(template.id)))
+    const excludedTeams = new Set(previousTeams
+      .filter(template => (template.id.startsWith('byclaw-team-') || template.id.startsWith('byclaw-group-')) && !retainedTeamIds.has(template.id))
+      .map(template => teamTemplateFileName(template.id)))
+    await Promise.all([
+      copyRetainedEntries(liveAgentTemplates, stagedAgentTemplates, excludedAgents, projectionConcurrency),
+      copyRetainedEntries(liveTeamTemplates, stagedTeamTemplates, excludedTeams, projectionConcurrency),
+    ])
 
+    phase('stage-ready')
     const direct = new Set(options.resources.directEmployeeIds)
     const employeesById = new Map(options.resources.employees.map(employee => [employee.id, employee]))
     const resolvedGroupRuntimes = await Promise.all(
@@ -322,6 +357,7 @@ export async function projectByClawResourcesToTemplates(options: {
       ))
       return false
     })
+    phase('groups-ready')
     const candidateEmployeeIdSet = new Set([
       ...options.resources.directEmployeeIds,
       ...candidateGroups.flatMap(group => (
@@ -371,10 +407,11 @@ export async function projectByClawResourcesToTemplates(options: {
     ])
     const acceptedEmployees = candidateEmployees.filter(employee => acceptedEmployeeIdSet.has(employee.id))
     const acceptedEmployeeIds = acceptedEmployees.map(employee => employee.id)
+    phase('models-ready')
     const skillRefs = new Map(
       acceptedEmployees.flatMap(employee => employee.skills.map(ref => [ref.code, ref])),
     )
-    const retainedSkillCodes = new Set(skillRefs.keys())
+    const retainedSkillCodes = new Set([...skillRefs.keys(), ...retainedAgents.flatMap(template => template.skills.map(skill => skill.code))])
     const skillPaths = new Map<string, string>()
     const sync = options.syncSkill ?? ((ref: ByClawSkillRef, cacheRoot = liveSkillCache) => syncByClawSkill({
       ref,
@@ -385,7 +422,9 @@ export async function projectByClawResourcesToTemplates(options: {
       attempts: options.skillSyncAttempts,
       retryDelayMs: options.skillSyncRetryDelayMs,
     }))
-    const synchronizedSkills = await Promise.all([...skillRefs.values()].map(skill => limit(async () => {
+    const synchronizedSkills = options.deferSkillSync
+      ? [...skillRefs.values()].map(skill => [skill.code, byClawSkillCacheDir(liveSkillCache, skill.code)] as const)
+      : await Promise.all([...skillRefs.values()].map(skill => limit(async () => {
       try {
         const livePath = resolve(await sync(skill, liveSkillCache))
         const expectedLivePath = byClawSkillCacheDir(liveSkillCache, skill.code)
@@ -402,6 +441,7 @@ export async function projectByClawResourcesToTemplates(options: {
     for (const synchronized of synchronizedSkills) {
       if (synchronized !== undefined) skillPaths.set(synchronized[0], synchronized[1])
     }
+    phase(options.deferSkillSync ? 'skill-index-ready' : 'skills-synchronized')
     const agents: DshAgentTemplate[] = []
     for (const employee of acceptedEmployees) {
       const template: DshAgentTemplate = {
@@ -413,7 +453,7 @@ export async function projectByClawResourcesToTemplates(options: {
         persona: employeePersona(employee),
         skills: employee.skills.flatMap(skill => {
           const path = skillPaths.get(skill.code)
-          return path === undefined ? [] : [{ code: skill.code, path }]
+          return path === undefined ? [] : [{ code: skill.code, path, ...(options.deferSkillSync ? { ref: skill } : {}) }]
         }),
         source: {
           system: 'byclaw',
@@ -427,7 +467,6 @@ export async function projectByClawResourcesToTemplates(options: {
           directlyAuthorized: direct.has(employee.id),
         },
       }
-      await writeAgentTemplate(stagedAgentCatalog, template)
       agents.push(template)
     }
 
@@ -486,10 +525,14 @@ export async function projectByClawResourcesToTemplates(options: {
           })),
         },
       }
-      await writeAgentTemplate(stagedAgentCatalog, template)
       agents.push(template)
     }
-    const publishSkills = await options.prepareSkillGeneration?.(agents, liveSkillCache)
+    if (options.requiredTemplateId !== undefined && !agents.some(template => template.id === options.requiredTemplateId)) {
+      throw new Error(`ByClaw template ${options.requiredTemplateId} could not be prepared`)
+    }
+    await mapConcurrent(agents, projectionConcurrency, template => writeAgentTemplate(stagedAgentCatalog, template))
+    const publishSkills = await options.prepareSkillGeneration?.([...retainedAgents, ...agents], liveSkillCache, retainedIds)
+    phase('templates-prepared')
     await publishDirectories([
       { prepared: stagedTeamTemplates, target: liveTeamTemplates },
       { prepared: stagedAgentTemplates, target: liveAgentTemplates },
@@ -497,7 +540,12 @@ export async function projectByClawResourcesToTemplates(options: {
     publishSkills?.()
     // Keep Skills referenced by the previous template generation available until
     // the new files and in-memory view have both been committed.
-    await removeRevokedSkills(liveSkillCache, retainedSkillCodes)
+    // Lazy association refresh can add Skills without rewriting a retained
+    // template file. Its persisted refs are not an authoritative cache inventory;
+    // pruning from them could delete a Skill still in use by another employee.
+    // Full-generation callers retain the existing cleanup behavior.
+    if (options.retainTemplateIds === undefined) await removeRevokedSkills(liveSkillCache, retainedSkillCodes)
+    phase('published')
     return {
       agents,
       teamAdapters,

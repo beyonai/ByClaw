@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { resolveConfig, safeValue, traceInput, ObservationState, LangfuseIngestion, apply } from '../src/index.js'
+import { resolveConfig, safeValue, traceInput, ObservationState, LangfuseIngestion, apply } from '../lib/index.js'
 
 class Span {
   constructor(name, attributes, parent, n) { this.name = name; this.attributes = { ...attributes }; this.parent = parent; this.n = n; this.ended = false }
@@ -92,4 +92,25 @@ test('preserves waterfalls and disposes subscriptions/exporters', async () => {
   apply({ root, logger: { info() {}, warn() {} }, effect(factory) { effects.push(factory()) } }, { enabled: true, baseUrl: 'http://lf', publicKey: 'pk', secretKey: 'sk', telemetry, ingestion })
   const a = agent(); const decision = { kind: 'enter', messages: [] }; assert.equal(await listeners.get('agent/pre-step')({ agent: a, turn: 1, step: 1, messages: [] }, async () => decision), decision); assert.deepEqual(await listeners.get('agent/request')({ agent: a, turn: 1, step: 1 }, async () => ({ provider: 'p', model: 'm' })), { provider: 'p', model: 'm' })
   await effects[0](); assert.equal(listeners.size, 0); assert.equal(telemetry.closed, true)
+})
+
+test('attributes runs to the configured userId before falling back to USER_CODE', () => {
+  const previous = process.env.USER_CODE
+  process.env.USER_CODE = 'process-user'
+  try {
+    const run = (config, a = agent()) => {
+      const telemetry = new Telemetry()
+      const state = new ObservationState(telemetry, { enqueue() {}, async close() {} }, resolveConfig(config, {}))
+      state.ensureRun(a, 1)
+      return telemetry.spans[0].attributes['langfuse.user.id']
+    }
+    assert.equal(resolveConfig({}, {}).userId, undefined)
+    assert.equal(resolveConfig({ userId: '  ' }, {}).userId, undefined)
+    assert.equal(run({}), 'process-user', 'default keeps the USER_CODE fallback')
+    assert.equal(run({ userId: 'alice' }), 'alice', 'a shared host sets the user per context')
+    assert.equal(run({ userId: 'alice' }, { id: 's', session: { id: 's', header: { userId: 'bob' } } }), 'bob', 'per-session identity still wins')
+  } finally {
+    if (previous === undefined) delete process.env.USER_CODE
+    else process.env.USER_CODE = previous
+  }
 })

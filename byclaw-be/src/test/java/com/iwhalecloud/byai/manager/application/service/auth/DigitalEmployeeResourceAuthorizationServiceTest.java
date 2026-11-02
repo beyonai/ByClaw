@@ -102,6 +102,45 @@ class DigitalEmployeeResourceAuthorizationServiceTest {
     }
 
     @Test
+    void approvedApplicantReceivesOnlyMissingBoundResourceUseWithoutExpandingOtherUsers() {
+        SsResource skill = bind(200L, "SKILL");
+        SsResource knowledge = bind(201L, "KG_DOC");
+        when(relations.findByResourceId(100L)).thenReturn(List.of(relation(200L), relation(201L)));
+        when(auth.hasResourceUsePermission(knowledge, 2L)).thenReturn(true);
+        service.synchronizeApprovedApplicant(employee, 2L);
+        verify(auth).requireApplicantAuditPermission(employee, 2L);
+        verify(auth).validateEmployeeResourceGrantTarget(skill, 2L);
+        verify(auth).appendApprovedEmployeeResourceUsePrivilege(skill, 2L);
+        verify(auth, never()).appendApprovedEmployeeResourceUsePrivilege(knowledge, 2L);
+        verify(auth, never()).validateDigitalEmployeeResourceUseGrant(any(), any());
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(any(), any());
+        verifyNoInteractions(grants, users);
+    }
+
+    @Test
+    void approvalDoesNotWriteAnyResourceIfAnotherBoundResourceValidationFails() {
+        bind(200L, "SKILL"); SsResource knowledge = bind(201L, "KG_DOC");
+        when(relations.findByResourceId(100L)).thenReturn(List.of(relation(200L), relation(201L)));
+        doThrow(new BaseException("blacklisted")).when(auth).validateEmployeeResourceGrantTarget(knowledge, 2L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.synchronizeApprovedApplicant(employee, 2L))
+            .hasMessage("blacklisted");
+        verify(auth, never()).appendApprovedEmployeeResourceUsePrivilege(any(), any());
+    }
+
+    @Test
+    void approvalDoesNotGrantBoundResourcesWhenReviewerLostAuthorityOrApplicantCannotUseEmployee() {
+        doThrow(new BaseException("denied")).when(auth).requireApplicantAuditPermission(employee, 2L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.synchronizeApprovedApplicant(employee, 2L))
+            .hasMessage("denied");
+        verifyNoInteractions(relations, resources);
+        org.mockito.Mockito.doNothing().when(auth).requireApplicantAuditPermission(employee, 2L);
+        when(auth.hasResourceUsePermission(employee, 2L)).thenReturn(false);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.synchronizeApprovedApplicant(employee, 2L))
+            .hasMessage("auth.employee.resources.employee.use.required");
+        verify(auth, never()).appendApprovedEmployeeResourceUsePrivilege(any(), any());
+    }
+
+    @Test
     void synchronizedUseScopeIsNeverExpandedToOtherSharedEmployeeUsers() {
         SsResource bound = bind(200L, "SKILL"); bound.setUseAuthControlled(true);
         when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))

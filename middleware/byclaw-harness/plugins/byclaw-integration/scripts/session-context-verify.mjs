@@ -1,6 +1,6 @@
 import { sessionLog } from './session-runtime-fixtures.mjs'
 import assert from 'node:assert/strict'
-import { EventType } from '@byclaw/by-framework'
+import { EventType, TaskCancelledError } from '@byclaw/by-framework'
 import {
   appendByClawContext,
   appendByClawInboundUserMessage,
@@ -20,6 +20,8 @@ import {
   byClawTurnFailurePresentation,
   emitByClawTurnFailure,
   resolveByClawTurnModelSelection,
+  byClawCommandSessionRoute,
+  ByClawDshSessionRuntime,
 } from '../lib/session-runtime.js'
 import {
   byClawModelErrorFromRequestFailure,
@@ -28,6 +30,18 @@ import {
 } from '../lib/model-error.js'
 import * as dshSession from '@deepseek-ai/dsh-session'
 import * as integration from '../lib/index.js'
+
+for (const projectId of [-1, 42]) {
+  const route = byClawCommandSessionRoute({
+    header: { sessionId: 'project-conversation', messageId: 'request', metadata: { project_info: { project_id: projectId } } },
+    content: [], extraPayload: { cwd: '/untrusted/override' },
+  })
+  assert.equal(route.cwd, `/by/.shared/project_${projectId}`)
+}
+assert.equal(byClawCommandSessionRoute({
+  header: { sessionId: 'project-conversation', messageId: 'request', metadata: {} },
+  content: [], extraPayload: { cwd: '/untrusted/override' },
+}).cwd, '/by/.sessions/project-conversation')
 
 const workspace = {
   externalSessionId: '350860623218590448',
@@ -135,6 +149,38 @@ assert.equal(failureChunks[0][2].metadata.provider_message.includes('sk-secret')
 assert.equal(failureChunks[0][2].metadata.diagnostic_id, 'trace-error:model')
 assert.equal(failureChunks[0][3].eventType, EventType.ANSWER_DELTA)
 assert.equal(failureChunks[0][3].status, '_ERROR_')
+
+// A failed filesystem/tool-environment hook ends the DSH turn before any model
+// answer. Preserve the failure for the caller and publish a visible error before
+// the framework closes its stream, rather than a blank successful response.
+const runtimeFailures = []
+const runtimeFailure = new Error('DSH turn failed: launch failed with api_key=private-secret')
+const failureRuntime = Object.assign(Object.create(ByClawDshSessionRuntime.prototype), {
+  ctx: { logger: { warn() {} } },
+  options: { sourceAgentType: 'BYCLAW_DSH' },
+  commandSessionRoute: () => ({ externalRootSessionId: 'failed-session' }),
+  assertAccepting() {},
+  waitingTurnFor: () => undefined,
+  async queueAsk() { throw runtimeFailure },
+  emitterFor: () => ({ async emitChunk(...args) { runtimeFailures.push(args) } }),
+})
+const failedCommand = {
+  header: { sessionId: 'failed-session', userCode: 'test-user', messageId: 'failed-message' },
+  extraPayload: {},
+}
+const failedContext = { sessionId: 'failed-session', traceId: 'failed-trace', isCancelRequested: () => false }
+await assert.rejects(failureRuntime.askPrepared(failedCommand, failedContext), error => error === runtimeFailure)
+assert.equal(runtimeFailures.length, 1, 'runtime failures must publish an assistant-visible error')
+assert.equal(runtimeFailures[0][2].metadata.error_domain, 'RUNTIME')
+assert.equal(runtimeFailures[0][2].metadata.session_status, 'failed')
+assert.equal(runtimeFailures[0][3].status, '_ERROR_')
+assert.equal(JSON.stringify(runtimeFailures).includes('private-secret'), false)
+runtimeFailures.length = 0
+await assert.rejects(failureRuntime.askPrepared(failedCommand, { ...failedContext, isCancelRequested: () => true }))
+assert.equal(runtimeFailures.length, 0, 'a cancelled turn must not display a runtime failure')
+failureRuntime.queueAsk = async () => { throw new TaskCancelledError('runtime closed') }
+await assert.rejects(failureRuntime.askPrepared(failedCommand, failedContext), { name: 'TaskCancelledError' })
+assert.equal(runtimeFailures.length, 0, 'runtime teardown must not display a failure before cancellation is requested')
 
 assert.equal(byClawInboundText(businessText), businessText)
 assert.equal(byClawInboundText(businessText).includes('<user-request>'), false)
@@ -355,6 +401,55 @@ assert.equal(inboundTurn.project.workspace, '/srv/byclaw/by/projects/20014944')
 assert.equal(inboundTurn.resources[0].resourceName, '研发知识库')
 assert.deepEqual(inboundTurn.connectors, { dws: true, gmail: false })
 
+const referencedFilesTurn = buildByClawInboundTurnContext({
+  header: {
+    messageId: 'turn-referenced-files',
+    sessionId: workspace.externalSessionId,
+    metadata: { project_info: { project_id: 20014944 } },
+  },
+  content: [],
+  extraPayload: {
+    resource_list: [{
+      resourceId: '/by/.sessions/350860623218590448/过程报告.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '过程报告.md',
+    }, {
+      resourceId: '/by/.shared/共享规范.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '共享规范.md',
+    }, {
+      resourceId: '/素材/需求说明.md',
+      resourceType: 'COMMON_FILE',
+      resourceName: '需求说明.md',
+    }],
+  },
+}, storage.byRoot)
+assert.deepEqual(referencedFilesTurn.resources[0], {
+  resourceId: '/by/.sessions/350860623218590448/过程报告.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '过程报告.md',
+  referenceSource: 'session',
+  filePath: '/srv/byclaw/by/.sessions/350860623218590448/过程报告.md',
+})
+assert.deepEqual(referencedFilesTurn.resources[1], {
+  resourceId: '/by/.shared/共享规范.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '共享规范.md',
+  referenceSource: 'shared',
+  filePath: '/srv/byclaw/by/.shared/共享规范.md',
+})
+assert.deepEqual(referencedFilesTurn.resources[2], {
+  resourceId: '/素材/需求说明.md',
+  resourceType: 'COMMON_FILE',
+  resourceName: '需求说明.md',
+  referenceSource: 'project-cloud',
+  filePath: '/素材/需求说明.md',
+})
+const referencedFilesDeclaration = byClawInboundTurnContextDeclaration(referencedFilesTurn)
+assert.match(referencedFilesDeclaration, /resource_usage: .*session.*直接使用文件系统工具读取/u)
+assert.match(referencedFilesDeclaration, /resource_usage: .*shared.*本地共享目录/u)
+assert.match(referencedFilesDeclaration, /resource_usage: .*project-cloud.*project-context.*20014944.*project-cloud-knowledge.*\/素材\/需求说明\.md/u)
+
 const deepSeekGlobalFallbackTurn = buildByClawInboundTurnContext({
   header: {
     messageId: 'turn-deepseek-global-fallback',
@@ -390,11 +485,13 @@ assert.equal(registry.getTurn(childSession.id), undefined)
 const first = appendByClawContext(session, [userMessage], workspace, inboundTurn)
 assert.equal(first.length, 3)
 assert.equal(first[0], userMessage)
-assert.deepEqual(first[1].source, { kind: 'plugin', plugin: 'byclaw-context' })
+assert.deepEqual(first[1].source, { kind: 'plugin:byclaw-context' })
 assert.match(first[1].content[0].text, /session_id: 350860623218590448/u)
 assert.match(first[1].content[0].text, /cwd: \/workspace\/byclaw/u)
 assert.match(first[1].content[0].text, /default_output_root: \/srv\/byclaw\/by\/\.sessions\/350860623218590448/u)
-assert.match(first[1].content[0].text, /默认使用当前会话的过程文件目录/u)
+assert.match(first[1].content[0].text, /需要长期保留的源码、配置、测试和用户交付物/u)
+assert.match(first[1].content[0].text, /上传附件、生成媒体和一次性中间文件/u)
+assert.match(first[1].content[0].text, /不得把内部会话状态作为业务文件/u)
 assert.match(first[2].content[0].text, /需求说明\.pdf/u)
 assert.match(first[2].content[0].text, /研发知识库/u)
 assert.match(first[2].content[0].text, /测试研发项目/u)
@@ -433,6 +530,6 @@ const delegated = appendByClawContext({
   ...sessionLog([{ type: 'seed/a' }, persistedContextEvent], 2),
 }, [userMessage], workspace)
 assert.equal(delegated.length, 2)
-assert.deepEqual(delegated[1].source, { kind: 'plugin', plugin: 'byclaw-context' })
+assert.deepEqual(delegated[1].source, { kind: 'plugin:byclaw-context' })
 
 console.info('ByClaw session context verification passed')

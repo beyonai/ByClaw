@@ -36,7 +36,7 @@ describe('plugin export surface', () => {
   })
 
   it('defaults the dispatch kind to "worktree"', () => {
-    expect(Worktree.Config({})).toEqual({ artifactKind: 'worktree' })
+    expect(Worktree.Config({})).toEqual({ artifactKind: 'worktree', workspaceOnToolEnvironment: false })
   })
 
   it('fails the load on a kind outside the artifact-kind grammar', () => {

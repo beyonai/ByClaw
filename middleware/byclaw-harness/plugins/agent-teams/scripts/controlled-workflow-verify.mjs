@@ -85,14 +85,14 @@ const ctx = {
   subagents: {
     async sendMessage(parent, childId, content, options) { return this[deliverSubagentPrompt](parent, childId, content, { kind: 'subagent', sessionId: parent.id }, options.signal, 'steer') },
     getProvider(name) {
-      return name === 'spawn' ? { prepareContinuable() {}, inheritsParentContext: false, capabilities: { persona: true, toolFilter: true } } : undefined
+      return name === 'spawn' ? { prepareContinuable() {}, inheritsParentContext: false, capabilities: { agentOptions: true, agentPreset: true, outputSchema: false, depthLimit: true } } : undefined
     },
     list() { return ['spawn'] },
-    async startContinuable() {
+    async startActivation() {
       const child = agent(`member-${++childSeq}`, captain.id)
       child.status = 'running'
       liveAgents.set(child.id, child)
-      return { childId: child.id, messageId: `welcome-${childSeq}` }
+      return { childId: child.id, messageId: `welcome-${childSeq}`, result: new Promise(() => {}), async dispose() {} }
     },
     async listChildren() { return [] },
     async listDescendants() { return [] },

@@ -36,6 +36,8 @@ public class SandboxWakeupStreamListener
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution platformExecution;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.recovery.SandboxRecoveryStore recoveryStore;
     private final Object admission = new Object();
     private boolean accepting;
     private int inFlight;
@@ -116,8 +118,21 @@ public class SandboxWakeupStreamListener
         catch (Exception e) {
             LOGGER.error("处理沙箱唤醒 Stream 消息失败，streamKey={}，messageId={}，将保留 pending",
                 message.getStream(), message.getId(), e);
+            recordRecoveryFailure(message, e);
         }
         finally { synchronized (admission) { inFlight--; admission.notifyAll(); } }
+    }
+
+    private void recordRecoveryFailure(MapRecord<String, String, String> message, Exception failure) {
+        try {
+            recoveryStore.audit(message.getStream(), consumerGroup, message.getId().getValue(), Map.of(
+                "operator", "system", "action", "AUTO_WAKE", "outcome", "FAILED",
+                "time", Long.toString(System.currentTimeMillis()),
+                "reason", "自动唤醒失败，原消息保留待确认",
+                "error", "自动唤醒失败（" + failure.getClass().getSimpleName() + "），请结合服务日志排查"));
+        } catch (RuntimeException auditFailure) {
+            LOGGER.warn("沙箱恢复失败记录写入失败，messageId={}，原消息继续保留", message.getId());
+        }
     }
 
     @Override

@@ -131,7 +131,6 @@ export class SchemaTaskRunner {
               "INIT_REQUIRES_EMPTY_DATABASE",
               "SCHEMA_VERSION_MISMATCH",
               "SCHEMA_AUDIT_MISMATCH",
-              "SCHEMA_FINGERPRINT_MISMATCH",
             ].includes(code)
           ? "NEEDS_ATTENTION"
           : "FAILED";

@@ -6,7 +6,7 @@
  * deliverables entry; when nothing was produced the selector returns null
  * and the original row renders unchanged.
  */
-import { IconCodeOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCodeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '../context-types.ts'
 import { firstLeaf, revealPaths, togglePanel, type SidebarStore } from './state.ts'
 import { t } from './locales.ts'
@@ -93,7 +93,7 @@ export function SidebarProducedFiles(props: {
             title={path}
             onClick={() => { openInSidebar(path) }}
           >
-            <IconCodeOutline16 size={12} />
+            <IconCodeOutlineRegular size={12} />
             <span>{name}</span>
           </button>
         )

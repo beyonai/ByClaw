@@ -53,6 +53,14 @@ describe('workspaceOf', () => {
       rulesDir: resolve('.devflow/iron-rules'),
     })
   })
+
+  it('falls back to the configured projectRoot, resolving a relative root under it', () => {
+    const agent = { session: { header: {} } } as Agent
+    expect(workspaceOf(agent, resolveConfig({ projectRoot: '/by' }))).toEqual({
+      projectRoot: '/by',
+      rulesDir: join('/by', '.devflow', 'iron-rules'),
+    })
+  })
 })
 
 describe('validateRuleId', () => {

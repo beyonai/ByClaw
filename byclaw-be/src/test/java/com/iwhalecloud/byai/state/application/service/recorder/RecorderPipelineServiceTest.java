@@ -27,7 +27,7 @@ import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 @DisabledOnOs(OS.WINDOWS)
-class RecorderPipelineServiceTest {
+class RecorderPipelineServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @TempDir
     Path tempDir;

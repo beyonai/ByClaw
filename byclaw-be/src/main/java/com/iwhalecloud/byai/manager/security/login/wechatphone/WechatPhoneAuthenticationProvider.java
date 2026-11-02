@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.security.login.wechatphone;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.PhoneAccountRegistrationService;
 import com.iwhalecloud.byai.manager.entity.users.Users;
@@ -29,20 +31,20 @@ public class WechatPhoneAuthenticationProvider implements AuthenticationProvider
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
         Object credentials = authentication.getCredentials();
         if (!(credentials instanceof String code) || code.isBlank()) {
-            throw new BadCredentialsException("微信手机号授权无效");
+            throw new BadCredentialsException(I18nUtil.get("login.wechat.invalid"));
         }
         String phone = wechat.exchangePhoneCode(code);
         try {
             Users user = accounts.resolveOrRegister(phone);
             if (user == null || login.checkUserIsValid(user) != null) {
-                throw new BadCredentialsException("账号不可用");
+                throw new BadCredentialsException(I18nUtil.get("login.wechat.accountUnavailable"));
             }
             return new WechatPhoneAuthentication(user);
         } catch (AuthenticationException e) {
             throw e;
         } catch (RuntimeException e) {
             // 数据库异常不得带着手机号或 SQL 信息进入登录失败响应。
-            throw new AuthenticationServiceException("微信手机号登录暂不可用");
+            throw new AuthenticationServiceException(I18nUtil.get("login.wechat.loginUnavailable"));
         }
     }
 

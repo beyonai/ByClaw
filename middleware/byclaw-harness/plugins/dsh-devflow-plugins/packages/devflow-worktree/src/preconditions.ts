@@ -23,8 +23,15 @@
 import { execFile } from 'node:child_process'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
+import type { WorkspaceIo } from '@zhchxiao123/dsh-devflow'
 
 const exec = promisify(execFile)
+
+/** Runs one git command; rejects with the exit status as `code`, like a promisified `execFile`. */
+export type DispatchGitRunner = WorkspaceIo['execFile']
+
+/** git in this process's own environment. */
+const LOCAL_GIT: DispatchGitRunner = async (file, args, options) => await exec(file, [...args], { cwd: options.cwd })
 
 /** Which precondition a repository fails; `undefined` is a repository that fails neither. */
 type DispatchFault = 'board-untracked' | 'transient-tracked'
@@ -35,14 +42,17 @@ type DispatchFault = 'board-untracked' | 'transient-tracked'
  * `createMainWorktreeResolver` caches its own: the fence consults it per
  * transition of a dispatched card, and a directory's repository membership
  * does not change under a running deployment.
+ * @param git - where git runs; this process by default.
  * @returns the checker; `undefined` admits, a string is the veto's reason.
  */
-export function createDispatchPreconditionChecker(): (workspace: string, root: string, cardId: string) => Promise<string | undefined> {
+export function createDispatchPreconditionChecker(
+  git: DispatchGitRunner = LOCAL_GIT,
+): (workspace: string, root: string, cardId: string) => Promise<string | undefined> {
   const faults = new Map<string, Promise<DispatchFault | undefined>>()
   return async (workspace: string, root: string, cardId: string): Promise<string | undefined> => {
     let fault = faults.get(workspace)
     if (fault === undefined) {
-      fault = findFault(workspace, root, cardId)
+      fault = findFault(git, workspace, root, cardId)
       faults.set(workspace, fault)
     }
     const found = await fault
@@ -50,10 +60,10 @@ export function createDispatchPreconditionChecker(): (workspace: string, root: s
   }
 }
 
-async function findFault(workspace: string, root: string, cardId: string): Promise<DispatchFault | undefined> {
+async function findFault(git: DispatchGitRunner, workspace: string, root: string, cardId: string): Promise<DispatchFault | undefined> {
   let listed: string
   try {
-    listed = (await exec('git', ['ls-files', '--', pathspec(workspace, board(root))], { cwd: workspace })).stdout
+    listed = (await git('git', ['ls-files', '--', pathspec(workspace, board(root))], { cwd: workspace })).stdout
   } catch {
     // git absent, the directory missing, or not a git work tree. The direction
     // here is the opposite of `maintree.ts`, where absence means no main
@@ -64,7 +74,7 @@ async function findFault(workspace: string, root: string, cardId: string): Promi
   }
   if (listed.trim() === '') return 'board-untracked'
   try {
-    await exec('git', ['check-ignore', '-q', '--', pathspec(workspace, lease(root, cardId))], { cwd: workspace })
+    await git('git', ['check-ignore', '-q', '--', pathspec(workspace, lease(root, cardId))], { cwd: workspace })
   } catch (error) {
     // Exit 1 is `check-ignore`'s answer that no rule covers the path; every
     // other failure is the unrunnable check above, admitted for the same

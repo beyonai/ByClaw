@@ -1,6 +1,6 @@
 import { DomainError } from "../../domain/errors.js";
 import type { SchemaManifest, SchemaTask, VerifiedScript } from "../../application/schema/types.js";
-import { digest, sha256 } from "../../interfaces/contracts/validation.js";
+import { sha256 } from "../../interfaces/contracts/validation.js";
 import { unzipBundle } from "./zip-bundle.js";
 import { validateScript } from "./script-validator.js";
 
@@ -38,7 +38,6 @@ export async function validateBundle(
       !manifest.objects.length
     )
       throw new DomainError("INVALID_MANIFEST");
-    digest(manifest.catalogDigest);
     const names = new Set<string>();
     for (const object of manifest.objects) {
       const key = `${object.kind}:${object.name}`;

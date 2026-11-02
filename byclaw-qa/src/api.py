@@ -22,6 +22,7 @@ from byclaw_userfs_storage import (
 
 _MULTIPART_METADATA_PATHS = {
     "/api/v1/knowledgeItems/import",
+    "/api/v1/knowledge-items/import",
     "/api/v1/knowledgeItems/update",
 }
 _JSON_METADATA_PATHS = {

@@ -423,6 +423,7 @@ export default function useRender({
       if (fromBeyond || isSuperAssistant) {
         leftName =
           agentInfo?.name ||
+          messageAgentName ||
           getSystemConfigByStorage().title ||
           intl.formatMessage({ id: 'messageList.defaultAIName' });
       } else {
@@ -599,7 +600,7 @@ export default function useRender({
                   <InfoCircleOutlined
                     className={classnames(styles.errorIcon, 'pointer')}
                     onClick={() => {
-                      setMyTitle(traceback ? messageTip : 'Error Tips');
+                      setMyTitle(traceback ? messageTip : intl.formatMessage({ id: 'ui.chat.errorDetails' }));
                       setMyContent(traceback || messageTip);
                       setOpen(true);
                     }}

@@ -22,7 +22,7 @@
  * and `icon` — so the Side card settings page can render the enable/disable
  * inventory without hardcoding (eating our own dogfood).
  */
-import { IconCodeOutline16, IconDownloadOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCodeOutlineRegular, IconDownloadOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { lazyChunkComponent } from '../lazy-chunk.tsx'
 import { PdfView } from '../PdfView.tsx'
 import { BinaryDownload } from '../binary-download.tsx'
@@ -103,7 +103,7 @@ export function builtinViewers(): readonly FileViewerDescriptor[] {
     {
       id: 'code',
       title: () => t('viewerCode'),
-      icon: (size: number) => <IconCodeOutline16 size={size} />,
+      icon: (size: number) => <IconCodeOutlineRegular size={size} />,
       exts: [],
       priority: -100,
       fetchStrategy: 'fsRead',
@@ -112,7 +112,7 @@ export function builtinViewers(): readonly FileViewerDescriptor[] {
     {
       id: 'binary-download',
       title: () => t('viewerBinary'),
-      icon: (size: number) => <IconDownloadOutline16 size={size} />,
+      icon: (size: number) => <IconDownloadOutlineRegular size={size} />,
       exts: ['doc', 'xls', 'ppt'],
       priority: -50,
       fetchStrategy: 'binary-download',

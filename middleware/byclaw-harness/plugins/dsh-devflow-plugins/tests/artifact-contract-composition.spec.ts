@@ -20,6 +20,7 @@ import LocalBashExecutor from '@deepseek-ai/dsh-bash-local'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import WorkingDirectoryFixture, { WORKING_DIRECTORY_FIXTURE } from './working-directory-fixture'
 import { DevflowCardId } from '@zhchxiao123/dsh-devflow'
 import type { CardLocation, DevActor, TransitionResult } from '@zhchxiao123/dsh-devflow'
 import FilesystemDevflowStore from '@zhchxiao123/dsh-devflow-filesystem'
@@ -76,6 +77,7 @@ async function boot(replies: ScriptedReply[]): Promise<{ ctx: Context; calls: Ch
     '  config:',
     '    provider: test-provider',
     '    model: test-model',
+    `- name: '${WORKING_DIRECTORY_FIXTURE}'`,
     "- name: '@deepseek-ai/dsh-subagent'",
     "- name: '@zhchxiao123/dsh-devflow-filesystem'",
     '  config:',
@@ -126,6 +128,7 @@ async function boot(replies: ScriptedReply[]): Promise<{ ctx: Context; calls: Ch
     ['@deepseek-ai/dsh-bash-local', LocalBashExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-default-model', AgentDefaultModelConfig],
+    [WORKING_DIRECTORY_FIXTURE, WorkingDirectoryFixture],
     ['@deepseek-ai/dsh-subagent', SubagentRuntime],
     ['@zhchxiao123/dsh-devflow-filesystem', FilesystemDevflowStore],
     ['@zhchxiao123/dsh-devflow-artifact-gate', DevflowArtifactGate],

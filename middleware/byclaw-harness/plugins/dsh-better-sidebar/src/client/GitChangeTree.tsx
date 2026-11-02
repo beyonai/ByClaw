@@ -1,5 +1,5 @@
 import { useState, type MouseEvent, type ReactNode } from 'react'
-import { IconBranchOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutlineRegular, IconTrashOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GitStatusEntry } from './api.ts'
 import type { GitChangeNode, GitSide, GitStatusKind } from './git-tree.ts'
 import { t } from './locales.ts'
@@ -94,7 +94,7 @@ export function GitChangeTree(props: GitChangeTreeProps): ReactNode {
                   disabled={busy || truncated}
                   onClick={() => { void onTogglePaths(node.actionPaths, side) }}
                 >
-                  {side === 'staged' ? <IconTrashOutline16 /> : <IconBranchOutline16 />}
+                  {side === 'staged' ? <IconTrashOutlineRegular /> : <IconBranchOutlineRegular />}
                 </button>
               </div>
               {directoryOpen && renderNodes(node.children, depth + 1)}
@@ -130,7 +130,7 @@ export function GitChangeTree(props: GitChangeTreeProps): ReactNode {
                 disabled={busy}
                 onClick={() => { void onTogglePaths([node.entry.path], side) }}
               >
-                {side === 'staged' ? <IconTrashOutline16 /> : <IconBranchOutline16 />}
+                {side === 'staged' ? <IconTrashOutlineRegular /> : <IconBranchOutlineRegular />}
               </button>
             </div>
           </li>

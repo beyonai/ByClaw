@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { getIntl, getLocale } from '@umijs/max';
 import { GET, POST } from '@/service/common/request';
+import { removeCachedModelHealth } from '@/service/modelHealth';
 import { getSessionKey, getssoToken, getToken, ssotokenKey, tokenKey } from '@/pages/manager/utils/auth';
 import { generateSignature } from '@/pages/manager/utils/signature';
 
@@ -69,7 +70,10 @@ export async function upsertModel(params: any) {
 }
 
 export async function deleteModel(params: any) {
-  return POST('/byaiService/new/model/deleteModel', { ...params }, withCustomHandle);
+  const response = await POST('/byaiService/new/model/deleteModel', { ...params }, withCustomHandle);
+  if (response?.code === 0 && response?.success !== false && response?.data !== false)
+    await removeCachedModelHealth(params.id);
+  return response;
 }
 
 export async function setModelStatus(params: any) {
@@ -162,6 +166,22 @@ async function requestModelDebugStream(endpoint: string, params: any) {
   });
 
   const contentType = response.headers.get('content-type') || '';
+  const assertSuccessful = (payload: any) => {
+    if (
+      payload?.success === false ||
+      (payload?.code !== undefined && `${payload.code}` !== '0') ||
+      payload?.error ||
+      ['response.failed', 'response.incomplete', 'error'].includes(payload?.type)
+    ) {
+      throw new Error(
+        payload?.msg ||
+          payload?.response?.error?.message ||
+          payload?.error?.message ||
+          payload?.message ||
+          getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' })
+      );
+    }
+  };
 
   if (!response.ok) {
     const errText = await response.text();
@@ -170,47 +190,68 @@ async function requestModelDebugStream(endpoint: string, params: any) {
 
   if (!contentType.includes('text/event-stream')) {
     const json = await response.json();
-    return json;
+    assertSuccessful(json);
+    throw new Error(getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
   }
 
   const reader = response.body?.getReader?.();
   if (!reader) {
-    return {
-      code: 0,
-      data: {
-        output: '',
-        success: true,
-      },
-    };
+    throw new Error(getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
   }
 
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let output = '';
+  let eventType = '';
+  let eventData: string[] = [];
 
-  const handleDataLine = (line: string): boolean => {
-    if (!line.startsWith('data:')) return false;
-    const raw = line.slice(5).trim();
+  const flushEvent = (): boolean => {
+    const raw = eventData.join('\n').trim();
+    const type = eventType;
+    eventData = [];
+    eventType = '';
+    if (type === 'error' && !raw)
+      throw new Error(getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
     if (!raw) return false;
-    if (raw === '[DONE]') return true;
+    if (raw === '[DONE]' && type !== 'error') return true;
 
     let parsed: any;
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
-      output += raw;
-      onDelta?.(raw);
-      return false;
+      throw new Error(getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
     }
-    if (parsed?.type === 'response.failed' || parsed?.type === 'error') {
-      throw new Error(parsed.response?.error?.message || parsed.error?.message || parsed.message || parsed.type);
+    assertSuccessful(parsed);
+    if (type === 'error') {
+      throw new Error(parsed?.message || getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
     }
     const delta = getDeltaText(parsed);
-    if (delta) {
+    if (typeof delta === 'string' && delta) {
       output += delta;
       onDelta?.(delta);
     }
 
+    return false;
+  };
+
+  const handleDataLine = (line: string): boolean => {
+    if (!line) return flushEvent();
+    if (line.startsWith('event:')) eventType = line.slice(6).trim();
+    if (line.startsWith('data:')) {
+      eventData.push(line.slice(5).trimStart());
+      const raw = eventData.join('\n').trim();
+      let complete = raw === '[DONE]';
+      if (!complete) {
+        try {
+          JSON.parse(raw);
+          complete = true;
+        } catch {
+          // Keep accumulating multi-line JSON until the event boundary or a complete value.
+        }
+      }
+      // Preserve support for gateways that omit the blank line between complete JSON events.
+      if (complete) return flushEvent();
+    }
     return false;
   };
 
@@ -219,39 +260,37 @@ async function requestModelDebugStream(endpoint: string, params: any) {
     buffer = lines.pop() || '';
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
       if (handleDataLine(trimmed)) return true;
     }
     return false;
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    if (flushBufferLines()) {
-      return {
-        code: 0,
-        data: {
-          output,
-          success: true,
-        },
-      };
-    }
-  }
-
-  if (buffer.trim()) {
-    handleDataLine(buffer.trim());
-  }
-
-  return {
-    code: 0,
-    data: {
-      output,
-      success: true,
-    },
+  const result = () => {
+    if (!output.trim()) throw new Error(getIntl().formatMessage({ id: 'modelMgr.error.invalidDebugResponse' }));
+    return { code: 0, data: { output, success: true } };
   };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      if (flushBufferLines()) {
+        return result();
+      }
+    }
+
+    if (buffer.trim()) {
+      handleDataLine(buffer.trim());
+    }
+    flushEvent();
+
+    return result();
+  } finally {
+    await Promise.resolve(reader.cancel?.()).catch(() => undefined);
+    reader.releaseLock?.();
+  }
 }
 
 export async function debugModelAsr(params: any) {
