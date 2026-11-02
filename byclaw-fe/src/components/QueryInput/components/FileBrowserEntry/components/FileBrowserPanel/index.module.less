@@ -265,3 +265,27 @@
     }
   }
 }
+
+.uploadProgress {
+  flex: none;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.uploadProgressRow + .uploadProgressRow {
+  margin-top: 8px;
+}
+
+.uploadProgressTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.uploadProgressLabel {
+  color: #8c8c8c;
+  font-size: 12px;
+}

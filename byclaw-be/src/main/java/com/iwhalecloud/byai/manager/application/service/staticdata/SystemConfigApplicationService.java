@@ -54,6 +54,7 @@ public class SystemConfigApplicationService {
      * @return ByaiSystemConfig
      */
     public ByaiSystemConfig saveSystemConfig(ByaiSystemConfig byaiSystemConfig) {
+        validateUploadPolicy(byaiSystemConfig);
 
         // 校验参数编码是否已存在
         long total = systemConfigService.countSystemConfig(byaiSystemConfig.getParamCode(), null);
@@ -77,6 +78,7 @@ public class SystemConfigApplicationService {
      * @param byaiSystemConfig 更新请求
      */
     public void updateSystemConfig(ByaiSystemConfig byaiSystemConfig) {
+        validateUploadPolicy(byaiSystemConfig);
 
         // 校验参数编码是否已存在
         Long paramId = byaiSystemConfig.getParamId();
@@ -152,4 +154,10 @@ public class SystemConfigApplicationService {
             RedisUtil.hmPut(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode, cacheJson);
         }
     }
+    private void validateUploadPolicy(ByaiSystemConfig config) {
+        if (com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy.CONFIG_CODE.equals(config.getParamCode())) {
+            com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy.fromJson(config.getParamValue());
+        }
+    }
+
 }

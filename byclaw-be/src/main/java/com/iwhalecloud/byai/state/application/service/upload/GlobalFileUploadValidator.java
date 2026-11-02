@@ -30,6 +30,22 @@ public class GlobalFileUploadValidator {
         validate(files, false);
     }
 
+    /** Validate declared full size before allocating a resumable session. */
+    public void validateSize(long size) {
+        if (size < 0) throw new IllegalArgumentException("Invalid upload size");
+        FileUploadDto config = JSON.parseObject(
+            byaiSystemConfigService.getDcSystemConfigValueByCode(CONFIG_CODE), FileUploadDto.class);
+        long limit = config == null ? 0 : config.getMaxFileSize();
+        if (limit > 0 && limit <= Long.MAX_VALUE / BYTES_PER_MB && size > limit * BYTES_PER_MB) {
+            throw new IllegalArgumentException(I18nUtil.get("file.upload.size.exceeded", limit,
+                size / (double) BYTES_PER_MB));
+        }
+    }
+
+    public ResumableUploadPolicy resumablePolicy() {
+        return ResumableUploadPolicy.fromJson(byaiSystemConfigService.getDcSystemConfigValueByCode(CONFIG_CODE));
+    }
+
     /** 知识库与项目云盘同时校验本批次数量及单文件大小，恰好达到数量上限仍允许上传。 */
     public void validateKnowledgeUpload(MultipartFile[] files) {
         validate(files, true);

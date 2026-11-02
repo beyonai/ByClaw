@@ -395,7 +395,12 @@ public class SandboxService {
         if (entity == null) {
             entity = sandboxServiceSpecEntityMapper.selectLegacyByServiceKey(serviceKey.trim());
         }
-        return entity != null && entity.getEnabled() != null && entity.getEnabled() == 1;
+        if (entity == null || !Integer.valueOf(1).equals(entity.getEnabled())) return false;
+        try {
+            return new ObjectMapper().readValue(entity.getSpecJson(), SandboxServiceSpec.class).isToolSandboxEnabled();
+        } catch (Exception invalidSpec) {
+            return false;
+        }
     }
 
     /** Explicit on-demand execution is valid, but must not become a login preference. */

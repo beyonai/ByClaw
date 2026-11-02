@@ -51,4 +51,21 @@ class SandboxAutoStartPolicyTest {
         row.setEnabled(0);
         assertTrue(repository.findByServiceKey("byclaw-dsh-tools").isEmpty());
     }
+    @Test
+    void toolTemplatesNeverJoinLoginAutoStartAndRespectIndependentAvailability() throws Exception {
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        SandboxServiceSpecEntity row = new SandboxServiceSpecEntity();
+        row.setServiceKey("byclaw-tools-browser");
+        row.setServiceType("byclaw-tools-browser");
+        row.setOwnerScope("USER");
+        row.setEnabled(1);
+        row.setSpecJson("{\"image\":\"fixture/browser:tag\",\"runtimeOptions\":{\"toolSandbox\":{\"contract\":\"byclaw.tool-sandbox/v1\",\"enabled\":\"true\"}}}");
+        when(mapper.selectProfileAwareByServiceKey("byclaw-tools-browser")).thenReturn(row);
+        MybatisSandboxServiceSpecRepository repository = new MybatisSandboxServiceSpecRepository(
+            mapper, mock(SandboxServiceProfileEntityMapper.class), mock(SandboxProperties.class));
+        assertFalse(repository.findByServiceKey("byclaw-tools-browser").orElseThrow().isAutoStartEnabled());
+        row.setSpecJson(row.getSpecJson().replace("\"enabled\":\"true\"", "\"enabled\":\"false\""));
+        assertTrue(repository.findByServiceKey("byclaw-tools-browser").isEmpty());
+    }
+
 }

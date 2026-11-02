@@ -30,16 +30,12 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
 - **Lease:** the first remote operation creates B, or resumes it when paused, and
   waits for its sshd.
 - **Idle:** after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10 min) without operations
-  or open streams, B is paused. Running commands and background jobs hold
+  or open streams, the connection is detached (`byclaw-be` retains B; OpenSandbox pauses it). Running commands and background jobs hold
   streams open, so they are never paused underneath.
 - **Gone:** a deleted or expired B is recreated on the next lease. The workspace
-  is a host volume shared with A, so pausing or recreating B loses no files.
-  With a `home` volume in B's spec (example below), `/home/byclaw` survives as
-  well (CLI logins, `~/.openclaw`, `~/.bycli`, user-level installs): the
-  entrypoint fills it from the image's home and later only adds new defaults.
-  The rest of B's root filesystem (system installs, `/tmp`) is lost on
-  recreation, as it was when the pre-split sandbox was recreated.
-- **Expiry:** A renews B's OpenSandbox expiry while it uses B. A B whose A
+  is a host volume shared with A, so pausing or recreating B loses no files; only
+  B's own root filesystem (e.g. ad-hoc installs) is lost on recreation.
+- **Expiry (`opensandbox`):** A renews B's OpenSandbox expiry while it uses B. A B whose A
   disappeared without a graceful shutdown lives at most `timeoutSeconds`.
 - **Identity:** A owns both SSH key pairs (client and B's host key) in its
   private DSH home, so the host key is pinned without trusting first contact.
@@ -50,14 +46,6 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
 - **Secrets:** every remote spawn and lookup passes through this service, which
   strips `BYCLAW_TOOL_ENV_*` and `BYCLAW_DSH_TOOL_ENV` from the forwarded
   environment. A's sessions, credentials and profiles are never mounted in B.
-- **Launch environment:** a process on B (Bash, terminals, LSP, PTC) gets the
-  user's launch environment under its own, as it would have inherited it from
-  the runtime before the split: `launchEnv` in the config, which the shared DSH
-  host fills from the environment BE renders for the user and renews with
-  every PUT, with `USER_CODE` always the context's user. The caller's own
-  values still win, and B keeps its own paths, interpreter and loader settings,
-  display and browser (`PATH`, `HOME`, `NODE_*`, `LD_*`, `XDG_*`, `DISPLAY`,
-  `PLAYWRIGHT_BROWSERS_PATH`, `BYCLAW_BROWSER_*` and the like).
 - **Confinement:** in split mode the entrypoint defaults `DSH_PERMISSION_MODE`
   to `danger-full-access` (override with `DSH_PERMISSION_MODE` or
   `BYCLAW_TOOL_ENV_PERMISSION_MODE`). B itself is the isolation boundary, and
@@ -69,32 +57,27 @@ digests from its own installation, and the helper refuses a mismatch.
 
 ## When B starts
 
-Every turn starts B, a model-only turn included: before the model runs, a turn
-reads the session's instruction files (`AGENTS.md`, `CLAUDE.md` and their
-`.local` variants from the project root, the nearest `.git`, down to the
-session directory), session Skills and iron rules, and those live in the user
-tree, which only B serves as of now (the platform writes there too, for
-example uploads). So a turn sees what the user's own sandbox would have shown,
-never an older copy. A context's boot (resource projection, Skill views, media
-projections) does not start B: the connection facade (`ctx.ssh`) exposes
-`connected` and `whenConnected(key, op)`, and the integration plugin hands
-B-bound writes and directory creation to it, so they run once B connects,
-before anything else runs there. While B is down the facade still answers what
-needs no user tree: path resolution only normalizes; directories queued for
-creation on B, and the ones this host already created there, are directories
-(what is in them is B's to say); DSH's own homes (`DSH_HOME`,
-`DSH_AGENTS_HOME`) hold nothing; cleanup of a process or stream of a
-connection that is gone (`process.terminate`, `fs.streamClose`) is already
-done; `executable` lookups resolve on this host (same image build). B is
-released after `BYCLAW_TOOL_ENV_IDLE_MS` without operations, so it stays up
-while the user is active.
-A launch that BE refuses (for example while the platform is still releasing
-or creating the sandbox: "Sandbox is being created") is retried every 3 s for
-up to 60 s inside the operation that needs B, so one transient refusal does not
-fail a tool call or a turn. Only after that window does the `byclaw-be` backend
-give up; it then waits before trying again (1 s, doubling to 30 s) and reports
-the cause instead of calling BE on every operation. A spec without an ssh
-endpoint is a configuration error and fails at once.
+Only a tool call starts B. A context's boot (resource projection, Skill views,
+media projections) and the start of a turn (the session directory) do not: the
+connection facade (`ctx.ssh`) exposes `connected` and `whenConnected(key, op)`,
+and the integration plugin hands B-bound writes and directory creation to it,
+so they run once B connects for a tool, before that tool runs. Reads of the
+user tree while B is down come from what this host last read or wrote there
+and are `ENOENT` otherwise, so a model-only answer never waits for a sandbox.
+Before the model runs, a turn also resolves its session directory and probes
+for files (git roots, session Skills). While B is down the facade answers
+those itself: path resolution only normalizes, queued directories are empty
+directories with nothing inside, `.git` and instruction-file probes
+(`AGENTS.md`, `CLAUDE.md` and their `.local` variants along the session
+directory's ancestors) are absent, DSH's own homes (`DSH_HOME`,
+`DSH_AGENTS_HOME`) hold nothing, Skill roots list as empty, and `executable`
+lookups resolve on this host (same image build). What tools do (stat, list,
+read, write of real paths; processes) still goes to B and starts it. The
+trade-off: until a session's first tool call, its prompt sees no
+session-local Skills and no instruction files from the user tree.
+After a failed launch the `byclaw-be` backend waits before trying again
+(1 s, doubling to 30 s) and reports the cause instead of calling BE on every
+operation.
 
 ## Backends
 
@@ -102,7 +85,7 @@ endpoint is a configuration error and fails at once.
 |---|---|---|---|
 | `static` | nobody: a fixed sshd (development, tests) | no | start sshd with them |
 | `opensandbox` | A, through the OpenSandbox API with a key held in A | yes | B's create request |
-| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | not yet | A's state directory, mounted into B; or the user's BE private parameters (`publishKeys`) |
+| `byclaw-be` | ByClaw BE, from a `sandbox_service_spec` row, as the user | detach SSH; retain compute | A's state directory, mounted into B; or the user's BE private parameters (`publishKeys`) |
 
 ### `byclaw-be`
 
@@ -115,44 +98,44 @@ credential, the spec and the sandbox record; A sends only the user's own
 not accept connections, A releases that record once (`/sandbox/removeSandbox`)
 and launches again.
 
-Every BE launch sends `autoRelease: 1` so newly created tool sandboxes use
-automatic idle release, even when BE/platform defaults to manual release.
-Reusing an existing sandbox preserves its release policy. The plugin's own
-idle/disposal release still applies.
+Every BE launch sends `autoRelease: 0`. Automatic idle, agent turn-end,
+context disposal and template switching detach execution leases/SSH clients;
+they do not delete healthy physical sandboxes. `sandbox_release` is reserved
+for user-requested destruction, and destroys only the final reference's exact
+sandbox. Failed manifest/private-entrypoint admission still destroys the
+rejected allocation with exact-id absence confirmation; unknown cleanup outcomes
+retain ownership for retry. Unreachable endpoints keep the existing recovery path.
+
+The BE/Platform must honor manual release on **reused** tool allocations too;
+older servers preserve an existing allocation's previous policy. Platform expiry
+renewal/reclaim must also honor manual mode; this plugin cannot override remote
+provider lifetime by sending the flag alone. Explicit administrative removal is
+still available. Deploy the coordinated backend fix before this plugin.
+
+Keys are stored under the user's persistent `stateDir/catalog/<templateKey>`;
+new handles reuse them. Do not point different users at one state directory.
+Moving or losing that directory requires safe re-admission/recreation of the old
+allocation; never bypass pinned SSH host-key verification. Keep this directory
+on the user's persistent home across A restarts.
 
 The B spec is a normal `sandbox_service_spec` row. It must use A's image, run
 the `tools` entrypoint, declare the sshd port as a `tcp` port named
 `sshInstance`, share `/by`, and mount A's tool-env state directory read-only at
 `BYCLAW_TOOL_ENV_SEED_DIR` (default `/etc/byclaw-tool-env`) so B's sshd finds
-`client_ed25519.pub` and `host_ed25519`. B also runs the browser the user's own
-sandbox ran: declare its desktop (8081) as instance `vnc`, which the frontend
-opens, and the byCLI daemon (19825) as instance `bycli`, which BE's account
-login and recorder call. The browser starts on demand: the native `browser`
-tool, a `bycli` command on B, or BE's first request to 19825 starts it; until
-then the supervisor holds 19825 for byCLI, and that first request is answered
-once the browser is up. The browser profile defaults to the path the user's
-own sandbox used on the user volume (`/by/byclaw/.dsh/browser/user-data`), so
-earlier logins carry over; `BYCLAW_TOOL_BROWSER_USER_DATA_DIR` overrides it and
-`BYCLAW_TOOL_BROWSER=0` turns the browser off. Host paths below follow the
-`byclaw-dsh` layout and are deployment-specific:
+`client_ed25519.pub` and `host_ed25519`. Host paths below follow the `byclaw-dsh`
+layout and are deployment-specific:
 
 ```json
 {
   "image": "byclaw/dsh:local",
   "startup": { "entrypoint": ["/usr/local/bin/byclaw-dsh-entrypoint", "tools"] },
-  "ports": [
-    { "port": 22, "instance": "ssh", "protocol": "tcp" },
-    { "port": 8081, "instance": "vnc", "protocol": "http" },
-    { "port": 19825, "instance": "bycli", "protocol": "http" }
-  ],
+  "ports": [{ "port": 22, "instance": "ssh", "protocol": "tcp" }],
   "timeout": 3600,
   "resourceLimits": { "cpu": "2", "memory": "4Gi" },
   "env": { "BYCLAW_TOOL_ENV_PORT": "22", "TZ": "Asia/Shanghai" },
   "volumes": [
     { "key": "by", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/by",
       "mountPath": "/by", "uid": 1001, "gid": 1001, "mode": "0770" },
-    { "key": "home", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file", "subPath": "byclaw-${user_code}/tool-home",
-      "mountPath": "/home/byclaw", "uid": 1001, "gid": 1001, "mode": "0700" },
     { "key": "templates", "scope": "PRIVATE", "hostPath": "/mnt/byclaw-file",
       "subPath": "byclaw-dsh/byclaw-${user_code}/dsh-home/agent-templates",
       "mountPath": "/home/byclaw/.dsh/agent-templates", "readOnly": true },
@@ -226,7 +209,6 @@ B's `/by` subPath must be the same as A's. Note that `launchByUserCode` records
 | `BYCLAW_TOOL_ENV_READY_TIMEOUT_MS`, `BYCLAW_TOOL_ENV_BE_REQUEST_TIMEOUT_MS` | `byclaw-be`: sshd readiness and BE request deadlines (default 180000) |
 | `USER_CODE`, `BEYOND_TOKEN` | `byclaw-be`: the user and token BE injected into A; reused as-is |
 | `BYCLAW_TOOL_ENV_IDLE_MS` | idle pause delay; `0` keeps B running (default 600000) |
-| `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` | `21600000` | processes left on B (`cmd &`) keep it past idle for at most this long |
 | `BYCLAW_TOOL_ENV_HOST`, `BYCLAW_TOOL_ENV_PORT` | `static` backend sshd endpoint |
 | `BYCLAW_TOOL_ENV_WS_URL` | `static` backend: B's WebSocket bridge URL instead of a TCP endpoint |
 | `BYCLAW_TOOL_ENV_WORKSPACE` | remote default workspace (default `/by`) |
@@ -281,54 +263,19 @@ out of the global spec: it would reach every A.
 - The shared DSH host (`scripts/byclaw-multi-host.mjs`) configures the
   `opensandbox` backend per user context unless `BYCLAW_DSH_TOOL_ENV=byclaw-be`
   is set on the host; then each context uses the `BEYOND_TOKEN` BE passed in
-  its PUT (renewed on every later PUT, see "Lifecycle of B"), and
-  `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the host cannot
-  mount the user's volume.
+  its PUT, and `BYCLAW_TOOL_ENV_BE_PUBLISH_KEYS=1` hands B the keys when the
+  host cannot mount the user's volume.
 
-## Lifecycle of B with `byclaw-be`
+## ByClaw BE lifecycle
 
-The plugin releases B on idle/disposal; BE also applies automatic idle release to newly created tool sandboxes.
-
-- **Idle.** BE has no pause API, so after `BYCLAW_TOOL_ENV_IDLE_MS` (default 10
-  minutes) without operations or open streams the connection calls `pause()`,
-  which releases B (`/sandbox/removeSandbox`). Before that it checks two more
-  things (src/busy.ts): whether DSH itself has work in progress on A (an Agent
-  in a turn, a background job), and whether processes the user left on B
-  (`cmd &`, `nohup`) are still running, asked over the connection's own `ssh`
-  alias. Either postpones the release by another idle period; residual
-  processes do so for at most `BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS` (default
-  6 h), after which B is released anyway. The next operation launches a fresh
-  B; the user's files are on the shared workspace volume, only B's own `/tmp`
-  goes.
-- **A goes away.** Closing the connection (the context is disposed, the host
-  shuts down) releases B the same way, with a short grace period.
-- **The user's tool sandbox changes.** The state directory records the service
-  key of the last launched B (`tool-sandbox.json`). A host that dies without
-  disposing its contexts leaves that B running; when the user's next context
-  serves a different service (BE assigns another tool sandbox, for example through
-  `BYCLAW_TOOL_SANDBOX_BY_USER`), the first launch releases the old service's B
-  first, since both mount the user's tool home. A failed release is logged and the
-  launch goes on.
-- **Credentials.** The `BEYOND_TOKEN` BE injected is the user's JWT and expires,
-  while a context on the shared host stays resident for days. The host therefore
-  hands every later PUT's token to the context (`ToolEnv.renewBeToken`; BE mints a
-  new one per PUT), and provides `byclawBeTokenSource`, the user's current login
-  token from Redis, which the backend asks when BE answers 401. A launch BE
-  rejects is logged as `tool environment launch rejected: this context's
-  Beyond-Token expired …` (not `launch failed …`), retried once with the source's
-  token when that differs, and its backoff ends as soon as a different token
-  arrives.
-- **A launch BE refuses** because B is still being released or created (the
-  platform answers "Sandbox is being created") is retried every 3 s for up to
-  60 s inside the operation that needed B, then the usual backoff applies. A
-  spec without an ssh endpoint fails at once.
-- **B is gone while A believes it is up** (the platform removed it): the in-flight
-  operation fails with the connection's own error; cleanup requests
-  (`process.terminate`, `fs.streamClose`) are answered locally, directories A
-  created on B are still reported as existing (B's volume survives), and the
-  next real operation launches a fresh B.
-- **What this process cannot see** (it died with B running) is left to the
-  platform's own reclaim of the record.
+The backend does nothing before the first remote operation. After the idle
+interval it detaches SSH, and task-end returns execution leases. Healthy physical
+B stays running with manual release; graceful context shutdown and template
+switching also preserve it. The next operation reconnects through get-or-create.
+Explicit user-requested `sandbox_release` destroys the final reference's B;
+failed admission/recovery retains the existing confirmed-cleanup safeguards.
+No lifecycle path releases the shared A. Remote expiry depends on the coordinated
+Platform manual-policy implementation described above.
 
 ## Building B's image
 

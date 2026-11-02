@@ -79,6 +79,16 @@ public class PlatformRemoteGateway {
         // Only the optional business preflight is bypassed. Real storage calls and failures stay intact.
         if (!personalStorageAdmissionEnabled && "storage".equals(area)
             && Set.of("quota-check", "quota-rejected").contains(operation)) return null;
+        if ("storage".equals(area) && operation.startsWith("uploads/")) {
+            try {
+                return data(client.getObject().call(area, operation, params));
+            } catch (feign.FeignException failure) {
+                // A durable transfer lease expiring is recoverable by creating a new upload ID.
+                if (failure.status() == 410) return Map.of("state", "EXPIRED");
+                if (failure.status() == 404 && "uploads/status".equals(operation)) return Map.of("state", "NOT_FOUND");
+                return safe(() -> { throw failure; });
+            }
+        }
         return data(envelope(area, operation, params));
     }
 

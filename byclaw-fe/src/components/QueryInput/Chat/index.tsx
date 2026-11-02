@@ -529,68 +529,64 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
               </span>
             </Tooltip>
           </MentionPopover>
-          {this.checkCanUploadFile() && (
-            <UploadFile
-              ref={this.uploadFileRef}
-              accept={this.getUploadFileAccept()}
-              beforeUpload={this.checkIsFilesValid}
-              extendsPayload={{
-                agentId,
-                sessionType: 'AGENT',
-                sessionId,
-                // 新建任务上传文件会提前创建会话，创建时就传入当前选择的项目，避免先落到默认项目。
-                projectId: resolvePendingSessionProjectId(
-                  this.props.projectId,
-                  this.props.selectedProject?.projectId
-                ),
-              }}
-              onCreate={(fileItem: IFile) => {
-                return this.onCreateFile({
-                  ...fileItem,
-                });
-              }}
-              onUpdate={this.onUpdateFile}
-              onRemove={this.onRemoveFile}
-              setSessionId={(mySessionId: string, sessionName?: string) => {
-                if (`${mySessionId}` === `${sessionId}`) return;
-                this.props.onFileUploadSessionCreated?.(mySessionId);
-                setSessionId?.(mySessionId);
-                dispatch({
-                  type: 'session/addSession',
-                  payload: createPendingRemoteSession({
+          <UploadFile
+            ref={this.uploadFileRef}
+            hidden={!this.checkCanUploadFile()}
+            accept={this.getUploadFileAccept()}
+            beforeUpload={this.checkIsFilesValid}
+            extendsPayload={{
+              agentId,
+              sessionType: 'AGENT',
+              sessionId,
+              // 新建任务上传文件会提前创建会话，创建时就传入当前选择的项目，避免先落到默认项目。
+              projectId: resolvePendingSessionProjectId(this.props.projectId, this.props.selectedProject?.projectId),
+            }}
+            onCreate={(fileItem: IFile) => {
+              return this.onCreateFile({
+                ...fileItem,
+              });
+            }}
+            onUpdate={this.onUpdateFile}
+            onRemove={this.onRemoveFile}
+            setSessionId={(mySessionId: string, sessionName?: string) => {
+              if (`${mySessionId}` === `${sessionId}`) return;
+              this.props.onFileUploadSessionCreated?.(mySessionId);
+              setSessionId?.(mySessionId);
+              dispatch({
+                type: 'session/addSession',
+                payload: createPendingRemoteSession({
+                  sessionId: mySessionId,
+                  sessionName,
+                  projectName: this.props.selectedProject?.projectName,
+                  projectId: resolvePendingSessionProjectId(
+                    this.props.projectId,
+                    this.props.selectedProject?.projectId
+                  ),
+                  objectId: agentId,
+                  objectType: agentId ? 'DigEmployee' : undefined,
+                  agentType: this.props.myAgentType,
+                }),
+              });
+              const projectId = resolvePendingSessionProjectId(
+                this.props.projectId,
+                this.props.selectedProject?.projectId
+              );
+              if (projectId !== undefined && projectId !== null) {
+                this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
+                  projectId,
+                  projectName: this.props.selectedProject?.projectName,
+                  session: createPendingRemoteSession({
                     sessionId: mySessionId,
                     sessionName,
-                    projectName: this.props.selectedProject?.projectName,
-                    projectId: resolvePendingSessionProjectId(
-                      this.props.projectId,
-                      this.props.selectedProject?.projectId
-                    ),
-                    objectId: agentId,
-                    objectType: agentId ? 'DigEmployee' : undefined,
-                    agentType: this.props.myAgentType,
-                  }),
-                });
-                const projectId = resolvePendingSessionProjectId(
-                  this.props.projectId,
-                  this.props.selectedProject?.projectId
-                );
-                if (projectId !== undefined && projectId !== null) {
-                  this.props.globalContext.EventEmitter.emit('projectSpace-session-refresh', {
                     projectId,
                     projectName: this.props.selectedProject?.projectName,
-                    session: createPendingRemoteSession({
-                      sessionId: mySessionId,
-                      sessionName,
-                      projectId,
-                      projectName: this.props.selectedProject?.projectName,
-                      updateTime: new Date().toISOString(),
-                      createTime: new Date().toISOString(),
-                    }),
-                  });
-                }
-              }}
-            />
-          )}
+                    updateTime: new Date().toISOString(),
+                    createTime: new Date().toISOString(),
+                  }),
+                });
+              }
+            }}
+          />
           <ModelSelect
             key={`desktop-model-${this.props.sessionId || 'new'}`}
             allowWeb={this.props.enableModelSelect}

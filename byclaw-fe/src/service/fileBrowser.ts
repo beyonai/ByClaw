@@ -1,5 +1,6 @@
 import type { KnowledgeUploadItem } from '@/service/knowledgeCenter';
 import { GET, POST } from '@/service/common/request';
+import { hasAdmittedUpload, uploadResumableFile, type FileTransferProgress } from './resumableFileUpload';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
 export interface FileBrowserItem {
@@ -106,16 +107,20 @@ export function getChangedFileDiff(sessionId: string, uuid: string) {
   );
 }
 
-export function uploadFiles(
+export async function uploadFiles(
   resourceId: string | number,
   path: string,
   files: File[],
   onUploadProgress?: (e: any) => void,
-  responseCfg?: Record<string, any>
+  responseCfg?: Record<string, any>,
+  transferOptions?: { ownerKey: string; overwrite?: boolean; checkContext?: () => void }
 ) {
+  const checkContext = transferOptions?.checkContext;
+  checkContext?.();
   if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
-    return window.byclawDesktop.files.registerAttachments(files).then((registered) =>
-      POST(
+    return window.byclawDesktop.files.registerAttachments(files).then((registered) => {
+      checkContext?.();
+      return POST(
         '/byaiService/fileBrowser/upload',
         {
           resourceId,
@@ -123,9 +128,54 @@ export function uploadFiles(
           attachmentIds: registered.map((item) => item.attachmentId),
         },
         { responseCfg: { hideErrorTips: true } }
-      )
-    );
+      );
+    });
   }
+  if (
+    transferOptions?.ownerKey &&
+    files.some((file) => file.size >= 8 * 1024 * 1024) &&
+    files.every((file) => !file.name.toLowerCase().endsWith('.zip'))
+  ) {
+    const capability = await GET<{ resumable: boolean; maxSize?: number }>(
+      '/byaiService/fileBrowser/uploads/capabilities'
+    );
+    checkContext?.();
+    if (typeof capability?.resumable !== 'boolean') throw new Error('Invalid file transfer capability response');
+    if (capability.resumable) {
+      if (!capability.maxSize || !Number.isSafeInteger(capability.maxSize) || capability.maxSize <= 0) {
+        throw new Error('Invalid file transfer maximum size');
+      }
+      for (const file of files) {
+        if (
+          file.size > capability.maxSize &&
+          !(await hasAdmittedUpload(
+            resourceId,
+            path,
+            file,
+            transferOptions.ownerKey,
+            transferOptions.overwrite,
+            checkContext
+          ))
+        ) {
+          throw new Error(`${file.name}: maximum upload size is ${capability.maxSize / 1024 / 1024} MiB`);
+        }
+      }
+      for (const file of files) {
+        await uploadResumableFile(
+          resourceId,
+          path,
+          file,
+          transferOptions.ownerKey,
+          (progress: FileTransferProgress) => onUploadProgress?.(progress),
+          transferOptions.overwrite,
+          capability.maxSize,
+          checkContext
+        );
+      }
+      return;
+    }
+  }
+  checkContext?.();
   const formData = new FormData();
   formData.append('resourceId', String(resourceId));
   formData.append('path', path);

@@ -12,7 +12,7 @@ export interface SandboxRuntime {
   handshake(): Promise<unknown>
   identity?(): { sandboxId?: string; workspaceRoot?: string }
   execute(argv: readonly string[], cwd?: string, signal?: AbortSignal): Promise<SandboxResult>
-  release(): Promise<void>
+  release(destroy?: boolean): Promise<void>
 }
 export interface ExecutionLease {
   leaseId: string
@@ -43,13 +43,18 @@ export class ToolSandboxManager {
   private readonly leases = new Map<string, OwnedLease>()
   private readonly requests = new Map<string, Promise<ExecutionLease>>()
   private readonly verified = new Set<string>()
+  private readonly failed = new Set<string>()
   private readonly actorReleases = new Map<string, Promise<ActorCleanup>>()
   private readonly executions = new Map<string, Set<Promise<SandboxResult>>>()
+  private disposed = false
+  private readonly actorEpochs = new Map<string, number>()
+  private refreshPending: Promise<void> | undefined
   private readonly leaseReleases = new Map<string, Promise<{ released: boolean; remainingReferences: number }>>()
   constructor(
-    private readonly templates: readonly SandboxTemplate[],
+    private templates: readonly SandboxTemplate[],
     private readonly create: (template: SandboxTemplate) => Promise<SandboxRuntime>,
     private readonly event: (value: Record<string, string>) => void = () => {},
+    private readonly loadCatalog?: () => Promise<readonly SandboxTemplate[]>,
   ) {
     const keys = new Set<string>(), services = new Set<string>()
     for (const t of templates) {
@@ -58,9 +63,39 @@ export class ToolSandboxManager {
     }
   }
   catalog() {
-    return this.templates.map(t => ({ ...t, available: this.verified.has(t.templateKey), verification: this.verified.has(t.templateKey) ? 'verified' : 'not-yet-verified', operations: { protocol: 'ssh', exposure: 'private' } }))
+    return this.templates.map(t => ({ ...t, available: t.enabled && !this.failed.has(t.templateKey), verification: this.failed.has(t.templateKey) ? 'failed' : this.verified.has(t.templateKey) ? 'verified' : 'not-yet-verified', operations: { protocol: 'ssh', exposure: 'private' } }))
+  }
+  /** Existing leases finish normally; publication changes apply to every new acquisition. */
+  refreshCatalog(): Promise<void> {
+    if (!this.loadCatalog) return Promise.resolve()
+    if (this.refreshPending) return this.refreshPending
+    this.refreshPending = this.loadCatalog().then(templates => {
+      const keys = new Set<string>(), services = new Set<string>()
+      for (const t of templates) {
+        if (!/^[a-z][a-z0-9-]{0,48}$/u.test(t.templateKey) || !t.serviceKey || keys.has(t.templateKey) || services.has(t.serviceKey)) throw new Error('INVALID_TEMPLATE_CATALOG')
+        keys.add(t.templateKey); services.add(t.serviceKey)
+      }
+      for (const template of templates) {
+        const previous = this.templates.find(t => t.templateKey === template.templateKey)
+        if (JSON.stringify(previous) !== JSON.stringify(template)) {
+          this.verified.delete(template.templateKey); this.failed.delete(template.templateKey)
+        }
+      }
+      this.templates = templates
+    }).finally(() => { this.refreshPending = undefined })
+    return this.refreshPending
   }
   acquire(actor: string, templateKey: string, requestId: string): Promise<ExecutionLease> {
+    if (this.disposed) return Promise.reject(new Error('MANAGER_DISPOSED'))
+    const epoch = this.actorEpochs.get(actor) ?? 0
+    if (this.loadCatalog) return this.refreshCatalog().then(() => {
+      if (this.disposed) throw new Error('MANAGER_DISPOSED')
+      if ((this.actorEpochs.get(actor) ?? 0) !== epoch) throw new Error('ACTOR_RELEASING')
+      return this.acquireCurrent(actor, templateKey, requestId)
+    })
+    return this.acquireCurrent(actor, templateKey, requestId)
+  }
+  private acquireCurrent(actor: string, templateKey: string, requestId: string): Promise<ExecutionLease> {
     if (this.actorReleases.has(actor)) return Promise.reject(new Error('ACTOR_RELEASING'))
     if (!actor || !requestId || requestId.length > 160) return Promise.reject(new Error('INVALID_REQUEST_ID'))
     const key = JSON.stringify([actor, templateKey, requestId])
@@ -78,6 +113,8 @@ export class ToolSandboxManager {
     const template = this.templates.find(t => t.templateKey === templateKey && t.enabled)
     if (!template) throw new Error('TEMPLATE_UNAVAILABLE')
     let handle = this.handles.get(templateKey)
+    if (handle && (handle.template.serviceKey !== template.serviceKey
+      || JSON.stringify([...handle.template.capabilities].sort()) !== JSON.stringify([...template.capabilities].sort()))) throw new Error('TEMPLATE_CHANGED_WITH_ACTIVE_LEASES')
     if (handle?.failedCleanup) throw new Error('ALLOCATION_CLEANUP_REQUIRED')
     if (handle?.closing) { await handle.closing; return this.acquireOnce(actor, templateKey) }
     if (!handle) {
@@ -93,11 +130,12 @@ export class ToolSandboxManager {
           if (!manifest || manifest.contract !== 'byclaw.tool-sandbox/v1' || manifest.purpose !== templateKey
             || manifest.operations?.protocol !== 'ssh' || manifest.operations.exposure !== 'private'
             || !Array.isArray(manifest.capabilities) || !template.capabilities.every(c => (manifest.capabilities as unknown[]).includes(c))) throw new Error('CONTRACT_INCOMPATIBLE')
+          this.failed.delete(templateKey)
           this.verified.add(templateKey)
           this.event({ phase: 'ready', templateKey, handleId: id })
           return runtime
         } catch (error) {
-          try { await runtime.release() }
+          try { await runtime.release(true) }
           catch {
             selected.failedCleanup = runtime
             this.event({ phase: 'ownership-retained', origin: 'allocation-failed', templateKey, handleId: id })
@@ -106,6 +144,7 @@ export class ToolSandboxManager {
         }
       }).catch(error => {
         this.verified.delete(templateKey)
+        this.failed.add(templateKey)
         if (!selected.failedCleanup && this.handles.get(templateKey) === selected) this.handles.delete(templateKey)
         this.event({ phase: 'failed', templateKey, handleId: id }); throw error
       })
@@ -156,7 +195,7 @@ export class ToolSandboxManager {
       this.event({ phase: 'releasing', origin, templateKey: handle.template.templateKey, handleId: handle.id })
       handle.closing = (async () => {
         try {
-          await (await handle.runtime).release()
+          await (await handle.runtime).release(origin === 'tool')
           this.leases.delete(leaseId); handle.references.delete(leaseId)
           if (this.handles.get(handle.template.templateKey) === handle) this.handles.delete(handle.template.templateKey)
           this.event({ phase: 'released', origin, templateKey: handle.template.templateKey, handleId: handle.id })
@@ -177,6 +216,7 @@ export class ToolSandboxManager {
   releaseActor(actor: string): Promise<ActorCleanup> {
     const previous = this.actorReleases.get(actor)
     if (previous) return previous
+    this.actorEpochs.set(actor, (this.actorEpochs.get(actor) ?? 0) + 1)
     const pending = (async () => {
       await Promise.allSettled([...this.requests.entries()].filter(([key]) => (JSON.parse(key) as string[])[0] === actor).map(([, value]) => value))
       await Promise.allSettled([...(this.executions.get(actor) ?? [])])
@@ -210,7 +250,7 @@ export class ToolSandboxManager {
     handle.closing = (async () => {
       await Promise.resolve() // Publish the closing promise before a provider can throw synchronously.
       try {
-        await runtime.release()
+        await runtime.release(true)
         delete handle.failedCleanup
         if (this.handles.get(handle.template.templateKey) === handle) this.handles.delete(handle.template.templateKey)
         this.event({ phase: 'released', origin, templateKey: handle.template.templateKey, handleId: handle.id })
@@ -228,6 +268,7 @@ export class ToolSandboxManager {
     return lease
   }
   async dispose(): Promise<void> {
+    this.disposed = true
     await Promise.allSettled([...this.requests.values()])
     const actors = new Set([...this.leases.values()].map(lease => lease.actor))
     await Promise.all([...actors].map(actor => this.releaseActor(actor)))

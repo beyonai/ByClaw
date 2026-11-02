@@ -156,6 +156,20 @@ public final class PlatformRoutedStorage implements ObjectStorage {
                 : legacy.exists(value);
     }
 
+    public boolean supportsStat() {
+        return remote() || legacy.supportsStat();
+    }
+
+    public FileStat stat(StorageLocation value) {
+        if (!remote()) return legacy.stat(value);
+        Object raw = gateway.call("storage", "stat", location(value));
+        if (!(raw instanceof Map<?, ?> result) || !(result.get("exists") instanceof Boolean exists)
+                || (exists && !(result.get("directory") instanceof Boolean))) {
+            throw new IllegalStateException("Invalid filesystem stat response");
+        }
+        return gateway.convert(raw, FileStat.class);
+    }
+
     public List<StorageObject> list(StoragePrefix value, Integer depth) {
         if (!remote()) return legacy.list(value, depth);
         Map<String, Object> request = prefix(value);

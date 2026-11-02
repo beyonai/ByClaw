@@ -182,18 +182,19 @@ export class ToolEnvConnection extends Service {
     await this.drop()
   }
 
-  /** Release only this isolated runtime after its final execution lease is returned. */
-  async releaseOwned(): Promise<void> {
+  /** Detach this runtime after its final lease; only explicit release destroys compute. */
+  async releaseOwned(destroy = true): Promise<void> {
     // The catalog checks active executions before its last lease returns. Closing
     // this owned connection also closes residual SSH streams; stream teardown
-    // may lag process.wait and must not prevent the final compute release.
+    // may lag process.wait and must not prevent returning the final execution lease.
     if (this.inflight > 0) throw new Error('LEASE_BUSY')
     if (this.pausing !== undefined) return this.pausing
     if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
     this.pausing = (async () => {
       await this.current?.catch(() => {})
       await this.drop()
-      await this.backend.pause()
+      if (destroy && this.backend.destroy) await this.backend.destroy()
+      else await this.backend.pause()
       this.backendPending = false
     })().finally(() => { this.pausing = undefined })
     return this.pausing
@@ -341,8 +342,8 @@ export class ToolEnvConnection extends Service {
     if (this.idleTimer !== undefined) clearTimeout(this.idleTimer)
     const wasLive = this.live !== undefined || this.backendPending
     await this.drop()
-    // A is going away (e.g. reclaimed while idle): stop paying for B too. The
-    // next A resumes it; if this does not finish in time, B's expiry still applies.
+    // Backends choose their shutdown policy: ByClaw BE retains manual compute;
+    // OpenSandbox still pauses. Explicit destruction uses releaseOwned(true).
     if (wasLive) await Promise.race([this.backend.pause().catch(() => {}), new Promise(resolve => setTimeout(resolve, 5000).unref())])
     await this.backend.dispose().catch(() => {})
   }

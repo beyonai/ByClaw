@@ -630,3 +630,22 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+.fileUploadProgress {
+  flex: none;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fileUploadRow + .fileUploadRow {
+  margin-top: 8px;
+}
+
+.fileUploadTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

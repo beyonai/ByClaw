@@ -28,18 +28,18 @@ import SearchResultList from './components/SearchResultList';
 import useCopyToFileBrowser from './hooks/useCopyToFileBrowser';
 import useFilePreviewActions from './hooks/useFilePreviewActions';
 import useSaveToKnowledge from './hooks/useSaveToKnowledge';
+import useFileTransferQueue, { type FileTransferContext, type FileTransferTask } from './hooks/useFileTransferQueue';
 import {
   BYKC_FILE_PATH,
   getVisibleFileCategories,
   ROOT_FILE_PATH,
-  SESSION_FILE_PATH,
+  SHARED_FILE_PATH,
   type FileActionKey,
   type FileCategoryItem,
   type FileCategoryKey,
   type FileTreeItem,
 } from './constants';
 import {
-  buildDirectoryPathChain,
   buildScopedFolderPath,
   buildTargetFolderPath,
   canPreviewFile,
@@ -109,7 +109,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
-  const [expandedTreeKeys, setExpandedTreeKeys] = useState<React.Key[]>([]);
+  const [expandedTreeKeys, setExpandedTreeKeysState] = useState<React.Key[]>([]);
+  const expandedTreeKeysRef = useRef<React.Key[]>([]);
+  const setExpandedTreeKeys = useCallback((keys: React.Key[]) => {
+    // rc-tree may finish an old load during a refresh; keep the latest intent synchronous.
+    expandedTreeKeysRef.current = keys;
+    setExpandedTreeKeysState(keys);
+  }, []);
   // 受控接管 rc-tree 的 loadedKeys：它默认把展开过的目录永久标记为已加载并跳过 loadData，
   // 刷新后再展开就不会重新请求。目录数据失效时必须把对应 key 摘掉。
   const [loadedTreeKeys, setLoadedTreeKeys] = useState<React.Key[]>([]);
@@ -121,6 +127,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     null
   );
   const [uploadingFiles, setUploadingFiles] = useState(false);
+  const uploadRunCountRef = useRef(0);
+  const uploadIdentityRef = useRef(0);
+  const pendingUploadContextRef = useRef<FileTransferContext | undefined>();
   const [uploadDirectoryPickerOpen, setUploadDirectoryPickerOpen] = useState(false);
   const [uploadDirectoryPath, setUploadDirectoryPath] = useState('/');
   const [uploadDirectoryBasePath, setUploadDirectoryBasePath] = useState('/');
@@ -140,6 +149,55 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       getNormalizedSessionId(sessionId) || getNormalizedSessionId(messageSessionId) || getFallbackCurrentSessionId()
     );
   }, [messageSessionId, sessionId]);
+
+  const contextIdentity = JSON.stringify([
+    resourceId,
+    userInfo?.userCode,
+    userInfo?.userId,
+    userInfo?.enterpriseId,
+    activeSessionId,
+  ]);
+  const contextSequence = useRef(0);
+  const contextRef = useRef<(FileTransferContext & { identity: string }) | undefined>();
+  const mountedRef = useRef(true);
+  if (contextRef.current?.identity !== contextIdentity) {
+    contextRef.current = {
+      identity: contextIdentity,
+      key: `${contextIdentity}:${++contextSequence.current}`,
+      resourceId,
+      ownerKey: userInfo?.userCode || '',
+      sessionId: activeSessionId,
+    };
+  }
+  const transferContext = contextRef.current!;
+  const isCurrentContext = useCallback(
+    (context: FileTransferContext) => mountedRef.current && contextRef.current === context,
+    []
+  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    fetchListRequestSeqRef.current += 1;
+    searchRequestSeqRef.current += 1;
+    uploadRunCountRef.current = 0;
+    pendingUploadContextRef.current = undefined;
+    setUploadingFiles(false);
+    setUploadConfirmOpen(false);
+    setPendingUploadFiles([]);
+    setPendingUploadPath('');
+    setPendingUploadConflicts([]);
+    setPendingUploadKnowledgeTarget(null);
+    setUploadDirectoryPickerOpen(false);
+    setUploadDirectoryFolders([]);
+    setUploadDirectoryLoading(false);
+    setCreateFolderOpen(false);
+    setRenameOpen(false);
+    setRenameTarget(null);
+  }, [transferContext]);
 
   const fileCategories = useMemo<FileCategoryItem[]>(() => {
     return getVisibleFileCategories(isAdminVip(userInfo));
@@ -179,8 +237,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     if (!categoryKey) return;
     childCacheInvalidVersionRef.current[categoryKey] = (childCacheInvalidVersionRef.current[categoryKey] || 0) + 1;
     // 数据作废的同时必须摘掉 rc-tree 的 loadedKeys，否则它认为目录已加载过，
-    // 用户再展开时不会触发 loadData，永远看不到新文件。摘掉后 rc-tree 可能对已展开节点
-    // 补一次 loadData，与调用方自己的重查重复；同接口同目录，结果一致，刷新是低频动作，不额外去重。
+    // 用户再展开时不会触发 loadData。刷新调用方同时折叠子树，避免后台补查已展开节点。
     setLoadedTreeKeys([]);
   }, []);
 
@@ -206,6 +263,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const fetchList = useCallback(
     async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const cacheKey = options.categoryKey ?? activeCategoryKey;
       if (!cacheKey) return;
       const categoryRootPath = getCategoryRootPath(cacheKey);
@@ -228,6 +287,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setLoading(true);
       try {
         const res: any = await listFiles({ resourceId, path: requestPath, sort: PROCESS_FILE_LIST_SORT });
+        if (!isCurrentContext(context)) return;
         const data = res?.data ?? res ?? [];
         const nextItems = Array.isArray(data) ? data : [];
         const nextChildrenByPath = options.force ? {} : cached?.childrenByPath || {};
@@ -249,52 +309,29 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           setChildrenByPath(nextChildrenByPath);
         }
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
-        if (requestSeq === fetchListRequestSeqRef.current) {
+        if (isCurrentContext(context) && requestSeq === fetchListRequestSeqRef.current) {
           setLoading(false);
         }
       }
     },
-    [activeCategoryKey, intl, resetChildDirectoryCacheVersion, resourceId, updateCategoryCache]
+    [
+      transferContext,
+      isCurrentContext,
+      activeCategoryKey,
+      intl,
+      resetChildDirectoryCacheVersion,
+      resourceId,
+      updateCategoryCache,
+    ]
   );
 
-  const expandCurrentSessionDirectory = useCallback(
-    async (targetSessionId = activeSessionId) => {
-      const normalizedSessionId = getNormalizedSessionId(targetSessionId);
-      if (!normalizedSessionId || !resourceId) return;
-
-      const sessionPath = getSessionFilePath(normalizedSessionId);
-      try {
-        await ensureFolder({ resourceId, path: sessionPath });
-        const res: any = await listFiles({ resourceId, path: sessionPath, sort: PROCESS_FILE_LIST_SORT });
-        const sessionChildren = unwrapListResponse<FileBrowserItem>(res);
-        markChildDirectoriesFresh('session', [sessionPath]);
-
-        setChildrenByPath((prev) => {
-          const nextChildrenByPath = {
-            ...prev,
-            [sessionPath]: sessionChildren,
-          };
-          if (!isSearching && activeCategoryKeyRef.current === 'session') {
-            updateCategoryCache('session', {
-              path: SESSION_FILE_PATH,
-              items: categoryCacheRef.current.session?.items ?? items,
-              childrenByPath: nextChildrenByPath,
-            });
-          }
-          return nextChildrenByPath;
-        });
-        setExpandedTreeKeys((prev) => (prev.includes(sessionPath) ? prev : [...prev, sessionPath]));
-      } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
-      }
-    },
-    [activeSessionId, intl, isSearching, items, markChildDirectoriesFresh, resourceId, updateCategoryCache]
-  );
-
-  const refreshExpandedDirectories = useCallback(
+  const refreshCurrentDirectory = useCallback(
     async (payload?: { sessionId?: string }) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const payloadSessionId = getMessagePayloadSessionId(payload);
       if (payloadSessionId) {
         setMessageSessionId(payloadSessionId);
@@ -310,33 +347,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         categoryKey !== 'root' && !isPathIn(normalizedCurrentPath, categoryRootPath)
           ? categoryRootPath
           : normalizedCurrentPath;
-      const expandedDirectoryPaths = Array.from(
-        new Set(
-          expandedTreeKeys
-            .map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
-            .filter((path) => path !== requestPath && (categoryKey === 'root' || isPathIn(path, categoryRootPath)))
-        )
-      );
+      // Refresh only this directory; nested directories reload on the next explicit expansion.
+      setExpandedTreeKeys([]);
+      clearChildDirectoryState();
 
       setLoading(true);
       try {
-        const [rootResponse, ...expandedResponses] = await Promise.all([
-          listFiles({ resourceId, path: requestPath, sort: PROCESS_FILE_LIST_SORT }),
-          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path, sort: PROCESS_FILE_LIST_SORT })),
-        ]);
+        const rootResponse = await listFiles({ resourceId, path: requestPath, sort: PROCESS_FILE_LIST_SORT });
+        if (!isCurrentContext(context)) return;
         const nextItems = unwrapListResponse<FileBrowserItem>(rootResponse);
-        const refreshedChildrenByPath = expandedDirectoryPaths.reduce<Record<string, FileBrowserItem[]>>(
-          (acc, path, index) => {
-            acc[path] = unwrapListResponse<FileBrowserItem>(expandedResponses[index]);
-            return acc;
-          },
-          {}
-        );
-        // The category cache was marked stale above. Keeping old children here would
-        // make rc-tree skip loadData on a collapsed directory because it already has
-        // a `children` array, leaving that directory permanently stale after refresh.
-        const nextChildrenByPath = refreshedChildrenByPath;
-        markChildDirectoriesFresh(categoryKey, expandedDirectoryPaths);
+        const nextChildrenByPath: Record<string, FileBrowserItem[]> = {};
 
         updateCategoryCache(categoryKey, {
           path: requestPath,
@@ -353,12 +373,21 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           setChildrenByPath(nextChildrenByPath);
         }
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
-        setLoading(false);
+        if (isCurrentContext(context)) setLoading(false);
       }
     },
-    [expandedTreeKeys, intl, markChildDirectoriesFresh, markChildDirectoryCacheStale, resourceId, updateCategoryCache]
+    [
+      transferContext,
+      isCurrentContext,
+      clearChildDirectoryState,
+      intl,
+      markChildDirectoryCacheStale,
+      resourceId,
+      updateCategoryCache,
+    ]
   );
 
   useEffect(() => {
@@ -414,21 +443,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         categorySwitchRequestRef.current = null;
         return;
       }
-      void fetchList(currentPath).then(() => {
-        if (activeCategoryKey === 'session' && currentPath === SESSION_FILE_PATH && activeSessionId) {
-          void expandCurrentSessionDirectory(activeSessionId);
-        }
-      });
+      void fetchList(currentPath);
     }
-  }, [
-    activeCategoryKey,
-    activeSessionId,
-    currentPath,
-    expandCurrentSessionDirectory,
-    fetchList,
-    pathInitialized,
-    resourceId,
-  ]);
+  }, [activeCategoryKey, activeSessionId, currentPath, fetchList, pathInitialized, resourceId]);
 
   useEffect(() => {
     if (!activeCategory || !pathInitialized) return;
@@ -464,7 +481,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       };
 
       // Clear cache so switching tabs always reloads the data.
-      const cached = categoryCacheRef.current[nextCategory.key];
       delete categoryCacheRef.current[nextCategory.key];
       resetChildDirectoryCacheVersion(nextCategory.key);
 
@@ -477,26 +493,14 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setExpandedTreeKeys(
         nextCategory.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []
       );
-      // Only ensure the folder when there is no cache, which means the first visit.
-      if (nextCategory.ensure && !cached) {
-        try {
-          await ensureFolder({ resourceId, path: nextCategoryPath });
-        } catch (error: any) {
-          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
-        }
-      }
       activeCategoryKeyRef.current = nextCategory.key;
       currentPathRef.current = nextCategoryPath;
       setCurrentPath(nextCategoryPath);
       await fetchList(nextCategoryPath, { force: true, categoryKey: nextCategory.key });
-      if (nextCategory.key === 'session') {
-        await expandCurrentSessionDirectory(activeSessionId);
-      }
     },
     [
       activeSessionId,
       clearChildDirectoryState,
-      expandCurrentSessionDirectory,
       fetchList,
       fileCategories,
       intl,
@@ -505,7 +509,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     ]
   );
 
-  // 回答完成后刷新一次文件列表（含已展开目录），避免流式过程中频繁刷新
+  // 回答完成后仅刷新当前目录；子树在用户再次展开时加载。
   useEffect(() => {
     let refreshTimer: number | null = null;
 
@@ -515,7 +519,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
-        void refreshExpandedDirectories(payload);
+        void refreshCurrentDirectory(payload);
       }, 500);
     };
 
@@ -543,7 +547,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       EventEmitter.off('chat-answer-completed', handleAnswerCompleted);
       EventEmitter.off('fileBrowser-session-files-updated', handleSessionFilesUpdated);
     };
-  }, [EventEmitter, activeSessionId, refreshExpandedDirectories]);
+  }, [EventEmitter, activeSessionId, refreshCurrentDirectory]);
 
   const sortedSearchItems = useMemo(() => {
     return sortFileBrowserItems(searchItems);
@@ -563,23 +567,29 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const loadUploadDirectoryFolders = useCallback(
     async (directoryPath: string) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const normalizedPath = ensureDirectoryPath(directoryPath || '/');
       setUploadDirectoryLoading(true);
       try {
         const response = await listFiles({ resourceId, path: normalizedPath, sort: PROCESS_FILE_LIST_SORT });
+        if (!isCurrentContext(context)) return;
         setUploadDirectoryFolders(unwrapListResponse<FileBrowserItem>(response).filter((item) => isDirectory(item)));
         setUploadDirectoryPath(normalizedPath);
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
-        setUploadDirectoryLoading(false);
+        if (isCurrentContext(context)) setUploadDirectoryLoading(false);
       }
     },
-    [intl, resourceId]
+    [transferContext, isCurrentContext, intl, resourceId]
   );
 
   const handleSearch = useCallback(
     async (keyword: string) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const nextKeyword = keyword.trim();
       setSearchValue(nextKeyword);
       if (!nextKeyword) {
@@ -601,12 +611,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
         const collectSearchResults = async (path: string) => {
           const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path || ROOT_FILE_PATH));
-          if (visitedDirectories.has(normalizedPath)) {
+          if (!isCurrentContext(context) || visitedDirectories.has(normalizedPath)) {
             return;
           }
           visitedDirectories.add(normalizedPath);
 
           const res: any = await searchFiles({ resourceId, path: normalizedPath, keyword: nextKeyword });
+          if (!isCurrentContext(context)) return;
           const list = unwrapListResponse<FileBrowserItem>(res);
           list.forEach((item) => {
             if (item?.path) {
@@ -622,18 +633,19 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         };
 
         await collectSearchResults(ROOT_FILE_PATH);
-        if (requestSeq === searchRequestSeqRef.current) {
+        if (isCurrentContext(context) && requestSeq === searchRequestSeqRef.current) {
           setSearchItems(Array.from(resultMap.values()));
         }
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
-        if (requestSeq === searchRequestSeqRef.current) {
+        if (isCurrentContext(context) && requestSeq === searchRequestSeqRef.current) {
           setLoading(false);
         }
       }
     },
-    [clearChildDirectoryState, currentPath, fetchList, intl, resourceId]
+    [transferContext, isCurrentContext, clearChildDirectoryState, currentPath, fetchList, intl, resourceId]
   );
 
   const clearClickTimer = useCallback(() => {
@@ -661,7 +673,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     activeSessionId,
     expandedTreeKeys,
     getActiveCategoryKey: () => activeCategoryKeyRef.current,
-    refreshExpandedDirectories,
+    refreshExpandedDirectories: refreshCurrentDirectory,
     clearClickTimer,
   });
 
@@ -702,12 +714,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const resolveKnowledgeUploadTarget = useCallback(
     async (targetPath: string): Promise<BykcKnowledgeUploadTarget | null> => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return null;
       const response = await queryDigEmployeeManageKnowledgeResourceAuth({
         resourceId,
         pageNum: 1,
         pageSize: 100,
         keyword: '',
       });
+      if (!isCurrentContext(context)) return null;
       const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
       if (!rows.length) {
         message.warning(intl.formatMessage({ id: 'fileSider.saveToKnowledge.noManagePermission' }));
@@ -719,77 +734,131 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       return target;
     },
-    [intl, resourceId]
+    [transferContext, isCurrentContext, intl, resourceId]
   );
 
-  const executeKnowledgeDirectoryUpload = useCallback(
-    async (
-      targetPath: string,
-      fileList: File[],
-      processFrontMatter: boolean,
-      options: { overwrite?: boolean; target?: BykcKnowledgeUploadTarget | null } = {}
-    ) => {
-      const target = options.target || (await resolveKnowledgeUploadTarget(targetPath));
-      if (!target) return;
-
-      const formData = new FormData();
-      fileList.forEach((file) => {
-        formData.append('files', file);
-      });
-      formData.append('resourceId', String(target.knowledgeBase.resourceId));
-      formData.append('directoryPath', target.directoryPath);
-      formData.append('processFrontMatter', String(processFrontMatter));
-      formData.append('overwrite', String(Boolean(options.overwrite)));
-
-      const result = await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
-      const succeeded = Number(result?.summary?.succeeded || 0);
-      const failed = Number(result?.summary?.failed || 0);
-      const postProcessErrorCount = result?.postProcessErrors?.length || 0;
-      if (failed > 0) {
-        const content = intl.formatMessage({ id: 'knowledgeDetail.uploadPartial' }, { succeeded, failed });
-        if (succeeded === 0) {
-          message.error(content);
-        } else {
-          message.warning(content);
+  const skillUploadTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  const uploadOneFile = useCallback(
+    async (task: FileTransferTask, report: (event: any) => void) => {
+      const destination = task.context;
+      if (!destination || !isCurrentContext(destination))
+        throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      if (task.knowledge) {
+        const form = new FormData();
+        form.append('files', task.file);
+        form.append('resourceId', String(task.knowledge.resourceId));
+        form.append('directoryPath', task.knowledge.directoryPath);
+        form.append('processFrontMatter', String(task.knowledge.processFrontMatter));
+        form.append('overwrite', String(task.overwrite));
+        const result = await uploadKnowledgeFiles(form, {
+          responseCfg: { hideErrorTips: true },
+          onUploadProgress: (event) =>
+            report({
+              loaded: event.loaded || 0,
+              total: event.total || task.file.size,
+              phase: event.total && event.loaded >= event.total ? 'processing' : 'uploading',
+              fileName: task.file.name,
+            }),
+        });
+        if (Number(result?.summary?.failed || 0) > 0) {
+          throw new Error(result?.failedItems?.[0]?.error || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
         }
-      } else if (postProcessErrorCount > 0) {
-        message.warning(
-          intl.formatMessage({ id: 'knowledgeDetail.uploadPostProcessWarning' }, { count: postProcessErrorCount })
+        if (isCurrentContext(destination) && result?.postProcessErrors?.length) {
+          message.warning(
+            `${task.file.name}: ${intl.formatMessage(
+              { id: 'knowledgeDetail.uploadPostProcessWarning' },
+              { count: result.postProcessErrors.length }
+            )}`
+          );
+        }
+        return;
+      }
+      const send = () => {
+        if (!isCurrentContext(destination)) throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+        return uploadFiles(
+          destination.resourceId,
+          task.path,
+          [task.file],
+          (event) =>
+            report({
+              loaded: event.loaded || 0,
+              total: event.total || task.file.size,
+              phase: event.phase || 'uploading',
+              fileName: task.file.name,
+              resumed: event.resumed,
+            }),
+          undefined,
+          {
+            ownerKey: destination.ownerKey,
+            overwrite: task.overwrite,
+            checkContext: () => {
+              if (!isCurrentContext(destination))
+                throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+            },
+          }
         );
-      } else {
-        message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      };
+      if (task.file.name.toLowerCase().endsWith('.zip')) {
+        // Skill registrations share the employee relation; keep their existing serial mutation order.
+        const running = skillUploadTailRef.current.catch(() => undefined).then(send);
+        skillUploadTailRef.current = running;
+        return running;
       }
-      if (succeeded === 0 && failed > 0) return;
-      setUploadConfirmOpen(false);
-      setPendingUploadFiles([]);
-      setPendingUploadPath('');
-      setPendingUploadConflicts([]);
-      setPendingUploadKnowledgeTarget(null);
-
-      if (isPathIn(currentPath, BYKC_FILE_PATH)) {
-        setSearchValue('');
-        setIsSearching(false);
-        clearChildDirectoryState();
-        await fetchList(currentPath, { force: true });
-      }
+      return send();
     },
-    [clearChildDirectoryState, currentPath, fetchList, intl, resolveKnowledgeUploadTarget]
+    [intl, isCurrentContext]
   );
+  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key);
 
   const executeUpload = useCallback(
     async (targetPath: string, fileList: File[], processFrontMatter = false) => {
+      const context = pendingUploadContextRef.current || transferContext;
+      if (!isCurrentContext(context)) return;
       if (!fileList.length || uploadingFiles) return;
       const uploadPath = ensureDirectoryPath(targetPath || currentPath || '/');
+      uploadRunCountRef.current += 1;
       setUploadingFiles(true);
       try {
-        if (isPathIn(uploadPath, BYKC_FILE_PATH)) {
-          await executeKnowledgeDirectoryUpload(uploadPath, fileList, processFrontMatter, {
+        const knowledgeTarget = isPathIn(uploadPath, BYKC_FILE_PATH)
+          ? pendingUploadKnowledgeTarget || (await resolveKnowledgeUploadTarget(uploadPath))
+          : null;
+        if (!isCurrentContext(context)) return;
+        if (isPathIn(uploadPath, BYKC_FILE_PATH) && !knowledgeTarget) return;
+        const previousRows = fileTransfers.rows;
+        let allSucceeded: boolean;
+        if (
+          previousRows.length &&
+          previousRows.every((row) => row.path === uploadPath) &&
+          previousRows.length === fileList.length &&
+          previousRows.every((row, index) => row.file === fileList[index])
+        ) {
+          const failedRows = previousRows.filter((row) => row.status === 'failed');
+          const outcomes = await Promise.all(failedRows.map((row) => fileTransfers.retry(row.id)));
+          allSucceeded = outcomes.every(Boolean);
+        } else {
+          let knowledge: FileTransferTask['knowledge'];
+          if (knowledgeTarget)
+            knowledge = {
+              resourceId: knowledgeTarget.knowledgeBase.resourceId,
+              directoryPath: knowledgeTarget.directoryPath,
+              processFrontMatter,
+            };
+          const tasks = fileList.map((file) => ({
+            id: `file-${++uploadIdentityRef.current}`,
+            file,
+            path: uploadPath,
             overwrite: pendingUploadConflicts.length > 0,
-            target: pendingUploadKnowledgeTarget,
-          });
+            knowledge,
+            context,
+          }));
+          allSucceeded = await fileTransfers.start(tasks);
+        }
+        if (!isCurrentContext(context)) return;
+        if (!allSucceeded) {
+          message.error(intl.formatMessage({ id: 'fileBrowser.upload.partialFailed' }));
+          await fetchList(currentPath, { force: true });
           return;
         }
-        await uploadFiles(resourceId, uploadPath, fileList);
         message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
         setUploadConfirmOpen(false);
         setPendingUploadFiles([]);
@@ -804,6 +873,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           return;
         }
         const res: any = await listFiles({ resourceId, path: uploadPath, sort: PROCESS_FILE_LIST_SORT });
+        if (!isCurrentContext(context)) return;
         markChildDirectoriesFresh(activeCategoryKey, [uploadPath]);
         setChildrenByPath((prev) => {
           const nextChildrenByPath = {
@@ -820,6 +890,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           return nextChildrenByPath;
         });
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         const errorMessage =
           (typeof error === 'string' ? error : undefined) ||
           error?.response?.data?.msg ||
@@ -828,14 +899,19 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           error?.message;
         message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       } finally {
-        setUploadingFiles(false);
+        if (isCurrentContext(context)) {
+          uploadRunCountRef.current -= 1;
+          setUploadingFiles(uploadRunCountRef.current > 0);
+        }
       }
     },
     [
+      transferContext,
+      isCurrentContext,
       activeCategoryKey,
       clearChildDirectoryState,
       currentPath,
-      executeKnowledgeDirectoryUpload,
+      resolveKnowledgeUploadTarget,
       fetchList,
       intl,
       isSearching,
@@ -846,6 +922,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       resourceId,
       updateCategoryCache,
       uploadingFiles,
+      fileTransfers,
     ]
   );
 
@@ -860,7 +937,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setSearchValue('');
         setIsSearching(false);
         // 重新拉取根级与所有已展开目录，避免清空已展开目录的子级数据
-        await refreshExpandedDirectories();
+        await refreshCurrentDirectory();
         return;
       }
       const res: any = await listFiles({ resourceId, path: normalizedPath });
@@ -887,7 +964,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       isSearching,
       items,
       markChildDirectoriesFresh,
-      refreshExpandedDirectories,
+      refreshCurrentDirectory,
       resetChildDirectoryCacheVersion,
       resourceId,
       updateCategoryCache,
@@ -958,7 +1035,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handleUploadSelect = useCallback(
     async (targetPath: string, fileList: File[]) => {
-      if (!fileList.length) return;
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
+      if (!fileList.length || uploadingFiles) return;
+      fileTransfers.reset();
       const uploadPath = ensureDirectoryPath(targetPath);
       let uploadConflicts: string[] = [];
       let uploadKnowledgeTarget: BykcKnowledgeUploadTarget | null = null;
@@ -973,18 +1053,33 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
             fileNames: fileList.map((file) => file.name),
           });
           uploadConflicts = response?.overwritePaths || [];
+        } else {
+          const response = await listFiles({ resourceId, path: uploadPath });
+          const existingNames = new Set(unwrapListResponse<FileBrowserItem>(response).map((item) => item.name));
+          uploadConflicts = fileList.filter((file) => existingNames.has(file.name)).map((file) => file.name);
         }
 
+        if (!isCurrentContext(context)) return;
+        pendingUploadContextRef.current = context;
         setPendingUploadPath(uploadPath);
         setPendingUploadFiles(fileList);
         setPendingUploadConflicts(uploadConflicts);
         setPendingUploadKnowledgeTarget(uploadKnowledgeTarget);
         setUploadConfirmOpen(true);
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       }
     },
-    [intl, resolveKnowledgeUploadTarget]
+    [
+      transferContext,
+      isCurrentContext,
+      fileTransfers.reset,
+      intl,
+      resolveKnowledgeUploadTarget,
+      resourceId,
+      uploadingFiles,
+    ]
   );
 
   const openUploadDirectoryPicker = useCallback(() => {
@@ -999,33 +1094,34 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       message.warning(intl.formatMessage({ id: 'fileBrowser.upload.directoryScopeTip' }));
       return;
     }
-    setPendingUploadPath(ensureDirectoryPath(uploadDirectoryPath || ROOT_FILE_PATH));
     setUploadDirectoryPickerOpen(false);
-  }, [intl, uploadDirectoryBasePath, uploadDirectoryPath]);
+    void handleUploadSelect(ensureDirectoryPath(uploadDirectoryPath || ROOT_FILE_PATH), pendingUploadFiles);
+  }, [handleUploadSelect, intl, pendingUploadFiles, uploadDirectoryBasePath, uploadDirectoryPath]);
 
   const handleCategoryUploadSelect = useCallback(
     async (category: FileCategoryItem, fileList: File[]) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       if (!fileList.length) return;
       const categoryPath = getCategoryActivePath(category, activeSessionId);
       try {
         if (category.key !== 'root') {
           await ensureFolder({ resourceId, path: categoryPath });
         }
+        if (!isCurrentContext(context)) return;
         await handleUploadSelect(categoryPath, fileList);
       } catch (error: any) {
+        if (!isCurrentContext(context)) return;
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
       }
     },
-    [activeSessionId, handleUploadSelect, intl, resourceId]
+    [transferContext, isCurrentContext, activeSessionId, handleUploadSelect, intl, resourceId]
   );
 
   const handleRefreshCategory = useCallback(
     async (category: FileCategoryItem) => {
       const categoryPath = getCategoryActivePath(category, activeSessionId);
       try {
-        if (category.key !== 'root') {
-          await ensureFolder({ resourceId, path: categoryPath });
-        }
         if (category.key !== activeCategoryKeyRef.current) {
           // 刷新非当前分类没有展开态可保留，按整分类重建最简单。
           delete categoryCacheRef.current[category.key];
@@ -1033,17 +1129,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           await fetchList(categoryPath, { force: true, categoryKey: category.key });
           return;
         }
-        // 保留展开态并逐个重查已展开目录。清空 expandedTreeKeys/childrenByPath 会把
-        // 已展开的子目录折叠回去且丢掉子级数据，用户看到的就是「刷新刷不出新文件」，
-        // 必须手动再点一次三角箭头。
+        // Refresh this directory once and invalidate its subtree instead of listing every expanded child.
         setSearchValue('');
         setIsSearching(false);
-        await refreshExpandedDirectories();
+        await refreshCurrentDirectory();
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [activeSessionId, fetchList, intl, refreshExpandedDirectories, resetChildDirectoryCacheVersion, resourceId]
+    [activeSessionId, fetchList, intl, refreshCurrentDirectory, resetChildDirectoryCacheVersion, resourceId]
   );
 
   useEffect(() => {
@@ -1064,14 +1158,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const openCategoryPath = useCallback(
     async (category: FileCategoryItem, path: string) => {
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const categoryPath = ensureDirectoryPath(path || getCategoryActivePath(category, activeSessionId));
       try {
-        if (category.key !== 'root') {
-          await ensureFolder({ resourceId, path: categoryPath });
-        }
         setLoading(true);
         delete categoryCacheRef.current[category.key];
         resetChildDirectoryCacheVersion(category.key);
+        if (activeCategoryKeyRef.current !== category.key || currentPathRef.current !== categoryPath) {
+          categorySwitchRequestRef.current = { key: category.key, path: categoryPath };
+        }
         setActiveCategoryKey(category.key);
         activeCategoryKeyRef.current = category.key;
         currentPathRef.current = categoryPath;
@@ -1081,48 +1177,28 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setSearchItems([]);
         setItems([]);
         clearChildDirectoryState();
-        const expandedPathChain = buildDirectoryPathChain(categoryPath);
-        const defaultExpandedKeys =
-          category.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : [];
-        setExpandedTreeKeys(Array.from(new Set([...defaultExpandedKeys, ...expandedPathChain])));
-        const categoryRootPath = getCategoryRootPath(category.key);
-        const parentPaths = expandedPathChain
-          .filter((item) => item !== categoryPath)
-          .filter((item) => category.key === 'root' || isPathIn(item, categoryRootPath));
-        const [targetResponse, ...parentResponses] = await Promise.all([
-          listFiles({ resourceId, path: categoryPath, sort: PROCESS_FILE_LIST_SORT }),
-          ...parentPaths.map((item) => listFiles({ resourceId, path: item, sort: PROCESS_FILE_LIST_SORT })),
-        ]);
-        const nextItems = unwrapListResponse<FileBrowserItem>(targetResponse);
-        const nextChildrenByPath = parentPaths.reduce<Record<string, FileBrowserItem[]>>((acc, item, index) => {
-          acc[item] = unwrapListResponse<FileBrowserItem>(parentResponses[index]);
-          return acc;
-        }, {});
-        markChildDirectoriesFresh(category.key, parentPaths);
-        updateCategoryCache(category.key, {
-          path: categoryPath,
-          items: nextItems,
-          childrenByPath: nextChildrenByPath,
-        });
+        setExpandedTreeKeys([]);
+        const response = await listFiles({ resourceId, path: categoryPath, sort: PROCESS_FILE_LIST_SORT });
+        if (!isCurrentContext(context) || currentPathRef.current !== categoryPath) return;
+        const nextItems = unwrapListResponse<FileBrowserItem>(response);
+        updateCategoryCache(category.key, { path: categoryPath, items: nextItems, childrenByPath: {} });
         setItems(nextItems);
-        setChildrenByPath(nextChildrenByPath);
-        if (category.key === 'session' && categoryPath === SESSION_FILE_PATH) {
-          await expandCurrentSessionDirectory(activeSessionId);
-        }
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        if (isCurrentContext(context)) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        }
       } finally {
-        setLoading(false);
+        if (isCurrentContext(context)) setLoading(false);
       }
     },
     [
       activeSessionId,
       clearChildDirectoryState,
-      expandCurrentSessionDirectory,
       intl,
-      markChildDirectoriesFresh,
+      isCurrentContext,
       resetChildDirectoryCacheVersion,
       resourceId,
+      transferContext,
       updateCategoryCache,
     ]
   );
@@ -1184,32 +1260,59 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setPendingUploadKnowledgeTarget(null);
   }, [uploadingFiles]);
 
+  const childReadRequestsRef = useRef(new Map<string, Promise<void>>());
+
   const loadTreeNode = useCallback(
     async (node: FileTreeItem) => {
-      if (!isDirectory(node)) return;
+      const context = transferContext;
+      if (!isCurrentContext(context) || !isDirectory(node)) return;
       const path = ensureDirectoryPath(node.path);
+      if (!expandedTreeKeysRef.current.includes(path)) return;
       const activeRootPath = getCategoryRootPath(activeCategoryKey);
       if (activeCategoryKey !== 'root' && !isPathIn(path, activeRootPath)) return;
       if (childrenByPath[path] && !isChildDirectoryCacheStale(activeCategoryKey, path)) return;
-      try {
-        const res: any = await listFiles({ resourceId, path, sort: PROCESS_FILE_LIST_SORT });
-        markChildDirectoriesFresh(activeCategoryKey, [path]);
-        setChildrenByPath((prev) => {
-          const nextChildrenByPath = {
-            ...prev,
-            [path]: unwrapListResponse<FileBrowserItem>(res),
-          };
-          if (!isSearching) {
-            updateCategoryCache(activeCategoryKey, {
-              path: currentPath,
-              items,
-              childrenByPath: nextChildrenByPath,
-            });
+      const version = activeCategoryKey ? childCacheInvalidVersionRef.current[activeCategoryKey] || 0 : 0;
+      if (activeCategoryKey && childCacheLoadedVersionRef.current[activeCategoryKey]?.[path] === version) return;
+      const requestKey = JSON.stringify([context.key, activeCategoryKey, version, path]);
+      const pending = childReadRequestsRef.current.get(requestKey);
+      if (pending) return pending;
+      const request = (async () => {
+        try {
+          const res: any = await listFiles({ resourceId, path, sort: PROCESS_FILE_LIST_SORT });
+          if (
+            !isCurrentContext(context) ||
+            activeCategoryKeyRef.current !== activeCategoryKey ||
+            !expandedTreeKeysRef.current.includes(path) ||
+            (activeCategoryKey && (childCacheInvalidVersionRef.current[activeCategoryKey] || 0) !== version)
+          ) {
+            return;
           }
-          return nextChildrenByPath;
-        });
-      } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+          markChildDirectoriesFresh(activeCategoryKey, [path]);
+          setChildrenByPath((prev) => {
+            const nextChildrenByPath = {
+              ...prev,
+              [path]: unwrapListResponse<FileBrowserItem>(res),
+            };
+            if (!isSearching) {
+              updateCategoryCache(activeCategoryKey, {
+                path: currentPath,
+                items,
+                childrenByPath: nextChildrenByPath,
+              });
+            }
+            return nextChildrenByPath;
+          });
+        } catch (error: any) {
+          if (isCurrentContext(context) && activeCategoryKeyRef.current === activeCategoryKey) {
+            message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+          }
+        }
+      })();
+      childReadRequestsRef.current.set(requestKey, request);
+      try {
+        await request;
+      } finally {
+        if (childReadRequestsRef.current.get(requestKey) === request) childReadRequestsRef.current.delete(requestKey);
       }
     },
     [
@@ -1221,6 +1324,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       isSearching,
       items,
       markChildDirectoriesFresh,
+      isCurrentContext,
+      transferContext,
       resourceId,
       updateCategoryCache,
     ]
@@ -1268,7 +1373,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   let uploadConfirmConflicts: string[] = [];
   if (isKnowledgeUploadConfirm) {
     uploadConfirmConflicts = pendingKnowledgeConflicts;
-  } else if (isBykcUploadConfirm) {
+  } else {
     uploadConfirmConflicts = pendingUploadConflicts;
   }
   const uploadConfirmLoading = isKnowledgeUploadConfirm ? savingToKnowledge : uploadingFiles;
@@ -1493,6 +1598,43 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     />
   );
 
+  const retryUploadFile = async (id: string) => {
+    const context = fileTransfers.rows.find((row) => row.id === id)?.context;
+    if (!context || !isCurrentContext(context)) return;
+    uploadRunCountRef.current += 1;
+    setUploadingFiles(true);
+    try {
+      const succeeded = await fileTransfers.retry(id);
+      if (succeeded && isCurrentContext(context)) await fetchList(currentPath, { force: true });
+    } finally {
+      if (isCurrentContext(context)) {
+        uploadRunCountRef.current -= 1;
+        setUploadingFiles(uploadRunCountRef.current > 0);
+      }
+    }
+  };
+
+  const uploadProgressRows = fileTransfers.rows.map((row) => {
+    let label = intl.formatMessage({ id: `fileBrowser.upload.${row.progress.phase}` }, { name: row.file.name });
+    if (row.status === 'pending') label = intl.formatMessage({ id: 'fileBrowser.upload.queued' });
+    if (row.status === 'success') label = intl.formatMessage({ id: 'fileBrowser.upload.success' });
+    return {
+      id: row.id,
+      name: row.file.name,
+      percent: Math.min(100, Math.floor((row.progress.loaded / Math.max(1, row.progress.total)) * 100)),
+      label,
+      status: row.status,
+      hint: row.error || (row.progress.resumed ? intl.formatMessage({ id: 'fileBrowser.upload.resumed' }) : undefined),
+    };
+  });
+
+  let retryProgressRow: ((id: string) => void) | undefined;
+  if (!isKnowledgeUploadConfirm) {
+    retryProgressRow = (id) => {
+      void retryUploadFile(id);
+    };
+  }
+
   return (
     <div className={styles.miniList}>
       <Input
@@ -1551,6 +1693,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         uploadConfirmDirectoryPath={uploadConfirmDirectoryPath}
         uploadConfirmConflicts={uploadConfirmConflicts}
         uploadConfirmLoading={uploadConfirmLoading}
+        uploadProgressRows={isKnowledgeUploadConfirm ? [] : uploadProgressRows}
+        onRetryUploadFile={retryProgressRow}
         showProcessFrontMatter={isKnowledgeUploadConfirm || isBykcUploadConfirm}
         uploadConfirmOkText={uploadConfirmOkText}
         onUploadDirectoryAction={isKnowledgeUploadConfirm ? undefined : openUploadDirectoryPicker}

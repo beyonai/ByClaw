@@ -169,8 +169,17 @@ public class FileBrowserApplicationService {
             return;
         }
         FileBrowserProvider provider = providerFactory.getProvider();
+        List<String> segments = splitPath(normalizedPath);
+        // Existing session folders are the common refresh path. Probe the destination once;
+        // enumerating every ancestor repeats the remote mount/lease/file protocol per level.
+        if (segments.size() > 1) {
+            String targetParent = "/" + String.join("/", segments.subList(0, segments.size() - 1)) + "/";
+            if (folderExists(provider, userCode, resourceId, targetParent, segments.get(segments.size() - 1))) {
+                return;
+            }
+        }
         String parentPath = "/";
-        for (String folderName : splitPath(normalizedPath)) {
+        for (String folderName : segments) {
             String targetPath = parentPath + folderName + "/";
             if (!folderExists(provider, userCode, resourceId, parentPath, folderName)) {
                 try {

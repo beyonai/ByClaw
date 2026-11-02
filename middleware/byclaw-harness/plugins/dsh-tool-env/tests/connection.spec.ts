@@ -1,8 +1,26 @@
-import { describe, expect, it } from 'vitest'
-import { launchEnvironment, scrubEnvironment } from '../src/connection.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { ToolEnvIdentity } from '../src/identity.ts'
+import { ToolEnvConnection, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
+
+describe('physical ownership versus SSH lease teardown', () => {
+  it('routes automatic teardown to detach, explicit release to destruction, and never destroys on context disposal', async () => {
+    const ctx = new Context()
+    const backend = { ensure: vi.fn(async () => ({ hostName: 'unused', port: 22 })), pause: vi.fn(async () => {}), dispose: vi.fn(async () => {}), destroy: vi.fn(async () => {}) }
+    const connection = new ToolEnvConnection(ctx, { ssh: {} as never, ptcLaunch: { kind: 'node-script', executable: 'node', bootstrapPath: '/unused' }, idleMs: 0 }, backend, new ToolEnvIdentity('/unused'))
+    await connection.releaseOwned(false)
+    expect(backend.pause).toHaveBeenCalledOnce()
+    expect(backend.destroy).not.toHaveBeenCalled()
+    await connection.releaseOwned()
+    expect(backend.destroy).toHaveBeenCalledOnce()
+    await ctx.fiber.dispose()
+    expect(backend.destroy).toHaveBeenCalledOnce()
+    expect(backend.ensure).not.toHaveBeenCalled()
+  })
+})
 
 describe('scrubEnvironment', () => {
   it('keeps host coordination and platform credentials out of user tool processes', () => {

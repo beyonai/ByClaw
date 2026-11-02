@@ -22,6 +22,12 @@ public class FileUploadDto {
     /** 单次上传文件数量上限；0 表示不限数量。 */
     private long maxFileCount = 0L;
 
+    /** Global resumable admission defaults; existing sessions retain their saved policy. */
+    private long resumableMaxFileSizeMB = 4096L;
+
+    /** New upload chunk size in MiB, from 1 through 16. */
+    private long resumableChunkSizeMB = 4L;
+
     /**
      * 允许上传word文档的最大页数
      */

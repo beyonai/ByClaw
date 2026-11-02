@@ -11,6 +11,7 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.storage.config.ObjectStorageConfiguration;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.common.storage.model.FileStat;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
@@ -71,6 +72,16 @@ public class ObjectStorageRouter implements ObjectStorage {
     @Override
     public boolean exists(StorageLocation location) {
         return getService().exists(location);
+    }
+
+    @Override
+    public boolean supportsStat() {
+        return getService().supportsStat();
+    }
+
+    @Override
+    public FileStat stat(StorageLocation location) {
+        return getService().stat(location);
     }
 
     @Override

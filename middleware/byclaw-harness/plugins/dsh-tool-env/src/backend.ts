@@ -29,10 +29,12 @@ export interface ToolEnvEndpoint {
 export interface ToolEnvBackend {
   /** Make B reachable (create or resume as needed) and return its sshd endpoint. */
   ensure(): Promise<ToolEnvEndpoint>
-  /** Release B's compute while idle; the next ensure() brings it back. */
+  /** Detach while idle; persistent backends retain physical compute. */
   pause(): Promise<void>
   /** Stop background work and release owned compute where the backend supports it. */
   dispose(): Promise<void>
+  /** Explicit destruction, separate from automatic connection teardown. */
+  destroy?(): Promise<void>
 }
 
 /** Fixed sshd endpoint (TCP or WebSocket bridge); pause is a no-op. */

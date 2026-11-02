@@ -8,6 +8,11 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'queryInput.attachment.progress': 'Upload progress',
+  'queryInput.attachment.retry': 'Retry upload',
+  'queryInput.attachment.uploading': 'Uploading',
+  'queryInput.attachment.processing': 'Processing on server',
+  'queryInput.attachment.failed': 'Upload failed. Click the circle to retry',
   ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': 'Only adminvip in the open-source edition can manage workgroup templates.',

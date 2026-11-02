@@ -30,6 +30,18 @@ public interface PlatformStorageClient {
     Map<String,Object> copyReplace(@RequestParam Map<String,Object> query,
             @RequestHeader("Content-Type") String contentType,@RequestBody Object placeholder);
 
+    @GetMapping("/internal/platform/storage/uploads/capabilities")
+    Map<String, Object> uploadCapabilities();
+
+    @PutMapping("/internal/platform/storage/uploads/chunk")
+    Map<String, Object> uploadChunk(@RequestParam Map<String, Object> query,
+            @RequestHeader("Content-Type") String contentType, @RequestBody Object placeholder);
+
+    @GetMapping("/internal/platform/storage/content")
+    Response getRange(@RequestParam Map<String, Object> query,
+            @RequestHeader(value = "Range", required = false) String range,
+            @RequestHeader(value = "If-Range", required = false) String ifRange);
+
     class Configuration extends PlatformControlClient.Configuration {
         @Bean
         @Override

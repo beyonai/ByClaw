@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -950,6 +951,7 @@ public class SandboxController {
         List<Map<String, String>> result = list.stream().map(entity -> {
             Map<String, String> map = new HashMap<>();
             map.put("serviceKey", entity.getServiceKey());
+                                    map.put("ownerScope", entity.getOwnerScope());
             map.put("serviceType", entity.getServiceType());
             map.put("displayName", entity.getDisplayName());
             map.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
@@ -985,6 +987,7 @@ public class SandboxController {
 
         Map<String, String> result = new HashMap<>();
         result.put("serviceKey", entity.getServiceKey());
+        result.put("ownerScope", entity.getOwnerScope());
         result.put("serviceType", entity.getServiceType());
         result.put("displayName", entity.getDisplayName());
         result.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
@@ -1018,20 +1021,40 @@ public class SandboxController {
             return ResponseUtil.failI18n("i18n.error.sandbox.specJson.required");
         }
 
+        String validationError = com.iwhalecloud.byai.gateway.sandbox.spec.ToolSandboxMetadata.validationError(specJson);
+        if (validationError != null) return ResponseUtil.fail(validationError);
         String serviceKeyTrimmed = serviceKey.trim();
         String specJsonTrimmed = specJson.trim();
         String templateJsonTrimmed = (templateJson != null && !templateJson.trim().isEmpty()) ? templateJson.trim() : null;
 
+        String serviceType = stringParam(params.get("serviceType"));
+        String ownerScope = stringParam(params.get("ownerScope"));
+        String displayName = stringParam(params.get("displayName"));
+        if ((serviceType != null && !serviceType.matches("[a-z][a-z0-9-]{0,63}"))
+                || (ownerScope != null && !Arrays.asList("USER", "TENANT", "SHARED").contains(ownerScope))
+                || (displayName != null && (displayName.length() > 128
+                    || displayName.chars().anyMatch(c -> c < 32)))) {
+            return ResponseUtil.fail("Invalid service metadata");
+        }
+        boolean metadata = serviceType != null || ownerScope != null || displayName != null;
         // 检查是否已存在
         SandboxServiceSpecEntity existing = sandboxServiceSpecEntityMapper.selectById(serviceKeyTrimmed);
-        if (existing == null) {
+        if (metadata) {
+            if (existing == null) {
+                sandboxServiceSpecEntityMapper.insertSpecWithMetadata(serviceKeyTrimmed, specJsonTrimmed,
+                    templateJsonTrimmed, enabled, serviceType, ownerScope, displayName);
+            } else {
+                sandboxServiceSpecEntityMapper.updateSpecWithMetadata(serviceKeyTrimmed, specJsonTrimmed,
+                    templateJsonTrimmed, enabled, serviceType, ownerScope, displayName);
+            }
+        } else if (existing == null) {
             // 新增 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
-                enabled);
+            sandboxServiceSpecEntityMapper.insertSpec(
+                    serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed, enabled);
         } else {
             // 更新 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
-                enabled);
+            sandboxServiceSpecEntityMapper.updateSpec(
+                    serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed, enabled);
         }
 
         return ResponseUtil.successResponse();

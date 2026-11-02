@@ -5,6 +5,8 @@ import { useIntl } from '@umijs/max';
 
 import { saveSystemConfig, updateSystemConfig } from '@/pages/manager/service/System';
 import styles from './index.module.less';
+import UploadPolicyEditor from './UploadPolicyFields';
+import { UPLOAD_CONFIG_CODE, getUploadPolicyFields, mergeUploadPolicyFields } from './uploadPolicy';
 
 type SystemParamsItem = {
   paramCode: string;
@@ -23,6 +25,8 @@ const CreateModal = (props: {
   const { open, onClose, onSuccess, record } = props;
   const intl = useIntl();
   const [form] = Form.useForm();
+  const paramCode = Form.useWatch('paramCode', form);
+  const paramValue = Form.useWatch('paramValue', form) || '';
 
   const [confirmLoading, setConfirmLoading] = React.useState(false);
 
@@ -32,15 +36,14 @@ const CreateModal = (props: {
     form
       .validateFields()
       .then((values) => {
+        if (values.paramCode === UPLOAD_CONFIG_CODE) {
+          values.paramValue = mergeUploadPolicyFields(values.paramValue, getUploadPolicyFields(values.paramValue));
+        }
         setConfirmLoading(true);
 
         const fn = isEdit ? updateSystemConfig : saveSystemConfig;
-        const p = isEdit
-          ? {
-            ...record,
-            ...values,
-          }
-          : values;
+        let p = values;
+        if (isEdit) p = { ...record, ...values };
 
         fn(p)
           .then((res) => {
@@ -73,12 +76,9 @@ const CreateModal = (props: {
     if (record) {
       const { paramValue, ...rest } = record as any;
       // CodeMirror 要求 value 为 string，这里兼容对象/数组等情况
-      const stringValue =
-        typeof paramValue === 'string'
-          ? paramValue
-          : paramValue !== null && paramValue !== undefined
-            ? JSON.stringify(paramValue, null, 2)
-            : '';
+      let stringValue = '';
+      if (typeof paramValue === 'string') stringValue = paramValue;
+      else if (paramValue !== null && paramValue !== undefined) stringValue = JSON.stringify(paramValue, null, 2);
 
       form.setFieldsValue({
         ...rest,
@@ -145,10 +145,20 @@ const CreateModal = (props: {
             </Form.Item>
           </div>
           <div className={classNames(styles.right, 'ub-f1')}>
+            {paramCode === UPLOAD_CONFIG_CODE && (
+              <UploadPolicyEditor value={paramValue} onChange={(next) => form.setFieldsValue({ paramValue: next })} />
+            )}
             <Form.Item
               label={intl.formatMessage({ id: 'SystemParams.createModal.paramValue' })}
               name="paramValue"
               className={styles.paramValue}
+              rules={[
+                {
+                  validator: async (_, value) => {
+                    if (form.getFieldValue('paramCode') === UPLOAD_CONFIG_CODE) getUploadPolicyFields(value);
+                  },
+                },
+              ]}
             >
               <Input.TextArea rows={20} style={{ fontFamily: 'monospace', resize: 'none', minHeight: 500 }} />
             </Form.Item>

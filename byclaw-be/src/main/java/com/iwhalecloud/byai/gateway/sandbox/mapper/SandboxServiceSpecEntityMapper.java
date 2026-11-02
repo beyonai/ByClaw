@@ -95,4 +95,20 @@ public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServic
                    @Param("specJson") String specJson,
                    @Param("templateJson") String templateJson,
                    @Param("enabled") Integer enabled);
+    /** Optional catalog identity is written atomically with the spec, without changing legacy callers. */
+    @Insert("INSERT INTO sandbox_service_spec (service_key,spec_json,template_json,enabled,service_type,owner_scope,display_name) " +
+            "VALUES (#{serviceKey},#{specJson}::jsonb,#{templateJson}::jsonb,#{enabled},#{serviceType},COALESCE(#{ownerScope},'USER'),#{displayName})")
+    int insertSpecWithMetadata(@Param("serviceKey") String serviceKey, @Param("specJson") String specJson,
+        @Param("templateJson") String templateJson, @Param("enabled") Integer enabled,
+        @Param("serviceType") String serviceType, @Param("ownerScope") String ownerScope,
+        @Param("displayName") String displayName);
+
+    @Update("UPDATE sandbox_service_spec SET spec_json=#{specJson}::jsonb,template_json=#{templateJson}::jsonb,enabled=#{enabled}," +
+            "service_type=COALESCE(#{serviceType},service_type),owner_scope=COALESCE(#{ownerScope},owner_scope)," +
+            "display_name=COALESCE(#{displayName},display_name) WHERE service_key=#{serviceKey}")
+    int updateSpecWithMetadata(@Param("serviceKey") String serviceKey, @Param("specJson") String specJson,
+        @Param("templateJson") String templateJson, @Param("enabled") Integer enabled,
+        @Param("serviceType") String serviceType, @Param("ownerScope") String ownerScope,
+        @Param("displayName") String displayName);
+
 }

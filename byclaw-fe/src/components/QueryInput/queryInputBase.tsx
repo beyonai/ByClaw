@@ -19,6 +19,7 @@ import styles from './index.module.less';
 import RichInput, { RichInputRef, RichInputResourceList } from './RichInput';
 import VoiceRecorder from './components/VoiceRecorder';
 import { uploadFiles } from '@/service/file';
+import { updateAttachmentByUid } from './utils/attachmentUpload';
 import { buildVoiceSendProps, type VoiceMessage } from '@/utils/voice';
 import type { IGlobalContext } from '@/layout/components/provider/global';
 import type { UploadFileRef } from './components/UploadFile';
@@ -633,16 +634,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.setState((prevState) => {
       return {
         ...prevState,
-        fileList: prevState.fileList?.map((item) => {
-          if (item.uid === fileItem.uid) {
-            return {
-              ...item,
-              ...fileItem,
-              status: 'done',
-            };
-          }
-          return item;
-        }),
+        fileList: updateAttachmentByUid(prevState.fileList, fileItem),
       };
     });
   };

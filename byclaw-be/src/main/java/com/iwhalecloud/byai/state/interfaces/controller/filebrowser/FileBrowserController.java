@@ -61,6 +61,9 @@ public class FileBrowserController {
     private FileBrowserKnowledgeTransferApplicationService knowledgeTransferApplicationService;
 
     @Autowired
+    private com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserTransferApplicationService transfers;
+
+    @Autowired
     private GlobalFileUploadValidator globalFileUploadValidator;
 
     /**
@@ -198,12 +201,47 @@ public class FileBrowserController {
     @GetMapping("/download")
     public ResponseEntity<InputStreamResource> download(
         @RequestParam("resourceId") Long resourceId,
-        @RequestParam("path") String path) {
+        @RequestParam("path") String path,
+        @org.springframework.web.bind.annotation.RequestHeader(value = "Range", required = false) String range,
+        @org.springframework.web.bind.annotation.RequestHeader(value = "If-Range", required = false) String ifRange) {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         if (StringUtils.isBlank(userCode) || resourceId == null || StringUtils.isBlank(path)) {
             return ResponseEntity.badRequest().build();
         }
         try {
+            if (transfers != null && transfers.enabled()) {
+                feign.Response remote = transfers.download(userCode, resourceId, path, range, ifRange);
+                org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                for (String name : java.util.List.of("Content-Range", "Accept-Ranges", "Content-Length",
+                        "ETag", "Last-Modified", "Content-Type", "Content-Disposition")) {
+                    remote.headers().forEach((key, values) -> {
+                        if (name.equalsIgnoreCase(key)) headers.put(name, new java.util.ArrayList<>(values));
+                    });
+                }
+                if (remote.status() != 200 && remote.status() != 206) {
+                    remote.close();
+                    return ResponseEntity.status(remote.status()).headers(headers).build();
+                }
+                if (remote.body() == null) {
+                    remote.close();
+                    return ResponseEntity.status(502).build();
+                }
+                InputStream body;
+                try {
+                    body = new java.io.FilterInputStream(remote.body().asInputStream()) {
+                        @Override public void close() throws java.io.IOException {
+                            try { super.close(); } finally { remote.close(); }
+                        }
+                    };
+                } catch (java.io.IOException failure) {
+                    remote.close();
+                    throw failure;
+                }
+                String fileName = path.substring(path.lastIndexOf('/') + 1);
+                headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''"
+                    + URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20"));
+                return ResponseEntity.status(remote.status()).headers(headers).body(new InputStreamResource(body));
+            }
             InputStream inputStream = fileBrowserService.download(userCode, resourceId, path);
             String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");

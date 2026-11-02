@@ -175,7 +175,7 @@ export class ToolEnv extends ToolEnvConnection {
     this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
     this.catalogLaunchEnv = config.launchEnv
     this.catalogToken = config.byclawBe.token
-    if (registerCatalog && config.templates?.length) this.installCatalog(ctx, config)
+    if (registerCatalog && (config.templates?.length || config.backend === 'byclaw-be')) this.installCatalog(ctx, config)
   }
 
   private installCatalog(ctx: Context, config: Config): void {
@@ -202,9 +202,10 @@ export class ToolEnv extends ToolEnvConnection {
         identity: () => ({ workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
         handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
         execute,
-        release: async () => { await runtime.ssh.releaseOwned(); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
+        release: async (destroy = true) => { await runtime.ssh.releaseOwned(destroy); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
       }
-    }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`))
+    }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`),
+    () => this.beBackend!.catalogTemplates())
     registerCatalogLifecycle(ctx, manager)
     ctx.effect(() => () => manager.dispose())
     ctx.inject(['tools'], inner => { registerCatalogTools(inner, manager) })

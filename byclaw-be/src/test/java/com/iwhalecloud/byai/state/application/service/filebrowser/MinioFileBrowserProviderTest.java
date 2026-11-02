@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 import java.io.ByteArrayInputStream;
 import java.util.List;
@@ -46,6 +47,9 @@ class MinioFileBrowserProviderTest extends com.iwhalecloud.byai.common.i18n.I18n
         assertThat(prefix.getPrefix()).isEqualTo("by/workspace/");
         assertThat(prefix.getShareType()).isEqualTo("private");
         assertThat(prefix.isRecursive()).isFalse();
+        verify(objectStorage, never()).stat(any(StorageLocation.class));
+        verify(objectStorage, never()).exists(any(StorageLocation.class));
+        verify(objectStorage, never()).metadata(any(StorageLocation.class));
 
         assertThat(items).hasSize(2);
         assertThat(items.get(0).isDir()).isTrue();

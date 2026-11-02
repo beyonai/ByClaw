@@ -51,12 +51,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 import {
   buildServiceSpecPayload,
+  buildServiceSpecEnabledPayload,
+  buildToolSandboxPayload,
+  getServiceSpecDimension,
+  getToolSandboxMetadata,
+  isServiceSpecEnabled,
+  isValidToolCover,
+  TOOL_SANDBOX_CONTRACT,
+  type ServiceSpecDimension,
   formatJsonIfValid,
   isServiceSpecAutoStartEnabled,
   type ServiceSpecConfig,
 } from './serviceSpecUtils';
 
 import EndpointLinks from './EndpointLinks';
+import ServiceSpecCatalog from './ServiceSpecCatalog';
+import ToolSandboxCover from './ToolSandboxCover';
 import RecoveryPanel from './RecoveryPanel';
 import SharedConfigPanel from './SharedConfig';
 import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
@@ -322,6 +332,8 @@ const SandboxMgr = () => {
   const [maximizedField, setMaximizedField] = useState<'specJson' | 'templateJson' | null>(null);
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
+  const [specDimension, setSpecDimension] = useState<ServiceSpecDimension>('USER');
+  const formDimension = Form.useWatch('dimension', specForm) as ServiceSpecDimension | undefined;
   const [savingSpec, setSavingSpec] = useState(false);
   const [updatingSpecKey, setUpdatingSpecKey] = useState<string | null>(null);
 
@@ -856,25 +868,44 @@ const SandboxMgr = () => {
     setResizeRecords([]);
   }, [profileForm, resizeForm, specForm, watermarkForm]);
 
-  const handleAddSpec = useCallback(() => {
-    setEditingSpec(null);
-    specForm.setFieldsValue({
-      serviceKey: '',
-      specJson: '',
-      templateJson: '',
-      enabled: true,
-    });
-    setSpecFormVisible(true);
-  }, [specForm]);
+  const handleAddSpec = useCallback(
+    (dimension: ServiceSpecDimension = 'USER') => {
+      setEditingSpec(null);
+      specForm.resetFields();
+      specForm.setFieldsValue({
+        serviceKey: '',
+        displayName: '',
+        serviceType: '',
+        dimension,
+        specJson:
+          dimension === 'TOOL'
+            ? JSON.stringify({ runtimeOptions: { toolSandbox: { contract: TOOL_SANDBOX_CONTRACT } } }, null, 2)
+            : '',
+        templateJson: '',
+        enabled: true,
+        autoStart: true,
+        description: '',
+        capabilities: [],
+        coverImage: '',
+      });
+      setSpecFormVisible(true);
+    },
+    [specForm]
+  );
 
   const handleEditSpec = useCallback(
     (record: ServiceSpecItem) => {
       setEditingSpec(record);
       specForm.setFieldsValue({
         serviceKey: record.serviceKey,
+        displayName: record.displayName || '',
+        serviceType: record.serviceType || '',
+        dimension: getServiceSpecDimension(record),
+        ...getToolSandboxMetadata(record),
         specJson: formatJsonIfValid(record.specJson),
         templateJson: record.templateJson || '',
-        enabled: isServiceSpecAutoStartEnabled(record.enabled),
+        enabled: isServiceSpecEnabled(record),
+        autoStart: isServiceSpecAutoStartEnabled(record),
       });
       setSpecFormVisible(true);
     },
@@ -895,39 +926,81 @@ const SandboxMgr = () => {
   );
 
   const handleSaveSpec = useCallback(() => {
-    specForm.validateFields().then((values) => {
-      setSavingSpec(true);
-      dispatch({
-        type: 'sandboxMgr/saveServiceSpec',
-        payload: {
+    specForm
+      .validateFields()
+      .then((values) => {
+        const spec: ServiceSpecItem = {
+          ...editingSpec,
           serviceKey: values.serviceKey,
+          displayName: values.displayName,
+          serviceType: values.serviceType,
+          ownerScope: values.dimension === 'TOOL' ? editingSpec?.ownerScope || 'USER' : values.dimension,
           specJson: values.specJson,
           templateJson: values.templateJson,
           enabled: values.enabled === false ? 0 : 1,
-        },
+        };
+        let payload = spec;
+        if (values.dimension === 'USER') payload = buildServiceSpecPayload(spec, values.autoStart !== false);
+        if (values.dimension === 'TOOL')
+          payload = buildToolSandboxPayload(spec, {
+            description: values.description,
+            capabilities: values.capabilities,
+            coverImage: values.coverImage,
+            enabled: values.enabled !== false,
+          });
+        setSavingSpec(true);
+        dispatch({
+          type: 'sandboxMgr/saveServiceSpec',
+          payload,
+          success: () => {
+            setSavingSpec(false);
+            setSpecFormVisible(false);
+            specForm.resetFields();
+            loadSpecList();
+          },
+          fail: () => {
+            setSavingSpec(false);
+          },
+        });
+      })
+      .catch(() => {
+        // Validation errors are displayed beside the form fields.
+      });
+  }, [dispatch, specForm, loadSpecList, editingSpec]);
+
+  const handleSpecEnabledChange = useCallback(
+    (record: ServiceSpecItem, checked: boolean) => {
+      const payload = buildServiceSpecEnabledPayload(record, checked);
+      setUpdatingSpecKey(record.serviceKey);
+      setSpecList((current) => current.map((item) => (item.serviceKey === record.serviceKey ? payload : item)));
+      dispatch({
+        type: 'sandboxMgr/saveServiceSpec',
+        payload,
         success: () => {
-          setSavingSpec(false);
-          setSpecFormVisible(false);
-          specForm.resetFields();
-          loadSpecList();
+          setUpdatingSpecKey(null);
+          message.success(intl.formatMessage({ id: 'sandboxMgr.market.enabledSaveSuccess' }));
         },
         fail: () => {
-          setSavingSpec(false);
+          setUpdatingSpecKey(null);
+          setSpecList((current) => current.map((item) => (item.serviceKey === record.serviceKey ? record : item)));
+          message.error(intl.formatMessage({ id: 'sandboxMgr.market.enabledSaveFailed' }));
         },
       });
-    });
-  }, [dispatch, specForm, loadSpecList]);
+    },
+    [dispatch, intl]
+  );
 
   const handleSpecAutoStartChange = useCallback(
     (record: ServiceSpecItem, checked: boolean) => {
-      const previousEnabled = record.enabled;
+      const previousSpecJson = record.specJson;
+      const payload = buildServiceSpecPayload(record, checked);
       setUpdatingSpecKey(record.serviceKey);
       setSpecList((current) =>
-        current.map((item) => (item.serviceKey === record.serviceKey ? { ...item, enabled: checked ? 1 : 0 } : item))
+        current.map((item) => (item.serviceKey === record.serviceKey ? { ...item, specJson: payload.specJson } : item))
       );
       dispatch({
         type: 'sandboxMgr/saveServiceSpec',
-        payload: buildServiceSpecPayload(record, checked),
+        payload,
         success: () => {
           setUpdatingSpecKey(null);
           message.success(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveSuccess' }));
@@ -936,7 +1009,7 @@ const SandboxMgr = () => {
           setUpdatingSpecKey(null);
           setSpecList((current) =>
             current.map((item) =>
-              item.serviceKey === record.serviceKey ? { ...item, enabled: previousEnabled } : item
+              item.serviceKey === record.serviceKey ? { ...item, specJson: previousSpecJson } : item
             )
           );
           message.error(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveFailed' }));
@@ -2245,7 +2318,7 @@ const SandboxMgr = () => {
         title={intl.formatMessage({ id: 'sandboxMgr.config.title' })}
         open={specDrawerOpen}
         onClose={handleCloseSpecDrawer}
-        width={960}
+        width={1040}
         destroyOnClose
       >
         <Tabs
@@ -2258,80 +2331,22 @@ const SandboxMgr = () => {
               children: (
                 <div className={styles.specDrawerContent}>
                   {templateRebuild.error && <Typography.Text type="warning">{templateRebuild.error}</Typography.Text>}
-                  <Row justify="end" style={{ marginBottom: 16 }}>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
-                      {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
-                    </Button>
-                  </Row>
-                  <Table<ServiceSpecItem>
-                    rowKey="serviceKey"
-                    dataSource={specList}
+                  <ServiceSpecCatalog
+                    specs={specList}
                     loading={specLoading}
-                    pagination={false}
-                    columns={[
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' }),
-                        dataIndex: 'serviceKey',
-                        width: 200,
-                        ellipsis: true,
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.specJson' }),
-                        dataIndex: 'specJson',
-                        ellipsis: true,
-                        render: (value: string) => (
-                          <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                            {value}
-                          </Typography.Paragraph>
-                        ),
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.autoStart' }),
-                        dataIndex: 'enabled',
-                        width: 100,
-                        align: 'center',
-                        render: (value: ServiceSpecItem['enabled'], record: ServiceSpecItem) => (
-                          <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}>
-                            <Switch
-                              size="small"
-                              checked={isServiceSpecAutoStartEnabled(value)}
-                              loading={updatingSpecKey === record.serviceKey}
-                              disabled={updatingSpecKey !== null}
-                              onChange={(checked) => handleSpecAutoStartChange(record, checked)}
-                            />
-                          </Tooltip>
-                        ),
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-                        width: templateRebuild.supported ? 390 : 150,
-                        align: 'center',
-                        render: (_: any, record: ServiceSpecItem) => (
-                          <Space size="small">
-                            <TemplateRebuildActions
-                              serviceKey={record.serviceKey}
-                              supported={templateRebuild.supported}
-                            />
-                            <Button
-                              size="small"
-                              type="link"
-                              icon={<EditOutlined />}
-                              onClick={() => handleEditSpec(record)}
-                            >
-                              {intl.formatMessage({ id: 'SystemParams.params.edit' })}
-                            </Button>
-                            <Popconfirm
-                              title={intl.formatMessage({ id: 'sandboxMgr.config.deleteConfirm' })}
-                              onConfirm={() => handleDeleteSpec(record)}
-                            >
-                              <Button size="small" type="link" danger icon={<DeleteOutlined />}>
-                                {intl.formatMessage({ id: 'SystemParams.params.delete' })}
-                              </Button>
-                            </Popconfirm>
-                          </Space>
-                        ),
-                      },
-                    ]}
+                    dimension={specDimension}
+                    onDimensionChange={setSpecDimension}
+                    updatingKey={updatingSpecKey}
+                    onAdd={handleAddSpec}
+                    onEdit={handleEditSpec}
+                    onDelete={handleDeleteSpec}
+                    onEnabledChange={handleSpecEnabledChange}
+                    onAutoStartChange={handleSpecAutoStartChange}
+                    renderRebuildActions={
+                      templateRebuild.supported
+                        ? (record) => <TemplateRebuildActions serviceKey={record.serviceKey} supported />
+                        : undefined
+                    }
                   />
                 </div>
               ),
@@ -2741,6 +2756,16 @@ const SandboxMgr = () => {
         width={720}
       >
         <Form form={specForm} layout="vertical" preserve={false}>
+          <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.dimension.label' })} name="dimension">
+            <Select
+              disabled
+              options={(['USER', 'TENANT', 'SHARED', 'TOOL'] as ServiceSpecDimension[]).map((dimension) => ({
+                value: dimension,
+                label: intl.formatMessage({ id: `sandboxMgr.dimension.${dimension}` }),
+              }))}
+            />
+          </Form.Item>
+
           <Form.Item
             label={intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' })}
             name="serviceKey"
@@ -2752,14 +2777,71 @@ const SandboxMgr = () => {
             />
           </Form.Item>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.displayName' })} name="displayName">
+                <Input maxLength={128} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.serviceType' })} name="serviceType">
+                <Input maxLength={64} />
+              </Form.Item>
+            </Col>
+          </Row>
+          {formDimension === 'TOOL' && (
+            <>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.description' })} name="description">
+                <Input.TextArea
+                  rows={3}
+                  maxLength={2000}
+                  showCount
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.market.descriptionPlaceholder' })}
+                />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.capabilities' })} name="capabilities">
+                <Select
+                  mode="tags"
+                  tokenSeparators={[',', '，']}
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.market.capabilitiesPlaceholder' })}
+                />
+              </Form.Item>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.market.cover' })}
+                name="coverImage"
+                extra={intl.formatMessage({ id: 'sandboxMgr.market.coverTip' })}
+                rules={[
+                  {
+                    validator: (_rule, value) =>
+                      !value || isValidToolCover(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.market.coverInvalid' }))),
+                  },
+                ]}
+              >
+                <ToolSandboxCover />
+              </Form.Item>
+            </>
+          )}
+
           <Form.Item
-            label={intl.formatMessage({ id: 'sandboxMgr.config.autoStart' })}
+            label={intl.formatMessage({ id: 'sandboxMgr.profile.enabled' })}
             name="enabled"
             valuePropName="checked"
-            tooltip={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}
           >
             <Switch />
           </Form.Item>
+
+          {formDimension === 'USER' && (
+            <Form.Item
+              label={intl.formatMessage({ id: 'sandboxMgr.config.autoStart' })}
+              name="autoStart"
+              valuePropName="checked"
+              tooltip={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}
+            >
+              <Switch />
+            </Form.Item>
+          )}
 
           <Form.Item
             label={
@@ -2817,7 +2899,10 @@ const SandboxMgr = () => {
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
                   try {
-                    JSON.parse(value);
+                    const parsed = JSON.parse(value);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                      return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.market.invalidSpec' })));
+                    }
                     return Promise.resolve();
                   } catch (e) {
                     return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.config.invalidJson' })));

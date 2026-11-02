@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.storage.ObjectStorage;
+import com.iwhalecloud.byai.common.storage.model.FileStat;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
@@ -33,6 +34,21 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
 
     public MinioFileBrowserProvider(ObjectStorage objectStorage) {
         this.objectStorage = objectStorage;
+    }
+
+    @Override
+    public boolean folderExists(String userCode, Long resourceId, String parentPath, String folderName) {
+        if (!objectStorage.supportsStat()) {
+            // Object stores retain virtual-prefix semantics; capability selection is not error fallback.
+            return FileBrowserProvider.super.folderExists(userCode, resourceId, parentPath, folderName);
+        }
+        String targetPath = resolveAbsolutePath(resourceId, normalizeDirPath(parentPath) + folderName);
+        FileStat value = objectStorage.stat(buildLocation(resolveBucket(userCode), targetPath));
+        if (value == null || value.getExists() == null
+            || (Boolean.TRUE.equals(value.getExists()) && value.getDirectory() == null)) {
+            throw new IllegalStateException("Invalid filesystem stat response");
+        }
+        return Boolean.TRUE.equals(value.getExists()) && Boolean.TRUE.equals(value.getDirectory());
     }
 
     @Override

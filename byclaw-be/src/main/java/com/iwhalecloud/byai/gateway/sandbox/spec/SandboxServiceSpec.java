@@ -36,9 +36,24 @@ public class SandboxServiceSpec {
      */
     @JsonIgnore
     public boolean isAutoStartEnabled() {
+        if (isToolSandbox()) return false;
         Map<String, String> lifecycle = runtimeOptions == null ? null : runtimeOptions.get("lifecycle");
         String value = lifecycle == null ? null : lifecycle.get("autoStart");
         return value == null || Boolean.parseBoolean(value.trim());
+    }
+
+    @JsonIgnore
+    public boolean isToolSandbox() {
+        Map<String, String> tool = runtimeOptions == null ? null : runtimeOptions.get("toolSandbox");
+        return tool != null && "byclaw.tool-sandbox/v1".equals(tool.get("contract"));
+    }
+
+    /** Availability is independent from login startup; old admitted templates remain enabled. */
+    @JsonIgnore
+    public boolean isToolSandboxEnabled() {
+        if (!isToolSandbox()) return true;
+        String value = runtimeOptions.get("toolSandbox").get("enabled");
+        return value == null || "true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim());
     }
 
     /**

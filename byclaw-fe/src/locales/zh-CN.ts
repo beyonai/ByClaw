@@ -8,6 +8,11 @@ import manager from './zh-CN/manager';
 import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
+  'queryInput.attachment.progress': '上传进度',
+  'queryInput.attachment.retry': '重试上传',
+  'queryInput.attachment.uploading': '正在上传',
+  'queryInput.attachment.processing': '服务器处理中',
+  'queryInput.attachment.failed': '上传失败，点击圆环重试',
   ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': '仅开源版 adminvip 可访问工作组模板管理。',

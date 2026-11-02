@@ -5,6 +5,7 @@ import {
   Dropdown,
   Empty,
   Modal,
+  Progress,
   Spin,
   Tooltip,
   Tree,
@@ -14,7 +15,7 @@ import {
   type MenuProps,
 } from 'antd';
 import { EllipsisOutlined, FolderAddOutlined, HomeOutlined, UploadOutlined } from '@ant-design/icons';
-import { getLocale, useIntl } from '@umijs/max';
+import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
@@ -40,6 +41,10 @@ import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/com
 import { DragType } from '@/components/QueryInput/withDrag';
 import { isUploadFileCountExceeded, isUploadFileSizeExceeded } from '@/components/QueryInput/utils/fileUpload';
 import useGlobal from '@/hooks/useGlobal';
+import useFileTransferQueue, {
+  type FileTransferContext,
+  type FileTransferTask,
+} from '@/layout/sider/components/FileSiderPanel/hooks/useFileTransferQueue';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
@@ -76,11 +81,7 @@ import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
 import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
-import {
-  CANONICAL_SESSION_ROOT,
-  appendProjectSessionsDirectory,
-  filterSessionRootItems,
-} from './sessionResourceUtils';
+import { CANONICAL_SESSION_ROOT, appendProjectSessionsDirectory, filterSessionRootItems } from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
@@ -151,6 +152,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
   const { EventEmitter, uploadFileConfig } = useGlobal();
+  const userInfo = useSelector(({ user }: any) => user?.userInfo);
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   // Tree 会缓存已触发过 loadData 的目录；刷新时必须同步清空，否则再次展开不会发起请求。
@@ -164,7 +166,6 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [createFolderName, setCreateFolderName] = useState('');
   const [createFolderPath, setCreateFolderPath] = useState('/');
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [moveTarget, setMoveTarget] = useState<FileBrowserItem | null>(null);
   const [moveTargetDirectory, setMoveTargetDirectory] = useState('/');
   const [moving, setMoving] = useState(false);
@@ -214,6 +215,44 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const currentDirectoryPath = scope === 'shared' ? browsePath : rootPath;
   const projectSessionsPathEnabled = scope === 'shared' && runtimeType === 'dsh' && !!projectId;
   const processFilesRootPath = `${CANONICAL_SESSION_ROOT}${sessionId}/`;
+  const contextIdentity = JSON.stringify([
+    scope,
+    sessionId,
+    resourceId,
+    projectId,
+    currentDirectoryPath,
+    runtimeType,
+    userInfo?.userCode,
+    userInfo?.userId,
+    userInfo?.enterpriseId,
+  ]);
+  const contextSequence = useRef(0);
+  const contextRef = useRef<(FileTransferContext & { identity: string }) | undefined>(undefined);
+  const mountedRef = useRef(true);
+  const rootRequestRef = useRef(0);
+  const batchActiveRef = useRef(false);
+  const skillUploadTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  if (contextRef.current?.identity !== contextIdentity) {
+    contextRef.current = {
+      identity: contextIdentity,
+      key: `${contextIdentity}:${++contextSequence.current}`,
+      resourceId: resourceId || '',
+      ownerKey: userInfo?.userCode || '',
+      sessionId,
+    };
+    batchActiveRef.current = false;
+  }
+  const transferContext = contextRef.current!;
+  const isCurrentContext = useCallback(
+    (context: FileTransferContext) => mountedRef.current && contextRef.current === context,
+    []
+  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const projectDirectoryIds = useMemo(() => {
     if (scope !== 'shared') return [];
@@ -317,6 +356,10 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     scope,
   ]);
   const loadRoot = useCallback(async () => {
+    const context = transferContext;
+    if (!isCurrentContext(context)) return;
+    const request = ++rootRequestRef.current;
+    const current = () => isCurrentContext(context) && request === rootRequestRef.current;
     if (scope === 'shared' && !runtimeReady) {
       setItems([]);
       return;
@@ -344,10 +387,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setLoadError(undefined);
     try {
       if (scope === 'shared') {
-        if (runtimeType === 'dsh' && projectId && browsePath === rootPath) {
-          await ensureFolder({ resourceId: resourceId!, path: rootPath });
-        }
+        if (!current()) return;
         const response = await listFiles({ resourceId: resourceId!, path: browsePath, language });
+        if (!current()) return;
         const files = unwrapListResponse<FileBrowserItem>(response);
         setItems(
           sortFileBrowserItems(
@@ -358,6 +400,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         );
       } else if (scope === 'project') {
         const cloudItems = await queryProjectCloudDrive(resourceId, '/', language);
+        if (!current()) return;
         setItems(sortFileBrowserItems(cloudItems));
       } else {
         // eslint-disable-next-line lines-around-comment
@@ -366,6 +409,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
           listFiles({ resourceId: resourceId!, path: browsePath, language }),
           projectId ? listProjectRepos(projectId) : Promise.resolve<DevloopProjectRepo[]>([]),
         ]);
+        if (!current()) return;
         if (filesResult.status === 'rejected') throw filesResult.reason;
         const reposResponse =
           reposResult.status === 'fulfilled' && Array.isArray(reposResult.value) ? reposResult.value : [];
@@ -377,6 +421,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         setItems(sortFileBrowserItems(filterSessionRootItems(files, reposResponse)));
       }
     } catch (error) {
+      if (!current()) return;
       console.error('Failed to load conversation resource files:', error);
       const responseError = error as { msg?: string; message?: string };
       const fallbackErrorMessage = intl.formatMessage({ id: `chatResource.loadFailed.${scope}` });
@@ -385,9 +430,11 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       setLoadError(errorMessage);
       setItems([]);
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [
+    transferContext,
+    isCurrentContext,
     browsePath,
     intl,
     language,
@@ -424,11 +471,14 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const loadDirectory = useCallback(
     async (path: string) => {
       if (!resourceId) return;
+      const context = transferContext;
+      if (!isCurrentContext(context)) return;
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
       const response =
         scope === 'project'
           ? await queryProjectCloudDrive(resourceId, normalizedPath, language)
           : await listFiles({ resourceId, path: normalizedPath, language });
+      if (!isCurrentContext(context)) return;
       const nextItems = sortFileBrowserItems(
         scope === 'project' ? response : unwrapListResponse<FileBrowserItem>(response)
       );
@@ -439,7 +489,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       }
       setLoadedDirectoryKeys((current) => (current.includes(normalizedPath) ? current : [...current, normalizedPath]));
     },
-    [browsePath, language, resourceId, scope]
+    [browsePath, language, resourceId, scope, isCurrentContext, transferContext]
   );
 
   const handleLoadData = useCallback(
@@ -846,47 +896,168 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     [intl, projectId, resourceId, scope, usesFileBrowser]
   );
 
-  const handleUpload = useCallback(
-    async (fileList: File[], targetPath = currentDirectoryPath) => {
-      if (!resourceId || !fileList.length || uploading) return;
-
-      // 项目云盘与知识库共用上传接口，数量校验保持一致，避免选择后才被后端拒绝。
-      if (scope === 'project' && isUploadFileCountExceeded(uploadFileConfig, fileList.length)) {
-        message.error(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig?.maxFileCount }));
-        return;
-      }
-
-      // 根目录和子目录上传共用单文件上限，整批校验通过后才开始写入。
-      if (fileList.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
-        message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
-        return;
-      }
-      setUploading(true);
-      try {
-        if (scope === 'project') {
-          const formData = new FormData();
-          fileList.forEach((file) => formData.append('files', file));
-          formData.append('resourceId', String(resourceId));
-          formData.append('directoryPath', targetPath);
-          await uploadKnowledgeFiles(formData, { responseCfg: { hideErrorTips: true } });
+  const uploadOneFile = useCallback(
+    async (task: FileTransferTask, report: (event: any) => void) => {
+      const destination = task.context!;
+      const checkContext = () => {
+        if (!isCurrentContext(destination)) throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      };
+      const onUploadProgress = (event: any) =>
+        report({
+          loaded: event.loaded || 0,
+          total: event.total || task.file.size,
+          phase: event.phase || (event.total && event.loaded >= event.total ? 'processing' : 'uploading'),
+          fileName: task.file.name,
+          resumed: event.resumed,
+        });
+      const send = async () => {
+        checkContext();
+        if (task.knowledge) {
+          const form = new FormData();
+          form.append('files', task.file);
+          form.append('resourceId', String(task.knowledge.resourceId));
+          form.append('directoryPath', task.path);
+          const result = await uploadKnowledgeFiles(form, { responseCfg: { hideErrorTips: true }, onUploadProgress });
+          if (Number(result?.summary?.failed || 0) > 0) {
+            throw new Error(result?.failedItems?.[0]?.error || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+          }
         } else {
-          await uploadFiles(resourceId, targetPath, fileList);
+          await uploadFiles(destination.resourceId, task.path, [task.file], onUploadProgress, undefined, {
+            ownerKey: destination.ownerKey,
+            overwrite: task.overwrite,
+            checkContext,
+          });
         }
-        message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
-        await loadRoot();
+      };
+      try {
+        if (!task.knowledge && task.file.name.toLowerCase().endsWith('.zip')) {
+          const pending = skillUploadTailRef.current.catch(() => undefined).then(send);
+          skillUploadTailRef.current = pending;
+          await pending;
+        } else {
+          await send();
+        }
       } catch (error: any) {
-        const errorMessage =
+        const detail =
           (typeof error === 'string' ? error : undefined) ||
           error?.response?.data?.msg ||
           error?.data?.msg ||
           error?.msg ||
           error?.message;
-        message.error(errorMessage || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
-      } finally {
-        setUploading(false);
+        throw new Error(detail || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       }
     },
-    [currentDirectoryPath, intl, loadRoot, resourceId, scope, uploadFileConfig, uploading]
+    [intl, isCurrentContext]
+  );
+  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key);
+  const uploading = fileTransfers.rows.some((row) => row.status === 'pending' || row.status === 'uploading');
+  const handleUpload = useCallback(
+    async (fileList: File[], targetPath = currentDirectoryPath) => {
+      const context = transferContext;
+      if (!resourceId || !fileList.length || batchActiveRef.current || uploading || !isCurrentContext(context)) return;
+
+      // Keep existing project count and global per-file size preflight before any writes.
+      if (scope === 'project' && isUploadFileCountExceeded(uploadFileConfig, fileList.length)) {
+        message.error(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig?.maxFileCount }));
+        return;
+      }
+      if (fileList.some((file) => isUploadFileSizeExceeded(uploadFileConfig, file.size))) {
+        message.error(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: uploadFileConfig?.maxFileSize }));
+        return;
+      }
+      batchActiveRef.current = true;
+      try {
+        // A read must not initialize storage. Prepare the target only for an explicit write.
+        if (scope !== 'project') await ensureFolder({ resourceId, path: targetPath });
+        if (!isCurrentContext(context)) return;
+        const succeeded = await fileTransfers.start(
+          fileList.map((file, index) => ({
+            id: `${context.key}:${index}`,
+            file,
+            path: targetPath,
+            overwrite: true,
+            context,
+            ...(scope === 'project'
+              ? { knowledge: { resourceId, directoryPath: targetPath, processFrontMatter: false } }
+              : {}),
+          }))
+        );
+        if (isCurrentContext(context)) {
+          if (succeeded) message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
+          await loadRoot();
+        }
+      } catch (error: any) {
+        if (isCurrentContext(context)) {
+          message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+        }
+      } finally {
+        if (isCurrentContext(context)) batchActiveRef.current = false;
+      }
+    },
+    [
+      currentDirectoryPath,
+      intl,
+      loadRoot,
+      resourceId,
+      scope,
+      uploadFileConfig,
+      uploading,
+      transferContext,
+      isCurrentContext,
+      fileTransfers.start,
+    ]
+  );
+
+  const retryUploadFile = async (id: string) => {
+    const context = fileTransfers.rows.find((row) => row.id === id)?.context;
+    if (!context || !isCurrentContext(context)) return;
+    const succeeded = await fileTransfers.retry(id);
+    if (succeeded && isCurrentContext(context)) await loadRoot();
+  };
+
+  const uploadProgress = !!fileTransfers.rows.length && (
+    <section className={styles.fileUploadProgress} aria-live="polite">
+      {fileTransfers.rows.map((row) => {
+        let label =
+          row.error || intl.formatMessage({ id: `fileBrowser.upload.${row.progress.phase}` }, { name: row.file.name });
+        if (row.status === 'pending') label = intl.formatMessage({ id: 'fileBrowser.upload.queued' });
+        if (row.status === 'success') label = intl.formatMessage({ id: 'fileBrowser.upload.success' });
+        return (
+          <div key={row.id} role="group" aria-label={row.file.name} className={styles.fileUploadRow}>
+            <div className={styles.fileUploadTitle}>
+              <Typography.Text ellipsis title={row.file.name}>
+                {row.file.name}
+              </Typography.Text>
+              {row.status === 'failed' && (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void retryUploadFile(row.id);
+                  }}
+                >
+                  {intl.formatMessage({ id: 'fileBrowser.upload.retryFile' })}
+                </Button>
+              )}
+            </div>
+            <Typography.Text type="secondary">{label}</Typography.Text>
+            <Progress
+              percent={
+                row.status === 'success'
+                  ? 100
+                  : Math.min(99, Math.floor((row.progress.loaded / Math.max(1, row.progress.total)) * 100))
+              }
+              status={row.status === 'failed' ? 'exception' : row.status === 'success' ? 'success' : 'active'}
+              size="small"
+            />
+            {row.status === 'failed' && !row.knowledge && typeof row.progress.resumed === 'boolean' && (
+              <Typography.Text type="secondary">
+                {intl.formatMessage({ id: 'fileBrowser.upload.resumeHint' })}
+              </Typography.Text>
+            )}
+          </div>
+        );
+      })}
+    </section>
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -1094,6 +1265,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     };
     return (
       <>
+        {uploadProgress}
         <div className={projectStyles.resourceCardGrid}>
           {visibleProjectItems.length ? (
             visibleProjectItems.map((item) => (
@@ -1217,94 +1389,98 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             : intl.formatMessage({ id: emptyTextId }))
         }
         contentBefore={
-          navigationEnabled ? (
-            <>
-              <div className={styles.localSharedBreadcrumb}>
-                <Breadcrumb
-                  items={sharedBreadcrumbItems.map((item) => ({
-                    title: item.clickable ? (
-                      <button
-                        type="button"
-                        className={styles.localSharedBreadcrumbButton}
-                        onClick={() => setBrowsePath(item.path)}
-                      >
-                        {item.title}
-                      </button>
-                    ) : (
-                      item.title
-                    ),
-                  }))}
-                />
-              </div>
-              {resourceId && !hideProjectToolbar && (
-                <div className={styles.localSharedToolbar}>
-                  <Upload
-                    showUploadList={false}
-                    multiple
-                    disabled={uploading}
-                    beforeUpload={(file, fileList) => {
-                      if (file === fileList[0]) void handleUpload(fileList as unknown as File[], currentDirectoryPath);
-                      return false;
-                    }}
-                  >
-                    <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+          <>
+            {uploadProgress}
+            {navigationEnabled ? (
+              <>
+                <div className={styles.localSharedBreadcrumb}>
+                  <Breadcrumb
+                    items={sharedBreadcrumbItems.map((item) => ({
+                      title: item.clickable ? (
+                        <button
+                          type="button"
+                          className={styles.localSharedBreadcrumbButton}
+                          onClick={() => setBrowsePath(item.path)}
+                        >
+                          {item.title}
+                        </button>
+                      ) : (
+                        item.title
+                      ),
+                    }))}
+                  />
+                </div>
+                {resourceId && !hideProjectToolbar && (
+                  <div className={styles.localSharedToolbar}>
+                    <Upload
+                      showUploadList={false}
+                      multiple
+                      disabled={uploading}
+                      beforeUpload={(file, fileList) => {
+                        if (file === fileList[0])
+                          void handleUpload(fileList as unknown as File[], currentDirectoryPath);
+                        return false;
+                      }}
+                    >
+                      <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+                        <Button
+                          size="small"
+                          aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                          icon={<UploadOutlined />}
+                          loading={uploading}
+                        />
+                      </Tooltip>
+                    </Upload>
+                    <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
                       <Button
                         size="small"
-                        aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-                        icon={<UploadOutlined />}
-                        loading={uploading}
+                        aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+                        icon={<FolderAddOutlined />}
+                        onClick={() => {
+                          setCreateFolderPath(currentDirectoryPath);
+                          setCreateFolderName('');
+                          setCreateFolderOpen(true);
+                        }}
                       />
                     </Tooltip>
-                  </Upload>
-                  <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
+                  </div>
+                )}
+              </>
+            ) : scope !== 'session' && resourceId && !hideProjectToolbar ? (
+              <div className={styles.localSharedToolbar}>
+                <Upload
+                  showUploadList={false}
+                  multiple
+                  disabled={uploading}
+                  beforeUpload={(file, fileList) => {
+                    if (file === fileList[0]) void handleUpload(fileList as unknown as File[], currentDirectoryPath);
+                    return false;
+                  }}
+                >
+                  <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
                     <Button
                       size="small"
-                      aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
-                      icon={<FolderAddOutlined />}
-                      onClick={() => {
-                        setCreateFolderPath(currentDirectoryPath);
-                        setCreateFolderName('');
-                        setCreateFolderOpen(true);
-                      }}
+                      aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                      icon={<UploadOutlined />}
+                      loading={uploading}
                     />
                   </Tooltip>
-                </div>
-              )}
-            </>
-          ) : scope !== 'session' && resourceId && !hideProjectToolbar ? (
-            <div className={styles.localSharedToolbar}>
-              <Upload
-                showUploadList={false}
-                multiple
-                disabled={uploading}
-                beforeUpload={(file, fileList) => {
-                  if (file === fileList[0]) void handleUpload(fileList as unknown as File[], currentDirectoryPath);
-                  return false;
-                }}
-              >
-                <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}>
+                </Upload>
+                <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
                   <Button
                     size="small"
-                    aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-                    icon={<UploadOutlined />}
-                    loading={uploading}
+                    aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+                    icon={<FolderAddOutlined />}
+                    onClick={() => {
+                      setCreateFolderPath(currentDirectoryPath);
+                      setCreateFolderName('');
+                      setCreateFolderOpen(true);
+                    }}
                   />
                 </Tooltip>
-              </Upload>
-              <Tooltip title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}>
-                <Button
-                  size="small"
-                  aria-label={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
-                  icon={<FolderAddOutlined />}
-                  onClick={() => {
-                    setCreateFolderPath(currentDirectoryPath);
-                    setCreateFolderName('');
-                    setCreateFolderOpen(true);
-                  }}
-                />
-              </Tooltip>
-            </div>
-          ) : null
+              </div>
+            ) : null}
+          </>
         }
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}

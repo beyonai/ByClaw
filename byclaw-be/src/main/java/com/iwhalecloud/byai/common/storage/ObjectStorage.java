@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.util.List;
 
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.common.storage.model.FileStat;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
@@ -30,6 +31,15 @@ public interface ObjectStorage {
     }
 
     boolean exists(StorageLocation location);
+
+    /** Explicit backend capability, never inferred by catching a failed remote request. */
+    default boolean supportsStat() {
+        return false;
+    }
+
+    default FileStat stat(StorageLocation location) {
+        throw new UnsupportedOperationException("Physical filesystem stat is not supported");
+    }
 
     List<StorageObject> list(StoragePrefix prefix, Integer maxDepth);
 
