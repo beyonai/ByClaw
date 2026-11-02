@@ -1,6 +1,6 @@
 import { sessionLog } from './session-runtime-fixtures.mjs'
 import assert from 'node:assert/strict'
-import { EventType } from '@byclaw/by-framework'
+import { EventType, TaskCancelledError } from '@byclaw/by-framework'
 import {
   appendByClawContext,
   appendByClawInboundUserMessage,
@@ -21,6 +21,7 @@ import {
   emitByClawTurnFailure,
   resolveByClawTurnModelSelection,
   byClawCommandSessionRoute,
+  ByClawDshSessionRuntime,
 } from '../lib/session-runtime.js'
 import {
   byClawModelErrorFromRequestFailure,
@@ -148,6 +149,38 @@ assert.equal(failureChunks[0][2].metadata.provider_message.includes('sk-secret')
 assert.equal(failureChunks[0][2].metadata.diagnostic_id, 'trace-error:model')
 assert.equal(failureChunks[0][3].eventType, EventType.ANSWER_DELTA)
 assert.equal(failureChunks[0][3].status, '_ERROR_')
+
+// A failed filesystem/tool-environment hook ends the DSH turn before any model
+// answer. Preserve the failure for the caller and publish a visible error before
+// the framework closes its stream, rather than a blank successful response.
+const runtimeFailures = []
+const runtimeFailure = new Error('DSH turn failed: launch failed with api_key=private-secret')
+const failureRuntime = Object.assign(Object.create(ByClawDshSessionRuntime.prototype), {
+  ctx: { logger: { warn() {} } },
+  options: { sourceAgentType: 'BYCLAW_DSH' },
+  commandSessionRoute: () => ({ externalRootSessionId: 'failed-session' }),
+  assertAccepting() {},
+  waitingTurnFor: () => undefined,
+  async queueAsk() { throw runtimeFailure },
+  emitterFor: () => ({ async emitChunk(...args) { runtimeFailures.push(args) } }),
+})
+const failedCommand = {
+  header: { sessionId: 'failed-session', userCode: 'test-user', messageId: 'failed-message' },
+  extraPayload: {},
+}
+const failedContext = { sessionId: 'failed-session', traceId: 'failed-trace', isCancelRequested: () => false }
+await assert.rejects(failureRuntime.askPrepared(failedCommand, failedContext), error => error === runtimeFailure)
+assert.equal(runtimeFailures.length, 1, 'runtime failures must publish an assistant-visible error')
+assert.equal(runtimeFailures[0][2].metadata.error_domain, 'RUNTIME')
+assert.equal(runtimeFailures[0][2].metadata.session_status, 'failed')
+assert.equal(runtimeFailures[0][3].status, '_ERROR_')
+assert.equal(JSON.stringify(runtimeFailures).includes('private-secret'), false)
+runtimeFailures.length = 0
+await assert.rejects(failureRuntime.askPrepared(failedCommand, { ...failedContext, isCancelRequested: () => true }))
+assert.equal(runtimeFailures.length, 0, 'a cancelled turn must not display a runtime failure')
+failureRuntime.queueAsk = async () => { throw new TaskCancelledError('runtime closed') }
+await assert.rejects(failureRuntime.askPrepared(failedCommand, failedContext), { name: 'TaskCancelledError' })
+assert.equal(runtimeFailures.length, 0, 'runtime teardown must not display a failure before cancellation is requested')
 
 assert.equal(byClawInboundText(businessText), businessText)
 assert.equal(byClawInboundText(businessText).includes('<user-request>'), false)
@@ -456,7 +489,9 @@ assert.deepEqual(first[1].source, { kind: 'plugin:byclaw-context' })
 assert.match(first[1].content[0].text, /session_id: 350860623218590448/u)
 assert.match(first[1].content[0].text, /cwd: \/workspace\/byclaw/u)
 assert.match(first[1].content[0].text, /default_output_root: \/srv\/byclaw\/by\/\.sessions\/350860623218590448/u)
-assert.match(first[1].content[0].text, /交付产物使用 default_output_root/u)
+assert.match(first[1].content[0].text, /需要长期保留的源码、配置、测试和用户交付物/u)
+assert.match(first[1].content[0].text, /上传附件、生成媒体和一次性中间文件/u)
+assert.match(first[1].content[0].text, /不得把内部会话状态作为业务文件/u)
 assert.match(first[2].content[0].text, /需求说明\.pdf/u)
 assert.match(first[2].content[0].text, /研发知识库/u)
 assert.match(first[2].content[0].text, /测试研发项目/u)

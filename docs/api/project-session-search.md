@@ -9,6 +9,7 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `projectId` | number | 是 | 当前项目 ID |
+| `sessionIds` | number[] | 否 | 仅返回这些会话 ID，用于批量补充指定会话的元数据 |
 | `pageNum` | number | 否 | 页码，默认沿用分页组件配置 |
 | `pageSize` | number | 否 | 每页条数，前端默认 30 |
 | `keyword` | string | 否 | 搜索关键字；空值时返回项目全部会话 |
@@ -40,6 +41,8 @@
 | `matchText` | string | 一条命中消息的截断片段，用于侧栏展示命中依据 |
 
 新模式按字面量包含匹配；`%`、`_` 与 `\\` 不会被当作 SQL 通配符。结果排序保持 `COALESCE(update_time, create_time) DESC, create_time DESC`。
+
+会话的 `createTime`、`updateTime` 在 Java 接口中使用北京时间 `yyyy-MM-dd HH:mm:ss`，字符串不含时区标记。前端显示相对时间或合并实时消息排序时，应按 `+08:00` 解析此格式；带时区的 ISO 日期和毫秒时间戳保留其原始时间含义，不能按浏览器本地时区重新解释接口日期。
 
 请求示例：
 

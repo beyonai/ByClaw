@@ -64,6 +64,8 @@ export class HistoryService {
     this.group.projectAccess(...args);
   management = (...args: Parameters<GroupHistory["management"]>) => this.group.management(...args);
   detail = (...args: Parameters<GroupHistory["detail"]>) => this.group.detail(...args);
+  groupMemberApiKey = (...args: Parameters<GroupHistory["groupMemberApiKey"]>) =>
+    this.group.groupMemberApiKey(...args);
   settings = (...args: Parameters<GroupHistory["settings"]>) => this.group.settings(...args);
   lifecycle = (...args: Parameters<GroupHistory["lifecycle"]>) => this.group.lifecycle(...args);
   tasks = (...args: Parameters<GroupHistory["tasks"]>) => this.group.tasks(...args);

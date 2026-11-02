@@ -7,11 +7,14 @@ import { ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/se
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
 import { getProject } from '@/pages/projectSpace/service';
+import { listProjectSessionsByQo } from '@/service/devloop';
 import FileResourcePanel from '../FileResourcePanel';
 
 const MB = 1024 * 1024;
 const mockIntl = getLocaleIntl();
 let mockConfig: Partial<IAgentFileUploadConf> | undefined;
+let mockSessions: Array<{ sessionId: string; sessionName?: string }> = [];
+let mockExpandAction: false | 'click' | 'doubleClick' | undefined;
 
 jest.mock('antd', () => {
   const actualAntd = jest.requireActual<typeof import('antd')>('antd');
@@ -25,6 +28,7 @@ jest.mock('antd', () => {
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
   useIntl: () => mockIntl,
+  useSelector: () => mockSessions,
 }));
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -32,7 +36,7 @@ jest.mock('@/hooks/useGlobal', () => ({
 }));
 jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
-jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
+jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn(), listProjectSessionsByQo: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
 jest.mock('@/utils/file', () => ({ downloadFile: jest.fn() }));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
@@ -59,22 +63,34 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     contentBefore,
     items,
     loading,
+    expandAction,
     onAction,
+    onLoadData,
     onNodeClick,
     getDisplayName,
   }: {
     contentBefore: ReactNode;
     items: FileBrowserItem[];
     loading: boolean;
+    expandAction?: false | 'click' | 'doubleClick';
     onAction: (action: string, item: FileBrowserItem) => void;
+    onLoadData: (item: FileBrowserItem) => Promise<void>;
     onNodeClick: (event: React.MouseEvent, item: FileBrowserItem) => void;
     getDisplayName?: (item: FileBrowserItem) => string;
   }) {
+    mockExpandAction = expandAction;
     return (
       <section aria-label="File space" aria-busy={loading}>
         {contentBefore}
         {items.map((item) => (
-          <button key={`open-${item.path}`} type="button" onClick={(event) => onNodeClick(event, item)}>
+          <button
+            key={`open-${item.path}`}
+            type="button"
+            onClick={(event) => {
+              if (item.isDir && expandAction !== false) void onLoadData(item);
+              onNodeClick(event, item);
+            }}
+          >
             Open {getDisplayName?.(item) || item.name}
           </button>
         ))}
@@ -88,6 +104,13 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
             Quote {item.name}
           </button>
         ))}
+        {items
+          .filter((item) => item.isDir)
+          .map((item) => (
+            <button key={`expand-${item.path}`} type="button" onClick={() => void onLoadData(item)}>
+              Expand {getDisplayName?.(item) || item.name}
+            </button>
+          ))}
       </section>
     );
   },
@@ -168,6 +191,234 @@ it('resolves project folder labels after returning to shared root and preserves 
   });
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_42/' }));
   expect(screen.getByText('其他项目')).toBeInTheDocument();
+});
+
+it('opens project sessions through canonical session directories without filesystem aliases', async () => {
+  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
+    path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
+  );
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="8798"
+        projectId={-1}
+        project={{
+          projectId: '-1',
+          projectName: '默认项目',
+          sessions: [{ sessionId: '8798', sessionName: '你好' }],
+        } as any}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  expect(screen.getByRole('button', { name: 'Open .sessions' })).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(screen.getByRole('button', { name: 'Open 你好' })).toBeInTheDocument();
+  expect(listFiles).toHaveBeenCalledWith(expect.objectContaining({ path: '/by/.sessions/' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open 你好' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.sessions/8798/' }));
+});
+
+it('returns from the virtual sessions directory to the DSH project root', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="8798"
+        projectId={-1}
+        project={{ projectId: '-1', projectName: '默认项目', sessions: [{ sessionId: '8798' }] } as any}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '默认项目' }));
+  });
+
+  expect(ensureFolder).toHaveBeenCalledTimes(2);
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_-1/' }));
+  expect(screen.getByRole('button', { name: 'Open .sessions' })).toBeInTheDocument();
+});
+
+it('keeps physical session directories that are missing from project session metadata', async () => {
+  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
+    path === '/by/.sessions/'
+      ? [
+          { name: '11410351', path: '/by/.sessions/11410351/', isDir: true },
+          { name: '11410999', path: '/by/.sessions/11410999/', isDir: true },
+        ]
+      : []
+  );
+  mockSessions = [{ sessionId: '11410351', sessionName: '用户发起问候' }];
+  jest.mocked(listProjectSessionsByQo).mockResolvedValue({
+    data: {
+      list: [
+        { sessionId: '11410351', sessionName: '用户发起问候' },
+        { sessionId: '11410999', sessionName: '图片处理' },
+      ],
+    },
+  });
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="11410351"
+        projectId={-1}
+        project={{
+          projectId: '-1',
+          projectName: '默认项目',
+          sessions: [{ sessionId: '11410351', sessionName: '用户发起问候' }],
+        } as any}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+
+  expect(listFiles).toHaveBeenCalledWith(
+    expect.objectContaining({ resourceId: '42', path: '/by/.sessions/' })
+  );
+  expect(listProjectSessionsByQo).toHaveBeenCalledWith(
+    { projectId: -1, sessionIds: ['11410351', '11410999'], pageNum: 1, pageSize: 2 },
+    { responseCfg: { hideErrorTips: true } }
+  );
+  expect(screen.getByRole('button', { name: 'Open 用户发起问候' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open 图片处理' })).toBeInTheDocument();
+});
+
+it('loads session names by directory IDs when expanding sessions from the project root', async () => {
+  jest.mocked(listFiles).mockImplementation(async ({ path }) => {
+    if (path === '/by/.shared/project_-1/') {
+      return [{ name: '.sessions', path: '/by/.sessions/', isDir: true }];
+    }
+    if (path === '/by/.sessions/') {
+      return [
+        { name: '11407993', path: '/by/.sessions/11407993/', isDir: true },
+        { name: '66', path: '/by/.sessions/66/', isDir: true },
+      ];
+    }
+    return [];
+  });
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="11407993"
+        projectId={-1}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Expand .sessions' }));
+  });
+
+  expect(listProjectSessionsByQo).toHaveBeenCalledWith(
+    { projectId: -1, sessionIds: ['11407993', '66'], pageNum: 1, pageSize: 2 },
+    { responseCfg: { hideErrorTips: true } }
+  );
+});
+
+it('does not reload the current session directory when live session names update', async () => {
+  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
+    path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
+  );
+  const panel = () => (
+    <FileResourcePanel
+      scope="shared"
+      sessionId="8798"
+      projectId={-1}
+      project={{
+        projectId: '-1',
+        projectName: '默认项目',
+        sessions: [{ sessionId: '8798', sessionName: '' }],
+      } as any}
+      runtimeType="dsh"
+      resourceId="42"
+      onOpenDetail={jest.fn()}
+    />
+  );
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(panel());
+  });
+  expect(mockExpandAction).toBe(false);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open 8798' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  const sessionPathCalls = () =>
+    jest.mocked(listFiles).mock.calls.filter(([request]) => request.path === '/by/.sessions/8798/');
+  expect(sessionPathCalls()).toHaveLength(1);
+
+  mockSessions = [{ sessionId: '8798', sessionName: '你好' }];
+  await act(async () => {
+    view.rerender(panel());
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(sessionPathCalls()).toHaveLength(1);
+});
+
+it('does not ensure or reload the DSH project root when only live session names update', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  const panel = () => (
+    <FileResourcePanel
+      scope="shared"
+      sessionId="8798"
+      projectId={-1}
+      project={{
+        projectId: '-1',
+        projectName: '默认项目',
+        sessions: [{ sessionId: '8798', sessionName: '' }],
+      } as any}
+      runtimeType="dsh"
+      resourceId="42"
+      onOpenDetail={jest.fn()}
+    />
+  );
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(panel());
+  });
+  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(listFiles).toHaveBeenCalledTimes(1);
+
+  mockSessions = [{ sessionId: '8798', sessionName: '你好' }];
+  await act(async () => {
+    view.rerender(panel());
+  });
+
+  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(listFiles).toHaveBeenCalledTimes(1);
 });
 
 it('retries failed project names and refreshes renamed projects on list refresh', async () => {
@@ -251,6 +502,8 @@ function getUploadedRequest(scope: 'shared' | 'project') {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSessions = [];
+  mockExpandAction = undefined;
   mockConfig = { maxFileSize: 512 };
   jest.spyOn(message, 'error').mockImplementation(jest.fn());
   jest.spyOn(message, 'success').mockImplementation(jest.fn());
@@ -259,6 +512,7 @@ beforeEach(() => {
   jest.mocked(queryProjectCloudDrive).mockResolvedValue(folders);
   jest.mocked(uploadFiles).mockResolvedValue({});
   jest.mocked(uploadKnowledgeFiles).mockResolvedValue({});
+  jest.mocked(listProjectSessionsByQo).mockResolvedValue({ data: { list: [] } });
 });
 
 afterEach(() => {

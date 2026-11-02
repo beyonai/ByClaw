@@ -1,5 +1,6 @@
 import { getIntl, getLocale } from '@umijs/max';
 import { Modal } from 'antd';
+import { isPersonalStorageAdmissionEnabled } from './personalStorageAdmission';
 
 export interface NasQuotaDetails {
   errorType: 'NAS_QUOTA_EXCEEDED';
@@ -55,6 +56,8 @@ export const formatNasQuota = (quota: NasQuotaDetails, locale: string, t: Format
 
 /** HTTP and SSE/WebSocket share one modal. Parallel failures never stack dialogs. */
 export const showNasQuotaError = (value: unknown): string | undefined => {
+  // Let the caller's normal error path retain actual HTTP/filesystem failures.
+  if (!isPersonalStorageAdmissionEnabled()) return undefined;
   const quota = readNasQuota(value);
   if (!quota) return undefined;
   const t: FormatMessage = (id, values) => getIntl().formatMessage({ id }, values);

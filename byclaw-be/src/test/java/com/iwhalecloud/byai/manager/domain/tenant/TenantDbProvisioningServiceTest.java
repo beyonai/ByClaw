@@ -14,6 +14,18 @@ class TenantDbProvisioningServiceTest {
     private static final String SANDBOX_ID = "803cfd04-ca9f-44f5-b2e1-85d8afeae0b2";
 
     @Test
+    void privateMicrovmDatabaseEndpointUsesTlsGatewayWithoutBecomingNativeTcp() {
+        String endpoint="https://15432-sbx-test.cn-beijing-vpc.sandbox.aliyuncs.com";
+        var parsed=TenantDbProvisioningService.parseEndpoint(endpoint,"microvm--cn-beijing--sbx-test");
+        assertEquals("15432-sbx-test.cn-beijing-vpc.sandbox.aliyuncs.com",parsed.host());
+        assertEquals(443,parsed.port());
+        assertThrows(IllegalArgumentException.class,()->TenantDbProvisioningService.parseEndpoint(
+            "https://15432-sbx-test.cn-beijing.sandbox.aliyuncs.com","microvm--cn-beijing--sbx-test"));
+        assertThrows(IllegalArgumentException.class,()->PrivateDatabaseSocketFactory.privateUrl(
+            "wss://15432-sbx-test.cn-beijing.sandbox.aliyuncs.com/postgresql"));
+    }
+
+    @Test
     void renewsExpiredReadyLeaseWithoutChangingAuthorityVersions() throws Exception {
         verifyLeaseRenewal(false, true);
     }

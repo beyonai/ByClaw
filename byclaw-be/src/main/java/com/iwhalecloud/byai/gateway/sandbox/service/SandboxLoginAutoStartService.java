@@ -33,6 +33,8 @@ public class SandboxLoginAutoStartService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLoginAutoStartService.class);
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper SPEC_JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
     private final SandboxServiceSpecEntityMapper serviceSpecMapper;
     private final SandboxService sandboxService;
     private final Executor executor;
@@ -119,14 +121,14 @@ public class SandboxLoginAutoStartService {
 
             Set<String> serviceKeys = new LinkedHashSet<>();
             for (SandboxServiceSpecEntity spec : specs) {
-                if (spec != null && StringUtils.isNotBlank(spec.getServiceKey())) {
+                if (spec != null && StringUtils.isNotBlank(spec.getServiceKey()) && isLoginService(spec)) {
                     serviceKeys.add(spec.getServiceKey().trim());
                 }
             }
 
             if (serviceKeys.contains(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE)) {
                 String preferred = StringUtils.trimToNull(sandboxService.getPreferredServiceKey(userCode));
-                if (preferred != null) {
+                if (preferred != null && sandboxService.isServiceKeyAutoStartEnabled(preferred)) {
                     serviceKeys.remove(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
                     serviceKeys.add(preferred);
                 }
@@ -140,6 +142,17 @@ public class SandboxLoginAutoStartService {
         finally {
             if (!pending) inProgressUsers.remove(userCode, generation);
         }
+    }
+
+    private boolean isLoginService(SandboxServiceSpecEntity spec) throws java.io.IOException {
+        // File compute is provisioned by the storage plane, never by a user business launch.
+        if (StringUtils.isBlank(spec.getSpecJson())) return true;
+        com.fasterxml.jackson.databind.JsonNode options = SPEC_JSON.readTree(spec.getSpecJson()).path("runtimeOptions");
+        if (options.has("fileService")) {
+            return false;
+        }
+        com.fasterxml.jackson.databind.JsonNode autoStart = options.path("lifecycle").path("autoStart");
+        return autoStart.isMissingNode() || autoStart.isNull() || Boolean.parseBoolean(autoStart.asText().trim());
     }
 
     // Retain only services blocked by storage; successful services must not be launched again.

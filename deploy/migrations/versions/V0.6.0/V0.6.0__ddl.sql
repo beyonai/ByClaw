@@ -274,3 +274,18 @@ ALTER TABLE byai.byai_session_member ADD COLUMN state VARCHAR(64) DEFAULT '00A';
 COMMENT ON COLUMN byai.byai_session_member.api_key IS 'api密钥';
 COMMENT ON COLUMN byai.byai_session_member.update_date IS '更新时间';
 COMMENT ON COLUMN byai.byai_session_member.state IS '状态：00A有效，00X无效';
+
+
+-- BEGIN HACU ENTERPRISE CONTACT DETAILS
+-- Purpose: add optional enterprise contact details, independent of personal member accounts.
+-- Prerequisite: byai.po_enterprise_info exists and these two columns have not been added.
+-- Apply this section once before deploying the backend that reads/writes enterprise contact details.
+-- Verification: existing rows remain NULL; profile reads, contact-only updates and explicit clearing succeed.
+-- Rollback: retain nullable columns and existing contact data when rolling back application code.
+BEGIN;
+ALTER TABLE byai.po_enterprise_info ADD COLUMN contact_phone VARCHAR(64);
+ALTER TABLE byai.po_enterprise_info ADD COLUMN contact_email VARCHAR(254);
+COMMENT ON COLUMN byai.po_enterprise_info.contact_phone IS '企业联系电话，选填；不从所有者或成员个人账号自动填充';
+COMMENT ON COLUMN byai.po_enterprise_info.contact_email IS '企业联系邮箱，选填；不从所有者或成员个人账号自动填充';
+COMMIT;
+-- END HACU ENTERPRISE CONTACT DETAILS

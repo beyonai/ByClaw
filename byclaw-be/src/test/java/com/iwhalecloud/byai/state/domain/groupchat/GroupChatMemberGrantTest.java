@@ -116,7 +116,10 @@ class GroupChatMemberGrantTest extends I18nTestSupport {
         ReflectionTestUtils.setField(authTarget, "privilegeGrantMapper", grantMapper);
         ReflectionTestUtils.setField(authTarget, "authRedisSyncService", cacheSync);
         authService = proxy(authTarget, manager, AuthApplicationService.class);
-        GroupChatApplicationService target = new GroupChatApplicationService(sessions, mock(SequenceService.class),
+        var sequence = mock(SequenceService.class);
+        when(sequence.nextVal()).thenReturn(9007199254740995L);
+        when(members.save(any())).thenReturn(1);
+        GroupChatApplicationService target = new GroupChatApplicationService(sessions, sequence,
             authorization, members, mock(ProjectApplicationService.class), projectMembers,
             mock(ByaiMessageMapper.class), mock(GroupChatExecutionCoordinator.class), events, mock(SessionExtService.class));
         ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));

@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.List;
+
 /**
  * 项目会话查询对象
  */
@@ -23,6 +25,9 @@ public class ProjectSessionQo extends QueryObject {
 
     /** 创建人 */
     private Long createBy;
+
+    /** 仅查询指定会话；用于按实际会话目录批量补充名称。 */
+    private List<Long> sessionIds;
 
     /**
      * 会话搜索方式；未传或非法值保持旧的会话标题、摘要搜索行为，保证既有调用兼容。

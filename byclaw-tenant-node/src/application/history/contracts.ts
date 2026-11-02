@@ -34,6 +34,7 @@ export interface HistoryRepository {
   acknowledgements(sessionId: string, messageIds: string[]): Promise<Row[]>;
   session(id: string): Promise<Row | null>;
   member(sessionId: string, userId: string): Promise<Row | null>;
+  groupMemberApiKey(sessionId: string, userId: string): Promise<string | null>;
   members(sessionId: string): Promise<Row[]>;
   extensions(sessionId: string): Promise<Row[]>;
   messages(filter: MessageFilter): Promise<Row[]>;

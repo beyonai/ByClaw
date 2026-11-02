@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 case "${BYCLAW_DSH_TOOL_ENV:-}" in
-    static|opensandbox|byclaw-be) ;;
-    *) echo 'Lean Harness requires BYCLAW_DSH_TOOL_ENV=static, opensandbox or byclaw-be and a paired Dockerfile.tool_slim image.' >&2; exit 2 ;;
+    none|static|opensandbox|byclaw-be) ;;
+    *) echo 'Lean Harness requires BYCLAW_DSH_TOOL_ENV=none, static, opensandbox or byclaw-be; tool backends require a paired tools image.' >&2; exit 2 ;;
 esac
 if [[ "${1:-}" == tools ]]; then
     echo 'Run tools mode with Dockerfile.tool_slim, not the lean Harness image.' >&2

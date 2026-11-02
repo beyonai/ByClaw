@@ -73,6 +73,9 @@ public class ChatProcessContext {
     /** 会话ID */
     public Long sessionId;
 
+    /** 经群聊出站装饰器校验的归属群 ID；仅进程内传递，不接受客户端请求赋值。 */
+    public Long groupSessionId;
+
     /** 推荐问题异步任务 */
     public SuggestionQuestionVo suggestionQuestion;
 

@@ -377,6 +377,7 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         groupChat.put("initiatorUserId", execution.getInitiatorUserId());
         groupChat.put("targetAgentId", execution.getTargetAgentId());
         gatewayParams.put("groupChat", groupChat);
+        context.setGroupSessionId(execution.getGroupSessionId());
         Map<String, Object> storedScope = coordinationService == null ? null : coordinationService.findScope(context.sessionId);
         Map<String, Object> scope = storedScope == null ? null
             : memberRouting.withRoutes(storedScope, userService.findById(execution.getInitiatorUserId()).getUserCode());

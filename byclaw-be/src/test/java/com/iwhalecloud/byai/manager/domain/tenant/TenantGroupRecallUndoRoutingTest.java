@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -30,7 +31,8 @@ class TenantGroupRecallUndoRoutingTest {
         var management = mock(TenantGroupManagementService.class);
         var controller = controller(local);
         var aspect = new TenantGroupChatRoutingAspect(mock(TenantNodeClient.class), mock(GroupChatReadService.class),
-            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class));
+            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class),
+            mock(TenantModeService.class));
         ReflectionTestUtils.setField(aspect, "management", management);
         var factory = new AspectJProxyFactory(controller);
         factory.setProxyTargetClass(true);

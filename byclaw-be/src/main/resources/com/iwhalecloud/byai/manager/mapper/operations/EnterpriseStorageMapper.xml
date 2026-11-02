@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.EnterpriseStorageMapper">
+    <resultMap id="cloud" type="com.iwhalecloud.byai.manager.vo.operations.EnterpriseCloudResourceVo">
+        <result column="project_id" property="projectId" />
+        <result column="project_name" property="projectName" />
+        <result column="cloud_resource_id" property="cloudResourceId" />
+        <result column="resource_code" property="knCode" />
+    </resultMap>
+    <!-- 工作组项目和云盘在平台库；Node 只保存会话。解散但未删的云盘继续计入用量。 -->
+    <select id="selectClouds" resultMap="cloud">
+        SELECT p.project_id, p.project_name, p.cloud_resource_id, r.resource_code
+        FROM byai.byai_project p
+        LEFT JOIN byai.ss_resource r ON r.resource_id=p.cloud_resource_id
+        WHERE p.enterprise_id=#{enterpriseId} AND (p.delete_flag IS NULL OR p.delete_flag &lt;&gt; '1')
+          AND (p.project_type='hacu' OR EXISTS (
+            SELECT 1 FROM byai.byai_session s WHERE s.project_id=p.project_id
+              AND s.enterprise_id=#{enterpriseId} AND s.session_type='hs_as'
+          ))
+        ORDER BY p.project_id
+    </select>
+    <select id="selectCloudEnterprises" resultType="java.lang.Long">
+        SELECT DISTINCT p.enterprise_id FROM byai.byai_project p
+        JOIN byai.ss_resource r ON r.resource_id=p.cloud_resource_id AND r.resource_biz_type='KG_CLOUD'
+        WHERE p.cloud_resource_id=#{resourceId} AND p.enterprise_id IS NOT NULL
+          AND (p.delete_flag IS NULL OR p.delete_flag &lt;&gt; '1')
+          AND (p.project_type='hacu' OR EXISTS (
+            SELECT 1 FROM byai.byai_session s WHERE s.project_id=p.project_id
+              AND s.enterprise_id=p.enterprise_id AND s.session_type='hs_as'
+          ))
+    </select>
+    <select id="commerciallyManaged" resultType="boolean">
+        SELECT EXISTS (SELECT 1 FROM byai.tenant_config WHERE enterprise_id=#{enterpriseId}
+          AND params_code='COMMERCIAL_MANAGED' AND params_value='true')
+    </select>
+    <select id="canRead" resultType="boolean">
+        SELECT EXISTS (SELECT 1 FROM byai.po_users u WHERE u.user_id=#{actorId}
+          AND u.state='A' AND UPPER(COALESCE(u.is_locked,'N'))!='Y'
+          AND (LOWER(u.user_code)='adminvip' OR EXISTS (
+            SELECT 1 FROM byai.tenant_user_membership m WHERE m.user_id=u.user_id
+              AND m.enterprise_id=#{enterpriseId} AND m.status='ACTIVE'
+          )))
+    </select>
+</mapper>

@@ -133,6 +133,7 @@ describe('Service Common Request', () => {
   });
 
   beforeEach(() => {
+    Object.assign(globalThis, { PERSONAL_STORAGE_ADMISSION_ENABLED: false });
     setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
     jest.clearAllMocks();
     window.sessionStorage.clear();
@@ -141,6 +142,7 @@ describe('Service Common Request', () => {
   });
 
   it('shows the quota modal for HTTP 507 without replacing it with a generic error', async () => {
+    Object.assign(globalThis, { PERSONAL_STORAGE_ADMISSION_ENABLED: true });
     const error = {
       response: {
         status: 507,
@@ -154,6 +156,7 @@ describe('Service Common Request', () => {
   });
 
   it('blocks structured quota business failures even with custom handling enabled', async () => {
+    Object.assign(globalThis, { PERSONAL_STORAGE_ADMISSION_ENABLED: true });
     mockRequest.mockResolvedValueOnce({
       data: { code: -1, data: { errorType: 'NAS_QUOTA_EXCEEDED', quotaBytes: 1024 } },
       config: { url: '/byaiService/fileBrowser/upload' },
@@ -162,6 +165,18 @@ describe('Service Common Request', () => {
       expect.any(String)
     );
     expect(Modal.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves actual file failures without a quota modal when admission is disabled', async () => {
+    const error = {
+      response: {
+        status: 507,
+        data: { code: -1, msg: '文件系统空间不足', data: { errorType: 'NAS_QUOTA_EXCEEDED' } },
+      },
+      config: {},
+    };
+    await expect(rejectWithResponseInterceptor(error)).rejects.toEqual('文件系统空间不足');
+    expect(Modal.error).not.toHaveBeenCalled();
   });
 
   it.each([approveUseApply, rejectUseApply, queryResourceUseApplyAudit, queryUseApplyList])(

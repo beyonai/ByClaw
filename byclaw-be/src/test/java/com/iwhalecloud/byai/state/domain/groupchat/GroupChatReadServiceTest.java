@@ -218,6 +218,37 @@ class GroupChatReadServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void publishesGroupReceiptCursorOnlyAfterCommitAndOnlyWhenAdvanced() {
+        ByaiMessage message = new ByaiMessage();
+        message.setMessageId(20L);
+        message.setSessionId(10L);
+        when(messageMapper.selectByMessageId(20L)).thenReturn(message);
+        when(memberMapper.advanceReadCursor(eq(11L), eq(20L), any())).thenReturn(1);
+        GroupChatListItemResponse state = new GroupChatListItemResponse();
+        state.setLastReadMessageId(20L);
+        when(mentionMapper.selectMentionState(10L, 30L)).thenReturn(state);
+        ByaiSessionMember recipient = new ByaiSessionMember();
+        recipient.setMemObjType("USER");
+        recipient.setMemObjId(40L);
+        when(memberMapper.findOrderedGroupMembers(10L)).thenReturn(List.of(recipient));
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.markRead(10L, 20L);
+            verifyNoInteractions(broadcastService);
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            ArgumentCaptor<JSONObject> event = ArgumentCaptor.forClass(JSONObject.class);
+            verify(broadcastService).broadcastRawToUser(eq(40L), event.capture(), isNull());
+            assertThat(event.getValue().getString("event")).isEqualTo("READ_RECEIPTS_UPDATED");
+            assertThat(event.getValue().getString("userId")).isEqualTo("30");
+            assertThat(event.getValue().getString("lastReadMessageId")).isEqualTo("20");
+            assertThat(event.getValue()).doesNotContainKey("unreadCount");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void advancesCursorAndReturnsRemainingMentionState() {
         ByaiMessage message = new ByaiMessage();
         message.setMessageId(20L);

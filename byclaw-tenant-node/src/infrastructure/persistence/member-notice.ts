@@ -5,7 +5,7 @@ import { nextSequence } from "./message-fields.js";
 /** Called only for a new membership change, under the command's group lock and transaction. */
 export async function membershipNotice(
   context: CommandContext,
-  member: { memObjId: string; memObjType: string; memName: string },
+  member: { memObjId: string; memObjType: string; memName: string; byaiSessionMemberId?: string },
   operatorId = context.command.userId,
   eventType: "MEMBER_INVITED" | "MEMBER_LEFT" | "MEMBER_REMOVED" = "MEMBER_INVITED",
 ): Promise<Record<string, any>> {
@@ -26,6 +26,7 @@ export async function membershipNotice(
     memberId: member.memObjId,
     memberType: member.memObjType,
     memberName,
+    ...(member.byaiSessionMemberId ? { byaiSessionMemberId: member.byaiSessionMemberId } : {}),
   };
   const messageId = await nextId(db, command.enterpriseId);
   const now = new Date();

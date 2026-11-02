@@ -66,6 +66,8 @@ class DatasetApplicationServiceProjectCloudDownloadTest extends com.iwhalecloud.
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", feignPythonBuildService);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(feignPythonBuildService));
         ReflectionTestUtils.setField(service, "datasetSystem", "");
     }
 

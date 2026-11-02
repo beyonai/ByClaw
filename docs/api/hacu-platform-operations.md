@@ -4,6 +4,8 @@
 不增加沙箱或工作组的持续停用策略。
 
 - BE 固定入口：`POST /internal/v1/platform-operations`，使用独立 `X-Hacu-Operations-Token`。
+- 资源桥请求与响应固定使用 Jackson，支持 `JsonNode` 请求体及数值、布尔、数组响应；不经过普通页面接口的 Fastjson 转换。此序列化选择不授予调用权限，仍校验独立服务令牌。
+- 企业成员移除预检和交接按目标企业读取 `TENANT_MODE`：`TRIAL` 使用同企业共享工作组数据，不要求独立 Node；其他独立租户缺失 Node 配置时继续拒绝。共享分支仍校验所有者、群成员快照、接任人、确认版本及交接事务，不把未知工作组状态当成零工作组。
 - 配置 `HACU_OPERATIONS_TOKEN`（或 `hacu.operations.token`），长度 32 至 512 字符。与 HACU 后端保持一致。
 - 未配置令牌时关闭入口；在匿名路由匹配前验证服务身份，Controller 再次校验。
 - 请求包含可信的 `actor`、`requestId`、`resource`、`operation`、`payload`。

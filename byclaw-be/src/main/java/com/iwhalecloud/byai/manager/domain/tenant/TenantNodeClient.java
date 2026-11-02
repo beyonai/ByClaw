@@ -44,6 +44,8 @@ import org.slf4j.LoggerFactory;
 /** Resolves the provisioned tenant Node from platform-owned records and calls its internal API. */
 @Service
 public class TenantNodeClient {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook memberJoinedHook;
 
     private static final Logger LOG = LoggerFactory.getLogger(TenantNodeClient.class);
 
@@ -52,6 +54,23 @@ public class TenantNodeClient {
     private final ObjectMapper mapper;
     private final DiscoveryClient discovery;
     private final String internalToken;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService sandboxService;
+
+    private URI providerEndpoint(long enterpriseId,URI registered) {
+        if(sandboxService==null)return registered;
+        var transport=sandboxService.privateTransport(enterpriseId,"tenant-data-node");
+        return transport.isEmpty()?registered:URI.create(transport.get("url"));
+    }
+    void privateHeaders(HttpRequest.Builder request,long enterpriseId,URI target) {
+        if(target.getHost()==null || !target.getHost().endsWith("-vpc.sandbox.aliyuncs.com"))return;
+        var transport=sandboxService.privateTransport(enterpriseId,"tenant-data-node");
+        URI trusted=URI.create(transport.get("url"));
+        if(!trusted.getScheme().equals(target.getScheme()) || !trusted.getRawAuthority().equals(target.getRawAuthority()))
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.node.authority.mismatch");
+        request.header("e2b-traffic-access-token",transport.get("trafficToken"));
+    }
+
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -190,7 +209,9 @@ public class TenantNodeClient {
             CommandRequest body = new CommandRequest(1, Long.toString(enterpriseId),
                 Long.toString(state.generation()), dbRecordId, Long.toString(context.userId()), requestId,
                 sessionId, operation, tenantMemberUserIds, hash, payload);
-            return request(context, method, path, body, new TypeReference<CommandResult>() { });
+            CommandResult result = request(context, method, path, body, new TypeReference<CommandResult>() { });
+            TenantGroupMembershipEvents.joined(memberJoinedHook, context, sessionId, result);
+            return result;
         }
         catch (ResponseStatusException e) {
             throw e;
@@ -250,7 +271,7 @@ public class TenantNodeClient {
     private URI discover(ServiceIdentity context, long generation, String dbRecordId) {
         String name = "TENANT_DATA_" + context.enterpriseId();
         List<ServiceInstance> instances = discovery.getInstances(name);
-        return registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances);
+        return providerEndpoint(context.enterpriseId(),registeredEndpoint(name, context.enterpriseId(), generation, dbRecordId, instances));
     }
 
     static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
@@ -261,8 +282,8 @@ public class TenantNodeClient {
     /** Schema bootstrap precedes READY; only this internal operation accepts ADMIN_ONLY nodes. */
     URI schemaEndpoint(long enterpriseId, long generation, long dbRecordId) {
         String name = "TENANT_DATA_" + enterpriseId;
-        return registeredEndpoint(name, enterpriseId, generation, Long.toString(dbRecordId),
-            discovery.getInstances(name), true);
+        return providerEndpoint(enterpriseId,registeredEndpoint(name, enterpriseId, generation, Long.toString(dbRecordId),
+            discovery.getInstances(name), true));
     }
 
     private static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
@@ -313,6 +334,7 @@ public class TenantNodeClient {
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation))
             ;
+        privateHeaders(request,enterpriseId,target);
         if (context.userId() != null) request.header("X-Actor-User-Id", Long.toString(context.userId()));
         if (content != null) request.header("Content-Type", "application/json");
         request.method(method, content == null ? HttpRequest.BodyPublishers.noBody()

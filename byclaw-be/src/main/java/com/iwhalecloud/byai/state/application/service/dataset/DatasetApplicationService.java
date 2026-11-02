@@ -179,6 +179,9 @@ public class DatasetApplicationService {
     private FeignPythonBuildService feignPythonBuildService;
 
     @Autowired
+    private WorkgroupStorageAdmission workgroupStorageAdmission;
+
+    @Autowired
     private ResourceArtifactStorageService resourceArtifactStorageService;
 
     @Autowired
@@ -735,8 +738,9 @@ public class DatasetApplicationService {
             kbFileImport.setExtractZip(extractZip);
             kbFileImport.setMetadata(metadata);
             kbFileImport.setMultipartFile(multipartFile);
-            PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
-                forwardedHeaders);
+            PythonBuildResponse<KbImportResult> importRet = workgroupStorageAdmission.write(resourceId,
+                kbFileImport.getKnCode(), kbFileImport.getFilePath(), multipartFile, kbFileImport.getExtractZip(), false,
+                () -> feignPythonBuildService.importKnowledgeItem(kbFileImport, forwardedHeaders));
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
             assertPythonBuildSuccess(importRet, I18nUtil.get("dataset.operation.upload"));
 
@@ -798,10 +802,7 @@ public class DatasetApplicationService {
             boolean zipUpload = isZipUpload(multipartFile) && !Boolean.FALSE.equals(extractZip);
             String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
                 : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
-            if (!zipUpload && existingFilePaths.contains(filePath)) {
-                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
-                deleteKnowledgeFile(ssResource, filePath, I18nUtil.get("dataset.operation.removeBeforeOverwrite"), forwardedHeaders);
-            }
+            boolean replacing = !zipUpload && existingFilePaths.contains(filePath);
             kbFileImport.setFilePath(filePath);
             kbFileImport
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
@@ -810,8 +811,15 @@ public class DatasetApplicationService {
             kbFileImport.setExtractZip(extractZip);
             kbFileImport.setMetadata(metadata);
             kbFileImport.setMultipartFile(multipartFile);
-            PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport,
-                forwardedHeaders);
+            PythonBuildResponse<KbImportResult> importRet = workgroupStorageAdmission.write(resourceId,
+                kbFileImport.getKnCode(), kbFileImport.getFilePath(), multipartFile, kbFileImport.getExtractZip(), replacing,
+                () -> {
+                    // 保留直接上传的覆盖契约，但必须在容量准入成功之后才能删除旧文件。
+                    if (replacing) {
+                        deleteKnowledgeFile(ssResource, filePath, I18nUtil.get("dataset.operation.removeBeforeOverwrite"), forwardedHeaders);
+                    }
+                    return feignPythonBuildService.importKnowledgeItem(kbFileImport, forwardedHeaders);
+                });
             logger.info("直接导入文件:{}", JSON.toJSONString(importRet));
             assertPythonBuildSuccess(importRet, I18nUtil.get("dataset.operation.upload"));
 
@@ -1124,8 +1132,9 @@ public class DatasetApplicationService {
         kbFileUpdate.setMetadata(metadata);
         kbFileUpdate.setMultipartFile(fileContent);
 
-        PythonBuildResponse<KbFileUpdateResult> response = feignPythonBuildService.updateKnowledgeItem(kbFileUpdate,
-            forwardedHeaders);
+        PythonBuildResponse<KbFileUpdateResult> response = workgroupStorageAdmission.write(resourceId,
+            kbFileUpdate.getKnCode(), kbFileUpdate.getFilePath(), fileContent, false, true,
+            () -> feignPythonBuildService.updateKnowledgeItem(kbFileUpdate, forwardedHeaders));
         assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.updateFile"));
 
         KbFileUpdateResult result = response.getResultObject();
@@ -1309,8 +1318,9 @@ public class DatasetApplicationService {
             upload.setProcessFrontMatter(false);
             upload.setSkipIfDuplicate(false);
             upload.setMultipartFile(file);
-            PythonBuildResponse<KbImportResult> response = feignPythonBuildService.importKnowledgeItem(upload,
-                forwardKnowledgeHeaders(headers, target.getResourceId()));
+            PythonBuildResponse<KbImportResult> response = workgroupStorageAdmission.write(target.getResourceId(),
+                upload.getKnCode(), upload.getFilePath(), file, upload.getExtractZip(), false,
+                () -> feignPythonBuildService.importKnowledgeItem(upload, forwardKnowledgeHeaders(headers, target.getResourceId())));
             assertPythonBuildSuccess(response, I18nUtil.get("dataset.file.copy.operation"));
             KbImportResult imported = response.getResultObject();
             validateCopiedFileResult(imported, targetPath);

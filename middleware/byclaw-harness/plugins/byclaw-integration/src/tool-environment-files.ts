@@ -52,6 +52,8 @@ export interface ToolEnvironmentFiles {
   lstat(path: string): Promise<{ type: ToolEnvironmentEntryType; size?: number } | undefined>
   /** `mkdir -p` with owner-only permissions for newly created directories. */
   ensureDirectory(path: string): Promise<void>
+  /** Idempotently create a directory symlink; existing non-links or different targets fail closed. */
+  ensureSymlink(target: string, path: string): Promise<void>
   readText(path: string): Promise<string>
   readBytes(path: string, maxBytes: number): Promise<Buffer>
   /** The last `maxBytes` bytes and whether the file is longer; rejects with `ENOENT` when absent. */
@@ -140,6 +142,10 @@ export function lazyToolEnvironmentFiles(environment: LazyToolEnvironment, files
     async ensureDirectory(path) {
       listings.set(path, listings.get(path) ?? [])
       await environment.whenConnected(`mkdir:${path}`, () => files.ensureDirectory(path))
+    },
+    async ensureSymlink(target, path) {
+      entries.set(path, { type: 'symlink' })
+      await environment.whenConnected(`symlink:${path}`, () => files.ensureSymlink(target, path))
     },
     async readText(path) {
       if (environment.connected) {
@@ -245,6 +251,10 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
     },
     async ensureDirectory(path) {
       await run(['/bin/sh', '-c', 'umask 077 && mkdir -p -- "$1"', 'sh', path])
+    },
+    async ensureSymlink(target, path) {
+      const script = `umask 077 && parent="$(dirname -- "$2")" && mkdir -p -- "$1" "$parent" && relative="$(node -e 'process.stdout.write(require("node:path").relative(process.argv[1], process.argv[2]))' "$parent" "$1")" && if [ -L "$2" ]; then [ "$(cd -- "$2" && pwd -P)" = "$(cd -- "$1" && pwd -P)" ] || { echo "unexpected target" >&2; exit 1; }; [ "$(readlink -- "$2")" = "$relative" ] || { temporary="$2.relative.$$"; ln -s -- "$relative" "$temporary" && unlink -- "$2" && mv -- "$temporary" "$2"; }; elif [ -e "$2" ]; then echo "alias exists and is not a symbolic link" >&2; exit 1; else ln -s -- "$relative" "$2"; fi`
+      await run(['/bin/sh', '-c', script, 'sh', target, path])
     },
     async readText(path) {
       const { resolved, info } = await present(path)

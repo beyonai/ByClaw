@@ -65,7 +65,7 @@ export class ConnectionManager {
       this.authority ??= await this.ports.readAuthority();
       assertTenant(next, this.identity);
       assertAuthority(next, this.authority);
-      if (!this.sameConnection(next)) await this.replacePool(next);
+      if (!this.available || !this.sameConnection(next)) await this.replacePool(next);
       await this.pool!.verifyIdentity();
       await this.ports.saveAuthority(next);
       this.authority = next;

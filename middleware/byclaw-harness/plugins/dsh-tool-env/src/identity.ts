@@ -6,7 +6,7 @@
  * without trusting first contact, and a recreated B keeps the same identity.
  */
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +15,9 @@ import { promisify } from 'node:util'
 import type { ToolEnvEndpoint } from './backend.ts'
 
 const run = promisify(execFile)
+
+// Resident contexts may construct distinct identity objects for the same user.
+const pendingKeys = new Map<string, Promise<ToolEnvKeys>>()
 
 /** Material B needs to accept exactly this A. */
 export interface ToolEnvKeys {
@@ -44,6 +47,17 @@ export class ToolEnvIdentity {
   async keys(): Promise<ToolEnvKeys> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
     await chmod(this.directory, 0o700)
+    const directory = await realpath(this.directory)
+    const pending = pendingKeys.get(directory)
+    if (pending !== undefined) return pending
+    const created = this.readOrCreateKeys()
+    pendingKeys.set(directory, created)
+    try { return await created } finally {
+      if (pendingKeys.get(directory) === created) pendingKeys.delete(directory)
+    }
+  }
+
+  private async readOrCreateKeys(): Promise<ToolEnvKeys> {
     for (const path of [this.clientKey, this.hostKey]) await ensureKey(path)
     const hostPublic = (await readFile(`${this.hostKey}.pub`, 'utf8')).trim().split(/\s+/).slice(0, 2).join(' ')
     await writeAtomic(this.knownHosts, `${this.alias} ${hostPublic}\n`, 0o600)
@@ -61,11 +75,15 @@ export class ToolEnvIdentity {
    */
   async writeClientConfig(endpoint: ToolEnvEndpoint): Promise<void> {
     await this.keys()
+    const endpointFile = join(this.directory, 'endpoint.json')
+    if (endpoint.websocket !== undefined) {
+      await writeAtomic(endpointFile, JSON.stringify({ url: endpoint.websocket, headers: endpoint.headers ?? {} }), 0o600)
+    }
     await writeAtomic(this.clientConfig, [
       `Host ${this.alias}`,
       `  HostName ${endpoint.hostName}`,
       `  Port ${String(endpoint.port)}`,
-      ...(endpoint.websocket === undefined ? [] : [`  ProxyCommand ${quote(process.execPath)} ${quote(WS_PROXY)} ${quote(endpoint.websocket)}`]),
+      ...(endpoint.websocket === undefined ? [] : [`  ProxyCommand ${quote(process.execPath)} ${quote(WS_PROXY)} ${quote(endpointFile)}`]),
       `  User ${this.user}`,
       `  IdentityFile ${this.clientKey}`,
       '  IdentitiesOnly yes',
@@ -76,6 +94,7 @@ export class ToolEnvIdentity {
       '  ConnectTimeout 10',
       '',
     ].join('\n'), 0o600)
+    if (endpoint.websocket === undefined) await rm(endpointFile, { force: true })
     await includeInUserConfig(this.clientConfig)
   }
 }

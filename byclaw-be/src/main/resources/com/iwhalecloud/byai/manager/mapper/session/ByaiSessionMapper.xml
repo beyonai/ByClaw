@@ -456,6 +456,12 @@
         <if test="createBy != null">
             AND a.creator_id = #{createBy}
         </if>
+        <if test="sessionIds != null and sessionIds.size() > 0">
+            AND a.session_id IN
+            <foreach collection="sessionIds" item="sessionId" open="(" separator="," close=")">
+                #{sessionId}
+            </foreach>
+        </if>
         ORDER BY COALESCE(a.update_time, a.create_time) DESC, a.create_time DESC
     </select>
 

@@ -89,4 +89,14 @@ class TenantCommandRequestTest {
         value.putNull("resourceSpec");
         assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(value));
     }
+
+    @Test void tenantModeDefaultsToStandardAndAcceptsTrial() throws Exception {
+        var standard = TenantCommandRequest.parse(json.readTree(request));
+        assertEquals("STANDARD", standard.tenantMode());
+        var trial = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request);
+        trial.put("tenantMode", "TRIAL");
+        assertEquals("TRIAL", TenantCommandRequest.parse(trial).tenantMode());
+        trial.put("tenantMode", "UNKNOWN");
+        assertThrows(TenantCommandException.class, () -> TenantCommandRequest.parse(trial));
+    }
 }

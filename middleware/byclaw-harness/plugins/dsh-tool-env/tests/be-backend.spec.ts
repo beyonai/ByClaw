@@ -15,10 +15,13 @@ class FakeByClawBe {
   readonly records = new Map<string, { sandboxId: string; instanceEndpoints: Record<string, string> }>()
   /** Endpoint map handed to the next created record. */
   nextEndpoints: Record<string, string> = {}
+  endpointHeaders: Record<string, string> | undefined
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
   removeFailure: string | undefined
+  removeSkipped = false
+  releaseConfirmation: Record<string, unknown> | undefined
   /** The user's private parameters, as BE stores them: values never read back whole. */
   readonly privateParams = new Map<string, { paramId: number; value: string }>()
   /** When set, any other `beyond-token` gets BE's JWT filter answer: HTTP 401 with its own envelope. */
@@ -82,20 +85,22 @@ class FakeByClawBe {
       }
       const primary = Object.values(record.instanceEndpoints)[0] ?? ''
       return { code: 0, msg: 'success', data: {
-        sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
+        endpointHeaders: this.endpointHeaders, sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
         instanceEndpoints: this.launchWithoutInstanceEndpoints ? undefined : record.instanceEndpoints,
       } }
     }
     if (path === '/byaiService/sandbox/getSandboxInfo') {
       const data = [...this.records.entries()]
         .filter(([key]) => key.startsWith(`${user}/`) && (body['sandboxType'] === undefined || key.endsWith(`/${String(body['sandboxType'])}`)))
-        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', instanceEndpoints: record.instanceEndpoints }))
+        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', endpointHeaders: this.endpointHeaders, instanceEndpoints: record.instanceEndpoints }))
       return { code: 0, msg: 'success', data }
     }
     if (path === '/byaiService/sandbox/removeSandbox') {
       if (this.removeFailure !== undefined) return { code: -1, msg: this.removeFailure, data: null }
-      this.records.delete(`${user}/${String(body['sandboxType'])}`)
-      return { code: 0, msg: 'success', data: null }
+      const key = `${user}/${String(body['sandboxType'])}`
+      if (body['expectedSandboxId'] !== undefined && this.records.get(key)?.sandboxId !== body['expectedSandboxId']) return { code: -1, msg: 'SANDBOX_TARGET_CHANGED', data: null }
+      if (!this.removeSkipped) this.records.delete(key)
+      return { code: 0, msg: 'success', data: this.releaseConfirmation ?? (this.removeSkipped || body['expectedSandboxId'] === undefined ? null : { releaseConfirmed: true, remoteAbsentConfirmed: true, sandboxId: body['expectedSandboxId'] }) }
     }
     return { code: -1, msg: `unknown path ${path}`, data: null }
   }
@@ -131,6 +136,25 @@ describe('ByClawBeBackend', () => {
     await fake.stop()
     await new Promise<void>(resolve => sshd.close(() => resolve()))
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('binds catalog SSH keys only to the launch request without changing user parameters', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    const keys = await identity.keys()
+    expect(fake.calls).toHaveLength(1)
+    expect(fake.calls[0]?.body['toolEnvironmentKeys']).toEqual({ authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') })
+    expect(fake.privateParams.size).toBe(0)
+    await backend.dispose()
+  })
+
+  it('catalog backends reject a public or raw SSH fallback and still release owned compute', async () => {
+    const backend = new ByClawBeBackend({ ...config, privateOnly: true, requestScopedKeys: true }, identity, () => {})
+    await expect(backend.ensure()).rejects.toThrow('PRIVATE_SSH_REQUIRED')
+    expect(backend.sandboxId).toBe('sb1')
+    await backend.dispose()
+    expect(fake.calls.find(call => call.path.endsWith('/sandbox/removeSandbox'))?.body['expectedSandboxId']).toBe('sb1')
+    expect(fake.records.size).toBe(0)
   })
 
   it('launches B through BE as the user and returns the tcp endpoint', async () => {
@@ -254,6 +278,27 @@ describe('ByClawBeBackend', () => {
       expect(logs[0]).toBe('tool environment sb1 from ByClaw BE: bridge ws://127.0.0.1:' + String(bridgePort) + '/kruise/sb1/8022/?…')
     } finally { await new Promise<void>(resolve => bridge.close(() => resolve())) }
   })
+
+  for (const fallback of [false, true]) {
+    it(`preserves private ingress headers from ${fallback ? 'info fallback' : 'launch'}`, async () => {
+      const seen: unknown[] = []
+      const bridge = createServer((request, response) => {
+        seen.push(request.headers['x-ingress-token'])
+        response.writeHead(request.headers['x-ingress-token'] === 'fixture-secret' ? 426 : 403).end()
+      })
+      await new Promise<void>(resolve => bridge.listen(0, '127.0.0.1', resolve))
+      try {
+        const bridgePort = (bridge.address() as { port: number }).port
+        fake.nextEndpoints = { ssh: `http://127.0.0.1:${bridgePort}/` }
+        fake.endpointHeaders = { 'x-ingress-token': 'fixture-secret' }
+        fake.launchWithoutInstanceEndpoints = fallback
+        const backend = new ByClawBeBackend(config, identity, message => logs.push(message))
+        expect(await backend.ensure()).toMatchObject({ headers: fake.endpointHeaders })
+        expect(seen).toEqual(['fixture-secret'])
+        expect(logs.join(' ')).not.toContain('fixture-secret')
+      } finally { await new Promise<void>(resolve => bridge.close(() => resolve())) }
+    })
+  }
 
   it('resolves a BE ingress path for the ssh port against the BE base URL', async () => {
     fake.nextEndpoints = { ssh: '/v1/sandboxes/sb1/proxy/8022?token=abc' }
@@ -465,6 +510,46 @@ describe('ByClawBeBackend', () => {
     expect(fake.records.size).toBe(0)
   })
 
+  it('catalog pause retains exact ownership when BE reports success but the record still runs', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    fake.removeSkipped = true
+    await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+    expect(backend.sandboxId).toBe('sb1')
+    expect(JSON.parse(await readFile(join(dir, 'state', 'tool-sandbox.json'), 'utf8')).sandboxId).toBe('sb1')
+    expect(fake.calls.find(call => call.path.endsWith('/removeSandbox'))?.body).toEqual({ userCode: 'u1', sandboxType: config.serviceKey, expectedSandboxId: 'sb1' })
+    fake.removeSkipped = false
+    await backend.pause()
+    expect(backend.sandboxId).toBeUndefined()
+    expect(fake.records.size).toBe(0)
+  })
+
+  it('an old catalog owner never releases a replacement sandbox of the same purpose', async () => {
+    const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+    await backend.ensure()
+    fake.records.set(`u1/${config.serviceKey}`, { sandboxId: 'replacement', instanceEndpoints: {} })
+    await expect(backend.pause()).rejects.toThrow('SANDBOX_TARGET_CHANGED')
+    expect(backend.sandboxId).toBe('sb1')
+    expect(fake.records.get(`u1/${config.serviceKey}`)?.sandboxId).toBe('replacement')
+  })
+
+  it('catalog release rejects ambiguous or mismatched receipts even if the active record is absent', async () => {
+    for (const confirmation of [
+      { releaseConfirmed: true, remoteAbsentConfirmed: true, sandboxId: 'other-b' },
+      { releaseConfirmed: 'true', remoteAbsentConfirmed: true, sandboxId: 'sb1' },
+      { releaseConfirmed: true, remoteAbsentConfirmed: false, sandboxId: 'sb1' },
+    ]) {
+      const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true }, identity, () => {})
+      fake.records.set(`u1/${config.serviceKey}`, { sandboxId: 'sb1', instanceEndpoints: fake.nextEndpoints })
+      await backend.ensure()
+      fake.releaseConfirmation = confirmation
+      await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      expect(fake.records.size).toBe(0)
+      expect(backend.sandboxId).toBe('sb1')
+      expect(JSON.parse(await readFile(join(dir, 'state', 'tool-sandbox.json'), 'utf8')).sandboxId).toBe('sb1')
+    }
+  })
+
   it('does not create or release a tool environment before the first runtime use', async () => {
     const backend = new ByClawBeBackend(config, identity, () => {})
     await backend.pause()
@@ -499,6 +584,24 @@ describe('ByClawBeBackend', () => {
       expect(fake.records.has('u1/byclaw-dsh-tools')).toBe(false)
       expect(logs).toContain('released tool environment old-1 of type byclaw-dsh-tools: this user\'s tool sandbox is now byclaw-dsh-unity')
       expect(JSON.parse(await readFile(recordFile(), 'utf8'))).toMatchObject({ serviceKey: 'byclaw-dsh-unity' })
+    })
+
+    it('catalog service changes retain the old exact allocation until its cleanup receipt is confirmed', async () => {
+      await leaveBehind('old-purpose', 'old-1')
+      fake.removeSkipped = true
+      let now = 0
+      const backend = new ByClawBeBackend({ ...config, requestScopedKeys: true, serviceKey: 'new-purpose' }, identity, () => {}, { now: () => now })
+      await expect(backend.ensure()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      expect(fake.calls.some(call => call.path.endsWith('/launchByUserCode'))).toBe(false)
+      expect(fake.calls[0]?.body).toEqual({ userCode: 'u1', sandboxType: 'old-purpose', expectedSandboxId: 'old-1' })
+      expect(JSON.parse(await readFile(recordFile(), 'utf8')).sandboxId).toBe('old-1')
+      await expect(backend.pause()).rejects.toThrow('RELEASE_UNCONFIRMED')
+      fake.removeSkipped = false
+      await backend.pause()
+      await expect(access(recordFile())).rejects.toThrow()
+      now = 2000
+      await backend.ensure()
+      expect(backend.sandboxId).toBe('sb1')
     })
 
     it('is kept when the user still has the same service', async () => {

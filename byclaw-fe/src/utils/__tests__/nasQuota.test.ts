@@ -38,7 +38,15 @@ it('keeps locale keys and interpolation parameters aligned', () => {
   );
 });
 
-it('deduplicates parallel quota errors into one blocking modal', () => {
+it('does not open a business quota modal when admission is disabled', () => {
+  Object.assign(globalThis, { PERSONAL_STORAGE_ADMISSION_ENABLED: false });
+  (getIntl as jest.Mock).mockReturnValue({ formatMessage: ({ id }: { id: string }) => en[id as keyof typeof en] });
+  expect(showNasQuotaError({ data: quota })).toBeUndefined();
+  expect(Modal.error).not.toHaveBeenCalled();
+});
+
+it('deduplicates parallel quota errors into one blocking modal when explicitly enabled', () => {
+  Object.assign(globalThis, { PERSONAL_STORAGE_ADMISSION_ENABLED: true });
   (getIntl as jest.Mock).mockReturnValue({ formatMessage: ({ id }: { id: string }) => en[id as keyof typeof en] });
   showNasQuotaError({ data: quota });
   showNasQuotaError({ quota });

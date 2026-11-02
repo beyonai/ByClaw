@@ -98,6 +98,8 @@ Watch 收到员工或关联技能更新后刷新目录并使准备缓存失效�
 
 ## 动态模型
 
+仅调整 apiKey 获取来源：本轮 Gateway 传入非空 `extraPayload.api_key` 时优先使用，否则使用 Redis 模型的 `authToken`。根会话及其模板、团队子会话沿工作区关系读取本轮密钥。模型及 baseUrl 解析、配置 headers 和协议发送流程沿用原有逻辑，不改写或过滤认证头。每个模型流独立固定凭据；密钥仅保存在进程内弱引用表，不进入模型配置、消息上下文或持久化会话元数据。前台续聊不改变仍在执行的子任务原轮次凭据；轮次上下文清理后，后续请求恢复各自的认证。未传、空白或非字符串密钥保持现有行为。`pnpm run verify:gateway-api-key` 使用本地 HTTP 服务验证最终认证头和并发隔离，不调用外部模型。
+
 `BYCLAW_REDIS_MODEL_ENABLED` 为所有经本插件入站或实例化的 Agent 选择运行态模型来源。该变量默认开启；未设置、空值、`true`、`1`、`on` 或 `yes` 都会启用 Redis 模型解析。开启时：
 
 - 主 Agent：每次 ByClaw 入站时读取 Redis 当前唯一默认 LLM。
@@ -118,7 +120,7 @@ Watch 收到员工或关联技能更新后刷新目录并使准备缓存失效�
 - 入站支持 `extra_payload.agent_id`，按当前用户授权目录匹配数字员工或专家团；数字员工只允许当前用户直接授权的员工，专家团匹配当前用户授权的专家团。`agentId`、`agent_code`、`agent_name` 及其 camelCase 写法，不参与目标选择或一致性校验。没有结构化 ID 时，正文中的唯一 `@资源名称`／`@资源编码`（忽略大小写）可选择目标，纯数字 `@` 不作为名称别名，匹配文本会从任务中移除。目标不存在、未授权或多个正文目标会在执行前拒绝。未指定目标仍走主 Agent。
 - ByClaw 对外的 DSH 根会话 ID 与入站 `session_id` 完全一致，续聊和跨系统追踪使用同一个标识。直达时，这个根 Agent 本身就是所选模板实例；同一会话再次指定同一目标会继续原上下文，尝试把在线会话改绑到其他模板则会被拒绝。日志中的 `🎯 入站直达` 和 `scope=direct-root` 可用于确认没有经过主 Agent 的 LLM 回合。
 - ByAI 入站可通过 `extra_payload.cwd` 指定新建 DSH 根会话的绝对工作目录；未提供时使用插件 `workspace`。当配置的工作目录以 `/by/projects` 结尾时，插件使用对应的 `/by` 根目录；容器部署继续使用 `/by`。DSH 的 `SessionHeader.cwd` 是权威源码工作目录，根会话不可变身份与模板绑定存放在插件自有的 `byclaw_sessions` storage domain 中；插件不再向 DSH 会话日志追加任何 ByClaw 自定义事件。
-- 业务指令保持为未经改写的 `source: user` 消息。`plugin:byclaw-context` 分为会话级和每轮级两层：会话级声明当前用户、项目工作目录、`.sessions/<sessionId>` 会话根、`.shared` 共享根及默认交付目录；每轮级只同步语言、`project_info`、文件附件元数据、`resource_list` 和连接器可用性。`channelExtension`、`groupChat`、multi-agent lane 元数据及认证 Token 不进入该上下文。独立报告、清单和导出文件默认写入当前 `.sessions/<sessionId>`，源码修改仍写入 `cwd`。持久消息按会话和 `messageId` 去重，AgentTeams 团员继承同一命名空间，同时保留独立的 DSH 会话 ID。
+- 业务指令保持为未经改写的 `source: user` 消息。`plugin:byclaw-context` 分为会话级和每轮级两层：会话级声明当前用户、项目工作目录、`.sessions/<sessionId>` 会话根、`.shared` 共享根及默认交付目录；每轮级只同步语言、`project_info`、文件附件元数据、`resource_list` 和连接器可用性。`channelExtension`、`groupChat`、multi-agent lane 元数据及认证 Token 不进入该上下文。源码修改以及需要长期保留的报告、清单、导出文件等用户交付物默认写入项目 `cwd`；`.sessions/<sessionId>` 只用于上传附件、生成媒体、一次性中间文件和用户明确要求保存在当前会话中的文件。持久消息按会话和 `messageId` 去重，AgentTeams 团员继承同一命名空间，同时保留独立的 DSH 会话 ID。
 
 ### 修复遗留会话日志
 
@@ -140,7 +142,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 - 子 Agent 创建、运行、等待、完成或失败 -> `reasoningLogDelta/3009` 的状态化节点；子 Agent 的思考、正文和工具事件都挂在该节点下
 - DSH 会话 ID、父会话 ID、委派深度、原始事件类型和序号只进入诊断 metadata，不再占用工具卡展示内容
 - Ask 请求成功后，将选中的最终回复正文放入 `AgentTaskResult.content`，由 by-framework 在完成信号之前发送一条 `finalAnswer/1002`。答案仅取负责回复的 Agent 在正常结束轮次的最后一个 Step 中已结算、未中断且不含工具调用块的 Assistant 文本。
-- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；报错与取消沿用既有处理，Resume 不另发最终答案。
+- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；Resume 不另发最终答案。模型、语音和会话执行失败在关闭流之前发送带 `_ERROR_` 状态的可见错误；工具环境或文件系统初始化失败使用 `RUNTIME/TURN_EXECUTION_FAILED`，原始异常仅记录在服务端。取消操作不发送运行失败提示。
 
 入站会话 ID 支持非空字符串或正的安全整数，在路由、交互匹配和输出时统一为字符串，会话路由覆盖字段同样处理。超出 JavaScript 安全整数范围的数字 ID 会被拒绝，上游必须将这些 ID 作为字符串发送。
 

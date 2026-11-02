@@ -9,6 +9,7 @@ const fake = vi.hoisted(() => ({
     release: vi.fn(),
     isTransactionActive: true,
   },
+  sourceOptions: [] as any[],
   query: vi.fn(),
   initialize: vi.fn(),
   destroy: vi.fn(),
@@ -16,7 +17,9 @@ const fake = vi.hoisted(() => ({
 vi.mock("typeorm", () => ({
   DataSource: class {
     isInitialized = true;
-    constructor(readonly options: unknown) {}
+    constructor(readonly options: unknown) {
+      fake.sourceOptions.push(options);
+    }
     initialize = fake.initialize;
     query = fake.query;
     destroy = fake.destroy;
@@ -39,6 +42,24 @@ beforeEach(() => {
   fake.runner.isTransactionActive = true;
 });
 describe("database transaction adapter without a database", () => {
+  it("keeps the connection pool and its transport when opening an independent verification connection", async () => {
+    fake.sourceOptions.length = 0;
+    const transport = {
+      url: "wss://15432-sbx.cn-beijing-vpc.sandbox.aliyuncs.com/postgresql",
+      trafficToken: "fixture",
+    };
+    const db = await Database.open(snapshot(), "test", locks, transport);
+    const fresh = await db.fresh();
+    expect(fake.sourceOptions).toHaveLength(2);
+    for (const options of fake.sourceOptions) {
+      expect(options.extra.max).toBe(8);
+      expect(options.extra.stream).toBeTypeOf("function");
+      expect(options.synchronize).toBe(false);
+    }
+    await fresh.close();
+    await db.close();
+  });
+
   it.each([
     { raw: [[{ message_id: "40" }], 1], expected: [{ message_id: "40" }] },
     { raw: [[], 0], expected: [] },

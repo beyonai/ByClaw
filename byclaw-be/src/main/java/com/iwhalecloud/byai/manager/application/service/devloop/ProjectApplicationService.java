@@ -744,6 +744,8 @@ public class ProjectApplicationService {
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
+        // 企业成员选择必须使用项目持久化归属；字符串避免前端丢失长整型 ID 精度。
+        map.put("enterpriseId", project.getEnterpriseId() == null ? null : project.getEnterpriseId().toString());
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());

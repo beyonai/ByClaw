@@ -256,6 +256,7 @@ public class SandboxController {
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
                     result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("endpointHeaders", sandbox.getEndpointHeaders());
                     result.put("token", sandbox.getGatewayToken());
                     result.put("isShared", shared);
                     result.put("serviceKey", sandbox.getServiceKey());
@@ -358,6 +359,25 @@ public class SandboxController {
             }
         }
 
+        if (params.containsKey("expectedSandboxId")) {
+            if (!(params.get("expectedSandboxId") instanceof String)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expectedSandboxId must be a nonempty string");
+            }
+            String expectedSandboxId = ((String) params.get("expectedSandboxId")).trim();
+            if (expectedSandboxId.isEmpty() || sandboxType == null || sandboxType.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "sandboxType and expectedSandboxId are required for exact release");
+            }
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Exact sandbox release requires the sandbox owner or a platform operator");
+            }
+            Long exactResourceId = resourceId;
+            return ResponseUtil.successResponse(sandboxUserContextRunner.callAsUser(userCode,
+                () -> sandboxService.removeSandbox(userCode, exactResourceId, sandboxType, expectedSandboxId)));
+        }
         sandboxService.removeSandbox(userCode, resourceId, sandboxType);
         return ResponseUtil.successResponse();
     }
@@ -381,6 +401,18 @@ public class SandboxController {
         }
         String userCode = userCodeObj.toString().trim();
 
+        // Check the authenticated caller before callAsUser replaces its identity.
+        if (params.get("toolEnvironmentKeys") != null) {
+            String caller = CurrentUserHolder.getCurrentUserCode();
+            if (StringUtils.isBlank(caller)) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+            }
+            if (!userCode.equals(caller) && !CurrentUserHolder.isPlatformAdminOrOperator()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Request-scoped tool keys require the sandbox owner or a platform operator");
+            }
+        }
+
         Object serviceKeyObj = params.get("serviceKey");
         String serviceKey = serviceKeyObj != null ? serviceKeyObj.toString().trim() : null;
         if (serviceKey != null && serviceKey.isEmpty()) {
@@ -400,15 +432,22 @@ public class SandboxController {
         try {
             String finalServiceKey = serviceKey;
             Integer finalAutoRelease = autoRelease;
+            Map<String, String> toolKeys = com.iwhalecloud.byai.gateway.sandbox.service.ToolEnvironmentBootstrapKeys.parse(
+                params.get("toolEnvironmentKeys"));
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
-                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease));
+                () -> toolKeys.isEmpty()
+                    ? sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease)
+                    : sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey, finalAutoRelease, toolKeys));
 
             // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射。
-            // 未对登录开放的规格（enabled=0，例如工具沙箱）只是被按需启动，不是用户的选择，不写入首选。
-            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
+            // Enabled controls execution; lifecycle.autoStart=false keeps on-demand tools out of
+            // login choices and must neither replace nor clear the user's main service preference.
+            boolean loginChoice = finalServiceKey != null
+                && sandboxService.isServiceKeyAutoStartEnabled(finalServiceKey);
+            if (loginChoice && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)
                 && sandboxService.isServiceKeyEnabled(finalServiceKey)) {
                 sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
-            } else if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+            } else if (loginChoice && SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
                 sandboxService.removePreferredServiceKey(userCode);
             }
 
@@ -420,6 +459,7 @@ public class SandboxController {
             result.put("sandboxId", data.getSandboxId());
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
+            result.put("endpointHeaders", data.getEndpointHeaders());
             return ResponseUtil.successResponse(result);
         } catch (Exception e) {
             return ResponseUtil.fail("沙箱启动失败: " + e.getMessage());
@@ -485,8 +525,14 @@ public class SandboxController {
 
         Map<String, String> inventory = runtimeInventory.current();
         final String requestedStatus = status;
-        List<String> sandboxIds = inventory.entrySet().stream()
-            .filter(entry -> requestedStatus == null || requestedStatus.equals(entry.getValue()))
+        String providerStatus = params.get("providerStatus") == null ? null : params.get("providerStatus").toString().trim();
+        if (providerStatus != null && providerStatus.isEmpty()) providerStatus = null;
+        if (providerStatus != null && !List.of("RUNNING", "STARTING", "RELEASING", "RELEASED", "FAILED", "UNKNOWN").contains(providerStatus)) {
+            return ResponseUtil.fail("invalid providerStatus");
+        }
+        final String requestedProviderStatus = providerStatus;
+        List<String> sandboxIds = requestedProviderStatus == null || "UNKNOWN".equals(requestedProviderStatus) ? null : inventory.entrySet().stream()
+            .filter(entry -> requestedProviderStatus.equals(entry.getValue()))
             .map(Map.Entry::getKey).collect(Collectors.toList());
         Map<String, Object> query = new HashMap<>();
         query.put("keyword", keyword);
@@ -495,20 +541,18 @@ public class SandboxController {
         query.put("offset", (pageIndex - 1) * pageSize);
         query.put("pageSize", pageSize);
         query.put("sandboxIds", sandboxIds);
+        query.put("observedSandboxIds", "UNKNOWN".equals(requestedProviderStatus) ? inventory.entrySet().stream()
+            .filter(entry -> !"UNKNOWN".equals(entry.getValue())).map(Map.Entry::getKey).collect(Collectors.toList()) : null);
         query.put("status", requestedStatus);
         List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
-                // Display the live runtime state when the engine still has the instance.
-                // This projection never updates the persisted lifecycle record.
-                // Map.of() rejects a null key. Persisted rows can have no sandbox id.
+                // Persisted lifecycle and current provider observation are independent.
+                // An inventory miss is unknown, not proof that a remote instance was deleted.
                 String sandboxId = record.getSandboxId();
                 String liveStatus = sandboxId == null ? null : inventory.get(sandboxId);
-                if (liveStatus != null) {
-                    record.setStatus(liveStatus);
-                }
                 SandboxRecordView view = sandboxService.buildRecordView(record);
                 if (view != null) {
                     view.setStatus(record.getStatus());
-                    view.setProviderStatus(record.getStatus());
+                    view.setProviderStatus(liveStatus == null ? "UNKNOWN" : liveStatus);
                     if (!"TENANT".equals(record.getOwnerScope()) && StringUtils.isNotBlank(record.getUserCode())) {
                         try {
                             view.setUserName(ShareCacheUtil.getShareBfmUser(record.getUserCode()).getUserName());
@@ -569,9 +613,9 @@ public class SandboxController {
             if (StringUtil.isEmpty(sandboxId)) {
                 return ResponseUtil.fail("id or sandboxId is required");
             }
-            id = sandboxService.findRecordIdBySandboxIdAndStatus(sandboxId.trim(), "RUNNING");
+            id = sandboxService.findRecordIdBySandboxId(sandboxId.trim());
             if (id == null) {
-                return ResponseUtil.fail("running sandbox record not found");
+                return ResponseUtil.fail("sandbox record not found");
             }
         }
 

@@ -168,10 +168,19 @@ class TenantGroupMemberServiceTest extends I18nTestSupport {
     }
 
     @Test
-    void inviteActiveTenantUserWritesMembershipAssertionAndGrantsExistingAgents() {
+    void inviteActiveTenantUserWritesMembershipAssertionAndGrantsExistingAgents() throws Exception {
         Map<String, Object> existingAgent = Map.of("memObjType", "AGENT", "memObjId", "10000713");
         Map<String, Object> owner = Map.of("memObjType", "USER", "memObjId", "57", "userRole", "OWNER");
-        Map<String, Object> invited = Map.of("memObjType", "USER", "memObjId", "91", "userRole", "MEMBER");
+        Map<String, Object> invited = Map.of("memObjType", "USER", "memObjId", "91", "userRole", "MEMBER",
+            "byaiSessionMemberId", "9007199254740996");
+        var hooks = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook.class);
+        var added = mock(TenantNodeModels.CommandResult.class);
+        when(added.data()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+            {"systemEvents":[{"systemEvent":{"eventType":"MEMBER_INVITED","memberType":"USER",
+              "memberId":"91","operatorId":"57","byaiSessionMemberId":"9007199254740996"}}]}
+            """));
+        when(node.command(eq(context), eq("POST"), eq(path() + "/members"), eq(groupId.toString()),
+            eq("ADD_MEMBERS"), any(TenantNodeModels.AddMembers.class), any(), any())).thenReturn(added);
         when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(
             Map.of("members", List.of(owner, existingAgent), "settings", Map.of("allowMemberInviteUser", false)),
             Map.of("members", List.of(owner, existingAgent, invited)));

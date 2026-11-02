@@ -41,6 +41,19 @@ export default function SharedMembersDrawer({
       defaultMessage: value,
     });
 
+  const formatStorageMode = (value?: string) => {
+    switch (value) {
+      case 'USER_AGENTICFS':
+        return intl.formatMessage({ id: 'sandboxMgr.shared.storage.userAgenticFs' });
+      case 'USER_NAS_QUOTA':
+        return intl.formatMessage({ id: 'sandboxMgr.shared.storage.userQuota' });
+      case 'LOGICAL':
+        return intl.formatMessage({ id: 'sandboxMgr.shared.storage.logical' });
+      default:
+        return intl.formatMessage({ id: 'sandboxMgr.status.unknown' });
+    }
+  };
+
   const load = useCallback(
     async (pageIndex = 1, pageSize = 20) => {
       const run = ++requestGeneration.current;
@@ -163,13 +176,7 @@ export default function SharedMembersDrawer({
             {
               title: intl.formatMessage({ id: 'sandboxMgr.shared.storageMode' }),
               dataIndex: 'storageMode',
-              render: (value) =>
-                intl.formatMessage({
-                  id:
-                    value === 'USER_NAS_QUOTA'
-                      ? 'sandboxMgr.shared.storage.userQuota'
-                      : 'sandboxMgr.shared.storage.logical',
-                }),
+              render: formatStorageMode,
             },
             {
               title: intl.formatMessage({ id: 'sandboxMgr.shared.assignedAt' }),

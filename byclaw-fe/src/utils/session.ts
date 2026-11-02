@@ -1,19 +1,21 @@
-import { themes } from '@/constants/theme';
 import { size, omit } from 'lodash';
 
+import { themes } from '@/constants/theme';
 import type { ISessionState } from '@/models/session';
 import type { ISession } from '@/typescript/session';
+import getSessionTimestamp from './getSessionTimestamp';
 
 export const createPendingRemoteSession = <T extends object>(session: T): T & { isPendingRemoteSession: true } => ({
   ...session,
   isPendingRemoteSession: true,
 });
 
-export const formatByUpdateTime = (sessionList: ISession[]) => {
-  return sessionList.sort((a, b) => {
-    return Number(b.updateTime) - Number(a.updateTime);
-  });
-};
+export function formatByUpdateTime(sessionList: ISession[]) {
+  // 接口日期和新消息的毫秒时间戳必须按同一时区比较，才能在发送后立即更新顺序。
+  return [...sessionList].sort(
+    (left, right) => getSessionTimestamp(right.updateTime) - getSessionTimestamp(left.updateTime)
+  );
+}
 
 export const updateSessionHandler = (state: ISessionState, newSession: ISession) => {
   const { sessionList } = state;

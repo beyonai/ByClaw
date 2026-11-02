@@ -136,6 +136,8 @@ export class ByClawSessionWorkspaceRegistry {
   private readonly workspaces = new Map<string, ByClawSessionWorkspace>()
   private readonly turns = new Map<string, ByClawInboundTurnContext>()
   private readonly sessionTurns = new Map<string, ByClawInboundTurnContext>()
+  /** Credentials follow live turn identity without entering durable context or session metadata. */
+  private readonly apiKeys = new WeakMap<ByClawInboundTurnContext, string>()
   private readonly pendingSessionTurns = new Map<string, {
     inputMessageId: string
     context: ByClawInboundTurnContext
@@ -186,8 +188,28 @@ export class ByClawSessionWorkspaceRegistry {
     return this.workspaces.get(String(sessionId))
   }
 
-  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext): void {
+  registerTurn(externalSessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.turns.set(externalSessionId, context)
+  }
+
+  /** Resolve the current turn after workspace inheritance and foreground steering have been applied. */
+  requestApiKey(sessionId: string): string | undefined {
+    const turn = this.getTurn(sessionId)
+    return turn === undefined ? undefined : this.apiKeys.get(turn)
+  }
+
+  /** A hot interaction resume refreshes future calls; started streams retain their frozen credential. */
+  refreshRequestApiKey(externalSessionId: string, apiKey: unknown, agentSessionId?: string): void {
+    const turn = agentSessionId === undefined ? this.turns.get(externalSessionId) : this.getTurn(agentSessionId)
+    if (turn === undefined) return
+    // A newly missing/disabled membership key must not leave the old credential active.
+    this.apiKeys.delete(turn)
+    this.bindApiKey(turn, apiKey)
+  }
+
+  private bindApiKey(context: ByClawInboundTurnContext, value: unknown): void {
+    if (typeof value === 'string' && value.trim() !== '') this.apiKeys.set(context, value)
   }
 
   getTurn(sessionId: string): ByClawInboundTurnContext | undefined {
@@ -211,11 +233,13 @@ export class ByClawSessionWorkspaceRegistry {
   }
 
   /** An interactive captain exchange must not change its descendants' task context. */
-  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext): void {
+  registerSessionTurn(sessionId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.sessionTurns.set(String(sessionId), context)
   }
 
-  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext): void {
+  registerPendingSessionTurn(sessionId: string, inputMessageId: string, context: ByClawInboundTurnContext, apiKey?: unknown): void {
+    this.bindApiKey(context, apiKey)
     this.pendingSessionTurns.set(String(sessionId), { inputMessageId, context })
   }
 
@@ -284,7 +308,7 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     ...(workspace.projectName === undefined ? [] : [`project_name: ${JSON.stringify(workspace.projectName)}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 命令和相对路径读写使用 cwd；报告等交付产物使用 default_output_root。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; use default_output_root for reports and other deliverables. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
+      'default_output_policy: 命令和相对路径读写使用 cwd；需要长期保留的源码、配置、测试和用户交付物写入 default_output_root。session_root 仅用于上传附件、生成媒体和一次性中间文件，或用户明确要求的当前会话文件；不得把内部会话状态作为业务文件。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; write durable source, configuration, tests, and user deliverables to default_output_root. Reserve session_root for uploaded attachments, generated media, disposable intermediate files, or files explicitly requested for the current session; never expose internal session state as business files. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
@@ -367,7 +391,9 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,
-      `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}.`,
+      `Write source changes and every user-requested file that must remain available after the conversation—including reports, checklists, and exports—to ${workspace.defaultOutputRoot ?? workspace.cwd}.`,
+      `Use ${workspace.sessionRoot} only for inbound attachments, generated image/audio assets, disposable intermediate files, or files the user explicitly asks to keep with the current session. Do not copy or move an attachment merely to reorganize it.`,
+      'Internal conversation logs, tool state, caches, and runtime metadata are not business files: do not create, expose, or present them as user deliverables.',
       'Reject path traversal outside the selected root, and read/list the exact target after writing before claiming completion.',
     ]),
     ...(workspace.sharedRoot === undefined ? [] : [

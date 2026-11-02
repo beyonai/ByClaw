@@ -10,6 +10,26 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 class SharedSandboxGatewayTest {
+    @Test
+    void cleanupFailureIsIgnoredOnlyInDevelopment() {
+        String previous = System.getProperty("BE_ENV");
+        var gateway = gateway();
+        when(client.call(eq("releaseAll"), anyMap())).thenThrow(new IllegalStateException("platform unavailable"));
+        try {
+            System.setProperty("BE_ENV", "production");
+            assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh"))
+                .hasMessage("platform unavailable");
+            System.setProperty("BE_ENV", "development");
+            assertThat(gateway.tryAcquire("alice", "byclaw-dsh")).isNull();
+            // 手动释放仍应向调用方报告失败，避免误报释放成功。
+            assertThatThrownBy(() -> gateway.release("alice")).hasMessage("platform unavailable");
+        }
+        finally {
+            if (previous == null) System.clearProperty("BE_ENV");
+            else System.setProperty("BE_ENV", previous);
+        }
+    }
+
     private final SharedSandboxPlatformClient client = mock(SharedSandboxPlatformClient.class);
     private final SharedSandboxPolicy policy = mock(SharedSandboxPolicy.class);
     private final SandboxUserInfoFactory users = mock(SandboxUserInfoFactory.class);
@@ -148,6 +168,48 @@ class SharedSandboxGatewayTest {
         when(client.call(eq("prepareUserStorage"),anyMap())).thenReturn(Map.of("code",0,"data",Map.of("enabled",true,"ready",true)));
         assertThat(gateway.tryAcquire("alice","byclaw-dsh").getSandboxId()).isEqualTo("existing");
         verify(client).call(eq("prepareUserStorage"),anyMap());
+    }
+
+    @Test
+    void nativeAgenticFsCanProceedWithoutALegacyNasBinding() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("prepareUserStorage"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("enabled", false, "ready", true, "state", "AGENTICFS")));
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0));
+        when(client.call(eq("acquire"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("sandboxId", "native-shared")));
+
+        assertThat(gateway.tryAcquire("alice", "byclaw-dsh").getSandboxId()).isEqualTo("native-shared");
+        verify(client).call(eq("acquire"), argThat(p -> !p.containsKey("storageBinding")));
+    }
+
+    @Test
+    void nativeAgenticFsStatusDoesNotBecomeALegacyNasFailure() {
+        var gateway = gateway();
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        when(client.call(eq("userStorageStatus"), anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("enabled", false, "ready", true, "state", "AGENTICFS", "binding", Map.of("private", "hidden"))));
+
+        assertThat(gateway.userStorageStatus("alice"))
+            .containsEntry("enabled", false).containsEntry("ready", true).containsEntry("state", "AGENTICFS")
+            .doesNotContainKey("binding");
+    }
+
+    @Test
+    void disabledOrUnreadyStorageCannotBypassSharedAdmission() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        when(policy.userNasEnabled("alice", "byclaw-dsh")).thenReturn(true);
+        for (var state : List.of(Map.of("enabled", false, "ready", true, "state", "LOGICAL"),
+                Map.of("enabled", false, "ready", false, "state", "AGENTICFS"))) {
+            when(client.call(eq("prepareUserStorage"), anyMap())).thenReturn(Map.of("code", 0, "data", state));
+            assertThatThrownBy(() -> gateway.tryAcquire("alice", "byclaw-dsh"))
+                .isInstanceOf(com.iwhalecloud.byai.state.common.exception.BdpRuntimeException.class);
+        }
+        verify(client, never()).call(eq("lookup"), anyMap());
+        verify(client, never()).call(eq("acquire"), anyMap());
     }
 
     @Test

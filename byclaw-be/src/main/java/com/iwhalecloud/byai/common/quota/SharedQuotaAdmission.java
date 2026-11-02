@@ -99,16 +99,17 @@ public class SharedQuotaAdmission {
     public void checkMembers(Optional<QuotaSnapshot> snapshot, int additions) {
         if (snapshot.isEmpty() || additions == 0) return;
         QuotaSnapshot value = snapshot.orElseThrow();
-        Long current = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status='ACTIVE'",
+        Long current = jdbc.queryForObject("SELECT COUNT(*) FROM byai.tenant_user_membership WHERE enterprise_id=? AND status IN ('ACTIVE','DISABLED')",
             Long.class, value.enterpriseId());
         check(current, additions, value.memberLimit(), "tenant.member.limit.reached");
     }
 
     public void checkGroupMembers(Optional<QuotaSnapshot> snapshot, Long sessionId, String type, int additions) {
         if (snapshot.isEmpty() || additions == 0) return;
+        // 暂停单群真人数量限制；企业总席位仍由 checkMembers 校验，机器人限额继续执行。
+        if ("USER".equals(type)) return;
         QuotaSnapshot value = snapshot.orElseThrow();
         int limit = switch (type) {
-            case "USER" -> value.groupMemberLimit();
             case "AGENT" -> value.agentLimit();
             default -> throw new IllegalArgumentException("Unsupported quota member type");
         };
@@ -125,7 +126,7 @@ public class SharedQuotaAdmission {
     /** Initial group batches have no persisted members; count the deduplicated owner and assistant too. */
     public void checkInitialGroup(Optional<QuotaSnapshot> snapshot, int humans, int agents) {
         if (snapshot.isEmpty()) return;
-        check(0L, humans, snapshot.orElseThrow().groupMemberLimit(), "groupchat.member.limit.reached");
+        // 暂不使用 groupMemberLimit 拦截建群真人批次，保留字段供后续策略使用。
         check(0L, agents, snapshot.orElseThrow().agentLimit(), "groupchat.agent.limit.reached");
     }
 

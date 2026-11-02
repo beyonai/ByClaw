@@ -1,6 +1,11 @@
 /** Path policy checks run directly from source, without a DSH daemon or mounted /by volume. */
 import assert from 'node:assert/strict'
-import { byClawProjectCwd, byClawSessionCwd, isLegacyProjectWorkspaceTransition, isProjectSharedCwd } from '../src/session-cwd.ts'
+import {
+  byClawProjectCwd,
+  byClawSessionCwd,
+  isLegacyProjectWorkspaceTransition,
+  isProjectSharedCwd,
+} from '../src/session-cwd.ts'
 
 assert.equal(byClawProjectCwd(-1), '/by/.shared/project_-1')
 assert.equal(byClawProjectCwd('42'), '/by/.shared/project_42')

@@ -4,7 +4,12 @@ import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, by
 import { instrumentChatEmitter } from './reply-log.ts'
 import { chatChain, measureChatStage, prepareChatTurn, type ByClawChatChain } from './chat-chain-log.ts'
 import { normalizeByClawSessionId } from './session-extensions.ts'
-import { byClawProjectCwd, byClawSessionCwd, isLegacyProjectWorkspaceTransition, isProjectSharedCwd } from './session-cwd.ts'
+import {
+  byClawProjectCwd,
+  byClawSessionCwd,
+  isLegacyProjectWorkspaceTransition,
+  isProjectSharedCwd,
+} from './session-cwd.ts'
 import { requestByClawProjectWorkspace } from './session-cwd-compat.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
@@ -451,12 +456,25 @@ export interface ByClawVoiceError {
 }
 
 export interface ByClawTurnFailurePresentation {
-  code: ByClawModelError['code'] | ByClawVoiceError['code']
+  code: ByClawModelError['code'] | ByClawVoiceError['code'] | 'TURN_EXECUTION_FAILED'
   message: string
 }
 
-/** Preserve the structured MODEL fallback; voice input failures have separate safe guidance. */
-export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError): ByClawTurnFailurePresentation {
+export interface ByClawRuntimeError {
+  schemaVersion: 1
+  domain: 'RUNTIME'
+  code: 'TURN_EXECUTION_FAILED'
+  retryable: boolean
+  httpStatus?: never
+  providerCode?: never
+  providerMessage?: never
+}
+
+/** Keep operational details server-side while giving each failure domain safe guidance. */
+export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError): ByClawTurnFailurePresentation {
+  if (error.domain === 'RUNTIME') {
+    return { code: error.code, message: '会话运行失败，请稍后重试或联系管理员。' }
+  }
   if (error.domain === 'VOICE') {
     return { code: error.code, message: error.code === 'ASR_SPEECH_NOT_DETECTED'
       ? ASR_NO_SPEECH_MESSAGE : '语音转文字失败，请检查 ASR 模型配置或重新录制后重试。' }
@@ -479,7 +497,7 @@ export async function emitByClawTurnFailure(params: {
   rootSessionId: string
   messageId: string
   sourceAgentType: string
-  error: ByClawModelError | ByClawVoiceError
+  error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError
 }): Promise<ByClawTurnFailurePresentation> {
   const failure = byClawTurnFailurePresentation(params.error)
   await params.emitter.emitChunk(params.sessionId, params.traceId, {
@@ -1602,7 +1620,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       return await this.queueAsk(command, context, key)
     } catch (error: unknown) {
       endPreflight?.('failed', { errorCode: 'PREFLIGHT_FAILED', errorType: error instanceof Error ? error.name : 'UnknownError' })
-      if (error instanceof ByClawModelRequestError && !context.isCancelRequested()) {
+      if (!context.isCancelRequested() && !(error instanceof TaskCancelledError)
+        && !(error instanceof Error && error.name === 'TaskCancelledError')) {
         try {
           await emitByClawTurnFailure({
             emitter: this.emitterFor(),
@@ -1611,7 +1630,9 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
             rootSessionId: route.externalRootSessionId,
             messageId: command.header.messageId,
             sourceAgentType: this.options.sourceAgentType,
-            error: error.modelError,
+            error: error instanceof ByClawModelRequestError ? error.modelError : {
+              schemaVersion: 1, domain: 'RUNTIME', code: 'TURN_EXECUTION_FAILED', retryable: true,
+            },
           })
         } catch (emitError: unknown) {
           this.ctx.logger.warn(
@@ -1740,10 +1761,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       this.pendingForeground.set(owner.responseSessionId, {
         turn, inputMessageId: String(input.id), inboundTurn,
       })
-      this.options.workspaceRegistry.registerPendingSessionTurn(owner.responseSessionId, String(input.id), inboundTurn)
+      this.options.workspaceRegistry.registerPendingSessionTurn(owner.responseSessionId, String(input.id), inboundTurn, command.extraPayload['api_key'])
     } else {
       this.foreground.set(owner.responseSessionId, turn)
-      this.options.workspaceRegistry.registerSessionTurn(owner.responseSessionId, inboundTurn)
+      this.options.workspaceRegistry.registerSessionTurn(owner.responseSessionId, inboundTurn, command.extraPayload['api_key'])
     }
     this.messageAgents.set(command.header.messageId, agent)
     teamModelOverrides?.set(owner.rootSessionId, selection)
@@ -1808,15 +1829,21 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   async resume(command: ResumeCommand, context?: AgentContext): Promise<boolean | ByClawDshAskResult> {
     this.assertAccepting()
+    const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId)
+      && turn.userCode === command.header.userCode)
+    const refreshApiKey = (agentSessionId?: string): void => {
+      if (owner !== undefined) this.options.workspaceRegistry.refreshRequestApiKey(
+        normalizeByClawSessionId(command.header.sessionId), command.extraPayload['api_key'], agentSessionId,
+      )
+    }
     const structured = parseDshInteractionResponse(command)
     const resumed = structured !== undefined
-      ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured)
-      : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command))
+      ? await this.questions.resumeStructured(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, structured, refreshApiKey)
+      : await this.questions.resume(normalizeByClawSessionId(command.header.sessionId), command.header.userCode, extractByClawUserText(command.content), interactionId(command), refreshApiKey)
     this.ctx.logger.info(
       `[ASK_USER_QUESTION_RECOVERY_TRACE] RESUME_MATCH session=${command.header.sessionId} message=${command.header.messageId} interaction=${structured?.interactionId ?? interactionId(command) ?? '-'} mode=${resumed === false ? 'unmatched' : resumed}`,
     )
     if (resumed) {
-      const owner = [...this.active.values()].find(turn => turn.context.sessionId === normalizeByClawSessionId(command.header.sessionId) && turn.userCode === command.header.userCode)
       groupPolicy(this.ctx)?.recordUserInput?.(owner?.rootSessionId ?? normalizeByClawSessionId(command.header.sessionId), command.header.messageId)
     }
     if (resumed === false) {
@@ -2114,13 +2141,13 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
+    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(route.cwd ?? sessionRoot)
     this.assertAccepting()
     const entry = await measureChatStage('harness.agent_open', () => this.handleFor(command, selection, preparedRoot))
     this.assertAccepting()
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
-    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     if (inboundTurn.project?.['project_id'] === undefined) {
       this.ctx.logger.warn(
         `DSH request has no project_id; falling back to session workspace (sessionId=${route.externalRootSessionId}, messageId=${command.header.messageId})`,
@@ -2142,7 +2169,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       },
       this.options.sessionMetadata.get(String(rootAgent.id))?.binding,
     )
-    this.options.workspaceRegistry.registerTurn(route.externalRootSessionId, inboundTurn)
+    this.options.workspaceRegistry.registerTurn(route.externalRootSessionId, inboundTurn, command.extraPayload['api_key'])
     const policy = groupPolicy(this.ctx)
     policy?.recordContext?.(String(rootAgent.id), command.extraPayload['groupContextSnapshot'])
     policy?.recordUserInput?.(String(rootAgent.id), command.header.messageId)

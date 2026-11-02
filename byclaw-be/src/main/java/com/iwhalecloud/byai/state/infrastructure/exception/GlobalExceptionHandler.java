@@ -123,9 +123,27 @@ public class GlobalExceptionHandler implements MessageSourceAware {
         return new ResponseEntity<>(ResponseUtil.fail(msg), httpStatus);
     }
 
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StorageBusyException.class)
+    public ResponseEntity<ResponseUtil<Object>> storageBusy(
+        com.iwhalecloud.byai.state.common.exception.StorageBusyException failure, HttpServletResponse response) {
+        if (response.isCommitted()) return null;
+        // A preview may have selected binary headers before opening the storage stream.
+        response.setHeader("Content-Disposition", null);
+        response.setHeader("Content-Length", null);
+        response.setHeader("Content-Range", null);
+        response.setContentType(org.springframework.http.MediaType.APPLICATION_JSON_VALUE);
+        return handleResponseStatusException(failure);
+    }
+
     /** 保留领域服务显式声明的 4xx/5xx，避免把协议错误统一伪装成 500。 */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ResponseUtil<Object>> handleResponseStatusException(ResponseStatusException e) {
+        if (e instanceof com.iwhalecloud.byai.state.common.exception.StorageBusyException busy) {
+            ResponseUtil<Object> body = ResponseUtil.fail(busy.publicMessage());
+            body.setData(busy.details());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON).header("Retry-After", "1").body(body);
+        }
         logger.warn("ResponseStatusException occurred: status={}, reason={}", e.getStatusCode(), e.getReason());
         String reason = StringUtils.defaultIfBlank(e.getReason(), e.getMessage());
         String translated = messageSource == null ? null

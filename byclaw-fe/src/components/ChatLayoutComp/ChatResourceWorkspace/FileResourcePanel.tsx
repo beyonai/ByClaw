@@ -14,7 +14,7 @@ import {
   type MenuProps,
 } from 'antd';
 import { EllipsisOutlined, FolderAddOutlined, HomeOutlined, UploadOutlined } from '@ant-design/icons';
-import { getLocale, useIntl } from '@umijs/max';
+import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
@@ -44,6 +44,7 @@ import type { ProjectSpace } from '@/pages/projectSpace/types';
 import {
   deleteProjectSpaceFile,
   listProjectRepos,
+  listProjectSessionsByQo,
   type DevloopProjectRepo,
   renameProjectSpaceFile,
 } from '@/service/devloop';
@@ -76,13 +77,19 @@ import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
 import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
-import { filterSessionRootItems } from './sessionResourceUtils';
+import {
+  CANONICAL_SESSION_ROOT,
+  appendProjectSessionsDirectory,
+  filterSessionRootItems,
+  mergeProjectSessionMetadata,
+  resolveProjectSessionDisplayName,
+} from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
 import type { ChatRuntimeType } from '@/utils/chatRuntime';
 import { getProject } from '@/pages/projectSpace/service';
-import { normalizeProjectDetail } from '@/pages/projectSpace/utils';
+import { getArrayData, normalizeProjectDetail } from '@/pages/projectSpace/utils';
 import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
 
 type ProjectFileItem = FileBrowserItem & {
@@ -144,8 +151,29 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 }) => {
   const intl = useIntl();
   const language = getLocale();
+  const sessions = useSelector(({ session }: any) => session?.sessionList || []);
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
+  const projectSessions = useMemo(
+    () => mergeProjectSessionMetadata(resolvedProject?.sessions || [], sessions),
+    [resolvedProject?.sessions, sessions]
+  );
+  const [queriedSessions, setQueriedSessions] = useState<Array<{ sessionId: string | number; sessionName?: string }>>(
+    []
+  );
+  const sessionDisplayMetadata = useMemo(() => {
+    const metadataById = new Map<string, { sessionId: string | number; sessionName?: string }>();
+    [...queriedSessions, ...projectSessions, ...sessions].forEach((session: any) => {
+      const id = `${session.sessionId}`;
+      const previous = metadataById.get(id);
+      metadataById.set(id, {
+        ...previous,
+        ...session,
+        sessionName: session.sessionName?.trim() || previous?.sessionName,
+      });
+    });
+    return [...metadataById.values()];
+  }, [projectSessions, queriedSessions, sessions]);
   const { EventEmitter, uploadFileConfig } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
@@ -208,6 +236,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const browsePath = browseLocation.context === browseContext ? browseLocation.path : rootPath;
   const setBrowsePath = (path: string) => setBrowseLocation({ context: browseContext, path });
   const currentDirectoryPath = scope === 'shared' ? browsePath : rootPath;
+  const projectSessionsPathEnabled = scope === 'shared' && runtimeType === 'dsh' && !!projectId;
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const projectDirectoryIds = useMemo(() => {
     if (scope !== 'shared') return [];
@@ -254,10 +283,51 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   }, [intl, projectDirectoryIds, refreshKey, resolvedProject?.projectId, resolvedProject?.projectName]);
   const getSharedDisplayName = (item: FileBrowserItem) => {
     const match = /^\/by\/\.shared\/project_(-?\d+)\/?$/.exec(item.path);
-    return isDirectory(item) && match ? projectNames[match[1]] || item.name : item.name;
+    if (isDirectory(item) && match) return projectNames[match[1]] || item.name;
+    return resolveProjectSessionDisplayName(item, sessionDisplayMetadata);
   };
+  const loadSessionNames = useCallback(
+    async (sessionItems: FileBrowserItem[]) => {
+      if (projectId === undefined || projectId === null) return;
+      const sessionIds = sessionItems
+        .filter((item) => isDirectory(item) && /^\d+$/.test(item.name))
+        .map((item) => item.name);
+      if (sessionIds.length === 0) return;
+      try {
+        const response = await listProjectSessionsByQo(
+          { projectId: Number(projectId), sessionIds, pageNum: 1, pageSize: sessionIds.length },
+          { responseCfg: { hideErrorTips: true } }
+        );
+        setQueriedSessions(getArrayData(response));
+      } catch (error) {
+        console.error('Failed to load session names for shared files:', error);
+      }
+    },
+    [projectId]
+  );
   const sharedBreadcrumbItems = useMemo(() => {
     if (scope !== 'shared') return [];
+    if (projectSessionsPathEnabled && browsePath.startsWith(CANONICAL_SESSION_ROOT)) {
+      const sessionSegments = browsePath.slice(CANONICAL_SESSION_ROOT.length).split('/').filter(Boolean);
+      const projectTitle =
+        resolvedProject?.projectName ||
+        projectNames[`${projectId}`] ||
+        (projectId === -1
+          ? intl.formatMessage({ id: 'projectSpace.projectForm.type.default' })
+          : `project_${projectId}`);
+      return [
+        { title: projectTitle, path: rootPath, clickable: true },
+        { title: '.sessions', path: CANONICAL_SESSION_ROOT, clickable: sessionSegments.length > 0 },
+        ...sessionSegments.map((segment, index) => ({
+          title:
+            index === 0
+              ? sessionDisplayMetadata.find(({ sessionId }) => `${sessionId}` === segment)?.sessionName?.trim() || segment
+              : segment,
+          path: `${CANONICAL_SESSION_ROOT}${sessionSegments.slice(0, index + 1).join('/')}/`,
+          clickable: index < sessionSegments.length - 1,
+        })),
+      ];
+    }
     const currentSegments = browsePath.split('/').filter(Boolean);
     const getSegmentTitle = (segment: string, index: number) => {
       if (segment === '.shared')
@@ -272,7 +342,17 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         clickable: index < currentSegments.length - 1 && index >= 1,
       }))
       .slice(1);
-  }, [browsePath, intl, projectNames, scope]);
+  }, [
+    browsePath,
+    intl,
+    projectId,
+    projectNames,
+    projectSessionsPathEnabled,
+    resolvedProject?.projectName,
+    rootPath,
+    sessionDisplayMetadata,
+    scope,
+  ]);
   const loadRoot = useCallback(async () => {
     if (scope === 'shared' && !runtimeReady) {
       setItems([]);
@@ -301,11 +381,23 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setLoadError(undefined);
     try {
       if (scope === 'shared') {
+        if (projectSessionsPathEnabled && browsePath === CANONICAL_SESSION_ROOT) {
+          const response = await listFiles({ resourceId: resourceId!, path: browsePath, language });
+          const files = unwrapListResponse<FileBrowserItem>(response);
+          await loadSessionNames(files);
+          setItems(sortFileBrowserItems(files));
+          return;
+        }
         if (runtimeType === 'dsh' && projectId && browsePath === rootPath) {
           await ensureFolder({ resourceId: resourceId!, path: rootPath });
         }
         const response = await listFiles({ resourceId: resourceId!, path: browsePath, language });
-        setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
+        const files = unwrapListResponse<FileBrowserItem>(response);
+        setItems(
+          sortFileBrowserItems(
+            projectSessionsPathEnabled && browsePath === rootPath ? appendProjectSessionsDirectory(files) : files
+          )
+        );
       } else if (scope === 'project') {
         const cloudItems = await queryProjectCloudDrive(resourceId, '/', language);
         setItems(sortFileBrowserItems(cloudItems));
@@ -341,7 +433,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     browsePath,
     intl,
     language,
+    loadSessionNames,
     projectId,
+    projectSessionsPathEnabled,
     resourceId,
     rootPath,
     runtimeReady,
@@ -381,6 +475,9 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       const nextItems = sortFileBrowserItems(
         scope === 'project' ? response : unwrapListResponse<FileBrowserItem>(response)
       );
+      if (scope === 'shared' && normalizedPath === CANONICAL_SESSION_ROOT) {
+        await loadSessionNames(nextItems);
+      }
       if (normalizedPath === browsePath) {
         setItems(nextItems);
       } else {
@@ -388,7 +485,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       }
       setLoadedDirectoryKeys((current) => (current.includes(normalizedPath) ? current : [...current, normalizedPath]));
     },
-    [browsePath, language, resourceId, scope]
+    [browsePath, language, loadSessionNames, resourceId, scope]
   );
 
   const handleLoadData = useCallback(
@@ -1258,6 +1355,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         expandedKeys={expandedKeys}
         loadedKeys={loadedDirectoryKeys}
         showActions
+        expandAction={false}
         onRefresh={loadRoot}
         onExpand={setExpandedKeys}
         onLoadData={handleLoadData}

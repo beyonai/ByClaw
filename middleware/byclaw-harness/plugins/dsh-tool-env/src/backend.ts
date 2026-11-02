@@ -21,6 +21,8 @@ export interface ToolEnvEndpoint {
   port: number
   /** `ws://` or `wss://` URL of B's bridge; ssh then runs through `scripts/ws-proxy.mjs`. */
   websocket?: string
+  /** Private ingress credentials, never rendered into SSH arguments or logs. */
+  headers?: Record<string, string>
 }
 
 /** Lifecycle owner for B. */
@@ -242,7 +244,7 @@ function sleep(ms: number): Promise<void> { return new Promise(resolve => setTim
 /** Wait until B's sshd (or its WebSocket bridge) accepts connections. */
 export async function waitForEndpoint(endpoint: ToolEnvEndpoint, timeoutMs: number): Promise<void> {
   if (endpoint.websocket === undefined) { await waitForPort(endpoint, timeoutMs); return }
-  await waitForHttp(endpoint.websocket, timeoutMs)
+  await waitForHttp(endpoint.websocket, timeoutMs, endpoint.headers)
 }
 
 /**
@@ -250,15 +252,15 @@ export async function waitForEndpoint(endpoint: ToolEnvEndpoint, timeoutMs: numb
  * refused with an HTTP status (426, 400 ...), which is the readiness signal; only a
  * transport failure (refused, reset, DNS, ingress 502/503/504) keeps waiting.
  */
-export async function waitForHttp(websocketUrl: string, timeoutMs: number): Promise<void> {
+export async function waitForHttp(websocketUrl: string, timeoutMs: number, headers?: Record<string, string>): Promise<void> {
   const url = websocketUrl.replace(/^ws(s?):\/\//iu, 'http$1://')
   const deadline = Date.now() + timeoutMs
   for (;;) {
     let ready = false
     try {
-      const response = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(5000) })
+      const response = await fetch(url, { method: 'GET', ...(headers === undefined ? {} : { headers }), redirect: 'manual', signal: AbortSignal.timeout(5000) })
       await response.body?.cancel()
-      ready = ![502, 503, 504].includes(response.status)
+      ready = ![401, 403, 407, 502, 503, 504].includes(response.status)
     } catch { /* not reachable yet */ }
     if (ready) return
     if (Date.now() > deadline) throw new Error(`tool environment bridge ${maskUrl(websocketUrl)} is not reachable`)

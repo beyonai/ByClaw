@@ -1,0 +1,59 @@
+.market {
+  min-height: 100vh;
+  padding: 56px 6vw;
+  color: #183238;
+  background: #f3f6f4;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 36px;
+}
+
+.eyebrow {
+  margin-bottom: 12px;
+  color: #42726c;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin: 24px 0;
+}
+
+.card {
+  min-height: 310px;
+  border-top: 4px solid #28786d;
+  border-radius: 8px;
+}
+
+.cardTop {
+  margin-bottom: 24px;
+  color: #5c6e6a;
+  font-size: 12px;
+}
+
+.connection {
+  margin: 28px 0 18px;
+  color: #58716a;
+}
+
+.workflow {
+  padding: 30px;
+  border: 1px solid #ccdcd4;
+  border-radius: 8px;
+  background: #e8f0eb;
+}
+
+@media (max-width: 700px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

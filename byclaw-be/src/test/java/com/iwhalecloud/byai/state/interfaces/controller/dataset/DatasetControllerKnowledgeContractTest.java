@@ -82,6 +82,19 @@ class DatasetControllerKnowledgeContractTest extends com.iwhalecloud.byai.common
             eq("{\"owner\":\"HR\"}"), any());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {409, 503})
+    void uploadPreservesStorageQuotaStatus(int statusCode) throws Exception {
+        when(service.uploadFiles(any(), eq(42L), any(), any(), any(), any(), anyBoolean(), any(), any(), any()))
+            .thenThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.valueOf(statusCode), "storage unavailable"));
+        mvc.perform(multipart("/datasetController/uploadFiles")
+                .file(new MockMultipartFile("files", "file.txt", "text/plain", new byte[]{1}))
+                .file(part("resourceId", "42", MediaType.APPLICATION_JSON_VALUE))
+                .file(part("directoryPath", "/docs", MediaType.TEXT_PLAIN_VALUE)))
+            .andExpect(status().is(statusCode));
+    }
+
     @Test
     void omittedImportOptionsStayAbsentForQaDefaults() throws Exception {
         when(service.uploadFiles(any(), eq(42L), any(), any(), any(), any(), anyBoolean(), any(), any(), any()))

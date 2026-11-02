@@ -47,6 +47,7 @@ interface FileSpaceBlockProps {
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+  expandAction?: false | 'click' | 'doubleClick';
 
   /** 是否显示文件/文件夹下方的大小、更新时间和创建人员信息。 */
   showItemMeta?: boolean;
@@ -96,6 +97,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   accordionGroups = false,
   groupCollapseResetKey,
   showActions = false,
+  expandAction = 'click',
   showItemMeta = true,
   onRefresh,
   onSwitchChange,
@@ -171,6 +173,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         loading={treeLoading}
         emptyText={treeEmptyText}
         showActions={showActions}
+        expandAction={expandAction}
         showItemMeta={showItemMeta}
         onExpand={onExpand}
         onLoadData={onLoadData}

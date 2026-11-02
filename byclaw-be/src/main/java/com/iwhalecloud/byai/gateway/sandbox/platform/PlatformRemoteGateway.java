@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class PlatformRemoteGateway {
     private final boolean remote;
+    private final boolean personalStorageAdmissionEnabled;
     private final ObjectProvider<PlatformControlClient> client;
     private final ObjectMapper json;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
@@ -30,6 +31,8 @@ public class PlatformRemoteGateway {
         this.remote = !execution.isLegacyExecutor();
         this.client = client;
         this.json = json;
+        this.personalStorageAdmissionEnabled = env.getProperty("byclaw.storage.personal-admission.enabled",
+            Boolean.class, env.getProperty("BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED", Boolean.class, false));
         if (remote) {
             URI url = URI.create(env.getRequiredProperty("byclaw.platform.base-url"));
             if (!("http".equals(url.getScheme()) || "https".equals(url.getScheme()))
@@ -45,6 +48,10 @@ public class PlatformRemoteGateway {
         return remote;
     }
 
+    public boolean isPersonalStorageAdmissionEnabled() {
+        return personalStorageAdmissionEnabled;
+    }
+
     public <T> T safe(java.util.function.Supplier<T> call) {
         try {
             return call.get();
@@ -58,7 +65,9 @@ public class PlatformRemoteGateway {
             }
             var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
             if(quota!=null)throw quota;
-            throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
+            BdpRuntimeException error = new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
+            error.initCause(failure);
+            throw error;
         }
     }
 
@@ -67,11 +76,14 @@ public class PlatformRemoteGateway {
     }
 
     public Object call(String area, String operation, Object params) {
+        // Only the optional business preflight is bypassed. Real storage calls and failures stay intact.
+        if (!personalStorageAdmissionEnabled && "storage".equals(area)
+            && Set.of("quota-check", "quota-rejected").contains(operation)) return null;
         return data(envelope(area, operation, params));
     }
 
     public void checkPersonalQuota(String operation,long requestedBytes) {
-        if(!remote || com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()!=null)return;
+        if(!personalStorageAdmissionEnabled || !remote || com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()!=null)return;
         String user=CurrentUserHolder.getCurrentUserCode();
         if(user==null || user.isBlank())return;
         call("storage","quota-check",params("userCode",user,"operation",operation,"requestedBytes",requestedBytes));
@@ -80,14 +92,14 @@ public class PlatformRemoteGateway {
     /** A generic runtime filesystem error is not evidence of a personal NAS failure.
      * Recheck that user's capacity and only return a verified structured rejection. */
     public Map<String,Object> recheckPersonalQuota(String user) {
-        if(!remote || user==null || user.isBlank())return null;
+        if(!personalStorageAdmissionEnabled || !remote || user==null || user.isBlank())return null;
         try { call("storage","quota-check",params("userCode",user,"operation","CHAT","requestedBytes",0)); }
         catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
         return null;
     }
 
     public Map<String,Object> reportQuotaRejection(String user,String requestId) {
-        if(!remote || user==null || user.isBlank())return null;
+        if(!personalStorageAdmissionEnabled || !remote || user==null || user.isBlank())return null;
         try { call("storage","quota-rejected",params("userCode",user,"operation","CHAT","requestId",requestId)); }
         catch(com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota){return quota.details();}
         return null;

@@ -1,9 +1,15 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
 import feign.*;
+import feign.codec.Decoder;
+import feign.codec.StringDecoder;
 import java.util.Map;
+import org.springframework.beans.factory.ObjectFactory;
+import org.springframework.boot.autoconfigure.http.HttpMessageConverters;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.cloud.openfeign.support.ResponseEntityDecoder;
+import org.springframework.cloud.openfeign.support.SpringDecoder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +30,16 @@ public interface PlatformControlClient {
     String metrics();
 
     class Configuration extends PlatformAlertClient.Configuration {
+        /** Platform control returns JSON, while its Prometheus endpoint returns unwrapped text. */
+        @Bean
+        public Decoder platformControlDecoder(ObjectFactory<HttpMessageConverters> messageConverters) {
+            Decoder jsonDecoder = new ResponseEntityDecoder(new SpringDecoder(messageConverters));
+            Decoder textDecoder = new StringDecoder();
+            return (response, type) -> type == String.class
+                    ? textDecoder.decode(response, type)
+                    : jsonDecoder.decode(response, type);
+        }
+
         @Bean
         @org.springframework.context.annotation.Scope("prototype")
         public Feign.Builder platformControlBuilder() {
@@ -37,8 +53,8 @@ public interface PlatformControlClient {
         public Request.Options platformAlertOptions() {
             long startupTimeout = env.getProperty("byclaw.gateway.worker-readiness-timeout-ms", Long.class,
                     env.getProperty("BYCLAW_SANDBOX_STARTUP_TIMEOUT_MS", Long.class, 60000L));
-            // Keep transport headroom when operators extend the startup budget.
-            int defaultReadTimeout = (int) Math.max(130000L,
+            // Cover the 180s MicroVM readiness probe plus preparation; retain headroom for longer startup budgets.
+            int defaultReadTimeout = (int) Math.max(240000L,
                     Math.min(Integer.MAX_VALUE - 10000L, startupTimeout) + 10000L);
             return new Request.Options(
                     env.getProperty("byclaw.platform.connect-timeout-ms", Integer.class, 5000),

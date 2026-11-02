@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.application.TenantGroupAgentDispatcher;
@@ -36,16 +37,18 @@ public class GroupChatWebSocketService {
     private final ByaiGroupChatMentionMapper mentionMapper;
     private final GroupChatEventPublisher eventPublisher;
     private final TenantGroupAgentDispatcher tenantDispatcher;
+    private final TenantModeService tenantModes;
 
     @Autowired
     public GroupChatWebSocketService(GroupChatApplicationService applicationService, TenantNodeClient tenantNodeClient,
         ByaiGroupChatMentionMapper mentionMapper, GroupChatEventPublisher eventPublisher,
-        TenantGroupAgentDispatcher tenantDispatcher) {
+        TenantGroupAgentDispatcher tenantDispatcher, TenantModeService tenantModes) {
         this.applicationService = applicationService;
         this.tenantNodeClient = tenantNodeClient;
         this.mentionMapper = mentionMapper;
         this.eventPublisher = eventPublisher;
         this.tenantDispatcher = tenantDispatcher;
+        this.tenantModes = tenantModes;
     }
 
     public GroupChatWebSocketService(GroupChatApplicationService applicationService) {
@@ -54,6 +57,7 @@ public class GroupChatWebSocketService {
         this.mentionMapper = null;
         this.eventPublisher = null;
         this.tenantDispatcher = null;
+        this.tenantModes = null;
     }
 
     public void send(ChannelHandlerContext context, ChatMessage message) {
@@ -78,7 +82,11 @@ public class GroupChatWebSocketService {
     private JSONObject accept(ChatMessage message) {
         try {
             TenantRequestContext tenant = TenantRequestContextHolder.get();
-            if (tenant != null) return acceptTenant(tenant, message);
+            // 有租户上下文不等于有独立 Node：试用租户和默认企业的群消息仍写公共库。
+            // 保留上下文，供公共业务校验真实企业归属、限额及回执中的 enterpriseId。
+            if (tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId())) {
+                return acceptTenant(tenant, message);
+            }
             Long messageId = applicationService.acceptUserMessage(message);
             JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
             ack.put("messageId", messageId);

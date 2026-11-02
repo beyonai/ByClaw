@@ -290,6 +290,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         gatewayParams.put("groupChat", Map.of("schemaVersion", "byclaw.group-chat-ref/v1", "conversationKey", groupId,
             "beforeMessageId", boundary, "childSessionId", context.sessionId.toString(),
             "initiatorUserId", context.tenantContext.userId(), "targetAgentId", context.assistantChatDto.getAgentId()));
+        context.setGroupSessionId(Long.valueOf(groupId));
         return decorateText(content, text -> prompts.appendGroupMembers(prompts.appendGroupHistory(text, file), membersFile));
     }
 

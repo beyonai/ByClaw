@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.enterprise;
 
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantContextService;
 import org.springframework.beans.factory.ObjectProvider;
 import com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
@@ -61,6 +62,9 @@ public class EnterpriseInfoApplicationService {
 
     @Autowired
     private TenantUserMembershipService tenantUserMembershipService;
+
+    @Autowired
+    private TenantContextService tenantContextService;
 
     @Autowired
     private LoginApplicationService loginApplicationService;
@@ -168,10 +172,9 @@ public class EnterpriseInfoApplicationService {
         requireEnterprise(enterpriseId);
 
         Long userId = CurrentUserHolder.getCurrentUserId();
-        if (!DEFAULT_ENTERPRISE_ID.equals(enterpriseId)
-            && tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(userId, enterpriseId) == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("enterprise.membership.required"));
+        // 管理企业切换统一在此完成成员关系和 READY 校验，前端不再先调用 tenantContext/switch。
+        if (!DEFAULT_ENTERPRISE_ID.equals(enterpriseId)) {
+            tenantContextService.validate(userId, enterpriseId);
         }
 
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();

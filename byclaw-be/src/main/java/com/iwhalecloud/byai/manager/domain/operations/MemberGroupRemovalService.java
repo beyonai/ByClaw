@@ -54,10 +54,12 @@ public class MemberGroupRemovalService {
         } else if (!"preview".equals(operation)) {
             throw new OperationsFailure("INVALID");
         }
-        String nodeRecord = tenants.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
+        // 试用组织的工作组保存在共享库，不依赖独立 Node；历史 Node 配置也不能改变试用路由。
+        boolean publicTrialTenant = "TRIAL".equals(tenants.selectConfig(enterpriseId, "TENANT_MODE"));
+        String nodeRecord = publicTrialTenant ? null : tenants.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
         boolean hasNode = nodeRecord != null && !nodeRecord.isBlank();
-        // 默认企业兼容历史单库；其他企业缺少 Node 配置时不能误判为没有工作组。
-        if (!hasNode && enterpriseId != 1 && !RuntimeEnvironment.isDevelopment()) {
+        // 默认企业与试用组织使用共享库；独立租户缺少 Node 配置仍不能降级为空工作组。
+        if (!hasNode && !publicTrialTenant && enterpriseId != 1 && !RuntimeEnvironment.isDevelopment()) {
             throw new OperationsFailure("UNAVAILABLE");
         }
         JsonNode remote = hasNode ? nodes.memberGroupRemoval(enterpriseId, "snapshot",

@@ -90,6 +90,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -147,6 +148,8 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", feignPythonBuildService);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(feignPythonBuildService));
         ReflectionTestUtils.setField(service, "datasetSystem", "");
     }
 
@@ -1313,6 +1316,23 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         var update = ArgumentCaptor.forClass(KbFileUpdate.class);
         verify(feignPythonBuildService).updateKnowledgeItem(update.capture(), any());
         assertThat(update.getValue().getMetadata()).isEqualTo("{\"owner\":\"HR\"}");
+        verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
+        verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
+    }
+
+    @Test
+    void directOverwriteChecksQuotaBeforeDeletingExistingCloudFile() throws Exception {
+        SsResource resource = prepareCloudConflict();
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        WorkgroupStorageAdmission admission = mock(WorkgroupStorageAdmission.class);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission", admission);
+        org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.CONFLICT, "full")).when(admission)
+            .write(eq(100L), any(), any(), any(), any(), eq(true), any());
+        assertThatThrownBy(() -> service.uploadFilesDirect(
+            new MockMultipartFile[]{new MockMultipartFile("files", "old.md", "text/markdown", new byte[2048])},
+            100L, "/reports/", "", false, true, false, Map.of()))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         verify(feignPythonBuildService, never()).deleteKnowledgeItem(any(), any());
         verify(feignPythonBuildService, never()).importKnowledgeItem(any(), any());
     }

@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 
@@ -29,11 +30,25 @@ import org.junit.jupiter.api.Test;
 class TenantChatRoutingAspectTest extends I18nTestSupport {
 
     private final TenantNodeClient node = mock(TenantNodeClient.class);
-    private final TenantChatRoutingAspect aspect = new TenantChatRoutingAspect(node);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
+    private final TenantChatRoutingAspect aspect = new TenantChatRoutingAspect(node, null, tenantModes);
 
     @AfterEach
     void clear() {
         TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void trialTenantUsesPublicChatWithoutCallingNode() throws Throwable {
+        TenantRequestContextHolder.set(new TenantRequestContext(8L, 456L, "MEMBER"));
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
+        ProceedingJoinPoint call = mock(ProceedingJoinPoint.class);
+        Object original = ResponseUtil.successResponse("trial");
+        when(call.proceed()).thenReturn(original);
+
+        assertThat(aspect.route(call)).isSameAs(original);
+        verify(tenantModes).isSharedDataTenant(456L);
+        org.mockito.Mockito.verifyNoInteractions(node);
     }
 
     @Test

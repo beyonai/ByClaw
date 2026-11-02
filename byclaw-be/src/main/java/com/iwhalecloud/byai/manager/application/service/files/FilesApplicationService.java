@@ -487,6 +487,9 @@ public class FilesApplicationService {
             return readCommonFile(bucketName, primaryPath, shareType);
         }
         catch (RuntimeException primaryException) {
+            if (primaryException instanceof com.iwhalecloud.byai.state.common.exception.StorageBusyException) {
+                throw primaryException;
+            }
             if (StringUtils.isBlank(bucketName)) {
                 throw primaryException;
             }
@@ -515,6 +518,9 @@ public class FilesApplicationService {
                 return inputStream;
             }
             catch (RuntimeException fallbackException) {
+                if (fallbackException instanceof com.iwhalecloud.byai.state.common.exception.StorageBusyException) {
+                    throw fallbackException;
+                }
                 if (fallbackException != primaryException) {
                     primaryException.addSuppressed(fallbackException);
                 }
@@ -547,6 +553,7 @@ public class FilesApplicationService {
             return readCommonFile(bucketName, filePath, shareType);
         }
         catch (RuntimeException e) {
+            if (e instanceof com.iwhalecloud.byai.state.common.exception.StorageBusyException) throw e;
             return null;
         }
     }
