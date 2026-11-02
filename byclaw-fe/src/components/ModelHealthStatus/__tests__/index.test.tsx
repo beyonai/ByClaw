@@ -235,6 +235,9 @@ it('keeps manually opened personal diagnostics when an administrator login retur
 it('removes deleted warnings and updates an open notice using Redis without a probe', async () => {
   await seed();
   render(<Page />);
+  // Wait for the independent login probe before measuring deletion cache updates.
+  await waitFor(() => expect((POST as jest.Mock).mock.calls.some(([url]) => url.endsWith('/healthCheck'))).toBe(true));
+  (POST as jest.Mock).mockClear();
   fireEvent.click(screen.getByRole('button', { name: 'View check details for Broken model' }));
   await screen.findByRole('alert');
   await act(async () => {

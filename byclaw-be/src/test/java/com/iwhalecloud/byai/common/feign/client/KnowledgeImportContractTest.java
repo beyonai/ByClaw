@@ -92,9 +92,18 @@ class KnowledgeImportContractTest extends com.iwhalecloud.byai.common.i18n.I18nT
             fixture.response = "{\"resultCode\":\"-1\",\"resultObject\":{}}";
             for (int status : new int[]{422, 408, 500}) {
                 fixture.status = status;
-                assertThatThrownBy(() -> fixture.service.importKnowledgeItem(request, Map.of()))
-                    .isInstanceOfSatisfying(KnowledgeHttpFailure.class, failure ->
-                        assertThat(failure.isDefiniteRejection()).isEqualTo(status == 422));
+                if (discovery && status == 500) {
+                    // Discovery exhausts node retries on 5xx without returning an HTTP response.
+                    // This remains an unknown outcome, never a definite rejection.
+                    assertThatThrownBy(() -> fixture.service.importKnowledgeItem(request, Map.of()))
+                        .isInstanceOf(BaseException.class)
+                        .isNotInstanceOf(KnowledgeHttpFailure.class)
+                        .hasCauseInstanceOf(java.util.concurrent.ExecutionException.class);
+                } else {
+                    assertThatThrownBy(() -> fixture.service.importKnowledgeItem(request, Map.of()))
+                        .isInstanceOfSatisfying(KnowledgeHttpFailure.class, failure ->
+                            assertThat(failure.isDefiniteRejection()).isEqualTo(status == 422));
+                }
             }
         }
     }

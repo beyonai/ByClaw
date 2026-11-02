@@ -1322,7 +1322,7 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
 
     @Test
     void directOverwriteChecksQuotaBeforeDeletingExistingCloudFile() throws Exception {
-        SsResource resource = prepareCloudConflict();
+        SsResource resource = prepareCloudConflict(false);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
         WorkgroupStorageAdmission admission = mock(WorkgroupStorageAdmission.class);
         ReflectionTestUtils.setField(service, "workgroupStorageAdmission", admission);
@@ -1391,10 +1391,16 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
     }
 
     private SsResource prepareCloudConflict() {
+        return prepareCloudConflict(true);
+    }
+
+    private SsResource prepareCloudConflict(boolean requiresAccessPermission) {
         SsResource resource = defaultPersonalDataset();
         resource.setResourceBizType("KG_CLOUD");
         when(ssResourceService.findById(100L)).thenReturn(resource);
-        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        if (requiresAccessPermission) {
+            when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        }
         DirOrFile item = new DirOrFile();
         item.setName("/reports/old.md");
         item.setType("file");

@@ -173,7 +173,7 @@ class EnterpriseInfoApplicationServiceTest {
         switchDTO.setEnterpriseId(21L);
         HttpSession session = mock(HttpSession.class);
         when(enterpriseInfoService.findById(21L)).thenReturn(enterpriseInfo(21L, "Acme", "acme"));
-        when(tenantUserMembershipService.findActiveByUserIdAndEnterpriseId(7L, 21L)).thenReturn(null);
+        doThrow(new BaseException("enterprise.membership.required")).when(tenantContextService).validate(7L, 21L);
 
         assertThatThrownBy(() -> service.switchTo(switchDTO, session))
             .isInstanceOf(BaseException.class)
