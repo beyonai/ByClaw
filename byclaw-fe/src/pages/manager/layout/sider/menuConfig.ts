@@ -55,10 +55,10 @@ export const withTenantAdminMenu = (menus: any[], allowed: boolean): any[] => {
   // 暂时隐藏租户模块入口；保留菜单定义和权限分支，便于恢复，同时过滤后台配置中的同名入口。
   return allowed
     ? [
-        ...filtered,
-        // TENANT_ADMIN_MENU,
-        // TENANT_DATASOURCE_MENU,
-      ]
+      ...filtered,
+      // TENANT_ADMIN_MENU,
+      // TENANT_DATASOURCE_MENU,
+    ]
     : filtered;
 };
 

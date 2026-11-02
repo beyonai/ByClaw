@@ -117,7 +117,7 @@ describe('TaskTemplateEntry project selector', () => {
     fireEvent.change(projectSelect, { target: { value: '项目二' } });
     fireEvent.click(await screen.findByText('项目二'));
 
-    expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('2');
+    await waitFor(() => expect(mockUpdateProjectScopeId).toHaveBeenCalledWith('2'));
     mockUseProjectScopeId.mockReturnValue(['2', mockUpdateProjectScopeId]);
     rerender(<TaskTemplateEntry onApply={jest.fn()} onProjectChange={onProjectChange} skipInitialProjectChange />);
 

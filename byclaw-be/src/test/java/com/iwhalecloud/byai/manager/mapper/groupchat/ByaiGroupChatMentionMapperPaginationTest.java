@@ -243,7 +243,7 @@ class ByaiGroupChatMentionMapperPaginationTest {
                 """);
         }
         Long[] enterpriseIds = { null, 1L, 100L, 200L };
-        List<List<Long>> visibleGroups = List.of(List.of(70L, 50L, 10L, 20L), List.of(70L, 50L, 10L, 20L),
+        List<List<Long>> visibleGroups = List.of(List.of(70L, 50L, 10L, 20L), List.of(70L),
             List.of(10L, 20L), List.of(50L));
         for (int index = 0; index < enterpriseIds.length; index++) {
             List<Long> projectedSessionIds = new ArrayList<>();

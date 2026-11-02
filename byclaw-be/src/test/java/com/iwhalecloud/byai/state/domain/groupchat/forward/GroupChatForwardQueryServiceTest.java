@@ -34,6 +34,7 @@ class GroupChatForwardQueryServiceTest {
         db.execute("CREATE TABLE byai.byai_session(session_id BIGINT PRIMARY KEY, enterprise_id BIGINT, session_type VARCHAR, state VARCHAR)");
         db.execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT PRIMARY KEY, session_id BIGINT, mem_obj_type VARCHAR, mem_obj_id BIGINT)");
         db.execute("CREATE TABLE byai.byai_message(message_id BIGINT PRIMARY KEY, session_id BIGINT, usage INT, recalled_at TIMESTAMP, archived_at TIMESTAMP)");
+        db.execute("CREATE TABLE byai.po_enterprise_info(enterprise_id BIGINT PRIMARY KEY)");
         // H2 不支持条件索引；这里只验证授权和快照查询，生产索引保留原样。
         db.execute(Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"))
             .replace("SET search_path TO byai;", "SET SCHEMA byai;")

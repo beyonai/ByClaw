@@ -43,6 +43,7 @@ class SessionMemberServiceQuotaTest {
             return jdbc.update("INSERT INTO byai.byai_session_member VALUES(?,?,?,?)", row.getByaiSessionMemberId(), row.getSessionId(), row.getMemObjType(), row.getMemObjId());
         });
         ReflectionTestUtils.setField(members, "byaiSessionMemberMapper", mapper);
+        ReflectionTestUtils.setField(members, "memberJoinedHook", mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook.class));
         ReflectionTestUtils.setField(members, "quotaAdmission", new com.iwhalecloud.byai.common.quota.SharedQuotaAdmission(reader, jdbc, com.iwhalecloud.byai.common.quota.TestQuotaLocks.create()));
         tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
