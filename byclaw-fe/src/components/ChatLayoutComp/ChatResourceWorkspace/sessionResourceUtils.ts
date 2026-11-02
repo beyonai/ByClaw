@@ -9,3 +9,20 @@ export const filterSessionRootItems = (items: FileBrowserItem[], repos: Pick<Dev
   );
   return items.filter((item) => !isDirectory(item) || !repoNames.has(item.name));
 };
+
+type SessionDisplayMetadata = {
+  sessionId: string | number;
+  sessionName?: string;
+};
+
+/** Resolve only the label; the physical name and path remain stable for browsing and quoting. */
+export const resolveProjectSessionDisplayName = (
+  item: FileBrowserItem,
+  sessions: SessionDisplayMetadata[]
+) => {
+  if (!isDirectory(item)) return item.name;
+  const match = /^\/by\/\.shared\/project_-?\d+\/\.sessions\/session_([^/]+)\/?$/.exec(item.path);
+  if (!match) return item.name;
+  const session = sessions.find(({ sessionId }) => `${sessionId}` === match[1]);
+  return session?.sessionName?.trim() || item.name;
+};

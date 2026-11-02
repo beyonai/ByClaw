@@ -14,7 +14,7 @@ import {
   type MenuProps,
 } from 'antd';
 import { EllipsisOutlined, FolderAddOutlined, HomeOutlined, UploadOutlined } from '@ant-design/icons';
-import { getLocale, useIntl } from '@umijs/max';
+import { getLocale, useIntl, useSelector } from '@umijs/max';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import { FilePathTooltip } from '@/layout/sider/components/FileSiderPanel/components/FileTreeList';
 import CreateFolderModal from '@/layout/sider/components/FileSiderPanel/components/CreateFolderModal';
@@ -76,7 +76,7 @@ import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
 import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
-import { filterSessionRootItems } from './sessionResourceUtils';
+import { filterSessionRootItems, resolveProjectSessionDisplayName } from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
@@ -144,6 +144,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 }) => {
   const intl = useIntl();
   const language = getLocale();
+  const sessions = useSelector(({ session }: any) => session?.sessionList || []);
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
   const { EventEmitter, uploadFileConfig } = useGlobal();
@@ -254,7 +255,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   }, [intl, projectDirectoryIds, refreshKey, resolvedProject?.projectId, resolvedProject?.projectName]);
   const getSharedDisplayName = (item: FileBrowserItem) => {
     const match = /^\/by\/\.shared\/project_(-?\d+)\/?$/.exec(item.path);
-    return isDirectory(item) && match ? projectNames[match[1]] || item.name : item.name;
+    if (isDirectory(item) && match) return projectNames[match[1]] || item.name;
+    return resolveProjectSessionDisplayName(item, sessions);
   };
   const sharedBreadcrumbItems = useMemo(() => {
     if (scope !== 'shared') return [];

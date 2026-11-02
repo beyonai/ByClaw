@@ -253,10 +253,12 @@ export function toolEnvironmentFiles(ctx: Pick<Context, 'get'>): ToolEnvironment
       await run(['/bin/sh', '-c', 'umask 077 && mkdir -p -- "$1"', 'sh', path])
     },
     async ensureSymlink(target, path) {
-      const script = 'umask 077 && mkdir -p -- "$1" "$(dirname -- "$2")" && '
+      const script = 'umask 077 && parent="$(dirname -- "$2")" && mkdir -p -- "$1" "$parent" && '
+        + 'relative="$(node -e '\''process.stdout.write(require("node:path").relative(process.argv[1], process.argv[2]))'\'' "$parent" "$1")" && '
         + 'if [ -L "$2" ]; then [ "$(cd -- "$2" && pwd -P)" = "$(cd -- "$1" && pwd -P)" ] || { echo "unexpected target" >&2; exit 1; }; '
+        + '[ "$(readlink -- "$2")" = "$relative" ] || { temporary="$2.relative.$$"; ln -s -- "$relative" "$temporary" && mv -Tf -- "$temporary" "$2"; }; '
         + 'elif [ -e "$2" ]; then echo "alias exists and is not a symbolic link" >&2; exit 1; '
-        + 'else ln -s -- "$1" "$2"; fi'
+        + 'else ln -s -- "$relative" "$2"; fi'
       await run(['/bin/sh', '-c', script, 'sh', target, path])
     },
     async readText(path) {
