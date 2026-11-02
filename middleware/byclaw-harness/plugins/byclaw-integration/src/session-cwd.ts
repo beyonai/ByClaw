@@ -1,7 +1,5 @@
 /** Internal session paths, project execution workspaces, and supported legacy transitions. */
-import { lstat, mkdir, readlink, rename, symlink, unlink } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
-import { dirname, join, relative, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 export function byClawSessionCwd(externalSessionId: string, byRoot = '/by'): string {
   // Business ids are single directory names, never paths supplied by the model.
@@ -13,62 +11,6 @@ export function byClawSessionCwd(externalSessionId: string, byRoot = '/by'): str
 export function byClawProjectCwd(projectId: unknown, byRoot = '/by'): string | undefined {
   const id = String(projectId ?? '').trim()
   return /^-?\d+$/u.test(id) ? join(resolve(byRoot), '.shared', `project_${id}`) : undefined
-}
-
-/** Project-local alias for the canonical, persistent conversation directory. */
-export function byClawProjectSessionAlias(
-  projectId: unknown, externalSessionId: string, byRoot = '/by',
-): string | undefined {
-  const projectCwd = byClawProjectCwd(projectId, byRoot)
-  if (projectCwd === undefined) return undefined
-  // Reuse the canonical validator so neither identifier can introduce a path segment.
-  byClawSessionCwd(externalSessionId, byRoot)
-  return join(projectCwd, '.sessions', `session_${externalSessionId}`)
-}
-
-/**
- * Idempotently expose one canonical session directory inside its DSH project.
- * Existing non-links and links to another target fail closed and are never replaced.
- */
-export async function ensureByClawProjectSessionAlias(sessionRoot: string, alias: string): Promise<void> {
-  const canonicalRoot = resolve(sessionRoot)
-  const aliasPath = resolve(alias)
-  const relativeTarget = relative(dirname(aliasPath), canonicalRoot)
-  await mkdir(canonicalRoot, { recursive: true })
-  await mkdir(dirname(aliasPath), { recursive: true })
-  const validateExisting = async (): Promise<string> => {
-    const entry = await lstat(aliasPath)
-    if (!entry.isSymbolicLink()) {
-      throw new Error(`ByClaw project session alias already exists and is not a symbolic link: ${aliasPath}`)
-    }
-    const linkTarget = await readlink(aliasPath)
-    const target = resolve(dirname(aliasPath), linkTarget)
-    if (target !== canonicalRoot) {
-      throw new Error(`ByClaw project session alias points to an unexpected target: ${aliasPath}`)
-    }
-    return linkTarget
-  }
-  try {
-    const existingTarget = await validateExisting()
-    if (existingTarget !== relativeTarget) {
-      const temporaryAlias = `${aliasPath}.relative-${randomUUID()}`
-      try {
-        await symlink(relativeTarget, temporaryAlias, 'dir')
-        await rename(temporaryAlias, aliasPath)
-      } catch (error) {
-        await unlink(temporaryAlias).catch(() => {})
-        throw error
-      }
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    try {
-      await symlink(relativeTarget, aliasPath, 'dir')
-    } catch (createError) {
-      if ((createError as NodeJS.ErrnoException).code !== 'EEXIST') throw createError
-      await validateExisting()
-    }
-  }
 }
 
 export function isProjectSharedCwd(cwd: string | undefined, byRoot = '/by'): boolean {

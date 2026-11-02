@@ -6,9 +6,7 @@ import { chatChain, measureChatStage, prepareChatTurn, type ByClawChatChain } fr
 import { normalizeByClawSessionId } from './session-extensions.ts'
 import {
   byClawProjectCwd,
-  byClawProjectSessionAlias,
   byClawSessionCwd,
-  ensureByClawProjectSessionAlias,
   isLegacyProjectWorkspaceTransition,
   isProjectSharedCwd,
 } from './session-cwd.ts'
@@ -135,7 +133,6 @@ export interface ByClawDshSessionRuntimeOptions {
   byRoot?: string
   /** Create a session directory where tools run; defaults to this host's filesystem. */
   ensureDirectory?: (path: string) => Promise<void>
-  ensureSessionAlias?: (sessionRoot: string, alias: string) => Promise<void>
   /** User-tree file access where tools run; defaults to this host's filesystem. */
   userFiles?: ToolEnvironmentFiles
   /** ByClaw UserFS root for file-change snapshots; defaults to `BYCLAW_USER_FS_ROOT` or workspace inference. */
@@ -2146,12 +2143,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
     const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(route.cwd ?? sessionRoot)
-    const projectSessionAlias = byClawProjectSessionAlias(
-      inboundTurn.project?.['project_id'], route.externalRootSessionId, byRoot,
-    )
-    if (projectSessionAlias !== undefined) {
-      await (this.options.ensureSessionAlias ?? ensureByClawProjectSessionAlias)(sessionRoot, projectSessionAlias)
-    }
     this.assertAccepting()
     const entry = await measureChatStage('harness.agent_open', () => this.handleFor(command, selection, preparedRoot))
     this.assertAccepting()
@@ -2170,7 +2161,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         userCode: nonEmptyString(command.header.userCode),
         userName: nonEmptyString(command.header.userName),
         sessionRoot,
-        ...(projectSessionAlias === undefined ? {} : { sessionAlias: projectSessionAlias }),
         sharedRoot: join(byRoot, '.shared'),
         sharedDir: isProjectSharedCwd(route.cwd, byRoot) ? route.cwd : join(byRoot, '.shared'),
         ...(inboundTurn.project?.['project_id'] === undefined ? {} : { projectId: String(inboundTurn.project['project_id']) }),

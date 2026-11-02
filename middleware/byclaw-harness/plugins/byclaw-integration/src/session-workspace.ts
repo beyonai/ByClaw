@@ -37,8 +37,6 @@ export interface ByClawSessionWorkspace {
   readonly userName?: string
   /** Canonical host-visible roots for per-session delivery and shared files. */
   readonly sessionRoot?: string
-  /** Project-local symlink to sessionRoot, recreated idempotently when a DSH tool environment starts. */
-  readonly sessionAlias?: string
   readonly sharedRoot?: string
   readonly sharedDir?: string
   readonly projectId?: string
@@ -304,14 +302,13 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     ...(workspace.userName === undefined ? [] : [`user_name: ${workspace.userName}`]),
     `cwd: ${workspace.cwd}`,
     ...(workspace.sessionRoot === undefined ? [] : [`session_root: ${workspace.sessionRoot}`]),
-    ...(workspace.sessionAlias === undefined ? [] : [`session_alias: ${workspace.sessionAlias}`]),
     ...(workspace.sharedRoot === undefined ? [] : [`shared_root: ${workspace.sharedRoot}`]),
     ...(workspace.sharedDir === undefined ? [] : [`shared_dir: ${workspace.sharedDir}`]),
     ...(workspace.projectId === undefined ? [] : [`project_id: ${workspace.projectId}`]),
     ...(workspace.projectName === undefined ? [] : [`project_name: ${JSON.stringify(workspace.projectName)}`]),
     ...(workspace.defaultOutputRoot === undefined ? [] : [
       `default_output_root: ${workspace.defaultOutputRoot}`,
-      'default_output_policy: 命令和相对路径读写使用 cwd；报告等交付产物使用 default_output_root。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; use default_output_root for reports and other deliverables. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
+      'default_output_policy: 命令和相对路径读写使用 cwd；需要长期保留的源码、配置、测试和用户交付物写入 default_output_root。session_root 仅用于上传附件、生成媒体和一次性中间文件，或用户明确要求的当前会话文件；不得把内部会话状态作为业务文件。项目共享目录与共享根目录不同，访问项目源码时使用明确的项目路径。 Default policy: use cwd for commands and relative-path file operations; write durable source, configuration, tests, and user deliverables to default_output_root. Reserve session_root for uploaded attachments, generated media, disposable intermediate files, or files explicitly requested for the current session; never expose internal session state as business files. The project shared directory differs from the global shared root; use an explicit project path for project source files.',
     ]),
     '</byclaw-session-workspace>',
   ].join('\n')
@@ -394,10 +391,9 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,
-      ...(workspace.sessionAlias === undefined ? [] : [
-        `The project-local session alias ${workspace.sessionAlias} refers to the same persistent directory; changes through either path are immediately visible through the other.`,
-      ]),
-      `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}.`,
+      `Write source changes and every user-requested file that must remain available after the conversation—including reports, checklists, and exports—to ${workspace.defaultOutputRoot ?? workspace.cwd}.`,
+      `Use ${workspace.sessionRoot} only for inbound attachments, generated image/audio assets, disposable intermediate files, or files the user explicitly asks to keep with the current session. Do not copy or move an attachment merely to reorganize it.`,
+      'Internal conversation logs, tool state, caches, and runtime metadata are not business files: do not create, expose, or present them as user deliverables.',
       'Reject path traversal outside the selected root, and read/list the exact target after writing before claiming completion.',
     ]),
     ...(workspace.sharedRoot === undefined ? [] : [
