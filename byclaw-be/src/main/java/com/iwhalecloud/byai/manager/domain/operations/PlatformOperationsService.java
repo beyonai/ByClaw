@@ -52,6 +52,9 @@ public class PlatformOperationsService {
     @Autowired
     private TenantAdministrationOperations tenantAdministrationOperations;
 
+    @Autowired
+    private EnterpriseStorageService enterpriseStorageService;
+
     /** 固定资源与操作集合，操作人和请求号必须由可信 HACU 服务提供。 */
     public JsonNode execute(JsonNode request) {
         if (request == null || !request.isObject()
@@ -65,6 +68,13 @@ public class PlatformOperationsService {
         String operation = text(request, "operation", 32);
         if (Set.of("tenant-admin", "tenant-datasource").contains(resource)) {
             return tenantAdministrationOperations.execute(resource, operation, payload);
+        }
+        if ("enterprise-storage".equals(resource) && "summary".equals(operation)) {
+            return enterpriseStorageService.summary(id(payload, "enterpriseId"), id(request, "actor"));
+        }
+        // 平台主体不等同企业成员；此入口只接受服务密钥认证且已在 HACU 完成平台授权的调用。
+        if ("platform-storage".equals(resource) && "summary".equals(operation)) {
+            return enterpriseStorageService.usage(id(payload, "enterpriseId"));
         }
         if ("member-removal".equals(resource)) {
             return memberGroupRemoval.execute(operation, payload, text(request, "actor", 128));

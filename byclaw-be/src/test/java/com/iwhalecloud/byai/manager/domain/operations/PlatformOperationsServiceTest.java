@@ -64,6 +64,25 @@ class PlatformOperationsServiceTest {
         ReflectionTestUtils.setField(service, "nodes", nodes);
     }
 
+    /** 平台查询沿用受服务认证保护的入口，成员入口继续执行成员鉴权。 */
+    @Test
+    void storageSeparatesPlatformAndEnterpriseMemberIdentity() {
+        EnterpriseStorageService storage = mock(EnterpriseStorageService.class);
+        ReflectionTestUtils.setField(service, "enterpriseStorageService", storage);
+        ObjectNode result = json.createObjectNode().put("usedKb", "0");
+        ObjectNode command = request("summary").put("resource", "platform-storage");
+        ((ObjectNode) command.get("payload")).put("enterpriseId", "42");
+        when(storage.usage(42)).thenReturn(result);
+        assertThat(service.execute(command)).isEqualTo(result);
+        verify(storage).usage(42);
+        command.put("resource", "enterprise-storage").put("actor", "7");
+        when(storage.summary(42, 7)).thenReturn(result);
+        assertThat(service.execute(command)).isEqualTo(result);
+        verify(storage).summary(42, 7);
+        command.put("resource", "platform-storage").put("operation", "delete");
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(OperationsFailure.class);
+    }
+
     /** 未读到运行时不能显示停止，敏感字段不可返回。 */
     @Test
     void detailProjectsSafeFieldsAndKeepsUnknownRuntime() {

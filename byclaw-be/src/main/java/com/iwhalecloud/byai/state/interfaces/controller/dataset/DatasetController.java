@@ -398,7 +398,11 @@ public class DatasetController {
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException
                 | com.iwhalecloud.byai.state.common.exception.StoragePreparingException e) {throw e;}
-        catch (Exception e) {
+        catch (org.springframework.web.server.ResponseStatusException quotaFailure) {
+            // 保留配额 409/503，由统一异常处理返回可识别的状态和国际化原因。
+            logger.error("Knowledge upload admission failed, resourceId={}", resourceId, quotaFailure);
+            throw quotaFailure;
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }
