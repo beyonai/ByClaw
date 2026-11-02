@@ -63,6 +63,10 @@ Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例�
 
 ## 登录预热与首次聊天
 
+远程模式的 `/sandbox/autoscale/boundary-blacklist/metrics` 透传 Platform 的 Prometheus 纯文本指标。
+Platform 控制客户端独立解码文本指标和 JSON 业务响应，避免通用 Feign 的 JSON 校验将正常 HTTP 200 指标响应误报为失败。
+其他 HTTP 错误仍会失败；平台请求异常保留原始原因链，便于区分传输与解码问题。此修复无需新增 SQL 或环境变量。
+
 仅在 `BE_ENV=development` 时，共享资格失效触发的 `shared/releaseAll` 请求报错会记录 WARN 并继续路由；其他环境及手动释放保持原有报错行为。请求仍使用原有超时配置。
 
 登录异步预热与首次聊天共用 Platform 的幂等启动流程：专享使用 `sandbox/business/launch`，共享使用 `shared/lookup`、`shared/acquire`。
