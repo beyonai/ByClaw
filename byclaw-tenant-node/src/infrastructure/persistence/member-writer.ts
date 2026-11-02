@@ -1,8 +1,8 @@
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { workgroupName } from '../../domain/workgroup-name.js';
-import { first, insert, nextId, camel } from "./sql-utils.js";
+import { workgroupName } from "../../domain/workgroup-name.js";
+import { first, camel } from "./sql-utils.js";
 
 import { membershipNotice } from "./member-notice.js";
 import { requireGroupMemberCapacity } from "./group-quota.js";
@@ -39,8 +39,7 @@ export async function addMembers(context: CommandContext): Promise<Record<string
       )
     )
       continue;
-    await insert(db, "byai_session_member", {
-      byai_session_member_id: await nextId(db, command.enterpriseId),
+    const byaiSessionMemberId = await context.saveMember({
       session_id: command.sessionId,
       mem_obj_type: member.memObjType,
       mem_obj_id: member.memObjId,
@@ -52,6 +51,7 @@ export async function addMembers(context: CommandContext): Promise<Record<string
     });
     systemEvents.push(
       await membershipNotice(context, {
+        byaiSessionMemberId,
         memObjId: member.memObjId,
         memObjType: member.memObjType,
         memName: text(member.memName ?? "", 255),

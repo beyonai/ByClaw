@@ -97,15 +97,24 @@ class SqlCommandTransaction implements CommandTransaction {
     return row ? JSON.parse(row.extParamValue) : null;
   }
   async apply(command: TenantCommand): Promise<Record<string, any>> {
-    const messageId = await handlers[command.operation](
-      new CommandContext(this.db, command, this.quotas),
-    );
+    const context = new CommandContext(this.db, command, this.quotas);
+    const messageId = await handlers[command.operation](context);
     return {
       sessionId: command.sessionId,
       requestId: command.requestId,
       operation: command.operation,
       ...(typeof messageId === "string" ? { messageId } : {}),
       ...(messageId && typeof messageId === "object" ? messageId : {}),
+      ...(context.savedMembers.length
+        ? {
+            data: {
+              ...(messageId && typeof messageId === "object" && "data" in messageId
+                ? messageId.data
+                : {}),
+              savedMembers: context.savedMembers,
+            },
+          }
+        : {}),
     };
   }
   /** 复用 session_ext 存幂等结果，与业务变更同事务提交，不新增独立回执表。 */

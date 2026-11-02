@@ -56,6 +56,7 @@ public class TenantGroupMemberService {
         requireInvite(context, sessionId, type);
     }
 
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public List<Map<String, Object>> invite(TenantRequestContext context, Long sessionId,
         GroupChatMemberRequest request) {
         if (request == null || !("AGENT".equals(request.getType()) || "USER".equals(request.getType()))
@@ -96,10 +97,11 @@ public class TenantGroupMemberService {
             }
         }
         TenantGroupMembershipEvents.publish(events, context, sessionId, added);
-        return rows(nodeDetail(context, sessionId).get("members")).stream()
+        List<Map<String, Object>> result = rows(nodeDetail(context, sessionId).get("members")).stream()
             .filter(member -> type.equals(member.get("memObjType"))
                 && request.getId().stream().anyMatch(idValue -> idValue.toString().equals(member.get("memObjId"))))
             .toList();
+        return result;
     }
 
     public List<TenantNodeModels.InvitedMember> prepareMembers(TenantRequestContext context, String type, List<Long> ids) {

@@ -22,11 +22,14 @@ jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn
 jest.mock('@/pages/manager/service/WorkgroupTemplate', () => ({ getWorkgroupTemplateCapability: async () => false }));
 jest.mock('@/pages/manager/service/AppVersion', () => ({ getAppVersionCapability: async () => false }));
 
-test('platform administrators only see tenant menus while multi-tenancy is enabled', async () => {
+test('tenant entries remain hidden for platform administrators regardless of multi-tenancy', async () => {
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
-  render(<Sider />);
-  expect(await screen.findByText('租户管理')).toBeInTheDocument();
-  expect(screen.getByText('租户数据源')).toBeInTheDocument();
+  await act(async () => {
+    render(<Sider />);
+  });
+  expect(screen.getByText('系统文件管理')).toBeInTheDocument();
+  expect(screen.queryByText('租户管理')).not.toBeInTheDocument();
+  expect(screen.queryByText('租户数据源')).not.toBeInTheDocument();
   act(() => setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' }));
   expect(screen.queryByText('租户管理')).not.toBeInTheDocument();
   expect(screen.queryByText('租户数据源')).not.toBeInTheDocument();

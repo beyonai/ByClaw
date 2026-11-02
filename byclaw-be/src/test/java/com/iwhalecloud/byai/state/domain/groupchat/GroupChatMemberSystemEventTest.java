@@ -71,6 +71,7 @@ class GroupChatMemberSystemEventTest extends I18nTestSupport {
 
     @BeforeEach
     void setUp() throws Exception {
+        when(members.save(any())).thenReturn(1);
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
         CurrentUserHolder.setLoginInfo(login);

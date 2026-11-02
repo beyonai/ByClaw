@@ -7,7 +7,7 @@ import {
 import type { CommandContext } from "./command-context.js";
 import { DomainError } from "../../domain/errors.js";
 import { requireId, text } from "../../domain/values.js";
-import { first, insert, nextId, camel } from "./sql-utils.js";
+import { first, insert, camel } from "./sql-utils.js";
 import { GROUP_COORDINATOR_AGENT_ID } from "../../domain/group-coordination.js";
 import { groupNameExists } from "./group-name.js";
 import { workgroupName } from "../../domain/workgroup-name.js";
@@ -70,7 +70,7 @@ export async function createSession(context: CommandContext): Promise<void> {
   }
 }
 async function createMembers(context: CommandContext): Promise<void> {
-  const { command, db } = context,
+  const { command } = context,
     members = command.payload.members;
   if (
     !Array.isArray(members) ||
@@ -103,8 +103,7 @@ async function createMembers(context: CommandContext): Promise<void> {
   }
   await requireGroupMemberCapacity(context, members);
   for (const member of members) {
-    await insert(db, "byai_session_member", {
-      byai_session_member_id: await nextId(db, command.enterpriseId),
+    await context.saveMember({
       session_id: command.sessionId,
       mem_obj_type: member.memObjType,
       mem_obj_id: member.memObjId,

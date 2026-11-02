@@ -10,6 +10,8 @@ import {
 } from "../src/infrastructure/persistence/member-writer.js";
 import { changeTask } from "../src/infrastructure/persistence/task-writer.js";
 import { command } from "./fixtures.js";
+import { SqlCommandTransactions } from "../src/infrastructure/persistence/command-repository.js";
+import type { ConnectionManager } from "../src/application/connection-manager.js";
 describe("command receipts", () => {
   const setup = () => {
     const tx = {
@@ -44,6 +46,23 @@ describe("command receipts", () => {
     const s = setup();
     s.tx.previous.mockResolvedValue({ hash: "different", userId: "20", result: {} });
     await expect(s.service.execute(command())).rejects.toThrow("IDEMPOTENCY_CONFLICT");
+  });
+  it("does not emit saved-row facts again when replaying a command receipt", async () => {
+    const s = setup(),
+      c = command();
+    s.tx.previous.mockResolvedValue({
+      hash: c.requestHash,
+      userId: c.userId,
+      result: {
+        sessionId: "30",
+        data: { savedMembers: [{ byaiSessionMemberId: "50" }], other: true },
+      },
+    });
+    expect(await s.service.execute(c)).toEqual({
+      sessionId: "30",
+      data: { savedMembers: [], other: true },
+    });
+    expect(s.tx.apply).not.toHaveBeenCalled();
   });
 });
 function context(operation: any, payload: Record<string, any> = {}, role = "MEMBER") {
@@ -194,6 +213,69 @@ describe("group write permission", () => {
     )!;
     expect(sql).toContain("session_content");
     expect(parameters).toContain("shared goal");
+    const [memberSql, memberValues] = s.query.mock.calls.find(([sql]) =>
+      sql.startsWith("INSERT INTO byai.byai_session_member "),
+    )!;
+    const columns = memberSql.slice(memberSql.indexOf("(") + 1, memberSql.indexOf(")")).split(",");
+    const savedId = memberValues[columns.indexOf("byai_session_member_id")];
+    expect(s.ctx.savedMembers).toEqual([
+      {
+        byaiSessionMemberId: savedId,
+        groupId: "30",
+        enterpriseId: "10",
+        userId: "20",
+        invitedBy: "20",
+      },
+    ]);
+  });
+  it("returns initial member insert facts from the command transaction without chat notices", async () => {
+    let sequence = 0;
+    const query = vi.fn(async (sql: string) =>
+      sql.includes("nextval") ? [{ id: String(++sequence) }] : [],
+    );
+    const transactions = new SqlCommandTransactions({
+      write: async (work: any) => work({ query, lock: async () => {} }),
+    } as unknown as ConnectionManager);
+    const result = await transactions.run((tx) =>
+      tx.apply(
+        command({
+          operation: "CREATE_GROUP",
+          payload: {
+            sessionName: "group",
+            projectId: "50",
+            members: [
+              { memObjType: "USER", memObjId: "20", userRole: "OWNER" },
+              { memObjType: "AGENT", memObjId: "42", userRole: "MEMBER", resourceAuthorized: true },
+            ],
+          },
+        }),
+      ),
+    );
+    expect(result.data.savedMembers).toHaveLength(1);
+    expect(result.data.savedMembers[0]).toMatchObject({
+      groupId: "30",
+      userId: "20",
+      invitedBy: "20",
+    });
+    expect(result.data.savedMembers[0].byaiSessionMemberId).toMatch(/^[1-9][0-9]*$/);
+    expect(result.data.systemEvents).toBeUndefined();
+  });
+  it("never records a saved-member fact when the member insert fails", async () => {
+    const s = context("ADD_MEMBERS");
+    s.query.mockImplementation(async (sql) => {
+      if (sql.includes("nextval")) return [{ id: "1" }];
+      throw new Error("member insert failed");
+    });
+    await expect(
+      s.ctx.saveMember({
+        session_id: "30",
+        mem_obj_type: "USER",
+        mem_obj_id: "20",
+        creator_id: "20",
+        com_acct_id: "10",
+      }),
+    ).rejects.toThrow("member insert failed");
+    expect(s.ctx.savedMembers).toEqual([]);
   });
   it("allows pending task writes only to the initiator", async () => {
     const s = context("SAVE_PENDING_PUBLICATION", { taskSessionId: "40" });

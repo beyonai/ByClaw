@@ -29,6 +29,7 @@ import { getArrayData, getPageTotal, normalizeProjectSession } from '@/pages/pro
 import { listProjectSessionsByQo } from '@/service/devloop';
 import { getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
+import getSessionTimestamp from '@/utils/getSessionTimestamp';
 import WorkspaceSiderHeader from './WorkspaceSiderHeader';
 import WorkspaceProjectActions from './WorkspaceProjectActions';
 import WorkspaceSessionActions from './WorkspaceSessionActions';
@@ -134,11 +135,12 @@ const getSessionsCreatedDuringRequest = (
 };
 
 const formatSessionTime = (value: string | number | undefined, intl: ReturnType<typeof useIntl>): string => {
-  if (!value) return '';
+  const timestamp = getSessionTimestamp(value);
+  if (!timestamp) {
+    return '';
+  }
 
-  const dateValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
-  const time = dayjs(dateValue);
-  if (!time.isValid()) return '';
+  const time = dayjs(timestamp);
 
   const minuteDiff = dayjs().diff(time, 'minute');
   if (minuteDiff < 60) {

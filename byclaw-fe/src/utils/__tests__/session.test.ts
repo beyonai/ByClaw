@@ -24,6 +24,33 @@ describe('utils/session', () => {
     ).toEqual(['2', '3', '1']);
   });
 
+  it('sorts mixed API dates and live timestamps without changing the source order', () => {
+    const sessions = [
+      { sessionId: 'api', updateTime: '2026-11-02 17:24:11' },
+      { sessionId: 'live', updateTime: String(Date.parse('2026-11-02T09:25:00Z')) },
+      { sessionId: 'iso', updateTime: '2026-11-02T09:24:30Z' },
+    ] as any;
+
+    expect(formatByUpdateTime(sessions).map((session) => session.sessionId)).toEqual(['live', 'iso', 'api']);
+    expect(sessions.map((session: any) => session.sessionId)).toEqual(['api', 'live', 'iso']);
+  });
+
+  it('moves an existing session to the front when sending after loading API dates', () => {
+    const state = {
+      sessionList: [
+        { sessionId: 'recent', updateTime: '2026-11-02 17:24:11' },
+        { sessionId: 'history', updateTime: '2026-11-02 16:33:25' },
+      ],
+    } as any;
+
+    const next = updateSessionHandler(state, {
+      sessionId: 'history',
+      updateTime: String(Date.parse('2026-11-02T09:25:00Z')),
+    } as any);
+
+    expect(next.sessionList.map((session) => session.sessionId)).toEqual(['history', 'recent']);
+  });
+
   it('updateSessionHandler updates an existing session and re-sorts the list', () => {
     const state = {
       sessionList: [

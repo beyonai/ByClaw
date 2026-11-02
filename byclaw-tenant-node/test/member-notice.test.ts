@@ -73,13 +73,24 @@ function fixture(operation: "JOIN_GROUP" | "ADD_MEMBERS" | "LEAVE_GROUP" | "REMO
       memName: "群主",
       memObjId: "20",
     });
-  return { context, messages };
+  return { context, messages, members };
 }
 
 describe("tenant membership chat notices", () => {
   it("persists a link join notice once, including inviter and member name snapshots", async () => {
-    const { context, messages } = fixture("JOIN_GROUP");
+    const { context, messages, members } = fixture("JOIN_GROUP");
     const result = await joinGroup(context);
+    expect(members.get("20").byai_session_member_id).toMatch(/^[1-9][0-9]*$/);
+    expect(members.get("20").byai_session_member_id).not.toBe(messages[0].message_id);
+    expect(context.savedMembers).toEqual([
+      {
+        byaiSessionMemberId: members.get("20").byai_session_member_id,
+        groupId: "30",
+        enterpriseId: "10",
+        userId: "20",
+        invitedBy: "20",
+      },
+    ]);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({
       usage: 5,
@@ -94,24 +105,54 @@ describe("tenant membership chat notices", () => {
       operatorId: "21",
       memberId: "20",
       memberName: "新成员",
+      byaiSessionMemberId: members.get("20").byai_session_member_id,
     });
     expect(result).toMatchObject({
       data: {
         systemEvents: [
-          { event: "MESSAGE_CREATED", kind: "SYSTEM_EVENT", messageId: messages[0].message_id },
+          {
+            event: "MESSAGE_CREATED",
+            kind: "SYSTEM_EVENT",
+            messageId: messages[0].message_id,
+            systemEvent: { byaiSessionMemberId: members.get("20").byai_session_member_id },
+          },
         ],
       },
     });
     expect(await joinGroup(context)).toBeUndefined();
+    expect(context.savedMembers).toHaveLength(1);
     expect(messages).toHaveLength(1);
   });
   it("writes one notice for a newly invited member and none for duplicates or retries", async () => {
-    const { context, messages } = fixture("ADD_MEMBERS");
+    const { context, messages, members } = fixture("ADD_MEMBERS");
     const result = await addMembers(context);
     expect(messages).toHaveLength(1);
     expect(result).toMatchObject({ data: { systemEvents: [{ event: "MESSAGE_CREATED" }] } });
+    const memberId = members.get("20").byai_session_member_id;
+    expect(memberId).toMatch(/^[1-9][0-9]*$/);
+    expect(result.data.systemEvents[0].systemEvent.byaiSessionMemberId).toBe(memberId);
+    expect(JSON.parse(messages[0].metadata).systemEvent.byaiSessionMemberId).toBe(memberId);
     await addMembers(context);
     expect(messages).toHaveLength(1);
+  });
+  it("returns each inserted member primary key in a batch without mixing user or message IDs", async () => {
+    const { context, members } = fixture("ADD_MEMBERS");
+    context.command.payload.members = [
+      { memObjType: "USER", memObjId: "20", memName: "成员一" },
+      { memObjType: "USER", memObjId: "22", memName: "成员二" },
+    ];
+    context.command.tenantMemberUserIds.push("22");
+    const result = await addMembers(context);
+    expect(result.data.systemEvents).toHaveLength(2);
+    const recordIds = result.data.systemEvents.map((notice: any) => {
+      const fact = notice.systemEvent;
+      expect(fact.byaiSessionMemberId).toBe(members.get(fact.memberId).byai_session_member_id);
+      expect(fact.byaiSessionMemberId).not.toBe(fact.memberId);
+      expect(fact.byaiSessionMemberId).not.toBe(notice.messageId);
+      return fact.byaiSessionMemberId;
+    });
+    expect(new Set(recordIds).size).toBe(2);
+    expect(context.savedMembers.map((member) => member.byaiSessionMemberId)).toEqual(recordIds);
   });
   it.each(["LEAVE_GROUP", "REMOVE_MEMBER"] as const)(
     "persists %s with names once and keeps the history snapshot after deletion",

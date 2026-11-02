@@ -26,6 +26,9 @@ export class CommandService {
       if (previous) {
         if (previous.hash !== command.requestHash || previous.userId !== command.userId)
           throw new DomainError("IDEMPOTENCY_CONFLICT");
+        if (Array.isArray(previous.result.data?.savedMembers)) {
+          return { ...previous.result, data: { ...previous.result.data, savedMembers: [] } };
+        }
         return previous.result;
       }
       await this.requireExecution();

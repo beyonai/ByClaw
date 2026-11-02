@@ -7,6 +7,24 @@ import { readGroupCandidate } from "./group-candidate.js";
 
 /** 命令事务内的资源与权限上下文；BE 已验租户成员，Node 再验会话归属和群内角色。 */
 export class CommandContext {
+  readonly savedMembers: Record<string, string>[] = [];
+
+  /** Record a fact only after the member row was inserted in the command transaction. */
+  async saveMember(values: Record<string, unknown>): Promise<string> {
+    const id = await nextId(this.db, this.command.enterpriseId);
+    await insert(this.db, "byai_session_member", { ...values, byai_session_member_id: id });
+    if (values.mem_obj_type === "USER") {
+      this.savedMembers.push({
+        byaiSessionMemberId: id,
+        groupId: String(values.session_id),
+        enterpriseId: String(values.com_acct_id),
+        userId: String(values.mem_obj_id),
+        invitedBy: String(values.creator_id),
+      });
+    }
+    return id;
+  }
+
   constructor(
     readonly db: SqlSession,
     readonly command: TenantCommand,
