@@ -9,7 +9,6 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `projectId` | number | 是 | 当前项目 ID |
-| `sessionIds` | number[] | 否 | 仅返回这些会话 ID，用于批量补充指定会话的元数据 |
 | `pageNum` | number | 否 | 页码，默认沿用分页组件配置 |
 | `pageSize` | number | 否 | 每页条数，前端默认 30 |
 | `keyword` | string | 否 | 搜索关键字；空值时返回项目全部会话 |

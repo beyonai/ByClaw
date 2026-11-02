@@ -7,7 +7,6 @@ import { ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/se
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
 import { getProject } from '@/pages/projectSpace/service';
-import { listProjectSessionsByQo } from '@/service/devloop';
 import FileResourcePanel from '../FileResourcePanel';
 
 const MB = 1024 * 1024;
@@ -36,7 +35,7 @@ jest.mock('@/hooks/useGlobal', () => ({
 }));
 jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
-jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn(), listProjectSessionsByQo: jest.fn() }));
+jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
 jest.mock('@/utils/file', () => ({ downloadFile: jest.fn() }));
 jest.mock('@/components/ProjectCloudDrive', () => ({ queryProjectCloudDrive: jest.fn() }));
@@ -193,7 +192,7 @@ it('resolves project folder labels after returning to shared root and preserves 
   expect(screen.getByText('其他项目')).toBeInTheDocument();
 });
 
-it('opens project sessions through canonical session directories without filesystem aliases', async () => {
+it('opens the current session directly when clicking the virtual sessions directory', async () => {
   jest.mocked(listFiles).mockImplementation(async ({ path }) =>
     path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
   );
@@ -214,18 +213,13 @@ it('opens project sessions through canonical session directories without filesys
       />
     );
   });
-  expect(screen.getByRole('button', { name: 'Open .sessions' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open 过程文件' })).toBeInTheDocument();
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  });
-  expect(screen.getByRole('button', { name: 'Open 你好' })).toBeInTheDocument();
-  expect(listFiles).toHaveBeenCalledWith(expect.objectContaining({ path: '/by/.sessions/' }));
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open 你好' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open 过程文件' }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   });
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.sessions/8798/' }));
+  expect(screen.getByText('过程文件')).toBeInTheDocument();
 });
 
 it('returns from the virtual sessions directory to the DSH project root', async () => {
@@ -244,7 +238,7 @@ it('returns from the virtual sessions directory to the DSH project root', async 
     );
   });
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open 过程文件' }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   });
 
@@ -254,70 +248,13 @@ it('returns from the virtual sessions directory to the DSH project root', async 
 
   expect(ensureFolder).toHaveBeenCalledTimes(2);
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_-1/' }));
-  expect(screen.getByRole('button', { name: 'Open .sessions' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open 过程文件' })).toBeInTheDocument();
 });
 
-it('keeps physical session directories that are missing from project session metadata', async () => {
-  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
-    path === '/by/.sessions/'
-      ? [
-          { name: '11410351', path: '/by/.sessions/11410351/', isDir: true },
-          { name: '11410999', path: '/by/.sessions/11410999/', isDir: true },
-        ]
-      : []
-  );
-  mockSessions = [{ sessionId: '11410351', sessionName: '用户发起问候' }];
-  jest.mocked(listProjectSessionsByQo).mockResolvedValue({
-    data: {
-      list: [
-        { sessionId: '11410351', sessionName: '用户发起问候' },
-        { sessionId: '11410999', sessionName: '图片处理' },
-      ],
-    },
-  });
-  await act(async () => {
-    render(
-      <FileResourcePanel
-        scope="shared"
-        sessionId="11410351"
-        projectId={-1}
-        project={{
-          projectId: '-1',
-          projectName: '默认项目',
-          sessions: [{ sessionId: '11410351', sessionName: '用户发起问候' }],
-        } as any}
-        runtimeType="dsh"
-        resourceId="42"
-        onOpenDetail={jest.fn()}
-      />
-    );
-  });
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  });
-
-  expect(listFiles).toHaveBeenCalledWith(
-    expect.objectContaining({ resourceId: '42', path: '/by/.sessions/' })
-  );
-  expect(listProjectSessionsByQo).toHaveBeenCalledWith(
-    { projectId: -1, sessionIds: ['11410351', '11410999'], pageNum: 1, pageSize: 2 },
-    { responseCfg: { hideErrorTips: true } }
-  );
-  expect(screen.getByRole('button', { name: 'Open 用户发起问候' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Open 图片处理' })).toBeInTheDocument();
-});
-
-it('loads session names by directory IDs when expanding sessions from the project root', async () => {
+it('expands process files directly from the current session directory', async () => {
   jest.mocked(listFiles).mockImplementation(async ({ path }) => {
-    if (path === '/by/.shared/project_-1/') {
-      return [{ name: '.sessions', path: '/by/.sessions/', isDir: true }];
-    }
-    if (path === '/by/.sessions/') {
-      return [
-        { name: '11407993', path: '/by/.sessions/11407993/', isDir: true },
-        { name: '66', path: '/by/.sessions/66/', isDir: true },
-      ];
+    if (path === '/by/.sessions/11407993/') {
+      return [{ name: 'artifacts', path: '/by/.sessions/11407993/artifacts/', isDir: true }];
     }
     return [];
   });
@@ -335,13 +272,13 @@ it('loads session names by directory IDs when expanding sessions from the projec
   });
 
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Expand .sessions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 过程文件' }));
   });
 
-  expect(listProjectSessionsByQo).toHaveBeenCalledWith(
-    { projectId: -1, sessionIds: ['11407993', '66'], pageNum: 1, pageSize: 2 },
-    { responseCfg: { hideErrorTips: true } }
+  expect(listFiles).toHaveBeenCalledWith(
+    expect.objectContaining({ resourceId: '42', path: '/by/.sessions/11407993/' })
   );
+  expect(listFiles).not.toHaveBeenCalledWith(expect.objectContaining({ path: '/by/.sessions/' }));
 });
 
 it('does not reload the current session directory when live session names update', async () => {
@@ -369,11 +306,7 @@ it('does not reload the current session directory when live session names update
   });
   expect(mockExpandAction).toBe(false);
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  });
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open 8798' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open 过程文件' }));
     await new Promise((resolve) => setTimeout(resolve, 250));
   });
   const sessionPathCalls = () =>
@@ -512,7 +445,6 @@ beforeEach(() => {
   jest.mocked(queryProjectCloudDrive).mockResolvedValue(folders);
   jest.mocked(uploadFiles).mockResolvedValue({});
   jest.mocked(uploadKnowledgeFiles).mockResolvedValue({});
-  jest.mocked(listProjectSessionsByQo).mockResolvedValue({ data: { list: [] } });
 });
 
 afterEach(() => {

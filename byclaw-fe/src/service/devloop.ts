@@ -43,7 +43,6 @@ export type DevloopProjectPayload = {
 
 type DevloopProjectSessionListPayload = {
   projectId: number;
-  sessionIds?: Array<string | number>;
   pageNum?: number;
   pageSize?: number;
   keyword?: string;
