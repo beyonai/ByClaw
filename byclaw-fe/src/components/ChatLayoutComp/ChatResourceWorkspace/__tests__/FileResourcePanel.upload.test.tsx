@@ -104,6 +104,13 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
             Quote {item.name}
           </button>
         ))}
+        {items
+          .filter((item) => item.isDir)
+          .map((item) => (
+            <button key={`expand-${item.path}`} type="button" onClick={() => void onLoadData(item)}>
+              Expand {getDisplayName?.(item) || item.name}
+            </button>
+          ))}
       </section>
     );
   },
@@ -299,6 +306,42 @@ it('keeps physical session directories that are missing from project session met
   );
   expect(screen.getByRole('button', { name: 'Open 用户发起问候' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Open 图片处理' })).toBeInTheDocument();
+});
+
+it('loads session names by directory IDs when expanding sessions from the project root', async () => {
+  jest.mocked(listFiles).mockImplementation(async ({ path }) => {
+    if (path === '/by/.shared/project_-1/') {
+      return [{ name: '.sessions', path: '/by/.sessions/', isDir: true }];
+    }
+    if (path === '/by/.sessions/') {
+      return [
+        { name: '11407993', path: '/by/.sessions/11407993/', isDir: true },
+        { name: '66', path: '/by/.sessions/66/', isDir: true },
+      ];
+    }
+    return [];
+  });
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="11407993"
+        projectId={-1}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Expand .sessions' }));
+  });
+
+  expect(listProjectSessionsByQo).toHaveBeenCalledWith(
+    { projectId: -1, sessionIds: ['11407993', '66'], pageNum: 1, pageSize: 2 },
+    { responseCfg: { hideErrorTips: true } }
+  );
 });
 
 it('does not reload the current session directory when live session names update', async () => {
