@@ -57,7 +57,11 @@ class PlatformMessageI18nTest extends I18nTestSupport {
         var httpError = mock(feign.FeignException.class);
         when(httpError.status()).thenReturn(503);
         assertThatThrownBy(() -> gateway.safe(() -> { throw httpError; }))
-            .isInstanceOf(BdpRuntimeException.class).hasMessage(unavailable);
+            .isInstanceOfSatisfying(BdpRuntimeException.class, error -> {
+                assertThat(error.getErrorMsg()).isEqualTo(unavailable);
+                assertThat(error.getErrorService()).isNull();
+            })
+            .hasMessage(unavailable).hasCause(httpError);
     }
 
     @ParameterizedTest

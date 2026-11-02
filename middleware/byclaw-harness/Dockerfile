@@ -174,7 +174,7 @@ USER root
 # Keep bubblewrap available for optional DSH sandbox backends; group members do not require it.
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/*
 
-ARG BYCLI_VERSION=2.1.77
+ARG BYCLI_VERSION=2.1.78
 ARG BYCLI_EXTENSION_VERSION=2.1.29
 
 ENV DSH_HOME=/home/byclaw/.dsh \

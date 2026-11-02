@@ -1,9 +1,15 @@
 package com.iwhalecloud.byai.gateway.sandbox.platform;
 
 import feign.*;
+import feign.codec.Decoder;
+import feign.codec.StringDecoder;
 import java.util.Map;
+import org.springframework.beans.factory.ObjectFactory;
+import org.springframework.boot.autoconfigure.http.HttpMessageConverters;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.cloud.openfeign.support.ResponseEntityDecoder;
+import org.springframework.cloud.openfeign.support.SpringDecoder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +30,16 @@ public interface PlatformControlClient {
     String metrics();
 
     class Configuration extends PlatformAlertClient.Configuration {
+        /** Platform control returns JSON, while its Prometheus endpoint returns unwrapped text. */
+        @Bean
+        public Decoder platformControlDecoder(ObjectFactory<HttpMessageConverters> messageConverters) {
+            Decoder jsonDecoder = new ResponseEntityDecoder(new SpringDecoder(messageConverters));
+            Decoder textDecoder = new StringDecoder();
+            return (response, type) -> type == String.class
+                    ? textDecoder.decode(response, type)
+                    : jsonDecoder.decode(response, type);
+        }
+
         @Bean
         @org.springframework.context.annotation.Scope("prototype")
         public Feign.Builder platformControlBuilder() {

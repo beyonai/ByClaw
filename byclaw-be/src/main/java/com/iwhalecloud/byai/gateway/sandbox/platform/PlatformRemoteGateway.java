@@ -65,7 +65,9 @@ public class PlatformRemoteGateway {
             }
             var quota=com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException.from(failure);
             if(quota!=null)throw quota;
-            throw new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
+            BdpRuntimeException error = new BdpRuntimeException(I18nUtil.get("platform.request.failed", failure.status()));
+            error.initCause(failure);
+            throw error;
         }
     }
 
