@@ -4,7 +4,14 @@ import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, by
 import { instrumentChatEmitter } from './reply-log.ts'
 import { chatChain, measureChatStage, prepareChatTurn, type ByClawChatChain } from './chat-chain-log.ts'
 import { normalizeByClawSessionId } from './session-extensions.ts'
-import { byClawProjectCwd, byClawSessionCwd, isLegacyProjectWorkspaceTransition, isProjectSharedCwd } from './session-cwd.ts'
+import {
+  byClawProjectCwd,
+  byClawProjectSessionAlias,
+  byClawSessionCwd,
+  ensureByClawProjectSessionAlias,
+  isLegacyProjectWorkspaceTransition,
+  isProjectSharedCwd,
+} from './session-cwd.ts'
 import { requestByClawProjectWorkspace } from './session-cwd-compat.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { sanitizeByClawOperationalLog } from './operational-log.ts'
@@ -128,6 +135,7 @@ export interface ByClawDshSessionRuntimeOptions {
   byRoot?: string
   /** Create a session directory where tools run; defaults to this host's filesystem. */
   ensureDirectory?: (path: string) => Promise<void>
+  ensureSessionAlias?: (sessionRoot: string, alias: string) => Promise<void>
   /** User-tree file access where tools run; defaults to this host's filesystem. */
   userFiles?: ToolEnvironmentFiles
   /** ByClaw UserFS root for file-change snapshots; defaults to `BYCLAW_USER_FS_ROOT` or workspace inference. */
@@ -2136,13 +2144,19 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
     const byRoot = resolve(this.options.byRoot ?? '/by')
     const sessionRoot = byClawSessionCwd(route.externalRootSessionId, byRoot)
+    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     await (this.options.ensureDirectory ?? (path => mkdir(path, { recursive: true }).then(() => {})))(route.cwd ?? sessionRoot)
+    const projectSessionAlias = byClawProjectSessionAlias(
+      inboundTurn.project?.['project_id'], route.externalRootSessionId, byRoot,
+    )
+    if (projectSessionAlias !== undefined) {
+      await (this.options.ensureSessionAlias ?? ensureByClawProjectSessionAlias)(sessionRoot, projectSessionAlias)
+    }
     this.assertAccepting()
     const entry = await measureChatStage('harness.agent_open', () => this.handleFor(command, selection, preparedRoot))
     this.assertAccepting()
     entry.selection.current = selection
     const rootAgent = entry.handle.agent
-    const inboundTurn = buildByClawInboundTurnContext(command, byRoot)
     if (inboundTurn.project?.['project_id'] === undefined) {
       this.ctx.logger.warn(
         `DSH request has no project_id; falling back to session workspace (sessionId=${route.externalRootSessionId}, messageId=${command.header.messageId})`,
@@ -2156,6 +2170,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         userCode: nonEmptyString(command.header.userCode),
         userName: nonEmptyString(command.header.userName),
         sessionRoot,
+        ...(projectSessionAlias === undefined ? {} : { sessionAlias: projectSessionAlias }),
         sharedRoot: join(byRoot, '.shared'),
         sharedDir: isProjectSharedCwd(route.cwd, byRoot) ? route.cwd : join(byRoot, '.shared'),
         ...(inboundTurn.project?.['project_id'] === undefined ? {} : { projectId: String(inboundTurn.project['project_id']) }),

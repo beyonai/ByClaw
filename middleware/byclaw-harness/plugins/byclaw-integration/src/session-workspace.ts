@@ -37,6 +37,8 @@ export interface ByClawSessionWorkspace {
   readonly userName?: string
   /** Canonical host-visible roots for per-session delivery and shared files. */
   readonly sessionRoot?: string
+  /** Project-local symlink to sessionRoot, recreated idempotently when a DSH tool environment starts. */
+  readonly sessionAlias?: string
   readonly sharedRoot?: string
   readonly sharedDir?: string
   readonly projectId?: string
@@ -302,6 +304,7 @@ export function byClawSessionWorkspaceDeclaration(workspace: ByClawSessionWorksp
     ...(workspace.userName === undefined ? [] : [`user_name: ${workspace.userName}`]),
     `cwd: ${workspace.cwd}`,
     ...(workspace.sessionRoot === undefined ? [] : [`session_root: ${workspace.sessionRoot}`]),
+    ...(workspace.sessionAlias === undefined ? [] : [`session_alias: ${workspace.sessionAlias}`]),
     ...(workspace.sharedRoot === undefined ? [] : [`shared_root: ${workspace.sharedRoot}`]),
     ...(workspace.sharedDir === undefined ? [] : [`shared_dir: ${workspace.sharedDir}`]),
     ...(workspace.projectId === undefined ? [] : [`project_id: ${workspace.projectId}`]),
@@ -391,6 +394,9 @@ function workspacePolicy(agent: Agent, registry: ByClawSessionWorkspaceRegistry)
     'Run commands and resolve relative file paths in cwd. Access project source code through an explicit project path when the task requires it.',
     ...(workspace.sessionRoot === undefined ? [] : [
       `Treat .session, session, sessions, .sessions, 会话目录, and 当前会话文件 as aliases for the canonical session root: ${workspace.sessionRoot}.`,
+      ...(workspace.sessionAlias === undefined ? [] : [
+        `The project-local session alias ${workspace.sessionAlias} refers to the same persistent directory; changes through either path are immediately visible through the other.`,
+      ]),
       `By default, write completion reports, checklists, generated exports, and other standalone deliverables to ${workspace.defaultOutputRoot ?? workspace.sessionRoot}.`,
       'Reject path traversal outside the selected root, and read/list the exact target after writing before claiming completion.',
     ]),
