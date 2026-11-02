@@ -14,6 +14,7 @@ const MODEL_ERROR_CODES = new Set([
 const PROVIDER_CODE_KEYS = new Set(['code', 'error_code', 'errorcode'])
 const PROVIDER_TYPE_KEYS = new Set(['type'])
 const MESSAGE_KEYS = new Set(['message', 'error_description', 'errormessage', 'error_message'])
+const HTTP_STATUS_KEYS = new Set(['status', 'statuscode', 'httpstatus'])
 const SECRET_KEY = /(?:api[-_]?key|authorization|cookie|credential|password|secret|token)/iu
 const PROVIDER_CODE = /^[\w.-]{1,100}$/u
 const MAX_PROVIDER_MESSAGE = 500
@@ -77,10 +78,16 @@ export function sanitizeProviderErrorText(value: unknown): string | undefined {
     : sanitized
 }
 
-function collectProviderDetails(value: unknown): { codes: string[]; messages: string[] } {
+function httpStatusValue(value: unknown): number | undefined {
+  const status = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined
+}
+
+function collectProviderDetails(value: unknown): { codes: string[]; messages: string[]; statuses: number[] } {
   const codes: string[] = []
   const types: string[] = []
   const messages: string[] = []
+  const statuses: number[] = []
   const visited = new Set<object>()
   const visit = (item: unknown, depth: number): void => {
     if (depth > 6 || item === null || item === undefined) return
@@ -96,9 +103,20 @@ function collectProviderDetails(value: unknown): { codes: string[]; messages: st
     const object = recordOf(item)
     if (object === undefined || visited.has(object)) return
     visited.add(object)
-    for (const [rawKey, child] of Object.entries(object).slice(0, 50)) {
+    // Native Error.message and Error.cause are non-enumerable; never include stack traces.
+    const entries = Object.entries(object)
+    if (item instanceof Error) {
+      for (const key of ['message', 'cause'] as const) {
+        if (!Object.prototype.propertyIsEnumerable.call(item, key)) entries.unshift([key, item[key]])
+      }
+    }
+    for (const [rawKey, child] of entries.slice(0, 50)) {
       const key = rawKey.toLowerCase()
       if (SECRET_KEY.test(key)) continue
+      if (HTTP_STATUS_KEYS.has(key)) {
+        const status = httpStatusValue(child)
+        if (status !== undefined) statuses.push(status)
+      }
       if (PROVIDER_CODE_KEYS.has(key) && typeof child === 'string' && PROVIDER_CODE.test(child.trim())) {
         codes.push(child.trim())
       }
@@ -113,16 +131,21 @@ function collectProviderDetails(value: unknown): { codes: string[]; messages: st
     }
   }
   visit(value, 0)
-  return { codes: [...codes, ...types], messages }
+  return { codes: [...codes, ...types], messages, statuses }
 }
 
-function httpStatusOf(failure: Record<string, unknown>, detail: string): number | undefined {
+function httpStatusOf(failure: Record<string, unknown>, details: ReturnType<typeof collectProviderDetails>): number | undefined {
   for (const value of [failure['status'], failure['statusCode'], failure['httpStatus']]) {
-    const status = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
-    if (Number.isInteger(status) && status >= 100 && status <= 599) return status
+    const status = httpStatusValue(value)
+    if (status !== undefined) return status
   }
-  const match = detail.match(/(?:^|\D)([1-5]\d\d)(?:\D|$)/u)
-  return match === null ? undefined : Number(match[1])
+  if (details.statuses[0] !== undefined) return details.statuses[0]
+  // Model names, request IDs and token counts can contain three-digit numbers too.
+  for (const message of details.messages) {
+    const match = message.match(/(?:\b(?:http(?:\/\d(?:\.\d)?)?|httpstatus|status(?:[_ -]?code)?)\s*[:=]?\s*|^\s*)([45]\d{2})(?=$|[\s:;,])/iu)
+    if (match !== null) return Number(match[1])
+  }
+  return undefined
 }
 
 function normalizedCode(failureCode: string | undefined, status: number | undefined, detail: string): ByClawModelErrorCode {
@@ -149,7 +172,7 @@ export function byClawModelErrorFromRequestFailure(value: unknown): ByClawModelE
   const rootMessage = sanitizeProviderErrorText(failure['message'])
   const details = collectProviderDetails(value)
   const detail = [rootMessage, ...details.messages, ...details.codes].filter(Boolean).join(' ').toLowerCase()
-  const status = httpStatusOf(failure, detail)
+  const status = httpStatusOf(failure, details)
   const dshCode = typeof failure['code'] === 'string' ? failure['code'] : undefined
   const code = normalizedCode(dshCode, status, detail)
   const providerCode = details.codes.find(candidate => candidate.toUpperCase() !== dshCode?.toUpperCase())
