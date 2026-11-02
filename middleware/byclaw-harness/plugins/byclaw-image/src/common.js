@@ -32,7 +32,7 @@ export function headers(model, auth = 'bearer') {
 }
 
 export async function jsonRequest(url, model, body, context, auth) {
-  const response = await request(url, { method: body === undefined ? 'GET' : 'POST', headers: headers(model, auth), ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, context)
+  const response = await request(url, { method: body === undefined ? 'GET' : 'POST', headers: headers(model, auth), ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, context, { errorDetails: true })
   // Inline base64 images are larger than binary media. Bound the entire JSON too.
   const result = await readJson(response, 70 * 1024 * 1024)
   if (!result || typeof result !== 'object' || result.error || result.code || (result.base_resp?.status_code !== undefined && result.base_resp.status_code !== 0)) throw new Error('IMAGE_PROVIDER_FAILED')

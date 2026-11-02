@@ -1,3 +1,4 @@
+import { providerErrorMessage } from '@byclaw/media-runtime'
 import { validateImage } from './common.js'
 import { imagesApi } from './providers/images-api.js'
 import { fal, google, minimax, qwen } from './providers/native.js'
@@ -28,6 +29,7 @@ export async function generateImage(model, args, context = {}) {
   } catch (error) {
     if (context.signal?.aborted || error?.name === 'AbortError') throw new DOMException('Image generation aborted', 'AbortError')
     if (error?.name === 'TimeoutError') throw new DOMException('Image generation timeout', 'TimeoutError')
+    if (providerErrorMessage(error) !== undefined) throw error
     // Recreate errors rather than rethrowing URL/Headers/transport errors, whose
     // message, input, cause or other properties can contain credential material.
     const code = /^(IMAGE_[A-Z0-9_]+|MEDIA_[A-Z0-9_]+)(?::|$)/.exec(error?.message ?? '')?.[1]

@@ -22,7 +22,7 @@ export interface SpeechOptions {
 export interface RequestContext { referenceImage?: { bytes: Uint8Array; mimeType: string }; signal?: AbortSignal; fetch?: typeof fetch; onWarning?: (warning: MediaWarning) => void }
 export function resolveMediaModel(redis: { hget(key: string, field: string): Promise<string | null> }, type: 'IMAGE_GENERATION' | 'TTS' | 'ASR', options?: { decrypt?: (value: string) => string; modelId?: string }): Promise<MediaModel>
 export function endpoint(base: string, suffix: string): string
-export function request(url: string, init?: RequestInit, context?: RequestContext, options?: { acceptErrorResponse?: boolean }): Promise<Response>
+export function request(url: string, init?: RequestInit, context?: RequestContext, options?: { acceptErrorResponse?: boolean; errorDetails?: boolean }): Promise<Response>
 export function readBytes(response: Response, maxBytes?: number, signal?: AbortSignal): Promise<Buffer>
 export function readJson(response: Response, maxBytes?: number): Promise<any>
 export function assetFromBase64(value: string, mimeType: string): MediaAsset
@@ -55,3 +55,6 @@ export interface MediaSessionIo extends MediaArtifactIo {
 }
 export function persistAssets(root: string, kind: 'image' | 'tts' | 'asr', assets: MediaAsset[], io?: MediaArtifactIo): Promise<Array<{ path: string; mimeType: string; bytes: number }>>
 export function mountMediaPlugin(ctx: any, options: { kind: 'image' | 'tts'; generate: (model: MediaModel, args: any, context: RequestContext) => Promise<MediaAsset[] | MediaGenerationResult>; describe?: (model: MediaModel) => SpeechOptions; modelId?: string; provider?: string; protocol?: string }): void
+
+/** Returns only diagnostics produced by the runtime's bounded sanitizer; untrusted errors return undefined. */
+export function providerErrorMessage(error: unknown): string | undefined

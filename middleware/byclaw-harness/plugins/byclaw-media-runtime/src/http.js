@@ -1,5 +1,6 @@
 import { setTimeout } from 'node:timers/promises'
 import dns from 'node:dns/promises'
+import { providerHttpError } from './provider-error.js'
 import { isIP } from 'node:net'
 
 export const MAX_MEDIA_BYTES = 50 * 1024 * 1024
@@ -25,6 +26,7 @@ export async function request(url, init = {}, context = {}, options = {}) {
     throw new Error('MEDIA_TRANSPORT_FAILED')
   }
   if (!response.ok && options.acceptErrorResponse !== true) {
+    if (options.errorDetails === true) throw await providerHttpError(response, init.headers)
     await response.body?.cancel().catch(() => {})
     throw new Error(`MEDIA_HTTP_${response.status}`)
   }

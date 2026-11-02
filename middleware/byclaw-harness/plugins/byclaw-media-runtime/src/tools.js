@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { loadImageReference, describeImageArtifacts, imageReferenceId } from './image-artifacts.js'
 import { persistAssets } from './artifacts.js'
+import { providerErrorMessage } from './provider-error.js'
 
 const imageFields = {
   referenceImage: { type: 'string', minLength: 1, maxLength: 1024, description: '用户要求修改所引用图片时必填：COMMON_FILE 引用的当前会话图片路径 /by/.sessions/<sessionId>/image/<文件名>，也兼容图片文件名；不接受 URL 或跨会话路径。' },
@@ -67,7 +68,8 @@ function connectorConfigurationError(kind, source, cause, connectorCode) {
   const message = effectiveSource === 'user-connector'
     ? `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; ${connector.name}连接器当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，检查并重新保存连接信息；配置完成前不要再次调用当前工具（原因：${reason}）。`
     : `MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${effectiveConnectorCode}; 系统默认${connector.name}当前不可用。请停止重试并告知用户点击工具结果中的“配置${connector.name}”按钮，配置并启用个人连接器；配置完成前不要再次调用当前工具（原因：${reason}）。`
-  const error = new Error(message)
+  const details = kind === 'image' ? providerErrorMessage(cause) : undefined
+  const error = new Error(message + (details ? ` 供应商详情：${details}` : ''))
   error.code = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED'
   error.capability = kind === 'image' ? 'IMAGE' : 'TTS'
   error.connectorCode = effectiveConnectorCode
