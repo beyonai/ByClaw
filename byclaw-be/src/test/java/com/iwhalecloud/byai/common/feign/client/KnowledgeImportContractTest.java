@@ -8,6 +8,8 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeStatus;
+import java.util.List;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -81,6 +83,24 @@ class KnowledgeImportContractTest extends com.iwhalecloud.byai.common.i18n.I18nT
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void uploadPreservesDefiniteRejectionVersusUnknownOutcome(boolean discovery) throws Exception {
+        try (var fixture = new Fixture(discovery, KnowledgeServiceOperation.UPLOAD_FILE)) {
+            KbFileImport request = new KbFileImport();
+            request.setKnCode("kb-1");
+            request.setFilePath("/f.txt");
+            request.setMultipartFile(new MockMultipartFile("fileContent", "f.txt", "text/plain", new byte[]{1}));
+            fixture.response = "{\"resultCode\":\"-1\",\"resultObject\":{}}";
+            for (int status : new int[]{422, 408, 500}) {
+                fixture.status = status;
+                assertThatThrownBy(() -> fixture.service.importKnowledgeItem(request, Map.of()))
+                    .isInstanceOfSatisfying(KnowledgeHttpFailure.class, failure ->
+                        assertThat(failure.isDefiniteRejection()).isEqualTo(status == 422));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void fileCountPreservesZeroLargeCountsAndProviderErrors(boolean discovery) throws Exception {
         try (var fixture = new Fixture(discovery, KnowledgeServiceOperation.FILE_COUNT)) {
             KbKnowledgeFileCount request = new KbKnowledgeFileCount();
@@ -96,6 +116,35 @@ class KnowledgeImportContractTest extends com.iwhalecloud.byai.common.i18n.I18nT
             fixture.response = "{\"resultCode\":\"-1\",\"resultMsg\":\"knowledge base not found: kb-1\",\"resultObject\":{}}";
             assertThatThrownBy(() -> fixture.service.fileCount(request, 42L))
                 .isInstanceOf(BaseException.class).hasMessageContaining("knowledge base not found: kb-1");
+        }
+    }
+
+    /** 验证与待上线 QA 文档一致的批量 JSON，以及依赖失败不产生成功空结果。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void statusUsesDocumentedBatchBodyAndPreservesDecimalKb(boolean discovery) throws Exception {
+        try (var fixture = new Fixture(discovery, KnowledgeServiceOperation.STATUS)) {
+            KbKnowledgeStatus request = new KbKnowledgeStatus();
+            request.setKnCodeList(List.of("kb-1", "kb-2"));
+            fixture.response = """
+                {"resultCode":"0","resultMsg":"success","resultObject":{"data":[
+                  {"knCode":"kb-1","fileCount":2,"spaceSize":1024.25},
+                  {"knCode":"kb-2","fileCount":0,"spaceSize":0}]}}
+                """;
+            var result = fixture.service.knowledgeStatus(request);
+            assertThat(fixture.resourceId).isNull();
+            assertThat(JSON.parseObject(fixture.body).keySet()).containsExactly("knCodeList");
+            assertThat(JSON.parseObject(fixture.body).getJSONArray("knCodeList"))
+                .containsExactly("kb-1", "kb-2");
+            assertThat(result.getResultObject().getData().get(0).getSpaceSize())
+                .isEqualByComparingTo("1024.25");
+            assertThat(result.getResultObject().getData().get(1).getFileCount()).isZero();
+            for (int status : new int[]{422, 503, 500, 404}) {
+                fixture.status = status;
+                fixture.response = "{\"resultCode\":\"-1\",\"resultObject\":{}}";
+                assertThatThrownBy(() -> fixture.service.knowledgeStatus(request))
+                    .isInstanceOf(BaseException.class);
+            }
         }
     }
 

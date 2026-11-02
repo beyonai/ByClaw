@@ -1,11 +1,14 @@
-# syntax=docker/dockerfile:1
 # Repository-root context. DSH build tools stay in the disposable builder.
-ARG RUNTIME_IMAGE=python:3.12-slim-trixie
+ARG RUNTIME_IMAGE
 FROM ${RUNTIME_IMAGE} AS runtime-os
 ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     NVM_DIR=/opt/nvm NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple UV_EXTRA_INDEX_URL= UV_PYTHON_DOWNLOADS=never \
+    PIP_EXTRA_INDEX_URL= \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PATH=/opt/nvm/current/bin:/usr/local/bin:$PATH
@@ -26,7 +29,8 @@ ARG PNPM_VERSION=11.28.5
 ARG CODEGRAPH_VERSION=1.6.0
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config \
     && rm -rf /var/lib/apt/lists/*
-ARG NVM_SOURCE_BASE=https://cdn.jsdelivr.net/gh/nvm-sh/nvm
+ARG NVM_SOURCE_BASE
+RUN : "${NVM_SOURCE_BASE:?Provide verified domestic NVM source; no overseas fallback}"
 ARG NVM_SH_SHA256=390260ab9eb1da20e8bc0ebea2ee90f528d53e5e9f6e13b16717db4af454df9d
 ARG NVM_EXEC_SHA256=e6b7a2bafac6994e1ba14282cff82c75476fba0788f68a9ecf558dfdf3331621
 ARG NVM_BASH_COMPLETION_SHA256=b7eb3bf03d59b61e451957b020640aa55fe8bf47fb39d85d244e259f445d2fbe
@@ -58,7 +62,7 @@ RUN . "${NVM_DIR}/nvm.sh" \
 ENV npm_config_nodedir=/opt/nvm/current
 
 RUN npm install --global "pnpm@${PNPM_VERSION}" \
-    && npm install --global "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" --registry=https://registry.npmjs.org \
+    && npm install --global "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" --registry="${NPM_CONFIG_REGISTRY}" \
     && test "$(codegraph --version)" = "${CODEGRAPH_VERSION}" \
     && npm cache clean --force
 RUN printf '%s\n' \
@@ -68,7 +72,8 @@ RUN printf '%s\n' \
         > /etc/profile.d/nvm.sh \
     && chmod 0644 /etc/profile.d/nvm.sh
 
-ARG DSH_REPOSITORY=https://githubfast.com/deepseek-ai/deepseek-harness.git
+ARG DSH_REPOSITORY
+RUN : "${DSH_REPOSITORY:?Provide verified domestic DSH repository; no overseas fallback}"
 ARG DSH_REF=dsh-v0.2.1-rc.2
 
 RUN git clone --depth 1 --branch "${DSH_REF}" "${DSH_REPOSITORY}" /workspace
@@ -92,5 +97,7 @@ COPY --from=dsh-builder /opt/nvm/ /opt/nvm/
 COPY --from=dsh-builder /etc/profile.d/nvm.sh /etc/profile.d/nvm.sh
 COPY --from=dsh-builder --chown=byclaw:byclaw /workspace/ /workspace/
 ENV npm_config_nodedir=/opt/nvm/current DSH_HOME=/by/byclaw/.dsh CODEGRAPH_MCP_CWD=/by
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /usr/local/bin/byclaw-configure-cn-sources
+RUN bash /usr/local/bin/byclaw-configure-cn-sources
 WORKDIR /workspace
 LABEL io.byclaw.dsh.base="slim" io.byclaw.dsh.ref="${DSH_REF}"

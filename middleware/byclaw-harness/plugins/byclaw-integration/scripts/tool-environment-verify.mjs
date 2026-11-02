@@ -30,6 +30,13 @@ try {
   // --- file primitives -------------------------------------------------------
   await files.ensureDirectory(join(byRoot, '.sessions', 's1'))
   check(((await stat(b.toHost(join(byRoot, '.sessions', 's1')))).mode & 0o777) === 0o700, 'ensureDirectory creates owner-only directories on B')
+  const sessionAlias = join(byRoot, '.shared', 'project_42', '.session', 'session_s1')
+  await files.ensureSymlink(join(byRoot, '.sessions', 's1'), sessionAlias)
+  await writeFile(b.toHost(join(byRoot, '.sessions', 's1', 'canonical.txt')), 'canonical')
+  check(await readFile(b.toHost(join(sessionAlias, 'canonical.txt')), 'utf8') === 'canonical', 'session alias reads canonical files')
+  await writeFile(b.toHost(join(sessionAlias, 'alias.txt')), 'alias')
+  check(await readFile(b.toHost(join(byRoot, '.sessions', 's1', 'alias.txt')), 'utf8') === 'alias', 'session alias writes canonical files')
+  await files.ensureSymlink(join(byRoot, '.sessions', 's1'), sessionAlias)
   check(b.calls.subprocess.some(argv => argv[0] === '/bin/sh' && argv.includes(join(byRoot, '.sessions', 's1'))), 'mkdir runs through ctx.subprocess')
   await assert.rejects(files.realpath(join(byRoot, 'missing')), { code: 'ENOENT' }); checks += 1
   await assert.rejects(files.listDir(join(byRoot, 'missing')), { code: 'ENOENT' }); checks += 1

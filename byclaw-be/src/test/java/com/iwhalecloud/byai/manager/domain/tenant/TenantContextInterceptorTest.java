@@ -3,17 +3,19 @@ package com.iwhalecloud.byai.manager.domain.tenant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.server.ResponseStatusException;
+
+import com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal;
 
 class TenantContextInterceptorTest {
 
@@ -25,166 +27,69 @@ class TenantContextInterceptorTest {
         TenantRequestContextHolder.clear();
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/tool/addToolFromThird", "/tool/queryResourceSyncJob"})
-    void synchronizationRoutesValidateTenantSelectors(String path) {
-        for (int headers = 1; headers <= 3; headers++) {
-            var request = new MockHttpServletRequest("POST", "/byaiService" + path);
-            request.setContextPath("/byaiService");
-            if ((headers & 1) != 0) request.addHeader("X-Enterprise-Id", "not-a-tenant-id");
-            if ((headers & 2) != 0) request.addHeader("X-Tenant-Context", "unused-context");
-            assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-                .isInstanceOf(ResponseStatusException.class);
-            assertThat(TenantRequestContextHolder.get()).isNull();
-        }
-        verifyNoInteractions(service);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"/tool/addToolFromThird/other", "/tool/queryResourceDetail"})
-    void synchronizationExceptionDoesNotExtendToOtherResourceRoutes(String path) {
-        var request = request("/byaiService" + path, "123");
-        request.setMethod("POST");
-        request.addHeader("X-Tenant-Context", "context-token");
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class);
-        verifyNoInteractions(service);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"/chat/superAgentChat", "/chat/runningStatus", "/chat/runningSnapshot",
-        "/api/v1/sessionResources/query", "/chat/stopChat", "/chat/getMessageById", "/chat/updateMessageStructById", "/chat/sessionStatus",
-        "/showcase/messages/count"})
-    void supportedChatRoutesReceiveValidatedTenantContext(String path) {
+    @Test
+    void supportedTenantRouteValidatesEnterpriseAgainstCurrentUserMembership() {
         TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123", "context-token")).thenReturn(context);
-        MockHttpServletRequest request = request("/byaiService" + path, "123");
-        request.addHeader("X-Tenant-Context", "context-token");
+        when(service.validate("123")).thenReturn(context);
+        MockHttpServletRequest request = request("/byaiService/assiman/getMessages", "123");
 
         assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verify(service).validate("123");
         assertThat(TenantRequestContextHolder.get()).isSameAs(context);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/group-chat/tasks/50", "/group-chat/tasks/50/delivery-status",
-        "/group-chat/tasks/50/pending-publication", "/group-chat/tasks/50/complete", "/group-chat/tasks/50/cancel"})
-    void groupTaskRoutesReceiveValidatedTenantContext(String path) {
-        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123", "context-token")).thenReturn(context);
-        MockHttpServletRequest request = request("/byaiService" + path, "123");
-        request.addHeader("X-Tenant-Context", "context-token");
+    @Test
+    void oldTenantContextHeaderIsRejectedInsteadOfBeingUsedAsAuthorization() {
+        MockHttpServletRequest request = request("/byaiService/assiman/getMessages", "123");
+        request.addHeader("X-Tenant-Context", "old-token");
 
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.context.header.removed");
+        verifyNoInteractions(service);
+        assertThat(TenantRequestContextHolder.get()).isNull();
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/group-chat/other", "/group-chat/tasks-other/50"})
-    void groupTaskAllowanceDoesNotPermitUnmappedSiblingRoutes(String path) {
-        MockHttpServletRequest request = request("/byaiService" + path, "123");
-        request.addHeader("X-Tenant-Context", "context-token");
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
+    @Test
+    void missingEnterpriseKeepsLegacyPersonalFlowWithoutCreatingTenantContext() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/byaiService/assiman/getMessages");
+        request.setContextPath("/byaiService");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verifyNoInteractions(service);
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 
     @Test
     void tenantHeaderCannotReachUnmappedBusinessRoute() {
         MockHttpServletRequest request = request("/byaiService/chat/sessions", "123");
-        request.addHeader("X-Tenant-Context", "context-token");
+
         assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("tenant.route.notReady");
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
+        verifyNoInteractions(service);
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 
     @Test
-    void validatedTenantRouteSetsAndClearsContext() {
+    void servicePrincipalIsCheckedByItsOwnTenantAllowList() {
+        MockHttpServletRequest request = request("/byaiService/internal/v1/tenants/123", "123");
+        request.setAttribute(InternalServicePrincipal.ATTRIBUTE,
+            new InternalServicePrincipal("client", "HACU", Set.of("tenant:read"), Set.of("123"), false));
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        verifyNoInteractions(service);
+        assertThat(TenantRequestContextHolder.get()).isNull();
+    }
+
+    @Test
+    void afterCompletionClearsValidatedTenantContext() {
         TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123", "context-token")).thenReturn(context);
+        when(service.validate("123")).thenReturn(context);
         MockHttpServletRequest request = request("/byaiService/assiman/getMessages", "123");
-        request.addHeader("X-Tenant-Context", "context-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        assertThat(interceptor.preHandle(request, response, new Object())).isTrue();
-        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
+        interceptor.preHandle(request, response, new Object());
         interceptor.afterCompletion(request, response, new Object(), null);
-        assertThat(TenantRequestContextHolder.get()).isNull();
-    }
 
-    @Test
-    void projectSessionListAcceptsValidatedTenantContext() {
-        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123", "context-token")).thenReturn(context);
-        MockHttpServletRequest request = request("/byaiService/project/session/listByQo", "123");
-        request.addHeader("X-Tenant-Context", "context-token");
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
-    }
-
-    @Test
-    void fileCopyAcceptsAndValidatesTenantContextInsteadOfIgnoringIt() {
-        TenantRequestContext context = new TenantRequestContext(1L, 123L, "MEMBER");
-        when(service.validate("123", "context-token")).thenReturn(context);
-        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
-        request.setMethod("POST");
-        request.addHeader("X-Tenant-Context", "context-token");
-
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-
-        verify(service).validate("123", "context-token");
-        assertThat(TenantRequestContextHolder.get()).isSameAs(context);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"/datasetController/copyKnowledgeFile/other", "/datasetController/uploadFiles"})
-    void fileCopyRegistrationDoesNotOpenOtherKnowledgeRoutes(String path) {
-        MockHttpServletRequest request = request("/byaiService" + path, "123");
-        request.setMethod("POST");
-        request.addHeader("X-Tenant-Context", "context-token");
-
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
-        verifyNoInteractions(service);
-    }
-
-    @Test
-    void fileCopyStillRejectsInvalidOrIncompleteTenantIdentity() {
-        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
-        request.setMethod("POST");
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("401");
-        request.addHeader("X-Tenant-Context", "invalid-token");
-        when(service.validate("123", "invalid-token")).thenThrow(new ResponseStatusException(
-            org.springframework.http.HttpStatus.UNAUTHORIZED, "invalid tenant context"));
-
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("invalid tenant context");
-
-        assertThat(TenantRequestContextHolder.get()).isNull();
-    }
-
-    @Test
-    void fileCopyTenantRegistrationIsLimitedToPost() {
-        MockHttpServletRequest request = request("/byaiService/datasetController/copyKnowledgeFile", "123");
-        request.addHeader("X-Tenant-Context", "context-token");
-
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("tenant.route.notReady");
-
-        verifyNoInteractions(service);
-    }
-
-    @Test
-    void existingChatRouteRequiresBothEnterpriseAndContextToken() {
-        MockHttpServletRequest missingToken = request("/byaiService/assiman/getMessages", "123");
-        assertThatThrownBy(() -> interceptor.preHandle(missingToken, new MockHttpServletResponse(), new Object()))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("401");
-
-        MockHttpServletRequest missingEnterprise = new MockHttpServletRequest("GET",
-            "/byaiService/assiman/getMessages");
-        missingEnterprise.setContextPath("/byaiService");
-        assertThat(interceptor.preHandle(missingEnterprise, new MockHttpServletResponse(), new Object())).isTrue();
         assertThat(TenantRequestContextHolder.get()).isNull();
     }
 

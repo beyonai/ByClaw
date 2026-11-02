@@ -71,6 +71,8 @@ public class RouteService {
     @Autowired
     private ObjectProvider<ChatGatewayRequestDecorator> requestDecorators;
     @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService groupCredentials;
+    @Autowired
     private ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> groupCoordinationProvider;
     @Autowired
     private ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantGroupCoordinationProvider;
@@ -171,18 +173,30 @@ public class RouteService {
     public void route(ChatProcessContext ctx) throws Exception {
         com.iwhalecloud.byai.state.domain.chat.service.ChatRequestCancellation.bindSession(ctx.getSessionId());
         ChatChainLog.accept(ctx.assistantChatDto);
+        boolean groupScopeValidated = false;
+        ctx.setGroupSessionId(null);
         if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null) {
             var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
-            if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
+            if (coordination != null) {
+                coordination.validateRequest(ctx.getAssistantChatDto());
+                groupScopeValidated = true;
+            }
         }
         else {
             var coordination = tenantGroupCoordinationProvider == null ? null : tenantGroupCoordinationProvider.getIfAvailable();
-            if (coordination != null) coordination.validateRequest(ctx.getAssistantChatDto());
+            if (coordination != null) {
+                coordination.validateRequest(ctx.getAssistantChatDto());
+                groupScopeValidated = true;
+            }
         }
         boolean interfaceIntegration = isIntegrationTypeInterface(ctx);
         boolean a2aIntegration = isIntegrationTypeA2A(ctx);
         Object groupScope = ctx.getAssistantChatDto() == null || ctx.getAssistantChatDto().getExtParams() == null
             ? null : ctx.getAssistantChatDto().getExtParams().get("groupCoordination");
+        // 持久化任务的深层子会话可以继承已校验范围，而不拥有独立的群聊执行记录。
+        if (groupScopeValidated && groupScope instanceof Map<?, ?> scope && scope.get("groupSessionId") != null) {
+            ctx.setGroupSessionId(Long.valueOf(scope.get("groupSessionId").toString()));
+        }
         if ((interfaceIntegration || a2aIntegration) && groupScope instanceof Map<?, ?> scope
             && "COORDINATED".equals(scope.get("mode"))
             && String.valueOf(ctx.getAssistantChatDto().getAgentId()).equals(scope.get("coordinatorAgentId"))) {
@@ -812,6 +826,9 @@ public class RouteService {
                 messageContent = decorator.decorate(ctx, messageContent, gatewayParams);
             }
         }
+
+        // 群来源由装饰器按持久化记录确认；普通 groupChat 引用不构成成员凭据授权。
+        groupCredentials.apply(ctx, gatewayParams);
 
         // Group decorators retain their own metadata, but must not replace the resolved DSH project cwd.
         if (dshRuntime && projectId != null) {

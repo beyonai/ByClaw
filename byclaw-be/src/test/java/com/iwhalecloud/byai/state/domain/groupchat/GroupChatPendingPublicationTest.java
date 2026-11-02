@@ -130,6 +130,8 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
         ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
         ReflectionTestUtils.setField(datasets, "authApplicationService", auth);
         ReflectionTestUtils.setField(datasets, "feignPythonBuildService", cloud);
+        ReflectionTestUtils.setField(datasets, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(cloud));
         pending = new GroupChatPendingPublicationService(authorization, tasks, store, sequence);
         completion = new GroupChatTaskService(tasks, publications, executions, messages, sequence, null, authorization,
             null, sessions, projects, resources,

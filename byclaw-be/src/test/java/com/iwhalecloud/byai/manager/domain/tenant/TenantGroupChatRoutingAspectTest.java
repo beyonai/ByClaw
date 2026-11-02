@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,8 +41,10 @@ class TenantGroupChatRoutingAspectTest {
     private final TenantGroupMemberService memberService = mock(TenantGroupMemberService.class);
     private final TenantGroupManagementService management = mock(TenantGroupManagementService.class);
     private final TenantGroupCreationService creation = mock(TenantGroupCreationService.class);
+    private final TenantGroupInvitationService invitations = mock(TenantGroupInvitationService.class);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final TenantGroupChatRoutingAspect aspect = new TenantGroupChatRoutingAspect(node, legacy, memberships,
-        new ObjectMapper(), memberService);
+        new ObjectMapper(), memberService, tenantModes);
     private String originalEnvironment;
 
     @BeforeEach
@@ -51,6 +54,7 @@ class TenantGroupChatRoutingAspectTest {
         System.setProperty("BE_ENV", "production");
         ReflectionTestUtils.setField(aspect, "creation", creation);
         ReflectionTestUtils.setField(aspect, "management", management);
+        ReflectionTestUtils.setField(aspect, "invitations", invitations);
     }
 
     @AfterEach
@@ -58,6 +62,27 @@ class TenantGroupChatRoutingAspectTest {
         TenantRequestContextHolder.clear();
         if (originalEnvironment == null) System.clearProperty("BE_ENV");
         else System.setProperty("BE_ENV", originalEnvironment);
+    }
+
+    @Test
+    void tenantReadBroadcastsActualMonotonicCursorWithinEachRecipientsTenantScope() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 11221859L, "MEMBER");
+        TenantRequestContextHolder.set(context);
+        var broadcasts = mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class);
+        ReflectionTestUtils.setField(aspect, "receiptBroadcasts", broadcasts);
+        when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats/70"),
+            eq(null), any())).thenReturn(Map.of("members", List.of(
+                Map.of("memObjType", "USER", "memObjId", "27", "lastReadMessageId", "9007199254740993"),
+                Map.of("memObjType", "USER", "memObjId", "28"))));
+        var request = new com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest();
+        request.setLastReadMessageId(20L);
+        aspect.route(call("markRead", 70L, request));
+        ArgumentCaptor<com.alibaba.fastjson.JSONObject> event = ArgumentCaptor.forClass(com.alibaba.fastjson.JSONObject.class);
+        verify(broadcasts).broadcastTenantRawToUser(eq(new TenantRequestContext(28L, 11221859L, "MEMBER")),
+            event.capture(), eq(null));
+        assertThat(event.getValue().getString("lastReadMessageId")).isEqualTo("9007199254740993");
+        assertThat(event.getValue().getString("userId")).isEqualTo("27");
+        verifyNoInteractions(legacy, memberships);
     }
 
     @Test
@@ -87,7 +112,7 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void developmentTenantListReadsFromLegacyDatabase() throws Throwable {
+    void developmentTenantListFiltersLegacyDatabaseByValidatedEnterprise() throws Throwable {
         TenantRequestContext context = new TenantRequestContext(27L, 11221076L, "MEMBER");
         TenantRequestContextHolder.set(context);
         GroupChatListItemResponse group = new GroupChatListItemResponse();
@@ -96,7 +121,7 @@ class TenantGroupChatRoutingAspectTest {
         PageInfo<GroupChatListItemResponse> legacyPage = new PageInfo<>();
         legacyPage.setList(List.of(group));
         legacyPage.setTotal(1);
-        when(legacy.listMyGroups(1, 20)).thenReturn(legacyPage);
+        when(legacy.listMyGroups(1, 20, 11221076L)).thenReturn(legacyPage);
         System.setProperty("BE_ENV", "development");
 
         ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("list", 1, 20, 11221076L));
@@ -105,7 +130,8 @@ class TenantGroupChatRoutingAspectTest {
         assertThat(response.getData()).isSameAs(legacyPage);
         assertThat(legacyPage.getTotal()).isEqualTo(1);
         assertThat(legacyPage.getList()).containsExactly(group);
-        verify(legacy).listMyGroups(1, 20);
+        verify(legacy).listMyGroups(1, 20, 11221076L);
+        verify(legacy, never()).listMyGroups(1, 20);
         verifyNoInteractions(node, memberships);
     }
 
@@ -155,8 +181,9 @@ class TenantGroupChatRoutingAspectTest {
     }
 
     @Test
-    void sharedWorkspaceCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
-        TenantRequestContext context = new TenantRequestContext(27L, 999L, "MEMBER");
+    void trialTenantCreateUsesPublicControllerAndPreservesBusinessContext() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
         TenantRequestContextHolder.set(context);
         GroupChatCreateRequest request = new GroupChatCreateRequest();
         request.setName("共享工作组");
@@ -170,6 +197,36 @@ class TenantGroupChatRoutingAspectTest {
 
         verify(invocation).proceed();
         verifyNoInteractions(creation, node, legacy, memberships);
+    }
+
+    @Test
+    void trialTenantInvitationUsesSharedControllerInsteadOfNodeCommand() throws Throwable {
+        TenantRequestContext context = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
+        TenantRequestContextHolder.set(context);
+        ProceedingJoinPoint invocation = call("createInvitation", 11393965L,
+            mock(jakarta.servlet.http.HttpServletResponse.class));
+        when(invocation.proceed()).thenReturn("shared-invitation");
+
+        assertThat(aspect.route(invocation)).isEqualTo("shared-invitation");
+        verify(invocation).proceed();
+        verifyNoInteractions(node, memberService);
+    }
+
+    @Test
+    void anonymousTrialTenantInvitationUsesSharedControllerAfterResolvingLink() throws Throwable {
+        TenantRequestContext trialContext = new TenantRequestContext(27L, 456L, "MEMBER");
+        when(invitations.resolve(eq("validateInvitation"), any(), eq(null))).thenReturn(trialContext);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
+        ProceedingJoinPoint invocation = call("validateInvitation",
+            mock(com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class),
+            mock(jakarta.servlet.http.HttpServletResponse.class));
+        when(invocation.proceed()).thenReturn("shared-preview");
+
+        assertThat(aspect.route(invocation)).isEqualTo("shared-preview");
+        verify(invocation).proceed();
+        verify(invitations, never()).handle(any(), eq("validateInvitation"), any());
+        verifyNoInteractions(node, memberService);
     }
 
     @Test
@@ -381,7 +438,15 @@ class TenantGroupChatRoutingAspectTest {
         when(signature.getMethod()).thenAnswer(invocation -> {
             Class<?>[] parameters = switch (method) {
                 case "list" -> new Class<?>[]{Integer.class, Integer.class, Long.class};
+                case "markRead" -> new Class<?>[]{Long.class,
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest.class};
                 case "create" -> new Class<?>[]{GroupChatCreateRequest.class};
+                case "createInvitation" -> new Class<?>[]{Long.class, jakarta.servlet.http.HttpServletResponse.class};
+                case "validateInvitation" -> new Class<?>[]{
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class,
+                    jakarta.servlet.http.HttpServletResponse.class};
+                case "joinInvitation" -> new Class<?>[]{
+                    com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationTokenRequest.class};
                 case "invite" -> new Class<?>[]{Long.class, GroupChatMemberRequest.class};
                 case "updateSettings" -> new Class<?>[]{Long.class, GroupChatSettingsRequest.class};
                 case "remove" -> new Class<?>[]{Long.class, String.class, Long.class};

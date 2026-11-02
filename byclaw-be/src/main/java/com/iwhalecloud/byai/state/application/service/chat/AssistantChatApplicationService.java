@@ -660,9 +660,14 @@ public class AssistantChatApplicationService {
             uploadItem.setFileName(byaiFiles.getConvertFileName());
             uploadItem.setFilePath(conversationStoragePathResolver.normalizeDisplayFilePath(location.getPath()));
             uploadItem.setFileUrl(fileUrl);
+            uploadItem.setSuccess(true);
             sessionUploadResult.getUploadItems().add(uploadItem);
         }
 
+        // This path is all-or-throw: only persisted files are returned as successful uploads.
+        sessionUploadResult.getSummary().setTotal(multipartFiles.length);
+        sessionUploadResult.getSummary().setSucceeded(sessionUploadResult.getUploadItems().size());
+        sessionUploadResult.getSummary().setFailed(0);
         return sessionUploadResult;
     }
 

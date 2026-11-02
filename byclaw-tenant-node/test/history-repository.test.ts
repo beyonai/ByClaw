@@ -14,6 +14,17 @@ function setup() {
   };
 }
 describe("BE query compatibility", () => {
+  it("limits credential reads to the tenant's active USER membership and supplied original group", async () => {
+    const { query, repository } = setup();
+    await repository.groupMemberApiKey("30", "20");
+    const [sql, parameters] = query.mock.calls[0]!;
+    expect(sql).toContain("SELECT api_key");
+    expect(sql).toContain("mem_obj_type='USER'");
+    expect(sql).toContain("state='00A'");
+    expect(sql).toContain("com_acct_id=$3");
+    expect(parameters).toEqual(["30", "20", "10"]);
+  });
+
   it("ranks the full history before filtering outline messages", async () => {
     const { query, repository } = setup();
     await repository.messages({ sessionId: "30", outline: true });

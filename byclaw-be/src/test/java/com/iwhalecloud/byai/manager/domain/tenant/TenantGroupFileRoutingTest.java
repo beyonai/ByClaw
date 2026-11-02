@@ -1,4 +1,5 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
+import com.iwhalecloud.byai.manager.domain.tenant.aspect.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,7 +70,8 @@ class TenantGroupFileRoutingTest {
 
     private GroupChatFileController proxy(TenantNodeClient node, GroupChatFileQueryService local) {
         var aspect = new TenantGroupChatRoutingAspect(node, mock(GroupChatReadService.class),
-            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class));
+            mock(ByaiGroupChatMentionMapper.class), new ObjectMapper(), mock(TenantGroupMemberService.class),
+            mock(TenantModeService.class));
         var factory = new AspectJProxyFactory(new GroupChatFileController(local));
         factory.setProxyTargetClass(true);
         factory.addAspect(aspect);

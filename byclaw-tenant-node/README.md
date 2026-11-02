@@ -2,6 +2,10 @@
 
 固定企业、固定代际的租户数据服务。使用 TypeScript、Fastify、TypeORM 的参数化 SQL 适配器及 by-framework Worker；不直接引用 BE/FE 源码，不创建数据库或平台账号，不负责 AI 执行。
 
+## 群成员模型凭据
+
+`GET /internal/v1/group-chats/{id}/member-api-key` 仅供 BE 在群聊派发或私有群任务续聊的 Gateway 出站阶段调用。用户取已鉴权的 `x-actor-user-id`，先校验当前租户原群的访问权，再查询 `session_id={id}`、`mem_obj_type='USER'`、`mem_obj_id=actor`、`com_acct_id=当前租户`、`state='00A'` 的 `api_key`，返回 `{ "api_key": "…" }`；缺失或空白返回 null。该查询不创建凭据。群详情和管理成员响应会排除凭据字段，不能以公开成员列表替代此内部接口。需要与 Java BE 和 Harness 插件一起部署。
+
 ## 共享 Redis 群成员额度
 
 Node 复用现有 Redis 连接，只读 `byclaw:shared:quota:v1:{enterpriseId}`，键名不包含环境名。花括号是 Redis hash tag 的实际字符，例如企业 10 使用 `byclaw:shared:quota:v1:{10}`。可通过 `QUOTA_REDIS_KEY_PREFIX` 调整前缀。HASH 的 `revision`、`payloadHash`、`payload` 一次读取，`payloadHash` 是原始 UTF-8 JSON 的 SHA-256 小写十六进制值。JSON 包含 `schemaVersion: 1`、字符串 `enterpriseId/revision`、`mode: LIMITED|UNLIMITED`、`limits: {memberLimit, groupLimit, groupMemberLimit, agentLimit}` 与 RFC3339 `updatedAt`；四项上限均为 0–2147483647 的整数，0 表示不能新增。revision 为规范的正十进制字符串，最大 9223372036854775807，与 Java long 范围保持一致；HASH 与 JSON 的 revision 必须完全一致，Node 通过 BigInt 校验，不转换成 JavaScript Number。

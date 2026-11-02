@@ -39,6 +39,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatApplicationService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatReadService;
+import com.iwhalecloud.byai.state.domain.groupchat.application.AggregatedGroupChatService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatWelcomeService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatWelcomeResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMessageAckService;
@@ -53,6 +54,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatReadStateResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTransferOwnershipRequest;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.AggregatedGroupChatPage;
 
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatInvitationResponse;
@@ -73,6 +75,8 @@ public class GroupChatController {
     private final GroupChatTaskService taskService;
     private final GroupChatReadService readService;
     private final GroupChatMessageAckService ackService;
+    @Autowired
+    private AggregatedGroupChatService aggregatedGroupChatService;
     @Autowired
     private GroupChatWelcomeService welcomeService;
     @Autowired
@@ -132,13 +136,21 @@ public class GroupChatController {
         return ResponseUtil.successResponse(ackService.unacknowledge(sessionId, messageId));
     }
 
-    /** 按当前 USER 成员关系返回群列表及未读 mention 状态；enterpriseId 不传或为 1 时不按企业筛选。 */
+    /** 按当前 USER 成员关系返回群列表及未读 mention 状态；指定企业时严格过滤，包括企业 1。 */
     @GetMapping
     public ResponseUtil<PageInfo<GroupChatListItemResponse>> list(
         @RequestParam(defaultValue = "1") Integer pageNum,
         @RequestParam(defaultValue = "20") Integer pageSize,
         @RequestParam(required = false) Long enterpriseId) {
         return ResponseUtil.successResponse(readService.listMyGroups(pageNum, pageSize, enterpriseId));
+    }
+
+    /** 查询当前用户所有企业的群组；单个企业失败会在结果中标记，不影响其他企业。 */
+    @GetMapping("/aggregated")
+    public ResponseUtil<AggregatedGroupChatPage> aggregated(
+        @RequestParam(defaultValue = "20") Integer pageSize,
+        @RequestParam(required = false) String cursor) {
+        return ResponseUtil.successResponse(aggregatedGroupChatService.list(pageSize, cursor));
     }
 
     /** 个人引导显式申请，不在详情读取、后台预取或已读更新时消耗资格。 */

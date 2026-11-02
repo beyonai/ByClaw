@@ -52,6 +52,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownInd
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeStatus;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeStatusResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
@@ -168,6 +170,12 @@ public class FeignPythonBuildService {
             });
     }
 
+
+    /** 批量请求只由 knCodeList 确定范围，不能用首个资源的单库上下文代表整批。 */
+    public PythonBuildResponse<KnowledgeStatusResult> knowledgeStatus(KbKnowledgeStatus knowledgeStatus) {
+        return post(KnowledgeServiceOperation.STATUS, knowledgeStatus,
+            new TypeReference<PythonBuildResponse<KnowledgeStatusResult>>() { });
+    }
 
     /** 查询所有层级的未删除文件数量；resourceId 写入资源上下文请求头。 */
     public PythonBuildResponse<KnowledgeFileCountResult> fileCount(KbKnowledgeFileCount request, Long resourceId) {
@@ -675,7 +683,7 @@ public class FeignPythonBuildService {
             throw new BaseException(I18nUtil.get("pythonBuild.response.empty", path));
         }
         if (!response.isSuccess()) {
-            throw new BaseException(
+            throw new KnowledgeHttpFailure(response.getStatusCode(),
                 I18nUtil.get("pythonBuild.response.failed", path, String.valueOf(response.getStatusCode()), body));
         }
         if (type != null && type.getType() != null && type.getType().getTypeName().contains("java.lang.Void")) {
@@ -1036,7 +1044,7 @@ public class FeignPythonBuildService {
         ResponseBody responseBody = response.body();
         String body = responseBody == null ? null : responseBody.string();
         if (!response.isSuccessful()) {
-            throw new BaseException(I18nUtil.get("pythonBuild.external.responseFailed", path, String.valueOf(response.code()), body));
+            throw new KnowledgeHttpFailure(response.code(), I18nUtil.get("pythonBuild.external.responseFailed", path, String.valueOf(response.code()), body));
         }
         if (type != null && type.getType() != null && type.getType().getTypeName().contains("java.lang.Void")) {
             JSONObject bodyJson = JSON.parseObject(body);

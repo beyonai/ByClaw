@@ -7,9 +7,6 @@ public final class InternalServiceRoutes {
         return scope(method, path) != null;
     }
     public static String scope(String method, String path) {
-        if ("POST".equals(method) && path.matches("/internal/v1/shared-workspaces/[1-9][0-9]*/members")) {
-            return "tenant:manage";
-        }
         if (path.matches("/internal/v1/tenants/[1-9][0-9]*/(?:enterprise|members)")) {
             if ("GET".equals(method)) return "tenant:read";
             if (("PUT".equals(method) && path.endsWith("/enterprise"))

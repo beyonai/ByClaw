@@ -1,0 +1,7 @@
+# Repository-root build context: purpose configuration only; no credentials/user data.
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
+!middleware/byclaw-harness/tool-sandbox/media.capabilities.json

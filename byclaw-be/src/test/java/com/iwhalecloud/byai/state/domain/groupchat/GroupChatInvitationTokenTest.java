@@ -184,6 +184,29 @@ class GroupChatInvitationTokenTest extends I18nTestSupport {
         }
     }
 
+    /** 工作组改名采用 50 字边界，个人群昵称继续使用原有上限。 */
+    @Test
+    void groupNameUsesFiftyCharacterLimitWithoutReducingNicknameLimit() {
+        GroupChatSettingsService groupChatSettingsService = new GroupChatSettingsService(
+            sessions, extensions, members, auth, sequence,
+            mock(ByaiGroupChatTaskMapper.class), mock(ByaiGroupChatExecutionMapper.class), events);
+        GroupChatSettingsRequest groupChatSettingsRequest = new GroupChatSettingsRequest();
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            groupChatSettingsRequest.setSessionName("组".repeat(50));
+            assertThat(groupChatSettingsService.updateSettings(20L, groupChatSettingsRequest).getSessionName())
+                .isEqualTo("组".repeat(50));
+            groupChatSettingsRequest.setSessionName("组".repeat(51));
+            assertThatThrownBy(() -> groupChatSettingsService.updateSettings(20L, groupChatSettingsRequest))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Workgroup name must contain 1 to 50 characters");
+            assertThat(groupChatSettingsService.updateNickname(20L, "人".repeat(100)).getMemName())
+                .isEqualTo("人".repeat(100));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
     @Test void settingsReadUsesOneBatchAndPreservesExplicitFalseAndMissingDefaults() {
         var settings = new GroupChatSettingsService(sessions, extensions, members, auth, sequence,
             mock(ByaiGroupChatTaskMapper.class), mock(ByaiGroupChatExecutionMapper.class), events);
@@ -415,6 +438,68 @@ class GroupChatInvitationTokenTest extends I18nTestSupport {
             com.iwhalecloud.byai.common.constants.enterprise.TenantUserMembershipRole.MEMBER, 11L);
         verify(members).save(joined);
     }
+    /** 已有群成员再次接受邀请时，按群归属补齐组织关系，不重复写群或项目成员。 */
+    @Test
+    void existingGroupMemberRepairsEnterpriseMembershipFromServerOwnedScope() {
+        String token = service.create(20L).getToken();
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
+        when(users.findById(11L)).thenReturn(new Users());
+        CurrentUserHolder.getLoginInfo().setEnterpriseId(4L);
+        ByaiSessionMember existingMember = new ByaiSessionMember();
+        existingMember.setSessionId(20L);
+        existingMember.setMemObjType("USER");
+        existingMember.setMemObjId(11L);
+        existingMember.setUserRole("ADMIN");
+        when(members.findSessionMember(20L, "USER", 11L)).thenReturn(existingMember);
+
+        assertThat(application.acceptInvitation(20L, token)).isSameAs(existingMember);
+
+        verify(tenantMembers).add(11L, 3L, "MEMBER", 11L);
+        assertThat(existingMember.getUserRole()).isEqualTo("ADMIN");
+        verify(members, never()).save(any());
+        verifyNoInteractions(projectMembers, events);
+    }
+
+    /** 停用组织关系或席位不足时，不可借已有群关系返回加入成功。 */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"tenant.member.disabled", "tenant.member.limit.reached"})
+    void existingGroupMemberCannotBypassEnterpriseAdmission(String failureMessage) {
+        String token = service.create(20L).getToken();
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
+        when(users.findById(11L)).thenReturn(new Users());
+        ByaiSessionMember existingMember = new ByaiSessionMember();
+        existingMember.setSessionId(20L);
+        existingMember.setMemObjType("USER");
+        existingMember.setMemObjId(11L);
+        when(members.findSessionMember(20L, "USER", 11L)).thenReturn(existingMember);
+        when(tenantMembers.add(11L, 3L, "MEMBER", 11L)).thenThrow(new IllegalArgumentException(failureMessage));
+
+        assertThatThrownBy(() -> application.acceptInvitation(20L, token)).hasMessage(failureMessage);
+
+        verify(members, never()).save(any());
+        verifyNoInteractions(projectMembers, events);
+    }
+
+    /** 个人群的存储企业号不能被当成组织归属，重复加入不创建组织成员。 */
+    @Test
+    void existingPersonalGroupMemberDoesNotJoinTheStorageEnterprise() {
+        String token = service.create(20L).getToken();
+        CurrentUserHolder.getLoginInfo().setUserId(11L);
+        when(users.findById(11L)).thenReturn(new Users());
+        ByaiSessionMember existingMember = new ByaiSessionMember();
+        existingMember.setMemObjId(11L);
+        when(members.findSessionMember(20L, "USER", 11L)).thenReturn(existingMember);
+        ByaiSessionExt ownership = new ByaiSessionExt();
+        ownership.setExtParamValue("NONE");
+        when(extensions.findOneByExtParamCode(20L, GroupChatApplicationService.BUSINESS_ENTERPRISE_EXT))
+            .thenReturn(ownership);
+
+        assertThat(application.acceptInvitation(20L, token)).isSameAs(existingMember);
+
+        verifyNoInteractions(tenantMembers);
+        verify(members, never()).save(any());
+    }
+
     @Test void successfulJoinUsesServerBoundGroupAndIsIdempotent() {
         var token = service.create(20L).getToken();
         CurrentUserHolder.getLoginInfo().setUserId(11L);

@@ -3,14 +3,15 @@
 `GET /group-chats` 的本地 Java 路径由 `GroupChatReadService.listMyGroups` 调用
 `ByaiGroupChatMentionMapper.selectMyGroupsScoped`，通过 PageHelper 返回列表和总数。
 租户路由在开发环境中复用此 Java 查询，其他环境直接请求 Node 群列表。
-本次优化覆盖 Java 查询，保持路由规则与 Node 内部查询不变。
+开发环境从已校验的租户上下文提取企业 ID，确保共库查询也限定企业；Node 内部查询不变。
 
 ## 查询范围
 
 列表、最新消息窗口和分页总数共用 `VisibleGroupConditions`：
 
 - 只返回当前用户以 `USER` 身份加入的 `hs_as` 工作组。
-- `enterpriseId` 缺失或为默认值 `1` 时不按企业过滤；其他非空值按工作组所属企业精确过滤。
+- 指定 `enterpriseId` 时按工作组所属企业精确过滤，包括企业 `1` 和共享体验企业 `999`；列表和总数使用相同范围。
+- 未指定 `enterpriseId` 的共享库查询保留跨企业查询契约；HACU 首页与侧栏列表显式传递当前企业 ID。独立租户由已认证上下文决定路由，开发环境同样按该上下文限定共库查询。
 - 已解散工作组不再对群主显示；非群主成员确认解散后也不再显示。
 
 最新消息窗口先限定到完整的可见工作组集合，再按工作组计算最新消息。

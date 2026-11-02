@@ -1,5 +1,11 @@
 # ByClaw-BE
 
+### 个人网盘容量业务门控
+
+`BYCLAW_PERSONAL_STORAGE_ADMISSION_ENABLED=false`（属性 `byclaw.storage.personal-admission.enabled`）默认关闭聊天容量预查、账号存储预热与容量错误重查；认证后的 readiness 返回 `enabled=false, ready=true, state=DISABLED`。不修改用户空间绑定、身份、云端配额或容量账本；普通文件请求继续走原存储接口，权限拒绝、文件不存在与实际 IO 错误仍失败。
+
+BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启动时读取。恢复业务门控须同时显式开启部署开关与原数据库 SaaS 开关，并重新构建前端。
+
 > BeyondAI 后端服务 - 企业级 AI 应用平台
 
 [![CI](https://github.com/byclaw/byclaw-be/actions/workflows/ci.yml/badge.svg)](https://github.com/byclaw/byclaw-be/actions)
@@ -56,6 +62,8 @@ Token 按机器人应用复用 Redis 缓存（119 分钟），同一 BE 实例�
 完整事件内容不再逐包记录到 INFO。生产效果需部署后用实际钉钉消息验证，单元测试不代表外网或模型可用。
 
 ## 登录预热与首次聊天
+
+仅在 `BE_ENV=development` 时，共享资格失效触发的 `shared/releaseAll` 请求报错会记录 WARN 并继续路由；其他环境及手动释放保持原有报错行为。请求仍使用原有超时配置。
 
 登录异步预热与首次聊天共用 Platform 的幂等启动流程：专享使用 `sandbox/business/launch`，共享使用 `shared/lookup`、`shared/acquire`。
 首次聊天按最终 Worker 类型确定服务及资源键，复用同一用户的启动结果；不会因 Worker 暂未注册而重启登录正在拉起的沙箱。
@@ -198,7 +206,7 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 
 ## 群列表消息摘要
 
-租户请求带 `X-Enterprise-Id` 和 `X-Tenant-Context` 时，新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。
+租户请求带 `X-Enterprise-Id` 时，BE 会按当前登录用户的 ACTIVE 成员关系重新校验租户范围；不再使用 `X-Tenant-Context`。新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。群列表和群详情返回归属 `enterpriseId`，调用方切换工作组时以该字段建立聊天上下文。
 
 - `GET /group-chats?pageNum=1&pageSize=20` 仅在返回时将 `latestMessageContent` 中的 `{{DIG_EMPLOYEE_资源ID}}`、`{{HUMAN_资源ID}}` 转成 `@名称`，名称取最新消息 metadata 中 `resourceList.resourceName` 的快照。
 - Agent 的 `[@成员名称](uid=成员UID)` 同样转成 `@名称`；优先使用资源快照名称，没有快照时使用链接中的成员名称。无法找到名称的占位符和其他资源占位符保留原文。
@@ -1026,3 +1034,8 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 ### 技能运行状态
 
 手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。
+
+
+### 沙箱运行记录与释放
+
+记录生命周期 `status` 与执行引擎观察 `providerStatus` 独立返回及筛选；未观测到实例为 `UNKNOWN`，不据此认定远端已删除。已释放记录仍有远端实例时，可通过按记录 ID 的正式释放接口精确回收，保留后继实例和用户文件。登录自动启动排除带 `runtimeOptions.fileService` 的内部文件计算规格；原生 AgenticFS 共享存储不重复走旧 NAS 绑定。

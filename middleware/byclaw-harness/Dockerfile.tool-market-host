@@ -1,0 +1,40 @@
+# Small host overlay; build the version-matched tool-env bundle before this image.
+# Build context is the repository root. No business credentials enter the image.
+ARG HARNESS_IMAGE
+FROM ${HARNESS_IMAGE} AS plugin-builder
+USER root
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/package.json middleware/byclaw-harness/plugins/dsh-tool-env/tsconfig.json middleware/byclaw-harness/plugins/dsh-tool-env/cordis.patch.yml /tmp/tool-market-source/
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/src/ /tmp/tool-market-source/src/
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ /tmp/tool-market-source/scripts/
+COPY middleware/byclaw-harness/scripts/pack-tool-market-plugin.py /tmp/pack-tool-market-plugin.py
+RUN python3 /tmp/pack-tool-market-plugin.py --source /tmp/tool-market-source --output /tmp/byclaw-tool-catalog-plugin.tgz
+
+FROM ${HARNESS_IMAGE} AS runtime
+USER root
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node/ \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PUPPETEER_SKIP_DOWNLOAD=1
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN bash /tmp/configure-cn-sources.sh && rm /tmp/configure-cn-sources.sh
+COPY --from=plugin-builder /tmp/byclaw-tool-catalog-plugin.tgz /tmp/byclaw-tool-catalog-plugin.tgz
+COPY --from=plugin-builder /tmp/byclaw-tool-catalog-plugin.tgz.json /usr/local/share/byclaw-tool-sandbox/plugin-build.json
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-multi-host.mjs
+COPY middleware/byclaw-harness/scripts/install-tool-market-overlay.py /tmp/install-market.py
+COPY middleware/byclaw-harness/scripts/verify-tool-market-overlay.mjs /usr/local/bin/byclaw-verify-tool-market-overlay.mjs
+RUN python3 /tmp/install-market.py \
+    && node --check /workspace/scripts/byclaw-multi-host.mjs \
+    && chown -R byclaw:byclaw /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-tool-env /opt/byclaw/dsh-managed/plugins/byclaw--dsh-tool-env \
+    && rm /tmp/install-market.py /tmp/byclaw-tool-catalog-plugin.tgz
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.role="harness-host"
+USER byclaw
+RUN node /usr/local/bin/byclaw-verify-tool-market-overlay.mjs

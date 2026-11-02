@@ -41,6 +41,11 @@ import lombok.extern.slf4j.Slf4j;
 @ConditionalOnProperty(prefix = "exception.log", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class ExceptionLogAspect {
 
+    private static final java.util.Set<String> SENSITIVE_LOG_FIELDS = java.util.Set.of(
+        "toolenvironmentkeys", "hostprivatekeybase64", "authorizedkey", "authorization",
+        "proxy-authorization", "beyond-token", "sso-token", "portal-session", "cookie", "set-cookie",
+        "x-api-key", "x-api-access-key", "api-key", "password", "token", "secret", "accesstoken", "refreshtoken");
+
     private Logger logger = LoggerFactory.getLogger(ExceptionLogAspect.class);
 
     @Autowired
@@ -202,7 +207,7 @@ public class ExceptionLogAspect {
         Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
-            headers.put(headerName, request.getHeader(headerName));
+            headers.put(headerName, isSensitiveLogField(headerName) ? "[REDACTED]" : request.getHeader(headerName));
         }
         return headers.toString();
     }
@@ -216,9 +221,34 @@ public class ExceptionLogAspect {
     private String getRequestBody(ProceedingJoinPoint point) {
         Object[] args = point.getArgs();
         if (args != null && args.length > 0) {
-            return String.valueOf(args[0]);
+            return String.valueOf(redactLogValue(args[0], 0));
         }
         return null;
+    }
+
+    private static boolean isSensitiveLogField(String name) {
+        return SENSITIVE_LOG_FIELDS.contains(name.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private static Object redactLogValue(Object value, int depth) {
+        if (depth > 16) return "[TRUNCATED]";
+        if (value instanceof Map<?, ?> entries) {
+            Map<String, Object> safe = new java.util.LinkedHashMap<>();
+            entries.forEach((key, item) -> {
+                String name = String.valueOf(key);
+                safe.put(name, isSensitiveLogField(name) ? "[REDACTED]" : redactLogValue(item, depth + 1));
+            });
+            return safe;
+        }
+        if (value instanceof Iterable<?> entries) {
+            java.util.List<Object> safe = new java.util.ArrayList<>();
+            for (Object item : entries) safe.add(redactLogValue(item, depth + 1));
+            return safe;
+        }
+        if (value instanceof Object[] entries) {
+            return java.util.Arrays.stream(entries).map(item -> redactLogValue(item, depth + 1)).toList();
+        }
+        return value;
     }
 
     /**

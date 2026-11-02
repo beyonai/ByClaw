@@ -98,6 +98,8 @@ Watch 收到员工或关联技能更新后刷新目录并使准备缓存失效�
 
 ## 动态模型
 
+仅调整 apiKey 获取来源：本轮 Gateway 传入非空 `extraPayload.api_key` 时优先使用，否则使用 Redis 模型的 `authToken`。根会话及其模板、团队子会话沿工作区关系读取本轮密钥。模型及 baseUrl 解析、配置 headers 和协议发送流程沿用原有逻辑，不改写或过滤认证头。每个模型流独立固定凭据；密钥仅保存在进程内弱引用表，不进入模型配置、消息上下文或持久化会话元数据。前台续聊不改变仍在执行的子任务原轮次凭据；轮次上下文清理后，后续请求恢复各自的认证。未传、空白或非字符串密钥保持现有行为。`pnpm run verify:gateway-api-key` 使用本地 HTTP 服务验证最终认证头和并发隔离，不调用外部模型。
+
 `BYCLAW_REDIS_MODEL_ENABLED` 为所有经本插件入站或实例化的 Agent 选择运行态模型来源。该变量默认开启；未设置、空值、`true`、`1`、`on` 或 `yes` 都会启用 Redis 模型解析。开启时：
 
 - 主 Agent：每次 ByClaw 入站时读取 Redis 当前唯一默认 LLM。
@@ -140,7 +142,7 @@ byclaw-repair-legacy-session --apply /path/to/dsh/session-persistence
 - 子 Agent 创建、运行、等待、完成或失败 -> `reasoningLogDelta/3009` 的状态化节点；子 Agent 的思考、正文和工具事件都挂在该节点下
 - DSH 会话 ID、父会话 ID、委派深度、原始事件类型和序号只进入诊断 metadata，不再占用工具卡展示内容
 - Ask 请求成功后，将选中的最终回复正文放入 `AgentTaskResult.content`，由 by-framework 在完成信号之前发送一条 `finalAnswer/1002`。答案仅取负责回复的 Agent 在正常结束轮次的最后一个 Step 中已结算、未中断且不含工具调用块的 Assistant 文本。
-- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；报错与取消沿用既有处理，Resume 不另发最终答案。
+- 未提取到最终答案时保持 `content: ""`。原有 `answer` 聚合和历史正文回退继续供调用方使用，但不填入 `content`；Resume 不另发最终答案。模型、语音和会话执行失败在关闭流之前发送带 `_ERROR_` 状态的可见错误；工具环境或文件系统初始化失败使用 `RUNTIME/TURN_EXECUTION_FAILED`，原始异常仅记录在服务端。取消操作不发送运行失败提示。
 
 入站会话 ID 支持非空字符串或正的安全整数，在路由、交互匹配和输出时统一为字符串，会话路由覆盖字段同样处理。超出 JavaScript 安全整数范围的数字 ID 会被拒绝，上游必须将这些 ID 作为字符串发送。
 

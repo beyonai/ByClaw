@@ -56,6 +56,25 @@ public class TenantCommandStore {
             ORDER BY created_at LIMIT 10
             """,Long.class,type);
     }
+
+    /** Filter confirmed order cleanup before limiting the batch so ordinary development tasks cannot starve it. */
+    public List<Long> orderDiscardCandidates() {
+        return jdbc.queryForList("""
+            SELECT c.id FROM byai.tenant_task c
+            JOIN byai.tenant_config marker ON marker.enterprise_id=c.enterprise_id
+                AND marker.params_code='ORDER_DISCARD_DELETE_COMMAND_ID' AND marker.params_value=CAST(c.id AS VARCHAR)
+            JOIN byai.tenant_config managed ON managed.enterprise_id=c.enterprise_id
+                AND managed.params_code='COMMERCIAL_MANAGED' AND managed.params_value='true'
+            JOIN byai.tenant_config origin ON origin.enterprise_id=c.enterprise_id
+                AND origin.params_code='INTEGRATION_SOURCE_SYSTEM' AND origin.params_value='hacu'
+            WHERE c.type='DELETE' AND c.source_system='hacu'
+                AND c.request_id='admin-delete-' || CAST(c.enterprise_id AS VARCHAR) AND (
+                (c.status IN ('PENDING','RETRY_WAIT') AND c.next_attempt_at<=CURRENT_TIMESTAMP)
+                OR (c.status='RUNNING' AND c.lease_until<CURRENT_TIMESTAMP))
+            ORDER BY c.created_at LIMIT 10
+            """,Long.class);
+    }
+
     public Lease claim(long id,String worker,Duration duration) {
         // The winner advances the fencing token atomically; old callers cannot save results even after expiry.
         int changed = jdbc.update("""

@@ -792,6 +792,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       model: config.model,
       redisModelsEnabled,
       llmRequestLogLevel: config.llmRequestLogLevel,
+      resolveRequestApiKey: sessionId => workspaceRegistry.requestApiKey(sessionId),
     })
     installBrowserText(ctx)
     if (modelRouting.enabled) {
@@ -1125,6 +1126,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       voiceRuntime,
       byRoot,
       ...(config.workspaceOnToolEnvironment ? { ensureDirectory: (path: string) => ensureRemoteDirectory(ctx, path) } : {}),
+      ...(userFiles === undefined ? {} : {
+        ensureSessionAlias: (sessionRoot: string, alias: string) => userFiles.ensureSymlink(sessionRoot, alias),
+      }),
       ...(userFiles === undefined ? {} : { userFiles }),
       ...(config.userFsRoot?.trim() ? { userFsRoot: resolve(config.userFsRoot.trim()) } : {}),
       stateDir: config.stateDir ?? '.agent-teams',

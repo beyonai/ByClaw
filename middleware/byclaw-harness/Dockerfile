@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Build the reusable image first:
 #   docker build -f middleware/byclaw-harness/Dockerfile.base -t 192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2 .
 # Then build this business-extension image:

@@ -40,6 +40,10 @@ import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
 
 export interface ByClawBeBackendConfig {
+  /** Bind bootstrap credentials to this create request, never user-global private parameters. */
+  requestScopedKeys?: boolean
+  /** Require the private MicroVM ingress; catalog runtimes never use a public fallback. */
+  privateOnly?: boolean
   /** BE origin including its path prefix, the same value the byclaw-dsh plugin uses. */
   baseUrl: string
   /** User whose B this is; BE switches to this user's context for the launch. */
@@ -80,8 +84,14 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string> }
-interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string> }
+interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface ReleaseConfirmation { releaseConfirmed?: boolean; sandboxId?: string; remoteAbsentConfirmed?: boolean }
+
+function confirmExactRelease(value: unknown, expectedSandboxId: string): void {
+  const confirmation = value as ReleaseConfirmation | undefined
+  if (confirmation?.releaseConfirmed !== true || confirmation.remoteAbsentConfirmed !== true || confirmation.sandboxId !== expectedSandboxId) throw new Error('RELEASE_UNCONFIRMED: backend did not confirm exact remote absence')
+}
 
 /** What `tool-sandbox.json` in the state directory records about the user's last launched B. */
 interface LaunchedRecord { serviceKey?: string; sandboxId?: string }
@@ -155,6 +165,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private ownsSandbox = false
   /** Whether this process already looked for a B of another service left from an earlier spec. */
   private previousChecked = false
+  private previousCleanupPending = false
 
   constructor(
     private readonly config: ByClawBeBackendConfig,
@@ -246,6 +257,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
    */
   pause(): Promise<void> {
     return this.serial(async () => {
+      if (this.previousCleanupPending) await this.releasePreviousService()
       if (!this.ownsSandbox) return
       await this.remove()
       this.currentId = undefined
@@ -304,18 +316,30 @@ export class ByClawBeBackend implements ToolEnvBackend {
 
   private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey, autoRelease: 1 }, 'POST', timeoutMs) as LaunchData | undefined
+    const keys = this.config.requestScopedKeys ? await this.identity.keys() : undefined
+    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey, autoRelease: 1,
+      ...(keys === undefined ? {} : { toolEnvironmentKeys: { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') } }),
+    }, 'POST', timeoutMs) as LaunchData | undefined
     const sandboxType = serviceKey
-    if (data?.sandboxId) this.ownsSandbox = true
+    if (data?.sandboxId) {
+      this.ownsSandbox = true
+      this.currentId = data.sandboxId
+      await this.writeLaunched({ serviceKey, sandboxId: data.sandboxId })
+    }
     let sandboxId = data?.sandboxId
-    let endpoint = this.sshEndpoint(data?.instanceEndpoints)
+    let endpoint = this.sshEndpoint(data?.instanceEndpoints, data?.endpointHeaders)
     if (endpoint === undefined) {
       // A reused record may come back with the primary endpoint only; the info query carries the full map.
       const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === sandboxType)
-      const entry = ofType.find(candidate => candidate.sandboxId === sandboxId) ?? ofType[0]
+      const entry = sandboxId === undefined ? ofType[0] : ofType.find(candidate => candidate.sandboxId === sandboxId)
       sandboxId ??= entry?.sandboxId
-      endpoint = this.sshEndpoint(entry?.instanceEndpoints)
+      if (sandboxId !== undefined && sandboxId !== '') {
+        this.ownsSandbox = true
+        this.currentId = sandboxId
+        await this.writeLaunched({ serviceKey, sandboxId })
+      }
+      endpoint = this.sshEndpoint(entry?.instanceEndpoints, entry?.endpointHeaders)
     }
     if (endpoint === undefined && this.config.hostTemplate !== '' && sandboxId !== undefined && sandboxId !== '') {
       endpoint = { hostName: this.config.hostTemplate.replaceAll('{id}', sandboxId), port: this.config.port }
@@ -324,6 +348,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     if (endpoint === undefined) {
       throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${sandboxType}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
+    if (this.config.privateOnly && (endpoint.websocket === undefined || !new URL(endpoint.websocket).hostname.endsWith('-vpc.sandbox.aliyuncs.com'))) throw new Error('PRIVATE_SSH_REQUIRED')
     this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     this.ownsSandbox = true
@@ -334,7 +359,10 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private async remove(): Promise<void> {
     const { userCode, serviceKey: sandboxType } = this.config
     try {
-      await this.call('/sandbox/removeSandbox', { userCode, sandboxType })
+      const expectedSandboxId = this.config.requestScopedKeys ? this.currentId : undefined
+      if (this.config.requestScopedKeys && expectedSandboxId === undefined) throw new Error('RELEASE_UNCONFIRMED: exact sandbox identity is missing')
+      const confirmation = await this.call('/sandbox/removeSandbox', { userCode, sandboxType, ...(expectedSandboxId === undefined ? {} : { expectedSandboxId }) })
+      if (expectedSandboxId !== undefined) confirmExactRelease(confirmation, expectedSandboxId)
       this.ownsSandbox = false
       this.log(`released tool environment of type ${sandboxType}`)
       await rm(this.launchedFile, { force: true })
@@ -355,11 +383,20 @@ export class ByClawBeBackend implements ToolEnvBackend {
     const sandboxType = previous.serviceKey
     if (typeof sandboxType !== 'string' || sandboxType === '' || sandboxType === this.config.serviceKey) return
     try {
-      await this.call('/sandbox/removeSandbox', { userCode: this.config.userCode, sandboxType })
+      const expectedSandboxId = this.config.requestScopedKeys ? previous.sandboxId : undefined
+      if (this.config.requestScopedKeys && (typeof expectedSandboxId !== 'string' || expectedSandboxId === '')) throw new Error('RELEASE_UNCONFIRMED: previous allocation identity is missing')
+      const receipt = await this.call('/sandbox/removeSandbox', { userCode: this.config.userCode, sandboxType, ...(expectedSandboxId === undefined ? {} : { expectedSandboxId }) })
+      if (expectedSandboxId !== undefined) confirmExactRelease(receipt, expectedSandboxId)
       const id = previous.sandboxId === undefined ? '' : ` ${previous.sandboxId}`
       this.log(`released tool environment${id} of type ${sandboxType}: this user's tool sandbox is now ${this.config.serviceKey}`)
       await rm(this.launchedFile, { force: true })
+      this.previousCleanupPending = false
     } catch (error) {
+      if (this.config.requestScopedKeys) {
+        this.previousCleanupPending = true
+        this.log(`release of the earlier tool environment of type ${sandboxType} unconfirmed; ownership retained`)
+        throw error
+      }
       this.log(`release of the earlier tool environment of type ${sandboxType} failed (${message(error)}); launching ${this.config.serviceKey} anyway`)
     }
   }
@@ -405,9 +442,11 @@ export class ByClawBeBackend implements ToolEnvBackend {
     if (published !== fingerprint) await writeFile(marker, JSON.stringify({ fingerprint, at: new Date().toISOString() }), { mode: 0o600 })
   }
 
-  private sshEndpoint(endpoints: Record<string, string> | undefined): ToolEnvEndpoint | undefined {
+  private sshEndpoint(endpoints: Record<string, string> | undefined, headers?: Record<string, string>): ToolEnvEndpoint | undefined {
     const raw = endpoints?.[this.config.sshInstance]
-    return typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
+    const endpoint = typeof raw === 'string' ? parseEndpoint(raw, this.config.port, this.config.baseUrl) : undefined
+    if (endpoint?.websocket !== undefined && headers !== undefined) endpoint.headers = headers
+    return endpoint
   }
 
   private async call(path: string, body: Record<string, unknown> | undefined, method: 'POST' | 'GET' = 'POST', timeoutMs = this.config.requestTimeoutMs): Promise<unknown> {
@@ -469,7 +508,7 @@ export function parseEndpoint(raw: string, defaultPort: number, baseUrl = ''): T
  * configuration and final, and a rejected token stays rejected until a new one arrives.
  */
 function retryableLaunchFailure(error: unknown): boolean {
-  if (isTokenRejected(error)) return false
+  if (isTokenRejected(error) || (error instanceof Error && error.message === 'PRIVATE_SSH_REQUIRED')) return false
   return !(error instanceof Error && error.message.startsWith('ByClaw BE returned no '))
 }
 

@@ -153,27 +153,34 @@ class ByaiGroupChatMentionMapperPaginationTest {
     }
 
     @Test
-    void defaultEnterpriseIdReturnsTheSameGroupsAndPaginationAsAnAbsentFilter() throws Exception {
+    void defaultEnterpriseIdFiltersGroupsAndPaginationLikeOtherEnterprises() throws Exception {
         String jdbcUrl = "jdbc:sqlite:" + tempDir.resolve("group-default-enterprise.sqlite").toAbsolutePath();
         initializeSchema(jdbcUrl);
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
             Statement statement = connection.createStatement()) {
+            statement.execute("UPDATE byai_session SET enterprise_id = 1 WHERE session_id = 10");
             statement.execute("UPDATE byai_session SET enterprise_id = 200 WHERE session_id = 20");
             statement.execute("INSERT INTO byai_session VALUES (40, 'not my group', NULL, 1, 'hs_as', NULL, "
                 + "'2026-09-11 15:00:00', '2026-09-11 15:00:00')");
             statement.execute("INSERT INTO byai_session_member VALUES (40, 'MEMBER', NULL, 'USER', 31)");
+            statement.execute("INSERT INTO byai_session VALUES (50, 'my default group', NULL, 1, 'hs_as', NULL, "
+                + "'2026-09-11 15:00:00', '2026-09-11 15:00:00')");
+            statement.execute("INSERT INTO byai_session_member VALUES (50, 'MEMBER', NULL, 'USER', 30)");
+            statement.execute("INSERT INTO byai_session VALUES (60, 'unassigned group', NULL, NULL, 'hs_as', NULL, "
+                + "'2026-09-11 16:00:00', '2026-09-11 16:00:00')");
+            statement.execute("INSERT INTO byai_session_member VALUES (60, 'MEMBER', NULL, 'USER', 30)");
         }
 
         try (SqlSession session = buildSqlSessionFactory(jdbcUrl).openSession()) {
             ByaiGroupChatMentionMapper mapper = session.getMapper(ByaiGroupChatMentionMapper.class);
             assertThat(mapper.selectMyGroups(30L, 1L))
-                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(10L, 20L);
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(50L, 10L);
             assertThat(mapper.selectMyGroups(30L, null))
-                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(10L, 20L);
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactlyInAnyOrder(10L, 20L, 50L, 60L);
 
             Page<GroupChatListItemResponse> page = PageHelper.startPage(2, 1);
             assertThat(mapper.selectMyGroups(30L, 1L))
-                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(20L);
+                .extracting(GroupChatListItemResponse::getSessionId).containsExactly(10L);
             assertThat(page.getTotal()).isEqualTo(2L);
         }
         finally {

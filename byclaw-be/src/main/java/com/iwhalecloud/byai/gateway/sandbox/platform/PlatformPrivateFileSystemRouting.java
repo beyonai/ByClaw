@@ -11,7 +11,8 @@ public class PlatformPrivateFileSystemRouting {
     private final PlatformRemoteGateway gateway;
     private final String canonicalFileRoot;
     public PlatformPrivateFileSystemRouting(PlatformRemoteGateway gateway,
-            @Value("${byclaw.platform.canonical-file-root:}") String canonicalFileRoot) {
+            // The root is a logical address prefix in remote mode; it need not exist on BE.
+            @Value("${byclaw.platform.canonical-file-root:${file.storage.local.path:${byclaw.sandbox.volume.file-root:}}}") String canonicalFileRoot) {
         this.gateway=gateway;this.canonicalFileRoot=canonicalFileRoot;
     }
     public boolean isRemote(){return gateway.isRemote();}

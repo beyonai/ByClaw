@@ -29,7 +29,8 @@ public class PersonalStoragePrewarm {
     }
 
     public void afterCommit(String userCode) {
-        if (userCode == null || userCode.isBlank() || !platform.isRemote()) return;
+        if (userCode == null || userCode.isBlank() || !platform.isRemote()
+            || !platform.isPersonalStorageAdmissionEnabled()) return;
         String user = userCode.trim();
         if (TransactionSynchronizationManager.isSynchronizationActive()
             && TransactionSynchronizationManager.isActualTransactionActive()) {

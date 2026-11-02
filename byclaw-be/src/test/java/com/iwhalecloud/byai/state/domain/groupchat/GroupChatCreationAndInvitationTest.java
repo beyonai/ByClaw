@@ -47,6 +47,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.WorkgroupTemplate
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatCreateRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatDetailResponse;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatSettingsRequest;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher;
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatController;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
@@ -59,6 +60,9 @@ import jakarta.validation.Validation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.http.MediaType;
@@ -572,6 +576,56 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         verifyNoInteractions(projectMembers, sessions, members);
     }
 
+    /** 未填写工作目标仍完成项目、工作组和组长的原子创建。 */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = { "   ", "\t\n" })
+    void createsGroupWithoutGoal(String goal) {
+        GroupChatCreateRequest groupChatCreateRequest = request();
+        groupChatCreateRequest.setGoal(goal);
+
+        GroupChatDetailResponse groupChatDetailResponse = service.create(groupChatCreateRequest);
+
+        ArgumentCaptor<ProjectDTO> projectDtoCaptor = ArgumentCaptor.forClass(ProjectDTO.class);
+        verify(projects).createGroupChatProject(projectDtoCaptor.capture());
+        assertThat(projectDtoCaptor.getValue().getDescription()).isNull();
+        verify(sessions).save(groupChatDetailResponse.getSession());
+        verify(members).batchSave(groupChatDetailResponse.getMembers());
+        assertThat(groupChatDetailResponse.getMembers()).singleElement()
+            .satisfies(member -> assertThat(member.getUserRole()).isEqualTo("OWNER"));
+    }
+
+    /** 目标选填，但填写时仍遵守 500 字上限。 */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = { "   ", "\t\n" })
+    void acceptsMissingOrBlankGoalAtRequestBoundary(String goal) {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            GroupChatCreateRequest groupChatCreateRequest = request();
+            groupChatCreateRequest.setGoal(goal);
+            assertThat(factory.getValidator().validate(groupChatCreateRequest)).isEmpty();
+            groupChatCreateRequest.setGoal("目".repeat(500));
+            assertThat(factory.getValidator().validate(groupChatCreateRequest)).isEmpty();
+            groupChatCreateRequest.setGoal("目".repeat(501));
+            assertThat(factory.getValidator().validate(groupChatCreateRequest)).singleElement()
+                .satisfies(violation -> assertThat(violation.getPropertyPath().toString()).isEqualTo("goal"));
+        }
+    }
+
+    /** 改名请求与创建请求共用 50 字边界，未传名称仍允许只修改权限。 */
+    @Test
+    void validatesFiftyCharacterNameForSettingsRequest() {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            GroupChatSettingsRequest groupChatSettingsRequest = new GroupChatSettingsRequest();
+            assertThat(factory.getValidator().validate(groupChatSettingsRequest)).isEmpty();
+            groupChatSettingsRequest.setSessionName("组".repeat(50));
+            assertThat(factory.getValidator().validate(groupChatSettingsRequest)).isEmpty();
+            groupChatSettingsRequest.setSessionName("组".repeat(51));
+            assertThat(factory.getValidator().validate(groupChatSettingsRequest)).singleElement()
+                .satisfies(violation -> assertThat(violation.getPropertyPath().toString()).isEqualTo("sessionName"));
+        }
+    }
+
     @Test
     void validatesNameAndMemberIdsAtRequestBoundary() {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
@@ -580,7 +634,9 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
             assertThat(validator.validate(request)).isEmpty();
             request.setName(" ");
             assertThat(validator.validate(request)).isNotEmpty();
-            request.setName("群".repeat(101));
+            request.setName("群".repeat(50));
+            assertThat(validator.validate(request)).isEmpty();
+            request.setName("群".repeat(51));
             assertThat(validator.validate(request)).isNotEmpty();
             request.setName("群");
             request.setUserIds(Arrays.asList(20L, null));

@@ -40,8 +40,12 @@ docker build -f middleware/byclaw-harness/Dockerfile.tool_slim \
 
 ## 启动与部署配置
 
-A 必须设置 `BYCLAW_DSH_TOOL_ENV=static`、`opensandbox` 或 `byclaw-be`，其余参数沿用
-[工具环境配置](plugins/dsh-tool-env/README.md#configuration)。未选择远程工具环境时，slim 入口直接报错。
+A 使用工具沙箱时必须设置 `BYCLAW_DSH_TOOL_ENV=static`、`opensandbox` 或 `byclaw-be`，其余参数沿用
+[工具环境配置](plugins/dsh-tool-env/README.md#configuration)。未设置或设置未知值时，slim 入口直接报错。
+显式设置 `BYCLAW_DSH_TOOL_ENV=none` 可跳过工具沙箱以验收聊天：专享 VM 使用自身的私有工作区，
+仍跳过本地浏览器监督启动；共享 `multi-host` 只提供聊天，禁用模型工具执行及工具/浏览器侧栏，
+每个用户的内部指令目录固定为其自身 home 下的 `chat-only-workspace`。共享模式不会回退到宿主机工具执行。
+`none` 不验证远程工具或浏览器能力，也不能用来启动 `tools` 入口。
 A 默认 `BYCLAW_BROWSER_ON_TOOL_ENV=1`，只启动本地私有 RPC 代理，不创建本地 Chromium/Xvfb。
 单用户和 `multi-host` 都走同一远程浏览器分支。
 

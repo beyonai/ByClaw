@@ -64,6 +64,60 @@ class SandboxLoginAutoStartServiceTest {
     }
 
     @Test
+    void trigger_skipsManagedFileComputeSpecsWithoutDependingOnServiceName() {
+        SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
+        SandboxService sandboxService = mock(SandboxService.class);
+        SandboxServiceSpecEntity files = spec("custom-file-compute");
+        files.setSpecJson("{\"runtimeOptions\":{\"fileService\":{\"mountDir\":\"/mnt/files\"}}}");
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(files, spec("byclaw-dsh")));
+        SandboxLoginAutoStartService service = new SandboxLoginAutoStartService(mapper, sandboxService, Runnable::run);
+        try {
+            service.trigger("user001");
+            verify(sandboxService, never()).launchSandboxWithServiceKey("user001", "custom-file-compute");
+            verify(sandboxService).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        }
+        finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void trigger_excludesExplicitOnDemandLifecycleWithoutChangingMissingDefault() {
+        var mapper = mock(SandboxServiceSpecEntityMapper.class);
+        var sandbox = mock(SandboxService.class);
+        var tools = spec("byclaw-dsh-tools");
+        tools.setSpecJson("{\"runtimeOptions\":{\"lifecycle\":{\"autoStart\":\"false\"}}}");
+        when(mapper.selectAutoStartSpecs()).thenReturn(List.of(tools, spec("byclaw-dsh")));
+        var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run);
+        try {
+            service.trigger("user001");
+            verify(sandbox, never()).launchSandboxWithServiceKey("user001", "byclaw-dsh-tools");
+            verify(sandbox).launchSandboxWithServiceKey("user001", "byclaw-dsh");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void trigger_ignoresStaleOnDemandPreferredButKeepsEligiblePreferredCompatibility() {
+        for (boolean eligible : List.of(false, true)) {
+            var mapper = mock(SandboxServiceSpecEntityMapper.class);
+            var sandbox = mock(SandboxService.class);
+            when(mapper.selectAutoStartSpecs()).thenReturn(List.of(spec("openclaw")));
+            when(sandbox.getPreferredServiceKey("user001")).thenReturn("byclaw-dsh-tools");
+            when(sandbox.isServiceKeyAutoStartEnabled("byclaw-dsh-tools")).thenReturn(eligible);
+            var service = new SandboxLoginAutoStartService(mapper, sandbox, Runnable::run);
+            try {
+                service.trigger("user001");
+                verify(sandbox).launchSandboxWithServiceKey("user001", eligible ? "byclaw-dsh-tools" : "openclaw");
+                verify(sandbox, never()).launchSandboxWithServiceKey("user001", eligible ? "openclaw" : "byclaw-dsh-tools");
+            } finally {
+                service.shutdown();
+            }
+        }
+    }
+
+    @Test
     void trigger_coalescesConcurrentRequestsForSameUser() {
         SandboxServiceSpecEntityMapper mapper = mock(SandboxServiceSpecEntityMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);

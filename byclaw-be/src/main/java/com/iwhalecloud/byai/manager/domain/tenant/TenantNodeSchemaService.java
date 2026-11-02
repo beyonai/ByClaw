@@ -246,13 +246,70 @@ public class TenantNodeSchemaService {
         throw new IllegalStateException("tenant Node database health check timed out");
     }
 
+    /** Publish Redis READY first, then wait for consumers before completing durable provisioning. */
+    public void awaitBusinessReady(long enterpriseId, long generation, long dbRecordId,
+                                   TenantSandboxView node) throws Exception {
+        awaitBusinessReady(enterpriseId, generation, dbRecordId, node,
+            Duration.ofSeconds(120), Duration.ofSeconds(2));
+    }
+
+    void awaitBusinessReady(long enterpriseId, long generation, long dbRecordId,
+                            TenantSandboxView node, Duration budget, Duration pollDelay) throws Exception {
+        if (node == null || node.recordId() <= 0 || internalToken == null || internalToken.isBlank()
+            || budget.isNegative() || budget.isZero() || budget.compareTo(Duration.ofSeconds(120)) > 0
+            || pollDelay.isNegative()) {
+            throw new IllegalArgumentException("invalid tenant business readiness configuration");
+        }
+        long deadline = System.nanoTime() + budget.toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                // Bootstrap discovery permits ADMIN_ONLY; requestBound would deadlock on DB READY.
+                URI base = nodeUri(nodeClient.schemaEndpoint(enterpriseId, generation, dbRecordId).toString());
+                URI health = base.resolve(base.getRawPath() + "/internal/v1/health/ready");
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) break;
+                HttpResponse<byte[]> response = send(health, "GET", null, null, enterpriseId, generation,
+                    Map.of(), Duration.ofNanos(Math.min(Duration.ofSeconds(15).toNanos(), remaining)));
+                if (response.statusCode() == 200) {
+                    JsonNode result = objectMapper.readTree(response.body());
+                    if (result == null || !Long.toString(enterpriseId).equals(result.path("enterpriseId").asText())
+                        || !Long.toString(generation).equals(result.path("generation").asText())
+                        || !Long.toString(dbRecordId).equals(result.path("dbSandboxRecordId").asText())) {
+                        throw new IllegalStateException("tenant Node business health identity mismatch");
+                    }
+                    if (result.path("businessReady").isBoolean()
+                        && result.path("businessReady").booleanValue() && System.nanoTime() < deadline) return;
+                }
+            } catch (org.springframework.web.server.ResponseStatusException unavailable) {
+                if (!"tenant.node.registration.unavailable".equals(unavailable.getReason())
+                    && !"tenant.node.registration.mismatch".equals(unavailable.getReason())) throw unavailable;
+                // An old registration can remain during handoff. No unverified endpoint is used.
+            } catch (IOException ignored) {
+                // Startup and transient network failures remain bounded by the same total budget.
+            }
+            long remaining = deadline - System.nanoTime();
+            if (remaining > 0) {
+                java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(pollDelay.toNanos(), remaining));
+            }
+        }
+        throw new IllegalStateException("tenant Node business health check timed out");
+    }
+
     private HttpResponse<byte[]> send(URI uri, String method, byte[] body, String contentType,
                                       long enterpriseId, long generation, Map<String, String> extra)
         throws IOException, InterruptedException {
-        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15))
+        return send(uri, method, body, contentType, enterpriseId, generation, extra, Duration.ofSeconds(15));
+    }
+
+    private HttpResponse<byte[]> send(URI uri, String method, byte[] body, String contentType,
+                                      long enterpriseId, long generation, Map<String, String> extra,
+                                      Duration timeout) throws IOException, InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(timeout)
             .header("X-Byclaw-Internal-Token", internalToken)
             .header("X-Enterprise-Id", Long.toString(enterpriseId))
             .header("X-Tenant-Generation", Long.toString(generation));
+        if(uri.getHost()!=null && uri.getHost().endsWith("-vpc.sandbox.aliyuncs.com"))
+            nodeClient.privateHeaders(request,enterpriseId,uri);
         if (contentType != null) request.header("Content-Type", contentType);
         extra.forEach(request::header);
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()

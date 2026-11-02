@@ -11,9 +11,11 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.regex.Pattern;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
@@ -28,6 +30,7 @@ public class TenantDatasourceService {
     private static final int MAX_ROWS = 500;
     private static final int MAX_PAGE = 10000;
     private static final int QUERY_TIMEOUT_SECONDS = 15;
+    private static final Pattern LOCKING_SQL = Pattern.compile("\\bfor\\s+update\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern DANGEROUS_SQL = Pattern.compile(
         "\\b(delete|drop|truncate|update|insert|alter|create|merge|grant|revoke|call|do|vacuum|reindex|refresh|copy|execute|exec|replace|into)\\b",
         Pattern.CASE_INSENSITIVE);
@@ -36,6 +39,9 @@ public class TenantDatasourceService {
     private final SsSandboxRecordMapper sandboxMapper;
     private final TenantCredentialCrypto credentialCrypto;
     private final String dbProbeHost;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private TenantSandboxService sandboxService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public TenantDatasourceService(TenantAdminTenantMapper tenantMapper, SsSandboxRecordMapper sandboxMapper,
@@ -98,8 +104,19 @@ public class TenantDatasourceService {
         }
     }
 
+    /**
+     * 执行有界 SQL；连接前统一拒绝行锁查询，危险操作仍须人工确认。
+     * @param enterpriseId 目标企业
+     * @param sql 单条 SQL
+     * @param page 结果页码
+     * @param confirmed 是否已确认危险操作
+     * @return 原有分页结果或影响行数
+     */
     public QueryResult execute(long enterpriseId, String sql, int page, boolean confirmed) {
         String statementSql = singleStatement(sql);
+        if (LOCKING_SQL.matcher(visibleSql(statementSql)).find()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.lockForbidden");
+        }
         if (page < 1 || page > MAX_PAGE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.page.invalid");
         }
@@ -158,9 +175,15 @@ public class TenantDatasourceService {
         String url = "jdbc:postgresql://" + host + ":" + endpoint.port() + "/" + dbName
             + "?connectTimeout=5&socketTimeout=20";
         try {
-            return DriverManager.getConnection(url, dbUser,
-                credentialCrypto.decrypt(enterpriseId, dbName, envelope));
-        } catch (GeneralSecurityException | SQLException e) {
+            Properties credentials = new Properties();
+            credentials.setProperty("user", dbUser);
+            credentials.setProperty("password", credentialCrypto.decrypt(enterpriseId, dbName, envelope));
+            if (record.getSandboxId() != null && record.getSandboxId().startsWith("microvm--")) {
+                PrivateDatabaseSocketFactory.configure(credentials,
+                    sandboxService.privateTransport(enterpriseId, "tenant-opengauss"));
+            }
+            return DriverManager.getConnection(url, credentials);
+        } catch (GeneralSecurityException | SQLException | IllegalArgumentException e) {
             throw databaseUnavailable(e);
         }
     }
@@ -205,6 +228,15 @@ public class TenantDatasourceService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.datasource.sql.singleStatement");
         }
         return terminator >= 0 ? value.substring(0, terminator).trim() : value;
+    }
+
+    /**
+     * 供已认证服务桥复用确认判定，避免浏览器绕过写入审计。
+     * @param sql 原 SQL 文本
+     * @return 是否需要人工确认
+     */
+    public static boolean requiresPlatformConfirmation(String sql) {
+        return requiresConfirmation(sql);
     }
 
     static boolean requiresConfirmation(String sql) {

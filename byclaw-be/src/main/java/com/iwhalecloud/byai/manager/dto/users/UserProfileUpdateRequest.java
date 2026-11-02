@@ -20,6 +20,9 @@ public class UserProfileUpdateRequest {
     @Size(max = 400, message = "{profile.avatar.max}")
     private String avatar;
 
+    /** 显式删除优先于文件和地址；省略或 false 沿用原头像更新规则。 */
+    private boolean removeAvatar;
+
     /** 省略则保留原值；提供时必须为非空组织名称。 */
     @Size(max = 100, message = "{profile.company.max}")
     @Pattern(regexp = "(?s).*\\S.*", message = "{profile.company.blank}")

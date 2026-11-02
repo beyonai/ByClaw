@@ -18,6 +18,42 @@ import static org.mockito.Mockito.*;
 
 /** Created by Codex on 2026-10-28: expected command misses must not become error incidents. */
 class ExceptionLogAspectTest {
+    @Test void deniedToolBootstrapKeepsAuditWithoutCredentialsOrChangingRequest() throws Throwable {
+        var keys = java.util.Map.of("hostPrivateKeyBase64", "fixture-host-private", "authorizedKey", "fixture-public");
+        var body = java.util.Map.of("userCode", "target", "toolEnvironmentKeys", keys);
+        var request = new org.springframework.mock.web.MockHttpServletRequest("POST", "/sandbox/launchByUserCode");
+        request.addHeader("Authorization", "Bearer fixture-auth");
+        request.addHeader("Beyond-Token", "fixture-beyond");
+        request.addHeader("X-Request-ID", "safe-request-id");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+            new org.springframework.web.context.request.ServletRequestAttributes(request));
+        var point = mock(ProceedingJoinPoint.class);
+        var failure = new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
+        when(point.proceed()).thenThrow(failure);
+        when(point.getArgs()).thenReturn(new Object[]{body});
+        var signature = mock(MethodSignature.class);
+        when(signature.getDeclaringTypeName()).thenReturn("SandboxController");
+        when(signature.getName()).thenReturn("launchByUserCode");
+        when(point.getSignature()).thenReturn(signature);
+        var sink = mock(LogExceptionInfoService.class);
+        var aspect = new ExceptionLogAspect();
+        ReflectionTestUtils.setField(aspect, "logExceptionInfoService", sink);
+        try {
+            assertSame(failure, assertThrows(Exception.class, () -> aspect.around(point)));
+            var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.log.LogExceptionInfo.class);
+            verify(sink).save(saved.capture());
+            String recorded = saved.getValue().getRequestBody() + saved.getValue().getRequestHeader();
+            assertTrue(recorded.contains("target"));
+            assertTrue(recorded.contains("safe-request-id"));
+            for (String secret : java.util.List.of("fixture-host-private", "fixture-public", "fixture-auth", "fixture-beyond")) {
+                assertFalse(recorded.contains(secret), "Audit contains a credential fixture");
+            }
+            assertEquals(keys, body.get("toolEnvironmentKeys"));
+        } finally {
+            org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
     @Test void commandLookupMissPreservesExceptionWithoutErrorLogOrIncident() throws Throwable {
         assertLogging(new TenantCommandException(404, "COMMAND_NOT_FOUND"), true, false);
     }

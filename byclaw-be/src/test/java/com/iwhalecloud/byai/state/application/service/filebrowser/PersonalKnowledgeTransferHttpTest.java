@@ -120,6 +120,8 @@ class PersonalKnowledgeTransferHttpTest extends I18nTestSupport {
         ReflectionTestUtils.setField(datasets, "ssResourceService", resources);
         ReflectionTestUtils.setField(datasets, "authApplicationService", auth);
         ReflectionTestUtils.setField(datasets, "feignPythonBuildService", knowledge);
+        ReflectionTestUtils.setField(datasets, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(knowledge));
         var source = new FileBrowserItemVo();
         source.setPath(SOURCE);
         source.setName("random_hello.txt");

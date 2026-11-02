@@ -1,4 +1,13 @@
 export default {
+  'sandboxMgr.filter.lifecycleStatus': '记录状态',
+  'sandboxMgr.filter.providerStatus': '实际状态',
+  'sandboxMgr.filter.allLifecycle': '全部记录状态',
+  'sandboxMgr.filter.allProvider': '全部实际状态',
+  'sandboxMgr.table.lifecycleStatus': '记录状态',
+  'sandboxMgr.table.providerStatus': '实际状态',
+  'sandboxMgr.status.unknown': '未知',
+  'sandboxMgr.status.stopped': '已停止',
+  'sandboxMgr.status.missing': '不存在',
   'sandboxMgr.shared.launch.title': '启动共享资源',
   'sandboxMgr.shared.launch.service': '服务规格',
   'sandboxMgr.shared.launch.profile': '资源档位',
@@ -23,6 +32,7 @@ export default {
 
   'sandboxMgr.shared.storageMode': '存储模式',
   'sandboxMgr.shared.storage.userQuota': '用户独立 NAS 配额',
+  'sandboxMgr.shared.storage.userAgenticFs': '用户独立 AgenticFS 配额',
   'sandboxMgr.shared.storage.logical': '逻辑隔离',
   'sandboxMgr.releaseReason.release.switch-to-shared': '已切换至共享沙箱',
   'sandboxMgr.status.pending': '等待中',

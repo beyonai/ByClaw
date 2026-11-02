@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TenantManagedDeletionService {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TenantManagedDeletionService.class);
+    private static final String ORDER_DISCARD_COMMAND = "ORDER_DISCARD_DELETE_COMMAND_ID";
     private final String worker = "tenant-delete-" + java.util.UUID.randomUUID();
     private final TenantCommandStore store;
     private final JdbcTemplate jdbc;
@@ -44,8 +45,9 @@ public class TenantManagedDeletionService {
     @Scheduled(fixedDelayString = "${tenant.delete.reconcile-delay-ms:30000}",
         initialDelayString = "${tenant.delete.reconcile-initial-delay-ms:30000}")
     public void scan() {
-        if (RuntimeEnvironment.isDevelopment()) return;
-        for (long id : store.candidates("DELETE")) {
+        boolean development = RuntimeEnvironment.isDevelopment();
+        // Apply the development authorization before the candidate limit; ordinary deletes remain untouched.
+        for (long id : development ? store.orderDiscardCandidates() : store.candidates("DELETE")) {
             var lease = store.claim(id, worker, java.time.Duration.ofMinutes(30));
             if (lease == null) continue;
             try { execute(lease); }
@@ -65,47 +67,126 @@ public class TenantManagedDeletionService {
     /** Called only after the administrator permission and exact tenant name have been checked. */
     public String request(long tenant, String name, long actor) {
         return tx.execute(transaction -> {
-            // UPDATE serializes with provisioning/recovery; no SELECT FOR UPDATE or network call under this lock.
-            if (jdbc.update("UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1 WHERE enterprise_id=?", tenant) != 1)
-                throw conflict("tenant.delete.operationMissing");
-            String source = tenants.selectConfig(tenant, "INTEGRATION_SOURCE_SYSTEM");
-            if (source == null || source.isBlank()) throw conflict("tenant.delete.operationMissing");
-            String requestId = "admin-delete-" + tenant;
-            var existing = store.byRequest(source, requestId);
-            if (existing != null) {
-                if (!"DELETE".equals(existing.type()) || !Long.toString(tenant).equals(existing.enterpriseId()))
-                    throw conflict("tenant.delete.operationMissing");
-                if ("SUCCEEDED".equals(existing.status())) return "COMPLETED";
-                requireSlot(tenant, Long.parseLong(existing.commandId()));
-                if ("MANUAL_REQUIRED".equals(existing.status()) || "FAILED".equals(existing.status())) {
-                    jdbc.update("UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,lease_until=NULL,"
-                        + "fencing_token=fencing_token+1,revision=revision+1,next_attempt_at=CURRENT_TIMESTAMP WHERE id=?",
-                        Long.parseLong(existing.commandId()));
-                    state(tenant, "DELETING", null);
-                }
-                return "ACCEPTED";
-            }
-            Long previous = jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=?",
-                Long.class, tenant);
-            if (previous != null) {
-                var command = store.find(previous);
-                if (command == null || !"PROVISION".equals(command.type()) || "RUNNING".equals(command.status())
-                    || "RECONCILING".equals(command.status())) throw conflict("tenant.delete.commandRunning");
-                // A live worker may have claimed the command while we waited for the operation slot.
-                if (jdbc.update("UPDATE byai.tenant_task SET status='FAILED',error_code='TENANT_DELETION_REQUESTED',"
-                    + "fencing_token=fencing_token+1,revision=revision+1,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP "
-                    + "WHERE id=? AND revision=? AND status IN ('PENDING','RETRY_WAIT','MANUAL_REQUIRED','FAILED')",
-                    previous, command.revision()) != 1) throw conflict("tenant.delete.commandRunning");
-            }
-            // 删除是技术生命周期关闭：持久 DELETING 状态阻止 Java 写入，不伪造 HACU 的商业规则。
-            long id = ids.nextVal();
-            String snapshot = json.createObjectNode().put("enterpriseName", name).put("actor", Long.toString(actor)).toString();
-            store.insert(id, source, requestId, TenantCommandRequest.digest(snapshot), "DELETE", tenant, actor, snapshot);
-            jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=? "
-                + "WHERE enterprise_id=?", id, tenant);
-            state(tenant, "DELETING", null);
-            return "ACCEPTED";
+            lockOperation(tenant);
+            return reserveDeletion(tenant, name, actor);
         });
+    }
+
+    /** HACU order cleanup proves the original provision identity before reserving the existing delete command. */
+    public OrderDiscardView requestOrderDiscard(long tenant, String name, long provisionCommandId, long actor) {
+        if (actor <= 0) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "tenant.login.required");
+        return tx.execute(transaction -> {
+            // Serialize identity checks with enterprise updates, provisioning and deletion retries.
+            lockOperation(tenant);
+            requireOrderTenant(tenant, name, provisionCommandId);
+            var previous = orderDiscardView(tenant, provisionCommandId);
+            if ("SUCCEEDED".equals(previous.status())) return previous;
+            reserveDeletion(tenant, name, actor);
+            var accepted = orderDiscardView(tenant, provisionCommandId);
+            // The durable command marker does not enable any other tenant deletion in development.
+            if (tenants.updateConfig(tenant, ORDER_DISCARD_COMMAND, accepted.deletionCommandId()) == 0) {
+                tenants.insertConfig(ids.nextVal(), tenant, ORDER_DISCARD_COMMAND, accepted.deletionCommandId());
+            }
+            return accepted;
+        });
+    }
+
+    /** Pure receipt lookup remains available after members and resource configuration have been removed. */
+    public OrderDiscardView orderDiscardStatus(long tenant, String name, long provisionCommandId) {
+        requireOrderTenant(tenant, name, provisionCommandId);
+        return orderDiscardView(tenant, provisionCommandId);
+    }
+
+    private void requireOrderTenant(long tenant, String name, long provisionCommandId) {
+        String actualName = tenants.selectManagedEnterpriseName(tenant);
+        if (actualName == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.notFound");
+        var provision = store.find(provisionCommandId);
+        if (provision == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant.delete.provisionCommandNotFound");
+        if (!actualName.equals(name) || !"true".equals(tenants.selectConfig(tenant, "COMMERCIAL_MANAGED"))
+            || !"hacu".equals(tenants.selectConfig(tenant, "INTEGRATION_SOURCE_SYSTEM"))
+            || !"hacu".equals(provision.sourceSystem()) || !"PROVISION".equals(provision.type())
+            || !Long.toString(tenant).equals(provision.enterpriseId())) {
+            throw conflict("tenant.delete.orderIdentityMismatch");
+        }
+    }
+
+    private OrderDiscardView orderDiscardView(long tenant, long provisionCommandId) {
+        String lifecycle = object(tenants.selectConfig(tenant, "PROVISION_STATE")).path("status").asText();
+        if (lifecycle.isBlank()) throw conflict("tenant.delete.operationMissing");
+        var deletion = store.byRequest("hacu", "admin-delete-" + tenant);
+        if (deletion == null) {
+            if (java.util.Set.of("DELETING", "DELETE_FAILED", "DELETED").contains(lifecycle)) {
+                throw conflict("tenant.delete.resultUncertain");
+            }
+            return new OrderDiscardView(Long.toString(tenant), Long.toString(provisionCommandId), null,
+                "NOT_STARTED", null, null);
+        }
+        if (!"DELETE".equals(deletion.type()) || !Long.toString(tenant).equals(deletion.enterpriseId())) {
+            throw conflict("tenant.delete.orderIdentityMismatch");
+        }
+        String status = switch (deletion.status()) {
+            case "PENDING", "RUNNING", "RETRY_WAIT", "MANUAL_REQUIRED", "SUCCEEDED" -> deletion.status();
+            case "FAILED" -> "MANUAL_REQUIRED";
+            default -> throw conflict("tenant.delete.resultUncertain");
+        };
+        // Only the committed resource-cleanup receipt can release HACU's purchase binding.
+        if (("SUCCEEDED".equals(status) && (!"DELETED".equals(lifecycle) || !"DELETED".equals(deletion.stage())))
+            || ("DELETED".equals(lifecycle) && !"SUCCEEDED".equals(status))) {
+            throw conflict("tenant.delete.resultUncertain");
+        }
+        return new OrderDiscardView(Long.toString(tenant), Long.toString(provisionCommandId), deletion.commandId(),
+            status, deletion.stage(), deletion.errorCode());
+    }
+
+    /** The bridge receipt exposes lifecycle evidence without returning provider identifiers or credentials. */
+    public record OrderDiscardView(String enterpriseId, String provisionCommandId, String deletionCommandId,
+                                   String status, String stage, String errorCode) { }
+
+    private void lockOperation(long tenant) {
+        // UPDATE serializes with provisioning/recovery; no SELECT FOR UPDATE or network call under this lock.
+        if (jdbc.update("UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1 WHERE enterprise_id=?", tenant) != 1)
+            throw conflict("tenant.delete.operationMissing");
+    }
+
+    /** The caller owns the operation-row write lock before reading or resuming the durable command. */
+    private String reserveDeletion(long tenant, String name, long actor) {
+        String source = tenants.selectConfig(tenant, "INTEGRATION_SOURCE_SYSTEM");
+        if (source == null || source.isBlank()) throw conflict("tenant.delete.operationMissing");
+        String requestId = "admin-delete-" + tenant;
+        var existing = store.byRequest(source, requestId);
+        if (existing != null) {
+            if (!"DELETE".equals(existing.type()) || !Long.toString(tenant).equals(existing.enterpriseId()))
+                throw conflict("tenant.delete.operationMissing");
+            if ("SUCCEEDED".equals(existing.status())) return "COMPLETED";
+            requireSlot(tenant, Long.parseLong(existing.commandId()));
+            if ("MANUAL_REQUIRED".equals(existing.status()) || "FAILED".equals(existing.status())) {
+                jdbc.update("UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,lease_until=NULL,"
+                    + "fencing_token=fencing_token+1,revision=revision+1,next_attempt_at=CURRENT_TIMESTAMP WHERE id=?",
+                    Long.parseLong(existing.commandId()));
+                state(tenant, "DELETING", null);
+            }
+            return "ACCEPTED";
+        }
+        Long previous = jdbc.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state WHERE enterprise_id=?",
+            Long.class, tenant);
+        if (previous != null) {
+            var command = store.find(previous);
+            if (command == null || !"PROVISION".equals(command.type()) || "RUNNING".equals(command.status())
+                || "RECONCILING".equals(command.status())) throw conflict("tenant.delete.commandRunning");
+            // A live worker may have claimed the command while we waited for the operation slot.
+            if (jdbc.update("UPDATE byai.tenant_task SET status='FAILED',error_code='TENANT_DELETION_REQUESTED',"
+                + "fencing_token=fencing_token+1,revision=revision+1,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP "
+                + "WHERE id=? AND revision=? AND status IN ('PENDING','RETRY_WAIT','MANUAL_REQUIRED','FAILED')",
+                previous, command.revision()) != 1) throw conflict("tenant.delete.commandRunning");
+        }
+        // 删除是技术生命周期关闭：持久 DELETING 状态阻止 Java 写入，不伪造 HACU 的商业规则。
+        long id = ids.nextVal();
+        String snapshot = json.createObjectNode().put("enterpriseName", name).put("actor", Long.toString(actor)).toString();
+        store.insert(id, source, requestId, TenantCommandRequest.digest(snapshot), "DELETE", tenant, actor, snapshot);
+        jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=? "
+            + "WHERE enterprise_id=?", id, tenant);
+        state(tenant, "DELETING", null);
+        return "ACCEPTED";
     }
 
     public void execute(TenantCommandStore.Lease lease) {

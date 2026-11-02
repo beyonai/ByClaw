@@ -5,6 +5,23 @@ import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
 describe('scrubEnvironment', () => {
+  it('keeps host coordination and platform credentials out of user tool processes', () => {
+    const protectedNames = ['REDIS_PASSWORD', 'REDIS_CLUSTER_PASSWORD', 'REDIS_URL', 'REDIS_CLUSTER_NODES',
+      'TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY', 'LANGFUSE_SECRET_KEY', 'TYPESAFE_API_KEY',
+      'BYCLAW_JEV_API_KEY', 'BYCLAW_DSH_WEB_AUTH_TOKEN', 'ALIYUN_ACCESS_KEY_SECRET',
+      'ALIBABA_CLOUD_ACCESS_KEY_ID', 'ALIBABA_CLOUD_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY',
+      'PLATFORM_BRIDGE_JWT_SECRET', 'JWT_SECRET']
+    const secrets = Object.fromEntries(protectedNames.map(name => [name, 'host-only-fixture']))
+    const params = { argv: ['python3'], env: { ...secrets, USER_CODE: 'u1', BEYOND_TOKEN: 'own-user-token',
+      ENTERPRISE_ID: 'tenant1', LANG: 'zh_CN.UTF-8', USER_BUSINESS_SETTING: 'kept' } }
+    expect(scrubEnvironment(params)).toEqual({ argv: ['python3'], env: {
+      USER_CODE: 'u1', BEYOND_TOKEN: 'own-user-token', ENTERPRISE_ID: 'tenant1', LANG: 'zh_CN.UTF-8', USER_BUSINESS_SETTING: 'kept',
+    } })
+    expect(params.env.REDIS_PASSWORD).toBe('host-only-fixture')
+    const inherited = launchEnvironment('process.prepare', { argv: ['sh'], env: { REDIS_PASSWORD: 'caller-host-value' } }, secrets)
+    expect(scrubEnvironment(inherited)).toEqual({ argv: ['sh'], env: {} })
+  })
+
   it('drops tool-environment settings from forwarded process environments', () => {
     const params = { argv: ['/bin/sh'], env: {
       PATH: '/usr/bin', BYCLAW_DSH_TOOL_ENV: 'opensandbox', BYCLAW_TOOL_ENV_OPENSANDBOX: '{"apiKey":"secret"}',
@@ -27,7 +44,7 @@ describe('launchEnvironment', () => {
   it('gives every process on B the user\'s launch environment under the caller\'s own', () => {
     const params = { argv: ['/bin/sh'], cwd: '/by', env: { PATH: '/usr/bin', MODEL_NAME: 'caller' }, graceMs: 1 }
     expect(scrubEnvironment(launchEnvironment('process.prepare', params, launch))).toEqual({
-      argv: ['/bin/sh'], cwd: '/by', graceMs: 1, env: { USER_CODE: 'u1', REDIS_HOST: 'redis', MODEL_NAME: 'caller', PATH: '/usr/bin' },
+      argv: ['/bin/sh'], cwd: '/by', graceMs: 1, env: { USER_CODE: 'u1', MODEL_NAME: 'caller', PATH: '/usr/bin' },
     })
     expect(params.env).toEqual({ PATH: '/usr/bin', MODEL_NAME: 'caller' })
   })

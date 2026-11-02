@@ -75,6 +75,8 @@ class DatasetApplicationServiceCopyTest extends I18nTestSupport {
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "authApplicationService", auth);
         ReflectionTestUtils.setField(service, "feignPythonBuildService", qa);
+        ReflectionTestUtils.setField(service, "workgroupStorageAdmission",
+            com.iwhalecloud.byai.state.application.service.dataset.UnmanagedCloudQuotaFixture.create(qa));
         source = resource(100L, "KG_CLOUD", "source-cloud");
         source.setCreateBy(8L);
         target = resource(200L, "KG_DOC", "target-kb");

@@ -16,6 +16,9 @@ import java.util.Map;
  */
 public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
 
+    /** 只读取当前用户在原始群聊中的有效成员凭据，不将密钥加入公开成员响应。 */
+    String findActiveUserApiKey(@Param("groupSessionId") Long groupSessionId, @Param("userId") Long userId);
+
     /** 按群主、管理员、普通成员、数字员工排序，同类使用主键稳定排序。 */
     List<ByaiSessionMember> findOrderedGroupMembers(@Param("sessionId") Long sessionId);
 

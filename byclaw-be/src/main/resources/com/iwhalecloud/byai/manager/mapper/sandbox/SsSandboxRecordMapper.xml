@@ -670,7 +670,7 @@
           AND user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, id DESC
         LIMIT 1
     </select>
 
@@ -679,7 +679,7 @@
         FROM ss_sandbox_record
         WHERE owner_scope = 'USER'
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, id DESC
         LIMIT 1
     </select>
 
@@ -713,9 +713,16 @@
     <!-- Live sandbox ids and persisted status are independent filters and may apply together. -->
     <sql id="CurrentInventoryFilter">
         <where>
+            <if test="sandboxIds != null and sandboxIds.size() == 0">
+                AND 1 = 0
+            </if>
             <if test="sandboxIds != null and sandboxIds.size() &gt; 0">
                 AND sandbox_id IN
                 <foreach collection="sandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>
+            </if>
+            <if test="observedSandboxIds != null and observedSandboxIds.size() &gt; 0">
+                AND (sandbox_id IS NULL OR sandbox_id NOT IN
+                <foreach collection="observedSandboxIds" item="sandboxId" open="(" separator="," close=")">#{sandboxId}</foreach>)
             </if>
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}

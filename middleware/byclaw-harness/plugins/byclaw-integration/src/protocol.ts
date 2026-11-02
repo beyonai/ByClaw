@@ -279,6 +279,7 @@ export function parseDshInteractionResponse(command: ResumeCommand): DshInteract
 
 interface PendingQuestion {
   id: string
+  agentSessionId?: string
   questions: ByClawQuestion[]
   resolve: (answer: ByClawQuestionAnswer) => void
   reject: (error: Error) => void
@@ -371,7 +372,7 @@ export class ByClawQuestionBroker {
     const id = randomUUID()
     let pending!: PendingQuestion
     const answer = new Promise<ByClawQuestionAnswer>((resolve, reject) => {
-      pending = { id, questions: options.questions, resolve, reject }
+      pending = { id, questions: options.questions, agentSessionId: options.agentSessionId, resolve, reject }
     })
     const queue = this.pending.get(options.sessionId) ?? []
     queue.push(pending)
@@ -419,7 +420,8 @@ export class ByClawQuestionBroker {
   }
 
   /** Resolve the matching interaction, or the oldest pending interaction for that session. */
-  async resume(sessionId: string, userCode: string, response: string, interactionId?: string): Promise<'hot' | 'cold' | false> {
+  async resume(sessionId: string, userCode: string, response: string, interactionId?: string,
+    onMatchedHot?: (agentSessionId?: string) => void): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
     const index = queue === undefined ? -1 : interactionId === undefined ? 0 : queue.findIndex(item => item.id === interactionId)
     const pending = index < 0 ? undefined : queue?.[index]
@@ -434,13 +436,15 @@ export class ByClawQuestionBroker {
     if (pending !== undefined && queue !== undefined) {
       queue.splice(index, 1)
       if (queue.length === 0) this.pending.delete(sessionId)
+      onMatchedHot?.(pending.agentSessionId)
       pending.resolve(answer)
     }
     return pending === undefined ? 'cold' : 'hot'
   }
 
   /** Resolve exactly one pending interaction from a versioned structured response. */
-  async resumeStructured(sessionId: string, userCode: string, response: DshInteractionResponse): Promise<'hot' | 'cold' | false> {
+  async resumeStructured(sessionId: string, userCode: string, response: DshInteractionResponse,
+    onMatchedHot?: (agentSessionId?: string) => void): Promise<'hot' | 'cold' | false> {
     const queue = this.pending.get(sessionId)
     const index = queue?.findIndex(item => item.id === response.interactionId) ?? -1
     const pending = index < 0 ? undefined : queue?.[index]
@@ -455,6 +459,7 @@ export class ByClawQuestionBroker {
     if (pending !== undefined && queue !== undefined) {
       queue.splice(index, 1)
       if (queue.length === 0) this.pending.delete(sessionId)
+      onMatchedHot?.(pending.agentSessionId)
       pending.resolve(answer)
     }
     return pending === undefined ? 'cold' : 'hot'

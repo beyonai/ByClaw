@@ -267,8 +267,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
         FastJsonHttpMessageConverter fastJsonConverter = new FastJsonHttpMessageConverter() {
             @Override
             public boolean canRead(java.lang.reflect.Type type, Class<?> contextClass, MediaType mediaType) {
-                return contextClass != com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController.class
-                    && super.canRead(type, contextClass, mediaType);
+                return !usesJacksonRequestBody(contextClass) && super.canRead(type, contextClass, mediaType);
             }
 
             @Override
@@ -318,8 +317,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
         var internalJson = new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter() {
             @Override
             public boolean canRead(java.lang.reflect.Type type, Class<?> contextClass, MediaType mediaType) {
-                return contextClass == com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController.class
-                    && super.canRead(type, contextClass, mediaType);
+                return usesJacksonRequestBody(contextClass) && super.canRead(type, contextClass, mediaType);
             }
 
             @Override
@@ -341,13 +339,27 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
         converters.add(1, internalJson);
     }
 
+    /**
+     * 服务接口使用 Jackson 树模型，避免 Fastjson 尝试实例化抽象 JsonNode。
+     * @param contextClass Spring 当前 Controller 类型
+     * @return 是否按 Jackson 请求契约读取
+     */
+    private static boolean usesJacksonRequestBody(Class<?> contextClass) {
+        return contextClass == com.iwhalecloud.byai.manager.interfaces.controller.tenant.TenantInternalController.class
+            || contextClass == com.iwhalecloud.byai.manager.interfaces.controller.operations.PlatformOperationsController.class;
+    }
+
     /** Select serialization only; this route check never grants service authentication. */
     private static boolean isInternalServiceRequest() {
         var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
-        if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) return false;
+        if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) {
+            return false;
+        }
         var request = servlet.getRequest();
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        return com.iwhalecloud.byai.common.integration.security.InternalServiceRoutes.matches(request.getMethod(), path);
+        return com.iwhalecloud.byai.common.integration.security.InternalServiceRoutes.matches(request.getMethod(), path)
+            || ("POST".equals(request.getMethod())
+                && com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication.PATH.equals(path));
     }
 
 }
