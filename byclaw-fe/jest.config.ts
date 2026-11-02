@@ -1,6 +1,10 @@
 import type { Config } from 'jest';
 
 const config: Config = {
+  // Full Ant Design forms are CPU-heavy in jsdom; bound worker contention on CI runners.
+  maxWorkers: 2,
+  // Keep assertion failures in CI output without serializing expected UI warnings for every passing test.
+  silent: process.env.CI === 'true',
   testEnvironment: '<rootDir>/jest.environment.js',
   transform: {
     '^.+\\.(ts|tsx|js|jsx)$': [

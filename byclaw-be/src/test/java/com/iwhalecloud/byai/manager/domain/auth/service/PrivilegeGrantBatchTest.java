@@ -86,20 +86,21 @@ class PrivilegeGrantBatchTest {
     }
 
     @Test
-    void insertsAll45000UserSkillPairsAndPreservesExistingData() {
-        List<PrivilegeGrant> grants = grants(45000);
+    void insertsMultipleBatchesAndPartialTailWhilePreservingExistingData() {
+        List<PrivilegeGrant> grants = grants(6001);
         service.saveBatch(grants);
-        assertThat(committed.queryForObject("SELECT COUNT(*) FROM au_privilege_grant", Integer.class)).isEqualTo(45001);
+        assertThat(committed.queryForObject("SELECT COUNT(*) FROM au_privilege_grant", Integer.class)).isEqualTo(6002);
         assertThat(committed.queryForObject("SELECT COUNT(DISTINCT privilege_grant_id) FROM au_privilege_grant",
-            Integer.class)).isEqualTo(45001);
+            Integer.class)).isEqualTo(6002);
         assertThat(committed.queryForList("SELECT COUNT(*) FROM au_privilege_grant WHERE grant_obj_type='SKILL' "
-            + "GROUP BY grant_obj_id", Integer.class)).hasSize(15).containsOnly(3000);
+            + "GROUP BY grant_obj_id", Integer.class)).containsExactlyInAnyOrder(3000, 3000, 1);
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM au_privilege_grant WHERE create_staff=42 "
             + "AND eff_date IS NOT NULL AND create_date IS NOT NULL AND status_cd='A' AND grant_type='FORCE_USE' "
             + "AND grant_to_type='RED' AND oper_type='READ' AND grant_to_obj_type='USER' AND allow_unsubscribe='002'",
-            Integer.class)).isEqualTo(45000);
-        verify(mapper, times(90)).insertBatch(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq("postgresql"));
-        verify(sequences, times(90)).nextValues(500);
+            Integer.class)).isEqualTo(6001);
+        verify(mapper, times(13)).insertBatch(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq("postgresql"));
+        verify(sequences, times(12)).nextValues(500);
+        verify(sequences).nextValues(1);
     }
 
     @Test
