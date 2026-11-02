@@ -120,7 +120,7 @@ Watch 收到员工或关联技能更新后刷新目录并使准备缓存失效�
 - 入站支持 `extra_payload.agent_id`，按当前用户授权目录匹配数字员工或专家团；数字员工只允许当前用户直接授权的员工，专家团匹配当前用户授权的专家团。`agentId`、`agent_code`、`agent_name` 及其 camelCase 写法，不参与目标选择或一致性校验。没有结构化 ID 时，正文中的唯一 `@资源名称`／`@资源编码`（忽略大小写）可选择目标，纯数字 `@` 不作为名称别名，匹配文本会从任务中移除。目标不存在、未授权或多个正文目标会在执行前拒绝。未指定目标仍走主 Agent。
 - ByClaw 对外的 DSH 根会话 ID 与入站 `session_id` 完全一致，续聊和跨系统追踪使用同一个标识。直达时，这个根 Agent 本身就是所选模板实例；同一会话再次指定同一目标会继续原上下文，尝试把在线会话改绑到其他模板则会被拒绝。日志中的 `🎯 入站直达` 和 `scope=direct-root` 可用于确认没有经过主 Agent 的 LLM 回合。
 - ByAI 入站可通过 `extra_payload.cwd` 指定新建 DSH 根会话的绝对工作目录；未提供时使用插件 `workspace`。当配置的工作目录以 `/by/projects` 结尾时，插件使用对应的 `/by` 根目录；容器部署继续使用 `/by`。DSH 的 `SessionHeader.cwd` 是权威源码工作目录，根会话不可变身份与模板绑定存放在插件自有的 `byclaw_sessions` storage domain 中；插件不再向 DSH 会话日志追加任何 ByClaw 自定义事件。
-- 业务指令保持为未经改写的 `source: user` 消息。`plugin:byclaw-context` 分为会话级和每轮级两层：会话级声明当前用户、项目工作目录、`.sessions/<sessionId>` 会话根、`.shared` 共享根及默认交付目录；每轮级只同步语言、`project_info`、文件附件元数据、`resource_list` 和连接器可用性。`channelExtension`、`groupChat`、multi-agent lane 元数据及认证 Token 不进入该上下文。独立报告、清单和导出文件默认写入当前 `.sessions/<sessionId>`，源码修改仍写入 `cwd`。持久消息按会话和 `messageId` 去重，AgentTeams 团员继承同一命名空间，同时保留独立的 DSH 会话 ID。
+- 业务指令保持为未经改写的 `source: user` 消息。`plugin:byclaw-context` 分为会话级和每轮级两层：会话级声明当前用户、项目工作目录、`.sessions/<sessionId>` 会话根、`.shared` 共享根及默认交付目录；每轮级只同步语言、`project_info`、文件附件元数据、`resource_list` 和连接器可用性。`channelExtension`、`groupChat`、multi-agent lane 元数据及认证 Token 不进入该上下文。源码修改以及需要长期保留的报告、清单、导出文件等用户交付物默认写入项目 `cwd`；`.sessions/<sessionId>` 只用于上传附件、生成媒体、一次性中间文件和用户明确要求保存在当前会话中的文件。持久消息按会话和 `messageId` 去重，AgentTeams 团员继承同一命名空间，同时保留独立的 DSH 会话 ID。
 
 ### 修复遗留会话日志
 

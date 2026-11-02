@@ -25,6 +25,7 @@ jest.mock('antd', () => {
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
   useIntl: () => mockIntl,
+  useSelector: () => [],
 }));
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
@@ -168,6 +169,39 @@ it('resolves project folder labels after returning to shared root and preserves 
   });
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_42/' }));
   expect(screen.getByText('其他项目')).toBeInTheDocument();
+});
+
+it('opens project sessions through canonical session directories without filesystem aliases', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  await act(async () => {
+    render(
+      <FileResourcePanel
+        scope="shared"
+        sessionId="8798"
+        projectId={-1}
+        project={{
+          projectId: '-1',
+          projectName: '默认项目',
+          sessions: [{ sessionId: '8798', sessionName: '你好' }],
+        } as any}
+        runtimeType="dsh"
+        resourceId="42"
+        onOpenDetail={jest.fn()}
+      />
+    );
+  });
+  expect(screen.getByRole('button', { name: 'Open .sessions' })).toBeInTheDocument();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open .sessions' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(screen.getByRole('button', { name: 'Open 你好' })).toBeInTheDocument();
+  expect(listFiles).not.toHaveBeenCalledWith(expect.objectContaining({ path: '/by/.sessions/' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open 你好' }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.sessions/8798/' }));
 });
 
 it('retries failed project names and refreshes renamed projects on list refresh', async () => {

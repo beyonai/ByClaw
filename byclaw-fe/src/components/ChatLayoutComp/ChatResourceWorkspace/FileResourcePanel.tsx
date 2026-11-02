@@ -76,7 +76,13 @@ import PersonalKnowledgeSaveDialogs from './PersonalKnowledgeSaveDialogs';
 import useSaveToKnowledge from '@/layout/sider/components/FileSiderPanel/hooks/useSaveToKnowledge';
 import projectStyles from '@/pages/projectSpace/index.module.less';
 import { useInfiniteScroll } from '@/pages/projectSpace/hooks/useInfiniteScroll';
-import { filterSessionRootItems, resolveProjectSessionDisplayName } from './sessionResourceUtils';
+import {
+  CANONICAL_SESSION_ROOT,
+  appendProjectSessionsDirectory,
+  createProjectSessionItems,
+  filterSessionRootItems,
+  resolveProjectSessionDisplayName,
+} from './sessionResourceUtils';
 import styles from './index.module.less';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { useChatResourceProject } from './useChatResourceProject';
@@ -147,6 +153,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const sessions = useSelector(({ session }: any) => session?.sessionList || []);
   const { project: loadedProject } = useChatResourceProject(!project && projectIdProp ? projectIdProp : undefined);
   const resolvedProject = project || loadedProject;
+  const projectSessions = resolvedProject?.sessions?.length ? resolvedProject.sessions : sessions;
   const { EventEmitter, uploadFileConfig } = useGlobal();
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
@@ -209,6 +216,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const browsePath = browseLocation.context === browseContext ? browseLocation.path : rootPath;
   const setBrowsePath = (path: string) => setBrowseLocation({ context: browseContext, path });
   const currentDirectoryPath = scope === 'shared' ? browsePath : rootPath;
+  const projectSessionsPathEnabled = scope === 'shared' && runtimeType === 'dsh' && !!projectId;
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const projectDirectoryIds = useMemo(() => {
     if (scope !== 'shared') return [];
@@ -303,11 +311,20 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     setLoadError(undefined);
     try {
       if (scope === 'shared') {
+        if (projectSessionsPathEnabled && browsePath === CANONICAL_SESSION_ROOT) {
+          setItems(sortFileBrowserItems(createProjectSessionItems(projectSessions)));
+          return;
+        }
         if (runtimeType === 'dsh' && projectId && browsePath === rootPath) {
           await ensureFolder({ resourceId: resourceId!, path: rootPath });
         }
         const response = await listFiles({ resourceId: resourceId!, path: browsePath, language });
-        setItems(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(response)));
+        const files = unwrapListResponse<FileBrowserItem>(response);
+        setItems(
+          sortFileBrowserItems(
+            projectSessionsPathEnabled && browsePath === rootPath ? appendProjectSessionsDirectory(files) : files
+          )
+        );
       } else if (scope === 'project') {
         const cloudItems = await queryProjectCloudDrive(resourceId, '/', language);
         setItems(sortFileBrowserItems(cloudItems));
@@ -344,6 +361,8 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     intl,
     language,
     projectId,
+    projectSessions,
+    projectSessionsPathEnabled,
     resourceId,
     rootPath,
     runtimeReady,
