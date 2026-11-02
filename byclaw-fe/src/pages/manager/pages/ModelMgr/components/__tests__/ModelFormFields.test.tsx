@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, Form } from 'antd';
 import type { FormInstance } from 'antd';
 import { useState } from 'react';
@@ -182,7 +182,7 @@ describe('ModelFormFields section placement', () => {
     await act(async () => {
       form!.setFieldsValue({ applicabilityScope: '适用于内部知识问答\n支持中文资料' });
     });
-    expect(scopeInput).toHaveValue('适用于内部知识问答\n支持中文资料');
+    await waitFor(() => expect(scopeInput).toHaveValue('适用于内部知识问答\n支持中文资料'));
     fireEvent.change(scopeInput, { target: { value: '适用于代码生成' } });
     expect(form!.getFieldValue('applicabilityScope')).toBe('适用于代码生成');
     fireEvent.change(scopeInput, { target: { value: '' } });

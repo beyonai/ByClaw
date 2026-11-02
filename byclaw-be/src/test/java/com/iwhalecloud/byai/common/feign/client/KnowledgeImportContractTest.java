@@ -194,7 +194,10 @@ class KnowledgeImportContractTest extends com.iwhalecloud.byai.common.i18n.I18nT
                 when(client.discover("qa")).thenReturn(Optional.of(instance));
                 when(client.discover("qa", 30000L)).thenReturn(Optional.of(instance));
                 ReflectionTestUtils.setField(service, "discoveryHttpClient",
-                    DiscoveryHttpClient.builder().discoveryClient(client).build());
+                    DiscoveryHttpClient.builder().discoveryClient(client)
+                        // Preserve retry attempts and response classification without production backoff delays.
+                        .retryConfig(com.iwhaleai.byai.framework.util.http.RetryConfig.builder()
+                            .initialDelay(0.001).maxDelay(0.001).build()).build());
             }
         }
 

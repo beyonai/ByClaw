@@ -298,3 +298,11 @@ Copyright 2026 beyondAI
 
 
 沙箱运行记录分别展示和筛选「记录状态」(`status`) 与「实际状态」(`providerStatus`)。远端清单未观察到实例时显示「未知」，不据此推断实例已删除。默认不过滤两种状态；记录已释放但远端仍在启动、运行或释放时，可通过释放操作重试精确回收该实例，后端保留权限和后继实例保护校验。
+
+
+### CI 测试资源与耗时
+
+Jest 默认最多使用两个 worker，避免完整 Ant Design 表单在共享 runner 上争抢 CPU 并连锁超时。
+`CI=true` 时静默处理测试中的 console 输出；失败用例和断言堆栈仍由 Jest 报告。需要排查 console 日志时使用 `pnpm run test --silent=false`。
+模板数据排列由 `modelFormPresets.test.ts` 验证；完整新建表单保留百炼与 Kimi Code 两条代表路径，删除四个重复模板的重型表单执行。
+完整回归运行 `CI=true pnpm run test`，无需改动工作流。

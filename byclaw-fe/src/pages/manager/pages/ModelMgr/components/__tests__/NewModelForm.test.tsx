@@ -275,12 +275,9 @@ describe('new model quick setup', () => {
     });
   });
 
+  // Template permutations are covered by modelFormPresets.test.ts; keep one UI flow per provider route.
   it.each<[string, string, string, number, number | undefined, boolean]>([
     ['GLM-5.3', 'GLM-5.3 · 智谱（阿里云百炼接入）', 'glm-5.3', 1048576, 131072, true],
-    ['ZHIPU/GLM-5.3-Flash', 'GLM-5.3-Flash · 智谱（阿里云百炼接入）', 'ZHIPU/GLM-5.3-Flash', 1048576, 131072, true],
-    ['GLM-5.1', 'GLM-5.1 · 智谱（阿里云百炼接入）', 'glm-5.1', 202745, 131072, false],
-    ['Kimi-K3', 'Kimi-K3 · 月之暗面（阿里云百炼接入）', 'kimi-k3', 1048576, 1048576, true],
-    ['Kimi-K2.7-Code', 'Kimi-K2.7-Code · 月之暗面（阿里云百炼接入）', 'kimi-k2.7-code', 262144, 16384, true],
     [
       'Kimi-K2.8-Preview',
       'Kimi-K2.8-Preview (kimi-for-coding) · 月之暗面（Kimi Code接入）',
