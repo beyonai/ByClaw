@@ -1024,3 +1024,27 @@ test('purpose marketplace templates come from the trusted user launch environmen
   assert.deepEqual(row.config.templates, templates)
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
 })
+
+test('listed users store sessions in the database, everyone else keeps files', () => {
+  const entries = [
+    { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
+    { id: 'session-persistence-db', name: 'db', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1, u2' })
+  const rows = user => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user) })
+    .filter(row => row.id.startsWith('session-persistence'))
+  assert.deepEqual(rows('u1'), [
+    { id: 'session-persistence-jsonl', config: { root: join('/home/u1', 'sessions') } },
+    { id: 'session-persistence-jsonl', disabled: true },
+    { id: 'session-persistence-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+  ])
+  assert.deepEqual(rows('u3'), [{ id: 'session-persistence-jsonl', config: { root: join('/home/u3', 'sessions') } }])
+  assert.equal(host.sessionDbFor({ sessionDbUrl: undefined, sessionDbUsers: ['*'] }, 'u1'), undefined)
+  assert.deepEqual(host.sessionDbFor({ sessionDbUrl: 'postgres://db', sessionDbUsers: ['*'] }, 'u9'), { url: 'postgres://db' })
+})
+
+test('the session database password never reaches a launch environment', () => {
+  const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
+  assert.equal(values.KEEP, '1')
+  assert.equal(values.BYCLAW_SESSION_DB_URL, undefined)
+})

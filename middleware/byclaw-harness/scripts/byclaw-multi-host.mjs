@@ -377,6 +377,11 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
     if (disabledRule(row, disabledLists) !== undefined) overlays.push({ id: row.id, disabled: true })
   }
   if (spec.managed && rows.has('byclaw-idle-reporter')) overlays.push({ id: 'byclaw-idle-reporter', disabled: true })
+  // Session logs move to the database for listed users; their old files stay on disk, unread.
+  if (spec.sessionDb !== undefined && rows.has('session-persistence-db') && rows.has('session-persistence-jsonl')) {
+    overlays.push({ id: 'session-persistence-jsonl', disabled: true })
+    overlays.push({ id: 'session-persistence-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
+  }
   return overlays
 }
 
@@ -419,7 +424,8 @@ export function parseEnsureBody(body) {
  */
 export function launchEnvironmentValues(processEnv, env, user, managed = false) {
   const values = {}
-  for (const [name, value] of Object.entries(processEnv)) if (typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
+  // Launch values reach the tool sandbox, where model-generated commands could read the database password.
+  for (const [name, value] of Object.entries(processEnv)) if (!name.startsWith('BYCLAW_SESSION_DB_') && typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
   return { ...values, ...env, USER_CODE: user }
 }
 
@@ -488,6 +494,8 @@ export function readHostConfig(env) {
     toolEnvCatalog: toolEnvCatalog({ env }),
     toolEnvBe,
     toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
+    sessionDbUrl: managed ? undefined : env.BYCLAW_SESSION_DB_URL?.trim() || undefined,
+    sessionDbUsers: (env.BYCLAW_SESSION_DB_USERS ?? '').split(',').map(entry => entry.trim()).filter(Boolean),
   }
 }
 
@@ -1221,6 +1229,12 @@ export function managedRuntimeActivity(ctx) {
   } catch { return { busy: true, activeRequests: 0 } }
 }
 
+/** The database a user's session logs go to; `undefined` keeps them in files. `*` lists everyone. */
+export function sessionDbFor(config, user) {
+  if (config.sessionDbUrl === undefined) return undefined
+  return config.sessionDbUsers.includes('*') || config.sessionDbUsers.includes(user) ? { url: config.sessionDbUrl } : undefined
+}
+
 /**
  * Read one user-owned configuration snapshot, then append the host's identity
  * overlays. Re-reading every bundle/home patch for boot both repeats work and
@@ -1412,6 +1426,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
     toolEnvCatalog: config.toolEnvCatalog,
     toolEnvBe: config.toolEnvBe,
     toolEnvIdleMs: config.toolEnvIdleMs,
+    sessionDb: sessionDbFor(config, user),
     publicUrl: userPublicUrl(config.publicBase, user),
   }
   const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)

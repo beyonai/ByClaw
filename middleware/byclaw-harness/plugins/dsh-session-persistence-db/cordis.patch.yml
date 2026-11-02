@@ -1,0 +1,8 @@
+# Off by default: the shared DSH host enables this row, and disables
+# session-persistence-jsonl, for the users in BYCLAW_SESSION_DB_USERS. A per-user
+# sandbox must keep JSONL because model-generated commands run beside the harness
+# there and could read the database credentials.
+- insert:
+    - id: session-persistence-db
+      name: '@byclaw/dsh-session-persistence-db'
+      disabled: true
