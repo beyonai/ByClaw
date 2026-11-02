@@ -5,6 +5,19 @@ function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
+function modelOptions(params, type) {
+  if (type !== 'IMAGE_GENERATION') return object(params.extendParam ?? {})
+  const options = { ...object(params.options ?? params.extendParam ?? {}) }
+  if (type === 'IMAGE_GENERATION') {
+    const image = object(params.imageGenerationConfig)
+    for (const key of ['size', 'watermark']) {
+      if (image[key] !== undefined) options[key] = image[key]
+    }
+    if (image.responseFormat !== undefined) options.response_format = image.responseFormat
+  }
+  return options
+}
+
 export async function resolveMediaModel(redis, type, { decrypt = value => value, modelId } = {}) {
   if (!['IMAGE_GENERATION', 'TTS', 'ASR'].includes(type)) throw new Error('MEDIA_MODEL_INVALID_TYPE')
   let raw
@@ -44,6 +57,6 @@ export async function resolveMediaModel(redis, type, { decrypt = value => value,
   return {
     id: String(raw.instanceId ?? modelId ?? ''), source: 'system-default', provider, protocol, model, endpoint,
     apiKey: decrypt(String(raw.authToken ?? '')), headers,
-    options: object(params.extendParam ?? {}), timeoutMs: Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 600000) : 180000,
+    options: modelOptions(params, type), timeoutMs: Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 600000) : 180000,
   }
 }

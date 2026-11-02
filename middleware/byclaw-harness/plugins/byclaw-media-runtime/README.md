@@ -30,3 +30,6 @@ TTS outputs include `status` and `warnings`; an explicit limitation with no asse
 returns `unsupported` without persisting files or disguising it as a connector error.
 Image output remains unchanged. Artifacts are read and written through the host's `artifactIo` when it supplies one (the shared DSH host does, so files land in the user's tool environment); otherwise through this process's filesystem. Keep speech controls in provider adapters rather
 than adding provider-specific request logic to this shared runtime.
+
+
+系统图片模型读取 `instanceParam.options`，缺省兼容对象或 JSON 字符串形式的 `extendParam`；`imageGenerationConfig.size/watermark/responseFormat` 分别覆盖 `size/watermark/response_format`，保留 `false`。仅补齐模型选项映射；具体供应商是否使用这些选项仍由现有适配器决定。语音和 ASR 的选项读取方式不变。
