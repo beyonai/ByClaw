@@ -15,8 +15,8 @@ import {
 assert.equal(byClawProjectCwd(-1), '/by/.shared/project_-1')
 assert.equal(byClawProjectCwd('42'), '/by/.shared/project_42')
 assert.equal(byClawProjectCwd('42', '/tmp/local/by'), '/tmp/local/by/.shared/project_42')
-assert.equal(byClawProjectSessionAlias('42', '100'), '/by/.shared/project_42/.session/session_100')
-assert.equal(byClawProjectSessionAlias('-1', 'abc-123', '/tmp/local/by'), '/tmp/local/by/.shared/project_-1/.session/session_abc-123')
+assert.equal(byClawProjectSessionAlias('42', '100'), '/by/.shared/project_42/sessions/session_100')
+assert.equal(byClawProjectSessionAlias('-1', 'abc-123', '/tmp/local/by'), '/tmp/local/by/.shared/project_-1/sessions/session_abc-123')
 assert.equal(byClawProjectSessionAlias(undefined, '100'), undefined)
 assert.throws(() => byClawProjectSessionAlias('42', '../escape'))
 for (const value of [undefined, '', '../escape', '42/child', 'NaN', '42.5']) {

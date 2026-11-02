@@ -22,7 +22,7 @@ export function byClawProjectSessionAlias(
   if (projectCwd === undefined) return undefined
   // Reuse the canonical validator so neither identifier can introduce a path segment.
   byClawSessionCwd(externalSessionId, byRoot)
-  return join(projectCwd, '.session', `session_${externalSessionId}`)
+  return join(projectCwd, 'sessions', `session_${externalSessionId}`)
 }
 
 /**

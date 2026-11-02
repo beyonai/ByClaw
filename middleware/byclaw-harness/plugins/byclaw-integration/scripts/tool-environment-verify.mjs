@@ -30,7 +30,7 @@ try {
   // --- file primitives -------------------------------------------------------
   await files.ensureDirectory(join(byRoot, '.sessions', 's1'))
   check(((await stat(b.toHost(join(byRoot, '.sessions', 's1')))).mode & 0o777) === 0o700, 'ensureDirectory creates owner-only directories on B')
-  const sessionAlias = join(byRoot, '.shared', 'project_42', '.session', 'session_s1')
+  const sessionAlias = join(byRoot, '.shared', 'project_42', 'sessions', 'session_s1')
   await files.ensureSymlink(join(byRoot, '.sessions', 's1'), sessionAlias)
   await writeFile(b.toHost(join(byRoot, '.sessions', 's1', 'canonical.txt')), 'canonical')
   check(await readFile(b.toHost(join(sessionAlias, 'canonical.txt')), 'utf8') === 'canonical', 'session alias reads canonical files')
