@@ -201,9 +201,9 @@ class DatasetApplicationServiceTest {
         ReflectionTestUtils.setField(service, "ssResExtDocService", documents);
         ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", discovery);
         ReflectionTestUtils.setField(service, "resourceRuntimeInfoResolver", org.mockito.Mockito.mock(ResourceRuntimeInfoResolver.class));
+        when(ssResourceService.findById(100L)).thenReturn(resource);
         when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
-        when(ssResourceService.updateResource(100L, "Updated", "Description")).thenReturn(resource);
         SsResExtDoc document = new SsResExtDoc();
         when(documents.updateSsResExtDocTargetContent(100L, "dataset", "Updated", "Description"))
             .thenReturn(document);
@@ -232,6 +232,7 @@ class DatasetApplicationServiceTest {
         SsResource resource = defaultPersonalDataset();
         resource.setResourceBizType("KG_DOC");
         resource.setOwnerType(OwnerType.PERSONAL);
+        when(ssResourceService.findById(100L)).thenReturn(resource);
         when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
         DatasetDto request = new DatasetDto();
         request.setResourceId(100L);
@@ -247,6 +248,7 @@ class DatasetApplicationServiceTest {
         resource.setResourceId(100L);
         resource.setResourceBizType("KG_DOC");
         resource.setResourceStatus(-1);
+        when(ssResourceService.findById(100L)).thenReturn(resource);
         when(ssResourceService.findByIdForUpdate(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
         com.iwhalecloud.byai.manager.dto.resource.DatasetDto request =

@@ -70,6 +70,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
+import com.iwhalecloud.byai.manager.domain.resource.service.DatasetOwnershipMetadata;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
@@ -360,13 +361,18 @@ public class DatasetApplicationService {
         String resourceName = datasetDto.getResourceName();
         String resourceDesc = datasetDto.getResourceDesc();
 
-        // 更新知识库
-        SsResource ssResource = ssResourceService.findByIdForUpdate(resourceId);
+        // 先读取身份，取得与同步共用的锁后再读取当前记录。
+        SsResource ssResource = ssResourceService.findById(resourceId);
+        validateDatasetManagePermission(ssResource);
+        lockDatasetIdentity(ssResource.getSystemCode(), ssResource.getResourceBizType(), ssResource.getResourceCode());
+        ssResource = ssResourceService.findByIdForUpdate(resourceId);
         validateDatasetManagePermission(ssResource);
         if (Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
             throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
         }
-        ssResource = ssResourceService.updateResource(resourceId, resourceName, resourceDesc);
+        // Reuse the post-lock record; updateResource would re-read a potentially cached pre-lock snapshot.
+        ssResource.setResourceName(resourceName);
+        ssResource.setResourceDesc(resourceDesc);
         if (datasetDto.getCatalogId() != null) {
             ssResource.setCatalogId(datasetDto.getCatalogId());
         }
@@ -379,6 +385,11 @@ public class DatasetApplicationService {
         // 不区分 type，也不改 sourceContent，避免影响导入链的原始内容语义。
         SsResExtDoc extDoc = ssResExtDocService.updateSsResExtDocTargetContent(ssResource.getResourceId(), type,
             resourceName, resourceDesc);
+        if (DatasetOwnershipMetadata.isLocal(extDoc)) {
+            extDoc.setTargetContent(DatasetOwnershipMetadata.applyScope(extDoc.getTargetContent(),
+                ssResource.getOwnerType(), ssResource.getCatalogId()));
+            ssResExtDocService.update(extDoc);
+        }
         // 页面更新知识库后，也按知识库导入的同一套规则把最新 targetContent 同步到开放资源目录。
         // 同步失败仅记日志，不影响主流程成功返回。
         // 下架知识仍可维护元信息，标准 JSON 和缓存只在上架状态发布。
@@ -395,6 +406,16 @@ public class DatasetApplicationService {
         PythonBuildResponse<Void> ret = feignPythonBuildService.updateKnowledgeBase(kbKnowledgeUpdate);
         logger.info("同步更新结果:{}", JSON.toJSONString(ret));
 
+    }
+
+    public boolean isOwnershipManagedLocally(SsResource resource) {
+        return resource != null && StringUtils.startsWith(resource.getResourceBizType(), "KG_")
+            && DatasetOwnershipMetadata.isLocal(ssResExtDocService.findById(resource.getResourceId()));
+    }
+
+    private void lockDatasetIdentity(String systemCode, String resourceBizType, String resourceCode) {
+        ssResourceService.lockSkillImport("THIRD_SYNC:" + StringUtils.trimToEmpty(systemCode) + ":"
+            + StringUtils.trimToEmpty(resourceBizType) + ":" + StringUtils.trimToEmpty(resourceCode));
     }
 
     private boolean isLocalDatasetType(String type) {
@@ -1730,17 +1751,23 @@ public class DatasetApplicationService {
     public Long importDatasetJson(String ownerType, Long catalogId, MultipartFile file) {
 
         // 校验上传文件
-        String rawJson = parseAndValidateFile(file);
+        String rawJson = DatasetOwnershipMetadata.stripLocalMarker(parseAndValidateFile(file));
 
         // 校验json文件参数
         DatasetImportDto dto = parseAndValidateDto(rawJson, ownerType);
         dto.setCatalogId(catalogId);
 
+        lockDatasetIdentity(dto.getSystemCode(), dto.getResourceBizType(), dto.getResourceCode());
         SsResource existing = ssResourceService.findByImportIdentity(dto.getSystemCode(), dto.getResourceBizType(),
             dto.getResourceCode());
         if (existing == null) {
             return createDatasetFromImport(dto, rawJson, ownerType);
         } else {
+            if (isOwnershipManagedLocally(existing)) {
+                ownerType = existing.getOwnerType();
+                dto.setOwnerType(ownerType);
+                dto.setCatalogId(existing.getCatalogId());
+            }
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
                 dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
@@ -1945,11 +1972,14 @@ public class DatasetApplicationService {
     }
 
     private void fillExtDoc(SsResExtDoc extDoc, DatasetImportDto dto, String rawJson, Long resourceId) {
+        boolean managedLocally = DatasetOwnershipMetadata.isLocal(extDoc);
         extDoc.setType(dto.getResourceType());
         extDoc.setResourceCatalogSub(dto.getResourceCatalogSub());
-        extDoc.setSourceContent(rawJson);
+        extDoc.setSourceContent(managedLocally ? DatasetOwnershipMetadata.markLocal(rawJson, resourceId) : rawJson);
         extDoc.setResourceAgentId(Long.valueOf(dto.getResourceCode()));
-        extDoc.setTargetContent(buildTargetContent(rawJson, resourceId));
+        String targetContent = buildTargetContent(rawJson, resourceId);
+        extDoc.setTargetContent(managedLocally
+            ? DatasetOwnershipMetadata.applyScope(targetContent, dto.getOwnerType(), dto.getCatalogId()) : targetContent);
     }
 
     private void validateResourceCodeCanMapToAgentId(String resourceCode) {

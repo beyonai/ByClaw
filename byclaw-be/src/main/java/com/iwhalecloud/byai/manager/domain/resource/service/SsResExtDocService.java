@@ -131,14 +131,14 @@ public class SsResExtDocService {
         ssResExtDoc.setResourceId(resourceId);
         ssResExtDoc.setType(type);
         ssResExtDoc.setTargetContent(buildKgDocTargetContent());
+        ssResExtDoc.setSourceContent(DatasetOwnershipMetadata.markLocal(ssResExtDoc.getTargetContent(), resourceId));
         ssResExtDocMapper.insert(ssResExtDoc);
         return ssResExtDoc;
     }
 
     /**
      * 按知识库 JSON 模板生成扩展表内容。
-     * 当前 createDataset 场景会把 sourceContent/targetContent 都写成同一份最终 JSON，
-     * 方便下游直接复用，不再额外区分“原始导入内容”和“最终发布内容”。
+     * sourceContent 额外记录百应管理归属的内部来源标记；targetContent 只包含运行配置。
      */
     public SsResExtDoc createSsResExtDoc(Long resourceId, String type, String resourceCode, String resourceName,
                                          String resourceDesc, String ownerType) {
@@ -147,7 +147,7 @@ public class SsResExtDocService {
         SsResExtDoc ssResExtDoc = new SsResExtDoc();
         ssResExtDoc.setResourceId(resourceId);
         ssResExtDoc.setType(type);
-        ssResExtDoc.setSourceContent(templateContent);
+        ssResExtDoc.setSourceContent(DatasetOwnershipMetadata.markLocal(templateContent, resourceId));
         ssResExtDoc.setTargetContent(templateContent);
         ssResExtDocMapper.insert(ssResExtDoc);
         return ssResExtDoc;
