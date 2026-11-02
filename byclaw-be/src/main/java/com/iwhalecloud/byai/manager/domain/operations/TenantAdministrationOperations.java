@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantAdminTenantService.Tenan
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDatasourceService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDeletionService;
+import com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,9 @@ public class TenantAdministrationOperations {
     private TenantDeletionService tenantDeletionService;
 
     @Autowired
+    private TenantManagedDeletionService tenantManagedDeletionService;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     /**
@@ -64,7 +68,7 @@ public class TenantAdministrationOperations {
     public JsonNode execute(String resource, String operation, JsonNode payload) {
         Set<String> allowed = "tenant-admin".equals(resource)
             ? Set.of("list", "packages", "create", "provision", "delete", "organizations",
-                "organization-members", "attach", "add-member")
+                "organization-members", "attach", "add-member", "order-discard", "order-discard-status")
             : Set.of("tables", "browse", "execute");
         if (resource == null || operation == null
             || !Set.of("tenant-admin", "tenant-datasource").contains(resource)
@@ -114,6 +118,16 @@ public class TenantAdministrationOperations {
             return view(tenant);
         }
         String enterpriseId = Long.toString(id(payload, "enterpriseId"));
+        if (Set.of("order-discard", "order-discard-status").contains(operation)) {
+            // Deleted tenants leave the management list; the original provision receipt proves their identity.
+            long provisionCommandId = id(payload, "provisionCommandId");
+            String enterpriseName = text(payload, "enterpriseName", 200);
+            return objectMapper.valueToTree("order-discard".equals(operation)
+                ? tenantManagedDeletionService.requestOrderDiscard(Long.parseLong(enterpriseId), enterpriseName,
+                    provisionCommandId, CurrentUserHolder.getCurrentUserId())
+                : tenantManagedDeletionService.orderDiscardStatus(Long.parseLong(enterpriseId), enterpriseName,
+                    provisionCommandId));
+        }
         if ("organizations".equals(operation)) {
             return objectMapper.valueToTree(tenantAdminOrganizationService.tree(enterpriseId));
         }

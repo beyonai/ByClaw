@@ -35,6 +35,7 @@ class TenantManagedDeletionServiceTest {
         jdbc.update("INSERT INTO byai.tenant_config(id,enterprise_id,params_code,params_value) VALUES(1,2,'PROVISION_STATE','{\"status\":\"READY\"}'),(2,2,'INTEGRATION_SOURCE_SYSTEM','hacu'),(3,2,'COMMERCIAL_MANAGED','true'),(4,2,'DB_PASSWORD','encrypted-test'),(5,2,'PACKAGE_CONTENT_SNAPSHOT','{\"memberLimit\":2}')");
         jdbc.update("UPDATE byai.tenant_operation_state SET policy_revision=1,runtime_generation='1' WHERE enterprise_id=2");
         tenants = mock(TenantAdminTenantMapper.class);
+        when(tenants.selectManagedEnterpriseName(2)).thenReturn("tenant");
         when(tenants.selectConfig(anyLong(),anyString())).thenAnswer(c -> {
             var values=jdbc.queryForList("SELECT params_value FROM byai.tenant_config WHERE enterprise_id=? AND params_code=?",String.class,c.<Object>getArgument(0),c.<Object>getArgument(1));
             return values.isEmpty()?null:values.getFirst();
@@ -51,6 +52,122 @@ class TenantManagedDeletionServiceTest {
             ids,new ObjectMapper(),mock(StringRedisTemplate.class));
     }
     String state() { return tenants.selectConfig(2,"PROVISION_STATE"); }
+
+    /** 订单废弃必须使用原开通任务定位租户，不能仅凭企业编号请求清理。 */
+    @Test void orderDiscardRejectsAnotherTenantProvisionCommand() {
+        store.insert(100,"hacu","other-provision","hash","PROVISION",3,3,"{}");
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",100,10001));
+        assertNull(store.latestDeletion(2));assertTrue(state().contains("READY"));
+        verifyNoInteractions(sandboxes);
+    }
+
+    /** 其他来源的开通任务和非开通任务均不能作为 HACU 订单清理授权。 */
+    @Test void orderDiscardRejectsWrongCommandSourceOrType() {
+        jdbc.update("UPDATE byai.tenant_task SET source_system='another-system' WHERE id=1");
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        jdbc.update("UPDATE byai.tenant_task SET source_system='hacu',type='POLICY' WHERE id=1");
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        assertNull(store.latestDeletion(2));assertTrue(state().contains("READY"));
+    }
+
+    /** 名称、托管标识和源系统都必须与当前企业一致。 */
+    @Test void orderDiscardRejectsMismatchedTenantIdentity() {
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"another-name",1,10001));
+        jdbc.update("UPDATE byai.tenant_config SET params_value='false' WHERE params_code='COMMERCIAL_MANAGED'");
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        jdbc.update("UPDATE byai.tenant_config SET params_value='true' WHERE params_code='COMMERCIAL_MANAGED'");
+        jdbc.update("UPDATE byai.tenant_config SET params_value='another-system' WHERE params_code='INTEGRATION_SOURCE_SYSTEM'");
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        assertNull(store.latestDeletion(2));assertTrue(state().contains("READY"));
+    }
+
+    /** 查询不存在的租户必须保留未找到语义，不能当作删除完成。 */
+    @Test void orderDiscardDoesNotTreatMissingTenantAsSucceeded() {
+        when(tenants.selectManagedEnterpriseName(2)).thenReturn(null);
+        var failure=assertThrows(ResponseStatusException.class,()->service.orderDiscardStatus(2,"tenant",1));
+        assertEquals(HttpStatus.NOT_FOUND,failure.getStatusCode());
+        assertNull(store.latestDeletion(2));
+    }
+
+    /** 没有原开通命令的企业不能通过订单清理入口受理删除。 */
+    @Test void orderDiscardRejectsMissingProvisionReceipt() {
+        var failure=assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",100,10001));
+        assertEquals(HttpStatus.NOT_FOUND,failure.getStatusCode());
+        assertNull(store.latestDeletion(2));assertTrue(state().contains("READY"));
+    }
+
+    /** 状态查询只读，受理清理时只返回原任务的 PENDING 回执。 */
+    @Test void orderDiscardAcceptanceRemainsPendingUntilResourceCleanupCompletes() {
+        assertEquals("NOT_STARTED",service.orderDiscardStatus(2,"tenant",1).status());
+        assertNull(store.latestDeletion(2));
+        var accepted=service.requestOrderDiscard(2,"tenant",1,10001);
+        assertEquals("2",accepted.enterpriseId());assertEquals("1",accepted.provisionCommandId());
+        assertEquals("10",accepted.deletionCommandId());assertEquals("PENDING",accepted.status());
+        assertEquals("PENDING",service.requestOrderDiscard(2,"tenant",1,10001).status());
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
+        assertTrue(state().contains("DELETING"));verifyNoInteractions(sandboxes);
+    }
+
+    /** 删除后的企业墓碑不再依赖管理列表中的成员和套餐投影。 */
+    @Test void orderDiscardCanQueryAndReplayCompletedDeletion() {
+        service.requestOrderDiscard(2,"tenant",1,10001);
+        var lease=store.claim(10,"worker",Duration.ofMinutes(30));service.execute(lease);
+        var completed=service.orderDiscardStatus(2,"tenant",1);
+        assertEquals("SUCCEEDED",completed.status());assertEquals("DELETED",completed.stage());
+        assertEquals("10",completed.deletionCommandId());assertTrue(state().contains("DELETED"));
+        assertEquals(completed,service.requestOrderDiscard(2,"tenant",1,10001));
+        assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
+    }
+
+    /** 单独的 DELETED 标记缺少持久删除回执，不能证明资源已经清理。 */
+    @Test void orderDiscardRequiresSuccessfulDeletionReceiptForDeletedState() {
+        tenants.updateConfig(2,"PROVISION_STATE","{\"status\":\"DELETED\"}");
+        assertThrows(ResponseStatusException.class,()->service.orderDiscardStatus(2,"tenant",1));
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        assertNull(store.latestDeletion(2));
+    }
+
+    /** 删除任务成功和企业终态必须一致，不能仅凭任务状态释放购买限制。 */
+    @Test void orderDiscardRejectsSuccessfulReceiptBeforeDeletedLifecycle() {
+        service.requestOrderDiscard(2,"tenant",1,10001);
+        jdbc.update("UPDATE byai.tenant_task SET status='SUCCEEDED',stage='DELETED' WHERE id=10");
+        assertThrows(ResponseStatusException.class,()->service.orderDiscardStatus(2,"tenant",1));
+    }
+
+    /** NAS 清理等待沿用原自动重试任务，查询和重复写入均不绕过等待。 */
+    @Test void orderDiscardRetainsRetryWaitReceipt() {
+        service.requestOrderDiscard(2,"tenant",1,10001);
+        var lease=store.claim(10,"worker",Duration.ofMinutes(30));
+        var pending=new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"tenant.volume.cleanup.pending");
+        doThrow(pending).when(sandboxes).deleteTenantResources(2);
+        assertThrows(ResponseStatusException.class,()->service.execute(lease));service.failed(lease,pending);
+        assertEquals("RETRY_WAIT",service.orderDiscardStatus(2,"tenant",1).status());
+        var repeated=service.requestOrderDiscard(2,"tenant",1,10001);
+        assertEquals("RETRY_WAIT",repeated.status());assertEquals("10",repeated.deletionCommandId());
+    }
+
+    /** provider 身份未知保持人工处理，轮询不会隐式重置失败任务。 */
+    @Test void orderDiscardUncertainResourceRequiresExplicitWriteToRetry() {
+        service.requestOrderDiscard(2,"tenant",1,10001);
+        var lease=store.claim(10,"worker",Duration.ofMinutes(30));
+        jdbc.update("INSERT INTO byai.ss_sandbox_record VALUES(2,'TENANT','tenant-opengauss','FAILED',NULL)");
+        var failure=assertThrows(ResponseStatusException.class,()->service.execute(lease));service.failed(lease,failure);
+        var observed=service.orderDiscardStatus(2,"tenant",1);
+        assertEquals("MANUAL_REQUIRED",observed.status());
+        assertEquals("TENANT_DELETE_RESOURCE_UNCERTAIN",observed.errorCode());
+        assertEquals("MANUAL_REQUIRED",store.find(10).status());
+        assertEquals("PENDING",service.requestOrderDiscard(2,"tenant",1,10001).status());
+        assertEquals("10",store.latestDeletion(2).commandId());verifyNoInteractions(sandboxes);
+    }
+
+    /** 在途开通任务仍由原执行者持有执行权，订单清理不能抢占。 */
+    @Test void orderDiscardCannotInterruptRunningProvision() {
+        jdbc.update("UPDATE byai.tenant_operation_state SET active_command_id=1 WHERE enterprise_id=2");
+        makeProvisionRunning();
+        assertThrows(ResponseStatusException.class,()->service.requestOrderDiscard(2,"tenant",1,10001));
+        assertEquals("RUNNING",store.find(1).status());assertNull(store.latestDeletion(2));
+        assertTrue(state().contains("READY"));
+    }
 
     @Test void repeatedAdministratorRequestsShareOneDeletionAndPreserveSuccessfulProvisionHistory() {
         assertEquals("ACCEPTED",service.request(2,"tenant",10001));
@@ -146,6 +263,44 @@ class TenantManagedDeletionServiceTest {
             service.request(2,"tenant",10001);service.scan();
             assertEquals("PENDING",store.latestDeletion(2).status());
             verifyNoInteractions(sandboxes);
+        } finally {
+            if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
+        }
+    }
+    /** 开发环境只推进显式确认的订单清理，不扩展到普通管理员删除。 */
+    @Test void developmentScannerConsumesOnlyConfirmedOrderDiscardCommand() {
+        String old=System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV","development");
+            store.insert(100,"hacu","admin-delete-3","hash","DELETE",3,10001,"{}");
+            for (long id=101;id<110;id++) {
+                store.insert(id,"hacu","ordinary-delete-"+id,"hash","DELETE",id+3,10001,"{}");
+            }
+            jdbc.update("UPDATE byai.tenant_task SET created_at=TIMESTAMP '2020-01-01 00:00:00' WHERE id>=100");
+            jdbc.update("INSERT INTO byai.tenant_operation_state(enterprise_id,active_command_id) VALUES(3,100)");
+            jdbc.update("INSERT INTO byai.tenant_config(id,enterprise_id,params_code,params_value) VALUES"
+                + "(100,3,'PROVISION_STATE','{\"status\":\"DELETING\"}'),"
+                + "(101,3,'COMMERCIAL_MANAGED','true'),(102,3,'INTEGRATION_SOURCE_SYSTEM','hacu')");
+            service.requestOrderDiscard(2,"tenant",1,10001);
+            service.scan();
+            assertEquals("SUCCEEDED",store.latestDeletion(2).status());assertTrue(state().contains("DELETED"));
+            assertEquals("PENDING",store.find(100).status());
+            assertNull(tenants.selectConfig(2,"ORDER_DISCARD_DELETE_COMMAND_ID"));
+            verify(sandboxes).deleteTenantResources(2);verify(sandboxes,never()).deleteTenantResources(3);
+        } finally {
+            if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
+        }
+    }
+
+    /** 开发环境授权绑定具体删除命令，陈旧的标记不能授权其他任务。 */
+    @Test void developmentScannerRejectsMarkerForAnotherCommand() {
+        String old=System.getProperty("BE_ENV");
+        try {
+            System.setProperty("BE_ENV","development");
+            service.requestOrderDiscard(2,"tenant",1,10001);
+            tenants.updateConfig(2,"ORDER_DISCARD_DELETE_COMMAND_ID","999");
+            service.scan();
+            assertEquals("PENDING",store.latestDeletion(2).status());verifyNoInteractions(sandboxes);
         } finally {
             if(old==null) System.clearProperty("BE_ENV"); else System.setProperty("BE_ENV",old);
         }

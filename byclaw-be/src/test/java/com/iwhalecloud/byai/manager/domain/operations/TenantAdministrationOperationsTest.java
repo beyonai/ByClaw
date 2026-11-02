@@ -11,6 +11,8 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantAdminTenantService.Tenan
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDatasourceService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDeletionService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
+import com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService;
+import com.iwhalecloud.byai.manager.domain.tenant.integration.TenantManagedDeletionService.OrderDiscardView;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +47,7 @@ class TenantAdministrationOperationsTest {
     private TenantDatasourceService tenantDatasourceService;
     private TenantDeletionService tenantDeletionService;
     private TenantDbProvisioningService tenantDbProvisioningService;
+    private TenantManagedDeletionService tenantManagedDeletionService;
 
     /** 所有业务服务和上下文读取均使用替身。 */
     @BeforeEach
@@ -54,6 +57,7 @@ class TenantAdministrationOperationsTest {
         tenantDatasourceService = mock(TenantDatasourceService.class);
         tenantDeletionService = mock(TenantDeletionService.class);
         tenantDbProvisioningService = mock(TenantDbProvisioningService.class);
+        tenantManagedDeletionService = mock(TenantManagedDeletionService.class);
         SandboxUserContextRunner sandboxUserContextRunner = mock(SandboxUserContextRunner.class);
         doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get())
             .when(sandboxUserContextRunner).callAsUser(eq("configured-admin"), any());
@@ -63,6 +67,7 @@ class TenantAdministrationOperationsTest {
         ReflectionTestUtils.setField(tenantAdministrationOperations, "tenantDatasourceService", tenantDatasourceService);
         ReflectionTestUtils.setField(tenantAdministrationOperations, "tenantDeletionService", tenantDeletionService);
         ReflectionTestUtils.setField(tenantAdministrationOperations, "tenantDbProvisioningService", tenantDbProvisioningService);
+        ReflectionTestUtils.setField(tenantAdministrationOperations, "tenantManagedDeletionService", tenantManagedDeletionService);
         ReflectionTestUtils.setField(tenantAdministrationOperations, "objectMapper", objectMapper);
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(42L);
@@ -119,6 +124,46 @@ class TenantAdministrationOperationsTest {
         assertThatThrownBy(() -> tenantAdministrationOperations.execute("tenant-admin", "delete", payload))
             .isInstanceOf(OperationsFailure.class);
         verify(tenantDeletionService, never()).request(anyString(), anyString());
+    }
+
+    /** 订单清理依靠持久开通任务身份，受理回执仍保留 PENDING 状态。 */
+    @Test
+    void orderDiscardReturnsDurablePendingReceiptWithoutTenantListLookup() {
+        ObjectNode payload = objectMapper.createObjectNode().put("enterpriseId", "9007199254740993")
+            .put("enterpriseName", "tenant").put("provisionCommandId", "9007199254740995");
+        when(tenantManagedDeletionService.requestOrderDiscard(9007199254740993L, "tenant", 9007199254740995L, 42L))
+            .thenReturn(new OrderDiscardView("9007199254740993", "9007199254740995", "9007199254740997",
+                "PENDING", "RESERVED", null));
+        var result = tenantAdministrationOperations.execute("tenant-admin", "order-discard", payload);
+        assertThat(result.path("status").asText()).isEqualTo("PENDING");
+        assertThat(result.path("deletionCommandId").asText()).isEqualTo("9007199254740997");
+        verify(tenantAdminTenantService, never()).list(any());
+        verify(tenantDeletionService, never()).request(anyString(), anyString());
+    }
+
+    /** 删除完成后的查询绕过管理列表过滤，查询本身不重新提交清理。 */
+    @Test
+    void orderDiscardStatusReadsDeletedTenantWithoutResubmittingDeletion() {
+        ObjectNode payload = objectMapper.createObjectNode().put("enterpriseId", "9007199254740993")
+            .put("enterpriseName", "tenant").put("provisionCommandId", "9007199254740995");
+        when(tenantManagedDeletionService.orderDiscardStatus(9007199254740993L, "tenant", 9007199254740995L))
+            .thenReturn(new OrderDiscardView("9007199254740993", "9007199254740995", "9007199254740997",
+                "SUCCEEDED", "DELETED", null));
+        var result = tenantAdministrationOperations.execute("tenant-admin", "order-discard-status", payload);
+        assertThat(result.path("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(result.path("stage").asText()).isEqualTo("DELETED");
+        verify(tenantAdminTenantService, never()).list(any());
+        verify(tenantManagedDeletionService, never()).requestOrderDiscard(anyLong(), anyString(), anyLong(), anyLong());
+    }
+
+    /** 任务编号只能按十进制字符串传递，拒绝发生精度丢失的 JSON 数字。 */
+    @Test
+    void orderDiscardRejectsNumericProvisionCommandIdentifier() {
+        ObjectNode payload = objectMapper.createObjectNode().put("enterpriseId", "9007199254740993")
+            .put("enterpriseName", "tenant").put("provisionCommandId", 9007199254740995L);
+        assertThatThrownBy(() -> tenantAdministrationOperations.execute("tenant-admin", "order-discard", payload))
+            .isInstanceOf(OperationsFailure.class);
+        verify(tenantManagedDeletionService, never()).requestOrderDiscard(anyLong(), anyString(), anyLong(), anyLong());
     }
 
     /** 未开通租户不能连接数据库，伪造 confirmed=false 也不能绕过写入审计。 */
