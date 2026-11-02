@@ -806,12 +806,10 @@ public class ProjectApplicationService {
         }
 
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        Long enterpriseId = currentEnterpriseId();
         Project project = projectService.findById(projectId);
         boolean defaultProject = Objects.equals(projectId, -1L);
         boolean projectUnavailable = project == null
-            || DeleteFlag.DELETED.equals(project.getDeleteFlag())
-            || (!defaultProject && !Objects.equals(project.getEnterpriseId(), enterpriseId));
+            || DeleteFlag.DELETED.equals(project.getDeleteFlag());
         if (projectUnavailable) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
         }
