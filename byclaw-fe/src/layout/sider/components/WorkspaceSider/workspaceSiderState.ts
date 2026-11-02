@@ -1,22 +1,16 @@
-import dayjs from 'dayjs';
 import type { ProjectSession } from '@/pages/projectSpace/types';
+import getSessionTimestamp from '@/utils/getSessionTimestamp';
 
 export const DESKTOP_UNASSIGNED_SESSION_SCOPE = '__desktop_unassigned_sessions__';
 
 export const hasDesktopTaskSessions = (desktopMode: boolean, sessionState?: { sessions?: unknown[]; total?: number }) =>
   desktopMode && Boolean((sessionState?.sessions?.length || 0) > 0 || (sessionState?.total || 0) > 0);
 
-const getSessionTime = (value?: string | number) => {
-  if (!value) return 0;
-  // 聊天 store 使用毫秒时间戳字符串，项目接口也可能返回日期字符串。
-  const time = dayjs(typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value).valueOf();
-  return Number.isFinite(time) ? time : 0;
-};
-
 export const sortWorkspaceSessions = (sessions: ProjectSession[]) =>
   [...sessions].sort(
     (left, right) =>
-      getSessionTime(right.updateTime || right.createTime) - getSessionTime(left.updateTime || left.createTime)
+      getSessionTimestamp(right.updateTime || right.createTime) -
+      getSessionTimestamp(left.updateTime || left.createTime)
   );
 
 export const syncWorkspaceSessionActivity = (
@@ -30,7 +24,7 @@ export const syncWorkspaceSessionActivity = (
       const liveSession = liveSessionMap.get(`${session.sessionId}`);
       if (
         !liveSession ||
-        getSessionTime(liveSession.updateTime) <= getSessionTime(session.updateTime || session.createTime)
+        getSessionTimestamp(liveSession.updateTime) <= getSessionTimestamp(session.updateTime || session.createTime)
       ) {
         return session;
       }

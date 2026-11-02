@@ -5,6 +5,7 @@ import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/
 import { getMessages, getMessageState } from '@/service/message';
 
 import type { IMessage, TaskPlanSnapshot } from '@/typescript/message';
+import getSessionTimestamp from '@/utils/getSessionTimestamp';
 import { shouldApplyScopedChildRun, type ScopedChildRunState } from '@/utils/scopedSession';
 
 const _INIT_PAGESIZE_ = 20;
@@ -24,13 +25,8 @@ const getMessageCreateTimeValue = (message: any) => {
     return numericTime;
   }
 
-  const timestamp = Date.parse(`${createTime}`);
-  if (Number.isFinite(timestamp)) {
-    return timestamp;
-  }
-
-  const normalizedTimestamp = Date.parse(`${createTime}`.replace(/-/g, '/'));
-  return Number.isFinite(normalizedTimestamp) ? normalizedTimestamp : Number.MAX_SAFE_INTEGER;
+  // 历史接口日期和实时消息时间戳必须按同一时区排序，否则会话摘要可能误取旧消息。
+  return getSessionTimestamp(String(createTime), Number.MAX_SAFE_INTEGER);
 };
 
 const getMessageIdValue = (message: any) => {

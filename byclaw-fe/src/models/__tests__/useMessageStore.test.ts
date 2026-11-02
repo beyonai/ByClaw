@@ -15,7 +15,7 @@ jest.mock('@/utils/messgae', () => ({
 
 import { getMessages, getMessageState } from '@/service/message';
 import { hasVisibleMessageContent } from '@/utils/messgae';
-import messageStoreModel, { fetchMessage } from '../useMessageStore';
+import messageStoreModel, { fetchMessage, sortMessagesByTimeline } from '../useMessageStore';
 
 const mockGetMessages = getMessages as jest.MockedFunction<typeof getMessages>;
 const mockGetMessageState = getMessageState as jest.MockedFunction<typeof getMessageState>;
@@ -66,6 +66,51 @@ describe('models/useMessageStore', () => {
     const result = await fetchMessage({ sessionId: 's1' });
 
     expect(result.list.map((item) => item.messageId)).toEqual([10007067, 2666782070, 10007074]);
+  });
+
+  it('keeps a new user message last when merging an older page of Beijing dates', async () => {
+    const history = { messageId: 11407236, createTime: '2026-11-02 16:33:25' };
+    const newMessage = { messageId: 11407400, createTime: String(Date.parse('2026-11-02T09:25:00Z')) };
+    const messageInfo = { list: [newMessage], pageNum: 1, pageSize: 1, total: 2, pageRange: [1, 1] };
+    const sessionListMap = new Map([['s1', messageInfo]]);
+    const select = jest.fn(() => sessionListMap);
+    const put = jest.fn((action) => action);
+    mockGetMessages.mockResolvedValue({ list: [history], pageNum: 2, pageSize: 1, total: 2 } as any);
+    const effect = (messageStoreModel as any).effects.getMoreSessionMessage(
+      { payload: { sessionId: 's1' } },
+      { put, select }
+    );
+
+    effect.next();
+    const fetchResult = await effect.next(sessionListMap).value;
+    const putEffect = effect.next(fetchResult).value;
+
+    expect(putEffect.payload.messageListInfo.list.map((message: any) => message.messageId)).toEqual([
+      history.messageId,
+      newMessage.messageId,
+    ]);
+    effect.next(putEffect);
+  });
+
+  it('keeps the same message order before and after refreshing live timestamps from the API', () => {
+    const history = { messageId: 1, createTime: '2026-11-02 17:24:11' };
+    const live = { messageId: 2, createTime: String(Date.parse('2026-11-02T09:25:00Z')) };
+    const refreshed = { ...live, createTime: '2026-11-02 17:25:00' };
+
+    expect(sortMessagesByTimeline([live, history]).map((message) => message.messageId)).toEqual([1, 2]);
+    expect(sortMessagesByTimeline([refreshed, history]).map((message) => message.messageId)).toEqual([1, 2]);
+  });
+
+  it('preserves message ID tie-breaking and puts unknown times after valid history', () => {
+    const messages = [
+      { messageId: 4, createTime: 'invalid' },
+      { messageId: 3, createTime: undefined },
+      { messageId: 2, createTime: '2026-11-02T09:24:11Z' },
+      { messageId: 1, createTime: '2026-11-02 17:24:11' },
+      { messageId: 0, createTime: '1970-01-01T00:00:00Z' },
+    ];
+
+    expect(sortMessagesByTimeline(messages).map((message) => message.messageId)).toEqual([0, 1, 2, 3, 4]);
   });
 
   it.each([
