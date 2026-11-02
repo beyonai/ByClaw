@@ -8,10 +8,22 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ProjectSessionQoTest {
+
+    @Test
+    void projectSessionMapper_filtersByRequestedSessionIds() {
+        ProjectSessionQo qo = new ProjectSessionQo();
+        qo.setProjectId(1L);
+        qo.setSessionIds(List.of(11407993L, 11409730L));
+
+        String sql = normalizeSql(resolveProjectSessionSql(qo));
+
+        assertThat(sql).contains("a.session_id IN ( ? , ? )");
+    }
 
     @Test
     void normalizeSearchCondition_enablesChatContentSearchAndEscapesLikeWildcards() {

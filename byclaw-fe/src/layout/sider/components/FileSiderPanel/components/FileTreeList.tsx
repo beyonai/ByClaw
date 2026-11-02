@@ -31,6 +31,7 @@ interface FileTreeListProps {
   // 项目资源等只读场景复用文件树时关闭三点操作，文件模块默认仍展示。
   showActions?: boolean;
   showItemMeta?: boolean;
+  expandAction?: false | 'click' | 'doubleClick';
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
   onNodeClick: (event: React.MouseEvent, node: FileTreeItem) => void;
@@ -151,6 +152,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   emptyText,
   showActions = true,
   showItemMeta = true,
+  expandAction = 'click',
   onExpand,
   onLoadData,
   onNodeClick,
@@ -176,6 +178,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
             <Tree.DirectoryTree
               showIcon
               selectable={false}
+              expandAction={expandAction}
               treeData={treeData}
               expandedKeys={expandedKeys}
               // 只有调用方真的接管了 loadedKeys 才透传：rc-tree 用 props.hasOwnProperty

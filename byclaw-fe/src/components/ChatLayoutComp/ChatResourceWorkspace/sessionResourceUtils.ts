@@ -17,6 +17,19 @@ type SessionDisplayMetadata = {
 
 export const CANONICAL_SESSION_ROOT = '/by/.sessions/';
 
+/** Keep the authoritative project membership/order while filling names from the live sidebar cache. */
+export const mergeProjectSessionMetadata = (
+  projectSessions: SessionDisplayMetadata[],
+  liveSessions: SessionDisplayMetadata[]
+): SessionDisplayMetadata[] => {
+  if (projectSessions.length === 0) return liveSessions;
+  const liveById = new Map(liveSessions.map((session) => [`${session.sessionId}`, session]));
+  return projectSessions.map((session) => {
+    const liveName = liveById.get(`${session.sessionId}`)?.sessionName?.trim();
+    return liveName ? { ...session, sessionName: liveName } : session;
+  });
+};
+
 export const createProjectSessionItems = (sessions: SessionDisplayMetadata[]): FileBrowserItem[] =>
   sessions.map(({ sessionId }) => ({
     name: `${sessionId}`,

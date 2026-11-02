@@ -4,6 +4,7 @@ import {
   appendProjectSessionsDirectory,
   createProjectSessionItems,
   filterSessionRootItems,
+  mergeProjectSessionMetadata,
   resolveProjectSessionDisplayName,
 } from '../sessionResourceUtils';
 
@@ -54,6 +55,27 @@ describe('resolveProjectSessionDisplayName', () => {
 });
 
 describe('project session virtual directory', () => {
+  it('fills missing project session names from the live session list', () => {
+    expect(
+      mergeProjectSessionMetadata(
+        [
+          { sessionId: '11407993', sessionName: '' },
+          { sessionId: '11409730', sessionName: undefined },
+          { sessionId: 'employee', sessionName: '员工问候开场' },
+        ],
+        [
+          { sessionId: '11407993', sessionName: '你好' },
+          { sessionId: '11409730', sessionName: '文件上传' },
+          { sessionId: 'other-project', sessionName: '其他项目会话' },
+        ]
+      )
+    ).toEqual([
+      { sessionId: '11407993', sessionName: '你好' },
+      { sessionId: '11409730', sessionName: '文件上传' },
+      { sessionId: 'employee', sessionName: '员工问候开场' },
+    ]);
+  });
+
   it('adds one virtual .sessions directory without depending on a filesystem entry', () => {
     const files = [{ name: 'README.md', path: '/by/.shared/project_12/README.md', isDir: false }] as any;
     expect(appendProjectSessionsDirectory(files)).toEqual([
