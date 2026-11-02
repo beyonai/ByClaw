@@ -36,6 +36,51 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class WorkgroupCreationHookTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void memberJoinedSendsWhitelistedSnapshotOnlyOnCommit(boolean rollback) {
+        runner.withUserConfiguration(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook.class)
+            .withPropertyValues("byclaw.hooks.subscriptions.groups.event=workgroup.member.joined").run(context -> {
+            assertThat(context).hasNotFailed();
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                var saved = new com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember();
+                saved.setByaiSessionMemberId(9007199254740996L);
+                saved.setSessionId(9007199254740993L);
+                saved.setMemObjType("USER");
+                saved.setMemObjId(9007199254740995L);
+                saved.setCreatorId(9007199254740994L);
+                var target = new SessionMemberService();
+                var quota = mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class);
+                when(quota.admitPersistedGroupMember(any(), any(), any())).thenReturn(true);
+                var mapper = mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class);
+                when(mapper.insert(saved)).thenReturn(1);
+                ReflectionTestUtils.setField(target, "quotaAdmission", quota);
+                ReflectionTestUtils.setField(target, "byaiSessionMemberMapper", mapper);
+                ReflectionTestUtils.setField(target, "memberJoinedHook",
+                    context.getBean(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook.class));
+                assertThat(target.save(saved)).isEqualTo(1);
+                assertThat(requests).isEmpty();
+                if (rollback) status.setRollbackOnly();
+            });
+            String raw = requests.poll(rollback ? 200 : 5000, TimeUnit.MILLISECONDS);
+            if (rollback) {
+                assertThat(raw).isNull();
+            } else {
+                assertThat(raw).isNotNull();
+                var body = new ObjectMapper().readTree(raw);
+                assertThat(body.path("event").path("type").asText()).isEqualTo("workgroup.member.joined");
+                assertThat(body.path("data").fieldNames()).toIterable()
+                    .containsExactlyInAnyOrder("groupId", "enterpriseId", "userId", "invitedBy", "byaiSessionMemberId");
+                assertThat(body.path("data").path("groupId").asText()).isEqualTo("9007199254740993");
+                assertThat(body.path("data").path("enterpriseId").isNull()).isTrue();
+                assertThat(body.path("data").path("userId").asText()).isEqualTo("9007199254740995");
+                assertThat(body.path("data").path("invitedBy").asText()).isEqualTo("9007199254740994");
+                assertThat(body.path("data").path("byaiSessionMemberId").isTextual()).isTrue();
+                assertThat(body.path("data").path("byaiSessionMemberId").asText()).isEqualTo("9007199254740996");
+            }
+        });
+    }
+
     private final LinkedBlockingQueue<String> requests = new LinkedBlockingQueue<>();
     private final ProjectApplicationService projects = mock(ProjectApplicationService.class);
     private final SessionMemberService members = mock(SessionMemberService.class);

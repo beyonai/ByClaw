@@ -63,6 +63,38 @@ BE 数据库与租户 Node 之间没有分布式事务：Node 已创建成功后
 
 通用 `config/examples/hooks.yaml` 的 `workgroup-sync` 订阅展示了本事件的 HMAC 认证、正文映射及必需字段过滤。默认关闭该订阅；启用时注入地址与签名密钥。
 
+## 用户入群事件
+
+`workgroup.member.joined` v1 以 `byai_session_member` 新增真人用户（`mem_obj_type=USER`）记录为触发依据，BE 事务提交后异步发送。公共库在 `SessionMemberService.save` 插入返回一行后登记，`batchSave` 逐条复用；标准租户 Node 的建群初始成员、直接邀请和链接入群共用 `CommandContext.saveMember`，插入成功后收集保存事实。建群 OWNER 和其他初始真人成员也会触发，无需邀请动作或聊天系统消息。配额跳过、插入失败、事务回滚、重复请求未插入、数字员工、更新和删除不触发。每条新增用户成员记录对应自己的成员主键。
+
+| 路径 | 类型 | 含义 |
+| --- | --- | --- |
+| `data.groupId` | string | 成员记录的 sessionId |
+| `data.enterpriseId` | string/null | 成员记录的 comAcctId，允许为空 |
+| `data.userId` | string | 实际加入的用户 ID |
+| `data.byaiSessionMemberId` | string | `byai_session_member.byai_session_member_id`，本次入群的成员记录主键，使用字符串避免长整数精度丢失 |
+| `data.invitedBy` | string/null | 保留既有字段名，取成员记录的 creatorId；链接加入时通常为加入者，不推断原邀请者 |
+
+可在外部配置中新增订阅（全局 Hook 开关也须启用）：
+
+```yaml
+byclaw:
+  hooks:
+    subscriptions:
+      workgroup-member-sync:
+        event: workgroup.member.joined
+        event-version: 1
+        http:
+          url: "${WORKGROUP_MEMBER_JOINED_HOOK_URL}"
+          auth:
+            type: bearer
+            token: "${WORKGROUP_MEMBER_JOINED_HOOK_TOKEN}"
+```
+
+省略 body 使用标准 event/data 信封，不包含邀请码、手机号或聊天内容。租户路径只根据 Node 命令结果的 `data.savedMembers[]` 保存事实登记，统一由 `TenantNodeClient.command` 消费，与邀请服务和聊天系统消息解耦。命令回执重放返回空的 savedMembers，避免无新插入时再触发。BE 与 Node 没有分布式事务，远端写入后本地失败可能留下已入群但未通知的状态。发送复用普通 Hook 的内存队列和重试语义，不保证持久化送达。
+
+成员主键直接取本次插入记录使用的 ID，BE 不从后续群详情重新推断。保存事实中主键缺失、为空或非法时明确报错，不发送不完整通知。升级时先部署返回 savedMembers 的 Node，再部署 BE；旧 Node 不提供该保存事实，不能视为已经接入。当前仅覆盖应用保存路径，绕过应用直接执行 SQL 写表不会自动发送通知。
+
 ## 示例与认证方式
 
 仓库只提供一份通用示例 `config/examples/hooks.yaml`，包含三个可独立启停的订阅：

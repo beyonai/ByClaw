@@ -95,6 +95,7 @@ class GroupChatApplicationServiceResourceListTest extends I18nTestSupport {
 
     @BeforeEach
     void setUp() {
+        when(memberService.save(any())).thenReturn(1);
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(USER_ID);
         loginInfo.setUserName("群成员");

@@ -97,6 +97,7 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
 
     @BeforeEach
     void setUp() {
+        when(members.save(any())).thenReturn(1);
         TransactionSynchronizationManager.initSynchronization();
         LoginInfo login = new LoginInfo();
         login.setUserId(10L);
@@ -657,6 +658,26 @@ class GroupChatCreationAndInvitationTest extends I18nTestSupport {
         assertThat(member.getLastReadMessageId()).isEqualTo(199L);
         assertThat(member.getLastReadTime()).isNotNull();
         assertThat(member.getUserRole()).isEqualTo("MEMBER");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @ValueSource(longs = {0, -1})
+    void missingOrInvalidGeneratedMemberIdNeverSavesOrNotifies(Long memberId) {
+        SequenceService sequence = (SequenceService) ReflectionTestUtils.getField(service, "sequenceService");
+        when(sequence.nextVal()).thenReturn(memberId);
+        assertThatThrownBy(() -> service.invite(200L, "USER", 20L))
+            .isInstanceOf(IllegalStateException.class).hasMessage("groupchat.member.id.unconfirmed");
+        verify(members, never()).save(any());
+        verify(messages, never()).insert(any(ByaiMessage.class));
+    }
+
+    @Test
+    void memberInsertWithoutAffectedRowNeverRecordsOrNotifies() {
+        when(members.save(any())).thenReturn(0);
+        assertThatThrownBy(() -> service.invite(200L, "USER", 20L))
+            .isInstanceOf(IllegalStateException.class).hasMessage("groupchat.member.insert.unconfirmed");
+        verify(messages, never()).insert(any(ByaiMessage.class));
     }
 
     @Test

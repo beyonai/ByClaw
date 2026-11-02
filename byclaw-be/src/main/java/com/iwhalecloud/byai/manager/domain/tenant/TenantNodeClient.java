@@ -44,6 +44,8 @@ import org.slf4j.LoggerFactory;
 /** Resolves the provisioned tenant Node from platform-owned records and calls its internal API. */
 @Service
 public class TenantNodeClient {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook memberJoinedHook;
 
     private static final Logger LOG = LoggerFactory.getLogger(TenantNodeClient.class);
 
@@ -207,7 +209,9 @@ public class TenantNodeClient {
             CommandRequest body = new CommandRequest(1, Long.toString(enterpriseId),
                 Long.toString(state.generation()), dbRecordId, Long.toString(context.userId()), requestId,
                 sessionId, operation, tenantMemberUserIds, hash, payload);
-            return request(context, method, path, body, new TypeReference<CommandResult>() { });
+            CommandResult result = request(context, method, path, body, new TypeReference<CommandResult>() { });
+            TenantGroupMembershipEvents.joined(memberJoinedHook, context, sessionId, result);
+            return result;
         }
         catch (ResponseStatusException e) {
             throw e;

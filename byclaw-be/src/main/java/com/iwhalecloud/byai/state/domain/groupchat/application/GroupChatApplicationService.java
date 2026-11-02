@@ -647,6 +647,9 @@ public class GroupChatApplicationService {
         member.setSessionId(session.getSessionId());
         member.setMemObjType(type);
         member.setMemObjId(memberId);
+        if (member.getByaiSessionMemberId() == null || member.getByaiSessionMemberId() <= 0) {
+            throw new IllegalStateException("groupchat.member.id.unconfirmed");
+        }
         member.setUserRole(UserRole.MEMBER.name());
         member.setCreatorId(CurrentUserHolder.getCurrentUserId());
         member.setCreateTime(new Date());
@@ -654,7 +657,9 @@ public class GroupChatApplicationService {
             member.setLastReadMessageId(messageMapper.selectLatestMessageId(session.getSessionId()));
             member.setLastReadTime(new Date());
         }
-        memberService.save(member);
+        if (memberService.save(member) != 1) {
+            throw new IllegalStateException("groupchat.member.insert.unconfirmed");
+        }
         fillMemberPresentation(member);
         return member;
     }

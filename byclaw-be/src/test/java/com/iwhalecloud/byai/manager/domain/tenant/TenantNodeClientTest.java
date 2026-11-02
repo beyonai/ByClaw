@@ -39,6 +39,31 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class TenantNodeClientTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"CREATE_GROUP", "ADD_MEMBERS", "JOIN_GROUP"})
+    void commandConsumesSavedRowsWithoutDependingOnInvitationOrChatEvents(String operation) throws Exception {
+        var tenants = mock(TenantAdminTenantMapper.class);
+        when(tenants.selectConfig(10L, "PROVISION_STATE")).thenReturn("{\"status\":\"READY\",\"generation\":7}");
+        when(tenants.selectConfig(10L, "DB_SANDBOX_RECORD_ID")).thenReturn("80");
+        var json = new ObjectMapper();
+        var client = org.mockito.Mockito.spy(new TenantNodeClient(tenants, mock(SsSandboxRecordMapper.class),
+            json, mock(RedisClient.class), "test-token"));
+        var hooks = mock(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook.class);
+        ReflectionTestUtils.setField(client, "memberJoinedHook", hooks);
+        var data = json.readTree("""
+            {"savedMembers":[{"groupId":"30","enterpriseId":"10","userId":"20",
+              "invitedBy":"40","byaiSessionMemberId":"9007199254740995"}]}
+            """);
+        var result = new TenantNodeModels.CommandResult("30", "req-1", operation, null, null, null, null, data);
+        org.mockito.Mockito.doReturn(result).when(client).request(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(TypeReference.class));
+        assertThat(client.command(new TenantRequestContext(40L, 10L, "ADMIN"), "POST", "/internal/v1/test", "30",
+            operation, new TenantNodeModels.Fields(Map.of()), "req-1")).isSameAs(result);
+        org.mockito.Mockito.verify(hooks).memberJoined("30", 10L, "20", "40", "9007199254740995");
+        org.mockito.Mockito.verifyNoMoreInteractions(hooks);
+    }
+
 
     @Test
     void nodeWireKeepsSnowflakeIdsExactInsideMirrorStructuresWhilePagingIsNumeric() throws Exception {
