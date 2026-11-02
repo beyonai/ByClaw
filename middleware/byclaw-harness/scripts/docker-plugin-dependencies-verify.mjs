@@ -52,4 +52,25 @@ for (const dependency of bundledClientInputs) {
   )
 }
 
+const toolEnvManifest = JSON.parse(await readFile(
+  new URL('../plugins/dsh-tool-env/package.json', import.meta.url),
+  'utf8',
+))
+
+assert.equal(
+  toolEnvManifest.dependencies?.['@deepseek-ai/dsh-tools'],
+  undefined,
+  'tool-env must not install a second dsh-tools runtime into the managed profile',
+)
+assert.equal(
+  toolEnvManifest.peerDependencies?.['@deepseek-ai/dsh-tools'],
+  '0.2.1-rc.2',
+  'tool-env must use the DSH host tool runtime',
+)
+assert.equal(
+  toolEnvManifest.devDependencies?.['@deepseek-ai/dsh-tools'],
+  'workspace:*',
+  'tool-env still needs the workspace tool runtime while building and testing',
+)
+
 console.log('docker plugin dependency verification passed')

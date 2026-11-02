@@ -35,12 +35,12 @@
     "@deepseek-ai/dsh-sandbox-ssh": "workspace:*",
     "@deepseek-ai/dsh-ssh": "workspace:*",
     "@deepseek-ai/dsh-subprocess-ssh": "workspace:*",
-    "ws": "8.21.3",
-    "@deepseek-ai/dsh-tools": "workspace:*"
+    "ws": "8.21.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
     "@deepseek-ai/dsh-ptc-runtime-node": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "^3.18.5"
   },
   "devDependencies": {
@@ -50,6 +50,7 @@
     "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "@deepseek-ai/dsh-session-projection": "workspace:*",
     "@deepseek-ai/dsh-subprocess": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/schemastery": "3.18.5",
     "@types/js-yaml": "4.0.9",
     "@types/node": "24.13.3",
