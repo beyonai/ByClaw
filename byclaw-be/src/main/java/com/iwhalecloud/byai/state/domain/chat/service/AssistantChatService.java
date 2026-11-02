@@ -110,6 +110,9 @@ public class AssistantChatService {
     private TenantNodeClient tenantNodeClient;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantModeService tenantModes;
+
+    @Autowired
     private SessionService sessionService;
 
     @Autowired
@@ -231,7 +234,7 @@ public class AssistantChatService {
             }
 
             // 研发派发的会话在等承接人接单:命中确认词才把完整任务提示词换上去下发,不命中原样放行。
-            if (TenantRequestContextHolder.get() == null) {
+            if (!usesTenantNode()) {
                 applyPendingTaskConfirm(assistantChatDto);
             }
 
@@ -241,7 +244,7 @@ public class AssistantChatService {
             if (assistantChatDto != null) {
                 assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
                 applyCallAcpAgentDelegation(assistantChatDto);
-                if (TenantRequestContextHolder.get() == null) {
+                if (!usesTenantNode()) {
                     var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
                     if (coordination != null) coordination.validateRequest(assistantChatDto);
                 }
@@ -250,7 +253,7 @@ public class AssistantChatService {
                     if (coordination != null) coordination.validateRequest(assistantChatDto);
                 }
                 // 会话标识与最终 agentId 已确定：解析本轮实际模型并维护会话级覆盖键（写/删）。
-                if (TenantRequestContextHolder.get() == null) {
+                if (!usesTenantNode()) {
                     sessionModelSelectionService.resolveSelection(assistantChatDto);
                     sessionModelSelectionService.applySessionOverride(assistantChatDto);
                 }
@@ -628,7 +631,7 @@ public class AssistantChatService {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
 
         TenantRequestContext tenant = TenantRequestContextHolder.get();
-        if (tenant != null) {
+        if (tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId())) {
             if (assistantChatDto.getSessionId() == null) {
                 SessionMembersDto session = createGroupChatSession(assistantChatDto);
                 CompletionsUtils.responseWrite(outputStream, SseResponseEventEnum.createSession,
@@ -663,6 +666,12 @@ public class AssistantChatService {
         }
     }
 
+    /** 保留请求租户身份；只有标准租户的会话、协调和模型处理才走 Node。 */
+    private boolean usesTenantNode() {
+        TenantRequestContext tenant = TenantRequestContextHolder.get();
+        return tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId());
+    }
+
     private void applyDefaultPersonalAssistant(AssistantChatDto assistantChatDto) {
         if (assistantChatDto == null || assistantChatDto.getAgentId() != null) {
             return;
@@ -686,7 +695,7 @@ public class AssistantChatService {
      */
     public SessionMembersDto createGroupChatSession(AssistantChatDto assistantChatDto) {
         TenantRequestContext tenant = TenantRequestContextHolder.get();
-        if (tenant != null) {
+        if (tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId())) {
             Long sessionId = sequenceService.nextVal();
             String content = StringUtils.defaultString(assistantChatDto.getChatContent());
             String title = StringUtils.substring(content, 0, 10);

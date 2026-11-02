@@ -32,6 +32,26 @@ class ScriptTaskTurnAdmissionTest extends I18nTestSupport {
     private ChatProcessContext context;
     private RunningChatInfo running;
 
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.clear();
+    }
+
+    @Test
+    void trialTaskUsesPublicTurnGuardWithoutDroppingRequestIdentity() {
+        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(57L, 456L, "MEMBER");
+        var modes = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class);
+        ReflectionTestUtils.setField(script, "tenantModes", modes);
+        when(modes.isSharedDataTenant(456L)).thenReturn(true);
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(tenant);
+
+        assertThatThrownBy(() -> script.prepareParams(context)).isSameAs(reachedMessagePreparation);
+
+        verify(guard).beforeTurn(60L, 40L, null);
+        assertThat(context.tenantContext).isNull();
+        assertThat(com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()).isSameAs(tenant);
+    }
+
     @BeforeEach
     void setUp() {
         @SuppressWarnings("unchecked")

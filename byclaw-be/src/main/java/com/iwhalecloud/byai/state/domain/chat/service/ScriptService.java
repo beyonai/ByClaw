@@ -158,12 +158,18 @@ public class ScriptService extends AbstractChatProcess {
     @Autowired
     private ConnectorAuthService connectorAuthService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantModeService tenantModes;
+
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
      */
     @Override
     public void prepareParams(ChatProcessContext ctx) {
-        ctx.tenantContext = TenantRequestContextHolder.get();
+        var tenant = TenantRequestContextHolder.get();
+        // 此字段控制 Node 镜像、任务轮次及存储分支；试用租户使用公共库处理链。
+        // 不清理请求 Holder，后续租户归属及成员权限校验仍需原始身份。
+        ctx.tenantContext = tenant != null && !tenantModes.isSharedDataTenant(tenant.enterpriseId()) ? tenant : null;
         // 前端有传就使用前端，没有则在马上生成一个session
         ctx.sessionId = ctx.assistantChatDto.getSessionId();
 

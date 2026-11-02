@@ -9,3 +9,11 @@
 走公共库不代表跳过权限校验：原业务服务仍校验群成员、任务发起人及具体操作权限，投递查询执行 `GroupChatTaskDeliveryService.current`，不直接调用跳过授权的 `currentAuthorized`。
 
 回归用例位于 `TenantGroupTaskRoutingAspectTest`：覆盖公共数据租户的六类操作、登记任务恢复身份及标准租户的 Node 查询授权路径。
+
+## 任务内继续对话
+
+“确认完成并发布到群聊”等输入会先经过普通聊天链，而不只是上述任务 Controller。`AssistantChatService` 的会话读取/创建、协调校验和模型选择同样通过 `TenantModeService.isSharedDataTenant` 区分公共库与 Node。
+
+`ScriptService.prepareParams` 的 `ChatProcessContext.tenantContext` 专用于选择 Node 镜像和消息存储分支，公共数据租户不设置该字段，继续执行公共库的任务轮次准入和持久化。原 `TenantRequestContextHolder` 保持完整，不清空租户身份；个人额度判断仍按原请求身份区分，不能把试用租户误当个人空间。
+
+对应回归位于 `AssistantChatServiceTest` 和 `ScriptTaskTurnAdmissionTest`，验证试用任务使用公共会话与任务轮次、保留请求身份，以及标准任务仍访问 Node。
