@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper">
+    <sql id="scope">
+        (g.enterprise_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND g.enterprise_id IS NULL))
+        AND g.session_type = 'hs_as' AND COALESCE(g.state, 'ACTIVE') IN ('ACTIVE', 'GROUP_DISSOLVED')
+    </sql>
+    <sql id="columns">
+        CAST(g.session_id AS VARCHAR) AS "id", CAST(#{enterpriseId} AS VARCHAR) AS "enterpriseId",
+        g.session_name AS "name", COALESCE(g.state, 'ACTIVE') AS "status",
+        CAST(g.creator_id AS VARCHAR) AS "creatorId", CAST(g.project_id AS VARCHAR) AS "projectId",
+        g.create_time AS "createdAt", g.update_time AS "updatedAt",
+        (SELECT COUNT(*) FROM byai.byai_session_member m WHERE m.session_id = g.session_id
+            AND (m.com_acct_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND m.com_acct_id IS NULL))
+            AND m.mem_obj_type = 'USER') AS "memberCount",
+        (SELECT COUNT(*) FROM byai.byai_session_member m WHERE m.session_id = g.session_id
+            AND (m.com_acct_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND m.com_acct_id IS NULL))
+            AND m.mem_obj_type = 'AGENT') AS "agentCount"
+    </sql>
+    <select id="groups" resultType="map">
+        SELECT <include refid="columns"/> FROM byai.byai_session g WHERE <include refid="scope"/>
+        AND POSITION(LOWER(#{keyword}) IN LOWER(COALESCE(g.session_name, ''))) &gt; 0
+        AND (#{status} = '' OR COALESCE(g.state, 'ACTIVE') = #{status})
+        ORDER BY g.create_time DESC NULLS LAST, g.session_id DESC
+    </select>
+    <select id="detail" resultType="map">
+        SELECT <include refid="columns"/>,
+        (SELECT COUNT(*) FROM byai.byai_session child WHERE child.parent_session_id = g.session_id
+            AND (child.enterprise_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND child.enterprise_id IS NULL))
+            AND child.session_type = 'h_as') AS "conversationCount"
+        FROM byai.byai_session g WHERE <include refid="scope"/> AND g.session_id = #{id}
+    </select>
+    <select id="members" resultType="map">
+        SELECT CAST(m.byai_session_member_id AS VARCHAR) AS "id", CAST(m.mem_obj_id AS VARCHAR) AS "objectId",
+        m.mem_obj_type AS "type", m.mem_name AS "name", m.user_role AS "role"
+        FROM byai.byai_session_member m JOIN byai.byai_session g ON g.session_id = m.session_id
+        WHERE <include refid="scope"/> AND g.session_id = #{id}
+        AND (m.com_acct_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND m.com_acct_id IS NULL))
+        AND m.mem_obj_type IN ('USER', 'AGENT') ORDER BY m.byai_session_member_id DESC
+    </select>
+    <select id="conversations" resultType="map">
+        SELECT CAST(child.session_id AS VARCHAR) AS "id", child.session_name AS "name",
+        COALESCE(child.state, 'ACTIVE') AS "status", CAST(child.creator_id AS VARCHAR) AS "creatorId",
+        CAST(child.project_id AS VARCHAR) AS "projectId", child.create_time AS "createdAt", child.update_time AS "updatedAt"
+        FROM byai.byai_session child JOIN byai.byai_session g ON g.session_id = child.parent_session_id
+        WHERE <include refid="scope"/> AND g.session_id = #{id} AND child.session_type = 'h_as'
+        AND (child.enterprise_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND child.enterprise_id IS NULL))
+        ORDER BY child.create_time DESC NULLS LAST, child.session_id DESC
+    </select>
+</mapper>

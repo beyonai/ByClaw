@@ -14,6 +14,8 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxReleaseException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+import com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper;
 import com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.List;
 
 /** 复用现有生命周期能力与租户查询通道；不增加停用策略。
  * @author Codex
@@ -44,6 +47,10 @@ public class PlatformOperationsService {
     private TenantDbProvisioningService tenants;
     @Autowired
     private TenantNodeClient nodes;
+    @Autowired
+    private TenantModeService tenantModes;
+    @Autowired
+    private OperationsGroupMapper groupRecords;
     @Autowired
     private ObjectMapper json;
     @Autowired
@@ -162,6 +169,9 @@ public class PlatformOperationsService {
     /** 工作组数据来自对应企业 Node，不读取主库遗留群表。 */
     private JsonNode groups(String operation, JsonNode input) {
         long enterpriseId = id(input, "enterpriseId");
+        if (tenantModes.isSharedDataTenant(enterpriseId)) {
+            return sharedGroups(operation, input, enterpriseId);
+        }
         String path;
         String method;
         ObjectNode query = json.createObjectNode();
@@ -189,6 +199,40 @@ public class PlatformOperationsService {
         query.put("pageSize", page(input, "pageSize", 20, 100));
         return nodes.operationsRequest(enterpriseId, method, path, "GET".equals(method) ? null : query,
             new TypeReference<JsonNode>() { });
+    }
+
+    /** 公共企业及试用租户使用公共库，保留企业范围及分页。 */
+    private JsonNode sharedGroups(String operation, JsonNode input, long enterpriseId) {
+        int pageNum = page(input, "pageNum", 1, 10000);
+        int pageSize = page(input, "pageSize", 20, 100);
+        if ("detail".equals(operation)) {
+            Map<String, Object> detail = groupRecords.detail(enterpriseId, id(input, "id"));
+            if (detail == null) throw new OperationsFailure("NOT_FOUND");
+            return json.valueToTree(detail);
+        }
+        long groupId = "list".equals(operation) ? 0 : id(input, "id");
+        if (!"list".equals(operation) && groupRecords.detail(enterpriseId, groupId) == null) {
+            throw new OperationsFailure("NOT_FOUND");
+        }
+        String keyword = text(input, "keyword", 128);
+        String status = option(input, "status", Set.of("", "ACTIVE", "GROUP_DISSOLVED"));
+        PageInfo<Map<String, Object>> result;
+        try {
+            PageHelper.startPage(pageNum, pageSize);
+            List<Map<String, Object>> rows = switch (operation) {
+                case "list" -> groupRecords.groups(enterpriseId, keyword, status);
+                case "members" -> groupRecords.members(enterpriseId, groupId);
+                case "conversations" -> groupRecords.conversations(enterpriseId, groupId);
+                default -> throw new OperationsFailure("INVALID");
+            };
+            result = new PageInfo<>(rows);
+        } finally {
+            PageHelper.clearPage();
+        }
+        ObjectNode output = json.createObjectNode();
+        output.set("list", json.valueToTree(result.getList()));
+        return output.put("total", result.getTotal()).put("pageNum", pageNum)
+            .put("pageSize", pageSize).put("totalPages", result.getPages());
     }
 
     /** OpenClaw 的档位通过既有 serviceKey 契约传递，避免重新启动后回到默认规格。 */

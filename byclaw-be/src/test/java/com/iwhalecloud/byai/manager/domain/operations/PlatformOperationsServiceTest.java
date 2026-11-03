@@ -9,6 +9,8 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxReleaseException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+import com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper;
 import com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,8 @@ class PlatformOperationsServiceTest {
     private TenantDbProvisioningService tenants;
     private SandboxUserContextRunner context;
     private TenantNodeClient nodes;
+    private TenantModeService tenantModes;
+    private OperationsGroupMapper groups;
 
     /** 所有远程调用使用替身。 */
     @BeforeEach
@@ -53,6 +57,8 @@ class PlatformOperationsServiceTest {
         tenants = mock(TenantDbProvisioningService.class);
         context = mock(SandboxUserContextRunner.class);
         nodes = mock(TenantNodeClient.class);
+        tenantModes = mock(TenantModeService.class);
+        groups = mock(OperationsGroupMapper.class);
         SandboxRuntimeInventory inventory = mock(SandboxRuntimeInventory.class);
         when(inventory.current()).thenReturn(Map.of());
         ReflectionTestUtils.setField(service, "json", json);
@@ -62,6 +68,22 @@ class PlatformOperationsServiceTest {
         ReflectionTestUtils.setField(service, "inventory", inventory);
         ReflectionTestUtils.setField(service, "userContext", context);
         ReflectionTestUtils.setField(service, "nodes", nodes);
+        ReflectionTestUtils.setField(service, "tenantModes", tenantModes);
+        ReflectionTestUtils.setField(service, "groupRecords", groups);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {1L, 456L})
+    void sharedTenantGroupsReadPublicStorage(long enterpriseId) {
+        when(tenantModes.isSharedDataTenant(enterpriseId)).thenReturn(true);
+        when(groups.groups(enterpriseId, "", "")).thenReturn(List.of(Map.of("id", "9")));
+        ObjectNode request = request("list").put("resource", "groups");
+        ((ObjectNode) request.get("payload")).put("enterpriseId", Long.toString(enterpriseId));
+
+        var result = service.execute(request);
+
+        assertThat(result.path("list").get(0).path("id").asText()).isEqualTo("9");
+        verify(nodes, never()).operationsRequest(anyLong(), any(), any(), any(), any());
     }
 
     /** 平台查询沿用受服务认证保护的入口，成员入口继续执行成员鉴权。 */
