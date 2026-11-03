@@ -168,8 +168,8 @@ public class AggregatedGroupChatService {
                     .map(group -> new Candidate(source.sourceId(), group)).toList(),
                 rawSize == pageSize, null);
         } catch (Exception error) {
-            LOG.warn("Aggregated group query failed for source {}: {}", source.displayId(),
-                error.getClass().getSimpleName());
+            // 保留异常原因和调用栈，区分租户就绪检查失败与群列表反序列化失败。
+            LOG.warn("Aggregated group query failed for source {}", source.displayId(), error);
             return new TenantResult(List.of(), false, new AggregatedGroupChatPage.FailedTenant(
                 source.displayId(), source.displayName(), reason(error)));
         }
