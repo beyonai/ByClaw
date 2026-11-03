@@ -15,7 +15,10 @@ jest.mock('@umijs/max', () => ({
   getLocale: jest.fn(() => 'zh-CN'),
   setLocale: jest.fn(),
   useIntl: () => ({
-    formatMessage: ({ id }: { id: string }) => id,
+    formatMessage: ({ id }: { id: string }) => {
+      if (!id) throw new Error('[React Intl] An id must be provided to format a message.');
+      return id;
+    },
   }),
   useLocation: () => ({ state: null }),
   useSelector: (selector: (state: any) => any) => mockUseSelector(selector),
@@ -77,6 +80,27 @@ describe('Settings version info', () => {
       },
       getVersionInfo: jest.fn(),
     });
+  });
+
+  it('ignores unknown version fields without passing an empty translation id', () => {
+    const store = mockUseAppStore();
+    mockUseAppStore.mockReturnValue({
+      ...store,
+      versionInfo: {
+        ...store.versionInfo,
+        buildNumber: 'unknown-build-field',
+        constructor: 'unknown-prototype-field',
+        emptyField: '',
+        nullField: null,
+      },
+    });
+
+    render(<Settings />);
+    fireEvent.click(screen.getByRole('button', { name: '1.2.3' }));
+
+    expect(screen.getByText('2026-06-16 10:00:00')).toBeInTheDocument();
+    expect(screen.queryByText('unknown-build-field')).not.toBeInTheDocument();
+    expect(screen.queryByText('unknown-prototype-field')).not.toBeInTheDocument();
   });
 
   it('expands filtered version details after clicking the version button', () => {

@@ -92,6 +92,7 @@ const Settings: React.FC = () => {
   const versionDetailItems = versionInfoEntries
     .filter(([key, value]) => {
       return (
+        Object.prototype.hasOwnProperty.call(versionDetailLabelIds, key) &&
         value !== undefined &&
         value !== null &&
         value !== '' &&
