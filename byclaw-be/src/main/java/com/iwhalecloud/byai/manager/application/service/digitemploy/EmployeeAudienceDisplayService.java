@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.organization.OrganizationAdminService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
@@ -11,6 +12,8 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.EmployeePublishScopeMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
+import com.iwhalecloud.byai.manager.qo.index.EmployeeAudienceFilter;
 import com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketVo;
 import com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketVo.AudienceOrganization;
 import java.util.*;
@@ -28,6 +31,40 @@ public class EmployeeAudienceDisplayService {
     private final OrganizationAdminService admins;
     private final OrganizationService organizations;
 
+    /** 在分页前构造筛选条件，组织层级和可展示范围与卡片回填共用同一口径。 */
+    public void prepareFilter(DiscoverQo query) {
+        query.setAudienceFilter(null);
+        var mode = query.getAudienceScopeMode();
+        if (mode == null || mode == DiscoverQo.AudienceScopeMode.ALL) return;
+        Long tenant = CurrentUserHolder.getEnterpriseId();
+        if (tenant == null) throw new BaseException("请先选择当前企业");
+        Map<Long, Organization> orgs = allowedOrganizations();
+        Set<Long> viewer = viewerOrganizations();
+        List<Long> visible = orgs.keySet().stream()
+            .filter(id -> viewer.stream().anyMatch(member -> covers(id, member, orgs))).sorted().toList();
+        List<EmployeeAudienceFilter.OrganizationMatch> matches = new ArrayList<>();
+        if (mode == DiscoverQo.AudienceScopeMode.ORGS) {
+            List<Long> selected = query.getAudienceOrgIds();
+            if (selected == null || selected.isEmpty()) throw new BaseException("请选择至少一个组织");
+            if (selected.stream().anyMatch(Objects::isNull) || !orgs.keySet().containsAll(selected)) {
+                throw new BaseException("筛选组织不属于当前企业");
+            }
+            boolean descendants = !Boolean.FALSE.equals(query.getAudienceIncludeDescendants());
+            for (Long id : selected.stream().distinct().sorted().toList()) {
+                // 包含下级时，重叠的选择交给祖先条件处理，避免重复生成 SQL。
+                if (descendants && selected.stream().anyMatch(parent -> !parent.equals(id) && covers(parent, id, orgs))) continue;
+                List<Long> ids = descendants
+                    ? orgs.keySet().stream().filter(child -> covers(id, child, orgs)).sorted().toList() : List.of(id);
+                List<Long> ancestors = orgs.keySet().stream()
+                    .filter(parent -> !parent.equals(id) && covers(parent, id, orgs)).sorted().toList();
+                matches.add(new EmployeeAudienceFilter.OrganizationMatch(ids, ancestors));
+            }
+        }
+        query.setAudienceFilter(new EmployeeAudienceFilter(tenant, CurrentUserHolder.getCurrentUserId(),
+            DigitalEmployeeGovernanceService.isAdministrator(), mode == DiscoverQo.AudienceScopeMode.COMPANY,
+            new Date(), rootOrganizations(orgs).stream().sorted().toList(), visible, matches));
+    }
+
     public void fill(List<? extends DigitEmployMarketVo> rows) {
         rows.forEach(row -> row.setAudienceOrganizations(List.of()));
         Long tenant = CurrentUserHolder.getEnterpriseId();
@@ -39,12 +76,8 @@ public class EmployeeAudienceDisplayService {
             .eq(SsResource::getResourceBizType, "DIG_EMPLOYEE").in(SsResource::getResourceId, ids));
         if (employees.isEmpty()) return;
         Map<Long, SsResource> byId = employees.stream().collect(Collectors.toMap(SsResource::getResourceId, r -> r));
-        Set<Long> allowed = admins.allowedOrgIds();
-        Map<Long, Organization> orgs = allowed.isEmpty() ? Map.of() : organizations.selectList(null,
-            new LambdaQueryWrapper<Organization>().in(Organization::getOrgId, allowed)).stream()
-            .collect(Collectors.toMap(Organization::getOrgId, o -> o));
-        Set<Long> viewer = new HashSet<>(admins.managedOrgIds());
-        viewer.addAll(admins.userOrgIds(CurrentUserHolder.getCurrentUserId()));
+        Map<Long, Organization> orgs = allowedOrganizations();
+        Set<Long> viewer = viewerOrganizations();
         Map<Long, Set<Long>> audience = new HashMap<>();
         List<Long> published = employees.stream().filter(DigitalEmployeeGovernanceService::isOfficialCopy)
             .map(SsResource::getResourceId).toList();
@@ -56,8 +89,7 @@ public class EmployeeAudienceDisplayService {
         List<Long> direct = employees.stream().filter(r -> !DigitalEmployeeGovernanceService.isOfficialCopy(r))
             .map(SsResource::getResourceId).toList();
         if (!direct.isEmpty()) fillDirectAudience(direct, audience);
-        Set<Long> roots = orgs.values().stream().filter(org -> !orgs.containsKey(org.getParentOrgId()))
-            .map(Organization::getOrgId).collect(Collectors.toSet());
+        Set<Long> roots = rootOrganizations(orgs);
         for (DigitEmployMarketVo row : rows) {
             SsResource employee = byId.get(row.getId());
             if (employee == null) continue;
@@ -75,6 +107,24 @@ public class EmployeeAudienceDisplayService {
                 .filter(id -> selected.stream().noneMatch(parent -> !parent.equals(id) && covers(parent, id, orgs)))
                 .sorted().map(id -> new AudienceOrganization(String.valueOf(id), orgs.get(id).getOrgName())).toList());
         }
+    }
+
+    private Map<Long, Organization> allowedOrganizations() {
+        Set<Long> allowed = admins.allowedOrgIds();
+        return allowed.isEmpty() ? Map.of() : organizations.selectList(null,
+            new LambdaQueryWrapper<Organization>().in(Organization::getOrgId, allowed)).stream()
+            .collect(Collectors.toMap(Organization::getOrgId, o -> o));
+    }
+
+    private Set<Long> viewerOrganizations() {
+        Set<Long> viewer = new HashSet<>(admins.managedOrgIds());
+        viewer.addAll(admins.userOrgIds(CurrentUserHolder.getCurrentUserId()));
+        return viewer;
+    }
+
+    private Set<Long> rootOrganizations(Map<Long, Organization> orgs) {
+        return orgs.values().stream().filter(org -> !orgs.containsKey(org.getParentOrgId()))
+            .map(Organization::getOrgId).collect(Collectors.toSet());
     }
 
     private void fillDirectAudience(List<Long> ids, Map<Long, Set<Long>> audience) {

@@ -391,6 +391,9 @@ export default {
   'skillRuntime.associated': 'Associated; preparing skills',
 
   'digitalEmployees.audienceOrganizations': 'Organizations',
+  'digitalEmployees.audienceFilter.select': 'Search and select organizations',
+  'digitalEmployees.audienceFilter.includeDescendants': 'Include sub-organizations',
+  'digitalEmployees.audienceFilter.retry': 'Could not load organizations. Retry',
   'digitalEmployees.audienceOrganizations.unset': 'No organization set',
   'resource.resourceManageAudit': 'Management access',
   'digitalEmployees.applyManage': 'Request management access',

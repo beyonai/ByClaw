@@ -409,6 +409,7 @@ public class IndexApplicationServiceV2 {
 
         // 设置用户信息
         resourceAuthContextService.setCurrentUserAuthQo(discoverQo);
+        employeeAudienceDisplayService.prepareFilter(discoverQo);
     }
 
     /**

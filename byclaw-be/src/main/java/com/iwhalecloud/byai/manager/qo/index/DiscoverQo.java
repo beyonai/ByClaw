@@ -17,6 +17,16 @@ import lombok.Setter;
 @Setter
 public class DiscoverQo extends AuthQo {
 
+    public enum AudienceScopeMode { ALL, COMPANY, ORGS }
+
+    /** 按卡片当前生效的所属组织筛选，与管理组织 orgFilters 相互独立。 */
+    private AudienceScopeMode audienceScopeMode;
+    private List<Long> audienceOrgIds;
+    private Boolean audienceIncludeDescendants;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private EmployeeAudienceFilter audienceFilter;
+
     /** 仅商业版官方推荐/我的收藏列表请求收藏字段与排序。 */
     private Boolean includeFavorites;
 

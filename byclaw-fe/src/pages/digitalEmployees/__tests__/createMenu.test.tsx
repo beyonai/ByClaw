@@ -71,6 +71,16 @@ jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfig: jest.fn(() => Promise.resolve({ paramValue: mockBrandVersion })),
 }));
 jest.mock('../components/EmployeeTypeTag', () => () => null);
+jest.mock('../components/EmployeeOrganizationFilter', () => ({
+  __esModule: true,
+  default: ({ value, onChange }: any) => (
+    <div data-testid="organization-filter" data-mode={value.audienceScopeMode || 'ALL'}>
+      <button onClick={() => onChange({ audienceScopeMode: 'ORGS', audienceOrgIds: ['10'] })}>
+        Filter organization
+      </button>
+    </div>
+  ),
+}));
 jest.mock('@/components/Resources/components/ResourceFilter', () => ({
   __esModule: true,
   default: () => null,
@@ -399,6 +409,34 @@ describe('digital employee creation by tab', () => {
     );
     expect(screen.getByRole('button', { name: 'resource.appliedByMe' })).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it.each(['openSource', 'commercial'])(
+    'keeps organization filtering on enterprise recommendations in %s',
+    async (brand) => {
+      mockBrandVersion = brand;
+      render(<DigitalEmployeesPage />);
+      expect(screen.queryByTestId('organization-filter')).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: 'digitalEmployees.official' }));
+      const search = screen.getByPlaceholderText('common.inputKeyword');
+      fireEvent.change(search, { target: { value: '财务' } });
+      fireEvent.click(screen.getByRole('button', { name: 'digitalEmployees.filter.enterpriseGroup' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Filter organization' }));
+      expect(mockEmployeeSearch).toHaveBeenLastCalledWith(
+        'official',
+        '财务',
+        expect.objectContaining({
+          digitalEmployeeType: 'ENTERPRISE_GROUP',
+          audienceScopeMode: 'ORGS',
+          audienceOrgIds: ['10'],
+        })
+      );
+      fireEvent.click(screen.getByRole('tab', { name: 'digitalEmployees.available' }));
+      expect(screen.queryByTestId('organization-filter')).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: 'digitalEmployees.official' }));
+      expect(screen.getByTestId('organization-filter')).toHaveAttribute('data-mode', 'ORGS');
+      await act(async () => {});
+    }
+  );
 
   it('keeps the keyword and cancels stale delayed searches when applying quick filters', () => {
     jest.useFakeTimers();

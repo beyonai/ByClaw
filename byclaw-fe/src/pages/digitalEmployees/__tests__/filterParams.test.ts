@@ -2,6 +2,40 @@ import { buildDigitalEmployeeFilterParam } from '../filterParams';
 
 // 四种筛选必须在服务端分页前生效，不能只过滤当前页卡片。
 describe('available employee filter params', () => {
+  it('combines organization audience with employee type and permission only in enterprise recommendations', () => {
+    const filter = {
+      resourceStatus: '2',
+      digitalEmployeeType: 'ENTERPRISE_GROUP',
+      permission: 'AUTHORIZED_TO_ME',
+      audienceScopeMode: 'ORGS' as const,
+      audienceOrgIds: ['10', '20'],
+    };
+    expect(buildDigitalEmployeeFilterParam('official', filter, 'official')).toEqual({
+      resourceStatus: '2',
+      excludeDeleted: true,
+      permission: 'AUTHORIZED_TO_ME',
+      ownerType: 'enterprise',
+      agentType: '017',
+      audienceScopeMode: 'ORGS',
+      audienceOrgIds: ['10', '20'],
+      audienceIncludeDescendants: true,
+    });
+    expect(
+      buildDigitalEmployeeFilterParam('official', { ...filter, audienceIncludeDescendants: false }, 'official')
+    ).toHaveProperty('audienceIncludeDescendants', false);
+    for (const source of ['available', 'favorites'] as const) {
+      expect(buildDigitalEmployeeFilterParam(source, filter, source)).not.toHaveProperty('audienceScopeMode');
+    }
+  });
+
+  it('clears stale organization IDs for company and all filters', () => {
+    expect(
+      buildDigitalEmployeeFilterParam('official', { audienceScopeMode: 'COMPANY', audienceOrgIds: ['10'] }, 'official')
+    ).toEqual({ resourceStatus: '2', excludeDeleted: true, audienceScopeMode: 'COMPANY' });
+    expect(
+      buildDigitalEmployeeFilterParam('official', { audienceScopeMode: 'ALL', audienceOrgIds: ['10'] }, 'official')
+    ).toEqual({ resourceStatus: '2', excludeDeleted: true });
+  });
   it.each<[string, Record<string, string | boolean>]>([
     ['PERSONAL_GROUP', { ownerType: 'personal', agentType: '017' }],
     ['ENTERPRISE_GROUP', { ownerType: 'enterprise', agentType: '017' }],

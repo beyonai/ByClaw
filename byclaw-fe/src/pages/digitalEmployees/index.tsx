@@ -7,6 +7,7 @@ import { trim, debounce } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import AllDigitalEmployees from './components/AllDigitalEmployees';
 import EmployeeTypeTag from './components/EmployeeTypeTag';
+import EmployeeOrganizationFilter from './components/EmployeeOrganizationFilter';
 import { type IOnOkParams, getDefaultParams } from '@/components/Resources/components/ResourceFilter';
 import ResourceQuickFilters from '@/components/Resources/components/ResourceQuickFilters';
 import { buildDigitalEmployeeFilterParam } from './filterParams';
@@ -287,6 +288,13 @@ const DigitalEmployeesPage: React.FC = () => {
                 value={dropdownParam}
                 onChange={handleQuickFilterChange}
               />
+              {activeTab === 'official' && (
+                <EmployeeOrganizationFilter
+                  className={styles.quickFilters}
+                  value={dropdownParam}
+                  onChange={handleQuickFilterChange}
+                />
+              )}
             </>
           )}
           onChange={(key) => {

@@ -1670,6 +1670,9 @@ export default {
   // 数字员工页面
   'digitalEmployees.title': '数字员工',
   'digitalEmployees.audienceOrganizations': '所属组织',
+  'digitalEmployees.audienceFilter.select': '选择组织，可搜索、多选',
+  'digitalEmployees.audienceFilter.includeDescendants': '包含下级组织',
+  'digitalEmployees.audienceFilter.retry': '组织加载失败，点击重试',
   'digitalEmployees.audienceOrganizations.unset': '未设置组织',
   'digitalEmployees.available': '我的员工',
   'myEmployees.view': '视图切换',
