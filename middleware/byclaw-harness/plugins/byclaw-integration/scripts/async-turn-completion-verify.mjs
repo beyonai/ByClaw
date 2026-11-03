@@ -1,7 +1,7 @@
 import { sessionLog, liveStreamFrames } from './session-runtime-fixtures.mjs'
 import assert from 'node:assert/strict'
 import { mock } from 'node:test'
-import { ByClawAsyncTeamGate, ByClawDshSessionRuntime, TimedChunkBatcher, waitForAsyncTurnCompletion } from '../lib/session-runtime.js'
+import { ByClawAsyncTeamGate, ByClawDshSessionRuntime, DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS, TimedChunkBatcher, waitForAsyncTurnCompletion } from '../lib/session-runtime.js'
 import { ByClawSessionActivityTracker } from '../lib/session-activity.js'
 
 function startTeamGate(gate) {
@@ -17,10 +17,13 @@ function startTeamGate(gate) {
 }
 
 function captainAnswer(gate, text = '最终答复') {
+  gate.observeAgentActive('captain-answer-test', true)
   gate.observe({
     type: 'assistant/message',
     data: { turn: 1, step: 0, message: { content: [{ type: 'text', text }] } },
   })
+  gate.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  gate.observeAgentActive('captain-answer-test', false)
 }
 
 const quietGate = new ByClawAsyncTeamGate(1000, 20)
@@ -29,6 +32,7 @@ quietGate.recordProgress()
 quietGate.completeRetainedTeamWhenQuiescent(0)
 captainAnswer(quietGate)
 quietGate.observeRootActive(false)
+assert.equal(quietGate.waiting, true, 'live status settling after turn/end must still pass through the quiet window')
 await new Promise(resolve => setTimeout(resolve, 30))
 assert.equal(quietGate.waiting, false, 'quiescent team must finish after the captain answer and quiet window')
 quietGate.assertHealthy()
@@ -183,7 +187,7 @@ try {
   mock.timers.tick(600_001)
   assert.equal(earlyStatusGate.waiting, true, 'starting the gate must retain already observed live member status')
   earlyStatusGate.observeAgentActive('member-started-before-projection', false)
-  mock.timers.tick(599_999)
+  mock.timers.tick(DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS - 1)
   assert.equal(earlyStatusGate.waiting, true, 'the watchdog restarts with a full budget once execution becomes idle')
   mock.timers.tick(1)
   assert.equal(earlyStatusGate.waiting, false)
@@ -193,7 +197,7 @@ try {
   startTeamGate(streamingGate)
   streamingGate.observeRootActive(false)
   for (let i = 0; i < 4; i += 1) {
-    mock.timers.tick(500_000)
+    mock.timers.tick(DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS - 1)
     streamingGate.recordActivity()
     assert.equal(streamingGate.waiting, true, 'real session events must renew the watchdog without a changed team snapshot')
   }
@@ -353,7 +357,7 @@ try {
   turn.teamGate = new ByClawAsyncTeamGate()
   startTeamGate(turn.teamGate)
   turn.teamGate.observeRootActive(false)
-  mock.timers.tick(500_000)
+  mock.timers.tick(DEFAULT_ASYNC_TEAM_STALL_TIMEOUT_MS - 1)
   chunk(memberSession, '转发队列等待中的新内容', 3)
   mock.timers.tick(110_000)
   assert.equal(turn.teamGate.waiting, true, 'incoming chunks renew the watchdog before blocked projection I/O')
