@@ -714,8 +714,10 @@ public class AuthApplicationService {
         //    避免"用户已被直接授权但仍显示在审核列表/我申请中"的脏数据，与 approveUseApply 行为一致。
         autoCancelPendingApplyForGrantedUsers(ssResource, qo);
 
-        // 名单写入后读取最终有效使用人，覆盖新授权以及历史遗漏的绑定资源权限。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        // 员工使用授权独立成立；仅为操作人有权授权的关联资源补齐使用权限。
+        if (isEnterpriseDigitalEmployee(ssResource)) {
+            employeeResourceAuthorizationService.synchronizeForDirectUseAuthorization(ssResource);
+        }
     }
 
     /**

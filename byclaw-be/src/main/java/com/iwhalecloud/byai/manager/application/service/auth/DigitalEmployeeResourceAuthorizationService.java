@@ -92,6 +92,16 @@ public class DigitalEmployeeResourceAuthorizationService {
     /** relToolCodes 非空时使用本次配置；为 null 时读取已生效的运行配置镜像。 */
     @Transactional(rollbackFor = Exception.class)
     public void synchronize(SsResource employee, List<String> relToolCodes) {
+        synchronize(employee, relToolCodes, false);
+    }
+
+    /** 直接授予员工使用权时，仅补齐操作人有权授权的关联资源；无权补授权的资源不阻断员工授权。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void synchronizeForDirectUseAuthorization(SsResource employee) {
+        synchronize(employee, null, true);
+    }
+
+    private void synchronize(SsResource employee, List<String> relToolCodes, boolean skipUnmanageableResources) {
         long started = System.nanoTime();
         if (!isEnterpriseEmployee(employee)) return;
         if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getEnterpriseId() == null
@@ -111,6 +121,7 @@ public class DigitalEmployeeResourceAuthorizationService {
         Map<SsResource, List<Long>> missing = new LinkedHashMap<>();
         for (SsResource resource : boundResources.values()) {
             if (Boolean.TRUE.equals(resource.getUseAuthControlled()) || Boolean.TRUE.equals(resource.getViewAuthControlled())) continue;
+            if (skipUnmanageableResources && !auth.hasResourceUseSettingPermission(resource)) continue;
             for (Long userId : userIds) {
                 if (auth.hasResourceUsePermission(resource, userId)) continue;
                 // 员工管理权限不能替代资源授权维护权限；黑名单也不能被自动授权覆盖。

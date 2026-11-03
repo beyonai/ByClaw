@@ -131,6 +131,65 @@ class DigitalEmployeeResourceAuthorizationServiceTest {
         verify(auth, never()).validateDigitalEmployeeResourceUseGrant(bound, 1L);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT", "OBJECT", "VIEW"})
+    void directUseAuthorizationSkipsResourcesTheOperatorCannotGrant(String type) {
+        SsResource bound = bind(200L, type);
+        when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))
+            .thenReturn(List.of(grant("USER", 2L, GrantType.FORCE_USE)));
+        when(auth.hasResourceUseSettingPermission(bound)).thenReturn(false);
+
+        service.synchronizeForDirectUseAuthorization(employee);
+
+        verify(auth, never()).validateDigitalEmployeeResourceUseGrant(any(), any());
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(any(), anyCollection());
+        verify(auth, never()).handleAuth(any());
+    }
+
+    @Test
+    void directUseAuthorizationStillGrantsEligibleResourcesAlongsideSkippedResources() {
+        SsResource denied = bind(200L, "SKILL");
+        SsResource allowed = resource(201L, "KG_DOC");
+        when(resources.selectById(201L)).thenReturn(allowed);
+        when(relations.findByResourceId(100L)).thenReturn(List.of(relation(200L), relation(201L)));
+        when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))
+            .thenReturn(List.of(grant("USER", 2L, GrantType.FORCE_USE)));
+        when(auth.hasResourceUseSettingPermission(denied)).thenReturn(false);
+        when(auth.hasResourceUseSettingPermission(allowed)).thenReturn(true);
+        when(auth.hasResourceUsePermission(allowed, 1L)).thenReturn(true);
+
+        service.synchronizeForDirectUseAuthorization(employee);
+
+        verify(auth, never()).validateDigitalEmployeeResourceUseGrant(eq(denied), any());
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(eq(denied), anyCollection());
+        verify(auth).appendDigitalEmployeeResourceUsePrivileges(allowed, List.of(2L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void directUseAuthorizationDoesNotExpandControlledResourceScopes(boolean useControlled) {
+        SsResource bound = bind(200L, "SKILL");
+        bound.setUseAuthControlled(useControlled);
+        bound.setViewAuthControlled(!useControlled);
+        when(auth.hasResourceUseSettingPermission(bound)).thenReturn(true);
+
+        service.synchronizeForDirectUseAuthorization(employee);
+
+        verify(auth, never()).validateDigitalEmployeeResourceUseGrant(any(), any());
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(any(), anyCollection());
+    }
+
+    @Test
+    void directUseAuthorizationStillEnforcesResourceGrantTargetRestrictions() {
+        SsResource bound = bind(200L, "SKILL");
+        when(auth.hasResourceUseSettingPermission(bound)).thenReturn(true);
+        doThrow(new BaseException("blacklisted")).when(auth).validateDigitalEmployeeResourceUseGrant(bound, 1L);
+
+        assertThatThrownBy(() -> service.synchronizeForDirectUseAuthorization(employee)).hasMessage("blacklisted");
+
+        verify(auth, never()).appendDigitalEmployeeResourceUsePrivileges(any(), anyCollection());
+    }
+
     @Test
     void expandsOrganizationPostAndStationThenExcludesEmployeeBlacklistedUsers() {
         SsResource bound = bind(200L, "KG_DOC");
