@@ -81,12 +81,16 @@ describe('publication approval in the audit list', () => {
       .mockReset()
       .mockResolvedValue({ publication: pending, employee: { resourceId: '10' }, dependencies: [], canReview: true });
     (useEmployeePublicationCapabilities as jest.Mock).mockReturnValue({ enabled: true, administrator: true });
-    (listPublications as jest.Mock).mockResolvedValue({ list: [pending], total: 1 });
+    (listPublications as jest.Mock).mockReset().mockResolvedValue({ list: [pending], total: 1 });
+    (publicationAction as jest.Mock).mockReset();
     jest.spyOn(message, 'success').mockImplementation(jest.fn());
     jest.spyOn(message, 'error').mockImplementation(jest.fn());
     jest.spyOn(message, 'info').mockImplementation(jest.fn());
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
 
   it('describes the published employee as published to the enterprise', async () => {
     (listPublications as jest.Mock).mockResolvedValue({ list: [{ ...pending, status: 'PUBLISHED' }], total: 1 });
@@ -257,6 +261,103 @@ describe('publication approval in the audit list', () => {
     expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
     expect(message.success).toHaveBeenCalledWith('审核通过，已发布到企业');
     expect(listPublications).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the approval result and unlocks controls before the list refresh finishes', async () => {
+    const onAuditComplete = jest.fn();
+    const published = { ...pending, status: 'PUBLISHED', revision: 5 };
+    jest
+      .mocked(publicationAction)
+      .mockResolvedValue({ publication: published, canReview: false, dependencies: [] } as any);
+    render(<PublicationAuditList initialReview onAuditComplete={onAuditComplete} />);
+    const dialog = await openApprovalConfirmation();
+    jest.mocked(listPublications).mockReturnValue(new Promise(() => {}));
+    await continuePublication(dialog);
+    expect(await screen.findByText('已发布')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看结果' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /刷新/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
+    expect(onAuditComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['stale', 'failed'])('preserves the confirmed result when background refresh is %s', async (refresh) => {
+    const published = { ...pending, status: 'PUBLISHED', revision: 5 };
+    jest
+      .mocked(publicationAction)
+      .mockResolvedValue({ publication: published, canReview: false, dependencies: [] } as any);
+    render(<PublicationAuditList initialReview />);
+    const dialog = await openApprovalConfirmation();
+    if (refresh === 'failed') jest.mocked(listPublications).mockRejectedValue(new Error('列表暂时不可用'));
+    await continuePublication(dialog);
+    await waitFor(() => expect(listPublications).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('已发布')).toBeInTheDocument();
+    expect(screen.queryByText('待审核')).not.toBeInTheDocument();
+    expect(screen.queryByText('发布申请加载失败')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '通过并发布' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /刷新/ })).toBeEnabled();
+  });
+
+  it('confirms a completed publication while the approval response is delayed and ignores its later error', async () => {
+    jest.useFakeTimers();
+    const onAuditComplete = jest.fn();
+    let rejectApproval!: (error: Error) => void;
+    jest.mocked(publicationAction).mockReturnValue(
+      new Promise((_, reject) => {
+        rejectApproval = reject;
+      })
+    );
+    render(<PublicationAuditList initialReview onAuditComplete={onAuditComplete} />);
+    await continuePublication(await openApprovalConfirmation());
+    await act(async () => jest.advanceTimersByTime(3000));
+    expect(screen.getByText('待审核')).toBeInTheDocument();
+    expect(onAuditComplete).not.toHaveBeenCalled();
+    jest.mocked(listPublications).mockResolvedValue({
+      list: [{ ...pending, status: 'PUBLISHED', revision: 5, canReview: false }],
+      total: 1,
+    });
+    await act(async () => jest.advanceTimersByTime(3000));
+    expect(screen.getByText('已发布')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /刷新/ })).toBeEnabled();
+    expect(onAuditComplete).toHaveBeenCalledTimes(1);
+    await act(async () => rejectApproval(new Error('审批响应超时')));
+    expect(message.error).not.toHaveBeenCalled();
+    expect(onAuditComplete).toHaveBeenCalledTimes(1);
+    expect(publicationAction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['PUBLISHED', 'FAILED'])('automatically follows an applying request until %s', async (status) => {
+    jest.useFakeTimers();
+    const onAuditComplete = jest.fn();
+    const applying = { ...pending, status: 'APPLYING', revision: 4, canReview: false };
+    const completed = { ...applying, status, revision: 5, canReview: status === 'FAILED' };
+    jest.mocked(listPublications).mockResolvedValueOnce({ list: [applying], total: 1 });
+    jest.mocked(listPublications).mockResolvedValue({ list: [completed], total: 1 });
+    render(<PublicationAuditList initialReview onAuditComplete={onAuditComplete} />);
+    await act(async () => {});
+    expect(screen.getByText('发布中')).toBeInTheDocument();
+    await act(async () => jest.advanceTimersByTime(3000));
+    expect(screen.getByText(status === 'PUBLISHED' ? '已发布' : '发布失败')).toBeInTheDocument();
+    expect(onAuditComplete).toHaveBeenCalledTimes(1);
+    await act(async () => jest.advanceTimersByTime(12000));
+    expect(listPublications).toHaveBeenCalledTimes(2);
+    expect(publicationAction).not.toHaveBeenCalled();
+  });
+
+  it('keeps applying rows after a poll failure and stops polling on unmount', async () => {
+    jest.useFakeTimers();
+    const applying = { ...pending, status: 'APPLYING', revision: 4, canReview: false };
+    jest.mocked(listPublications).mockResolvedValueOnce({ list: [applying], total: 1 });
+    jest.mocked(listPublications).mockRejectedValue(new Error('列表暂时不可用'));
+    const view = render(<PublicationAuditList initialReview />);
+    await act(async () => {});
+    await act(async () => jest.advanceTimersByTime(3000));
+    expect(screen.getByText('发布中')).toBeInTheDocument();
+    expect(screen.queryByText('发布申请加载失败')).not.toBeInTheDocument();
+    await act(async () => jest.advanceTimersByTime(3000));
+    expect(listPublications).toHaveBeenCalledTimes(3);
+    view.unmount();
+    await act(async () => jest.advanceTimersByTime(12000));
+    expect(listPublications).toHaveBeenCalledTimes(3);
   });
 
   it('does not offer approval to ordinary users', async () => {
