@@ -580,13 +580,21 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+
+    // 面包屑列表按中心线对齐图标、分隔符和文字。
+    > ol {
+      align-items: center;
+    }
   }
 }
 
 .localSharedBreadcrumbButton {
+  display: inline-flex;
+  align-items: center;
   padding: 0;
   border: 0;
   color: #1677ff;
+  font: inherit;
   background: transparent;
   cursor: pointer;
 }
