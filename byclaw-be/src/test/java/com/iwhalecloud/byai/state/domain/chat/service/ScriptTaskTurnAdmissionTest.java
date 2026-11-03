@@ -37,12 +37,16 @@ class ScriptTaskTurnAdmissionTest extends I18nTestSupport {
         com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.clear();
     }
 
-    @Test
-    void trialTaskUsesPublicTurnGuardWithoutDroppingRequestIdentity() {
-        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(57L, 456L, "MEMBER");
-        var modes = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class);
+    @ParameterizedTest
+    @ValueSource(longs = {1L, 456L})
+    void sharedTenantTaskUsesPublicTurnGuardWithoutDroppingRequestIdentity(long enterpriseId) {
+        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(57L, enterpriseId, "MEMBER");
+        var tenants = mock(com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper.class);
+        var modes = new com.iwhalecloud.byai.manager.domain.tenant.TenantModeService(tenants);
         ReflectionTestUtils.setField(script, "tenantModes", modes);
-        when(modes.isSharedDataTenant(456L)).thenReturn(true);
+        if (enterpriseId == 456L) {
+            when(tenants.selectConfig(enterpriseId, "TENANT_MODE")).thenReturn("TRIAL");
+        }
         com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(tenant);
 
         assertThatThrownBy(() -> script.prepareParams(context)).isSameAs(reachedMessagePreparation);

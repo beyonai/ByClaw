@@ -43,6 +43,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -434,8 +435,57 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
     @AfterEach
     void tearDown() {
         CurrentUserHolder.setLoginInfo(null);
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.clear();
         LocaleContextHolder.resetLocaleContext();
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {1L, 456L})
+    void sharedTenantUsesPublicCoordinationDespiteRequestIdentity(long enterpriseId) throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.assistantChatDto.setMessageIntent("prepare_group_task_publication");
+        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(100L, enterpriseId, "MEMBER");
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(tenant);
+        var publicCoordination = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        var tenantCoordination = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> publicProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantProvider = mock(ObjectProvider.class);
+        when(publicProvider.getIfAvailable()).thenReturn(publicCoordination);
+        ReflectionTestUtils.setField(routeService, "groupCoordinationProvider", publicProvider);
+        ReflectionTestUtils.setField(routeService, "tenantGroupCoordinationProvider", tenantProvider);
+        RuntimeException stop = new RuntimeException("public coordination reached");
+        doThrow(stop).when(publicCoordination).validateRequest(ctx.assistantChatDto);
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isSameAs(stop);
+
+        verify(publicCoordination).validateRequest(ctx.assistantChatDto);
+        verifyNoInteractions(tenantProvider, tenantCoordination);
+        assertThat(com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()).isSameAs(tenant);
+    }
+
+    @Test
+    void standardTenantUsesTenantCoordination() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.tenantContext = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(100L, 789L, "MEMBER");
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(ctx.tenantContext);
+        var tenantCoordination = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService> publicProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService> tenantProvider = mock(ObjectProvider.class);
+        when(tenantProvider.getIfAvailable()).thenReturn(tenantCoordination);
+        ReflectionTestUtils.setField(routeService, "groupCoordinationProvider", publicProvider);
+        ReflectionTestUtils.setField(routeService, "tenantGroupCoordinationProvider", tenantProvider);
+        RuntimeException stop = new RuntimeException("tenant coordination reached");
+        doThrow(stop).when(tenantCoordination).validateRequest(ctx.assistantChatDto);
+
+        assertThatThrownBy(() -> routeService.route(ctx)).isSameAs(stop);
+
+        verify(tenantCoordination).validateRequest(ctx.assistantChatDto);
+        verifyNoInteractions(publicProvider);
     }
 
     @Test
