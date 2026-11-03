@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 /** 邀请码由 BE 生成；租户群记录和二次入群校验由 Node 持久化负责。 */
 @Service
 public class TenantGroupInvitationService {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TenantGroupInvitationService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private final TenantGroupData data;
@@ -120,6 +121,9 @@ public class TenantGroupInvitationService {
         String id = preview.path("groupNumber").asText();
         String name = CurrentUserHolder.getCurrentUserName();
         boolean alreadyMember = preview.path("alreadyMember").asBoolean();
+        if (alreadyMember) {
+            LOG.info("用户添加未触发勾子，用户已在工作组,userId={},enterpriseId={},groupId={}", tenant.userId(), tenant.enterpriseId(), id);
+        }
         TenantNodeModels.CommandResult joined = null;
         if (!alreadyMember) joined = data.write(tenant, "POST", "/join", id, "JOIN_GROUP", Map.of("token", token,
             "joinLinkAuthorized", true, "memName", name == null ? "" : name));
