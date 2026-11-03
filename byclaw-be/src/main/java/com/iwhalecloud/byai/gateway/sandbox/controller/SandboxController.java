@@ -256,7 +256,7 @@ public class SandboxController {
                     result.put("sandboxType", sandbox.getSandboxType());
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
-                    result.put("instanceEndpoints", com.iwhalecloud.byai.gateway.sandbox.service.ingress.vnc.SandboxVncTargetResolver.viewerEndpoints(sandbox));
+                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                     result.put("endpointHeaders", sandbox.getEndpointHeaders());
                     result.put("token", sandbox.getGatewayToken());
                     result.put("isShared", shared);
