@@ -189,7 +189,7 @@ ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_BROWSER_STARTUP=eager \
     BYCLAW_BROWSER_VIEWER=shared-novnc \
     BYCLAW_BROWSER_USER_DATA_DIR=/home/byclaw/.dsh/browser/user-data \
-    BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension \
+    BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension \
     BYCLAW_BYCLI_ENABLED=true \
     BYCLAW_BROWSER_XVFB_SCREEN=1365x768x24 \
     BYCLAW_BROWSER_SESSION_RUNTIME_ROOT=/run/byclaw-browser/sessions \
@@ -356,10 +356,13 @@ COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/n
 RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli \
     && ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli
 
+COPY middleware/byclaw-harness/scripts/version-bycli-extension.mjs /usr/local/lib/byclaw/version-bycli-extension.mjs
 RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
     && test "$(bycli --version)" = "${BYCLI_VERSION}" \
     && test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json \
     && node -e 'const manifest = require("/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json"); if (manifest.version !== process.argv[1] || !manifest.permissions?.includes("system.display")) process.exit(1)' "${BYCLI_EXTENSION_VERSION}" \
+    && extension_real_path="$(node /usr/local/lib/byclaw/version-bycli-extension.mjs /opt/nvm/current/lib/node_modules/@sovovs/bycli /opt/byclaw/bycli-extensions)" \
+    && ln -s "${extension_real_path}" /opt/byclaw/bycli-extension \
     && npm cache clean --force
 RUN ln -sf /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli
 

@@ -45,6 +45,7 @@ record = {
     "fdEnvRemoved": fd_name not in os.environ,
     "generationFile": os.environ.get("BYCLAW_BROWSER_GENERATION_FILE"),
     "profileExclusive": os.environ.get("BYCLAW_BROWSER_PROFILE_EXCLUSIVE"),
+    "extensions": os.environ.get("BYCLAW_BROWSER_EXTENSIONS"),
 }
 open(os.environ["FAKE_BROWSER_RECORD"], "w").write(json.dumps(record))
 generation_path = os.environ.get("BYCLAW_BROWSER_GENERATION_FILE")
@@ -1047,11 +1048,29 @@ def run_lazy_unused_exit(root: Path) -> None:
                 timings[phase] = int(line.split(marker, 1)[1])
     assert 0 <= timings["prepared"] <= timings["cli-spawned"], result.stderr
 
+def run_versioned_extension_path(root: Path) -> None:
+    versioned = root / "extensions" / ("a" * 64)
+    versioned.mkdir(parents=True)
+    current = root / "current-extension"
+    current.symlink_to(versioned, target_is_directory=True)
+    profile = root / "persistent-profile"
+    profile.mkdir()
+    cookie_marker = profile / "Cookies"
+    cookie_marker.write_bytes(b"existing-user-login-state")
+    command, env, _, browser_record, _ = fixture(root, dsh_mode="exit7", browser_profile=profile)
+    env["BYCLAW_BROWSER_EXTENSIONS"] = str(current)
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 7, result
+    assert json.loads(browser_record.read_text())["extensions"] == str(versioned.resolve()), result
+    assert cookie_marker.read_bytes() == b"existing-user-login-state"
+
+
 def main() -> None:
     # macOS has a short AF_UNIX path limit; keep the fixture root compact.
     with tempfile.TemporaryDirectory(prefix="bsv-", dir="/tmp") as temporary:
         base = Path(temporary)
         for name, check in [
+            ("versioned-extension-path", run_versioned_extension_path),
             ("lazy-activation", run_lazy_activation),
             ("lazy-extension-verification-failure", run_lazy_extension_verification_failure),
             ("lazy-unused-exit", run_lazy_unused_exit),

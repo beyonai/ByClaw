@@ -236,3 +236,16 @@ A NAS quota limits storage consumption. A shared process and UID are a trusted e
 ### Full-image VNC startup and MicroVM readiness
 
 `Dockerfile` and `Dockerfile.extensions` default to `BYCLAW_BROWSER_STARTUP=eager`. The local browser and shared noVNC listener must start before a MicroVM's declared-port readiness check can succeed, including a declared HTTP `vnc` port at 8081. Do not override the full image to `on-demand` when 8081 participates in readiness. Slim/shared hosts and the separate slim tools image keep their own startup contracts.
+
+
+### Persistent-profile extension build isolation
+
+Full images validate the installed byCLI extension manifest, build metadata and
+background-script SHA256 at build time, then copy the bounded, symlink-free
+runtime tree into a root-owned build-ID directory. The browser supervisor passes
+its canonical path to both Chrome extension flags. A different extension build
+therefore uses a different unpacked-extension/service-worker identity instead of
+reusing cached code at the package's stable installation path. The daemon's
+installed package remains authoritative and the existing doctor build check is
+still mandatory. Existing browser profiles, cookies and site login state are
+preserved; this does not clear a user's profile or bypass extension verification.

@@ -41,7 +41,8 @@ done
 for dockerfile in "${dockerfiles[@]}"; do
     grep -F 'BYCLAW_BROWSER_VIEWER=shared-novnc' "${dockerfile}" >/dev/null
     grep -F 'BYCLAW_BROWSER_USER_DATA_DIR=/home/byclaw/.dsh/browser/user-data' "${dockerfile}" >/dev/null
-    grep -F 'BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension' "${dockerfile}" >/dev/null
+    grep -F 'BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension' "${dockerfile}" >/dev/null
+    grep -F 'version-bycli-extension.mjs /opt/nvm/current/lib/node_modules/@sovovs/bycli /opt/byclaw/bycli-extensions' "${dockerfile}" >/dev/null
     grep -F 'BYCLAW_BYCLI_ENABLED=true' "${dockerfile}" >/dev/null
     grep -F 'BYCLI_BROWSER_IDLE_TIMEOUT=900' "${dockerfile}" >/dev/null
     grep -F '"@sovovs/bycli@${BYCLI_VERSION}"' "${dockerfile}" >/dev/null
