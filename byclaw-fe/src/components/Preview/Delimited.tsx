@@ -3,15 +3,15 @@ import { Alert, Empty, Pagination } from 'antd';
 import { useIntl } from '@umijs/max';
 import { MAX_DELIMITED_COLUMNS, MAX_DELIMITED_ROWS, parseDelimited } from './parseDelimited';
 import styles from './Delimited.module.less';
+import { DEFAULT_PREVIEW_BYTES } from './previewSize';
 
 const PAGE_SIZE = 50;
-const MAX_TEXT_SIZE = 2 * 1024 * 1024;
 
 export default function Delimited({ content, type }: { content: string; type: 'csv' | 'tsv' }) {
   const intl = useIntl();
   const [page, setPage] = useState(1);
   const result = useMemo(() => {
-    if (new Blob([content]).size > MAX_TEXT_SIZE) return null;
+    if (new Blob([content]).size > DEFAULT_PREVIEW_BYTES) return null;
     return parseDelimited(content, type === 'tsv' ? '\t' : ',');
   }, [content, type]);
 

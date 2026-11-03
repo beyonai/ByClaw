@@ -1,13 +1,16 @@
-import type { ReactNode } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { message } from 'antd';
+import { isValidElement, type ComponentProps, type ReactNode } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message, type MenuProps } from 'antd';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
+import MessageFilePreviewPanel from '@/components/MessageList/components/FileRender/components/Previewer/MessageFilePreviewPanel';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
-import { ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { downloadFile, ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { downloadResourceFile } from '@/service/file';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
 import { getProject } from '@/pages/projectSpace/service';
 import FileResourcePanel from '../FileResourcePanel';
+import useResourceAttachmentPreview from '../useResourceAttachmentPreview';
 
 const MB = 1024 * 1024;
 const mockIntl = getLocaleIntl();
@@ -33,7 +36,12 @@ jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
   default: () => ({ uploadFileConfig: mockConfig }),
 }));
-jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
+jest.mock('@/service/fileBrowser', () => ({
+  downloadFile: jest.fn(),
+  ensureFolder: jest.fn(),
+  listFiles: jest.fn(),
+  uploadFiles: jest.fn(),
+}));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
@@ -67,6 +75,7 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     onLoadData,
     onNodeClick,
     getDisplayName,
+    getActionItems,
   }: {
     contentBefore: ReactNode;
     items: FileBrowserItem[];
@@ -76,6 +85,7 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     onLoadData: (item: FileBrowserItem) => Promise<void>;
     onNodeClick: (event: React.MouseEvent, item: FileBrowserItem) => void;
     getDisplayName?: (item: FileBrowserItem) => string;
+    getActionItems: (item: FileBrowserItem) => MenuProps['items'];
   }) {
     mockExpandAction = expandAction;
     return (
@@ -93,6 +103,17 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
             Open {getDisplayName?.(item) || item.name}
           </button>
         ))}
+        {items
+          .filter((item) => getActionItems(item)?.some((action) => action?.key === 'preview'))
+          .map((item) => (
+            <button
+              key={`preview-${item.path}`}
+              type="button"
+              onClick={() => onAction('preview', item)}
+            >
+              Preview {item.name}
+            </button>
+          ))}
         {items.map((item) => (
           <button key={item.path} type="button" onClick={() => onAction('upload', item)}>
             Upload to {item.name}
@@ -465,6 +486,78 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+it.each([
+  ['project', 390, 'Open'],
+  ['project', 1440, 'Preview'],
+  ['shared', 390, 'Open'],
+  ['shared', 1440, 'Preview'],
+] as const)('%s 在 %i 像素视口下通过 %s 将超过 2 MiB 的 HTML 交给附件页签', async (scope, width, action) => {
+  const originalWidth = window.innerWidth;
+  const onOpenDetail = jest.fn();
+  const resourceId = scope === 'project' ? '42' : '43';
+  const sessionRoot = '/by/.sessions/7';
+  const isProcessFile = scope === 'shared' && action === 'Preview';
+  const sharedRoot = isProcessFile ? sessionRoot : '/by/.shared';
+  const directory = scope === 'project' ? '/reports' : `${sharedRoot}/reports`;
+  const path = `${directory}/report.html`;
+  const file = new Blob([new Uint8Array(3_100_000)], { type: 'text/html' });
+  const items = [{ path, name: 'report.html', size: file.size, isDir: false }];
+  jest.mocked(queryProjectCloudDrive).mockResolvedValue(items);
+  jest.mocked(listFiles).mockResolvedValue(items);
+  jest.mocked(downloadResourceFile).mockResolvedValue({ fileName: 'report.html', file });
+  jest.mocked(downloadFile).mockResolvedValue({ fileName: 'report.html', file });
+
+  function ResourcePreview() {
+    const onPreviewFile = useResourceAttachmentPreview(scope, resourceId, onOpenDetail);
+    return (
+      <FileResourcePanel
+        scope={scope}
+        sessionId="7"
+        resourceId={resourceId}
+        onOpenDetail={onOpenDetail}
+        canPreviewItem={(item) => !item.isDir}
+        onPreviewFile={onPreviewFile}
+      />
+    );
+  }
+
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  try {
+    render(<ResourcePreview />);
+    fireEvent.click(await screen.findByRole('button', { name: `${action} report.html` }));
+    await waitFor(() => expect(onOpenDetail).toHaveBeenCalledTimes(1));
+
+    const [panel, options] = onOpenDetail.mock.calls[0];
+    expect(options).toEqual({ tabKey: `${scope}-file:${resourceId}:${path}`, title: 'report.html' });
+    if (!isValidElement<ComponentProps<typeof MessageFilePreviewPanel>>(panel)) throw new Error('Missing preview panel');
+    expect(panel.type).toBe(MessageFilePreviewPanel);
+    expect(panel.props.fileType).toBe('html');
+    await expect(panel.props.fileItem.downloadRequest?.()).resolves.toEqual({ file, fileName: 'report.html' });
+    await panel.props.fileItem.resolvePreviewResource?.('images/chart.svg');
+    const imagePath = `${directory}/images/chart.svg`;
+    if (scope === 'project') {
+      expect(downloadResourceFile).toHaveBeenNthCalledWith(1, { resourceId, directoryPath: path });
+      expect(downloadResourceFile).toHaveBeenNthCalledWith(2, { resourceId, directoryPath: imagePath });
+      expect(downloadFile).not.toHaveBeenCalled();
+    } else {
+      expect(downloadFile).toHaveBeenNthCalledWith(1, resourceId, path);
+      expect(downloadFile).toHaveBeenNthCalledWith(2, resourceId, imagePath);
+      expect(downloadResourceFile).not.toHaveBeenCalled();
+    }
+    if (isProcessFile) {
+      await panel.props.fileItem.resolvePreviewResource?.('../../root.svg');
+      expect(downloadFile).toHaveBeenLastCalledWith(resourceId, `${sessionRoot}/root.svg`);
+    }
+    panel.props.onOpenRelativeFile?.('details.html');
+    expect(onOpenDetail).toHaveBeenLastCalledWith(expect.anything(), {
+      tabKey: `${scope}-file:${resourceId}:${directory}/details.html`,
+      title: 'details.html',
+    });
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+  }
 });
 
 describe.each(['shared', 'project'] as const)('%s file upload size validation', (scope) => {

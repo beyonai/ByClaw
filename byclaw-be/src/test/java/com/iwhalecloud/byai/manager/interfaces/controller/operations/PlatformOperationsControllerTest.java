@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.interfaces.controller.operations;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication;
+import com.iwhalecloud.byai.common.integration.security.InternalServicePrincipal;
+import java.util.Set;
 import com.iwhalecloud.byai.manager.domain.operations.PlatformOperationsService;
 import com.iwhalecloud.byai.state.infrastructure.filter.AccessTokenVerifyInterceptor;
 import com.iwhalecloud.byai.state.infrastructure.filter.WebMvcConfiguration;
@@ -37,7 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * @since 2026-10-30
  */
 class PlatformOperationsControllerTest {
-    private static final String TEST_TOKEN = "test-only-resource-bridge-token-32-characters";
+    private static final InternalServicePrincipal PRINCIPAL = new InternalServicePrincipal(
+        "hacu", "hacu", Set.of("tenant:manage"), Set.of(), true);
 
     private PlatformOperationsService platformOperationsService;
 
@@ -48,12 +51,8 @@ class PlatformOperationsControllerTest {
     void prepare() {
         platformOperationsService = mock(PlatformOperationsService.class);
         PlatformOperationsController platformOperationsController = new PlatformOperationsController();
-        OperationsAuthentication operationsAuthentication = new OperationsAuthentication();
-        ReflectionTestUtils.setField(operationsAuthentication, "token", TEST_TOKEN);
-        ReflectionTestUtils.setField(platformOperationsController, "authentication", operationsAuthentication);
         ReflectionTestUtils.setField(platformOperationsController, "service", platformOperationsService);
         AccessTokenVerifyInterceptor accessTokenVerifyInterceptor = new AccessTokenVerifyInterceptor();
-        ReflectionTestUtils.setField(accessTokenVerifyInterceptor, "operationsAuthentication", operationsAuthentication);
         List<HttpMessageConverter<?>> messageConverters = new ArrayList<>();
         new WebMvcConfiguration().extendMessageConverters(messageConverters);
         mockMvc = MockMvcBuilders.standaloneSetup(platformOperationsController)
@@ -71,7 +70,7 @@ class PlatformOperationsControllerTest {
         when(platformOperationsService.execute(any(JsonNode.class))).thenReturn(plan);
         mockMvc.perform(post(OperationsAuthentication.PATH)
             .servletPath(OperationsAuthentication.PATH)
-            .header(OperationsAuthentication.HEADER, TEST_TOKEN)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE, PRINCIPAL)
             .contentType("application/json")
             .content(previewBody()))
             .andExpect(status().isOk())
@@ -103,7 +102,7 @@ class PlatformOperationsControllerTest {
 
         String responseBody = mockMvc.perform(post(OperationsAuthentication.PATH)
             .servletPath(OperationsAuthentication.PATH)
-            .header(OperationsAuthentication.HEADER, TEST_TOKEN)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE, PRINCIPAL)
             .contentType("application/json")
             .content(bridgeBody.toString()))
             .andExpect(status().isOk())
@@ -154,6 +153,19 @@ class PlatformOperationsControllerTest {
             .contentType("application/json")
             .content(previewBody()))
             .andExpect(status().isUnauthorized());
+        verifyNoInteractions(platformOperationsService);
+    }
+
+    @Test
+    void serviceIdentityWithoutAllTenantAuthorityIsRejected() throws Exception {
+        InternalServicePrincipal limited = new InternalServicePrincipal(
+            "hacu", "hacu", Set.of("tenant:manage"), Set.of("42"), false);
+        mockMvc.perform(post(OperationsAuthentication.PATH)
+            .servletPath(OperationsAuthentication.PATH)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE, limited)
+            .contentType("application/json")
+            .content(previewBody()))
+            .andExpect(status().isForbidden());
         verifyNoInteractions(platformOperationsService);
     }
 

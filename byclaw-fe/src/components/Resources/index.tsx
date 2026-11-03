@@ -438,11 +438,9 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (activeTab !== 'enterprise') {
       return true;
     }
-    // 商用版官方技能对所有用户开放；其他版本按角色控制，等待版本加载后再展示入口。
+    // 企业技能导入与后端固定入口能力保持一致；普通用户通过个人技能发布审核。
     if (resourceType === 'SKILL') {
-      return (
-        brandVersionLoaded && (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
-      );
+      return brandVersionLoaded && fixedEntryCapability?.canImportEnterpriseSkill === true;
     }
     if (!fixedEntryCapability) {
       return false;

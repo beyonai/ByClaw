@@ -69,10 +69,13 @@ class EnterpriseResourceSyncContextTest {
     @Test void untrustedImportNeverSkipsEnterpriseChecks() {
         var resource = resource(10L, "target");
         EnterpriseResourceSyncContext.execute(false, "BYAI", "TOOLKIT", "target", () -> {
+            assertThat(EnterpriseResourceSyncContext.isImporting(resource)).isTrue();
+            assertThat(EnterpriseResourceSyncContext.isImporting(resource(11L, "other"))).isFalse();
             assertThat(EnterpriseResourceSyncContext.canUpdate(resource)).isFalse();
             assertThat(EnterpriseResourceSyncContext.skipsImportEnterpriseCheck(resource)).isFalse();
             return null;
         });
+        assertThat(EnterpriseResourceSyncContext.isImporting(resource)).isFalse();
     }
 
     @Test void privateResourcesAndReviewSnapshotsRemainProtected() {

@@ -10,6 +10,7 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { readdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
   CAPTAIN_KEY, listArchivedTeamIds, readArchivedTeam, readUnreadMailbox, readTeam,
@@ -71,6 +72,8 @@ export interface TeamActivitySnapshot {
   /** Durable dispatch admission, used when restoring an interrupted command. */
   readonly lifecycle?: TeamState['lifecycle']
   readonly stoppedAt?: number
+  /** Task/result generation, independent of member activity and mailbox acknowledgements. */
+  readonly workRevision?: string
   readonly members: readonly TeamActivityMember[]
   readonly tasks: readonly TeamActivityTask[]
   readonly messageCount: number
@@ -190,6 +193,20 @@ export async function assembleTeamSnapshot(
     captainSessionId: state.captainSessionId,
     ...(state.lifecycle === undefined ? {} : { lifecycle: state.lifecycle }),
     ...(state.stoppedAt === undefined ? {} : { stoppedAt: state.stoppedAt }),
+    workRevision: createHash('sha256').update(JSON.stringify({
+      captainSessionId: state.captainSessionId,
+      lifecycle: state.lifecycle,
+      stoppedAt: state.stoppedAt,
+      inputRevision: state.inputRevision,
+      tasks: [...tasks].sort((left, right) => left.id.localeCompare(right.id)).map(task => ({
+        id: task.id, subject: task.subject, description: task.description,
+        status: task.status, assignee: task.assignee, dependencies: [...task.dependencies].sort(),
+        attempt: task.attempt, attemptId: task.attemptId,
+        inputRevision: task.inputRevision, outputInputRevision: task.outputInputRevision,
+        output: task.output, waitingUser: task.waitingUser, waitingAssistance: task.waitingAssistance,
+        reassigning: task.reassigning,
+      })),
+    })).digest('hex'),
     members,
     tasks: tasks.map((task) => ({
       id: task.id,

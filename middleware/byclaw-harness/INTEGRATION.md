@@ -34,6 +34,27 @@ docker build -f middleware/byclaw-harness/Dockerfile \
 基础镜像构建需要访问上游 DSH 源码和依赖源，详见 `Dockerfile.base`。
 模块使用方式见 [README.zh.md](README.zh.md)；本地开发前置条件见 [LOCAL-START.md](LOCAL-START.md)。
 
+### 企业技能名称兼容
+
+个人技能发布到企业后，展示名、ZIP 文件名（不含 `.zip`）和 `SKILL.md.name`
+统一为 `原名_企业`；发布时将原名中的非法字符替换为下划线并合并连续分隔符。
+为与 OpenClaw 使用同一个技能包，Harness 不把包内名称转换成资源 ID。
+业务镜像的 `prepare-dsh-skill-names-021.mjs` 仅对固定的 DSH `0.2.1-rc.2` 扩展名称语法：
+Unicode 字母、数字可使用 `-` 或 `_` 分隔，仍拒绝路径、空白、括号和标签字符。
+补丁覆盖原生注册表、`skill` 工具所用校验器以及 `/技能名` 识别，ByClaw 加载器使用相同规则。
+工具权限、员工作用域、调用开关和撤销逻辑保持原有约束。
+
+`Dockerfile`、`Dockerfile.extensions`、`Dockerfile.slim` 都重编译 `skill` 和 `tool-skill`，
+将两包纳入 profile 的本地包覆盖，并复制 `src`、`lib`；只更新后端或插件文件不足以启用此兼容。
+旧企业副本不会自动改名，需要重新发布并审核、安装新副本。
+
+补丁与镜像接线检查：`node --test middleware/byclaw-harness/scripts/skill-names-021-patch.test.mjs`。
+真实 SDK 集成测试：在隔离的固定版本 DSH 工作区先执行
+`node middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs "$DSH_ROOT"`，
+再执行 `DSH_ROOT="$DSH_ROOT" node middleware/byclaw-harness/plugins/byclaw-integration/scripts/skill-runtime-verify.mjs`。
+源码测试覆盖原名加载、个人/企业并存、原生工具和斜杠入口、跨员工拒绝及撤销；
+它们不替代业务镜像构建和部署后的会话验收。
+
 ### 插件依赖来源
 
 两个业务 Dockerfile 在安装插件依赖前执行 `scripts/docker-workspace-prepare.mjs`。

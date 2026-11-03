@@ -41,8 +41,6 @@ import jakarta.servlet.http.HttpSession;
  */
 @Component
 public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
-    @Autowired
-    private com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication operationsAuthentication;
     @org.springframework.beans.factory.annotation.Value("${byclaw.platform.execution-mode:legacy}")
     private String platformExecutionMode;
 
@@ -158,16 +156,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         }
 
         try {
-            // 独立运营端点在匿名规则之前验证服务身份，不能借用普通登录态。
+            // 运营端点只接受已通过内部服务签名过滤器的请求。
             if (com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication.PATH
                 .equals(request.getServletPath())) {
                 CurrentUserHolder.clearLoginInfo();
-                if (!"POST".equals(request.getMethod()) || !operationsAuthentication.accepts(
-                    request.getHeader(com.iwhalecloud.byai.manager.domain.operations.OperationsAuthentication.HEADER))) {
-                    response.setStatus(401);
-                    return false;
-                }
-                return true;
+                response.setStatus(401);
+                return false;
             }
             if (response.isCommitted()) {
                 logger.warn("Response already committed, skip session check.");

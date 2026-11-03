@@ -88,6 +88,7 @@ export function createSkillReadiness(params: {
     const enabled = new Set(cfg.agents?.list?.find(a => a.id === agentId)?.skills ?? []);
     const resources = rows(raw.relResourceList);
     const skills: RuntimeSkill[] = [];
+    const skillNames = new Map<string, RuntimeSkill>();
     for (const ref of rows(refs).filter(ref => ref.skillType === "hub")) {
       const code = String(ref.skillCode ?? "");
       const resource = resources.find(r => String(r.resourceCode) === code && r.resourceBizType === "SKILL");
@@ -119,6 +120,14 @@ export function createSkillReadiness(params: {
         if (metadata.skillCode !== code || metadata.version !== download.version || (metadata.versionUrl !== ref.versionUrl && !String(metadata.versionUrl).endsWith(ref.versionUrl))) {
           item.errorCode = "VERSION_PENDING"; continue;
         }
+        const conflicting = skillNames.get(name);
+        if (conflicting && conflicting.skillCode !== code) {
+          conflicting.state = item.state = "FAILED";
+          conflicting.errorCode = item.errorCode = "SKILL_NAME_CONFLICT";
+          delete conflicting.skillFile;
+          continue;
+        }
+        skillNames.set(name, item);
         if (!enabled.has(name)) { item.errorCode = "CONFIG_PENDING"; continue; }
         item.state = "READY"; item.version = metadata.version; item.skillFile = doc;
       } catch { item.errorCode = "PACKAGE_MISSING"; }

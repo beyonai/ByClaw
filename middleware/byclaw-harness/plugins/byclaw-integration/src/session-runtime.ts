@@ -989,6 +989,7 @@ export class ByClawAsyncTeamGate {
   private rootActive = false
   private readonly activeAgents = new Set<string>()
   private snapshotActiveChildCount = 0
+  private readonly teamWorkRevisions = new Map<string, string>()
   private activityVersion = 0
   private recovering = false
   private disposed = false
@@ -1021,20 +1022,34 @@ export class ByClawAsyncTeamGate {
 
   completeRetainedTeamWhenQuiescent(activeChildCount = 0): void {
     if (!this.waiting || this.kind !== 'team' || this.startCallId !== undefined || !this.teamActive) return
+    if (!this.teamQuiescent) {
+      this.minimumFinalCaptainTurn = this.captainTurnOpen
+        ? this.captainTurn
+        : (this.captainTurn ?? 0) + 1
+    }
     this.teamQuiescent = true
     this.observeSnapshotActiveChildren(activeChildCount)
-    this.minimumFinalCaptainTurn = this.captainTurnOpen
-      ? this.captainTurn
-      : (this.captainTurn ?? 0) + 1
     this.scheduleTimeout()
     this.scheduleQuietCompletion()
   }
 
-  /** Renew the inactivity budget when a retained team's durable snapshot advances. */
+  /** UI-only changes must not invalidate an answer for the same task/result generation. */
+  observeTeamWork(snapshot: TeamActivitySnapshot): void {
+    // Older snapshot producers have no workRevision; retain their task-level fence.
+    const revision = snapshot.workRevision ?? JSON.stringify({
+      lifecycle: snapshot.lifecycle, stoppedAt: snapshot.stoppedAt, tasks: snapshot.tasks,
+    })
+    if (this.teamWorkRevisions.get(snapshot.teamId) === revision) return
+    this.teamWorkRevisions.set(snapshot.teamId, revision)
+    this.recordProgress()
+  }
+
+  /** Renew the inactivity budget when actual work or a new captain report advances. */
   recordProgress(): void {
     if (!this.waiting || this.kind !== 'team') return
     this.teamQuiescent = false
     this.captainAnsweredAfterTeam = false
+    this.minimumFinalCaptainTurn = undefined
     this.clearQuietTimer()
     this.recordActivity()
   }
@@ -1124,13 +1139,13 @@ export class ByClawAsyncTeamGate {
 
   private scheduleQuietCompletion(): void {
     if (!this.waiting || this.kind !== 'team' || !this.teamQuiescent
-      || !this.captainAnsweredAfterTeam || this.rootActive
+      || !this.captainAnsweredAfterTeam || this.rootActive || this.captainTurnOpen
       || this.recovering || this.activeAgents.size > 0 || this.snapshotActiveChildCount > 0) return
     this.clearQuietTimer()
     this.quietTimer = setTimeout(() => {
       this.quietTimer = undefined
       if (this.waiting && this.kind === 'team' && this.teamQuiescent
-        && this.captainAnsweredAfterTeam && !this.rootActive
+        && this.captainAnsweredAfterTeam && !this.rootActive && !this.captainTurnOpen
         && this.activeAgents.size === 0 && this.snapshotActiveChildCount === 0) {
         this.finish()
       }
@@ -1189,7 +1204,30 @@ export class ByClawAsyncTeamGate {
     return false
   }
 
+  private observeTemplateResult(isError: boolean, content: readonly ContentBlock[], meta?: Record<string, unknown>): void {
+    const text = contentText(content)
+    const assistanceReturned = this.templateCallIsAssistance && (
+      meta?.['byclaw_assistance_status'] === 'completed' || meta?.['byclaw_assistance_status'] === 'blocked'
+      || /^Assistance status: (completed|blocked)\b/u.test(text)
+    )
+    if (isError || assistanceReturned) this.templateReported = true
+    else {
+      // DSH PTC records rendered content without presentation metadata. Both
+      // dispatch paths must bind the exact child before accepting its settlement.
+      const childId = meta?.['instance_session_id'] ?? (this.templateCallIsAssistance
+        ? /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
+        : /^(?:agent|expert-team) template [^\s]+ instantiated as child ([^\s;]+); parent is waiting for the asynchronous report\.$/mu.exec(text)?.[1])
+      if (typeof childId === 'string' && childId !== '') {
+        this.templateSessionId = childId
+        this.templateReported = this.templateSettledSessions.has(childId)
+      }
+    }
+    this.templateCallId = undefined
+  }
+
   observe(event: SessionEvent): void {
+    if (event.type === 'user/message' && (String(event.data.source.kind) === 'plugin:dsh-agent-teams'
+      || event.data.source.kind === 'subagent-settled')) this.recordProgress()
     if (event.type === 'turn/start') {
       this.captainTurn = event.data.turn
       this.captainTurnOpen = true
@@ -1230,35 +1268,11 @@ export class ByClawAsyncTeamGate {
     if (event.type === 'tool/result' && this.templateCallId !== undefined) {
       const result = toolResultOf(event)
       if (result.toolCallId !== String(this.templateCallId)) return
-      const meta = result.meta
-      const text = contentText(result.content)
-      const assistanceReturned = this.templateCallIsAssistance && (meta?.['byclaw_assistance_status'] === 'completed' || meta?.['byclaw_assistance_status'] === 'blocked' || /^Assistance status: (completed|blocked)\b/u.test(text))
-      if (result.isError || assistanceReturned) this.templateReported = true
-      else {
-        const meta = event.data.meta
-        const childId = (meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta['instance_session_id'] : undefined)
-          ?? (result as unknown as { meta?: Record<string, unknown> }).meta?.['instance_session_id']
-          ?? /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
-        if (typeof childId === 'string' && childId !== '') {
-          this.templateSessionId = childId
-          this.templateReported = this.templateSettledSessions.has(childId)
-        }
-      }
-      this.templateCallId = undefined
+      this.observeTemplateResult(result.isError, result.content, result.meta)
       return
     }
     if (event.type === 'tool/ptc-dispatch' && this.templateCallId === event.data.subCallId) {
-      const text = contentText(event.data.content)
-      if (event.data.isError || (this.templateCallIsAssistance && /^Assistance status: (completed|blocked)\b/u.test(text))) this.templateReported = true
-      else if (this.templateCallIsAssistance) {
-        // PTC dispatch events do not carry presentation metadata in DSH rc.2.
-        const childId = /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
-        if (childId !== undefined) {
-          this.templateSessionId = childId
-          this.templateReported = this.templateSettledSessions.has(childId)
-        }
-      }
-      this.templateCallId = undefined
+      this.observeTemplateResult(event.data.isError, event.data.content)
       return
     }
     if (event.type === 'user/message' && event.data.source.kind === 'subagent-settled') {
@@ -1282,7 +1296,7 @@ export class ByClawAsyncTeamGate {
     const completed = this.kind === 'team'
       ? this.startCallId === undefined && (
           this.teamDeleted
-          || (this.teamQuiescent
+          || (this.teamQuiescent && this.captainAnsweredAfterTeam
             && this.minimumFinalCaptainTurn !== undefined
             && event.data.turn >= this.minimumFinalCaptainTurn)
         )
@@ -2786,6 +2800,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
 
     if (response) {
+      if (turn.owner === undefined && (event.type === 'assistant/message' || event.type === 'turn/end')) {
+        // Reconcile durable results before accepting this answer. A delayed UI
+        // refresh must not later mistake already summarized work for new work.
+        turn.teamSnapshots?.request()
+        await turn.teamSnapshots?.flush()
+      }
       const wasWaiting = turn.teamGate.waiting
       if ((event.type === 'tool/call' && event.data.name === 'agent_teams_start')
         || (event.type === 'tool/ptc-dispatch-start' && event.data.name === 'agent_teams_start')) {
@@ -3455,6 +3475,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       turn.teamGate.retainActiveTeam()
     }
     turn.teamGate.observeSnapshotActiveChildren(workingChildren.size)
+    for (const team of ownedLiveSnapshots) turn.teamGate.observeTeamWork(team)
+    if (ownedLiveSnapshots.length > 0 && ownedLiveSnapshots.every(isQuiescentTeamSnapshot)) {
+      turn.teamGate.completeRetainedTeamWhenQuiescent(workingChildren.size)
+    }
     this.queueRuntimeProjection(turn, turn.runtime.observeTeamActivity(
       ownedLiveSnapshots.some(team => !isQuiescentTeamSnapshot(team)),
       workingChildren.size,
@@ -3467,7 +3491,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         const eventId = dshAgentTeamsSnapshotEventId(team, isArchived)
         if (turn.emittedTeamSnapshots.has(eventId)) continue
         turn.emittedTeamSnapshots.add(eventId)
-        if (!isArchived) turn.teamGate.recordProgress()
         const projection = teamSnapshotProjection(team, {
           archived: isArchived,
           capturedAt: new Date().toISOString(),
@@ -3492,9 +3515,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
           this.options.sourceAgentType,
         )
         await this.emitTeamTaskPlans(turn, team, eventId, isArchived)
-      }
-      if (!isArchived && ownedSnapshots.length > 0 && ownedSnapshots.every(isQuiescentTeamSnapshot)) {
-        turn.teamGate.completeRetainedTeamWhenQuiescent(workingChildren.size)
       }
     }
   }

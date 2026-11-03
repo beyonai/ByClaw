@@ -143,7 +143,9 @@ async function readDefinition(
     name = code
   }
   const description = data['description'] ?? (code === undefined ? undefined : `ByClaw Skill ${code}`)
-  if (typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)
+  // Keep aligned with prepare-dsh-skill-names-021.mjs: published packages retain
+  // their exact Unicode name (e.g. report_企业), without allowing paths or markup.
+  if (typeof name !== 'string' || !/^[\p{L}\p{N}]+(?:[-_][\p{L}\p{N}]+)*$/u.test(name)
     || typeof description !== 'string' || description.trim() === '') {
     throw new Error(
       `invalid Skill name/description: ${readPath} `

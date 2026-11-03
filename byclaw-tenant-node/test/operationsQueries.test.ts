@@ -27,6 +27,19 @@ it('所有 SQL 使用配置企业且绑定分页和搜索，不查询正文', as
   );
 });
 
+it('空搜索条件兼容数据库将空字符串视为 NULL', async () => {
+  const query = vi.fn(async (sql: string, _parameters?: unknown[]) =>
+    sql.includes('COUNT(*) AS total') ? [{ total: '1' }] : [{ id: '1' }],
+  );
+  const service = new OperationsQueries({ query }, '10');
+  await service.groups({});
+  for (const [sql, parameters] of query.mock.calls) {
+    expect(sql).toContain('COALESCE(LENGTH($2::text),0)=0');
+    expect(sql).toContain('COALESCE(LENGTH($3::text),0)=0');
+    expect(parameters?.slice(0, 3)).toEqual(['10', '', '']);
+  }
+});
+
 it('其他企业或不存在的工作组不能读取成员', async () => {
   const query = vi.fn(async () => []);
   const service = new OperationsQueries({ query }, '10');

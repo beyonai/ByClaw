@@ -25,14 +25,18 @@ import {
   PREVIEW_MIME_TYPES,
   TEXT_PREVIEW_TYPES,
   VIDEO_PREVIEW_TYPES,
+  getPreviewSizeLimit,
+  isTextPreviewType,
   resolvePreviewType,
-  MAX_TEXT_PREVIEW_SIZE,
 } from './formats';
 import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
 import type { MarkdownImageResolver } from './Md';
 import type { OfficeVariantType } from './officeVariantTypes';
+import PagedPreviewSource from './PagedPreviewSource';
+import PreviewSizeNotice from './PreviewSizeNotice';
+import { DEFER_HTML_SOURCE_BYTES, LARGE_TEXT_SOURCE_BYTES } from './previewSize';
 
 const HtmlRenderComponent = React.lazy(() =>
   import('@/components/Preview/Html').then((module) => ({ default: module.HtmlRender }))
@@ -138,7 +142,7 @@ export interface TwinsProps {
 
 type PreviewFileProps = TwinsProps & { extra?: React.ReactNode; className?: string };
 
-export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElement => {
+const FilePreviewContent = React.memo((props: PreviewFileProps): React.ReactElement => {
   const {
     data,
     type: providedType,
@@ -153,6 +157,9 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
   const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
   const usePdfCanvas = type === 'pdf' && /MicroMessenger|DingTalk/i.test(window.navigator.userAgent);
   const [tab, setTab] = useState<'source' | 'preview'>();
+  const deferHtmlSource =
+    data instanceof Blob && data.size > DEFER_HTML_SOURCE_BYTES && HTML_PREVIEW_TYPES.includes(type);
+  const readSource = !deferHtmlSource || tab === 'source';
 
   /** 资源链接 - 用于预览 */
   const [uri, setUri] = useState<string>();
@@ -184,6 +191,7 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
     a.click();
   };
 
+  const usePagedSource = (data instanceof Blob ? data.size : content?.[1].length ?? 0) > LARGE_TEXT_SOURCE_BYTES;
   const onCopy = () => {
     if (content) copyWithMessage(content[1]);
   };
@@ -197,48 +205,43 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
     setError(undefined);
 
     if (data instanceof Blob && !officeTypes.includes(type)) {
-      if (canReadSource(type)) {
-        if (data.size > MAX_TEXT_PREVIEW_SIZE) {
-          setError('preview.tooLarge');
-        } else {
-          setLoading(true);
-          data
-            .text()
-            .then((source) => {
-              if (disposed) return;
-              if (
-                /[\u0000-\u0008\u000b\u000e-\u001f]/.test(source) ||
-                source.startsWith('PK\u0003\u0004') ||
-                source.startsWith('%PDF-')
-              ) {
-                setError('preview.binaryText');
-                return;
+      if (readSource && canReadSource(type)) {
+        setLoading(true);
+        data
+          .text()
+          .then((source) => {
+            if (disposed) return;
+            if (
+              /[\u0000-\u0008\u000b\u000e-\u001f]/.test(source) ||
+              source.startsWith('PK\u0003\u0004') ||
+              source.startsWith('%PDF-')
+            ) {
+              setError('preview.binaryText');
+              return;
+            }
+            let text = source;
+            if (type === 'json' && data.size <= LARGE_TEXT_SOURCE_BYTES) {
+              try {
+                text = JSON.stringify(JSON.parse(source), null, 2);
+              } catch {
+                // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
               }
-              let text = source;
-              if (type === 'json') {
-                try {
-                  text = JSON.stringify(JSON.parse(source), null, 2);
-                } catch {
-                  // 非标准 JSON 仍展示原文，避免影响下载或其他格式预览。
-                }
-              }
-              setContent([langMap[type], text]);
-            })
-            .catch(() => {
-              if (!disposed) setError('fileRender.previewUnavailable');
-            })
-            .finally(() => {
-              if (!disposed) setLoading(false);
-            });
-        }
+            }
+            setContent([langMap[type], text]);
+          })
+          .catch(() => {
+            if (!disposed) setError('fileRender.previewUnavailable');
+          })
+          .finally(() => {
+            if (!disposed) setLoading(false);
+          });
       }
       if (!data.size) setError('preview.empty');
       objectUrl = URL.createObjectURL(createPreviewBlob(data, type, title));
       setUri(objectUrl);
     } else if (typeof data === 'string') {
       if (canReadSource(type)) {
-        if (new Blob([data]).size > MAX_TEXT_PREVIEW_SIZE) setError('preview.tooLarge');
-        else setContent([langMap[type], data]);
+        setContent([langMap[type], data]);
       }
       if (type === 'svg' || HTML_PREVIEW_TYPES.includes(type)) {
         objectUrl = URL.createObjectURL(createPreviewBlob(new Blob([data]), type, title));
@@ -253,21 +256,22 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
       disposed = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [data, type, title]);
+  }, [data, readSource, type, title]);
 
+  const sourceAvailable = Boolean(content) || deferHtmlSource;
   const previewLabel = intl.formatMessage({ id: 'common.preview' });
   const sourceLabel = intl.formatMessage({ id: 'preview.source' });
   const tabs = useMemo(() => {
     const options = [];
     if (visualTypes.includes(type)) options.push({ value: 'preview', label: previewLabel, icon: <EyeOutlined /> });
-    if (content)
+    if (sourceAvailable)
       options.push({
         value: 'source',
         label: sourceLabel,
         icon: <FileDoneOutlined />,
       });
     return options;
-  }, [type, content, previewLabel, sourceLabel]);
+  }, [type, sourceAvailable, previewLabel, sourceLabel]);
 
   useEffect(() => {
     setTab(tabs[0]?.value as 'source' | 'preview' | undefined);
@@ -308,9 +312,13 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
           </div>
         )}
         <div style={{ display: !!content && tab === 'source' ? 'block' : 'none' }} className={'full-width full-height'}>
-          <Suspense fallback={<Spin />}>
-            <TextHighlightComponent content={content?.[1]} lang={content?.[0] as any} lineNumber />
-          </Suspense>
+          {usePagedSource ? (
+            tab === 'source' && content && <PagedPreviewSource content={content[1]} />
+          ) : (
+            <Suspense fallback={<Spin />}>
+              <TextHighlightComponent content={content?.[1]} lang={content?.[0] as any} lineNumber />
+            </Suspense>
+          )}
         </div>
         <div
           style={{
@@ -327,7 +335,7 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
               !!uri &&
               tab === 'preview' &&
               (HTML_PREVIEW_TYPES.includes(type) || (type === 'pdf' && !usePdfCanvas)) &&
-              (type !== 'pdf' && resolveHtmlResource ? (
+              (type !== 'pdf' && (resolveHtmlResource || deferHtmlSource) ? (
                 <HtmlRenderComponent
                   content={content?.[1]}
                   data={data instanceof Blob ? data : undefined}
@@ -471,6 +479,8 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
                 data={data}
                 type={type as 'zip' | 'rar' | '7z' | 'tar' | 'gz' | 'tgz'}
                 fileName={title}
+                // 归档递归预览只在回调执行时访问已初始化的 PreViewFile。
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 renderFile={(file, name) => <PreViewFile data={file} title={name} />}
               />
             </Suspense>
@@ -479,6 +489,17 @@ export const PreViewFile = React.memo((props: PreviewFileProps): React.ReactElem
       </div>
     </section>
   );
+});
+
+export const PreViewFile = React.memo(function PreViewFile(props: PreviewFileProps) {
+  const { data, title, type: providedType } = props;
+  const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
+  const limit = getPreviewSizeLimit(type);
+  const input = typeof data === 'string' && isTextPreviewType(type) ? new Blob([data]) : data;
+  if (input instanceof Blob && limit !== undefined && input.size > limit) {
+    return <PreviewSizeNotice data={input} limit={limit} title={title} />;
+  }
+  return <FilePreviewContent {...props} />;
 });
 
 export default function Twins(props: TwinsProps) {

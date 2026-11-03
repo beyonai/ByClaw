@@ -4,7 +4,7 @@ import { MAX_RTF_BYTES, renderRtf } from './rtfDecoder';
 import { BinaryPreviewError } from './binaryPreview';
 
 jest.mock('@umijs/max', () => ({ useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }) }));
-jest.mock('./rtfDecoder', () => ({ MAX_RTF_BYTES: 2 * 1024 * 1024, renderRtf: jest.fn() }));
+jest.mock('./rtfDecoder', () => ({ MAX_RTF_BYTES: 50_000_000, renderRtf: jest.fn() }));
 
 const blob = () => {
   const data = new Blob(['rtf']);

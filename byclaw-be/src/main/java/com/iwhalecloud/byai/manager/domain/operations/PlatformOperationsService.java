@@ -14,10 +14,14 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxReleaseException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+import com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper;
 import com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.Date;
@@ -25,6 +29,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import jakarta.annotation.PreDestroy;
 
 /** 复用现有生命周期能力与租户查询通道；不增加停用策略。
  * @author Codex
@@ -32,6 +42,14 @@ import java.util.Set;
  */
 @Service
 public class PlatformOperationsService {
+    private static final Logger LOG = LoggerFactory.getLogger(PlatformOperationsService.class);
+    private final ThreadPoolExecutor groupQueries = new ThreadPoolExecutor(5, 5, 0, TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(20));
+
+    @PreDestroy
+    void closeGroupQueries() {
+        groupQueries.shutdownNow();
+    }
     @Autowired
     private OperationsSandboxMapper records;
     @Autowired
@@ -44,6 +62,10 @@ public class PlatformOperationsService {
     private TenantDbProvisioningService tenants;
     @Autowired
     private TenantNodeClient nodes;
+    @Autowired
+    private TenantModeService tenantModes;
+    @Autowired
+    private OperationsGroupMapper groupRecords;
     @Autowired
     private ObjectMapper json;
     @Autowired
@@ -80,6 +102,9 @@ public class PlatformOperationsService {
             return memberGroupRemoval.execute(operation, payload, text(request, "actor", 128));
         }
         if ("groups".equals(resource)) {
+            if ("aggregate".equals(operation)) {
+                return aggregateGroups(payload);
+            }
             return groups(operation, payload);
         }
         if (!"sandboxes".equals(resource)) {
@@ -133,6 +158,78 @@ public class PlatformOperationsService {
         return json.createObjectNode().put("accepted", true).put("id", record.getId().toString());
     }
 
+    /** 跨企业按来源分页，跳过故障来源并返回其标识。 */
+    private JsonNode aggregateGroups(JsonNode input) {
+        int pageSize = page(input, "pageSize", 20, 100);
+        String cursor = text(input, "cursor", 80);
+        long afterId = 0;
+        int sourcePage = 1;
+        if (!cursor.isEmpty()) {
+            if (!cursor.matches("[0-9]{1,19}:[1-9][0-9]{0,4}")) throw new OperationsFailure("INVALID");
+            try {
+                String[] parts = cursor.split(":");
+                afterId = Long.parseLong(parts[0]);
+                sourcePage = Integer.parseInt(parts[1]);
+                if (sourcePage > 10000 || (sourcePage > 1 && afterId == 0)) throw new OperationsFailure("INVALID");
+            } catch (NumberFormatException failure) {
+                throw new OperationsFailure("INVALID");
+            }
+        }
+        String keyword = text(input, "keyword", 128);
+        String status = option(input, "status", Set.of("", "ACTIVE", "GROUP_DISSOLVED"));
+        long sourceAfter = sourcePage > 1 ? afterId - 1 : afterId;
+        List<Map<String, Object>> sources = groupRecords.sources(sourceAfter);
+        ObjectNode result = json.createObjectNode();
+        ArrayNode failures = result.putArray("failedTenants");
+        result.putArray("list");
+        result.putNull("nextCursor");
+        int limit = Math.min(10, sources.size());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        for (int index = 0; index < limit; index++) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            Map<String, Object> source = sources.get(index);
+            long enterpriseId = Long.parseLong(source.get("enterpriseId").toString());
+            int currentPage = sourcePage > 1 && enterpriseId == afterId ? sourcePage : 1;
+            ObjectNode query = json.createObjectNode().put("enterpriseId", Long.toString(enterpriseId))
+                .put("pageNum", currentPage).put("pageSize", pageSize).put("keyword", keyword).put("status", status);
+            Future<JsonNode> pending = null;
+            try {
+                pending = groupQueries.submit(() -> groups("list", query));
+                JsonNode page = pending.get(remaining, TimeUnit.NANOSECONDS);
+                if (!page.path("list").isArray() || !page.path("totalPages").isIntegralNumber()) {
+                    throw new OperationsFailure("UNAVAILABLE");
+                }
+                result.set("list", page.path("list"));
+                if (currentPage < page.path("totalPages").asInt()) {
+                    result.put("nextCursor", enterpriseId + ":" + (currentPage + 1));
+                } else if (index + 1 < sources.size()) {
+                    result.put("nextCursor", enterpriseId + ":1");
+                } else {
+                    result.putNull("nextCursor");
+                }
+                if (!page.path("list").isEmpty()) {
+                    result.put("partial", !failures.isEmpty());
+                    return result;
+                }
+            } catch (InterruptedException failure) {
+                if (pending != null) pending.cancel(true);
+                Thread.currentThread().interrupt();
+                throw new OperationsFailure("UNAVAILABLE");
+            } catch (Exception failure) {
+                if (pending != null) pending.cancel(true);
+                LOG.error("Platform group source unavailable, enterpriseId={}", enterpriseId, failure);
+                failures.addObject().put("enterpriseId", Long.toString(enterpriseId))
+                    .put("enterpriseName", Objects.toString(source.get("enterpriseName"), ""));
+            }
+            if (index + 1 < sources.size()) result.put("nextCursor", enterpriseId + ":1");
+            else result.putNull("nextCursor");
+        }
+        if (sources.isEmpty()) result.putNull("nextCursor");
+        result.put("partial", !failures.isEmpty());
+        return result;
+    }
+
     /** 查询历史和当前实例，运行时缺失不推断为停止。 */
     private JsonNode list(JsonNode input) {
         Map<String, Object> query = new HashMap<>();
@@ -162,6 +259,9 @@ public class PlatformOperationsService {
     /** 工作组数据来自对应企业 Node，不读取主库遗留群表。 */
     private JsonNode groups(String operation, JsonNode input) {
         long enterpriseId = id(input, "enterpriseId");
+        if (tenantModes.isSharedDataTenant(enterpriseId)) {
+            return sharedGroups(operation, input, enterpriseId);
+        }
         String path;
         String method;
         ObjectNode query = json.createObjectNode();
@@ -189,6 +289,40 @@ public class PlatformOperationsService {
         query.put("pageSize", page(input, "pageSize", 20, 100));
         return nodes.operationsRequest(enterpriseId, method, path, "GET".equals(method) ? null : query,
             new TypeReference<JsonNode>() { });
+    }
+
+    /** 公共企业及试用租户使用公共库，保留企业范围及分页。 */
+    private JsonNode sharedGroups(String operation, JsonNode input, long enterpriseId) {
+        int pageNum = page(input, "pageNum", 1, 10000);
+        int pageSize = page(input, "pageSize", 20, 100);
+        if ("detail".equals(operation)) {
+            Map<String, Object> detail = groupRecords.detail(enterpriseId, id(input, "id"));
+            if (detail == null) throw new OperationsFailure("NOT_FOUND");
+            return json.valueToTree(detail);
+        }
+        long groupId = "list".equals(operation) ? 0 : id(input, "id");
+        if (!"list".equals(operation) && groupRecords.detail(enterpriseId, groupId) == null) {
+            throw new OperationsFailure("NOT_FOUND");
+        }
+        String keyword = text(input, "keyword", 128);
+        String status = option(input, "status", Set.of("", "ACTIVE", "GROUP_DISSOLVED"));
+        PageInfo<Map<String, Object>> result;
+        try {
+            PageHelper.startPage(pageNum, pageSize);
+            List<Map<String, Object>> rows = switch (operation) {
+                case "list" -> groupRecords.groups(enterpriseId, keyword, status);
+                case "members" -> groupRecords.members(enterpriseId, groupId);
+                case "conversations" -> groupRecords.conversations(enterpriseId, groupId);
+                default -> throw new OperationsFailure("INVALID");
+            };
+            result = new PageInfo<>(rows);
+        } finally {
+            PageHelper.clearPage();
+        }
+        ObjectNode output = json.createObjectNode();
+        output.set("list", json.valueToTree(result.getList()));
+        return output.put("total", result.getTotal()).put("pageNum", pageNum)
+            .put("pageSize", pageSize).put("totalPages", result.getPages());
     }
 
     /** OpenClaw 的档位通过既有 serviceKey 契约传递，避免重新启动后回到默认规格。 */

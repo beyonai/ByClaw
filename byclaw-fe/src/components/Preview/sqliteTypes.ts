@@ -1,4 +1,6 @@
-export const MAX_DATABASE_BYTES = 50 * 1024 * 1024;
+import { DEFAULT_PREVIEW_BYTES } from './previewSize';
+
+export const MAX_DATABASE_BYTES = DEFAULT_PREVIEW_BYTES;
 export const MAX_DATABASE_TABLES = 200;
 export const MAX_DATABASE_COLUMNS = 100;
 export const MAX_DATABASE_ROWS = 1000;

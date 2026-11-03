@@ -112,6 +112,9 @@ interface FileResourcePanelProps {
   resourceId?: string;
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
+
+  /** 自定义预览入口可提供与其渲染链路一致的文件资格判断。 */
+  canPreviewItem?: (item: FileBrowserItem) => boolean;
   onPreviewFile?: (item: FileBrowserItem) => void;
 
   /** 嵌入引用菜单时直接回传引用，右侧面板则继续通过全局输入事件插入。 */
@@ -141,6 +144,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   resourceId,
   refreshKey = 0,
   onOpenDetail,
+  canPreviewItem = canPreviewFile,
   onPreviewFile,
   onQuote,
   cardMode = false,
@@ -523,7 +527,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
 
   const openPreview = useCallback(
     (item: FileBrowserItem) => {
-      if (!canPreviewFile(item)) {
+      if (!canPreviewItem(item)) {
         message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
         return;
       }
@@ -556,7 +560,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
       };
       openFileInTab(item.name, item.path);
     },
-    [intl, onOpenDetail, onPreviewFile, resourceId, scope, sessionId]
+    [canPreviewItem, intl, onOpenDetail, onPreviewFile, resourceId, scope, sessionId]
   );
 
   const downloadResource = useCallback(
@@ -860,7 +864,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     (item: FileBrowserItem): MenuProps['items'] => {
       const keys = [
         ...(resourceId ? ['quote'] : []),
-        ...(canPreviewFile(item) ? ['preview'] : []),
+        ...(canPreviewItem(item) ? ['preview'] : []),
         'download',
         ...(resourceId && isDirectory(item) ? ['upload', 'createSibling', 'createChild'] : []),
         ...(scope === 'project' && resourceId ? ['move'] : []),
@@ -893,7 +897,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         label: <div className={employeeStyles.dropdownMenuItem}>{labels[key]}</div>,
       }));
     },
-    [intl, projectId, resourceId, scope, usesFileBrowser]
+    [canPreviewItem, intl, projectId, resourceId, scope, usesFileBrowser]
   );
 
   const uploadOneFile = useCallback(

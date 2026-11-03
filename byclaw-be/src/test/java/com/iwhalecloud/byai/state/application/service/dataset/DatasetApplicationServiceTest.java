@@ -3,6 +3,9 @@ package com.iwhalecloud.byai.state.application.service.dataset;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeStatus;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeStatusResult;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileRenameRequest;
@@ -94,6 +97,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 @DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
@@ -518,35 +522,42 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         assertThat(result.getSummary().getFailed()).isEqualTo(1);
     }
 
+    /** 门户计数兼容旧响应，并将过滤条件交给新的 status 接口。 */
     @ParameterizedTest
-    @ValueSource(longs = {0, 12})
+    @ValueSource(longs = {0, 12, 2147483648L})
     void fileCountChecksReadAccessAndMapsResourceCode(long count) {
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
-        var qaResult = new com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult();
-        qaResult.setFileCount(count);
-        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
-        response.setResultCode("0");
-        response.setResultObject(qaResult);
-        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
-        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
-        request.setResourceId(100L);
+        KnowledgeStatusResult.Item knowledgeStatusItem = new KnowledgeStatusResult.Item();
+        knowledgeStatusItem.setKnCode("personal-kb");
+        knowledgeStatusItem.setFileCount(count);
+        KnowledgeStatusResult knowledgeStatusResult = new KnowledgeStatusResult();
+        knowledgeStatusResult.setData(List.of(knowledgeStatusItem));
+        PythonBuildResponse<KnowledgeStatusResult> knowledgeStatusResponse = new PythonBuildResponse<>();
+        knowledgeStatusResponse.setResultCode("0");
+        knowledgeStatusResponse.setResultObject(knowledgeStatusResult);
+        when(feignPythonBuildService.knowledgeStatus(any())).thenReturn(knowledgeStatusResponse);
+        KnowledgeFileCountRequest knowledgeFileCountRequest = new KnowledgeFileCountRequest();
+        knowledgeFileCountRequest.setResourceId(100L);
+        knowledgeFileCountRequest.setExcludePathPrefixList(List.of("/group-task-results/"));
 
-        assertThat(service.fileCount(request).getFileCount()).isEqualTo(count);
-        var captor = ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount.class);
-        verify(feignPythonBuildService).fileCount(captor.capture(), eq(100L));
-        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(service.fileCount(knowledgeFileCountRequest).getFileCount()).isEqualTo(count);
+        ArgumentCaptor<KbKnowledgeStatus> knowledgeStatusCaptor = ArgumentCaptor.forClass(KbKnowledgeStatus.class);
+        verify(feignPythonBuildService).knowledgeStatus(knowledgeStatusCaptor.capture());
+        assertThat(knowledgeStatusCaptor.getValue().getKnCodeList()).containsExactly("personal-kb");
+        assertThat(knowledgeStatusCaptor.getValue().getExcludePathPrefixList()).containsExactly("/group-task-results/");
+        verifyNoMoreInteractions(feignPythonBuildService);
     }
 
     @Test
     void fileCountRejectsUnreadableAndMissingResourcesBeforeCallingQa() {
-        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
-        request.setResourceId(100L);
-        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        KnowledgeFileCountRequest knowledgeFileCountRequest = new KnowledgeFileCountRequest();
+        knowledgeFileCountRequest.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(knowledgeFileCountRequest)).isInstanceOf(IllegalArgumentException.class);
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
-        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.fileCount(knowledgeFileCountRequest)).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(feignPythonBuildService);
     }
 
@@ -555,14 +566,40 @@ class DatasetApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18
         SsResource resource = defaultPersonalDataset();
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
-        var response = new PythonBuildResponse<com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult>();
-        response.setResultCode("-1");
-        response.setResultMsg("knowledge base not found: personal-kb");
-        when(feignPythonBuildService.fileCount(any(), eq(100L))).thenReturn(response);
-        var request = new com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileCountRequest();
-        request.setResourceId(100L);
-        assertThatThrownBy(() -> service.fileCount(request)).isInstanceOf(BaseException.class)
+        PythonBuildResponse<KnowledgeStatusResult> knowledgeStatusResponse = new PythonBuildResponse<>();
+        knowledgeStatusResponse.setResultCode("-1");
+        knowledgeStatusResponse.setResultMsg("knowledge base not found: personal-kb");
+        when(feignPythonBuildService.knowledgeStatus(any())).thenReturn(knowledgeStatusResponse);
+        KnowledgeFileCountRequest knowledgeFileCountRequest = new KnowledgeFileCountRequest();
+        knowledgeFileCountRequest.setResourceId(100L);
+        assertThatThrownBy(() -> service.fileCount(knowledgeFileCountRequest)).isInstanceOf(BaseException.class)
             .hasMessageContaining("knowledge base not found: personal-kb");
+    }
+
+    /** 缺失、错误库和无效统计不能作为成功的零数量返回。 */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "null", "{}", "{\"data\":[]}", "{\"data\":[null]}",
+        "{\"data\":[{\"knCode\":\"other-kb\",\"fileCount\":1}]}",
+        "{\"data\":[{\"knCode\":\"personal-kb\"}]}",
+        "{\"data\":[{\"knCode\":\"personal-kb\",\"fileCount\":-1}]}",
+        "{\"data\":[{\"knCode\":\"personal-kb\",\"fileCount\":1},{\"knCode\":\"personal-kb\",\"fileCount\":1}]}"
+    })
+    void fileCountRejectsMalformedStatusResults(String resultJson) {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+        PythonBuildResponse<KnowledgeStatusResult> knowledgeStatusResponse = new PythonBuildResponse<>();
+        knowledgeStatusResponse.setResultCode("0");
+        knowledgeStatusResponse.setResultObject(com.alibaba.fastjson.JSON.parseObject(resultJson, KnowledgeStatusResult.class));
+        when(feignPythonBuildService.knowledgeStatus(any())).thenReturn(knowledgeStatusResponse);
+        KnowledgeFileCountRequest knowledgeFileCountRequest = new KnowledgeFileCountRequest();
+        knowledgeFileCountRequest.setResourceId(100L);
+
+        assertThatThrownBy(() -> service.fileCount(knowledgeFileCountRequest)).isInstanceOf(BaseException.class);
+        ArgumentCaptor<KbKnowledgeStatus> knowledgeStatusCaptor = ArgumentCaptor.forClass(KbKnowledgeStatus.class);
+        verify(feignPythonBuildService).knowledgeStatus(knowledgeStatusCaptor.capture());
+        assertThat(knowledgeStatusCaptor.getValue().getExcludePathPrefixList()).isNull();
     }
 
     @ParameterizedTest

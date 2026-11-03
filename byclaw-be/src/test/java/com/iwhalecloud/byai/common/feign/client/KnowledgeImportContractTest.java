@@ -157,6 +157,31 @@ class KnowledgeImportContractTest extends com.iwhalecloud.byai.common.i18n.I18nT
         }
     }
 
+    /** 两种路由均完整发送目录边界，空列表维持显式的不过滤语义。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void statusForwardsExcludedPathPrefixes(boolean discovery) throws Exception {
+        try (Fixture fixture = new Fixture(discovery, KnowledgeServiceOperation.STATUS)) {
+            KbKnowledgeStatus kbKnowledgeStatus = new KbKnowledgeStatus();
+            kbKnowledgeStatus.setKnCodeList(List.of("kb-1"));
+            kbKnowledgeStatus.setExcludePathPrefixList(List.of("/group-task-results/", "/archive/"));
+            fixture.response = """
+                {"resultCode":"0","resultObject":{"data":[{"knCode":"kb-1","fileCount":0,"spaceSize":0}]}}
+                """;
+
+            assertThat(fixture.service.knowledgeStatus(kbKnowledgeStatus).getResultObject().getData())
+                .singleElement().satisfies(item -> assertThat(item.getFileCount()).isZero());
+            assertThat(JSON.parseObject(fixture.body).keySet())
+                .containsExactlyInAnyOrder("knCodeList", "excludePathPrefixList");
+            assertThat(JSON.parseObject(fixture.body).getJSONArray("excludePathPrefixList"))
+                .containsExactly("/group-task-results/", "/archive/");
+
+            kbKnowledgeStatus.setExcludePathPrefixList(List.of());
+            fixture.service.knowledgeStatus(kbKnowledgeStatus);
+            assertThat(JSON.parseObject(fixture.body).getJSONArray("excludePathPrefixList")).isEmpty();
+        }
+    }
+
     private static class Fixture implements AutoCloseable {
         final HttpServer server;
         final FeignPythonBuildService service = new FeignPythonBuildService();

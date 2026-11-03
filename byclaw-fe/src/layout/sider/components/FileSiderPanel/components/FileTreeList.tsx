@@ -214,7 +214,8 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                       (item as any).createStaffName ||
                       (item as any).size
                   );
-                const previewable = canPreviewFile(treeItem);
+                const actionItems = showActions ? getActionItems(treeItem) : undefined;
+                const previewable = canPreviewFile(treeItem) || actionItems?.some((action) => action?.key === 'preview');
                 const directoryExpanded =
                   isDirectory(treeItem) &&
                   expandedKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)));
@@ -256,12 +257,12 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         ) : null}
                       </span>
                     </FilePathTooltip>
-                    {showActions && getActionItems(treeItem)?.length ? (
+                    {actionItems?.length ? (
                       <Dropdown
                         trigger={['hover']}
                         overlayClassName={employeeStyles.mydropdown}
                         menu={{
-                          items: getActionItems(treeItem),
+                          items: actionItems,
                           onClick: ({ key, domEvent }) => {
                             domEvent.stopPropagation();
                             onAction(key, treeItem);

@@ -38,6 +38,7 @@ const runtime = new ByClawDshSessionRuntime({
   agents: { get(id) { return id === 'root' ? agent : undefined } },
 }, {
   byRoot: '/tmp', sourceAgentType: 'BYCLAW_DSH', agentTemplateDir: '', workspaceRegistry: registry,
+  sessionMetadata: { get() { return undefined } },
   async sessionSetup(agentCtx, command, root) {
     assert.equal(agentCtx, rootAgentCtx)
     assert.equal(command.header.messageId, setupCount === 0 ? 'progress-question' : 'dropped-question')
@@ -124,13 +125,16 @@ try {
   agent.status = 'running'
   const droppedHeader = new MessageHeader('dropped-question', 'root', 'dropped-trace')
   droppedHeader.userCode = 'user'
-  await assert.rejects(
-    runtime.ask(new AskAgentCommand(droppedHeader, '再次查询进度'), {
-      sessionId: 'root', traceId: 'dropped-trace', isCancelRequested: () => false,
-    }),
-    /steering input was not admitted/i,
-    'an unclaimed steering input must not report a successful empty answer',
-  )
+  const unadmitted = runtime.ask(new AskAgentCommand(droppedHeader, '再次查询进度'), {
+    sessionId: 'root', traceId: 'dropped-trace', isCancelRequested: () => false,
+  })
+  let completed = false
+  void unadmitted.then(() => { completed = true }, () => { completed = true })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(completed, false, 'pre-admission idle must not complete an unclaimed steering input')
+  const cancelled = assert.rejects(unadmitted, /runtime closed/i)
+  await runtime.close()
+  await cancelled
   assert.equal(registry.getTurn('root')?.messageId, 'original-task')
   console.log('busy captain steering and independent output routing verification passed')
 } finally {

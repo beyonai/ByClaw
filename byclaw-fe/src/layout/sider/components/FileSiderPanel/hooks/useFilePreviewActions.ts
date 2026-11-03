@@ -8,8 +8,6 @@ import {
   ensureDirectoryPath,
   getPreviewFileType,
   isDirectory,
-  isTextPreviewFile,
-  MAX_TEXT_PREVIEW_SIZE,
 } from '../utils';
 
 interface UseFilePreviewActionsOptions {
@@ -59,9 +57,6 @@ export default function useFilePreviewActions({
       try {
         const res: any = await downloadFile(resourceId, item.path);
         const rawBlob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
-        if (isTextPreviewFile(item.name) && rawBlob.size > MAX_TEXT_PREVIEW_SIZE) {
-          throw new Error(intl.formatMessage({ id: 'chatResource.previewTooLarge' }));
-        }
         const mimeType = getMimeType(item.name);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
         renderPreviewPanel(item, { blob, loading: false });

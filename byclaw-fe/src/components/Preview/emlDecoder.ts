@@ -1,6 +1,6 @@
 import PostalMime, { type Address } from 'postal-mime';
 import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
-import { MAX_EML_ATTACHMENTS, MAX_EML_BODY_BYTES, MAX_EML_HEADERS_BYTES, type EmlContent } from './emlTypes';
+import { MAX_EMAIL_ATTACHMENT_BYTES, MAX_EML_ATTACHMENTS, MAX_EML_BODY_BYTES, MAX_EML_HEADERS_BYTES, type EmlContent } from './emlTypes';
 
 /** 邮件附件名仅用于显示/下载，移除路径、控制符和双向覆盖字符，不能作为本地路径使用。 */
 export function emlAttachmentName(value?: string | null) {
@@ -67,7 +67,7 @@ export async function decodeEml(buffer: ArrayBuffer): Promise<EmlContent> {
       bytes = new Uint8Array(content.buffer, content.byteOffset, content.byteLength).slice().buffer;
     else throw new BinaryPreviewError('invalid');
     attachmentBytes += bytes.byteLength;
-    if (attachmentBytes > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+    if (attachmentBytes > MAX_EMAIL_ATTACHMENT_BYTES) throw new BinaryPreviewError('limit');
     return {
       id,
       name: emlAttachmentName(attachment.filename),

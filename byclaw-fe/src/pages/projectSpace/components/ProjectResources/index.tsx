@@ -24,7 +24,8 @@ import AntdIcon from '@/components/AntdIcon';
 import { getFileIconType } from '@/constants/icon';
 import FilePreviewPanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FilePreviewPanel';
 import FileResourcePanel from '@/components/ChatLayoutComp/ChatResourceWorkspace/FileResourcePanel';
-import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useResourceAttachmentPreview from '@/components/ChatLayoutComp/ChatResourceWorkspace/useResourceAttachmentPreview';
+import { SiderContentContext, type DetailPanelOptions } from '@/layout/sider/siderContentContext';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
 import type { FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
 import {
@@ -133,7 +134,21 @@ const ProjectResources: React.FC<Props> = ({
   const [resourceOptionsLoading, setResourceOptionsLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<DevloopProjectSpaceFile | null>(null);
+  const [cloudPreview, setCloudPreview] = useState<{
+    resourceId: string | undefined;
+    title: React.ReactNode;
+    content: React.ReactNode;
+  } | null>(null);
+  const previewResourceId = project.cloudResourceId ? String(project.cloudResourceId) : undefined;
+  const activeCloudPreview = cloudPreview?.resourceId === previewResourceId ? cloudPreview : null;
+  // 项目详情复用附件面板，仍由本页的抽屉承载预览和相对文件链接。
+  const openCloudPreview = useCallback(
+    (content: React.ReactNode, { title }: DetailPanelOptions) => {
+      setCloudPreview({ content, title, resourceId: previewResourceId });
+    },
+    [previewResourceId]
+  );
+  const previewCloudFile = useResourceAttachmentPreview('project', previewResourceId, openCloudPreview);
   const [detailRepo, setDetailRepo] = useState<DevloopProjectRepo | null>(null);
   const [repoFiles, setRepoFiles] = useState<RepoFileItem[]>([]);
   const [repoFilesLoading, setRepoFilesLoading] = useState(false);
@@ -659,6 +674,12 @@ const ProjectResources: React.FC<Props> = ({
   const boundEmployees = boundResources.filter((resource) => resource.resourceType === 'digital_employee');
 
   const renderSharedFile = (file: DevloopProjectSpaceFile) => {
+    const openFile = () =>
+      previewCloudFile?.({
+        name: file.fileName,
+        path: file.fileUrl || `/${file.fileName}`,
+        isDir: false,
+      });
     const metadata = [
       (file as any).size || (file as any).fileSize,
       (file as any).updateTime || (file as any).updatedAt,
@@ -685,7 +706,7 @@ const ProjectResources: React.FC<Props> = ({
           if (file.isDir) {
             const nextPath = `${cloudPath.replace(/\/$/, '')}/${file.fileName}`.replace(/^\/?/, '/');
             setCloudPath(`${nextPath}/`);
-          } else setPreviewFile(file);
+          } else openFile();
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -693,7 +714,7 @@ const ProjectResources: React.FC<Props> = ({
             if (file.isDir) {
               const nextPath = `${cloudPath.replace(/\/$/, '')}/${file.fileName}`.replace(/^\/?/, '/');
               setCloudPath(`${nextPath}/`);
-            } else setPreviewFile(file);
+            } else openFile();
           }
         }}
       >
@@ -826,19 +847,12 @@ const ProjectResources: React.FC<Props> = ({
             sessionId=""
             projectId={Number(project.projectId)}
             project={project}
-            resourceId={cloudResourceId ? String(cloudResourceId) : undefined}
+            resourceId={previewResourceId}
             fillContainer
             compactResourceEmpty
             onOpenDetail={(panel, options) => siderContentContext.setDetailPanel?.(panel, options)}
-            onPreviewFile={(item) => {
-              setPreviewFile({
-                fileId: Number((item as any).fileId),
-                fileName: item.name,
-                fileUrl: item.path,
-                isDir: false,
-                projectId: Number(project.projectId),
-              } as DevloopProjectSpaceFile);
-            }}
+            canPreviewItem={(item) => !isDirectory(item)}
+            onPreviewFile={previewCloudFile}
           />
         </section>
 
@@ -1072,24 +1086,16 @@ const ProjectResources: React.FC<Props> = ({
       )}
 
       <Drawer
-        title={previewFile?.fileName || intl.formatMessage({ id: 'projectSpace.resources.filePreview' })}
-        open={!!previewFile}
+        title={activeCloudPreview?.title || intl.formatMessage({ id: 'projectSpace.resources.filePreview' })}
+        open={!!activeCloudPreview}
         placement="right"
-        width="50vw"
+        width="min(100vw, max(50vw, 480px))"
         mask={false}
         destroyOnClose
-        onClose={() => setPreviewFile(null)}
+        onClose={() => setCloudPreview(null)}
         styles={{ body: { padding: 0, overflow: 'hidden' } }}
       >
-        {previewFile && (
-          <FilePreviewPanel
-            fileName={previewFile.fileName}
-            resourceId={project.cloudResourceId ? `${project.cloudResourceId}` : undefined}
-            path={previewFile.fileUrl || `/${previewFile.fileName}`}
-            fileUrl={undefined}
-            source="dataset"
-          />
-        )}
+        {activeCloudPreview?.content}
       </Drawer>
 
       <Drawer

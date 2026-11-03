@@ -8,6 +8,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
@@ -163,7 +164,7 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
             if (!"enterprise".equals(target.getOwnerType()) || !"SKILL".equals(target.getResourceBizType())
                 || !Objects.equals(target.getPublicationRequestId(), context.requestId())
                 || !Objects.equals(target.getResourceStatus(), 2) || existing == null
-                || !Objects.equals(existing.getSkillPackageHash(), snapshot.getSkillPackageHash())) {
+                || !matchesPublishedPackage(existing, target, snapshot, bytes)) {
                 throw new BaseException("employee.publication.skillCopyChanged");
             }
             relate(officialEmployeeId, target.getResourceId(), context, "DIG_EMPLOYEE_SKILL");
@@ -171,8 +172,15 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
         }
         target = new SsResource();
         target.setResourceId(sequence.nextVal()); target.setResourceCode(code);
-        target.setResourceName(StringUtils.defaultIfBlank(context.copyName(),
-            EmployeePublicationNames.enterpriseName(source.getResourceName(), null)));
+        String baseName = SkillPublicationNames.enterpriseName(StringUtils.defaultIfBlank(context.copyName(),
+            source.getResourceName()));
+        String name = baseName;
+        for (int attempt = 1; resources.existsEnterpriseSkillByName(name); attempt++) {
+            name = SkillPublicationNames.enterpriseName(baseName, context.requestId() + "_" + source.getResourceId()
+                + (attempt == 1 ? "" : "_" + attempt));
+        }
+        byte[] publishedBytes = runtime.renamePublishedSkillPackage(bytes, name);
+        target.setResourceName(name);
         target.setResourceDesc(source.getResourceDesc());
         target.setResourceBizType("SKILL"); target.setResourceType("ATOM"); target.setSystemCode("BYAI");
         target.setOwnerType("enterprise"); target.setComAcctId(context.tenantId());
@@ -182,17 +190,18 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
         target.setAvatar(source.getAvatar()); target.setTags(source.getTags()); target.setCatalogId(source.getCatalogId());
         target.setManUserId(String.valueOf(context.authorId())); target.setManOrgId(employee.getManOrgId());
         String directory = "skill/org-hub/" + context.tenantId() + "/" + context.requestId() + "/" + source.getResourceId();
-        String filename = snapshot.getSkillPackageHash() + ".zip";
-        storage.uploadToSubdirectory(bytes, directory, filename, "application/zip");
+        String filename = name + ".zip";
+        storage.uploadToSubdirectory(publishedBytes, directory, filename, "application/zip");
         mapper.insert(target);
         SsResExtSkill ext = new SsResExtSkill();
         ext.setResourceId(target.getResourceId()); ext.setSkillType("hub");
         ext.setSkillUrl(directory + "/" + filename); ext.setVersion("v0.1");
-        ext.setSkillOriginalFilename(snapshot.getSkillOriginalFilename()); ext.setSkillPackageFormat("zip");
-        ext.setSkillPackageSize((long) bytes.length); ext.setSkillPackageHash(snapshot.getSkillPackageHash());
+        ext.setSkillOriginalFilename(filename); ext.setSkillPackageFormat("zip");
+        ext.setSkillPackageSize((long) publishedBytes.length); ext.setSkillPackageHash(DigestUtils.sha256Hex(publishedBytes));
         ext.setSourceType("OFFICIAL_EMPLOYEE_PUBLICATION"); ext.setSyncStatus("SUCCESS");
         ext.setTargetContent(JSON.toJSONString(Map.of("sourceResourceId", String.valueOf(source.getResourceId()),
             "sourceCreatorId", String.valueOf(context.authorId()), "sourcePackageUrl", snapshot.getSkillUrl(),
+            "sourcePackageHash", snapshot.getSkillPackageHash(),
             "sourceVersion", StringUtils.defaultString(snapshot.getVersion()))));
         skills.save(ext);
         if (StringUtils.isBlank(runtime.refreshSkillBasicInfo(target))) throw new BaseException("employee.publication.skillRuntimeFailed");
@@ -202,6 +211,19 @@ public class EmployeePublicationSkillService implements EmployeePublicationSkill
         } catch (Exception error) { throw new BaseException("employee.publication.skillRelationsFailed"); }
         relate(officialEmployeeId, target.getResourceId(), context, "DIG_EMPLOYEE_SKILL");
         return target.getResourceId();
+    }
+
+    private boolean matchesPublishedPackage(SsResExtSkill existing, SsResource target, SsResExtSkill snapshot,
+        byte[] sourceBytes) {
+        JSONObject metadata = StringUtils.isBlank(existing.getTargetContent()) ? new JSONObject()
+            : JSON.parseObject(existing.getTargetContent());
+        // Existing snapshots created before package renaming retain their original reviewed hash.
+        if (metadata == null || !metadata.containsKey("sourcePackageHash")) {
+            return Objects.equals(existing.getSkillPackageHash(), snapshot.getSkillPackageHash());
+        }
+        return Objects.equals(metadata.getString("sourcePackageHash"), snapshot.getSkillPackageHash())
+            && Objects.equals(existing.getSkillPackageHash(), DigestUtils.sha256Hex(
+                runtime.renamePublishedSkillPackage(sourceBytes, target.getResourceName())));
     }
 
     private void relate(Long from, Long to, Context context, String type) {

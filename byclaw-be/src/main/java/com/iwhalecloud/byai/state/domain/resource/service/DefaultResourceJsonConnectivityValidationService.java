@@ -34,6 +34,8 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
 
     private static final Set<String> DELETE_KNOWLEDGE_KEYWORDS = Set.of("knowledge-bases/delete", "delete_kb");
 
+    private static final Set<String> HTTP_METHODS = Set.of("get", "post", "put", "patch", "delete", "head", "options", "trace");
+
     private final ResourceCurlService resourceCurlService;
 
     private final SsResExtMcpService ssResExtMcpService;
@@ -68,17 +70,18 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
         String resourceBizType = StringUtils.trimToEmpty(context.resourceJsonPath().resourceBizType());
         try {
             // 这里按资源类型执行“轻量强校验”：
-            // 知识库只做创建/删除闭环，工具集与 MCP 只测一个读/查类优先的可调用项，避免写入链路被全量接口测试拖慢。
+            // 知识库按声明能力选择结构校验或创建/删除闭环，工具集与 MCP 只测一个读/查类优先的可调用项。
 
             /**
              * KG_*:
              *   解析所有 resourceService[*].openapiSchema
+             *   未声明 create_kb/delete_kb 时只校验结构；仅声明其中一个时拒绝不完整的闭环
              *   真实调用只做 create_kb
              *   create 成功后 finally 里调用 delete_kb 清理
              *   不再调用查询知识库
              */
             if (StringUtils.startsWithIgnoreCase(resourceBizType, "KG_")) {
-                validateKnowledgeCreateThenDelete(context);
+                validateKnowledge(context);
                 return;
             }
 
@@ -162,7 +165,7 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
         return root != null && StringUtils.equalsIgnoreCase("dataset", root.getString("systemCode"));
     }
 
-    private void validateKnowledgeCreateThenDelete(ResourceJsonValidationContext context) {
+    private void validateKnowledge(ResourceJsonValidationContext context) {
         JSONObject root = JSON.parseObject(context.json(), Feature.OrderedField);
         // 个人知识库由当前应用内部创建，dataset 模板只描述目录、文件和检索等运行时接口，
         // 不包含外部知识库的 create_kb/delete_kb 生命周期接口，因此不应执行该闭环校验。
@@ -175,6 +178,19 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
 
         KnowledgeOperation createOperation = findKnowledgeOperation(root, "create_kb", CREATE_KNOWLEDGE_KEYWORDS);
         KnowledgeOperation deleteOperation = findKnowledgeOperation(root, "delete_kb", DELETE_KNOWLEDGE_KEYWORDS);
+        if (createOperation == null && deleteOperation == null) {
+            // 外部既有知识库可能只开放检索/查询能力。不能用缺少生命周期接口判定同步失败，
+            // 也不能擅自选择其他操作执行；结构有效并不意味着远端连通性或检索已经验证。
+            LOGGER.info("知识资源未声明 create_kb/delete_kb，仅完成接口结构校验，跳过连通性探测: path={}",
+                context.resourceJsonPath().targetPath());
+            return;
+        }
+        if (createOperation == null || deleteOperation == null) {
+            // 在任何外部调用前确认闭环完整，禁止只创建不清理或单独执行删除。
+            throw new IllegalArgumentException(I18nUtil.get(
+                "resource.json.connectivity.validation.knowledge.operation.notfound",
+                createOperation == null ? "create_kb" : "delete_kb"));
+        }
         String testKnowledgeCode = "VALIDATE_" + context.resourceJsonPath().resourceId() + "_"
             + System.currentTimeMillis();
         // create/delete 必须共享同一个临时知识库标识，确保 finally 删除的是本次校验刚创建的那一个。
@@ -201,11 +217,15 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
             throw new IllegalArgumentException(I18nUtil.get(
                 "resource.json.connectivity.validation.knowledge.resource.service.missing"));
         }
+        boolean hasOperation = false;
         for (int i = 0; i < resourceService.size(); i++) {
             JSONObject service = resourceService.getJSONObject(i);
             JSONObject openApi = service == null ? null : service.getJSONObject("openapiSchema");
             if (openApi == null) {
-                // 兼容老格式 resourceService：只有 method/path/action 时，后续仍可走普通 JSON 请求校验。
+                // 老格式 method 缺省时按现有执行规则使用 POST，但仍须有实际接口路径。
+                hasOperation |= service != null && StringUtils.isNotBlank(service.getString("path"))
+                    && HTTP_METHODS.contains(StringUtils.lowerCase(
+                        StringUtils.defaultIfBlank(service.getString("method"), "POST"), java.util.Locale.ROOT));
                 continue;
             }
             JSONObject paths = openApi.getJSONObject("paths");
@@ -213,6 +233,16 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
                 throw new IllegalArgumentException(I18nUtil.get(
                     "resource.json.connectivity.validation.knowledge.openapi.paths.missing", i));
             }
+            for (String path : paths.keySet()) {
+                JSONObject pathItem = paths.getJSONObject(path);
+                if (StringUtils.isNotBlank(path) && pathItem != null) {
+                    hasOperation |= HTTP_METHODS.stream().anyMatch(method -> pathItem.get(method) instanceof JSONObject);
+                }
+            }
+        }
+        if (!hasOperation) {
+            throw new IllegalArgumentException(I18nUtil.get(
+                "resource.json.connectivity.validation.knowledge.operations.missing"));
         }
     }
 
@@ -239,8 +269,7 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
                     keywords);
             }
         }
-        throw new IllegalArgumentException(I18nUtil.get(
-            "resource.json.connectivity.validation.knowledge.operation.notfound", operationId));
+        return null;
     }
 
     private boolean openApiContainsOperation(JSONObject openApi, String operationId, Set<String> keywords) {

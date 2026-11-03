@@ -133,10 +133,10 @@ describe('decoded image preview', () => {
     expect(context.setTransform).toHaveBeenCalled();
   });
 
-  it('allows RAW files above 20 MiB, explains processing and enforces the separate 50 MiB cap', async () => {
+  it('allows RAW files at the 50 MB cap, explains processing and rejects larger files', async () => {
     worker.request.mockImplementation(async (operation) => (operation === 'openImage' ? 1 : pixels));
     const file = blob();
-    Object.defineProperty(file, 'size', { value: MAX_BINARY_PREVIEW_BYTES + 1 });
+    Object.defineProperty(file, 'size', { value: MAX_RAW_BYTES });
     const { rerender } = render(<DecodedImage data={file} type="dng" />);
     await waitFor(() => expect(context.putImageData).toHaveBeenCalled());
     expect(screen.getByText('fileRender.rawNotice')).toBeVisible();

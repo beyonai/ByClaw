@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Empty, Table, Spin } from 'antd';
 import { useIntl } from '@umijs/max';
 import DOMPurify from 'dompurify';
-import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES, type ArchiveEntry } from './binaryPreview';
+import { BinaryPreviewError, type ArchiveEntry } from './binaryPreview';
 import { createPreviewWorker } from './createPreviewWorker';
 import { HTML_PREVIEW_TYPES, getPreviewMimeType, resolvePreviewType } from './formats';
 import type { PreviewWorkerClient } from './previewWorkerClient';
 import type { NativeArchiveType } from './nativeArchiveDecoder';
 import type { CompressedArchiveType } from './compressedArchiveDecoder';
 import styles from './BinaryPreview.module.less';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 
 const errorMessage = (error: unknown) => {
   if (error instanceof BinaryPreviewError && error.code === 'limit') return 'fileRender.archiveLimit';
@@ -79,7 +80,7 @@ export default function Archive({
     setPage(1);
     void (async () => {
       if (!(data instanceof Blob) || !data.size) throw new BinaryPreviewError('invalid');
-      if (data.size > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+      if (data.size > MAX_ARCHIVE_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
       const buffer = await data.arrayBuffer();
       if (revision.current !== version) return;
       const worker = createPreviewWorker();

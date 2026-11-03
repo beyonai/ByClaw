@@ -1,8 +1,9 @@
 import { getPreviewExtension } from './formats';
 import type { LibarchiveWasm } from 'libarchive-wasm';
-import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES, type ArchiveEntry } from './binaryPreview';
+import { BinaryPreviewError, type ArchiveEntry } from './binaryPreview';
 import { archiveEntryLimit, canPreviewArchiveName, isSafeArchivePath } from './archiveDecoder';
 import { MAX_ARCHIVE_EXPANDED_BYTES, openExpandedTar } from './nativeArchiveDecoder';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 
 export type CompressedArchiveType = 'gz' | 'tgz';
 
@@ -67,7 +68,7 @@ export async function openCompressedArchive(
   fileName: string | undefined,
   loadTar: () => Promise<LibarchiveWasm>
 ) {
-  if (buffer.byteLength > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+  if (buffer.byteLength > MAX_ARCHIVE_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
   const storedName = gzipName(new Uint8Array(buffer));
   // 外部文件名优先，兼容不保存 FNAME 的 gzip；无扩展名时不猜测内部格式。
   const outerName = fileName?.split(/[\\/]/).pop() || '';

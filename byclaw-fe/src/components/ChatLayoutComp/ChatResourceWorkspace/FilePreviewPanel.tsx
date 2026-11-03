@@ -2,13 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Empty, Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import { localizeErrorMessage } from '@/utils/localizeErrorMessage';
+import { resolveSessionResourcePath } from '@/components/MessageList/components/FileRender/components/Previewer/relativeResource';
 import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
-import {
-  getPreviewFileType,
-  MAX_TEXT_PREVIEW_SIZE,
-  isTextPreviewFile,
-} from '@/layout/sider/components/FileSiderPanel/utils';
+import { getPreviewFileType } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadChatFileArtifact } from '@/service/chatFileArtifact';
 import { downloadResourceFile } from '@/service/file';
 import { downloadFile as downloadFileBrowserFile } from '@/service/fileBrowser';
@@ -88,28 +85,6 @@ const resolveMarkdownImagePath = (markdownPath: string, imagePath: string) => {
   const resourcePath = imagePath.split(/[?#]/, 1)[0];
   if (resourcePath.startsWith('/')) return normalizeFilePath(resourcePath);
   return normalizeFilePath(`${directoryPath}${resourcePath}`);
-};
-
-// 会话目录中的 HTML 经常使用 ../../assets 这类相对路径；资源不应越过当前会话根目录。
-const resolveSessionResourcePath = (sourcePath: string, resourcePath: string) => {
-  const normalizedSourcePath = normalizeFilePath(sourcePath);
-  const sessionRootMatch = normalizedSourcePath.match(/^(\/by\/\.sessions\/[^/]+)\//);
-  const resolvedPath = resolveMarkdownImagePath(normalizedSourcePath, resourcePath);
-  if (!sessionRootMatch || !resourcePath.includes('..')) return resolvedPath;
-
-  const root = sessionRootMatch[1];
-  const relativePath = resourcePath.split(/[?#]/, 1)[0].replace(/^\/+/, '');
-  const baseSegments = normalizedSourcePath.slice(root.length).split('/').filter(Boolean).slice(0, -1);
-  const segments = [...baseSegments];
-  relativePath.split('/').forEach((segment) => {
-    if (!segment || segment === '.') return;
-    if (segment === '..') {
-      if (segments.length) segments.pop();
-      return;
-    }
-    segments.push(segment);
-  });
-  return normalizeFilePath(`${root}/${segments.join('/')}`);
 };
 
 const getFilePathFromUrl = (value?: string) => {
@@ -308,9 +283,6 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
 
     void loadFile()
       .then((result) => {
-        if (isTextPreviewFile(fileName) && result.size > MAX_TEXT_PREVIEW_SIZE) {
-          throw new Error(intl.formatMessage({ id: 'chatResource.previewTooLarge' }));
-        }
         if (active) setBlob(result);
       })
       .catch((error: any) => {

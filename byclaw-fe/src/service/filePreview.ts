@@ -1,6 +1,7 @@
 import { POST } from '@/service/common/request';
+import { DEFAULT_PREVIEW_BYTES } from '@/components/Preview/previewSize';
 
-export const MAX_LEGACY_PREVIEW_SIZE = 20 * 1024 * 1024;
+export const MAX_LEGACY_PREVIEW_SIZE = DEFAULT_PREVIEW_BYTES;
 
 /** 只转换已取得的文件副本，不改变存储文件或原文件下载地址。 */
 export function convertLegacyOfficePreview(file: Blob, fileName: string, controller: AbortController) {

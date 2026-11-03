@@ -3,17 +3,17 @@ import { readZipEntry } from './readZipEntry';
 import {
   BinaryPreviewError,
   MAX_ARCHIVE_ENTRIES,
-  MAX_ARCHIVE_TEXT_BYTES,
-  MAX_BINARY_PREVIEW_BYTES,
+  MAX_ARCHIVE_ENTRY_BYTES,
+  MAX_ARCHIVE_EXPANDED_BYTES,
   type ArchiveEntry,
 } from './binaryPreview';
 import {
   ARCHIVE_PREVIEW_TYPES,
-  HTML_PREVIEW_TYPES,
-  TEXT_PREVIEW_TYPES,
+  getPreviewSizeLimit,
   isPreviewableName,
   resolvePreviewType,
 } from './formats';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 
 export const isSafeArchivePath = (name: string) =>
   !!name &&
@@ -28,9 +28,7 @@ export const canPreviewArchiveName = (name: string) =>
 
 export function archiveEntryLimit(name: string) {
   const type = resolvePreviewType(undefined, name);
-  return [...TEXT_PREVIEW_TYPES, ...HTML_PREVIEW_TYPES, 'md', 'svg'].includes(type)
-    ? MAX_ARCHIVE_TEXT_BYTES
-    : MAX_BINARY_PREVIEW_BYTES;
+  return Math.min(getPreviewSizeLimit(type) ?? MAX_ARCHIVE_ENTRY_BYTES, MAX_ARCHIVE_ENTRY_BYTES);
 }
 
 export function canPreviewArchiveEntry(entry: JSZip.JSZipObject) {
@@ -50,7 +48,7 @@ const decodeFileName = (bytes: string[] | Uint8Array) => {
 
 export async function openArchive(buffer: ArrayBuffer) {
   if (!buffer.byteLength) throw new BinaryPreviewError('invalid');
-  if (buffer.byteLength > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+  if (buffer.byteLength > MAX_ARCHIVE_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
   // 不开启 checkCRC32：它会在列目录时解压全部文件，破坏按需解压的内存边界。
   const zip = await JSZip.loadAsync(buffer, { decodeFileName });
   const files = Object.values(zip.files);
@@ -66,12 +64,25 @@ export async function openArchive(buffer: ArrayBuffer) {
     previewable: canPreviewArchiveEntry(entry),
   }));
   entries.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
+  // 只计算实际读取过的不同条目，重复预览同一条目不重复计入展开预算。
+  const extractedEntries = new Set<string>();
+  let expandedBytes = 0;
   return {
     entries,
     async extract(name: string): Promise<ArrayBuffer> {
       const entry = zip.files[name];
       if (!entry || !canPreviewArchiveEntry(entry)) throw new BinaryPreviewError('unsupported');
-      return readZipEntry(entry, archiveEntryLimit(name));
+      const entryLimit = archiveEntryLimit(name);
+      const limit = extractedEntries.has(name)
+        ? entryLimit
+        : Math.min(entryLimit, MAX_ARCHIVE_EXPANDED_BYTES - expandedBytes);
+      const data = await readZipEntry(entry, limit);
+      if (!extractedEntries.has(name)) {
+        if (expandedBytes + data.byteLength > MAX_ARCHIVE_EXPANDED_BYTES) throw new BinaryPreviewError('limit');
+        extractedEntries.add(name);
+        expandedBytes += data.byteLength;
+      }
+      return data;
     },
   };
 }

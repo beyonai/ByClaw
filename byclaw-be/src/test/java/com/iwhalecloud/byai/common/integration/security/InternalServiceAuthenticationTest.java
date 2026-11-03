@@ -135,6 +135,8 @@ class InternalServiceAuthenticationTest {
     }
     @Test void routesDoNotCaptureExistingNodeInternalEndpoints() {
         assertTrue(InternalServiceRoutes.matches("GET", "/internal/v1/commands/by-request"));
+        assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/platform-operations"));
+        assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/platform-operations"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("PUT", "/internal/v1/tenants/42/enterprise"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/tenants/42/members"));
         assertFalse(InternalServiceRoutes.matches("POST", "/internal/v1/shared-workspaces/999/members"));
@@ -144,6 +146,23 @@ class InternalServiceAuthenticationTest {
         assertFalse(InternalServiceRoutes.matches("POST", "/internal/v1/tenantSchemaTaskReports"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/schema/current"));
         assertFalse(InternalServiceRoutes.matches("GET", "/internal/v1/tenants/42/runtime/extra"));
+    }
+
+    @Test void operationsRequiresValidSignatureAndManageScope() {
+        var verifier = verifier();
+        byte[] body = "{\"resource\":\"groups\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var signed = new MockHttpServletRequest("POST", "/internal/v1/platform-operations");
+        signed.addHeader("X-ByClaw-Client-Id", "hacu");
+        signed.addHeader("X-ByClaw-Timestamp", "1000");
+        signed.addHeader("X-ByClaw-Nonce", "operations-nonce-12345");
+        signed.addHeader("X-ByClaw-Signature", InternalServiceAuthenticator.sign(
+            "test-only-signing-material-at-least-32-bytes", InternalServiceAuthenticator.canonical(signed, body)));
+        assertEquals(403, assertThrows(InternalServiceSecurityException.class,
+            () -> verifier.authenticate(signed, body)).status());
+        properties.getClients().get("hacu").setScopes(Set.of("tenant:manage"));
+        assertThrows(InternalServiceSecurityException.class, () -> verifier.authenticate(signed, new byte[0]));
+        assertEquals("hacu", verifier.authenticate(signed, body).clientId());
+        assertThrows(InternalServiceSecurityException.class, () -> verifier.authenticate(signed, body));
     }
     @Test void recoveryRoutesHaveExactScopeAndUuidBoundaries() {
         assertEquals("tenant:read",InternalServiceRoutes.scope("GET","/internal/v1/commands/7/recovery"));
