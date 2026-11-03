@@ -30,7 +30,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
@@ -55,6 +55,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeStatusResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
@@ -1580,17 +1581,35 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 统计指定知识库所有层级的未删除文件数量。
+     * 通过 status 统计未删除文件，保留门户 fileCount 响应契约。
+     * @param knowledgeFileCountRequest 资源及可选的排除路径前缀
+     * @return 排除指定目录后的文件数量
      */
-    public KnowledgeFileCountResult fileCount(KnowledgeFileCountRequest request) {
-        SsResource resource = loadDatasetResource(request.getResourceId());
-        validateDatasetReadablePermission(resource);
-        KbKnowledgeFileCount qaRequest = new KbKnowledgeFileCount();
-        qaRequest.setKnCode(resource.getResourceCode());
-        PythonBuildResponse<KnowledgeFileCountResult> response =
-            feignPythonBuildService.fileCount(qaRequest, request.getResourceId());
-        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.fileCount"));
-        return response.getResultObject();
+    public KnowledgeFileCountResult fileCount(KnowledgeFileCountRequest knowledgeFileCountRequest) {
+        SsResource ssResource = loadDatasetResource(knowledgeFileCountRequest.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+        KbKnowledgeStatus kbKnowledgeStatus = new KbKnowledgeStatus();
+        kbKnowledgeStatus.setKnCodeList(Collections.singletonList(ssResource.getResourceCode()));
+        kbKnowledgeStatus.setExcludePathPrefixList(knowledgeFileCountRequest.getExcludePathPrefixList());
+        // 旧的知识服务 fileCount 不支持排除目录；复用已支持路由的批量 status 接口。
+        PythonBuildResponse<KnowledgeStatusResult> knowledgeStatusResponse =
+            feignPythonBuildService.knowledgeStatus(kbKnowledgeStatus);
+        assertPythonBuildSuccess(knowledgeStatusResponse, I18nUtil.get("dataset.operation.fileCount"));
+        KnowledgeStatusResult knowledgeStatusResult = knowledgeStatusResponse.getResultObject();
+        if (knowledgeStatusResult == null || knowledgeStatusResult.getData() == null
+                || knowledgeStatusResult.getData().size() != 1) {
+            throw new BaseException(I18nUtil.get("dataset.file.count.response.invalid"));
+        }
+        KnowledgeStatusResult.Item knowledgeStatusItem = knowledgeStatusResult.getData().get(0);
+        // 缺项、错误库编码及无效数量不能伪装成空云盘。
+        if (knowledgeStatusItem == null
+                || !Objects.equals(ssResource.getResourceCode(), knowledgeStatusItem.getKnCode())
+                || knowledgeStatusItem.getFileCount() == null || knowledgeStatusItem.getFileCount() < 0) {
+            throw new BaseException(I18nUtil.get("dataset.file.count.response.invalid"));
+        }
+        KnowledgeFileCountResult knowledgeFileCountResult = new KnowledgeFileCountResult();
+        knowledgeFileCountResult.setFileCount(knowledgeStatusItem.getFileCount());
+        return knowledgeFileCountResult;
     }
 
     /** 按 QA glob 单层通配规则匹配知识库文件或目录。 */

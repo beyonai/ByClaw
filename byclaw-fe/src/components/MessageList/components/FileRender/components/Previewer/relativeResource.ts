@@ -33,6 +33,26 @@ export const resolveRelativeFilePath = (filePath: string, resourcePath: string) 
   return normalizeFilePath(`${directoryPath}${normalizedResourcePath}`);
 };
 
+/** 过程文件的相对资源可以回到会话根目录，但不能进入其他会话。 */
+export function resolveSessionResourcePath(filePath: string, resourcePath: string) {
+  const normalizedPath = normalizeFilePath(filePath);
+  const sessionRoot = normalizedPath.match(/^\/(?:by\/)?\.sessions\/[^/]+(?=\/)/)?.[0];
+  const resolvedPath = resolveRelativeFilePath(normalizedPath, resourcePath);
+  if (!sessionRoot || resolvedPath.startsWith(`${sessionRoot}/`)) return resolvedPath;
+
+  const segments = normalizedPath.slice(sessionRoot.length).split('/').filter(Boolean).slice(0, -1);
+  const relativePath = resourcePath.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+  relativePath.split('/').forEach((segment) => {
+    if (!segment || segment === '.') return;
+    if (segment === '..') {
+      segments.pop();
+      return;
+    }
+    segments.push(segment);
+  });
+  return normalizeFilePath(`${sessionRoot}/${segments.join('/')}`);
+}
+
 const normalizeResourceBlob = (blob: Blob, resourcePath: string) => {
   if (!blob.size) throw new Error(getIntl().formatMessage({ id: 'fileBrowser.preview.empty' }));
   const mimeType = getMimeType(resourcePath);
@@ -89,15 +109,16 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
 
 export const createRelativePathResourceResolver = (
   filePath: string,
-  downloadResource: (resolvedPath: string) => Promise<Blob>
+  downloadResource: (resolvedPath: string) => Promise<Blob>,
+  { useSessionResourceUrl = true, resolveResourcePath = resolveRelativeFilePath } = {}
 ) => {
   const resourceCache = new Map<string, Promise<Blob>>();
 
   return async (resourcePath: string) => {
     if (isExternalResourcePath(resourcePath)) return resourcePath;
 
-    const resolvedPath = resolveRelativeFilePath(filePath, resourcePath);
-    if (isSessionFilePath(filePath)) return getCommonFilePreviewUrl(resolvedPath);
+    const resolvedPath = resolveResourcePath(filePath, resourcePath);
+    if (useSessionResourceUrl && isSessionFilePath(filePath)) return getCommonFilePreviewUrl(resolvedPath);
 
     const cached = resourceCache.get(resolvedPath);
     if (cached) return cached;

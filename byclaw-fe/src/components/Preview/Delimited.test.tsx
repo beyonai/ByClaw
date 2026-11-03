@@ -31,7 +31,12 @@ describe('CSV and TSV table preview', () => {
     const { rerender } = render(<Delimited content={'"unterminated'} type="csv" />);
     expect(screen.getByText('fileRender.delimitedMalformed')).toBeVisible();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    rerender(<Delimited content={'a'.repeat(2 * 1024 * 1024 + 1)} type="csv" />);
-    expect(screen.getByText('fileRender.delimitedTooLarge')).toBeVisible();
+    const size = jest.spyOn(Blob.prototype, 'size', 'get').mockReturnValue(50_000_001);
+    try {
+      rerender(<Delimited content="oversized" type="csv" />);
+      expect(screen.getByText('fileRender.delimitedTooLarge')).toBeVisible();
+    } finally {
+      size.mockRestore();
+    }
   });
 });

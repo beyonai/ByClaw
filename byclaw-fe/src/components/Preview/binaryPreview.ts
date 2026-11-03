@@ -1,9 +1,12 @@
+import { BYTES_PER_MB, DEFAULT_PREVIEW_BYTES } from './previewSize';
+
 /** 解码前限制输入，解码后再限制实际像素/字节，避免小文件展开后耗尽页面内存。 */
-export const MAX_BINARY_PREVIEW_BYTES = 20 * 1024 * 1024;
+export const MAX_BINARY_PREVIEW_BYTES = DEFAULT_PREVIEW_BYTES;
 export const MAX_IMAGE_PAGES = 100;
 export const MAX_IMAGE_PIXELS = 50 * 1000 * 1000;
 export const MAX_ARCHIVE_ENTRIES = 1000;
-export const MAX_ARCHIVE_TEXT_BYTES = 2 * 1024 * 1024;
+export const MAX_ARCHIVE_ENTRY_BYTES = 20 * BYTES_PER_MB;
+export const MAX_ARCHIVE_EXPANDED_BYTES = DEFAULT_PREVIEW_BYTES;
 export const PREVIEW_WORKER_TIMEOUT = 30_000;
 
 export class BinaryPreviewError extends Error {

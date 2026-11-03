@@ -1,9 +1,10 @@
 import type { LibarchiveWasm } from 'libarchive-wasm';
-import { BinaryPreviewError, MAX_ARCHIVE_ENTRIES, MAX_BINARY_PREVIEW_BYTES, type ArchiveEntry } from './binaryPreview';
+import { BinaryPreviewError, MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_EXPANDED_BYTES, type ArchiveEntry } from './binaryPreview';
 import { archiveEntryLimit, canPreviewArchiveName, isSafeArchivePath } from './archiveDecoder';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 
 export type NativeArchiveType = 'rar' | '7z' | 'tar';
-export const MAX_ARCHIVE_EXPANDED_BYTES = 50 * 1024 * 1024;
+export { MAX_ARCHIVE_EXPANDED_BYTES };
 const CHUNK_BYTES = 64 * 1024;
 
 /** TAR 没有固定魔数（旧格式也有效），用首块校验和排除误标文件。 */
@@ -32,7 +33,7 @@ export function validateTar(buffer: ArrayBuffer) {
 /** 先校验签名；RAR 分卷/加密头不能作为普通单文件目录展示。 */
 export function validateNativeArchive(buffer: ArrayBuffer, type: NativeArchiveType) {
   if (!buffer.byteLength) throw new BinaryPreviewError('invalid');
-  if (buffer.byteLength > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+  if (buffer.byteLength > MAX_ARCHIVE_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
   if (type === 'tar') return validateTar(buffer);
   const bytes = new Uint8Array(buffer);
   const starts = (values: number[]) => values.every((byte, index) => bytes[index] === byte);

@@ -7,7 +7,7 @@ jest.mock('@umijs/max', () => ({
 }));
 jest.mock('@/service/filePreview', () => ({
   convertLegacyOfficePreview: jest.fn(),
-  MAX_LEGACY_PREVIEW_SIZE: 20 * 1024 * 1024,
+  MAX_LEGACY_PREVIEW_SIZE: 50_000_000,
 }));
 jest.mock('./Html', () => ({
   HtmlRender: ({ href }: { href: string }) => <iframe title="converted PDF" src={href} />,

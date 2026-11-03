@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify';
 import { BinaryPreviewError } from './binaryPreview';
+import { DEFAULT_PREVIEW_BYTES } from './previewSize';
 
-export const MAX_RTF_BYTES = 2 * 1024 * 1024;
+export const MAX_RTF_BYTES = DEFAULT_PREVIEW_BYTES;
 const MAX_RTF_CONTROLS = 20_000;
 const isLetter = (value: number) => (value >= 65 && value <= 90) || (value >= 97 && value <= 122);
 const isDigit = (value: number) => value >= 48 && value <= 57;

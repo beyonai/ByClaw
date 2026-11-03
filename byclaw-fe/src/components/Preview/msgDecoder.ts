@@ -3,7 +3,7 @@ import { Reader, type CFolder } from '@kenjiuno/msgreader/lib/Reader';
 import { BinaryPreviewError, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
 import { emlAttachmentName } from './emlDecoder';
 import { getPreviewMimeType } from './formats';
-import { MAX_EML_ATTACHMENTS, MAX_EML_BODY_BYTES, type EmlContent } from './emlTypes';
+import { MAX_EMAIL_ATTACHMENT_BYTES, MAX_EML_ATTACHMENTS, MAX_EML_BODY_BYTES, type EmlContent } from './emlTypes';
 import { decodeMsgRtf } from './msgRtfDecoder';
 
 const codepages: Record<number, string> = {
@@ -109,11 +109,11 @@ export function decodeMsg(buffer: ArrayBuffer): EmlContent {
   const attachments = (email.attachments || []).map((attachment, id) => {
     // 引用型附件只有路径，不访问文件系统或网络；明确保留一个不可下载的附件条目。
     const unavailable = !attachment.innerMsgContent && typeof attachment.dataId !== 'number';
-    if ((attachment.contentLength || 0) > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+    if ((attachment.contentLength || 0) > MAX_EMAIL_ATTACHMENT_BYTES) throw new BinaryPreviewError('limit');
     const decoded = unavailable ? undefined : reader.getAttachment(attachment);
     const bytes = decoded?.content || new Uint8Array();
     total += bytes.byteLength;
-    if (total > MAX_BINARY_PREVIEW_BYTES) throw new BinaryPreviewError('limit');
+    if (total > MAX_EMAIL_ATTACHMENT_BYTES) throw new BinaryPreviewError('limit');
     const name = emlAttachmentName(
       decoded?.fileName || attachment.fileName || attachment.fileNameShort || attachment.name
     );

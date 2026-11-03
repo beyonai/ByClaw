@@ -9,6 +9,7 @@ export const OFFICE_VARIANTS = {
 } as const;
 
 export type OfficeVariantType = keyof typeof OFFICE_VARIANTS;
+export const MAX_OFFICE_PART_BYTES = 20 * 1024 * 1024;
 export const MAX_OFFICE_EXPANDED_BYTES = 50 * 1024 * 1024;
 export const MAX_OFFICE_METADATA_BYTES = 2 * 1024 * 1024;
 

@@ -1,4 +1,5 @@
 import { OFFICE_VARIANTS } from './officeVariantTypes';
+import { DEFAULT_PREVIEW_BYTES, LARGE_PREVIEW_BYTES } from './previewSize';
 
 // 预览入口与渲染器共用格式清单，避免列表允许打开但内容区没有对应渲染分支。
 export const CODE_TEXT_EXTENSIONS = [
@@ -222,7 +223,9 @@ export function getPreviewExtension(name: string): string {
 
 const normalizeType = (type: string) => (type === 'tar.gz' ? 'tgz' : TYPE_ALIASES[type] || type);
 
-export const MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024;
+// 兼容仍引用文本默认档的调用方。
+export const MAX_TEXT_PREVIEW_SIZE = DEFAULT_PREVIEW_BYTES;
+export const MAX_HTML_PREVIEW_SIZE = LARGE_PREVIEW_BYTES;
 
 const TEXT_FILE_NAMES = new Set([
   '.gitattributes',
@@ -414,11 +417,26 @@ export function getPreviewMimeType(name: string): string {
   return PREVIEW_MIME_TYPES[normalizeType(getPreviewExtension(name))] || '';
 }
 
-export function isTextPreviewFile(name: string) {
-  const type = resolvePreviewType(undefined, name);
-  return ['md', 'html', 'h5', 'svg', ...TEXT_PREVIEW_TYPES].includes(type);
+export function isTextPreviewType(type: string): boolean {
+  return ['md', 'svg', ...HTML_PREVIEW_TYPES, ...TEXT_PREVIEW_TYPES].includes(type);
 }
 
-export function canPreviewName(name: string, size?: number) {
-  return isPreviewableName(name) && (!isTextPreviewFile(name) || size === undefined || size <= MAX_TEXT_PREVIEW_SIZE);
+export function isTextPreviewFile(name: string): boolean {
+  return isTextPreviewType(resolvePreviewType(undefined, name));
+}
+
+export function getPreviewSizeLimit(type: string): number | undefined {
+  if (!PREVIEWABLE_TYPES.includes(type)) return undefined;
+  const isLarge = type === 'md' || HTML_PREVIEW_TYPES.includes(type) ||
+    VIDEO_PREVIEW_TYPES.includes(type) || ARCHIVE_PREVIEW_TYPES.includes(type);
+  return isLarge ? LARGE_PREVIEW_BYTES : DEFAULT_PREVIEW_BYTES;
+}
+
+export function isPreviewSizeExceeded(name: string, size?: number): boolean {
+  const limit = getPreviewSizeLimit(resolvePreviewType(undefined, name));
+  return limit !== undefined && size !== undefined && size > limit;
+}
+
+export function canPreviewName(name: string, size?: number): boolean {
+  return isPreviewableName(name) && !isPreviewSizeExceeded(name, size);
 }

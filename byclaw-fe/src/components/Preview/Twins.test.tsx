@@ -454,19 +454,20 @@ describe('PreViewFile text validation', () => {
 
   it('keeps download available but does not read oversized text files', async () => {
     const read = jest.fn();
-    const file = new Blob(['a'.repeat(2 * 1024 * 1024 + 1)]);
-    Object.defineProperty(file, 'text', { value: read });
+    const file = new Blob(['text']);
+    // 只替换大小元数据，验证组件在读取正文前拒绝超限文件。
+    Object.defineProperties(file, { size: { value: 100_000_001 }, text: { value: read } });
     render(<PreViewFile data={file} title="large.md" />);
     expect(await screen.findByText('preview.tooLarge')).toBeVisible();
     expect(read).not.toHaveBeenCalled();
-    expect(screen.getByTestId('icon-a-Downloadxiazai')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'common.download' })).toBeVisible();
   });
 
   it('never starts the HTML renderer or its resource loading for oversized HTML', async () => {
     mockHtmlRender.mockClear();
-    const file = new Blob(['a'.repeat(2 * 1024 * 1024 + 1)]);
+    const file = new Blob(['<p>report</p>']);
     const read = jest.fn();
-    Object.defineProperty(file, 'text', { value: read });
+    Object.defineProperties(file, { size: { value: 100_000_001 }, text: { value: read } });
     render(<PreViewFile data={file} title="large.html" resolveHtmlResource={jest.fn()} />);
     expect(await screen.findByText('preview.tooLarge')).toBeVisible();
     expect(read).not.toHaveBeenCalled();

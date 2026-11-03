@@ -16,10 +16,17 @@ interface MessageFilePreviewPanelProps {
   fileItem: IFile;
   fileType: string;
   fileName: string;
-  onClose: () => void;
+  onClose?: () => void;
+  onOpenRelativeFile?: (path: string) => void;
 }
 
-const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileItem, fileType, fileName, onClose }) => {
+const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({
+  fileItem,
+  fileType,
+  fileName,
+  onClose,
+  onOpenRelativeFile,
+}) => {
   const intl = useIntl();
   const { onPreview, previewInfo, previewing } = usePreview();
   const resolveRelativeResource = useMemo(
@@ -33,19 +40,24 @@ const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileI
 
   return (
     <div className={fileSiderStyles.previewPanel}>
-      <div className={fileSiderStyles.previewHeader}>
-        <span className={fileSiderStyles.previewTitle} title={fileName}>
-          {fileName}
-        </span>
-        <button
-          type="button"
-          className={fileSiderStyles.previewClose}
-          onClick={onClose}
-          aria-label={intl.formatMessage({ id: 'file.preview.close' })}
-        >
-          <CloseOutlined />
-        </button>
-      </div>
+      {onClose && (
+        <div className={fileSiderStyles.previewHeader}>
+          <span
+            className={fileSiderStyles.previewTitle}
+            title={fileName}
+          >
+            {fileName}
+          </span>
+          <button
+            type="button"
+            className={fileSiderStyles.previewClose}
+            onClick={onClose}
+            aria-label={intl.formatMessage({ id: 'file.preview.close' })}
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      )}
       <div className={fileSiderStyles.previewBody}>
         <Spin spinning={previewing || previewInfo.loading} wrapperClassName="full-height-spin">
           {previewInfo.error && <Alert type="warning" showIcon message={previewInfo.error} />}
@@ -57,6 +69,7 @@ const MessageFilePreviewPanel: React.FC<MessageFilePreviewPanelProps> = ({ fileI
                 title={fileName}
                 resolveMarkdownImage={resolveRelativeResource}
                 resolveHtmlResource={resolveRelativeResource}
+                onHtmlLinkClick={onOpenRelativeFile}
                 className={fileSiderStyles.previewContent}
               />
             </React.Suspense>
