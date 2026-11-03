@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.state.domain.groupchat.application;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
@@ -13,6 +15,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.dto.AggregatedGroupChatPage;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatListItemResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -149,7 +152,7 @@ public class AggregatedGroupChatService {
                     null, new TypeReference<Map<String, Object>>() { });
                 Object list = raw == null ? null : raw.get("list");
                 groups = list == null ? List.of()
-                    : mapper.convertValue(list, new TypeReference<List<GroupChatListItemResponse>>() { });
+                    : convertNodeGroups(list);
             }
             int rawSize = groups.size();
             if (skip >= rawSize) return new TenantResult(List.of(), rawSize == pageSize, null);
@@ -173,6 +176,20 @@ public class AggregatedGroupChatService {
             return new TenantResult(List.of(), false, new AggregatedGroupChatPage.FailedTenant(
                 source.displayId(), source.displayName(), reason(error)));
         }
+    }
+
+    /** Node 使用带时区的 ISO 时间；只在内部转换边界归一化，保留对外 DTO 的时间格式。 */
+    private List<GroupChatListItemResponse> convertNodeGroups(Object list) {
+        JsonNode rows = mapper.valueToTree(list);
+        for (JsonNode row : rows) {
+            JsonNode timestamp = row.get("latestMessageTime");
+            if (row instanceof ObjectNode object && timestamp != null && timestamp.isTextual()
+                && timestamp.asText().contains("T")) {
+                // 使用时间戳保留时区与毫秒，避免按北京时间重新解释 UTC 时间。
+                object.put("latestMessageTime", OffsetDateTime.parse(timestamp.asText()).toInstant().toEpochMilli());
+            }
+        }
+        return mapper.convertValue(rows, new TypeReference<List<GroupChatListItemResponse>>() { });
     }
 
     /**
