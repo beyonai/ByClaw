@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.service.ingress.vnc;
 
 import java.util.Map;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
@@ -17,8 +18,9 @@ import com.iwhalecloud.byai.manager.domain.tenant.TenantContextInterceptor;
 public class SandboxVncWebSocketConfig {
     @Bean
     public SimpleUrlHandlerMapping sandboxVncWebSocketMapping(SandboxVncTargetResolver resolver,
-        SandboxVncWebSocketHandler handler, AccessTokenVerifyInterceptor authentication,
-        TenantContextInterceptor tenant) {
+        SandboxVncWebSocketHandler handler,
+        @Qualifier("tokenVerifyInterceptor") AccessTokenVerifyInterceptor authentication,
+        @Qualifier("tenantContextInterceptor") TenantContextInterceptor tenant) {
         var websocket = new WebSocketHttpRequestHandler(handler);
         websocket.setHandshakeInterceptors(java.util.List.of(new HandshakeInterceptor() {
             @Override
