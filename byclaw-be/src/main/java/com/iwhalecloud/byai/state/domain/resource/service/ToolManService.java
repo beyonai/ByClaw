@@ -331,6 +331,7 @@ public class ToolManService {
         String resourceDesc = StringUtils.trimToEmpty(root.getString("resourceDesc"));
         String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
         String version = StringUtils.trimToEmpty(root.getString("version"));
+        Long createBy = root.getLong("createBy");
 
         // 如果前端没有传implType，则默认为API （目前智能体调，后续其他传要明确传implType），回头告诉伟斌必传过来
         String implType = StringUtils.defaultIfBlank(StringUtils.trimToEmpty(root.getString("implType")),
@@ -355,7 +356,7 @@ public class ToolManService {
         // 6. 主表统一复用 SsResourceService：
         // 新增走 createResource，更新走 update。
         SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceSourcePkId, resourceBizType, resourceCode,
-            resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
+            resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType, createBy);
         boolean runtimeAvailable = ResourceLifecyclePolicy.isRuntimeAvailable(resource);
 
         // 7. 子表统一保留两份内容：
@@ -420,6 +421,7 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.resource.biz.type.missing"));
         }
         var request = com.iwhalecloud.byai.manager.dto.resource.EnterpriseResourceSyncRequest.parse(root);
+        normalizeSyncCreator(root);
         enterpriseResourceSyncService.validate(request);
         if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
@@ -475,6 +477,23 @@ public class ToolManService {
     private Long resolveAddToolFromThirdCatalogId(JSONObject root) {
         Long bodyCatalogId = root.getLong("catalogId");
         return bodyCatalogId != null ? bodyCatalogId : 0L;
+    }
+
+    /** Accept numeric and string IDs, without silently truncating malformed creator values. */
+    private void normalizeSyncCreator(JSONObject root) {
+        Object value = root.get("createBy");
+        if (value == null) return;
+        String text = value.toString();
+        try {
+            if (!(value instanceof Number || value instanceof String) || !text.matches("[0-9]+")) {
+                throw new NumberFormatException();
+            }
+            long creator = Long.parseLong(text);
+            if (creator <= 0) throw new NumberFormatException();
+            root.put("createBy", creator);
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.creator.invalid"), error);
+        }
     }
 
     /**
@@ -1627,7 +1646,7 @@ public class ToolManService {
      */
     private SsResource saveOrUpdateToolJsonNewMain(SsResource existing, Long resourceSourcePkId, String resourceBizType,
         String resourceCode, String resourceName, String resourceDesc, String ownerType, String systemCode,
-        String version, Long catalogId, String implType) {
+        String version, Long catalogId, String implType, Long createBy) {
 
         if (existing == null) {
             SsResource myResource = new SsResource();
@@ -1641,6 +1660,10 @@ public class ToolManService {
             myResource.setSystemCode(systemCode);
             myResource.setResourceVersionId(version);
             myResource.setCatalogId(catalogId);
+
+            if (createBy != null && com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.isImporting(myResource)) {
+                myResource.setCreateBy(createBy);
+            }
 
             resourceRuntimeInfoResolver.fillResource(myResource,
                 resourceRuntimeInfoResolver.resolveToolJson(resourceBizType, implType));
@@ -1664,6 +1687,9 @@ public class ToolManService {
         existing.setSystemCode(effectiveSystemCode);
         existing.setCatalogId(effectiveCatalogId);
         existing.setResourceVersionId(version);
+        if (createBy != null && com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.isImporting(existing)) {
+            existing.setCreateBy(createBy);
+        }
         existing.setUpdateBy(userId);
         existing.setUpdateTime(now);
         existing.setPublishTime(now);

@@ -367,7 +367,8 @@ public class ByClawSkillResourceApplicationService {
         boolean changed = previous == null || !DigestUtils.sha256Hex(bytes).equals(previous.getSkillPackageHash());
         Integer previousStatus = existing == null ? null : existing.getResourceStatus();
         Date previousPublishTime = existing == null ? null : existing.getPublishTime();
-        SsResource resource = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, catalogId, existing, systemCode);
+        SsResource resource = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, catalogId, existing, systemCode,
+            root.getLong("createBy"));
         if (existing == null) {
             authApplicationService.ensureCreatorDefaultPrivileges(resource);
         } else {
@@ -1167,8 +1168,14 @@ public class ByClawSkillResourceApplicationService {
 
     private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId,
         SsResource existing, String systemCode) {
+        return saveOrUpdateSkillResource(metadata, ownerType, catalogId, existing, systemCode, null);
+    }
+
+    private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId,
+        SsResource existing, String systemCode, Long createBy) {
         if (existing == null) {
             SsResource resource = new SsResource();
+            resource.setCreateBy(createBy);
             resource.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
             resource.setSystemCode(systemCode);
             resource.setResourceType("ATOM");
@@ -1194,6 +1201,7 @@ public class ByClawSkillResourceApplicationService {
 
         assertSkillManagePermission(existing);
 
+        if (createBy != null) existing.setCreateBy(createBy);
         existing.setResourceName(metadata.skillName());
         existing.setResourceDesc(metadata.skillDesc());
         existing.setResourceStatus(ResourceStatus.ON_SHELF.getNum());

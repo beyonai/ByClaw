@@ -45,6 +45,9 @@ public class DatasetImportDto {
 
     private Long catalogId;
 
+    /** Source-system creator, used only by the resource synchronization API. */
+    private Long createBy;
+
     /**
      * 知识库服务列表，保留原始JSON结构
      */

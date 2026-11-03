@@ -1721,6 +1721,42 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
     }
 
     @Test
+    void thirdPartySyncPersistsCreatorOnCreateAndUpdateWithoutImpersonatingIt() {
+        String url = "https://example.invalid/creator.zip";
+        var syncing = spy(service);
+        doReturn(skillZipBytes("creator"))
+            .when(syncing).downloadThirdPartySkillPackage(url);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(call -> {
+            SsResource created = call.getArgument(0);
+            assertThat(created.getCreateBy()).isEqualTo(1168L);
+            created.setResourceId(7301L);
+            return created;
+        });
+        var root = com.alibaba.fastjson.JSON.parseObject("{\"systemCode\":\"WHALE_AGENT\",\"resourceCode\":\"creator\","
+            + "\"resourceName\":\"Creator test\",\"downloadUrl\":\"" + url + "\",\"createBy\":\"1168\"}");
+        syncing.syncEnterpriseSkill(root, 10L);
+        var capture = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(capture.capture());
+        SsResource stored = capture.getValue();
+        assertThat(stored.getCreateBy()).isEqualTo(1168L);
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(stored);
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", "creator")).thenReturn(stored);
+        when(authApplicationService.hasResourceManagePermission(stored)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(stored)).thenReturn(stored);
+        root.put("createBy", 2268L);
+        syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+        root.remove("createBy");
+        syncing.syncEnterpriseSkill(root, 10L);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(10001L);
+        when(authApplicationService.hasResourceManagePermission(stored)).thenReturn(false);
+        root.put("createBy", 10001L);
+        assertThatThrownBy(() -> syncing.syncEnterpriseSkill(root, 10L)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+    }
+
+    @Test
     void enterpriseSyncKeepsOffShelfLifecycleAndPackageVersionForIdenticalBytes() {
         String url = "https://example.invalid/rotated-signature.zip";
         byte[] bytes = skillZipBytes("demo");

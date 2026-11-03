@@ -27,9 +27,15 @@ public final class EnterpriseResourceSyncContext {
 
     public static boolean skipsImportEnterpriseCheck(SsResource resource) {
         ImportIdentity identity = IMPORT.get();
-        return identity != null && identity.trusted() && resource != null
-            && Objects.equals(CurrentUserHolder.getEnterpriseId(), resource.getComAcctId()) && "enterprise".equals(resource.getOwnerType())
-            && EnterpriseResourceSyncRequest.TYPES.contains(resource.getResourceBizType())
+        return identity != null && identity.trusted() && isImporting(resource)
+            && Objects.equals(CurrentUserHolder.getEnterpriseId(), resource.getComAcctId())
+            && "enterprise".equals(resource.getOwnerType());
+    }
+
+    /** Identifies the API import without changing its tenant or management permission checks. */
+    public static boolean isImporting(SsResource resource) {
+        ImportIdentity identity = IMPORT.get();
+        return identity != null && resource != null && EnterpriseResourceSyncRequest.TYPES.contains(resource.getResourceBizType())
             && Objects.equals(identity.systemCode(), resource.getSystemCode())
             && Objects.equals(identity.resourceBizType(), resource.getResourceBizType())
             && Objects.equals(identity.resourceCode(), resource.getResourceCode());

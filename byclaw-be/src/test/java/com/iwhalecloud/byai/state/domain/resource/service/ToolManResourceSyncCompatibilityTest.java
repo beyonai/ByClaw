@@ -50,6 +50,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
     private SsResourceService resources;
     private SsResource resource;
     private Boolean manageDuringImport;
+    private Long userIdDuringImport;
     private DatasetApplicationService datasets;
 
     @BeforeEach
@@ -274,6 +275,23 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
         verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    void enterpriseCreatorDoesNotReplaceTheAuthenticatedSyncPrincipal(String type) {
+        resource.setResourceBizType(type);
+        service.addToolFromThird(request(type, "{\"ownerType\":\"enterprise\",\"createBy\":\"8\",\"autoAuthorize\":false}"));
+        assertThat(userIdDuringImport).isEqualTo(9L);
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(9L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1", "1.5", "true", "\"abc\"", "\"\"", "\"9223372036854775808\"", "{}"})
+    void malformedCreatorIsRejectedBeforeAnyImport(String creator) {
+        assertThatThrownBy(() -> service.addToolFromThird(request("SKILL", "{\"createBy\":" + creator + "}")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("createBy");
+        verify(resources, never()).lockSkillImport(any());
+    }
+
     private String request(String type, String fields) {
         JSONObject json = JSONObject.parseObject(fields);
         json.put("resourceBizType", type);
@@ -284,6 +302,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
 
     private Map<String, Object> importResult() {
         manageDuringImport = auth.hasResourceManagePermission(resource);
+        userIdDuringImport = CurrentUserHolder.getCurrentUserId();
         return new HashMap<>(Map.of("resourceId", "10"));
     }
 }

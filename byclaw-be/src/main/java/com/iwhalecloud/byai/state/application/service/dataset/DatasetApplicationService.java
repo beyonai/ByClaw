@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.dataset;
 
+import com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -1994,6 +1996,9 @@ public class DatasetApplicationService {
         myResource.setSystemCode(datasetImportDto.getSystemCode());
         myResource.setResourceVersionId(datasetImportDto.getVersion());
         myResource.setCatalogId(datasetImportDto.getCatalogId());
+        if (datasetImportDto.getCreateBy() != null && EnterpriseResourceSyncContext.isImporting(myResource)) {
+            myResource.setCreateBy(datasetImportDto.getCreateBy());
+        }
 
         fillKnowledgeResourceImplInfo(myResource);
 
@@ -2035,6 +2040,9 @@ public class DatasetApplicationService {
         existing.setResourceVersionId(dto.getVersion());
         existing.setOwnerType(StringUtils.trimToEmpty(ownerType));
         existing.setCatalogId(dto.getCatalogId());
+        if (dto.getCreateBy() != null && EnterpriseResourceSyncContext.isImporting(existing)) {
+            existing.setCreateBy(dto.getCreateBy());
+        }
         fillKnowledgeResourceImplInfo(existing);
 
         existing.setUpdateBy(CurrentUserHolder.getCurrentUserId());

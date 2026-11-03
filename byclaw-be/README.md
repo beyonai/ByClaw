@@ -1073,6 +1073,13 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 也不会因此新增授权或自动关联；原有授权开关语义不变。关联资源 Redis 写入失败或缺少运行 JSON 时，
 不能发布员工的新快照或把同步标为全部生效。`VIEW`、`OBJECT` 和 `DIG_EMPLOYEE` 不属于此接口支持的同步类型。
 
+资源同步 `/tool/addToolFromThird` 在现有企业资源范围内统一读取顶层 `createBy`，支持正整数或数字字符串
+（例如 `1168`、`"1168"`）。技能、工具、MCP、智能体和知识库的新增、更新均写入 `ss_resource.create_by`。
+本改动不扩展开源接口的资源范围：个人资源和 `KG_CLOUD` 继续不支持。企业调用仍按实际调用方校验权限和租户，
+不切换为创建人身份；先校验原资源权限，再写创建人。省略 `createBy` 或显式传 `null` 时，新增沿用当前上下文，
+更新保留原创建人；非法、非正整数或超出 Long 范围的 ID 在导入前拒绝。普通页面导入保留原创建人规则。
+无需数据迁移；历史记录可携带正确的 `createBy` 再次同步修正。
+
 ### 技能运行状态
 
 手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。

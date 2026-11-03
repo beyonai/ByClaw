@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.i18n.I18nTestSupport;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext;
 import com.iwhalecloud.byai.manager.domain.resource.service.*;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -53,7 +55,7 @@ class DatasetOwnershipManagementTest extends I18nTestSupport {
             stored = call.getArgument(0);
             stored.setResourceId(100L);
             if (stored.getSystemCode() == null) stored.setSystemCode("BYAI");
-            stored.setCreateBy(88L);
+            if (stored.getCreateBy() == null) stored.setCreateBy(88L);
             return stored;
         });
         when(resources.findById(100L)).thenAnswer(call -> stored);
@@ -116,6 +118,31 @@ class DatasetOwnershipManagementTest extends I18nTestSupport {
             assertThat(target.getString("domainURL")).isEqualTo("https://example.invalid/updated");
             assertThat(storedDocument.getTargetContent()).doesNotContain("_byclawKnowledgeOwnership");
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"KG_DOC,enterprise", "KG_DB,enterprise", "KG_QA,enterprise", "KG_TERM,enterprise"})
+    void synchronizedKnowledgePersistsCreator(String type, String owner) throws Exception {
+        when(resources.findByImportIdentity("WHALE_AGENT", type, "22")).thenAnswer(call -> stored);
+        JSONObject json = JSONObject.parseObject(new String(imported("WHALE_AGENT", owner, false).getBytes(), StandardCharsets.UTF_8));
+        json.put("resourceBizType", type); json.put("createBy", "1168");
+        java.util.function.Supplier<Long> importAction = () -> service.importDatasetJson(owner, 0L,
+            new MockMultipartFile("file", "knowledge.json", "application/json", json.toJSONString().getBytes(StandardCharsets.UTF_8)));
+        EnterpriseResourceSyncContext.execute(false, "WHALE_AGENT", type, "22", importAction);
+        assertThat(stored.getCreateBy()).isEqualTo(1168L);
+        json.put("createBy", 2268L);
+        EnterpriseResourceSyncContext.execute(false, "WHALE_AGENT", type, "22", importAction);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+        json.put("createBy", null);
+        EnterpriseResourceSyncContext.execute(false, "WHALE_AGENT", type, "22", importAction);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+        json.put("createBy", 88L);
+        importAction.get();
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
+        when(auth.hasResourceManagePermission(any())).thenReturn(false);
+        assertThatThrownBy(() -> EnterpriseResourceSyncContext.execute(false, "WHALE_AGENT", type, "22", importAction))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(stored.getCreateBy()).isEqualTo(2268L);
     }
 
     @Test
