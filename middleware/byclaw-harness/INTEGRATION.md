@@ -232,3 +232,7 @@ Parent headroom is reserved once, so new users do not repeatedly enlarge the par
 Local tests exercise allocation, fixed mount snapshots, provider manifests, binding validation and real DSH JSONL reopen/write ownership using temporary local directories. ACS/NAS nested quota enforcement, cross-Pod file locking, actual mount behavior and concurrent chat latency still require deployment acceptance.
 
 A NAS quota limits storage consumption. A shared process and UID are a trusted execution boundary; this is **not** an operating-system security boundary against malicious plugins or arbitrary code that can access other mounted directories. Browser temporary files remain ephemeral and host-local. Container restarts do not remove durable homes.
+
+### Full-image VNC startup and MicroVM readiness
+
+`Dockerfile` and `Dockerfile.extensions` default to `BYCLAW_BROWSER_STARTUP=eager`. The local browser and shared noVNC listener must start before a MicroVM's declared-port readiness check can succeed, including a declared HTTP `vnc` port at 8081. Do not override the full image to `on-demand` when 8081 participates in readiness. Slim/shared hosts and the separate slim tools image keep their own startup contracts.
