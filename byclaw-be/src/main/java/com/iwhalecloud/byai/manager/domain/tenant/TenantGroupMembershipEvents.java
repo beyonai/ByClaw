@@ -22,29 +22,38 @@ final class TenantGroupMembershipEvents {
      */
     static void joined(com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.MemberJoinedHook hooks,
                        TenantRequestContext tenant, String sessionId, TenantNodeModels.CommandResult result) {
+        boolean membershipCommand = result == null || "CREATE_GROUP".equals(result.operation())
+            || "ADD_MEMBERS".equals(result.operation()) || "JOIN_GROUP".equals(result.operation());
         if (result == null || result.data() == null) {
-            LOG.info("用户添加触发勾子失败,result={}", JsonUtil.toJSONString(result));
+            if (membershipCommand) {
+                LOG.info("用户添加触发勾子失败，命令结果或data为空,userId={},enterpriseId={},groupId={},result={}", tenant.userId(), tenant.enterpriseId(), sessionId, JsonUtil.toJSONString(result));
+            }
             return;
         }
         var notices = result.data().path("savedMembers");
         if (!notices.isArray()) {
-            LOG.info("用户添加触发勾子失败,notices={}", JsonUtil.toJSONString(notices));
+            if (membershipCommand) {
+                LOG.info("用户添加触发勾子失败，savedMembers缺失或非数组,userId={},enterpriseId={},groupId={},result={},data={}", tenant.userId(), tenant.enterpriseId(), sessionId, JsonUtil.toJSONString(result), result.data());
+            }
             return;
         }
         if (notices.isEmpty()) {
-            LOG.info("用户添加未触发勾子，新增成员为空,result={}", JsonUtil.toJSONString(result));
+            LOG.info("用户添加未触发勾子，新增成员为空,userId={},enterpriseId={},groupId={},result={},data={}", tenant.userId(), tenant.enterpriseId(), sessionId, JsonUtil.toJSONString(result), result.data());
         }
         var users = new java.util.HashSet<String>();
         for (var notice : notices) {
             if (!sessionId.equals(notice.path("groupId").asText())
                 || !Long.toString(tenant.enterpriseId()).equals(notice.path("enterpriseId").asText())) {
-                LOG.info("用户添加触发勾子失败，成员归属不一致,notice={}", JsonUtil.toJSONString(notice));
+                LOG.info("用户添加触发勾子失败，成员归属不一致,userId={},enterpriseId={},groupId={},requestId={},notice={}", tenant.userId(), tenant.enterpriseId(), sessionId, result.requestId(), notice);
                 throw new IllegalStateException("groupchat.member.ownership.unconfirmed");
             }
             if (users.add(notice.path("byaiSessionMemberId").asText())) {
-                LOG.info("用户添加开始触发勾子,notice={}", JsonUtil.toJSONString(notice));
+                LOG.info("用户添加开始触发勾子,userId={},enterpriseId={},groupId={},requestId={},notice={}", tenant.userId(), tenant.enterpriseId(), sessionId, result.requestId(), notice);
                 hooks.memberJoined(sessionId, tenant.enterpriseId(), notice.path("userId").asText(),
                     notice.path("invitedBy").asText(), notice.path("byaiSessionMemberId").asText());
+                LOG.info("用户添加调用勾子完成,requestId={},notice={}", result.requestId(), notice);
+            } else {
+                LOG.info("用户添加跳过重复成员勾子,requestId={},notice={}", result.requestId(), notice);
             }
         }
     }

@@ -88,6 +88,9 @@ public class TenantGroupInvitationService {
 
     @org.springframework.transaction.annotation.Transactional
     public Object handle(TenantRequestContext tenant, String method, Object[] args) {
+        if ("joinInvitation".equals(method)) {
+            LOG.info("用户链接入群开始,userId={},enterpriseId={}", tenant.userId(), tenant.enterpriseId());
+        }
         if ("createInvitation".equals(method)) {
             ((jakarta.servlet.http.HttpServletResponse) args[1]).setHeader("Cache-Control", "no-store");
             JsonNode invitation = data.write(tenant, "POST", "/invitations", args[0].toString(),
@@ -121,6 +124,7 @@ public class TenantGroupInvitationService {
         String id = preview.path("groupNumber").asText();
         String name = CurrentUserHolder.getCurrentUserName();
         boolean alreadyMember = preview.path("alreadyMember").asBoolean();
+        LOG.info("用户链接入群判断,userId={},enterpriseId={},groupId={},alreadyMember={}", tenant.userId(), tenant.enterpriseId(), id, alreadyMember);
         if (alreadyMember) {
             LOG.info("用户添加未触发勾子，用户已在工作组,userId={},enterpriseId={},groupId={}", tenant.userId(), tenant.enterpriseId(), id);
         }
@@ -134,7 +138,11 @@ public class TenantGroupInvitationService {
             if ("AGENT".equals(member.path("memObjType").asText())) agentIds.add(member.path("memObjId").asLong());
             if ("USER".equals(member.path("memObjType").asText()) && member.path("memObjId").asLong() == tenant.userId()) result = member;
         }
-        if (result == null) throw new IllegalStateException(I18nUtil.get("tenant.invitation.join.unconfirmed"));
+        if (result == null) {
+            LOG.info("用户链接入群失败，详情未找到成员,userId={},enterpriseId={},groupId={},members={}", tenant.userId(), tenant.enterpriseId(), id, members);
+            throw new IllegalStateException(I18nUtil.get("tenant.invitation.join.unconfirmed"));
+        }
+        LOG.info("用户链接入群已确认,userId={},enterpriseId={},groupId={},member={}", tenant.userId(), tenant.enterpriseId(), id, result);
         if (!agentIds.isEmpty()) grants.grantDigitalEmployeesToUser(agentIds, tenant.userId());
         if (!alreadyMember) TenantGroupMembershipEvents.publish(events, tenant, Long.valueOf(id), joined);
         ((com.fasterxml.jackson.databind.node.ObjectNode) result).put("enterpriseId", Long.toString(tenant.enterpriseId()));

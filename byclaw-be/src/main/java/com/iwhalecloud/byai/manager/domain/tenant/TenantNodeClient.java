@@ -191,6 +191,10 @@ public class TenantNodeClient {
     public CommandResult command(TenantRequestContext context, String method, String path, String sessionId,
                                  String operation, CommandPayload payload, String requestId,
                                  List<String> tenantMemberUserIds) {
+        boolean membershipCommand = List.of("CREATE_GROUP", "ADD_MEMBERS", "JOIN_GROUP").contains(operation);
+        if (membershipCommand) {
+            LOG.info("用户添加发送Node命令,userId={},enterpriseId={},groupId={},requestId={},operation={},tenantMemberUserIds={}", context.userId(), context.enterpriseId(), sessionId, requestId, operation, tenantMemberUserIds);
+        }
         try {
             if (requestId == null || !requestId.matches("[A-Za-z0-9:_-]{1,64}")) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.command.requestId.invalid");
@@ -210,13 +214,22 @@ public class TenantNodeClient {
                 Long.toString(state.generation()), dbRecordId, Long.toString(context.userId()), requestId,
                 sessionId, operation, tenantMemberUserIds, hash, payload);
             CommandResult result = request(context, method, path, body, new TypeReference<CommandResult>() { });
+            if (membershipCommand) {
+                LOG.info("用户添加Node解析结果,userId={},enterpriseId={},groupId={},requestId={},operation={},result={}", context.userId(), context.enterpriseId(), sessionId, requestId, operation, mapper.writeValueAsString(result));
+            }
             TenantGroupMembershipEvents.joined(memberJoinedHook, context, sessionId, result);
             return result;
         }
         catch (ResponseStatusException e) {
+            if (membershipCommand) {
+                LOG.info("用户添加Node命令失败,userId={},enterpriseId={},groupId={},requestId={},operation={},status={},exceptionType={}", context.userId(), context.enterpriseId(), sessionId, requestId, operation, e.getStatusCode().value(), e.getClass().getSimpleName());
+            }
             throw e;
         }
         catch (Exception e) {
+            if (membershipCommand) {
+                LOG.info("用户添加Node命令异常,userId={},enterpriseId={},groupId={},requestId={},operation={},exceptionType={}", context.userId(), context.enterpriseId(), sessionId, requestId, operation, e.getClass().getSimpleName());
+            }
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.command.unavailable");
         }
     }
@@ -340,6 +353,10 @@ public class TenantNodeClient {
         request.method(method, content == null ? HttpRequest.BodyPublishers.noBody()
             : HttpRequest.BodyPublishers.ofByteArray(content));
         HttpResponse<byte[]> response = client.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+        if (body instanceof CommandRequest command
+            && List.of("CREATE_GROUP", "ADD_MEMBERS", "JOIN_GROUP").contains(command.operation())) {
+            LOG.info("用户添加Node原始响应,userId={},enterpriseId={},groupId={},requestId={},operation={},status={},response={}", context.userId(), enterpriseId, command.sessionId(), command.requestId(), command.operation(), response.statusCode(), new String(response.body(), StandardCharsets.UTF_8));
+        }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             ErrorEnvelope error;
             try {

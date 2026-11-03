@@ -102,6 +102,7 @@ public class HookDispatcher implements AutoCloseable {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
+                        logger.info("勾子事务已提交，提交投递任务,subscription={},event={}", id, eventId);
                         try {
                             executor.execute(() -> send(id, eventId, subscription, request, 1));
                         } catch (RuntimeException rejected) {
@@ -117,8 +118,8 @@ public class HookDispatcher implements AutoCloseable {
                     }
                 });
             } catch (RuntimeException invalidPayload) {
-                logger.info("触发勾子失败，请求映射异常,subscription={},exceptionType={},data={}", id,
-                    invalidPayload.getClass().getSimpleName(), JsonUtil.toJSONString(data));
+                logger.info("触发勾子失败，请求映射异常,subscription={},event={},exceptionType={},data={}", id,
+                    eventId, invalidPayload.getClass().getSimpleName(), JsonUtil.toJSONString(data));
                 record(id, eventId, "mapping_error", 0, 0);
             }
         });
@@ -128,16 +129,19 @@ public class HookDispatcher implements AutoCloseable {
     private void send(String subscriptionId, String eventId, HookProperties.Subscription subscription, Request request, int number) {
         long start = System.nanoTime();
         DeliveryAttempt attempt = new DeliveryAttempt();
+        logger.info("勾子开始HTTP投递,subscription={},event={},attempt={}", subscriptionId, eventId, number);
         try {
             Request signed = signer.sign(request, subscription.getHttp().getAuth());
             try (Response response = client.newCall(signed.newBuilder().tag(DeliveryAttempt.class, attempt).build()).execute()) {
+                logger.info("勾子HTTP响应,subscription={},event={},attempt={},status={}", subscriptionId, eventId, number, response.code());
                 if (response.isSuccessful()) {
                     record(subscriptionId, eventId, "success", response.code(), System.nanoTime() - start);
                     return;
                 }
+                logger.info("勾子HTTP失败响应,subscription={},event={},attempt={},status={},response={}", subscriptionId, eventId, number, response.code(), response.body() == null ? null : response.body().string());
             }
         } catch (Exception failure) {
-            // Diagnostics exclude the URL, credentials, response body and raw exception message.
+            logger.info("勾子HTTP投递异常,subscription={},event={},attempt={},exceptionType={}", subscriptionId, eventId, number, failure.getClass().getSimpleName());
         }
         HookProperties.Retry policy = subscription.getRetry();
         boolean retryable = attempt.status == 0 ? policy.isTransportErrors() : policy.getStatuses().contains(attempt.status);
@@ -162,7 +166,7 @@ public class HookDispatcher implements AutoCloseable {
     }
 
     private void record(String subscriptionId, String eventId, String outcome, int status, long nanos) {
-        // Never log request/response bodies, URLs, headers or exception messages containing credentials.
+        // Delivery outcomes share the event id with transaction and HTTP diagnostics.
         logger.info("勾子投递结果 subscription={} event={} outcome={} status={} durationMs={}",
             subscriptionId, eventId, outcome, status, TimeUnit.NANOSECONDS.toMillis(nanos));
         if (meters != null) {

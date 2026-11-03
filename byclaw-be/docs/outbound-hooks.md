@@ -173,7 +173,11 @@ auth:
 
 独立线程池为核心 2、最大 4、队列 100，不复制用户 ThreadLocal。队列满时拒绝并记录结果，不转到注册请求线程执行。事务回调只负责入队，不等待 HTTP。延迟重试由独立定时线程唤醒后重新进入原执行器，最多保留 100 个待重试任务，不阻塞工作线程等待；达到上限时保留终止失败结果。进程退出、队列拒绝或接收方持续故障可能导致通知丢失；需要持久化可靠送达的业务不能仅依赖本版本。
 
-失败日志记录订阅 ID、事件 ID、结果类别、状态码和耗时，不记录请求/响应正文、URL、Header 或原始网络异常内容。成功日志为 DEBUG。已有 MeterRegistry 时提供：
+投递日志使用 INFO，记录订阅 ID、事件 ID、投递次数、结果类别、状态码、耗时及异常类型，不记录 HTTP 认证头或签名密钥。
+
+入群排查时，搜索 `用户添加`、`用户链接入群`、`用户直接邀请` 和 `勾子`。`CREATE_GROUP`、`ADD_MEMBERS`、`JOIN_GROUP` 记录用户、企业、工作组和 requestId，并输出 Node 原始 HTTP 响应与 Java 解析结果；通过同一 requestId 对比可判断 savedMembers 是否在传输或解析环节缺失。成员事实日志包含完整 JSON、缺失/空数组、归属不一致、重复成员及调用 Hook 的结果，已读等无新增成员事实的普通命令不再记录入群失败。进入投递后，以等待事务提交日志中的 event ID 关联事务提交/回滚、HTTP 尝试及最终结果。诊断日志包含成员数据和上述命令的完整响应，按业务数据管理日志访问权限。
+
+已有 MeterRegistry 时提供：
 
 - `byclaw.hooks.deliveries`：按 `subscription`、`outcome` 计数。结果包括 `success`、`http_error`、`transport_error`、`rejected`、`mapping_error`、`no_transaction`、`filtered`、`retry_scheduled`。
 - `byclaw.hooks.duration`：按 `subscription` 记录耗时；未开始 HTTP 的结果耗时为零。

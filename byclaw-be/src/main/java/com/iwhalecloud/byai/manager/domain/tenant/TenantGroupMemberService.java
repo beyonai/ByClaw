@@ -23,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Validates group invitations against the group owner and the shared resource catalog. */
 @Service
 public class TenantGroupMemberService {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TenantGroupMemberService.class);
     private final TenantNodeClient node;
     private final ByaiGroupChatMentionMapper legacyMembership;
     private final GroupChatAuthorizationService legacyAuthorization;
@@ -59,6 +60,7 @@ public class TenantGroupMemberService {
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public List<Map<String, Object>> invite(TenantRequestContext context, Long sessionId,
         GroupChatMemberRequest request) {
+        LOG.info("用户直接邀请开始,userId={},enterpriseId={},groupId={},request={}", context.userId(), context.enterpriseId(), sessionId, com.iwhalecloud.byai.common.util.JsonUtil.toJSONString(request));
         if (request == null || !("AGENT".equals(request.getType()) || "USER".equals(request.getType()))
             || request.getId() == null
             || request.getId().isEmpty() || request.getId().size() > 100
@@ -101,6 +103,7 @@ public class TenantGroupMemberService {
             .filter(member -> type.equals(member.get("memObjType"))
                 && request.getId().stream().anyMatch(idValue -> idValue.toString().equals(member.get("memObjId"))))
             .toList();
+        LOG.info("用户直接邀请已确认,userId={},enterpriseId={},groupId={},requestId={},members={}", context.userId(), context.enterpriseId(), sessionId, added == null ? null : added.requestId(), com.iwhalecloud.byai.common.util.JsonUtil.toJSONString(result));
         return result;
     }
 
