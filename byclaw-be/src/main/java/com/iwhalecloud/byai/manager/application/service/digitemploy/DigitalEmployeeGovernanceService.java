@@ -134,15 +134,9 @@ public class DigitalEmployeeGovernanceService {
     }
 
     public void requireDirectMutationAllowed(SsResource resource) {
+        // 已发布副本的配置（包括绑定变更）均走版本审核，管理员也不能绕过已发布组织。
+        if (isOfficialCopy(resource)) throw new BaseException("企业员工配置变更需提交更新审核，所有已发布组织通过后生效");
         requireNotProtected(resource);
-        if (isOfficialCopy(resource)) {
-            if (!canAdministerOfficial(resource)) {
-                throw new BaseException("employee.governance.reviewRequired");
-            }
-            // 调用方已锁定官方副本；申请准备同样锁定副本，避免旧候选版本覆盖直接保存的配置。
-            if (publications.active(resource.getPublicationSourceId(), resource.getComAcctId()) != null) {
-                throw new BaseException("employee.governance.pendingUpdate");
-            }
-        }
+
     }
 }

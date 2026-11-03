@@ -37,11 +37,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -299,11 +301,15 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(copy).isNotSameAs(sourceExt);
         assertThat(copy.getResourceId()).isEqualTo(7101L);
         assertThat(sourceExt.getResourceId()).isEqualTo(7001L);
-        assertThat(copy.getSkillUrl()).isEqualTo(sourceExt.getSkillUrl());
+        assertThat(copy.getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/7101/" + target.getResourceName() + ".zip");
         assertThat(copy.getVersion()).isEqualTo("v0.3");
-        assertThat(copy.getSkillPackageSize()).isEqualTo(123L);
-        assertThat(copy.getSkillPackageHash()).isEqualTo("source-hash");
-        assertThat(copy.getSkillOriginalFilename()).isEqualTo("personal-skill.zip");
+        byte[] uploaded = assertPublishedPackageName(target.getResourceName());
+        assertThat(copy.getSkillPackageSize()).isEqualTo((long)uploaded.length);
+        assertThat(copy.getSkillPackageHash()).isEqualTo(DigestUtils.sha256Hex(uploaded));
+        assertThat(sourceExt.getSkillUrl()).isEqualTo("/byclaw/resource/skill/user002-hub/personal-skill.zip");
+        assertThat(sourceExt.getSkillPackageHash()).isEqualTo("source-hash");
+        assertThat(sourceExt.getSkillPackageSize()).isEqualTo(123L);
+        assertThat(copy.getSkillOriginalFilename()).isEqualTo(target.getResourceName() + ".zip");
         assertThat(copy.getSyncStatus()).isEqualTo("SUCCESS");
         var json = com.alibaba.fastjson2.JSON.parseObject(copy.getTargetContent());
         assertThat(json.getString("sourceResourceId")).isEqualTo("7001");
@@ -312,9 +318,22 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(json.getString("skillUrl")).endsWith("skillId=7101");
         verify(ssResourceArtifactService).upsertArtifact(eq(7101L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.IMPORT_ZIP.name()), eq("minio"),
-            eq("skill/user002-hub/personal-skill.zip"), any());
+            eq("skill/org-hub/7101/" + target.getResourceName() + ".zip"), any());
         verify(resourceArtifactStorageService).readWithinResourceRoot("skill/user002-hub/personal-skill.zip");
-        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Skill/path", "Skill\\path"})
+    void publishEnterpriseRejectsPathSeparatorsInPackageName(String sourceName) throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName(sourceName);
+
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("byclaw.skill.zip.file.invalid");
+
+        verify(ssResourceService, never()).saveResource(any());
+        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
+        verify(publications, never()).submit(any(), any());
     }
 
     @Test
@@ -676,6 +695,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
     void enterpriseCopyUpdatesKeepIsolatedStorageAndSourceProvenance() throws Exception {
         prepareEnterpriseCopy();
         SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        String publishedFilename = target.getResourceName() + ".zip";
         // 本用例覆盖审核通过后的企业副本更新，不允许审核中快照被导入覆盖。
         target.setResourceStatus(2);
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
@@ -694,9 +714,81 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(com.alibaba.fastjson2.JSON.parseObject(ext.getTargetContent()).getString("sourceResourceId"))
             .isEqualTo("7001");
         verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class),
+            eq("skill/org-hub/7101"), eq(publishedFilename), eq("application/zip"));
+        verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class),
             eq("skill/org-hub/7101"), eq("updated.zip"), eq("application/zip"));
         verify(ssResourceService, never()).updateResourceEntity(org.mockito.ArgumentMatchers.argThat(
             resource -> resource != null && Long.valueOf(7001L).equals(resource.getResourceId())));
+    }
+
+    @Test
+    void publicationDoesNotSubmitAuditWhenIndependentPackageUploadFails() throws Exception {
+        prepareEnterpriseCopy();
+        org.mockito.Mockito.doThrow(new IllegalStateException("Upload unavailable"))
+            .when(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class), any(), any(), any());
+
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .isInstanceOf(IllegalStateException.class).hasMessage("Upload unavailable");
+        verify(publications, never()).submit(any(), any());
+        verify(ssResExtSkillService, never()).saveOrUpdate(any());
+        org.mockito.Mockito.verifyNoInteractions(ssResourceArtifactService);
+        assertThat(ssResExtSkillService.findById(7001L).getSkillUrl())
+            .isEqualTo("/byclaw/resource/skill/user002-hub/personal-skill.zip");
+    }
+
+    /** 验证发布上传的真实 ZIP，而不只断言资源展示名。 */
+    private byte[] assertPublishedPackageName(String expectedName) {
+        ArgumentCaptor<byte[]> uploaded = ArgumentCaptor.forClass(byte[].class);
+        verify(resourceArtifactStorageService).uploadToSubdirectory(uploaded.capture(), eq("skill/org-hub/7101"),
+            eq(expectedName + ".zip"), eq("application/zip"));
+        service.inspectSkillPackage(new MockMultipartFile("file", expectedName + ".zip", "application/zip",
+            uploaded.getValue()));
+        String document = new String(service.readCenterSkillDocument(uploaded.getValue()), StandardCharsets.UTF_8);
+        assertThat(document).contains("name: " + com.alibaba.fastjson2.JSON.toJSONString(expectedName) + "\n");
+        return uploaded.getValue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"zh-CN, demo/skill.md", "en-US, SKILL.md"})
+    void publicationChangesOnlyRootDocumentNameAndPreservesPackageContents(String language, String documentPath)
+        throws Exception {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag(language));
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName("Skill: \"quoted\"");
+        String originalDocument = "---\nname: old-name\ndescription: Keep description\nmetadata:\n  name: nested\n---\n# Keep body\n";
+        String prefix = documentPath.contains("/") ? "demo/" : "";
+        byte[] original;
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            ZipArchiveOutputStream zip = new ZipArchiveOutputStream(bytes)) {
+            for (String path : List.of(documentPath, prefix + "scripts/run.sh", prefix + "nested/child/SKILL.md")) {
+                ZipArchiveEntry entry = new ZipArchiveEntry(path);
+                entry.setUnixMode(path.endsWith(".sh") ? 0100755 : 0100644);
+                zip.putArchiveEntry(entry);
+                zip.write((path.equals(documentPath) ? originalDocument : "keep:" + path).getBytes(StandardCharsets.UTF_8));
+                zip.closeArchiveEntry();
+            }
+            zip.finish();
+            original = bytes.toByteArray();
+        }
+        when(resourceArtifactStorageService.readWithinResourceRoot("skill/user002-hub/personal-skill.zip"))
+            .thenAnswer(invocation -> new java.io.ByteArrayInputStream(original));
+
+        SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        byte[] uploaded = assertPublishedPackageName(target.getResourceName());
+        String document = new String(service.readCenterSkillDocument(uploaded), StandardCharsets.UTF_8);
+        assertThat(document).doesNotContain("name: old-name")
+            .contains("description: Keep description\nmetadata:\n  name: nested\n---\n# Keep body\n");
+        assertThat(new String(service.readCenterSkillDocument(original), StandardCharsets.UTF_8))
+            .isEqualTo(originalDocument);
+        try (var channel = new org.apache.commons.compress.utils.SeekableInMemoryByteChannel(uploaded);
+            var zip = new org.apache.commons.compress.archivers.zip.ZipFile(channel)) {
+            assertThat(zip.getEntry(prefix + "scripts/run.sh").getUnixMode()).isEqualTo(0100755);
+            for (String path : List.of(prefix + "scripts/run.sh", prefix + "nested/child/SKILL.md")) {
+                try (var input = zip.getInputStream(zip.getEntry(path))) {
+                    assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("keep:" + path);
+                }
+            }
+        }
     }
 
     private String enterpriseName(String name) {
@@ -789,6 +881,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
     @AfterEach
     void tearDown() {
         CurrentUserHolder.setLoginInfo(null);
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test

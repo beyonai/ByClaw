@@ -130,6 +130,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class AuthApplicationService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeVersionAccess employeeVersionAccess;
 
 
     @Autowired
@@ -714,8 +716,10 @@ public class AuthApplicationService {
         //    避免"用户已被直接授权但仍显示在审核列表/我申请中"的脏数据，与 approveUseApply 行为一致。
         autoCancelPendingApplyForGrantedUsers(ssResource, qo);
 
-        // 名单写入后读取最终有效使用人，覆盖新授权以及历史遗漏的绑定资源权限。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        // 员工使用授权独立成立；仅为操作人有权授权的关联资源补齐使用权限。
+        if (isEnterpriseDigitalEmployee(ssResource)) {
+            employeeResourceAuthorizationService.synchronizeForDirectUseAuthorization(ssResource);
+        }
     }
 
     /**
@@ -4240,7 +4244,7 @@ public class AuthApplicationService {
         vo.setCanPublishEmployee(canPublishEmployee != null ? canPublishEmployee : employeeGovernance.canPublish(resource));
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
-            vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
+            vo.setOfficialUpdateRequiresReview(true);
             // 配置更新审核与日常授权、上下架分开判定，避免作者只有编辑入口却无法维护授权。
             vo.setCanEdit(employeeGovernance.canMaintainOfficial(resource));
             boolean canManage = vo.isHasManagePermission();
@@ -4265,6 +4269,10 @@ public class AuthApplicationService {
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
             vo.setCanDelete(false);
+        }
+        if (employeeVersionAccess != null
+            && com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)) {
+            vo.setCanEdit(employeeVersionAccess.canManage(resource));
         }
     }
 

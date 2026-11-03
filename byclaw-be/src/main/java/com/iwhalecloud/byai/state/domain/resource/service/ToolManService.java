@@ -433,10 +433,20 @@ public class ToolManService {
         return executeWithOpenApiImportLoginContext(() ->
             com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.execute(trusted,
                 systemCode, resourceBizType, resourceCode, () -> {
-            ssResourceService.lockSkillImport("THIRD_SYNC:" + CurrentUserHolder.getEnterpriseId() + ":"
-                + systemCode + ":" + resourceBizType + ":" + resourceCode);
-            enterpriseResourceSyncService.validateExisting(
-                ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode));
+            // Match the global import identity so enterprise metadata cannot split synchronization locks.
+            ssResourceService.lockSkillImport("THIRD_SYNC:" + systemCode + ":" + resourceBizType + ":" + resourceCode);
+            SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
+            boolean knowledge = StringUtils.startsWith(resourceBizType, "KG_");
+            boolean localKnowledge = knowledge && datasetApplicationService.isOwnershipManagedLocally(existing);
+            // Knowledge import decides ownership from persisted provenance. Whale Agent may also change
+            // ownership of externally managed knowledge; do not reject that transition before importing.
+            boolean knowledgeOwnsScope = localKnowledge || (knowledge
+                && SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(systemCode));
+            if (!knowledgeOwnsScope) {
+                enterpriseResourceSyncService.validateExisting(existing);
+            } else if (existing != null && Objects.equals(existing.getResourceStatus(), -1)) {
+                throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+            }
             Map<String, Object> result;
             boolean packageChanged = false;
             if ("SKILL".equals(resourceBizType)) {
@@ -450,8 +460,11 @@ public class ToolManService {
                 // Refresh existing employee bindings without changing their authorization or association intent.
                 packageChanged = true;
             }
-            enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
-                request, packageChanged, result);
+            // Locally managed personal knowledge carries no enterprise authorization semantics.
+            if (!localKnowledge || OwnerType.ENTERPRISE.equals(existing.getOwnerType())) {
+                enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
+                    request, packageChanged, result);
+            }
             return result;
         }));
     }

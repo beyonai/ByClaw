@@ -50,6 +50,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
     private SsResourceService resources;
     private SsResource resource;
     private Boolean manageDuringImport;
+    private DatasetApplicationService datasets;
 
     @BeforeEach
     void setUp() {
@@ -88,7 +89,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
         ReflectionTestUtils.setField(service, "authApplicationService", auth);
         doAnswer(invocation -> importResult()).when(service).importToolJsonNewFromMultipart(any(), any(), any());
 
-        DatasetApplicationService datasets = mock(DatasetApplicationService.class);
+        datasets = mock(DatasetApplicationService.class);
         ReflectionTestUtils.setField(service, "datasetApplicationService", datasets);
         when(datasets.importDatasetJson(any(), any(), any())).thenAnswer(invocation -> {
             importResult();
@@ -203,6 +204,74 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
             Map<String, Object> result = service.addToolFromThird(request(type, fields));
             verify(sync).completeImport(eq(10L), any(), eq(true), same(result));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"personal", "personal_default"})
+    void enterprisePayloadCannotReclassifyOrGrantALocallyManagedPersonalKnowledgeBase(String localOwner) {
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(localOwner);
+        resource.setCreateBy(9L);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\",\"autoAuthorize\":true,\"authScope\":{}}"));
+
+        verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
+        verify(sync, never()).validateExisting(any());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        assertThat(manageDuringImport).isTrue();
+    }
+
+    @Test
+    void localProvenanceAloneDoesNotGrantPermissionToUpdatePersonalKnowledge() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType("personal");
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\",\"autoAuthorize\":true,\"authScope\":{}}"));
+
+        assertThat(manageDuringImport).isFalse();
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+    }
+
+    @Test
+    void localEnterpriseKnowledgeKeepsNormalEnterpriseReconciliation() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setCreateBy(9L);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\"}"));
+
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+    }
+
+    @Test
+    void externalWhaleKnowledgeCanFollowAnIncomingEnterpriseOwnershipChange() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setSystemCode("WHALE_AGENT");
+        resource.setOwnerType("personal");
+        resource.setCreateBy(9L);
+        JSONObject json = JSONObject.parseObject(request("KG_DOC", "{\"ownerType\":\"enterprise\"}"));
+        json.put("systemCode", "WHALE_AGENT");
+
+        service.addToolFromThird(json.toJSONString());
+
+        assertThat(manageDuringImport).isTrue();
+        verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+    }
+
+    @Test
+    void localKnowledgeCannotBypassTheDeletedResourceCheck() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setResourceStatus(-1);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+        try (var messages = new I18nTestScope(Locale.US)) {
+            assertThatThrownBy(() -> service.addToolFromThird(request("KG_DOC", "{}")))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        verify(datasets, never()).importDatasetJson(any(), any(), any());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
     }
 
     private String request(String type, String fields) {

@@ -54,4 +54,9 @@ public class DigitalEmployeePublication {
     private boolean canReview;
     @TableField(exist = false)
     private boolean requiresAdminVipReview;
+
+    /** 审核冻结的来源版本与企业目标版本，均不得随当前员工编辑变化。 */
+    private Long sourceVersionId;
+    private Long targetVersionId;
+
 }

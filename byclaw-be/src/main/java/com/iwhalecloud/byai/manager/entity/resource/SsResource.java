@@ -268,4 +268,10 @@ public class SsResource implements Serializable {
         this.workerAgentType = StringUtils.defaultString(workerAgentType);
     }
 
+
+    /** 配置保存序号、并发修订号与运行态同步任务。 */
+    private Long configVersionSeq;
+    private Long configRevision;
+    private Long pendingActivationId;
+
 }
