@@ -112,6 +112,7 @@ interface FileResourcePanelProps {
   resourceId?: string;
   refreshKey?: number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
+
   /** 自定义预览入口可提供与其渲染链路一致的文件资格判断。 */
   canPreviewItem?: (item: FileBrowserItem) => boolean;
   onPreviewFile?: (item: FileBrowserItem) => void;

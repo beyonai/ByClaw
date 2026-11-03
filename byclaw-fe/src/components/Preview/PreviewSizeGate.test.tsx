@@ -28,15 +28,10 @@ test.each([
     size: { value: limit * 1_000_000 + 1 },
     text: { value: read },
   });
-  render(
-    <PreViewFile
-      data={file}
-      title={title}
-    />
-  );
+  render(<PreViewFile data={file} title={title} />);
   expect(screen.getByText(`preview.tooLarge ${limit}`)).toBeInTheDocument();
   expect(read).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'common.download' }));
+  fireEvent.click(screen.getByRole('button', { name: /common\.download$/ }));
   expect(downloadFile).toHaveBeenCalledWith({ file, fileName: title });
 });
 
@@ -48,12 +43,7 @@ test('大 HTML 默认不读取源码，切换源码页签后再读取', async ()
   const revokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:report') });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
-  const view = render(
-    <PreViewFile
-      data={file}
-      title="report.html"
-    />
-  );
+  const view = render(<PreViewFile data={file} title="report.html" />);
   try {
     const [, source] = screen.getAllByRole('radio');
     expect(read).not.toHaveBeenCalled();

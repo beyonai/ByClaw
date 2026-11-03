@@ -157,7 +157,8 @@ const FilePreviewContent = React.memo((props: PreviewFileProps): React.ReactElem
   const type = resolvePreviewType(providedType, title, data instanceof Blob ? data.type : undefined);
   const usePdfCanvas = type === 'pdf' && /MicroMessenger|DingTalk/i.test(window.navigator.userAgent);
   const [tab, setTab] = useState<'source' | 'preview'>();
-  const deferHtmlSource = data instanceof Blob && data.size > DEFER_HTML_SOURCE_BYTES && HTML_PREVIEW_TYPES.includes(type);
+  const deferHtmlSource =
+    data instanceof Blob && data.size > DEFER_HTML_SOURCE_BYTES && HTML_PREVIEW_TYPES.includes(type);
   const readSource = !deferHtmlSource || tab === 'source';
 
   /** 资源链接 - 用于预览 */
@@ -478,6 +479,8 @@ const FilePreviewContent = React.memo((props: PreviewFileProps): React.ReactElem
                 data={data}
                 type={type as 'zip' | 'rar' | '7z' | 'tar' | 'gz' | 'tgz'}
                 fileName={title}
+                // 归档递归预览只在回调执行时访问已初始化的 PreViewFile。
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 renderFile={(file, name) => <PreViewFile data={file} title={name} />}
               />
             </Suspense>
@@ -494,13 +497,7 @@ export const PreViewFile = React.memo(function PreViewFile(props: PreviewFilePro
   const limit = getPreviewSizeLimit(type);
   const input = typeof data === 'string' && isTextPreviewType(type) ? new Blob([data]) : data;
   if (input instanceof Blob && limit !== undefined && input.size > limit) {
-    return (
-      <PreviewSizeNotice
-        data={input}
-        limit={limit}
-        title={title}
-      />
-    );
+    return <PreviewSizeNotice data={input} limit={limit} title={title} />;
   }
   return <FilePreviewContent {...props} />;
 });

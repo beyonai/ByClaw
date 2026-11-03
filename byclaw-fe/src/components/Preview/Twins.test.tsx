@@ -460,7 +460,7 @@ describe('PreViewFile text validation', () => {
     render(<PreViewFile data={file} title="large.md" />);
     expect(await screen.findByText('preview.tooLarge')).toBeVisible();
     expect(read).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'common.download' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /common\.download$/ })).toBeVisible();
   });
 
   it('never starts the HTML renderer or its resource loading for oversized HTML', async () => {
