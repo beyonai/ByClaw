@@ -1,4 +1,4 @@
-/** Source-mode integration checks against an unmodified DSH checkout. */
+/** Source-mode integration checks against DSH with the business image's Skill name patch. */
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

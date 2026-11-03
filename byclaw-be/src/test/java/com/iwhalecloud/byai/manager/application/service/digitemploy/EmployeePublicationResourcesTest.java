@@ -89,18 +89,18 @@ class EmployeePublicationResourcesTest extends I18nTestSupport {
         verify(auth, never()).handleAuth(any());
         verifyNoInteractions(organizations);
     }
-    @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesLocalizedCopyName() {
+    @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesRuntimeCopyName() {
         resource.setCreateBy(9L);
         readableSkill();
         org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
         var captured = service.capture(dto, 7L, 1L, 100L);
         assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
         assertThat(captured.getFirst().getResource().getCreateBy()).isEqualTo(9L);
-        assertThat(captured.getFirst().getCopyName()).isEqualTo("技能(企业)");
+        assertThat(captured.getFirst().getCopyName()).isEqualTo("技能_企业");
         org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
         service.validate(captured, 7L, 1L);
         assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
-        assertThat(EmployeePublicationResources.describe(captured.getFirst()).impact()).contains("技能(企业)");
+        assertThat(EmployeePublicationResources.describe(captured.getFirst()).impact()).contains("技能_企业");
         when(auth.hasResourceUsePermission(resource, 7L)).thenReturn(false);
         service.validate(captured, 7L, 1L);
         assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");

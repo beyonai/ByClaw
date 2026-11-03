@@ -201,7 +201,8 @@ public class EmployeePublicationResources {
                 dependency.setSkill(snapshot);
                 dependency.setTargetId(id);
                 dependency.setAction("COPY_SKILL");
-                dependency.setCopyName(EmployeePublicationNames.enterpriseName(resource.getResourceName(), null));
+                dependency.setCopyName(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+                    .enterpriseName(resource.getResourceName()));
                 checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
                 omit(dependency, error instanceof BaseException ? error.getMessage() : I18nUtil.get("employee.publication.skillReadFailed"));

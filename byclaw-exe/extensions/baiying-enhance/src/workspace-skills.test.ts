@@ -246,6 +246,41 @@ describe("workspace-skills", () => {
     }
   });
 
+  it("keeps personal and enterprise package names distinct in the OpenClaw filter", async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-enterprise-skill-names-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const workspace = path.join(stateDir, "workspace-agent");
+    const api = {
+      runtime: { config: { loadConfig: () => ({ agents: { list: [{ id: "agent", workspace }] } }) } },
+    } as any;
+    try {
+      for (const [code, name] of [["report", "report"], ["enterprise-skill-123", "report_企业"]]) {
+        const dir = path.join(stateDir, "skills", code);
+        await mkdir(dir, { recursive: true });
+        await writeFile(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: Report\n---\n# ${name}\n`);
+      }
+      const merged = await mergeWorkspaceSkillsIntoManagedAgents({
+        api,
+        managed: [{ agentId: "agent", listEntry: { id: "agent", skills: ["report", "enterprise-skill-123"] } }],
+        includeMainShared: false,
+        mainParentAgentId: "main",
+      });
+      expect(merged[0].listEntry.skills).toEqual(expect.arrayContaining(["report", "report_企业"]));
+      expect(merged[0].listEntry.skills).not.toContain("enterprise-skill-123");
+      await writeFile(path.join(stateDir, "skills", "enterprise-skill-123", "SKILL.md"), "---\nname: report\n---\n# Conflicting copy");
+      const conflicting = await mergeWorkspaceSkillsIntoManagedAgents({
+        api,
+        managed: [{ agentId: "agent", listEntry: { id: "agent", skills: ["report", "enterprise-skill-123"] } }],
+        includeMainShared: false,
+        mainParentAgentId: "main",
+      });
+      expect(conflicting[0].listEntry.skills).not.toContain("report");
+      expect(conflicting[0].listEntry.skills).not.toContain("enterprise-skill-123");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("enables core bundled skills without copying them into agent workspace", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "baiying-core-skills-workspace-"));
     const api = {

@@ -113,6 +113,70 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         CurrentUserHolder.setLoginInfo(loginInfo);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"NO_ROLE", "ORD_USER", "ORG_MAN", "BUSINESS_MAN", "PLAT_DEVOPS"})
+    void enterpriseCreationRequiresImportAuthorityAcrossAllDirectEntrypoints(String identity) {
+        setImportIdentity(identity);
+        byte[] bytes = skillZipBytes("new-skill");
+        var upload = new MockMultipartFile("files", "new-skill.zip", "application/zip", bytes);
+        assertThatThrownBy(() -> service.importSkillZip(upload, 10L, "enterprise", "SKILL_MANAGE_IMPORT"))
+            .isInstanceOf(IllegalArgumentException.class);
+        var batch = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {upload},
+            10L, "enterprise");
+        assertThat(batch.getSuccess()).isZero();
+        assertThat(batch.getItems()).singleElement().satisfies(item -> assertThat(item.isSuccess()).isFalse());
+        var preview = service.previewSkillZipImportConflicts(
+            new org.springframework.web.multipart.MultipartFile[] {upload}, "enterprise");
+        assertThat(preview.getItems()).singleElement().satisfies(item -> assertThat(item.isSuccess()).isFalse());
+        assertThatThrownBy(() -> service.saveWorkspaceSkillCenterPackage(bytes, "enterprise", "workspace-demo",
+            "new-skill", null)).isInstanceOf(IllegalArgumentException.class);
+        verify(ssResourceService, never()).saveResource(any());
+        verify(ssResourceService, never()).updateResourceEntity(any());
+        org.mockito.Mockito.verifyNoInteractions(ssResExtSkillService, resourceArtifactStorageService,
+            ssResourceArtifactService, authApplicationService, digitalEmployeeRuntimeRefreshService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"adminvip", "AdminVip", "ADMINVIP", "PLAT_MAN", "plat_man"})
+    void authorizedEnterpriseImportCreatesOnShelfResource(String identity) {
+        setImportIdentity(identity);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7101L);
+            return resource;
+        });
+        var upload = new MockMultipartFile("files", "new-skill.zip", "application/zip", skillZipBytes("new-skill"));
+        var imported = service.importSkillZip(upload, 10L, "enterprise", "SKILL_MANAGE_IMPORT");
+        assertThat(imported.resource().getOwnerType()).isEqualTo("enterprise");
+        assertThat(imported.resource().getResourceStatus()).isEqualTo(2);
+        var synced = service.saveWorkspaceSkillCenterPackage(skillZipBytes("center-skill"), "enterprise",
+            "workspace-demo", "center-skill", null);
+        assertThat(synced.resource().getOwnerType()).isEqualTo("enterprise");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @ValueSource(strings = {"personal", "ENTERPRISE", " enterprise ", "enterprise%00"})
+    void defaultAndUnrecognizedOwnershipNeverCreatesEnterpriseSkills(String owner) {
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7101L);
+            return resource;
+        });
+        var upload = new MockMultipartFile("files", "new-skill.zip", "application/zip", skillZipBytes("new-skill"));
+        var result = service.importSkillZip(upload, 10L, owner, "SKILL_MANAGE_IMPORT");
+        assertThat(result.resource().getOwnerType()).isEqualTo("personal");
+    }
+
+    private void setImportIdentity(String identity) {
+        var login = CurrentUserHolder.getLoginInfo();
+        if ("adminvip".equalsIgnoreCase(identity)) login.setUserCode(identity);
+        var role = new com.iwhalecloud.byai.common.login.bean.UsersOrganization();
+        role.setUserType(identity);
+        login.setUsersOrganizations("NO_ROLE".equals(identity) ? List.of() : List.of(role));
+        CurrentUserHolder.setLoginInfo(login);
+    }
+
     @Test
     void centerMarkdownUpdatePreservesOtherFilesNestedSkillsAndExecutableModes() throws Exception {
         byte[] original;
@@ -324,16 +388,14 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
 
     @ParameterizedTest
     @ValueSource(strings = {"Skill/path", "Skill\\path"})
-    void publishEnterpriseRejectsPathSeparatorsInPackageName(String sourceName) throws Exception {
+    void publishEnterpriseNormalizesPathSeparatorsBeforeWritingPackage(String sourceName) throws Exception {
         SsResource source = prepareEnterpriseCopy();
         source.setResourceName(sourceName);
 
-        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
-            .isInstanceOf(IllegalArgumentException.class).hasMessage("byclaw.skill.zip.file.invalid");
-
-        verify(ssResourceService, never()).saveResource(any());
-        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
-        verify(publications, never()).submit(any(), any());
+        SsResource target = service.publishSkillToEnterprise(7001L).resource();
+        assertThat(target.getResourceName()).isEqualTo("Skill_path_企业");
+        assertPublishedPackageName("Skill_path_企业");
+        assertThat(source.getResourceName()).isEqualTo(sourceName);
     }
 
     @Test
@@ -397,12 +459,26 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         CurrentUserHolder.getLoginInfo().setUserName("张三");
         when(ssResourceService.existsEnterpriseSkillByName(enterpriseName("技能1"))).thenReturn(true);
         var result = service.publishSkillToEnterprise(7001L);
-        assertThat(result.resource().getResourceName()).isEqualTo(enterpriseName("技能1（张三）"));
+        assertThat(result.resource().getResourceName()).isEqualTo("技能1_张三_企业");
         assertThat(source.getResourceName()).isEqualTo("技能1");
         verify(ssResourceService).existsEnterpriseSkillByName(enterpriseName("技能1"));
         ArgumentCaptor<SsResExtSkill> extension = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extension.capture());
-        assertThat(extension.getValue().getTargetContent()).contains(enterpriseName("技能1（张三）"));
+        assertThat(extension.getValue().getTargetContent()).contains("技能1_张三_企业");
+    }
+
+    @Test
+    void disambiguatesNamesThatCollideAfterNormalization() throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName("report (daily)");
+        CurrentUserHolder.getLoginInfo().setUserName("张三");
+        when(ssResourceService.existsEnterpriseSkillByName("report_daily_企业")).thenReturn(true);
+        when(ssResourceService.existsEnterpriseSkillByName("report_daily_张三_企业")).thenReturn(true);
+
+        SsResource target = service.publishSkillToEnterprise(7001L).resource();
+
+        assertThat(target.getResourceName()).isEqualTo("report_daily_张三_7001_企业");
+        assertPublishedPackageName("report_daily_张三_7001_企业");
     }
 
     @Test
@@ -410,7 +486,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         SsResource source = prepareEnterpriseCopy();
         when(ssResourceService.existsEnterpriseSkillByName(enterpriseName(source.getResourceName()))).thenReturn(true);
         var result = service.publishSkillToEnterprise(7001L);
-        assertThat(result.resource().getResourceName()).isEqualTo(enterpriseName(source.getResourceName() + "（user001）"));
+        assertThat(result.resource().getResourceName()).isEqualTo(enterpriseName(source.getResourceName() + "_user001"));
     }
 
     @Test
@@ -791,8 +867,39 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({"zh-CN, report, report_企业", "en-US, report, report_企业",
+        "zh-CN, 数据分析, 数据分析_企业", "zh-CN, 销售 分析（日报）, 销售_分析_日报_企业",
+        "en-US, Report: daily, Report_daily_企业"})
+    void publishedZipAndRootSkillNameMatchForBothRuntimes(String language, String sourceName, String expectedName)
+        throws Exception {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag(language));
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName(sourceName);
+
+        SsResource target = service.publishSkillToEnterprise(7001L).resource();
+
+        assertThat(target.getResourceName()).isEqualTo(expectedName);
+        assertPublishedPackageName(expectedName);
+        assertThat(source.getResourceName()).isEqualTo(sourceName);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"---", "（ ）", "___", "<>"})
+    void rejectsNamesWithoutLettersOrNumbersBeforeCreatingAnEnterpriseCopy(String sourceName) throws Exception {
+        SsResource source = prepareEnterpriseCopy();
+        source.setResourceName(sourceName);
+
+        assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("byclaw.skill.enterprise.name.invalid");
+
+        verify(ssResourceService, never()).saveResource(any());
+        verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
+        verify(publications, never()).submit(any(), any());
+    }
+
     private String enterpriseName(String name) {
-        return com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames.enterpriseName(name, null);
+        return com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames.enterpriseName(name);
     }
 
     private SsResource enterpriseCopy(Long id, int status) {
@@ -1144,6 +1251,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
 
     @Test
     void importSkillZips_enterpriseSkill_syncsPackageToOrgHubAndJsonToSkillRoot() {
+        setImportIdentity("PLAT_MAN");
         MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
             skillZipBytes("enterprise-skill"));
 
@@ -1533,7 +1641,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         ext.setSkillUrl("resource/skill/user001-hub/demo-skill.zip");
         ext.setSkillPackageFormat("zip");
         ext.setSkillOriginalFilename("demo-skill.zip");
-        ext.setTargetContent("{\"skillPath\":\"/skills/demo-skill\"}");
+        ext.setTargetContent("{\"skillPath\":\"/skills/demo-skill\",\"sourcePackageHash\":\"reviewed-source-hash\"}");
 
         when(ssResExtSkillService.findById(7201L)).thenReturn(ext);
         when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
@@ -1541,7 +1649,8 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         String targetContent = service.refreshSkillBasicInfo(resource);
 
         assertThat(targetContent).contains("\"resourceName\":\"Demo Skill New\"", "\"version\":\"v0.2\"",
-            "\"skillUrl\":\"/byaiService/tool/downloadSkillZip?skillId=7201\"");
+            "\"skillUrl\":\"/byaiService/tool/downloadSkillZip?skillId=7201\"",
+            "\"sourcePackageHash\":\"reviewed-source-hash\"");
         verify(ssResExtSkillService).saveOrUpdate(ext);
         verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class), eq("skill"),
             eq("SKILL_7201.json"), eq("application/json"));

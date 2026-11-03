@@ -75,6 +75,21 @@ describe("skill readiness", () => {
     await rm(path.join(dir, "skills", "8640", "SKILL.md"));
     expect((await runtime.inspect(agentId)).skills[0].errorCode).toBe("PACKAGE_MISSING");
   });
+  it("fails both resources when distinct packages declare the same runtime skill name", async () => {
+    raw.relSkills.push({ skillCode: "enterprise-copy", skillType: "hub", versionUrl: "/version", skillUrl: "/copy.zip" });
+    raw.relResourceList.push({ resourceId: "78", resourceCode: "enterprise-copy", resourceBizType: "SKILL" });
+    const copy = path.join(dir, "skills", "enterprise-copy");
+    await mkdir(copy, { recursive: true });
+    await writeFile(path.join(copy, "SKILL.md"), "---\nname: westock-data\n---\n# Enterprise");
+    await writeFile(path.join(copy, ".baiying-hub-skill.json"), JSON.stringify({ skillCode: "enterprise-copy", version: "v1", versionUrl: "/version" }));
+    runtime.recordApplied([agent], "applied");
+    cfg.agents.list[0].skills = []; // The conflicting name is deliberately excluded from the live allowlist.
+    const result = await runtime.inspect(agentId);
+    expect(result.state).toBe("FAILED");
+    expect(result.skills).toHaveLength(2);
+    expect(result.skills.every(skill => skill.state === "FAILED" && skill.errorCode === "SKILL_NAME_CONFLICT")).toBe(true);
+    expect(result.skills.every(skill => !skill.skillFile)).toBe(true);
+  });
   it("does not acknowledge an old package after an upgrade failed", async () => {
     runtime.recordApplied([agent], "applied");
     vi.mocked(getHubSkillDownloadState).mockReturnValue({ state: "FAILED", errorCode: "DOWNLOAD_UNAUTHORIZED", checkedAt: clock });

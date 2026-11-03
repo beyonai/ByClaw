@@ -54,6 +54,8 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         when(resources.findById(90L)).thenReturn(employee);
         when(sequence.nextVal()).thenReturn(99L, 101L, 102L, 103L);
         when(runtime.refreshSkillBasicInfo(any())).thenReturn("{}");
+        when(runtime.renamePublishedSkillPackage(any(), anyString())).thenAnswer(call ->
+            new ByClawSkillResourceApplicationService().renamePublishedSkillPackage(call.getArgument(0), call.getArgument(1)));
         snapshot = new SsResExtSkill(); snapshot.setSkillUrl("skill/official-publications/100/20/frozen.zip");
         snapshot.setVersion("v0.1"); snapshot.setSkillType("hub");
     }
@@ -63,12 +65,12 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
     }
 
     @ParameterizedTest @ValueSource(strings = {"zh", "en"})
-    void newSkillNameUsesLocalizedSuffixAndNeverMutatesSource(String language) throws Exception {
+    void newSkillNameUsesRuntimeCompatibleSuffixAndNeverMutatesSource(String language) throws Exception {
         org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.forLanguageTag(language));
         byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
         service.publish(source, snapshot, bytes, 90L, context);
         var target = ArgumentCaptor.forClass(SsResource.class); verify(mapper).insert(target.capture());
-        assertThat(target.getValue().getResourceName()).isEqualTo("zh".equals(language) ? "客户分析(企业)" : "客户分析 (Enterprise)");
+        assertThat(target.getValue().getResourceName()).isEqualTo("客户分析_企业");
         assertThat(source.getResourceName()).isEqualTo("客户分析");
     }
 
@@ -77,7 +79,7 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
         service.publish(source, snapshot, bytes, 90L,
             new EmployeePublicationSkillBridge.Context(1L, 7L, 100L, "客户分析(企业)"));
-        verify(mapper).insert(argThat((SsResource target) -> "客户分析(企业)".equals(target.getResourceName())));
+        verify(mapper).insert(argThat((SsResource target) -> "客户分析_企业".equals(target.getResourceName())));
     }
     static byte[] zip(Map<String,String> files) throws Exception {
         var bytes = new ByteArrayOutputStream();
@@ -109,8 +111,8 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         byte[] bytes = manifestPresent ? skill("{\"resources\":[]}") : zip(Map.of("analysis/SKILL.md", "# skill"));
         snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
         assertThat(service.publish(source, snapshot, bytes, 90L, context)).isEqualTo(99L);
-        verify(storage).uploadToSubdirectory(eq(bytes), eq("skill/org-hub/1/100/20"),
-            eq(snapshot.getSkillPackageHash() + ".zip"), eq("application/zip"));
+        verify(storage).uploadToSubdirectory(any(byte[].class), eq("skill/org-hub/1/100/20"),
+            eq("客户分析_企业.zip"), eq("application/zip"));
         verify(mapper).insert(argThat((SsResource target) -> "enterprise".equals(target.getOwnerType())));
         verify(relations).save(argThat(relation -> relation.getResourceId().equals(90L)
             && relation.getRelResourceId().equals(99L)));
@@ -172,7 +174,18 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         byte[] bytes = skill("{\"resources\":[{\"resourceId\":\"2001\",\"resourceType\":\"TOOL\"}]}");
         snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
         assertThat(service.publish(source, snapshot, bytes, 90L, context)).isEqualTo(99L);
-        verify(storage).uploadToSubdirectory(eq(bytes), eq("skill/org-hub/1/100/20"), eq(snapshot.getSkillPackageHash()+".zip"), eq("application/zip"));
+        var uploaded = ArgumentCaptor.forClass(byte[].class);
+        verify(storage).uploadToSubdirectory(uploaded.capture(), eq("skill/org-hub/1/100/20"), eq("客户分析_企业.zip"), eq("application/zip"));
+        try (var channel = new org.apache.commons.compress.utils.SeekableInMemoryByteChannel(uploaded.getValue());
+            var archive = new org.apache.commons.compress.archivers.zip.ZipFile(channel)) {
+            try (var input = archive.getInputStream(archive.getEntry("analysis/SKILL.md"))) {
+                assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).contains("name: \"客户分析_企业\"");
+            }
+            try (var input = archive.getInputStream(archive.getEntry("analysis/references/resourceMate.json"))) {
+                assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).contains("2001");
+            }
+        }
+        assertThat(DigestUtils.sha256Hex(bytes)).isEqualTo(snapshot.getSkillPackageHash());
         var target = ArgumentCaptor.forClass(SsResource.class); verify(mapper).insert(target.capture());
         assertThat(target.getValue().getOwnerType()).isEqualTo("enterprise");
         assertThat(target.getValue().getCreateBy()).isEqualTo(7L); // 署名保留作者，不变成审核管理员。
@@ -183,12 +196,33 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         verify(runtime, never()).publishSkillToEnterprise(anyLong());
         assertThat(snapshot.getSkillUrl()).contains("official-publications"); assertThat(source.getOwnerType()).isEqualTo("personal");
         var ext = ArgumentCaptor.forClass(SsResExtSkill.class); verify(skills).save(ext.capture());
-        assertThat(ext.getValue().getSkillUrl()).startsWith("skill/org-hub/");
+        assertThat(ext.getValue().getSkillUrl()).isEqualTo("skill/org-hub/1/100/20/客户分析_企业.zip");
+        assertThat(ext.getValue().getSkillOriginalFilename()).isEqualTo("客户分析_企业.zip");
+        assertThat(ext.getValue().getSkillPackageHash()).isEqualTo(DigestUtils.sha256Hex(uploaded.getValue()));
+        assertThat(com.alibaba.fastjson.JSON.parseObject(ext.getValue().getTargetContent()).getString("sourcePackageHash"))
+            .isEqualTo(snapshot.getSkillPackageHash());
         when(mapper.selectOne(any())).thenReturn(target.getValue()); when(skills.findById(99L)).thenReturn(ext.getValue());
         when(relations.count(any())).thenReturn(1L);
         assertThat(service.publish(source, snapshot, bytes, 90L, context)).isEqualTo(99L);
         verify(storage, times(1)).uploadToSubdirectory(any(), anyString(), anyString(), anyString());
     }
+    @Test void duplicateEnterpriseNamesReceiveTheSameUniqueIdentityInResourceZipAndDocument() throws Exception {
+        source.setResourceName("分析 (周报)/2026");
+        when(resources.existsEnterpriseSkillByName("分析_周报_2026_企业")).thenReturn(true);
+        byte[] bytes = skill("{\"resources\":[]}");
+        snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
+        service.publish(source, snapshot, bytes, 90L, context);
+        var uploaded = ArgumentCaptor.forClass(byte[].class);
+        String name = "分析_周报_2026_100_20_企业";
+        verify(mapper).insert(argThat((SsResource target) -> name.equals(target.getResourceName())));
+        verify(storage).uploadToSubdirectory(uploaded.capture(), anyString(), eq(name + ".zip"), anyString());
+        try (var channel = new org.apache.commons.compress.utils.SeekableInMemoryByteChannel(uploaded.getValue());
+            var zip = new org.apache.commons.compress.archivers.zip.ZipFile(channel);
+            var input = zip.getInputStream(zip.getEntry("analysis/SKILL.md"))) {
+            assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).contains("name: \"" + name + "\"");
+        }
+    }
+
     @Test void unauthorizedOperatorAndChangedSnapshotCannotWriteEnterpriseResources() throws Exception {
         byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash("changed");
         assertThatThrownBy(() -> service.publish(source, snapshot, bytes, 90L, context)).hasMessageContaining("文件已变化");
@@ -202,7 +236,7 @@ class EmployeePublicationSkillServiceTest extends I18nTestSupport {
         when(scopes.hasReviewAuthority(publication)).thenReturn(true);
         byte[] bytes = skill("{\"resources\":[]}"); snapshot.setSkillPackageHash(DigestUtils.sha256Hex(bytes));
         assertThat(service.publish(source, snapshot, bytes, 90L, context)).isEqualTo(99L);
-        verify(storage).uploadToSubdirectory(eq(bytes), eq("skill/org-hub/1/100/20"), anyString(), eq("application/zip"));
+        verify(storage).uploadToSubdirectory(any(byte[].class), eq("skill/org-hub/1/100/20"), anyString(), eq("application/zip"));
         verify(mapper).insert(argThat((SsResource target) -> target.getCreateBy().equals(7L)
             && target.getPublicationRequestId().equals(100L) && "enterprise".equals(target.getOwnerType())));
     }

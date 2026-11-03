@@ -33,6 +33,7 @@ COPY middleware/byclaw-harness/scripts/docker-plugin-layout.mjs /workspace/scrip
 COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/scripts/docker-workspace-prepare.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -53,6 +54,12 @@ RUN node scripts/prepare-by-framework.mjs \
     && node scripts/docker-workspace-prepare.mjs plugins \
     && pnpm install --no-frozen-lockfile \
     && node scripts/verify-by-framework-runtime.mjs plugins/byclaw-integration/package.json
+
+# Preserve the enterprise package name in both the registry and native skill tool.
+RUN node scripts/prepare-dsh-skill-names-021.mjs /workspace \
+    && pnpm exec tsc -b packages/skill/skill/tsconfig.json packages/skill/tool-skill/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/skill/skill --filter packages/skill/tool-skill \
+    && node --input-type=module -e "const {isSkillName}=await import('./packages/skill/skill/lib/index.js');if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('DSH Skill name compatibility build is missing')"
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
@@ -90,6 +97,9 @@ RUN set -eux; \
     mkdir -p /tmp/byclaw-plugin-packs; \
     node scripts/docker-plugin-layout.mjs packages plugins >/tmp/byclaw-package-manifests; \
     node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace --manifests >>/tmp/byclaw-package-manifests; \
+    for skill_package in skill tool-skill; do \
+        printf '%s\n' "/workspace/packages/skill/${skill_package}/package.json" >>/tmp/byclaw-package-manifests; \
+    done; \
     # DSH's SSH provider family is outside the CLI installation table; pack it
     # from this workspace so @byclaw/dsh-tool-env installs the same build.
     for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
@@ -225,6 +235,10 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/lib/ /workspace/packages/core/agent/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/src/ /workspace/packages/core/agent-loop/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/lib/ /workspace/packages/core/agent-loop/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/src/ /workspace/packages/skill/skill/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/lib/ /workspace/packages/skill/skill/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/src/ /workspace/packages/skill/tool-skill/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/lib/ /workspace/packages/skill/tool-skill/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
@@ -274,6 +288,7 @@ RUN set -eux; \
     cd "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs "$(node -p "require.resolve('@byclaw/dsh-integration/package.json')")"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
+    node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/dsh-integration'));const {isSkillName}=await import(require.resolve('@deepseek-ai/dsh-skill'));if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('Profile resolved unpatched Skill names')"; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
     node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \

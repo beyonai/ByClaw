@@ -69,6 +69,29 @@ class ResourceSyncScopeMapperTest {
                     new ResourceSyncScopeMapper.UserAssistantRow(5L, 23L),
                     new ResourceSyncScopeMapper.UserAssistantRow(6L, 27L),
                     new ResourceSyncScopeMapper.UserAssistantRow(6L, 28L));
+            // Legacy users with no membership belong only to the default platform space.
+            try (var statement = session.getConnection().createStatement()) {
+                statement.execute("INSERT INTO byai.po_users VALUES (9,'A',NULL,'legacy'),"
+                    + "(10,'A',NULL,'disabled'),(11,'A',NULL,'other'),(12,'X',NULL,'inactive'),"
+                    + "(13,'A',NULL,'trial')");
+                statement.execute("INSERT INTO byai.tenant_user_membership VALUES (10,1,'DISABLED'),"
+                    + "(11,2,'ACTIVE'),(13,3,'ACTIVE')");
+                statement.execute("INSERT INTO byai.ss_resource VALUES (101,'legacy_personal','DIG_EMPLOYEE',2,1),"
+                    + "(102,'legacy_personal','DIG_EMPLOYEE',2,2),(103,'disabled_personal','DIG_EMPLOYEE',2,1),"
+                    + "(104,'other_personal','DIG_EMPLOYEE',2,1),(105,'other_personal','DIG_EMPLOYEE',2,2),"
+                    + "(106,'inactive_personal','DIG_EMPLOYEE',2,1),(107,'trial_personal','DIG_EMPLOYEE',2,3)");
+            }
+            session.clearCache();
+            var candidates = List.of(9L, 10L, 11L, 12L, 13L);
+            assertThat(mapper.activeTenantUsers(candidates, 1L)).containsExactly(9L);
+            assertThat(mapper.personalAssistantsBatch(candidates, 1L))
+                .containsExactly(new ResourceSyncScopeMapper.UserAssistantRow(9L, 101L));
+            assertThat(mapper.activeTenantUsers(candidates, 2L)).containsExactly(11L);
+            assertThat(mapper.personalAssistantsBatch(candidates, 2L))
+                .containsExactly(new ResourceSyncScopeMapper.UserAssistantRow(11L, 105L));
+            assertThat(mapper.activeTenantUsers(candidates, 3L)).containsExactly(13L);
+            assertThat(mapper.personalAssistantsBatch(candidates, 3L))
+                .containsExactly(new ResourceSyncScopeMapper.UserAssistantRow(13L, 107L));
             assertThat(mapper.personalAssistants(1L, 2L)).isEmpty();
             assertThat(mapper.activeTenantUsers(List.of(1L), 2L)).isEmpty();
             try (var statement = session.getConnection().createStatement()) {

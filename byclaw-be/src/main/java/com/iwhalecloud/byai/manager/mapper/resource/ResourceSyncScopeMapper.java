@@ -8,6 +8,15 @@ import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface ResourceSyncScopeMapper {
+    // Historical platform users log in to enterprise 1 without tenant memberships.
+    // Never apply that fallback to disabled memberships or users already assigned to another tenant.
+    String ACTIVE_TENANT_USER = """
+        (EXISTS (SELECT 1 FROM byai.tenant_user_membership m WHERE m.user_id = u.user_id
+            AND m.enterprise_id = #{tenantId} AND m.status = 'ACTIVE')
+         OR (#{tenantId} = 1 AND NOT EXISTS
+            (SELECT 1 FROM byai.tenant_user_membership membership WHERE membership.user_id = u.user_id)))
+        """;
+
     @Select("SELECT count(*) FROM byai.po_users WHERE user_id = #{id} AND state = 'A'")
     int activeUser(Long id);
 
@@ -33,8 +42,8 @@ public interface ResourceSyncScopeMapper {
     @Select("""
         <script>
         SELECT DISTINCT u.user_id FROM byai.po_users u
-        JOIN byai.tenant_user_membership m ON m.user_id = u.user_id
-        WHERE u.state = 'A' AND m.status = 'ACTIVE' AND m.enterprise_id = #{tenantId}
+        WHERE u.state = 'A' AND
+        """ + ACTIVE_TENANT_USER + """
           AND u.user_id IN
           <foreach collection="userIds" item="id" open="(" separator="," close=")">#{id}</foreach>
         </script>
@@ -74,8 +83,8 @@ public interface ResourceSyncScopeMapper {
         WHERE u.state = 'A' AND u.user_code IS NOT NULL AND u.user_code != ''
           AND r.resource_biz_type = 'DIG_EMPLOYEE' AND r.resource_status = 2
           AND r.com_acct_id = #{tenantId}
-          AND EXISTS (SELECT 1 FROM byai.tenant_user_membership m WHERE m.user_id = u.user_id
-              AND m.enterprise_id = #{tenantId} AND m.status = 'ACTIVE')
+          AND
+        """ + ACTIVE_TENANT_USER + """
           AND u.user_id IN
           <foreach collection="userIds" item="id" open="(" separator="," close=")">#{id}</foreach>
         </script>
