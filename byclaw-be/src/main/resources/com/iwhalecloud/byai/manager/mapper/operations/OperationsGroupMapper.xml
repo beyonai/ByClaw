@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper">
+    <select id="sources" resultType="map">
+        SELECT CAST(source.enterprise_id AS VARCHAR) AS "enterpriseId", source.enterprise_name AS "enterpriseName"
+        FROM (
+            SELECT e.enterprise_id, e.com_acct_name AS enterprise_name
+            FROM byai.po_enterprise_info e
+            WHERE e.enterprise_id = 1 OR EXISTS (
+                SELECT 1 FROM byai.tenant_config c WHERE c.enterprise_id = e.enterprise_id
+                AND (c.params_code = 'PROVISION_STATE' OR (c.params_code = 'TENANT_MODE' AND c.params_value = 'TRIAL'))
+            )
+            UNION ALL
+            SELECT 1 AS enterprise_id, '默认企业' AS enterprise_name
+            WHERE NOT EXISTS (SELECT 1 FROM byai.po_enterprise_info WHERE enterprise_id = 1)
+        ) source WHERE source.enterprise_id &gt; #{afterId}
+        ORDER BY source.enterprise_id LIMIT 11
+    </select>
     <sql id="scope">
         (g.enterprise_id = #{enterpriseId} OR (#{enterpriseId} = 1 AND g.enterprise_id IS NULL))
         AND g.session_type = 'hs_as' AND COALESCE(g.state, 'ACTIVE') IN ('ACTIVE', 'GROUP_DISSOLVED')
@@ -19,8 +34,12 @@
     </sql>
     <select id="groups" resultType="map">
         SELECT <include refid="columns"/> FROM byai.byai_session g WHERE <include refid="scope"/>
-        AND POSITION(LOWER(#{keyword}) IN LOWER(COALESCE(g.session_name, ''))) &gt; 0
-        AND (#{status} = '' OR COALESCE(g.state, 'ACTIVE') = #{status})
+        <if test="keyword != null and keyword != ''">
+            AND POSITION(LOWER(#{keyword}) IN LOWER(COALESCE(g.session_name, ''))) &gt; 0
+        </if>
+        <if test="status != null and status != ''">
+            AND COALESCE(g.state, 'ACTIVE') = #{status}
+        </if>
         ORDER BY g.create_time DESC NULLS LAST, g.session_id DESC
     </select>
     <select id="detail" resultType="map">

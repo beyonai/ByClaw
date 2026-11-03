@@ -72,6 +72,36 @@ class PlatformOperationsServiceTest {
         ReflectionTestUtils.setField(service, "groupRecords", groups);
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeGroupQueries() {
+        service.closeGroupQueries();
+    }
+
+    @Test
+    void aggregatedGroupsContinueAfterAnUnavailableTenant() {
+        when(groups.sources(0)).thenReturn(List.of(Map.of("enterpriseId", "1", "enterpriseName", "Default"),
+            Map.of("enterpriseId", "42", "enterpriseName", "Tenant")));
+        when(tenantModes.isSharedDataTenant(1)).thenReturn(true);
+        when(groups.groups(1, "", "")).thenReturn(List.of(Map.of("id", "9", "enterpriseId", "1")));
+        ObjectNode request = request("aggregate").put("resource", "groups");
+        var first = service.execute(request);
+        assertThat(first.path("list").get(0).path("enterpriseId").asText()).isEqualTo("1");
+        assertThat(first.path("nextCursor").asText()).isEqualTo("1:1");
+
+        when(groups.sources(1)).thenReturn(List.of(Map.of("enterpriseId", "42", "enterpriseName", "Tenant"),
+            Map.of("enterpriseId", "43", "enterpriseName", "Next")));
+        when(nodes.operationsRequest(eq(42L), any(), any(), any(), any()))
+            .thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(tenantModes.isSharedDataTenant(43)).thenReturn(true);
+        when(groups.groups(43, "", "")).thenReturn(List.of(Map.of("id", "10", "enterpriseId", "43")));
+        ((ObjectNode) request.get("payload")).put("cursor", "1:1");
+        var second = service.execute(request);
+        assertThat(second.path("partial").asBoolean()).isTrue();
+        assertThat(second.path("failedTenants").get(0).path("enterpriseId").asText()).isEqualTo("42");
+        assertThat(second.path("list").get(0).path("enterpriseId").asText()).isEqualTo("43");
+        assertThat(second.path("nextCursor").isNull()).isTrue();
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(longs = {1L, 456L})
     void sharedTenantGroupsReadPublicStorage(long enterpriseId) {
