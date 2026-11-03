@@ -149,3 +149,21 @@ BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，�
 提前创建账号可以把这段等待移到首次登录之前，刚注册立即聊天仍使用原有等待流程。
 
 文件上传能力探测兼容较早版本 Platform：仅在分片上传能力接口返回 HTTP 404 或显式 `resumable=false` 时告知前端使用既有 multipart 上传接口；认证、网络和服务端错误继续上报。该兼容不会将远程存储切换为 BE 本地存储。
+
+### Same-origin VNC viewer
+
+`getSandboxInfo` publishes `vnc` and `desktop` viewer URLs under
+`/byaiService/sandbox/vnc/{sandboxId}/{instance}/`. The viewer document, assets,
+and `websockify` connection use this same origin and the existing `SESSION`
+login cookie. The returned noVNC `path` parameter keeps its WebSocket on that
+protected route. No portal token or cloud traffic token is placed in the URL.
+
+The backend resolves the exact sandbox from the logged-in user's sandbox list
+and accepts only its declared desktop endpoint. The document and JavaScript are
+fixed, versioned classpath resources; runtime guest HTML/JS is never fetched or
+executed on the platform origin. Only the `websockify` WebSocket is forwarded,
+with server-owned endpoint headers and no browser portal credentials. The
+WebSocket handler applies MVC authentication and tenant interceptors plus a
+same-origin handshake check. Reverse proxies must preserve WebSocket Upgrade
+headers and the original `Host`/`X-Forwarded-Proto` on this route. See the bundled
+`sandbox-vnc/README.md` for runtime provenance and licensing.

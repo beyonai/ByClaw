@@ -462,6 +462,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("browser-supervisor-invalid-viewer")
 
     base_environment = dict(os.environ)
+    # Chrome derives an unpacked extension ID from its canonical path. A build-versioned
+    # directory isolates its service-worker cache while keeping the user's profile intact.
+    if base_environment.get("BYCLAW_BROWSER_EXTENSIONS"):
+        base_environment["BYCLAW_BROWSER_EXTENSIONS"] = os.pathsep.join(
+            os.path.realpath(path.strip())
+            for path in base_environment["BYCLAW_BROWSER_EXTENSIONS"].split(os.pathsep)
+            if path.strip()
+        )
     base_environment.pop("BYCLAW_BROWSER_SECRET", None)
     base_environment.pop("BYCLAW_BROWSER_SECRET_FD", None)
     base_environment["BYCLAW_BROWSER_SOCKET"] = str(socket_path)
