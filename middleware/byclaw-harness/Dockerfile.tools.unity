@@ -1,0 +1,22 @@
+# Preserve the deployed CN Editor, launchers, SSH/PTC runtime and container config.
+ARG UNITY_IMAGE=byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness-tools-unity@sha256:4e8a75098b97262957d85da69aea5ee6c68bbb90de9d4d2c0e23e411b05141c4
+FROM ${UNITY_IMAGE}
+USER root
+ARG UNITY_WEBGL_URL=https://download.unitychina.cn/download_unity/1623fc0bbb97/LinuxEditorTargetInstaller/UnitySetup-WebGL-Support-for-Editor-2022.3.62f3c1.tar.xz
+ARG UNITY_WEBGL_SHA256=7193dfdb816cb244db7604609be9916fdcc6364c777be04246430b7049a9cd8d
+RUN set -eux; \
+    test "$(/opt/unity/Editor/Unity -version)" = '2022.3.62f3c1'; \
+    curl --fail --location --retry 3 "${UNITY_WEBGL_URL}" -o /tmp/unity-webgl.tar.xz; \
+    printf '%s  %s\n' "${UNITY_WEBGL_SHA256}" /tmp/unity-webgl.tar.xz | sha256sum -c -; \
+    tar -xJf /tmp/unity-webgl.tar.xz -C /opt/unity ./Editor/Data/PlaybackEngines/WebGLSupport; \
+    rm /tmp/unity-webgl.tar.xz
+RUN set -eux; \
+    test -f /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/UnityEditor.WebGL.Extensions.dll; \
+    EM_CONFIG=/opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/.emscripten /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/emscripten/emcc --version; \
+    test -x /usr/local/bin/byclaw-tool-env-sshd; \
+    test -x /usr/local/bin/unity-editor; \
+    test -x /usr/local/bin/unity-build
+COPY middleware/byclaw-harness/tool-sandbox/unity.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+RUN node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json");if(m.contract!=="byclaw.tool-sandbox/v1"||m.purpose!=="unity"||m.operations.protocol!=="ssh"||m.operations.exposure!=="private"||JSON.stringify(m.capabilities)!==JSON.stringify(["unity","games"]))process.exit(1)'
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="unity"

@@ -249,3 +249,30 @@ reusing cached code at the package's stable installation path. The daemon's
 installed package remains authoritative and the existing doctor build check is
 still mandatory. Existing browser profiles, cookies and site login state are
 preserved; this does not clear a user's profile or bypass extension verification.
+
+### Unity tool image and WebGL support
+
+`Dockerfile.tools.unity` is a repository-root purpose layer over the immutable
+previously deployed Unity image. It preserves Editor 2022.3.62f3c1, its launchers,
+SSH/PTC runtime, user, environment and entrypoint. It adds the matching official
+China-release WebGL support package and the `byclaw.tool-sandbox/v1` manifest
+required by the enabled `unity` template (`capabilities: ["unity", "games"]`).
+The build checks the exact Editor version, module SHA256, WebGL extension DLL,
+Emscripten version and existing SSH/helper executables before the image succeeds.
+Source URL, China revision and digest are recorded in
+`tool-sandbox/unity-webgl-source.json`. The release metadata is published at
+https://unity.cn/api/releases?releaseType=full&major=2022 .
+
+Build from the repository root:
+
+```bash
+docker build -f middleware/byclaw-harness/Dockerfile.tools.unity \
+  --build-arg UNITY_IMAGE=your-registry/byclaw-harness-tools-unity@sha256:4e8a75098b97262957d85da69aea5ee6c68bbb90de9d4d2c0e23e411b05141c4 \
+  -t byclaw-harness-tools-unity:candidate .
+```
+
+The existing `unity-build` launcher still defaults to Linux. A WebGL project
+must invoke its own Editor `BuildPipeline.BuildPlayer` method targeting WebGL.
+Installing the module does not activate or grant a Unity license. Actual Editor
+builds require the deployment's valid license; do not embed credentials or license
+files in this build context or claim successful game output from module checks.

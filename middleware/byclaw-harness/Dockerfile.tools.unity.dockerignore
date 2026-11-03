@@ -1,0 +1,6 @@
+# Repository-root context; the Editor/module are versioned upstream artifacts.
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/unity.capabilities.json

@@ -1,0 +1,9 @@
+{
+  "editorVersion": "2022.3.62f3c1",
+  "editorSourceRevision": "1623fc0bbb97",
+  "releaseMetadata": "https://unity.cn/api/releases?releaseType=full&major=2022",
+  "moduleUrl": "https://download.unitychina.cn/download_unity/1623fc0bbb97/LinuxEditorTargetInstaller/UnitySetup-WebGL-Support-for-Editor-2022.3.62f3c1.tar.xz",
+  "moduleBytes": 570391052,
+  "moduleSHA256": "7193dfdb816cb244db7604609be9916fdcc6364c777be04246430b7049a9cd8d",
+  "baseImageDigest": "sha256:4e8a75098b97262957d85da69aea5ee6c68bbb90de9d4d2c0e23e411b05141c4"
+}
