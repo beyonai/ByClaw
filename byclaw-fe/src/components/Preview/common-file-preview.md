@@ -3,6 +3,7 @@
 ## 会话文件链接
 
 - Markdown 中的相对文件链接（如 `故地重游-高考作文.txt`、`./motion-15s.html`、`output/report.pdf`）以消息所属会话的 `/.sessions/<sessionId>/` 为基准。点击预览或下载时先通过 `/chat/file-artifacts/resolve` 核验文件，再用带登录凭证的 `/chat/file-artifacts/download` 读取；不会将文件名拼到 `/byaiService/` 根路径，也不搜索其它会话目录。
+- DSH 项目会话在会话目录找不到文件时，使用与「本地共享」侧栏相同的文件空间，通过 `/fileBrowser/download` 在当前项目的共享目录内按原相对路径读取。默认项目使用 `project_-1`。预览中的相对资源也限定在该项目目录内。
 - 缺少会话上下文、文件不存在、越界路径或下载失败时提示无法预览。文本链接、HTML、TXT 等使用相同流程，中文与 URL 编码的文件名保留原件身份。
 - 原始 UserFS 路径、`{{file_preview_prefix}}`、同源 `commonFile` 和会话下载 URL 归一化后由消息文件卡片统一展示。相同路径只显示一次，同名但不同路径的文件保留；外部链接及显式指定存储桶的链接不按会话文件处理。
 - 预览拒绝 HTTP 失败和空响应，不缓存错误 JSON。重复打开重新读取文件；切换或关闭附件预览时取消旧请求并忽略迟到结果，侧栏显示下载失败提示。

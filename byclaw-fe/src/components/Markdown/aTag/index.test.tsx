@@ -1,10 +1,13 @@
-import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message } from 'antd';
+import React from 'react';
+
+import ProjectSharedFileProvider from '@/components/ChatLayoutComp/ProjectSharedFileProvider';
+import { useChatRuntime } from '@/hooks/useChatRuntime';
+import { GET, POST } from '@/service/common/request';
+import { downloadFile } from '@/utils/file';
 
 import ATag from './index';
-import { downloadFile } from '@/utils/file';
-import { GET, POST } from '@/service/common/request';
-import { message } from 'antd';
 
 const mockEmit = jest.fn();
 
@@ -18,6 +21,11 @@ jest.mock('@/hooks/useGlobal', () => () => ({
   EventEmitter: {
     emit: mockEmit,
   },
+}));
+
+jest.mock('@/hooks/useChatRuntime', () => ({ useChatRuntime: jest.fn() }));
+jest.mock('@/layout/sider/components/ActiveSiderAgentBar', () => ({
+  useActiveSiderAgent: () => ({ resourceId: '42' }),
 }));
 
 jest.mock('@/components/MessageList/components/FileRender/components/IconRender', () => () => (
@@ -196,6 +204,72 @@ describe('Markdown ATag file actions', () => {
     expect(GET).not.toHaveBeenCalled();
     expect(mockEmit).not.toHaveBeenCalled();
   });
+
+  it.each(['preview', 'download'])('loads a relative file from the DSH default project for %s', async (action) => {
+    const fileName = '项目报告.txt';
+    const file = new Blob(['共享文件']);
+    const runtimeType = 'dsh';
+    const providerProps = { sessionId: '101', projectId: -1, projectResourceId: 90 };
+    jest
+      .mocked(useChatRuntime)
+      .mockReturnValue({ runtimeType, runtimeReady: true, runtimeError: false, retry: jest.fn() });
+    jest.mocked(POST).mockResolvedValueOnce([]);
+    jest.mocked(GET).mockResolvedValueOnce({ file, fileName });
+
+    render(
+      <ProjectSharedFileProvider {...providerProps}>
+        <ATag
+          sessionId="101"
+          messageId="reply-1"
+          domNode={{ attribs: { href: `reports/${encodeURIComponent(fileName)}` }, children: [{ data: fileName }] }}
+        />
+      </ProjectSharedFileProvider>
+    );
+    fireEvent.click(document.querySelector(`.${action}`)!);
+
+    const actionSpy = action === 'preview' ? mockEmit : downloadFile;
+    const previewArgs = ['beyond-main-driver-message', expect.objectContaining({ data: file })];
+    const expectedArgs = action === 'preview' ? previewArgs : [{ file, fileName }];
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledWith(...expectedArgs));
+    expect(POST).toHaveBeenCalledWith('/byaiService/chat/file-artifacts/resolve', {
+      sessionId: '101',
+      messageId: 'reply-1',
+      paths: [`/.sessions/101/reports/${fileName}`],
+    });
+    expect(GET).toHaveBeenCalledWith(
+      '/byaiService/fileBrowser/download',
+      { resourceId: '42', path: `/by/.shared/project_-1/reports/${fileName}` },
+      { responseType: 'blob' }
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { runtimeType: 'dsh', messageSessionId: '102' },
+    { runtimeType: 'openclaw', messageSessionId: '101' },
+  ] as const)(
+    'keeps shared lookup scoped to the current DSH session: %j',
+    async ({ runtimeType, messageSessionId }) => {
+      const providerProps = { sessionId: '101', projectId: 12 };
+      jest
+        .mocked(useChatRuntime)
+        .mockReturnValue({ runtimeType, runtimeReady: true, runtimeError: false, retry: jest.fn() });
+      jest.mocked(POST).mockResolvedValueOnce([]);
+
+      render(
+        <ProjectSharedFileProvider {...providerProps}>
+          <ATag
+            sessionId={messageSessionId}
+            domNode={{ attribs: { href: 'report.txt' }, children: [{ data: 'report.txt' }] }}
+          />
+        </ProjectSharedFileProvider>
+      );
+      fireEvent.click(document.querySelector('.preview')!);
+
+      await waitFor(() => expect(message.warning).toHaveBeenCalledWith('fileRender.previewUnavailable'));
+      expect(GET).not.toHaveBeenCalled();
+    }
+  );
 
   it('does not guess a session for relative links without message context', async () => {
     render(<ATag domNode={{ attribs: { href: 'no-session.txt' }, children: [{ data: 'no-session.txt' }] }} />);
