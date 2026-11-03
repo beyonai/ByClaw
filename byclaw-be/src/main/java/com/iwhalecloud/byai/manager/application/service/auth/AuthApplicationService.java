@@ -1274,7 +1274,8 @@ public class AuthApplicationService {
     }
 
     private PrivilegeGrant pendingManageApplication(SsResource resource, Long applicant) {
-        return getActiveUserPrivilege(resource, applicant, GrantType.MANAGE_APPLY, Color.RED, USE_APPLY_PENDING_STATUS);
+        return getActiveUserPrivilege(resource, applicant, GrantType.MANAGE_APPLY, OperType.WRITE,
+            Color.RED, USE_APPLY_PENDING_STATUS);
     }
 
     private void applyEmployeeManage(SsResource resource) {
@@ -1899,18 +1900,18 @@ public class AuthApplicationService {
      * @date 2026-04-25 16:20:00
      */
     private boolean isCurrentUserUseBlacklisted(SsResource ssResource, Long currentUserId) {
-        return getActiveUserPrivilege(ssResource, currentUserId, GrantType.AVAILABLE_USE, Color.BLACK, "A") != null
-            || getActiveUserPrivilege(ssResource, currentUserId, GrantType.FORCE_USE, Color.BLACK, "A") != null;
+        return getActiveUserPrivilege(ssResource, currentUserId, GrantType.AVAILABLE_USE, OperType.READ, Color.BLACK, "A") != null
+            || getActiveUserPrivilege(ssResource, currentUserId, GrantType.FORCE_USE, OperType.READ, Color.BLACK, "A") != null;
     }
 
     /**
-     * 查询指定用户在资源上的单条授权记录。
+     * 查询指定用户在资源上的单条授权记录，管理申请使用 WRITE，使用申请和使用黑名单使用 READ。
      *
      * @author qin.guoquan
      * @date 2026-04-25 16:20:00
      */
-    private PrivilegeGrant getActiveUserPrivilege(SsResource ssResource, Long userId, String grantType, String color,
-                                                  String statusCd) {
+    private PrivilegeGrant getActiveUserPrivilege(SsResource ssResource, Long userId, String grantType, String operType,
+                                                  String color, String statusCd) {
         LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId());
         queryWrapper.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType());
@@ -1918,7 +1919,7 @@ public class AuthApplicationService {
         queryWrapper.eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER);
         queryWrapper.eq(PrivilegeGrant::getGrantToObjId, userId);
         queryWrapper.eq(PrivilegeGrant::getGrantToType, color);
-        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.eq(PrivilegeGrant::getOperType, operType);
         queryWrapper.eq(PrivilegeGrant::getStatusCd, statusCd);
         queryWrapper.last("limit 1");
         return privilegeGrantMapper.selectOne(queryWrapper);
@@ -1951,7 +1952,7 @@ public class AuthApplicationService {
      * @date 2026-04-25 16:20:00
      */
     private PrivilegeGrant getPendingUseApplyPrivilege(SsResource ssResource, Long userId) {
-        return getActiveUserPrivilege(ssResource, userId, GrantType.AVAILABLE_USE, Color.RED,
+        return getActiveUserPrivilege(ssResource, userId, GrantType.AVAILABLE_USE, OperType.READ, Color.RED,
             USE_APPLY_PENDING_STATUS);
     }
 
