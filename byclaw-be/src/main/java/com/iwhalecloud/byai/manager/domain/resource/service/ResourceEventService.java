@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
@@ -42,6 +43,9 @@ public class ResourceEventService {
     // 统一的资源事件主题
     private static final String RESOURCE_EVENTS_TOPIC = "resource-events";
 
+    @Value("${zlog.adapter.kafka.enabled:false}")
+    private boolean kafkaEnabled;
+
     @Autowired(required = false)
     private ZlogAdapter zlogAdapter;
 
@@ -57,6 +61,10 @@ public class ResourceEventService {
      * @param resource 资源对象
      */
     public void sendResourceShelfEvent(SsResource resource) {
+        if (!kafkaEnabled) {
+            LOGGER.debug("Kafka资源事件未启用，跳过通知 resourceId={}", resource.getResourceId());
+            return;
+        }
         try {
             ResourceEventMessage message = createResourceEventMessage(resource, EVENT_TYPE_SHELF);
             CompletableFuture<SendResult<String, String>> send = sendMessage(message);
@@ -77,6 +85,10 @@ public class ResourceEventService {
      * @param resource 资源对象
      */
     public void sendResourceUnshelfEvent(SsResource resource) {
+        if (!kafkaEnabled) {
+            LOGGER.debug("Kafka资源事件未启用，跳过通知 resourceId={}", resource.getResourceId());
+            return;
+        }
         try {
             ResourceEventMessage message = createResourceEventMessage(resource, EVENT_TYPE_UNSHELF);
             CompletableFuture<SendResult<String, String>> send = sendMessage(message);
@@ -169,6 +181,10 @@ public class ResourceEventService {
      * @param resource 资源对象，包含需要发送审核通过事件的资源信息
      */
     public void sendResourceAuditPassEvent(SsResource resource) {
+        if (!kafkaEnabled) {
+            LOGGER.debug("Kafka资源事件未启用，跳过通知 resourceId={}", resource.getResourceId());
+            return;
+        }
         try {
             // 创建资源事件消息并发送
             ResourceEventMessage message = createResourceEventMessage(resource, EVENT_TYPE_AUDIT_PASS);
@@ -190,6 +206,10 @@ public class ResourceEventService {
      * @param resource 资源对象，用于创建事件消息并发送
      */
     public void sendResourceAuditRejectEvent(SsResource resource) {
+        if (!kafkaEnabled) {
+            LOGGER.debug("Kafka资源事件未启用，跳过通知 resourceId={}", resource.getResourceId());
+            return;
+        }
         try {
             // 创建资源事件消息并发送
             ResourceEventMessage message = createResourceEventMessage(resource, EVENT_TYPE_AUDIT_REJECT);
