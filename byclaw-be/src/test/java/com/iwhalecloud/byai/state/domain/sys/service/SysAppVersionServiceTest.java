@@ -14,7 +14,8 @@ import com.iwhalecloud.byai.common.storage.util.FileUtil;
 import com.iwhalecloud.byai.manager.entity.system.SysAppVersion;
 import com.iwhalecloud.byai.manager.mapper.system.SysAppVersionMapper;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -33,14 +34,15 @@ class SysAppVersionServiceTest {
         ReflectionTestUtils.setField(service, "fileIngressService", fileIngressService);
     }
 
-    @Test
-    void downloadPackageRestoresPackageBucketForRawObjectPath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void downloadPackageUsesPackageBucketForRawAndPreviewPaths(boolean previewUrl) throws Exception {
         long versionId = 20096802L;
         String objectPath = "/file/user_10001/20260923/鲸智百应-0.1.1-arm64.dmg";
         String storageUrl = FileUtil.generateFileAccessUrl(Constants.BUCKET_NAME_PACKAGE, objectPath, "file");
         SysAppVersion version = new SysAppVersion();
         version.setVersionId(versionId);
-        version.setUrl(objectPath);
+        version.setUrl(previewUrl ? storageUrl : objectPath);
         version.setFileName("鲸智百应-0.1.1-arm64.dmg");
         version.setFileSize(7L);
         when(sysAppVersionMapper.selectById(versionId)).thenReturn(version);

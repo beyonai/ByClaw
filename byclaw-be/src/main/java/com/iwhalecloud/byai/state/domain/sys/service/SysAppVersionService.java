@@ -241,7 +241,7 @@ public class SysAppVersionService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "安装包不存在");
         }
         String storageUrl = url;
-        if (StringUtils.isBlank(fileInfo.getFilePath())) {
+        if (StringUtils.isBlank(fileInfo.getBucketName())) {
             // Local/file storage returns the object key directly (for example
             // /file/user_10001/20260923/app.dmg), while FileIngressService expects
             // a storage URL carrying both bucketName and fileName. App packages
