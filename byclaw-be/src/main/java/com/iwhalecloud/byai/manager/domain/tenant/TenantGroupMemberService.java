@@ -121,9 +121,12 @@ public class TenantGroupMemberService {
             SsResource resource = resources.findById(id);
             if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
                 || !Objects.equals(resource.getResourceStatus(), 2)
-                || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
-                    && Objects.equals(resource.getComAcctId(), context.enterpriseId())
-                    || resourceAuthorization.hasResourceAccessPermission(resource))) {
+                // 邀请入群允许跨企业使用已上架数字员工，不再校验邀请人的资源访问权限。
+                // 群内邀请权限仍由 requireInvite 校验，入群后继续为群成员补充资源授权。
+                // || !("enterprise".equalsIgnoreCase(resource.getOwnerType())
+                //     && Objects.equals(resource.getComAcctId(), context.enterpriseId())
+                //     || resourceAuthorization.hasResourceAccessPermission(resource))
+                ) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "tenant.employee.inaccessible");
             }
             return new TenantNodeModels.InvitedMember("AGENT", id.toString(), resource.getResourceName(), true);
