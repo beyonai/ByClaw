@@ -144,6 +144,7 @@ export default {
   'sandboxMgr.status.all': 'All',
   'sandboxMgr.status.starting': 'Starting',
   'sandboxMgr.status.running': 'Running',
+  'sandboxMgr.status.draining': 'Draining',
   'sandboxMgr.status.releasing': 'Releasing',
   'sandboxMgr.status.released': 'Released',
   'sandboxMgr.status.failed': 'Failed',

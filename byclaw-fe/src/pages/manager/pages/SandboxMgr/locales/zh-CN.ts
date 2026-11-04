@@ -137,6 +137,7 @@ export default {
   'sandboxMgr.status.all': '全部',
   'sandboxMgr.status.starting': '启动中',
   'sandboxMgr.status.running': '运行中',
+  'sandboxMgr.status.draining': '排空中',
   'sandboxMgr.status.releasing': '释放中',
   'sandboxMgr.status.released': '已释放',
   'sandboxMgr.status.failed': '失败',
