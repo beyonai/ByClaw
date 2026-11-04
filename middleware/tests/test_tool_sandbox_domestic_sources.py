@@ -1,5 +1,6 @@
 """Build-source defaults must fail closed rather than silently go overseas."""
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -8,6 +9,12 @@ HARNESS = ROOT / 'middleware/byclaw-harness'
 
 
 class ToolSandboxDomesticSourcesTest(unittest.TestCase):
+    def test_business_manifests_match_release_tags(self):
+        for purpose in ('browser', 'media', 'godot'):
+            manifest = json.loads((HARNESS / 'tool-sandbox' / f'{purpose}.capabilities.json').read_text())
+            self.assertEqual(manifest['purpose'], purpose)
+            self.assertEqual(manifest['runtimeVersion'], f'D0.6.0_{purpose}')
+
     def test_python_bootstrap_requires_explicit_controlled_image(self):
         source = (HARNESS / 'Dockerfile.base').read_text()
         self.assertRegex(source, r'(?m)^ARG PYTHON_IMAGE\s*$')
@@ -27,11 +34,15 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
         for name in ('Dockerfile.base', 'Dockerfile', 'Dockerfile.extensions', 'Dockerfile.base_slim', 'Dockerfile.slim', 'Dockerfile.tool_slim'):
             self.assertNotRegex((HARNESS / name).read_text(), r'(?m)^#\s*syntax=docker/dockerfile')
 
-    def test_derived_image_base_is_a_required_input(self):
-        for name, variable in (('Dockerfile.tools.browser', 'TOOLS_IMAGE'),
-                               ('Dockerfile.tools.media', 'TOOLS_IMAGE'),
-                               ('Dockerfile.tool-market-host', 'HARNESS_IMAGE')):
-            self.assertRegex((HARNESS / name).read_text(), rf'(?m)^ARG {variable}\s*$', name)
+    def test_business_images_default_to_the_internal_slim_family(self):
+        for name, tag in (('Dockerfile.tools.browser', 'D0.6.0_base_slim'),
+                          ('Dockerfile.tools.media', 'D0.6.0_browser')):
+            self.assertIn(f'ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:{tag}',
+                          (HARNESS / name).read_text(), name)
+        for name in ('Dockerfile.tools.godot',):
+            self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser',
+                          (HARNESS / name).read_text(), name)
+        self.assertRegex((HARNESS / 'Dockerfile.tool-market-host').read_text(), r'(?m)^ARG HARNESS_IMAGE\s*$')
 
     def test_external_images_preserve_domestic_defaults_without_implicit_dockerhub(self):
         expected = {
@@ -44,12 +55,14 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
             'Dockerfile.tool_slim': 'HARNESS_IMAGE',
             'Dockerfile.tools.browser': 'TOOLS_IMAGE',
             'Dockerfile.tools.media': 'TOOLS_IMAGE',
+            'Dockerfile.tools.base-slim': 'TOOLS_IMAGE',
+            'Dockerfile.tools.godot': 'BROWSER_IMAGE',
             'Dockerfile.tool-market-host': 'HARNESS_IMAGE',
         }
         for name, variable in expected.items():
             source = (HARNESS / name).read_text()
             defaults = re.findall(rf'(?m)^ARG {variable}=(\S+)$', source)
-            if name in {'Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim', 'Dockerfile.tools', 'Dockerfile.tool_slim'}:
+            if name in {'Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim', 'Dockerfile.tools', 'Dockerfile.tool_slim', 'Dockerfile.tools.browser', 'Dockerfile.tools.media', 'Dockerfile.tools.unity', 'Dockerfile.tools.godot'}:
                 self.assertEqual(len(defaults), 1, name)
                 self.assertTrue(defaults[0].startswith('192.168.0.81:8080/byclaw/'), name)
             else:
@@ -61,7 +74,11 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
                 if not match:
                     continue
                 image, stage = match.groups()
-                self.assertTrue(image == 'scratch' or image in stages or image == '${' + variable + '}',
+                self.assertTrue(image == 'scratch' or image in stages or image == '${' + variable + '}'
+                                or (name == 'Dockerfile.tools.browser' and image == '${BROWSER_DONOR_IMAGE}')
+                                or (name == 'Dockerfile.tools.browser' and image == '${INSTALLED_BROWSER_IMAGE}')
+                                or (name == 'Dockerfile.tools.base-slim' and image == '${RUNTIME_IMAGE}')
+                                or (name == 'Dockerfile.tools.unity' and image == '${UNITY_DONOR_IMAGE}'),
                                 f'{name}: implicit external image {image}')
                 if stage:
                     stages.add(stage)

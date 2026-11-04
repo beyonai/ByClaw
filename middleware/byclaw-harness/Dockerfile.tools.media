@@ -1,5 +1,6 @@
-# Purpose layers add dependencies without replacing the SSH/helper/PTC core.
-ARG TOOLS_IMAGE
+# The browser business layer is itself built from D0.6.0_base_slim.
+# HyperFrames needs its Chromium runtime; never inherit the full Harness image.
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
 FROM ${TOOLS_IMAGE}
 USER root
 ARG HYPERFRAMES_VERSION=0.8.226
@@ -34,3 +35,7 @@ RUN test -x /usr/local/bin/byclaw-tool-env-sshd \
     && node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="media") process.exit(1)'
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
       io.byclaw.tool-sandbox.purpose="media"
+RUN env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env \
+    && chmod 0644 /etc/byclaw-tool-env.session-env
+# Explicit runtime overlay also covers releases pinned to a validated browser digest.
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor

@@ -5,3 +5,8 @@
 !middleware/byclaw-harness/tool-sandbox/
 !middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
 !middleware/byclaw-harness/tool-sandbox/browser.capabilities.json
+!middleware/byclaw-harness/tool-sandbox/collect-browser-runtime.mjs
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/byclaw-bycli-managed.py
+!middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py
+!middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh
