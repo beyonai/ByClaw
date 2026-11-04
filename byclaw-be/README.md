@@ -301,6 +301,10 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - `userId` 是必填的用户主键（Long），不是工号或姓名；前端附带的 `language` 参数不参与用户查询。用户不存在时返回 `{code: -1, msg: '用户不存在'}`。
 - 成功返回 `{code: 0, data: {...}}`，资料卡读取 `userId`、`userName`、`userCode`（工号）、`phone`（沿用解密脱敏规则）、`pathName`（部门路径）、`positionName`（职位）。保留现有超级助手字段，助手或岗位记录缺失不会导致空指针异常。
 
+## 普通聊天消息姓名持久化
+
+共享库消息新增及缺失补插时，`insertBatch` 将消息对象已有的 `creatorName` 写入 `byai_message.creator_name`，供 `getMessageOutline` 等查询读取。姓名来源沿用现有逻辑：普通用户及助手消息均使用生成消息时的登录用户名；未提供姓名时保存 `NULL`。本次仅补齐 INSERT，不改变已有消息更新、独立租户镜像或群聊写入逻辑，也不回填历史空值。
+
 ## 群列表消息摘要
 
 租户请求带 `X-Enterprise-Id` 时，BE 会按当前登录用户的 ACTIVE 成员关系重新校验租户范围；不再使用 `X-Tenant-Context`。新建工作组由租户 Node 持久化。创建请求中的 `agentIds` 与模板资源先在 BE 校验访问权限并去重，再随 `CREATE_GROUP` 一次写入群成员；无效或无权限的资源不会留下半成品群。现阶段创建时的 `userIds` 仍不支持，需建群后邀请真人成员。存量旧库群仍按其原有成员关系路由。群列表和群详情返回归属 `enterpriseId`，调用方切换工作组时以该字段建立聊天上下文。
