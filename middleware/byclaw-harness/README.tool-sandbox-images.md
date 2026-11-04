@@ -7,6 +7,7 @@ Build from the repository root on host53 for `linux/amd64`. Dockerfile parents u
 | `Dockerfile.tools.base-slim` | `D0.6.0_base_slim` | Clean Debian13, Python/Node/Git, exact Harness SSH/helper/PTC transport |
 | `Dockerfile.tools.browser` | `D0.6.0_browser` | Slim base; Chromium/Playwright/byCLI, native browser automation and noVNC |
 | `Dockerfile.tools.media` | `D0.6.0_media` | Browser business layer; HyperFrames/GSAP, FFmpeg/FFprobe |
+| `Dockerfile.tools.unity` | `D0.6.0_unity` | Browser business layer; Unity Editor/Hub, WebGL/Linux toolchains and game desktop |
 | `Dockerfile.tools.godot` | `D0.6.0_godot` | Browser business layer; Godot editor, built-in GDScript, Web/Linux exports and game desktop |
 
 GDScript is provided by Godot. There is no separate GDScript image or service.
@@ -24,8 +25,10 @@ Run the actual image checks, not only version commands:
 - `scripts/tool-media-slim-smoke.sh` inside the Media image as `byclaw`; actual offline video/audio render, decoded motion/audio and preview.
 - `scripts/godot-business-smoke.sh` inside Godot as `byclaw`; valid/invalid GDScript, import, Web/Linux export and player execution. Also run its browser/desktop verification.
 
-For each published image, validate an isolated aliyun83 cloud template plus command/file operations. Docker ENTRYPOINT does not replace MicroVM start configuration; SSH identities are provisioned per instance after restore. Keep authenticated viewer routing: browser8081, Godot desktop8083.
+For each published image, validate an isolated aliyun83 cloud template plus command/file operations. Docker ENTRYPOINT does not replace MicroVM start configuration; SSH identities are provisioned per instance after restore. Keep authenticated viewer routing: browser8081, Unity/Godot desktop8083.
 
 After all53 image builds, checks and publications finish, remove this run's validation containers, temporary payload copies and BuildKit build cache. Record before/after disk usage. Preserve published images, existing services, persistent volumes and release receipts; do not use volume or global image pruning as build-cache cleanup.
 
-See [base details](README.tools-base-slim.md) and [Godot](README.tools.godot.md).
+Unity project import, Player builds and WebGL export require the owner's valid runtime license. Verify those separately from Editor/Hub and installed toolchain readiness.
+
+See [base details](README.tools-base-slim.md), [Unity](README.tools.unity.md) and [Godot](README.tools.godot.md).

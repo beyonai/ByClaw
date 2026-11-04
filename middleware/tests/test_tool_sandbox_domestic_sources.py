@@ -10,7 +10,7 @@ HARNESS = ROOT / 'middleware/byclaw-harness'
 
 class ToolSandboxDomesticSourcesTest(unittest.TestCase):
     def test_business_manifests_match_release_tags(self):
-        for purpose in ('browser', 'media', 'godot'):
+        for purpose in ('browser', 'media', 'unity', 'godot'):
             manifest = json.loads((HARNESS / 'tool-sandbox' / f'{purpose}.capabilities.json').read_text())
             self.assertEqual(manifest['purpose'], purpose)
             self.assertEqual(manifest['runtimeVersion'], f'D0.6.0_{purpose}')
@@ -39,7 +39,7 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
                           ('Dockerfile.tools.media', 'D0.6.0_browser')):
             self.assertIn(f'ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:{tag}',
                           (HARNESS / name).read_text(), name)
-        for name in ('Dockerfile.tools.godot',):
+        for name in ('Dockerfile.tools.unity', 'Dockerfile.tools.godot'):
             self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser',
                           (HARNESS / name).read_text(), name)
         self.assertRegex((HARNESS / 'Dockerfile.tool-market-host').read_text(), r'(?m)^ARG HARNESS_IMAGE\s*$')
@@ -56,6 +56,7 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
             'Dockerfile.tools.browser': 'TOOLS_IMAGE',
             'Dockerfile.tools.media': 'TOOLS_IMAGE',
             'Dockerfile.tools.base-slim': 'TOOLS_IMAGE',
+            'Dockerfile.tools.unity': 'BROWSER_IMAGE',
             'Dockerfile.tools.godot': 'BROWSER_IMAGE',
             'Dockerfile.tool-market-host': 'HARNESS_IMAGE',
         }

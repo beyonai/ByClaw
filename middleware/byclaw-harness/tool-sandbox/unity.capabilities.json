@@ -1,10 +1,10 @@
 {
   "contract": "byclaw.tool-sandbox/v1",
-  "runtimeVersion": "D0.6.0-unity-2022.3.62f3c1",
+  "runtimeVersion": "D0.6.0_unity",
   "purpose": "unity",
   "os": "linux",
   "operations": { "protocol": "ssh", "exposure": "private" },
-  "capabilities": ["unity", "games"],
+  "capabilities": ["process.exec", "filesystem", "browser.automation", "game.unity"],
   "display": { "available": true, "defaultExposure": "public", "auth": "byclaw-session" },
   "storageModes": ["agenticfs-subpath"]
 }
