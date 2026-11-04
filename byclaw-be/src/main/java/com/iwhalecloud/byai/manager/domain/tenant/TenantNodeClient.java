@@ -140,38 +140,58 @@ public class TenantNodeClient {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.node.request.invalid");
         }
         long enterpriseId = context.enterpriseId();
-        String recordId = tenantMapper.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
-        String stateJson = tenantMapper.selectConfig(enterpriseId, "PROVISION_STATE");
+        boolean recoveryScan = "/internal/v1/forward-maintenance/scan".equals(path);
+        String step = "readNodeSandboxRecordId";
         try {
+            String recordId = tenantMapper.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
+            step = "readProvisionState";
+            String stateJson = tenantMapper.selectConfig(enterpriseId, "PROVISION_STATE");
+            step = "validateProvisionState";
             ProvisionState state = mapper.readValue(stateJson, ProvisionState.class);
             long generation = state.generation();
             if (!"READY".equals(state.status()) || generation <= 0
                 || recordId == null || !recordId.matches("[1-9][0-9]*")) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.notReady");
             }
+            step = "lookupNodeSandbox";
             SsSandboxRecord record = sandboxMapper.selectActiveTenantByResourceAndType(enterpriseId,
                 "tenant-data-node");
+            step = "validateNodeIdentity";
             if (record == null || !"TENANT".equals(record.getOwnerScope())
                 || !"RUNNING".equals(record.getStatus()) || record.getId() == null
                 || record.getId() != Long.parseLong(recordId) || record.getEnterpriseId() == null
                 || record.getEnterpriseId() != enterpriseId || internalToken == null || internalToken.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.identity.mismatch");
             }
+            step = "readDatabaseRecordId";
             String dbRecordId = dbRecordId(enterpriseId);
+            step = "discoverEndpoint";
             URI base = discover(context, generation, dbRecordId);
+            step = "requestReadiness";
             ReadyView ready = send(base, "/internal/v1/health/ready", "GET", null, context, generation,
                 new TypeReference<ReadyView>() { });
+            step = "validateReadiness";
             if (!ready.ready() || !Long.toString(enterpriseId).equals(ready.enterpriseId())
                 || !Long.toString(generation).equals(ready.generation())
                 || !dbRecordId.equals(ready.dbSandboxRecordId())) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.readiness.mismatch");
             }
+            step = "requestNodeOperation";
             return send(base, path, method, body, context, generation, responseType);
         }
-        catch (ResponseStatusException e) {
-            throw e;
-        }
         catch (Exception e) {
+            if (recoveryScan) {
+                // 恢复线程统一记录租户和扫描类别，在异常链中保留实际失败阶段。
+                String detail = "Tenant forward scan failed, step=" + step;
+                if (e instanceof NodeRejection rejection) {
+                    detail += ", nodeStatus=" + rejection.nodeStatus();
+                }
+                throw new IllegalStateException(detail, e);
+            }
+            if (e instanceof ResponseStatusException status) throw status;
+            // 配置读取异常沿用原有传播方式，由调用方处理。
+            if (("readNodeSandboxRecordId".equals(step) || "readProvisionState".equals(step))
+                && e instanceof RuntimeException runtime) throw runtime;
             LOG.warn("Tenant Node transport failed for {} {}: {}", method, path, e.getClass().getSimpleName());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.node.unavailable");
         }

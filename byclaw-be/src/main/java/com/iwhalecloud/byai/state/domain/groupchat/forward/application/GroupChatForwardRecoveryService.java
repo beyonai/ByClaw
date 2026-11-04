@@ -132,15 +132,20 @@ public class GroupChatForwardRecoveryService {
         if(category==Category.DELIVERY&&deliveryCapacity.availablePermits()==0)category=Category.WORK;
         if((category==Category.WORK?workCapacity:deliveryCapacity).availablePermits()==0)return;
         String key=database+":"+category;
+        String step = "scanCandidates";
         try{
             var page=store.scan(enterprise,category,cursors.get(key),limit);
+            step = category == Category.WORK ? "dispatchWork" : "dispatchDelivery";
             for(var candidate:page.candidates()){
                 if(category==Category.WORK){if(!submitRequest(candidate.locator()))return;}
                 else if(!submitDelivery(store,candidate))return;
                 cursors.put(key,Long.toString(candidate.targetId()));
             }
             if(page.nextCursor()==null)cursors.remove(key);
-        }catch(RuntimeException error){LOG.warn("Forward recovery discovery deferred, backend={}, enterprise={}, code={}",backend,enterprise,errorCode(error));}
+        } catch (RuntimeException error) {
+            LOG.warn("Forward recovery discovery deferred, backend={}, enterprise={}, category={}, step={}, code={}",
+                backend, enterprise, category, step, errorCode(error), error);
+        }
     }
     /** Called with a server-discovered candidate; store authority and current policy are rechecked at each phase. */
     public void process(ForwardMaintenanceStore store,Candidate candidate,Category category){
