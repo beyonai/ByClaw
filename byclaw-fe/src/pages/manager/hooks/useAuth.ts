@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import { listAuthDetail, batchHandleAuth, allowManageAuth } from '@/pages/manager/service/DigitalResourceMgr';
+import useAuthorizationTask from './useAuthorizationTask';
 import { grantTypeMap } from '@/pages/manager/constants/digitalResource';
 
 function useAuth({
@@ -72,87 +73,65 @@ function useAuth({
       });
   }, [grantType, grantObjType, grantObjId, getGrantItem, includeUseGrantFamily]);
 
-  // 编辑授权
+  const background = useAuthorizationTask({
+    enabled: [
+      '/byaiService/auth/privilegeGrant/setResourceUsers',
+      '/byaiService/auth/privilegeGrant/setResourceManagers',
+    ].includes(authApiPath),
+    resourceId: grantObjId,
+    onCompleted: getDetail,
+  });
+  const usesBackground = [
+    '/byaiService/auth/privilegeGrant/setResourceUsers',
+    '/byaiService/auth/privilegeGrant/setResourceManagers',
+  ].includes(authApiPath);
+
   const setAuth = useCallback(
-    (cb) => {
-      if (!grantType || !grantObjType || authLoading) return;
+    async (cb) => {
+      if (!grantType || !grantObjType || authLoading || background.taskBlocked) return;
       setAuthLoading(true);
-
-      if (grantType === grantTypeMap.useAuth) {
-        // 使用授权：使用 batchHandleAuth 接口
-        // 授权对象的 grantType 是 FORCE_USE
-        const authObjectList =
-          redList?.map((item) => ({
-            ...transFormGrandItem(item),
-            grantType: 'FORCE_USE',
-          })) || [];
-
-        // 排除对象的 grantType 是 FORCE_USE
-        const blackObjectList =
-          blackList?.map((item) => ({
-            ...transFormGrandItem(item),
-            grantType: 'FORCE_USE',
-          })) || [];
-
-        const authParams = {
-          orgId,
-          grantObjId,
-          grantObjType,
-          redList: authObjectList,
-          blackList: blackObjectList,
-          resourceId: grantObjId, // 资源授权使用
-          ...(includeUseGrantFamily ? { includeUseGrantFamily: true } : {}),
-        };
-        // 开发态：传递pid参数
-        if (pid) {
-          authParams.pid = pid;
+      const use = grantType === grantTypeMap.useAuth;
+      const target = (item) => ({ ...transFormGrandItem(item), ...(use ? { grantType: 'FORCE_USE' } : {}) });
+      const params = {
+        orgId,
+        grantObjId,
+        grantObjType,
+        resourceId: grantObjId,
+        redList: redList?.map(target) || [],
+        blackList: blackList?.map(target) || [],
+        ...(pid ? { pid } : {}),
+        ...(includeUseGrantFamily ? { includeUseGrantFamily: true } : {}),
+      };
+      try {
+        if (usesBackground) {
+          await background.submitTask(params, use ? 'USE' : 'MANAGE', cb);
+        } else {
+          const response = await (use ? batchHandleAuth : allowManageAuth)(params, authApiPath);
+          if (!response || response.code !== 0) throw new Error(response?.msg || '请求失败');
+          message.success('授权成功');
+          cb?.();
         }
-        batchHandleAuth(authParams, authApiPath).then((res) => {
-          setAuthLoading(false);
-          if (res && res.code === 0) {
-            message.success('授权成功');
-            if (cb) cb();
-          } else {
-            message.error(`授权失败：${res?.msg}`);
-          }
-        });
-      } else {
-        // 管理授权：保持原有逻辑
-        const manageAuthParams = {
-          orgId,
-          grantObjId,
-          grantObjType,
-          redList: redList?.map(transFormGrandItem),
-          blackList: blackList?.map(transFormGrandItem),
-          resourceId: grantObjId, // 资源授权使用
-        };
-        // 开发态：传递pid参数
-        if (pid) {
-          manageAuthParams.pid = pid;
-        }
-        allowManageAuth(manageAuthParams, authApiPath).then((res) => {
-          setAuthLoading(false);
-          if (res && res.code === 0) {
-            message.success('授权成功');
-            if (cb) cb();
-          } else {
-            message.error(`授权失败：${res?.msg}`);
-          }
-        });
+      } catch (error) {
+        message.error(`授权失败：${error?.message || '网络异常，请重试'}`);
+      } finally {
+        setAuthLoading(false);
       }
     },
     [
       redList,
       blackList,
-      authLoading,
       grantType,
       grantObjType,
       grantObjId,
       orgId,
-      transFormGrandItem,
       pid,
       authApiPath,
       includeUseGrantFamily,
+      transFormGrandItem,
+      authLoading,
+      usesBackground,
+      background.taskBlocked,
+      background.submitTask,
     ]
   );
 
@@ -162,6 +141,7 @@ function useAuth({
   }, [getDetail]);
 
   return {
+    ...background,
     redList,
     blackList,
     applicantList,

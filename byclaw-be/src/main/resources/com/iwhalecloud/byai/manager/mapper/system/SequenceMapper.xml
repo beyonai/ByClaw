@@ -16,10 +16,6 @@
         SELECT nextval(#{sequenceName})
     </select>
 
-    <select id="nextValuesForPostgreSql" resultType="java.lang.Long" useCache="false" flushCache="true">
-        SELECT nextval(#{sequenceName}) FROM generate_series(1, #{count})
-    </select>
-
 	<insert id="nextValForMySqlIncrement" useGeneratedKeys="true" keyProperty="id">
 		  insert into id(id) values(null)
 	</insert>
@@ -28,4 +24,15 @@
 	  delete from id where id <![CDATA[ < ]]> #{id}
   </delete>
 
+    <select id="nextValuesForPostgreSql" resultType="java.lang.Long" useCache="false" flushCache="true">
+        <!-- openGauss 6 can fail when nextval is evaluated over a FROM generate_series scan.
+             Each UNION ALL arm allocates independently; the caller bounds a batch to 500. -->
+        <bind name="rows" value="@java.util.Collections@nCopies(count, 0)"/>
+        <foreach collection="rows" item="ignored" separator=" UNION ALL ">
+            SELECT nextval(#{sequenceName})
+        </foreach>
+    </select>
+    <select id="nextValuesForOracle" resultType="java.lang.Long" useCache="false" flushCache="true">
+        SELECT ${sequenceName}.nextval FROM dual CONNECT BY level &lt;= #{count}
+    </select>
 </mapper>

@@ -136,6 +136,11 @@ public class TransactionAdviceConfig {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.manager.application.service.auth.AuthorizationTaskService")) {
+                    // Queue checkpoints commit independently; only the worker's explicit template owns grant writes.
+                    return notSurpportedTx;
+                }
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService")
                     && ("openCommonFileInputStream".equals(method.getName()) || "preview".equals(method.getName()))) {
                     // File preview and legacy paths may fail before the UserFS fallback succeeds. Suspend the

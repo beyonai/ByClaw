@@ -14,6 +14,11 @@ import java.util.List;
  */
 public interface SequenceMapper extends BaseMapper<Sequence> {
 
+    List<Long> nextValuesForPostgreSql(@Param("sequenceName") String sequenceName, @Param("count") int count);
+
+    List<Long> nextValuesForOracle(@Param("sequenceName") String sequenceName, @Param("count") int count);
+
+
     /**
      * 获取Udal数据库的下一个序列值适用于Udal数据库的序列生成策略
      * 
@@ -37,8 +42,6 @@ public interface SequenceMapper extends BaseMapper<Sequence> {
      * @return 下一个序列值
      */
     Long nextValForPostgreSql(@Param("sequenceName") String sequenceName);
-
-    List<Long> nextValuesForPostgreSql(@Param("sequenceName") String sequenceName, @Param("count") int count);
 
     /**
      * 获取MySQL数据库的自增序列值通过插入临时记录获取自增ID，然后删除该记录

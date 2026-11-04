@@ -38,6 +38,15 @@ public class AuthRedisSyncService {
     @Autowired
     private AuthRedisApplicationService authRedisApplicationService;
 
+    /** Durable jobs require a real completion signal; exceptions must reach the retry worker. */
+    public void syncUserNow(Long userId) {
+        authRedisApplicationService.writeUserAuth(userId, authApplicationService.buildUserAuthResources(userId));
+        authRedisApplicationService.writeUserManageAuth(userId, authApplicationService.buildUserManageResources(userId));
+        if (authApplicationService.isGlobalResourceManagerByUserId(userId)) {
+            authRedisApplicationService.markGlobalResourceManager(userId);
+        } else authRedisApplicationService.clearGlobalResourceManagerMark(userId);
+    }
+
     /**
      * 异步批量同步用户权限到Redis
      *

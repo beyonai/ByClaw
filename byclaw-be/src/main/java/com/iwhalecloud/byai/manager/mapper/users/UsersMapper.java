@@ -68,6 +68,8 @@ public interface UsersMapper extends BaseMapper<Users> {
 
     List<Long> findUserIdsByPostId(Long grantToObjId);
 
+    List<Long> findUserIdsByPostIds(@org.apache.ibatis.annotations.Param("postIds") List<Long> postIds);
+
     List<Long> findUserIdsByStationId(Long grantToObjId);
 
     /**

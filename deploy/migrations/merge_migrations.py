@@ -8,7 +8,7 @@ DDL/DML 增量脚本，按语义化版本顺序追加合并到 deploy/middleware
     versions/V0.0.1/V0.0.1__dml.sql              -> 合并进 04_dml.sql
     versions/V0.0.1/V0.0.1-alpha__baseline__*.sql -> 基线全量快照，跳过
 
-版本排序遵循语义化版本：major.minor.patch，预发布 alpha < beta < rc < 正式版，
+版本排序支持 major.minor.patch[.revision]，预发布 alpha < beta < rc < 正式版，
 同类预发布按序号比较（alpha.2 < alpha.10）。
 
 用法:
@@ -62,7 +62,7 @@ def write_applied(applied: set[str]) -> None:
 # 目录内的迁移文件已手工预拆为：
 #   <版本>__ddl.sql / <版本>__dml.sql        —— 需要合并的增量
 #   *__baseline__ddl.sql / *__baseline__dml.sql —— 基线全量快照，跳过
-VERSION_DIR_PATTERN = re.compile(r"^V\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
+VERSION_DIR_PATTERN = re.compile(r"^V\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.]+)?$")
 BASELINE_FILE_PATTERN = re.compile(r".*__baseline__(ddl|dml)\.sql$", re.IGNORECASE)
 DDL_FILE_PATTERN = re.compile(r".*__ddl\.sql$", re.IGNORECASE)
 DML_FILE_PATTERN = re.compile(r".*__dml\.sql$", re.IGNORECASE)
@@ -93,11 +93,11 @@ def parse_version_sort_key(name: str):
     """把版本目录名解析成可比较的排序键。
 
     规则（语义化版本）：
-      - 主体按 major.minor.patch 数字比较；
+      - 主体按 major.minor.patch.revision 数字比较，缺省 revision 为 0；
       - 预发布版排在同主体的正式版之前（V1.0.0-alpha < V1.0.0）；
       - 预发布之间 alpha < beta < rc，同类按数字序号比较（alpha.2 < alpha.10）。
 
-    返回元组：(major, minor, patch, is_release, prerelease_rank, prerelease_num)
+    返回元组：(major, minor, patch, revision, is_release, prerelease_rank, prerelease_num)
       is_release=1 表示正式版（排在预发布之后）。
     """
     raw = name[1:] if name.startswith(("V", "v")) else name
@@ -105,16 +105,16 @@ def parse_version_sort_key(name: str):
 
     parts = core.split(".")
     nums = []
-    for i in range(3):
+    for i in range(4):
         try:
             nums.append(int(parts[i]) if i < len(parts) else 0)
         except ValueError:
             nums.append(0)
-    major, minor, patch = nums[0], nums[1], nums[2]
+    major, minor, patch, revision = nums
 
     if not pre:
         # 正式版：排在所有预发布之后
-        return (major, minor, patch, 1, 0, 0)
+        return (major, minor, patch, revision, 1, 0, 0)
 
     # 预发布：如 alpha / alpha.2 / beta.1 / rc.3
     pre_parts = pre.split(".")
@@ -125,7 +125,7 @@ def parse_version_sort_key(name: str):
         if token.isdigit():
             seq = int(token)
             break
-    return (major, minor, patch, 0, rank, seq)
+    return (major, minor, patch, revision, 0, rank, seq)
 
 
 def discover_versions() -> list["Version"]:
@@ -312,8 +312,8 @@ def validate_layout() -> list[str]:
             continue
         if not VERSION_DIR_PATTERN.match(rel):
             errors.append(
-                f"版本目录名不规范: {rel}（应形如 V0.1.0 或 V0.1.0-alpha.2，"
-                f"需 V 前缀 + major.minor.patch）"
+                f"版本目录名不规范: {rel}（应形如 V0.1.0、V0.5.2.1 或 V0.1.0-alpha.2，"
+                f"需 V 前缀 + major.minor.patch[.revision]）"
             )
             continue  # 目录名都不对，不再校验内部文件
 

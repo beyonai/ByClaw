@@ -37,7 +37,7 @@ deploy/migrations/
 V{major}.{minor}.{patch}[-{prerelease}]
 ```
 
-- 必须以 `V` 开头，后接 `major.minor.patch` 三段数字
+- 必须以 `V` 开头，后接 `major.minor.patch` 三段数字，也支持第四段修订号，如 `V0.5.2.1`；缺省修订号为 0
 - 可选预发布后缀：`-alpha`、`-alpha.2`、`-beta.1`、`-rc.3` 等
 
 合法示例：`V0.1.0`、`V0.1.0-alpha.2`、`V1.2.3-rc.1`

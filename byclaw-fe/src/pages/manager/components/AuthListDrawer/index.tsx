@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useCallback } from 'react';
-import { Alert, Row, Col, Spin, message } from 'antd';
+import { Alert, Row, Col, Spin, message, Button, Progress, Space } from 'antd';
 import { useIntl, useDispatch, connect } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import AuthList from './AuthList';
@@ -34,7 +34,23 @@ const AuthListDrawer = (props) => {
   const intl = useIntl();
   const dispatch = useDispatch();
   // console.log('authApiPath', authApiPath);
-  const { redList, blackList, setRedList, setBlackList, setAuth, detailLoading, authLoading } = useAuth({
+  const {
+    redList,
+    blackList,
+    setRedList,
+    setBlackList,
+    setAuth,
+    detailLoading,
+    authLoading,
+    task,
+    taskError,
+    taskBlocked,
+    taskChecking,
+    taskSubmitting,
+    refreshTask,
+    retryTask,
+    cancelTask,
+  } = useAuth({
     authType,
     grantObjType: record?.resourceBizType,
     grantObjId: record?.resourceId || record?.id || record?.resourceIdStr,
@@ -148,7 +164,46 @@ const AuthListDrawer = (props) => {
       open
       onOk={handleOk}
       confirmLoading={authLoading || checkLoading}
+      okButtonProps={{ disabled: onlyView || taskBlocked || detailLoading }}
     >
+      {(task || taskError || taskChecking) && (
+        <Alert
+          showIcon
+          type={task?.status === 'FAILED' || taskError ? 'warning' : task?.status === 'SUCCEEDED' ? 'success' : 'info'}
+          message={taskError || task?.message || '正在查询后台授权进度'}
+          style={{ marginBottom: 16 }}
+          description={
+            <>
+              {task && (
+                <Progress percent={task.progress || 0} status={task.status === 'FAILED' ? 'exception' : undefined} />
+              )}
+              {!!task?.totalUsers && (
+                <div>
+                  生效同步：{task.completedUsers} / {task.totalUsers} 人
+                </div>
+              )}
+              {task && ['QUEUED', 'RUNNING', 'RETRYING'].includes(task.status) && (
+                <div>可以关闭窗口，后台将继续处理；重新打开可查看进度。</div>
+              )}
+              <Space>
+                <Button size="small" loading={taskChecking} onClick={refreshTask}>
+                  刷新进度
+                </Button>
+                {task?.status === 'FAILED' && (
+                  <Button size="small" loading={taskSubmitting} onClick={retryTask}>
+                    重试任务
+                  </Button>
+                )}
+                {task?.status === 'FAILED' && task.dataApplied === 0 && (
+                  <Button size="small" disabled={taskSubmitting} onClick={cancelTask}>
+                    放弃本次任务
+                  </Button>
+                )}
+              </Space>
+            </>
+          }
+        />
+      )}
       <div className={`${styles.headWrap} ub ub-ac gap8`}>
         {icon || <span className="iconHead mr-8" />}
         <div className="ub-f1">
@@ -188,7 +243,7 @@ const AuthListDrawer = (props) => {
                 />
               )}
               btnRender={intl.formatMessage({ id: 'common.add' })}
-              onlyView={onlyView}
+              onlyView={onlyView || taskBlocked}
             />
           </Spin>
         </Col>
@@ -216,7 +271,7 @@ const AuthListDrawer = (props) => {
                   />
                 )}
                 btnRender={intl.formatMessage({ id: 'common.add' })}
-                onlyView={onlyView}
+                onlyView={onlyView || taskBlocked}
               />
             </Spin>
           </Col>

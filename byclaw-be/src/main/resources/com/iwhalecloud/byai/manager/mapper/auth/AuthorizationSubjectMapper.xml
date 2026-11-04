@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper">
+    <sql id="users">
+        <foreach collection="userIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </sql>
+    <select id="memberships" resultType="com.iwhalecloud.byai.manager.dto.auth.AuthorizationSubject">
+        SELECT u.user_id, 'ORG' AS subject_type, o.org_id AS subject_id, o.path_code AS subject_path
+        FROM po_users_organization u JOIN po_organization o ON o.org_id = u.org_id
+        WHERE u.user_id IN <include refid="users"/>
+        UNION ALL
+        SELECT u.user_id, 'POST' AS subject_type, p.position_id AS subject_id, NULL AS subject_path
+        FROM po_users_organization u JOIN po_position p ON p.position_id = u.position_id
+        WHERE p.is_digital_position = 0 AND u.user_id IN <include refid="users"/>
+        UNION ALL
+        SELECT u.user_id, 'STATION' AS subject_type, s.station_id AS subject_id, s.station_id_path AS subject_path
+        FROM po_users u JOIN po_station s ON s.station_id = u.station_id
+        WHERE u.user_id IN <include refid="users"/>
+    </select>
+</mapper>

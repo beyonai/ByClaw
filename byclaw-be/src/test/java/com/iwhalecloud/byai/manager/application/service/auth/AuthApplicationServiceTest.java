@@ -1488,10 +1488,10 @@ class AuthApplicationServiceTest {
 
         service.handleAuth(dto);
 
-        verify(privilegeGrantService).save(argThat(privilegeGrant -> privilegeGrant != null
-            && GrantType.FORCE_USE.equals(privilegeGrant.getGrantType())
-            && grantToObjType.equals(privilegeGrant.getGrantToObjType())
-            && Long.valueOf(1001L).equals(privilegeGrant.getGrantToObjId())));
+        verify(privilegeGrantService).saveBatch(argThat(batch -> batch.size() == 1
+            && GrantType.FORCE_USE.equals(batch.get(0).getGrantType())
+            && grantToObjType.equals(batch.get(0).getGrantToObjType())
+            && Long.valueOf(1001L).equals(batch.get(0).getGrantToObjId())));
     }
 
     /**
@@ -1514,7 +1514,10 @@ class AuthApplicationServiceTest {
         when(ssResourceMapper.selectById(602L)).thenReturn(resource);
         when(privilegeGrantService.findPrivilegeGrant(anyString(), eq(ResourceBizTypeEnum.TOOLKIT.name()), eq(602L), anyString()))
             .thenReturn(List.of());
-        when(privilegeGrantMapper.selectCount(any())).thenReturn(1L);
+        PrivilegeGrant existing = new PrivilegeGrant();
+        existing.setGrantToObjType(GrantToObjType.USER);
+        existing.setGrantToObjId(1002L);
+        when(privilegeGrantMapper.selectList(any())).thenReturn(List.of(existing));
 
         AuthDTO authDTO = new AuthDTO();
         authDTO.setGrantToObjType(GrantToObjType.USER);
@@ -1527,8 +1530,8 @@ class AuthApplicationServiceTest {
 
         service.handleAuth(dto);
 
-        verify(privilegeGrantService, never()).save(argThat(privilegeGrant -> privilegeGrant != null
-            && GrantType.FORCE_USE.equals(privilegeGrant.getGrantType())));
+        verify(privilegeGrantService, never()).saveBatch(argThat(batch -> batch.stream()
+            .anyMatch(grant -> GrantType.FORCE_USE.equals(grant.getGrantType()))));
     }
 
     @Test
@@ -1553,11 +1556,13 @@ class AuthApplicationServiceTest {
             .thenReturn(List.of());
         when(privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, ResourceBizTypeEnum.AGENT.name(), 88L, Color.BLACK))
             .thenReturn(List.of());
-        when(privilegeGrantMapper.selectCount(any())).thenReturn(1L);
+        PrivilegeGrant existing = new PrivilegeGrant();
+        existing.setGrantToObjType(GrantToObjType.USER); existing.setGrantToObjId(1001L);
+        when(privilegeGrantMapper.selectList(any())).thenReturn(List.of(existing));
 
         service.handleAuth(dto);
 
-        verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
+        verify(privilegeGrantService, never()).saveBatch(any());
     }
 
     @Test
@@ -1584,11 +1589,13 @@ class AuthApplicationServiceTest {
             Color.RED)).thenReturn(List.of());
         when(privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, ResourceBizTypeEnum.AGENT.name(), 88L,
             Color.BLACK)).thenReturn(List.of());
-        when(privilegeGrantMapper.selectCount(any())).thenReturn(1L);
+        PrivilegeGrant existing = new PrivilegeGrant();
+        existing.setGrantToObjType(GrantToObjType.USER); existing.setGrantToObjId(1001L);
+        when(privilegeGrantMapper.selectList(any())).thenReturn(List.of(existing));
 
         service.handleAuth(dto);
 
-        verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
+        verify(privilegeGrantService, never()).saveBatch(any());
         verify(authRedisSyncService).asyncSyncAuthChangedUsers(argThat(userIds -> userIds.contains(1001L)),
             eq(GrantType.FORCE_USE));
     }
@@ -2420,6 +2427,9 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
         ReflectionTestUtils.setField(service, "authRedisSyncService", cache);
         ReflectionTestUtils.setField(synchronization, "auth", service);
+        ReflectionTestUtils.setField(synchronization, "users", mock(com.iwhalecloud.byai.manager.mapper.users.UsersMapper.class));
+        ReflectionTestUtils.setField(synchronization, "authorizationSubjects", mock(com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper.class));
+        ReflectionTestUtils.setField(synchronization, "authorizationGrants", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(synchronization, "resources", resources);
         ReflectionTestUtils.setField(synchronization, "skillGroups", locks);
         ReflectionTestUtils.setField(synchronization, "relations", relationService);

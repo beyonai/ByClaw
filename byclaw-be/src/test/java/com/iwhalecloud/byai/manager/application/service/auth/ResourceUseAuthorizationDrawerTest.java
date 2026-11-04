@@ -148,6 +148,17 @@ class ResourceUseAuthorizationDrawerTest {
             return null;
         }).when(grants).update(any());
 
+        doAnswer(call -> {
+            for (PrivilegeGrant grant : (List<PrivilegeGrant>) call.getArgument(0)) grants.save(grant);
+            return null;
+        }).when(grants).saveBatch(any());
+        doAnswer(call -> {
+            for (PrivilegeGrant grant : (List<PrivilegeGrant>) call.getArgument(0)) {
+                if (call.getArgument(1, Boolean.class)) grants.remove(grant); else grants.update(grant);
+            }
+            return null;
+        }).when(grants).updateAuthorizationBatch(any(), org.mockito.ArgumentMatchers.anyBoolean());
+
         originalRedis = ReflectionTestUtils.getField(RedisUtil.class, "instance");
         originalMessageSource = ReflectionTestUtils.getField(I18nUtil.class, "messageSource");
         var redis = new RedisUtil();

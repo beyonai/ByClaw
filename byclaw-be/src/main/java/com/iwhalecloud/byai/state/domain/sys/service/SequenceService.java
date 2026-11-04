@@ -61,15 +61,19 @@ public class SequenceService {
     public List<Long> nextValues(int count) {
         if (count < 0) throw new IllegalArgumentException("Sequence count must not be negative");
         if (count == 0) return List.of();
+        List<Long> values = new ArrayList<>(count);
         String dbType = byaiDruidProperties.getDbType();
-        List<Long> values;
-        if (DS_POSTGRESQL.equalsIgnoreCase(dbType) || DS_OPENGAUSS.equalsIgnoreCase(dbType)) {
-            values = sequenceMapper.nextValuesForPostgreSql(defaultSequenceName, count);
-        } else {
-            // 其他数据库沿用现有取号契约，避免改变跨库主键生成规则。
-            values = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) values.add(nextVal());
+        for (int offset = 0; offset < count; offset += 500) {
+            int size = Math.min(500, count - offset);
+            if (DS_POSTGRESQL.equalsIgnoreCase(dbType) || DS_OPENGAUSS.equalsIgnoreCase(dbType)) {
+                values.addAll(sequenceMapper.nextValuesForPostgreSql(defaultSequenceName, size));
+            } else if (DS_ORACLE.equalsIgnoreCase(dbType)) {
+                values.addAll(sequenceMapper.nextValuesForOracle(defaultSequenceName, size));
+            } else {
+                for (int i = 0; i < size; i++) values.add(nextVal());
+            }
         }
+
         if (values == null || values.size() != count || values.stream().anyMatch(java.util.Objects::isNull)
             || new HashSet<>(values).size() != count) {
             throw new IllegalStateException("Sequence returned an incomplete or duplicate ID batch");

@@ -372,7 +372,11 @@ public class RedisUtil {
      * pipeline 部分成功或不支持时同步重放该批；SADD 幂等，重复执行不会重复授权。
      * 重放仍失败时向调用方抛出异常，不将缓存写入失败视为成功。
      */
-    public static void addSets(Map<String, Set<String>> additions) {
+    public static void addSets(Map<String, Set<String>> values) { changeSets(values, false); }
+
+    public static void removeSets(Map<String, Set<String>> values) { changeSets(values, true); }
+
+    private static void changeSets(Map<String, Set<String>> additions, boolean remove) {
         if (additions.isEmpty()) return;
         List<SetAddition> commands = new ArrayList<>();
         for (Map.Entry<String, Set<String>> entry : additions.entrySet()) {
@@ -390,7 +394,8 @@ public class RedisUtil {
                     @SuppressWarnings({"rawtypes", "unchecked"})
                     public Object execute(RedisOperations operations) {
                         for (SetAddition command : batch) {
-                            operations.opsForSet().add(command.key(), (Object[]) command.members());
+                            if (remove) operations.opsForSet().remove(command.key(), (Object[]) command.members());
+                            else operations.opsForSet().add(command.key(), (Object[]) command.members());
                         }
                         return null;
                     }
@@ -402,7 +407,8 @@ public class RedisUtil {
                 logger.warn("授权 Redis pipeline 失败，幂等重放本批 commands={}", batch.size(), pipelineFailure);
                 try {
                     for (SetAddition command : batch) {
-                        instance.stringRedisTemplate.opsForSet().add(command.key(), command.members());
+                        if (remove) instance.stringRedisTemplate.opsForSet().remove(command.key(), (Object[]) command.members());
+                        else instance.stringRedisTemplate.opsForSet().add(command.key(), command.members());
                     }
                 } catch (RuntimeException retryFailure) {
                     retryFailure.addSuppressed(pipelineFailure);

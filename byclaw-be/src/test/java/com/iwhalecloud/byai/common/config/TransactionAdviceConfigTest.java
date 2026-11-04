@@ -25,6 +25,20 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest {
 
     @Test
+    void authorizationQueueOwnsItsGrantTransactionAndCheckpoints() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var type = com.iwhalecloud.byai.manager.application.service.auth.AuthorizationTaskService.class;
+        for (Method method : type.getDeclaredMethods()) {
+            if (java.lang.reflect.Modifier.isPublic(method.getModifiers())) {
+                assertThat(source.getTransactionAttribute(method, type).getPropagationBehavior())
+                    .as(method.getName()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+            }
+        }
+    }
+
+    @Test
     void workspaceSkillCenterOwnsItsCommitBeforeFileCleanup() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

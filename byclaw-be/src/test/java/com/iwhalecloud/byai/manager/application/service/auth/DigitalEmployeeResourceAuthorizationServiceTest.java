@@ -61,6 +61,8 @@ class DigitalEmployeeResourceAuthorizationServiceTest {
     @BeforeEach
     void setup() {
         ReflectionTestUtils.setField(service, "auth", auth);
+        ReflectionTestUtils.setField(service, "authorizationSubjects", mock(com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper.class));
+        ReflectionTestUtils.setField(service, "authorizationGrants", mock(com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(service, "resources", resources);
         ReflectionTestUtils.setField(service, "skillGroups", skillGroups);
         ReflectionTestUtils.setField(service, "relations", relations);
@@ -197,7 +199,7 @@ class DigitalEmployeeResourceAuthorizationServiceTest {
             grant("ORG", 11L, GrantType.FORCE_USE), grant("POST", 12L, GrantType.ALLOW_MANAGE),
             grant("STATION", 13L, GrantType.AVAILABLE_USE)));
         when(users.findUserIdsByOrgIdListIncludingChildren(List.of(11L))).thenReturn(List.of(2L, 3L));
-        when(users.findUserIdsByPostId(12L)).thenReturn(List.of(3L, 4L));
+        when(users.findUserIdsByPostIds(List.of(12L))).thenReturn(List.of(3L, 4L));
         when(users.findUserIdsByStationIdListIncludingChildren(List.of(13L))).thenReturn(List.of(4L, 5L));
         when(auth.hasResourceUsePermission(employee, 3L)).thenReturn(false);
 

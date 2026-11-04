@@ -17,7 +17,8 @@ final class AuthorizationCommitBatch implements TransactionSynchronization {
     private static final Logger logger = LoggerFactory.getLogger(AuthorizationCommitBatch.class);
     private final Object owner;
     private final AuthRedisSyncService sync;
-    private final Map<String, Set<String>> additions = new LinkedHashMap<>();
+    private final AuthorizationCachePlan plan = new AuthorizationCachePlan();
+    private final Map<String, Set<String>> additions = plan.getAdditions();
     private final Set<Long> userIds = new LinkedHashSet<>();
     private final Set<String> hints = new LinkedHashSet<>();
 
@@ -36,7 +37,17 @@ final class AuthorizationCommitBatch implements TransactionSynchronization {
     }
 
     void addSetMembers(Map<String, Set<String>> values) {
-        values.forEach((key, members) -> additions.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(members));
+        plan.change(values, false);
+    }
+
+    void removeSetMembers(Map<String, Set<String>> values) {
+        plan.change(values, true);
+    }
+
+    void copyTo(AuthorizationCachePlan target) {
+        target.change(plan.getRemovals(), true);
+        target.change(additions, false);
+        target.getUserIds().addAll(userIds);
     }
 
     void refreshUsers(Set<Long> changedUsers, String hint) {
@@ -46,9 +57,11 @@ final class AuthorizationCommitBatch implements TransactionSynchronization {
 
     @Override
     public void afterCommit() {
+        if (AuthorizationTaskExecution.active()) return;
         long started = System.nanoTime();
         RuntimeException failure = null;
         try {
+            RedisUtil.removeSets(plan.getRemovals());
             RedisUtil.addSets(additions);
         } catch (RuntimeException exception) {
             failure = exception;

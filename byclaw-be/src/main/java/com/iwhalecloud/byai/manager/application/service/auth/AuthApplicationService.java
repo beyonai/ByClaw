@@ -657,6 +657,18 @@ public class AuthApplicationService {
         return result;
     }
 
+    public void validateAuthorizationTask(ResourceMemberSettingQo qo, boolean manage) {
+        SsResource resource = getRequiredResource(qo.getResourceId());
+        validateEmployeeAuthorizationPermission(resource);
+        if (Integer.valueOf(0).equals(resource.getPublishPortal())) {
+            throw new BaseException(I18nUtil.get("resource.not.allow.auth", resource.getResourceName()));
+        }
+        if (manage) {
+            validateResourceManageAuthAllowed(resource);
+            validateResourceMemberSettingPermission(resource);
+        } else validateResourceUseSettingPermission(resource);
+    }
+
     /**
      * 设置资源管理人员。 这里不直接操作 au_privilege_grant，而是统一复用 handleAuth(...)， 这样红黑名单比较、增删改、缓存同步都仍然走现有稳定链路。
      *
@@ -801,13 +813,16 @@ public class AuthApplicationService {
             throw new BaseException(I18nUtil.get("auth.employee.resources.invalid",
                 resource == null ? "-" : resource.getResourceName()));
         }
-        validateEmployeeAuthorizationPermission(resource);
-        if (!hasResourceUseSettingPermission(resource)) {
-            throw new BaseException(I18nUtil.get("auth.employee.resources.no.grant.permission", resource.getResourceName()));
+        if (!AuthorizationPermissionSnapshot.alreadyValidated(resource.getResourceId())) {
+            validateEmployeeAuthorizationPermission(resource);
+            if (!hasResourceUseSettingPermission(resource)) {
+                throw new BaseException(I18nUtil.get("auth.employee.resources.no.grant.permission", resource.getResourceName()));
+            }
+            AuthorizationPermissionSnapshot.validated(resource.getResourceId());
         }
         Date now = new Date();
-        boolean blacklisted = listAuthPrivilegeGrant(null, List.of(resource.getResourceBizType()),
-            GrantToObjType.USER, userId, List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE)).stream()
+        boolean blacklisted = resourceUseGrants(resource, userId,
+            List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE)).stream()
             .filter(grant -> Objects.equals(resource.getResourceId(), grant.getGrantObjId()))
             .filter(grant -> isEffectiveResourceUseGrant(grant, now))
             .anyMatch(grant -> Color.BLACK.equalsIgnoreCase(grant.getGrantToType()));
@@ -1668,8 +1683,7 @@ public class AuthApplicationService {
             && isCurrentUserBoundDefaultPersonalResource(ssResource)))) {
             return true;
         }
-        List<PrivilegeGrant> privilegeGrants = listAuthPrivilegeGrant(null,
-            List.of(ssResource.getResourceBizType()), GrantToObjType.USER, userId,
+        List<PrivilegeGrant> privilegeGrants = resourceUseGrants(ssResource, userId,
             List.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE, GrantType.FORCE_USE));
         if (CollectionUtils.isEmpty(privilegeGrants)) {
             return false;
@@ -1694,6 +1708,12 @@ public class AuthApplicationService {
                 || GrantType.FORCE_USE.equals(item.getGrantType()))
             .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
         return (hasManageRedGrant && !hasManageBlackGrant) || (hasUseRedGrant && !hasUseBlackGrant);
+    }
+
+    private List<PrivilegeGrant> resourceUseGrants(SsResource resource, Long userId, List<String> types) {
+        List<PrivilegeGrant> snapshot = AuthorizationPermissionSnapshot.find(resource, userId, types);
+        return snapshot != null ? snapshot : listAuthPrivilegeGrant(null,
+            List.of(resource.getResourceBizType()), GrantToObjType.USER, userId, types);
     }
 
     /** 待审核、尚未生效和已过期的授权均不能被资源权限补齐视为已可使用。 */
@@ -2162,20 +2182,20 @@ public class AuthApplicationService {
                 }
             } catch (Exception e) {
                 logger.error("查询组织及下级组织用户失败", e);
+                if (AuthorizationTaskExecution.active()) throw new IllegalStateException("Authorization refresh planning failed", e);
             }
         }
 
         // 如果有授权给岗位，查询岗位下的所有用户
         if (CollectionUtils.isNotEmpty(postIds)) {
             try {
-                for (Long postId : postIds) {
-                    List<Long> postUserIds = usersMapper.findUserIdsByPostId(postId);
-                    if (CollectionUtils.isNotEmpty(postUserIds)) {
-                        userIds.addAll(postUserIds);
-                    }
+                List<Long> positions = new ArrayList<>(postIds);
+                for (int start = 0; start < positions.size(); start += 500) {
+                    userIds.addAll(usersMapper.findUserIdsByPostIds(positions.subList(start, Math.min(start + 500, positions.size()))));
                 }
             } catch (Exception e) {
                 logger.error("查询岗位下用户失败", e);
+                if (AuthorizationTaskExecution.active()) throw new IllegalStateException("Authorization refresh planning failed", e);
             }
         }
 
@@ -2189,6 +2209,7 @@ public class AuthApplicationService {
                 }
             } catch (Exception e) {
                 logger.error("查询驻地及下级驻地用户失败", e);
+                if (AuthorizationTaskExecution.active()) throw new IllegalStateException("Authorization refresh planning failed", e);
             }
         }
     }
@@ -2309,6 +2330,10 @@ public class AuthApplicationService {
     // * @return List<PrivilegeGrant>
     public List<PrivilegeGrant> listAuthPrivilegeGrant(String grantType, List<String> grantObjTypes,
                                                        String grantToObjType, Long grantToObjId, List<String> grantTypes) {
+        if (GrantToObjType.USER.equalsIgnoreCase(grantToObjType)) {
+            List<PrivilegeGrant> snapshot = AuthorizationPermissionSnapshot.findAll(grantToObjId, grantType, grantTypes, grantObjTypes);
+            if (snapshot != null) return snapshot;
+        }
 
         // 查询授权信息
         PrivilegeGrantQo privilegeGrantQo = new PrivilegeGrantQo();
@@ -2489,6 +2514,7 @@ public class AuthApplicationService {
             }
         } catch (Exception e) {
             logger.error("同步用户权限到Redis失败", e);
+                if (AuthorizationTaskExecution.active()) throw new IllegalStateException("Authorization refresh planning failed", e);
         }
     }
 
@@ -2513,9 +2539,15 @@ public class AuthApplicationService {
         if (CollectionUtils.isEmpty(inheritTargets)) {
             return;
         }
+        Set<String> useBlackTargets = privilegeGrantMapper.selectList(new LambdaQueryWrapper<PrivilegeGrant>()
+            .eq(PrivilegeGrant::getGrantObjType, authRedBlackDTO.getGrantObjType())
+            .eq(PrivilegeGrant::getGrantObjId, authRedBlackDTO.getGrantObjId())
+            .eq(PrivilegeGrant::getGrantToType, Color.BLACK).eq(PrivilegeGrant::getOperType, OperType.READ)
+            .eq(PrivilegeGrant::getStatusCd, "A")
+            .in(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE, GrantType.FORCE_USE))
+            .stream().map(grant -> grant.getGrantToObjType() + ":" + grant.getGrantToObjId()).collect(Collectors.toSet());
         List<AuthDTO> forceUseTargets = inheritTargets.stream()
-            .filter(target -> !hasActiveUseBlackSameDimension(authRedBlackDTO.getGrantObjType(),
-                authRedBlackDTO.getGrantObjId(), target.getGrantToObjType(), target.getGrantToObjId()))
+            .filter(target -> !useBlackTargets.contains(target.getGrantToObjType() + ":" + target.getGrantToObjId()))
             .collect(Collectors.toList());
         if (CollectionUtils.isEmpty(forceUseTargets)) {
             return;
@@ -2856,13 +2888,15 @@ public class AuthApplicationService {
      * @param addMap    新增红黑名单集合
      */
     private void handleAdd(String grantType, Map<String, PrivilegeGrant> addMap) {
+        if (addMap.isEmpty()) return;
+        addMap.values().forEach(grant -> grant.setStatusCd("A"));
+        privilegeGrantService.saveBatch(new ArrayList<>(addMap.values()));
 
         for (Map.Entry<String, PrivilegeGrant> entry : addMap.entrySet()) {
             String key = entry.getKey();
             PrivilegeGrant privilegeGrant = entry.getValue();
             // 如果不存在权限，数据库新增新增权限
             privilegeGrant.setStatusCd("A");
-            privilegeGrantService.save(privilegeGrant);
 
             // 授权信息
             String[] splitArray = key.split("\\|");
@@ -2879,13 +2913,14 @@ public class AuthApplicationService {
      * @param updateMap 更新红黑名单集合
      */
     private void handleUpdate(String grantType, Map<String, PrivilegeGrant> updateMap) {
+        if (updateMap.isEmpty()) return;
+        privilegeGrantService.updateAuthorizationBatch(new ArrayList<>(updateMap.values()), false);
         for (Map.Entry<String, PrivilegeGrant> entry : updateMap.entrySet()) {
 
             String key = entry.getKey();
             PrivilegeGrant privilegeGrant = entry.getValue();
 
             // 如果不存在权限，数据库新增新增权限
-            privilegeGrantService.update(privilegeGrant);
 
             // 授权信息
             String[] splitArray = key.split("\\|");
@@ -2902,6 +2937,8 @@ public class AuthApplicationService {
      * @param delMap    删除红黑名单集合
      */
     private void handleDel(String grantType, Map<String, PrivilegeGrant> delMap) {
+        if (delMap.isEmpty()) return;
+        privilegeGrantService.updateAuthorizationBatch(new ArrayList<>(delMap.values()), true);
 
         for (Map.Entry<String, PrivilegeGrant> entry : delMap.entrySet()) {
 
@@ -2909,7 +2946,6 @@ public class AuthApplicationService {
             PrivilegeGrant privilegeGrant = entry.getValue();
 
             // 如果不存在权限，数据库新增新增权限
-            privilegeGrantService.remove(privilegeGrant);
 
             // 授权信息
             String[] splitArray = key.split("\\|");
@@ -2981,6 +3017,19 @@ public class AuthApplicationService {
 
         Map<String, PrivilegeGrant> historyRedMap = this.buildPrivilegeGrantMap(historyList);
         Map<String, PrivilegeGrant> redMap = this.buildPrivilegeGrantMap(privilegeGrantList);
+        Set<String> existingFamily = new HashSet<>();
+        List<String> family = resolveSameFamilyGrantTypes(grantType);
+        if (Color.RED.equalsIgnoreCase(color) && !family.isEmpty() && !privilegeGrantList.isEmpty()) {
+            PrivilegeGrant sample = privilegeGrantList.get(0);
+            privilegeGrantMapper.selectList(new LambdaQueryWrapper<PrivilegeGrant>()
+                .eq(PrivilegeGrant::getGrantObjType, sample.getGrantObjType())
+                .eq(PrivilegeGrant::getGrantObjId, sample.getGrantObjId())
+                .eq(PrivilegeGrant::getGrantToType, Color.RED)
+                .eq(PrivilegeGrant::getOperType, OperType.READ)
+                .eq(PrivilegeGrant::getStatusCd, "A")
+                .in(PrivilegeGrant::getGrantType, family))
+                .forEach(grant -> existingFamily.add(grant.getGrantToObjType() + ":" + grant.getGrantToObjId()));
+        }
 
         for (Map.Entry<String, PrivilegeGrant> entry : redMap.entrySet()) {
             String key = entry.getKey();
@@ -3002,7 +3051,7 @@ public class AuthApplicationService {
                     compareVo.getBlackUpdateMap().put(key, historyPrivilegeGrant);
                 }
             } else {
-                if (shouldSkipSameDimensionDuplicateGrant(grantType, privilegeGrant)) {
+                if (existingFamily.contains(privilegeGrant.getGrantToObjType() + ":" + privilegeGrant.getGrantToObjId())) {
                     continue;
                 }
                 if (Color.RED.equalsIgnoreCase(color)) {
@@ -3059,7 +3108,10 @@ public class AuthApplicationService {
     private void writeRedis(String grantType, String key, String... values) {
         if (GrantType.AVAILABLE_USE.equalsIgnoreCase(grantType) || GrantType.SHARE_USE.equalsIgnoreCase(grantType)
             || GrantType.FORCE_USE.equalsIgnoreCase(grantType)) {
-            afterAuthorizationCommit(() -> RedisUtil.addSet(key, values));
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                AuthorizationCommitBatch.current(this, authRedisSyncService)
+                    .addSetMembers(Map.of(key, new LinkedHashSet<>(Arrays.asList(values))));
+            } else RedisUtil.addSet(key, values);
         }
     }
 
@@ -3073,7 +3125,10 @@ public class AuthApplicationService {
     private void removeRedis(String grantType, String key, String... values) {
         if (GrantType.AVAILABLE_USE.equalsIgnoreCase(grantType) || GrantType.SHARE_USE.equalsIgnoreCase(grantType)
             || GrantType.FORCE_USE.equalsIgnoreCase(grantType)) {
-            afterAuthorizationCommit(() -> RedisUtil.removeSet(key, values));
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                AuthorizationCommitBatch.current(this, authRedisSyncService)
+                    .removeSetMembers(Map.of(key, new LinkedHashSet<>(Arrays.asList(values))));
+            } else RedisUtil.removeSet(key, values);
         }
     }
 

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.auth.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
@@ -120,6 +121,30 @@ public class PrivilegeGrantService {
         logger.info("授权批量保存完成 rows={}, batches={}, sequenceMs={}, totalMs={}", grants.size(),
             (grants.size() + INSERT_BATCH_SIZE - 1) / INSERT_BATCH_SIZE,
             sequenceNanos / 1_000_000, (System.nanoTime() - started) / 1_000_000);
+    }
+
+    /** Only the unsubscribe policy changes during list reconciliation; preserve dates and other fields. */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateAuthorizationBatch(List<PrivilegeGrant> grants, boolean remove) {
+        Map<String, List<Long>> groups = new HashMap<>();
+        for (PrivilegeGrant grant : grants) {
+            groups.computeIfAbsent(remove ? "X" : grant.getAllowUnsubscribe(), ignored -> new ArrayList<>())
+                .add(grant.getPrivilegeGrantId());
+        }
+        groups.forEach((value, ids) -> {
+            for (int offset = 0; offset < ids.size(); offset += INSERT_BATCH_SIZE) {
+                List<Long> batch = ids.subList(offset, Math.min(offset + INSERT_BATCH_SIZE, ids.size()));
+                LambdaUpdateWrapper<PrivilegeGrant> update = new LambdaUpdateWrapper<PrivilegeGrant>()
+                    .in(PrivilegeGrant::getPrivilegeGrantId, batch)
+                    .set(PrivilegeGrant::getUpdateStaff, CurrentUserHolder.getCurrentUserId())
+                    .set(PrivilegeGrant::getUpdateDate, new Date());
+                if (remove) update.set(PrivilegeGrant::getStatusCd, "X");
+                else update.set(PrivilegeGrant::getAllowUnsubscribe, value);
+                if (privilegeGrantMapper.update(null, update) != batch.size()) {
+                    throw new IllegalStateException("Incomplete authorization update batch");
+                }
+            }
+        });
     }
 
     /**

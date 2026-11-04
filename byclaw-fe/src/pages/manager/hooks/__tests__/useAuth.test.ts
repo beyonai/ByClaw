@@ -1,3 +1,11 @@
+jest.mock('@/pages/manager/service/authorizationTasks', () => ({
+  submitAuthorizationTask: jest.fn(),
+  listAuthorizationTasks: jest.fn(),
+  getAuthorizationTask: jest.fn(),
+  retryAuthorizationTask: jest.fn(),
+  cancelAuthorizationTask: jest.fn(),
+}));
+import { submitAuthorizationTask, listAuthorizationTasks } from '@/pages/manager/service/authorizationTasks';
 jest.mock('antd', () => ({
   message: {
     error: jest.fn(),
@@ -32,6 +40,13 @@ describe('useAuth', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    (listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [] });
+    (submitAuthorizationTask as jest.Mock).mockImplementation((request) =>
+      Promise.resolve({
+        code: 0,
+        data: { taskId: 'task1', requestId: request.requestId, status: 'SUCCEEDED', progress: 100 },
+      })
+    );
     (listAuthDetail as jest.Mock).mockResolvedValue({ code: 0, data: { redList: [], blackList: [] } });
     (batchHandleAuth as jest.Mock).mockResolvedValue({ code: 0 });
     (allowManageAuth as jest.Mock).mockResolvedValue({ code: 0 });
@@ -126,14 +141,16 @@ describe('useAuth', () => {
     const onSaved = jest.fn();
     await act(async () => result.current.setAuth(onSaved));
 
-    expect(batchHandleAuth).toHaveBeenCalledWith(
+    expect(submitAuthorizationTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        resourceId: '13',
-        includeUseGrantFamily: true,
-        redList: [],
-        blackList: [{ grantToObjId: '10000118', grantToObjType: 'USER', grantType: 'FORCE_USE' }],
-      }),
-      useAuthPath
+        operation: 'USE',
+        setting: expect.objectContaining({
+          resourceId: '13',
+          includeUseGrantFamily: true,
+          redList: [],
+          blackList: [{ grantToObjId: '10000118', grantToObjType: 'USER', grantType: 'FORCE_USE' }],
+        }),
+      })
     );
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
@@ -152,9 +169,24 @@ describe('useAuth', () => {
 
     expect(listAuthDetail).toHaveBeenCalledWith({ grantType, grantObjType, grantObjId: '13' });
     const saveApi = authType === 'mgrAuth' ? allowManageAuth : batchHandleAuth;
-    const [params, path] = (saveApi as jest.Mock).mock.calls[0];
+    const background = authApiPath?.startsWith('/byaiService/auth/privilegeGrant/setResource');
+    const [params, path] = background
+      ? [(submitAuthorizationTask as jest.Mock).mock.calls[0][0].setting, authApiPath]
+      : (saveApi as jest.Mock).mock.calls[0];
     expect(params).not.toHaveProperty('includeUseGrantFamily');
     expect(params.pid).toBe('project-1');
     expect(path).toBe(authApiPath);
+  });
+});
+
+describe('useAuth failure cleanup', () => {
+  it.each(['useAuth', 'mgrAuth'])('clears submission loading after %s rejects', async (authType) => {
+    (listAuthDetail as jest.Mock).mockResolvedValue({ code: 0, data: { redList: [], blackList: [] } });
+    const api = authType === 'useAuth' ? batchHandleAuth : allowManageAuth;
+    (api as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    const { result } = renderHook(() => useAuth({ authType, grantObjId: '13', grantObjType: 'SKILL' }));
+    await waitFor(() => expect(result.current.detailLoading).toBe(false));
+    await act(async () => result.current.setAuth());
+    expect(result.current.authLoading).toBe(false);
   });
 });

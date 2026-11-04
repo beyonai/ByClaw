@@ -218,6 +218,12 @@
         group by a.user_id
     </select>
 
+    <select id="findUserIdsByPostIds" resultType="java.lang.Long">
+        SELECT DISTINCT a.user_id FROM po_users a JOIN po_users_organization b ON a.user_id = b.user_id
+        WHERE a.state != 'X' AND b.position_id IN
+        <foreach collection="postIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </select>
+
     <select id="findUserIdsByPostId" resultType="java.lang.Long" parameterType="java.lang.Long">
         select a.user_id
         from po_users a

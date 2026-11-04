@@ -44,6 +44,11 @@ import org.slf4j.LoggerFactory;
 /** 企业员工配置和人员授权共用的资源使用权限补齐；不撤销资源上的任何既有授权。 */
 @Service
 public class DigitalEmployeeResourceAuthorizationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper authorizationSubjects;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper authorizationGrants;
+
 
     private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeResourceAuthorizationService.class);
 
@@ -117,6 +122,11 @@ public class DigitalEmployeeResourceAuthorizationService {
         if (boundResources.isEmpty()) return;
         long resourcesRead = System.nanoTime();
         Set<Long> userIds = effectiveUsers(employee);
+        List<SsResource> snapshotResources = new ArrayList<>(boundResources.values());
+        snapshotResources.add(employee);
+        try (AuthorizationPermissionSnapshot snapshot = new AuthorizationPermissionSnapshot(
+            snapshotResources, userIds, authorizationSubjects, authorizationGrants)) {
+        userIds.removeIf(id -> id == null || !auth.hasResourceUsePermission(employee, id));
         long usersExpanded = System.nanoTime();
         Map<SsResource, List<Long>> missing = new LinkedHashMap<>();
         for (SsResource resource : boundResources.values()) {
@@ -137,6 +147,7 @@ public class DigitalEmployeeResourceAuthorizationService {
             missing.values().stream().mapToInt(List::size).sum(), (resourcesRead - started) / 1_000_000,
             (usersExpanded - resourcesRead) / 1_000_000, (checked - usersExpanded) / 1_000_000,
             (System.nanoTime() - checked) / 1_000_000);
+        }
     }
 
     private boolean isEnterpriseEmployee(SsResource employee) {
@@ -218,6 +229,9 @@ public class DigitalEmployeeResourceAuthorizationService {
         Set<Long> candidates = new LinkedHashSet<>();
         if (employee.getCreateBy() != null) candidates.add(employee.getCreateBy());
         Date now = new Date();
+        Set<Long> organizationIds = new LinkedHashSet<>();
+        Set<Long> positionIds = new LinkedHashSet<>();
+        Set<Long> stationIds = new LinkedHashSet<>();
         List<PrivilegeGrant> records = grants.listActiveRedGrantsForGrantObject(employee.getResourceId(), "DIG_EMPLOYEE");
         if (records != null) {
             for (PrivilegeGrant grant : records) {
@@ -227,16 +241,25 @@ public class DigitalEmployeeResourceAuthorizationService {
                 if (targetId == null) continue;
                 switch (StringUtils.upperCase(StringUtils.trimToEmpty(grant.getGrantToObjType()), java.util.Locale.ROOT)) {
                     case GrantToObjType.USER -> candidates.add(targetId);
-                    case GrantToObjType.ORG -> candidates.addAll(users.findUserIdsByOrgIdListIncludingChildren(List.of(targetId)));
-                    case GrantToObjType.POST -> candidates.addAll(users.findUserIdsByPostId(targetId));
-                    case GrantToObjType.STATION -> candidates.addAll(users.findUserIdsByStationIdListIncludingChildren(List.of(targetId)));
+                    case GrantToObjType.ORG -> organizationIds.add(targetId);
+                    case GrantToObjType.POST -> positionIds.add(targetId);
+                    case GrantToObjType.STATION -> stationIds.add(targetId);
                     default -> { }
                 }
             }
         }
-        // 展开继承范围后再按真实权限排除黑名单用户，不把员工排除名单复制到共享资源。
-        candidates.removeIf(id -> id == null || !auth.hasResourceUsePermission(employee, id));
+        expandTargets(organizationIds, users::findUserIdsByOrgIdListIncludingChildren, candidates);
+        expandTargets(positionIds, users::findUserIdsByPostIds, candidates);
+        expandTargets(stationIds, users::findUserIdsByStationIdListIncludingChildren, candidates);
+        // The caller applies the permission snapshot to exclude blacklisted users.
         return candidates;
+    }
+
+    private void expandTargets(Set<Long> targets, java.util.function.Function<List<Long>, List<Long>> expand, Set<Long> result) {
+        List<Long> ids = new ArrayList<>(targets);
+        for (int start = 0; start < ids.size(); start += 500) {
+            result.addAll(expand.apply(ids.subList(start, Math.min(start + 500, ids.size()))));
+        }
     }
 
     private boolean isEffective(PrivilegeGrant grant, Date now) {
