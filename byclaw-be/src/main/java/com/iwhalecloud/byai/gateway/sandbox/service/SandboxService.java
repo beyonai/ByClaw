@@ -101,6 +101,16 @@ public class SandboxService {
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
 
+    @Lazy
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties sandboxProperties;
+
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy sharedSandboxPolicy;
+
     /**
      * 该用户的这类沙箱是常驻宿主上的进程内上下文：不建记录、不启动沙箱，直接向宿主要上下文（幂等 PUT）。
      * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
@@ -333,6 +343,46 @@ public class SandboxService {
      */
     public SandboxLaunchData launchSandbox(String userCode, Long resourceId) {
         return launchSandboxInternal(userCode, resourceId, sandboxLaunchContextFactory.resolveRouting(resourceId, userCode));
+    }
+
+    /** Resolves the current user's execution sandbox through the existing launch lifecycle. */
+    public SandboxLaunchData launchUserExecutionSandbox(String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            throw new IllegalArgumentException("userCode is required");
+        }
+        String user = userCode.trim();
+        String targetAgentType = systemParamTargetAgentResolver.resolve(null, user);
+        SandboxLaunchRouting routing = SandboxTargetRouting.resolve(user, targetAgentType,
+            () -> sandboxLaunchContextFactory.resolveRouting(null, user));
+        if (isSharedExecutionContext(user, routing)) {
+            String selectedTool = com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts
+                .toolSandboxLookup(() -> byaiSystemConfigService.getDcSystemConfigValueByCode(
+                    com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts.TOOL_SANDBOX_PARAM))
+                .apply(user);
+            String toolServiceKey = StringUtils.defaultIfBlank(selectedTool,
+                sandboxProperties.getSharedDshHost().getToolServiceKey());
+            if (StringUtils.isBlank(toolServiceKey)) {
+                throw new IllegalStateException("User execution tool sandbox is not configured");
+            }
+            routing = new SandboxLaunchRouting(toolServiceKey, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+            if (isSharedExecutionContext(user, routing)) {
+                throw new IllegalStateException("User execution tool sandbox resolves to a shared host context");
+            }
+        }
+        SandboxLaunchData launched = launchSandboxInternal(user, null, routing);
+        if (launched != null && Boolean.TRUE.equals(launched.getIsShared())) {
+            throw new IllegalStateException("Shared host contexts cannot execute sandbox commands");
+        }
+        return launched;
+    }
+
+    private boolean isSharedExecutionContext(String userCode, SandboxLaunchRouting routing) {
+        return SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(routing.getSandboxType())
+            && (sharedHostRoutes(userCode, routing.getSandboxType())
+                || sharedSandboxGateway != null && sharedSandboxPolicy.eligible(userCode)
+                    && sharedSandboxGateway.enabled()
+                // Redis-announced hosts belong to the legacy lifecycle, not Platform execution.
+                || !platformRemote() && sharedDshHost(userCode, routing) != null);
     }
 
     /**

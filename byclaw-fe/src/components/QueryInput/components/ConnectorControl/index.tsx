@@ -704,7 +704,6 @@ const ConnectorControl = ({
           await loadAuthorizedConnectors();
         } catch {
           message.error(intl.formatMessage({ id: 'connector.revoke.failed' }));
-          throw new Error(intl.formatMessage({ id: 'connector.revoke.error' }));
         } finally {
           setRevokingConnectorIds((ids) => {
             const nextIds = new Set(ids);

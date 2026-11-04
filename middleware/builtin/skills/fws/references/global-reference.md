@@ -2,17 +2,21 @@
 
 ## 安装与初始化
 
+所有 CLI 命令遵守父 Skill 的 HOME 隔离：仅对子进程使用 `HOME="$LARK_HOME"`，缺少 `LARK_HOME` 时停止。
+检查、初始化、登录和验证须使用同一 `LARK_HOME`、同一 CLI workspace 和同一运行时环境；不得清空或改写用于配置发现的环境信号，不得切换 profile、workspace 或来源寻找另一份配置，保留已有绑定和凭证。
+本文的 `scripts/...` 相对已加载的 `SKILL.md` 所在目录定位；执行时使用解析后的脚本绝对路径，保持当前执行工作目录，不切换 CLI workspace。
+
 ```bash
 # 安装官方 CLI
 npx @larksuite/cli@latest install
 
-# 初始化应用配置；会输出授权/配置链接
-lark-cli config init --new
+# 先检查同一 LARK_HOME 的应用元数据；已有应用直接复用，另行验证凭证
+lark-cli config show
 
-# OpenClaw/Hermes/Lark Channel 环境优先绑定 Agent 已配置的应用
-lark-cli config bind --source openclaw --identity user-default
+# 仅满足下方全部首次配置门槛时初始化；profile、损坏配置或未知错误禁止初始化
+lark-cli config init --new --force-init
 
-# 人工场景可用推荐授权；OpenClaw agent 场景必须使用下方 --domain/--scope split-flow
+# 人工场景可用推荐授权；Agent 场景必须使用下方 --domain/--scope split-flow
 lark-cli auth login --recommend
 lark-cli auth login --domain docs --no-wait --json
 lark-cli auth login --scope "calendar:calendar:readonly" --no-wait --json
@@ -22,56 +26,28 @@ lark-cli whoami
 lark-cli auth logout --json
 ```
 
-不要把 App Secret、token、cookie 或本地凭证写入 skill、代码仓库或回复。OpenClaw 场景优先绑定 `channels.feishu`，不要默认新建一个与 OpenClaw 脱钩的本机 app。
+不要把 App Secret、token、cookie 或本地凭证写入 skill、代码仓库或回复。应用配置和个人凭证都保留在当前用户持久化的 `LARK_HOME` 中。
 
-### OpenClaw 渠道配置与绑定顺序
+### CLI 应用配置与用户授权顺序
 
-OpenClaw 里有三层配置，顺序不能反：
+1. 先执行 `lark-cli config show` 检查同一 `LARK_HOME` 的应用元数据。已有应用时直接复用，不重新初始化或切换配置来源；退出码为 0 且有 `appId` 也不证明密钥引用有效。
+2. 首次配置门槛：只有 `config show` 本身明确返回 `not_configured`，且没有既有应用元数据，同时错误为 `error.type=config`、`error.subtype=not_configured`、没有 `error.field`，错误消息明确表示缺少应用配置，才允许初始化。不能仅凭 subtype 或缺少 appId 推断应用不存在。
+3. 已有应用需要访问个人资源时执行 `auth login --scope/--domain --no-wait --json`。若 `auth login` 返回 `not_configured`，但已有 `appId` 或其他应用元数据，应报告应用配置或密钥引用错误并保留绑定和凭证，不得重新初始化。
 
-1. OpenClaw 渠道配置：`openclaw.json` 必须存在 `channels.feishu`，至少包含 `appId`、`appSecret`、`domain`。
-2. lark-cli 工作区绑定：用 `lark-cli config bind --source openclaw --identity ...` 把 OpenClaw 渠道同步到当前 lark-cli workspace。
-3. user 身份授权：访问个人通讯录、日历、邮箱、个人云空间等 user 资源时，再用 `auth login --scope/--domain --no-wait --json`。
+`error.field` 为 `--profile`、`LARKSUITE_CLI_PROFILE` 或 `currentApp` 表示 profile 选择错误，先修正既有 profile 选择并保留配置；仅针对报错指明的选择确认原应用，不试切其他 profile、HOME、workspace 或来源。无活动 profile、`invalid_config`、未知错误消息或密钥错误均须停止并报告，不得初始化。
 
-当提示“当前 OpenClaw 配置中未检测到飞书（Feishu）渠道”、`openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first` 时：
+不要求任何聊天渠道配置。历史外部配置来源报错时，先检查当前 CLI 应用元数据；已有应用时继续其凭证检查，不因历史提示重复配置或换来源。
+外部应用配置导入只是管理员明确选择的可选操作，先查 `lark-cli config bind --help` 确认当前 CLI 支持的来源与身份策略。
+如果导入会从 `bot-only` 切到 `user-default`，须说明 AI 将访问用户个人资源并取得确认；不自动增加 `--force`。
 
-- 这是渠道缺失，不是用户授权缺失；不要让用户“确认授权”，不要执行 `auth login`。
-- 如果 agent 能执行命令并回传输出，先执行 `lark-cli config init --new --force-init`，从本次输出提取 `https://open.feishu.cn/page/cli?...` 配置链接，再执行 `python3 scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"` 生成 data URI 二维码。
-- 将配置链接和 data URI 二维码返回给管理员，并说明这只是创建/获取飞书应用入口，完成后仍需把 App ID 和 App Secret 安全写入 OpenClaw 的 `channels.feishu`；二维码生成失败时只返回可点击链接和失败原因，不能返回破图占位。
-- 如果 agent 不能执行命令或没有拿到配置链接，再返回手工配置指引：用户/管理员需要先在 OpenClaw 后台或 `openclaw.json` 中配置 `channels.feishu`。
-- 不要在回复里展示 App Secret；可展示配置字段名和示例占位符。
+### 本地应用初始化 split-flow
 
-用户回复“配置成功了”后，不要重复要求配置 `channels.feishu`，先检查当前 lark-cli workspace：
-
-```bash
-lark-cli config show
-lark-cli auth status --json --verify
-```
-
-- 如果 `config show` 能看到 `appId`，说明 `config init --new --force-init` 已经把飞书应用写入当前 lark-cli 本地配置；可先继续 user 授权和本次业务查询。
-- 如果仍提示未配置 app，重新生成配置链接或让管理员检查当前 agent 与生成链接时是否同一个 workspace。
-- 即使用本地配置跑通，也要提醒管理员后续把同一个应用凭证同步进 OpenClaw `channels.feishu`，否则新会话、新沙箱或 `config bind --source openclaw` 仍可能失败。
-
-OpenClaw 渠道存在后，按场景绑定：
-
-```bash
-# 个人通讯录、日历、邮箱、个人云空间等用户资源
-lark-cli config bind --source openclaw --identity user-default
-
-# 机器人发消息、群通知、应用身份场景
-lark-cli config bind --source openclaw --identity bot-only
-```
-
-如果 `config bind` 提示从 `bot-only` 切到 `user-default` 有风险，必须先向用户说明“AI 将以用户飞书身份访问个人资源”，用户确认后才可加 `--force` 重跑。
-
-### 本机应用初始化 split-flow
-
-仅在本机非 OpenClaw 场景，或管理员明确要创建飞书应用用于填入 OpenClaw 渠道时，才使用 `config init`：
-
-1. 非 Agent 本机场景执行 `lark-cli config init --new`；OpenClaw/Hermes 环境下如管理员明确要新建独立应用，才执行 `lark-cli config init --new --force-init`。
-2. 立即读取本次输出，只从本次输出提取配置链接，通常是 `https://open.feishu.cn/page/cli?...`。
+1. 只有满足上述全部首次配置门槛，才执行 `lark-cli config init --new --force-init`；已有应用、profile 选择错误或检查出现其他错误时不得运行初始化命令。
+2. 使用当前运行时的命令执行工具读取本次进程输出，只从本次输出提取配置链接，通常是 `https://open.feishu.cn/page/cli?...`；后台进程用对应进程工具读取。
 3. 执行 `python3 scripts/qrcode_data_uri.py "<url>" --alt "飞书应用配置二维码"`，从 JSON 输出读取 `markdownImage`。
 4. 将 URL 原样嵌入 Markdown 超链接返回给管理员，格式为 `[点击打开飞书应用配置](<url>)`，并在下一行返回 `markdownImage` 二维码；不要修改、拼接或重新编码 URL，禁止输出裸长链接。
-5. 禁止返回本地图片路径。ByClaw/OpenClaw 聊天页无法访问 agent 本地生成的相对路径图片，`![飞书应用配置二维码](relative.png)` 会显示成破图；二维码脚本失败时只返回可点击链接和失败原因。
+5. 禁止返回本地图片路径。ByClaw 聊天页无法访问 agent 本地生成的相对路径图片，`![飞书应用配置二维码](relative.png)` 会显示成破图；二维码脚本失败时只返回可点击链接和失败原因。
+6. 管理员回复完成后，在同一环境再执行 `lark-cli config show`。读取到 `appId` 仅确认元数据写入，随后仍需用户登录和 `auth status --json --verify`；密钥引用或登录失败时报告错误，保留应用与凭证，不换 HOME、不重新初始化。
 
 ## 身份类型
 
@@ -103,7 +79,7 @@ lark-cli auth login --device-code <device_code> --json
 ```
 
 执行要求：
-- 第一轮必须通过 OpenClaw `exec` 发起授权，并立即通过 `process` 读取本次返回。
+- 第一轮使用当前运行时的命令执行工具发起授权，并立即读取本次进程输出；后台进程用对应进程工具读取。
 - 第一轮从本次 JSON 中提取 `verification_url` 和 `device_code`；必要时用 `verification_uri_complete` 兜底授权 URL。
 - 执行 `python3 scripts/qrcode_data_uri.py "<verification_url>" --alt "飞书授权二维码"`，从 JSON 输出读取 `markdownImage`。
 - 把 `verification_url` 原样放入 Markdown 超链接返回给用户，推荐格式：`[点击打开飞书授权](<verification_url>)`，并在下一行返回 `markdownImage` 二维码。
@@ -114,7 +90,7 @@ lark-cli auth login --device-code <device_code> --json
 - 不要修改、拼接、编码/解码授权 URL。
 - 不要在同一轮展示 URL 后立刻阻塞轮询 `--device-code`；用户看不到 URL 会导致流程卡住。
 - 不要复用历史 `verification_url` 或 `device_code`；每次重新授权都重新生成。`device_code` 只允许用于本次授权会话的后续确认轮。
-- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态；用户回复“已授权”本身不代表登录成功。
+- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态，并按父 Skill 完成平台状态同步后恢复业务；用户回复“已授权”本身不代表登录成功。
 - `verification_url`、二维码和 `device_code` 只属于本次授权会话。若 `device_code` 已过期、已使用、无效或登录命令失败，必须丢弃旧授权信息，重新执行 `auth login --scope/--domain --no-wait --json` 生成全新的链接和 `device_code`，禁止重试旧值。
 - 单个业务请求最多执行两轮完整授权流程；第二轮仍失败时停止自动重试，报告最新错误并要求用户重新发起授权。未通过 `auth status --json --verify` 前不得恢复原业务命令。
 - bot 身份缺少 scope 时禁止执行 `auth login`；直接返回错误 envelope 中的 `console_url`，让管理员在飞书开放平台开通权限并发布/生效。
@@ -197,7 +173,8 @@ lark-cli calendar events instance_view --params '{"calendar_id":"primary"}' --fo
 
 | 变量 | 说明 |
 |------|------|
-| `LARKSUITE_CLI_CONFIG_DIR` | 覆盖 CLI 配置目录，隔离不同 OpenClaw/租户环境 |
+| `LARK_HOME` | 运行时注入的当前用户凭证目录，仅对子进程映射为 `HOME` |
+| `LARKSUITE_CLI_CONFIG_DIR` | CLI 配置目录覆盖项；不得指向共享目录或绕过当前用户的 HOME 隔离 |
 | `LARKSUITE_CLI_NO_UPDATE_NOTIFIER` | 设为 `1` 时关闭更新提示，避免污染 JSON 解析 |
 | `LARKSUITE_CLI_NO_SKILLS_NOTIFIER` | 设为 `1` 时关闭 skills 提示，避免污染 JSON 解析 |
 

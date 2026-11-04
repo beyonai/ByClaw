@@ -13,7 +13,6 @@ public final class LarkSandboxCommandPolicy {
     public enum Action {
         SHOW_CONFIG,
         INITIALIZE_APP,
-        BIND_OPENCLAW_CONTEXT,
         START_USER_AUTHORIZATION,
         COMPLETE_USER_AUTHORIZATION,
         VERIFY_AUTHORIZATION,
@@ -37,7 +36,6 @@ public final class LarkSandboxCommandPolicy {
         List<String> argv = switch (action) {
             case SHOW_CONFIG -> catalog.command("configCheck", 0);
             case INITIALIZE_APP -> catalog.command("configInitialize", 0);
-            case BIND_OPENCLAW_CONTEXT -> catalog.command("contextBind", 0);
             case START_USER_AUTHORIZATION -> catalog.command("login", 0);
             case COMPLETE_USER_AUTHORIZATION -> catalog.command(
                 "login", 1, Map.of("deviceCode", validateDeviceCode(deviceCode)));
@@ -60,13 +58,12 @@ public final class LarkSandboxCommandPolicy {
             throw new IllegalArgumentException("Lark manifest command is not allowed");
         }
         String expectedGroup = switch (action) {
-            case SHOW_CONFIG, INITIALIZE_APP, BIND_OPENCLAW_CONTEXT -> "config";
+            case SHOW_CONFIG, INITIALIZE_APP -> "config";
             case START_USER_AUTHORIZATION, COMPLETE_USER_AUTHORIZATION, VERIFY_AUTHORIZATION, LOGOUT -> "auth";
         };
         String expectedSubcommand = switch (action) {
             case SHOW_CONFIG -> "show";
             case INITIALIZE_APP -> "init";
-            case BIND_OPENCLAW_CONTEXT -> "bind";
             case START_USER_AUTHORIZATION, COMPLETE_USER_AUTHORIZATION -> "login";
             case VERIFY_AUTHORIZATION -> "status";
             case LOGOUT -> "logout";

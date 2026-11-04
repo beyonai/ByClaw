@@ -1,9 +1,13 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.wecom;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +37,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,15 +64,13 @@ public class WecomCliAuthorizationProvider
 
     private static final String PROVIDER_CODE = "wecom-cli";
     private static final List<String> INIT_COMMAND =
-        List.of("wecom-cli", "init", "--noninteractive", "--no-open");
-    private static final List<String> CACHE_STATUS_COMMAND =
-        List.of("wecom-cli", "cache", "status");
+        List.of("wecom-cli", "auth", "init", "--noninteractive", "--no-browser");
     private static final List<String> CACHE_CLEAR_COMMAND =
         List.of("wecom-cli", "cache", "clear");
-    private static final List<String> DEFAULT_PROBE_COMMAND =
-        List.of("wecom-cli", "contact", "get_userlist", "{}");
+    private static final List<String> AUTH_STATUS_COMMAND =
+        List.of("wecom-cli", "auth", "show", "--status");
     private static final Duration CLI_TIMEOUT = Duration.ofSeconds(30);
-    private static final long DEFAULT_AUTHORIZATION_TIMEOUT_SECONDS = 120L;
+    private static final long DEFAULT_AUTHORIZATION_TIMEOUT_SECONDS = 300L;
     private static final long MIN_AUTHORIZATION_TIMEOUT_SECONDS = 90L;
     private static final long MAX_AUTHORIZATION_TIMEOUT_SECONDS = 900L;
     private static final Duration DEFAULT_START_OUTPUT_TIMEOUT = Duration.ofSeconds(10);
@@ -78,7 +81,6 @@ public class WecomCliAuthorizationProvider
     private static final Duration LIFECYCLE_CLEANUP_INTERVAL = Duration.ofSeconds(30);
     private static final Duration TERMINAL_HANDOFF_PROTECTION = Duration.ofSeconds(5);
     private static final int MAX_ACTIVE_LIFECYCLES = 256;
-    private static final int MAX_JSON_RPC_STRING_ID_LENGTH = 256;
     private static final Pattern ANSI_CSI_SEQUENCE = Pattern.compile("\u001B\\[[0-?]*[ -/]*[@-~]");
     private static final Pattern ANSI_OSC_SEQUENCE =
         Pattern.compile("\u001B\\].*?(?:\u0007|\u001B\\\\)", Pattern.DOTALL);
@@ -90,7 +92,6 @@ public class WecomCliAuthorizationProvider
     private static final String PROVIDER_START_FAILED = "PROVIDER_START_FAILED";
     private static final String PROVIDER_AUTH_URL_MISSING = "PROVIDER_AUTH_URL_MISSING";
     private static final String PROVIDER_AUTH_FAILED = "PROVIDER_AUTH_FAILED";
-    private static final String PROVIDER_CACHE_INVALID = "PROVIDER_CACHE_INVALID";
     private static final String PROVIDER_PROBE_FAILED = "PROVIDER_PROBE_FAILED";
     private static final String PROVIDER_AUTH_CANCELLED = "PROVIDER_AUTH_CANCELLED";
     private static final String PROVIDER_CAPACITY_EXCEEDED = "PROVIDER_CAPACITY_EXCEEDED";
@@ -102,7 +103,6 @@ public class WecomCliAuthorizationProvider
     private static final String PROVIDER_START_FAILED_MESSAGE = "Unable to start WeCom authorization";
     private static final String PROVIDER_AUTH_URL_MISSING_MESSAGE = "WeCom authorization URL was not provided";
     private static final String PROVIDER_AUTH_FAILED_MESSAGE = "Unable to complete WeCom authorization";
-    private static final String PROVIDER_CACHE_INVALID_MESSAGE = "WeCom credential cache is unavailable";
     private static final String PROVIDER_PROBE_FAILED_MESSAGE = "WeCom authorization probe failed";
     private static final String PROVIDER_AUTH_CANCELLED_MESSAGE = "WeCom authorization was cancelled";
     private static final String PROVIDER_CAPACITY_EXCEEDED_MESSAGE =
@@ -228,14 +228,68 @@ public class WecomCliAuthorizationProvider
             throw new IllegalArgumentException(INVALID_USER_MESSAGE);
         }
         ConnectorCliWorkspace workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        ManifestCommandCatalog catalog = catalogFor(connector);
+        List<String> clearCommand = command(catalog, "logout", CACHE_CLEAR_COMMAND);
+        List<String> statusCommand = command(catalog, "status", AUTH_STATUS_COMMAND);
+        Map<String, String> environment = commandEnvironment(workspace);
+        // Every 1.3.4 CLI startup can migrate bot.enc through a network request.
+        // Remove credentials before launching it so local revocation never triggers migration.
+        removeCredentials(workspace);
         CliResult result = cliRunner.run(
-            command(catalogFor(connector), "logout", 0, "cache", "clear"),
-            workspace.environment(),
+            clearCommand,
+            environment,
             null,
             CLI_TIMEOUT
         );
         if (result == null || result.exitCode() != 0 || result.truncated()) {
+            throw new IllegalStateException("Unable to clear WeCom discovery cache");
+        }
+        CliResult status = cliRunner.run(
+            statusCommand,
+            environment, null, CLI_TIMEOUT);
+        if (!validAuthorizationStatus(status, "unauthorized")) {
             throw new IllegalStateException("Unable to revoke WeCom credential");
+        }
+    }
+
+    private Map<String, String> commandEnvironment(ConnectorCliWorkspace workspace) {
+        Path wecomConfig = credentialDirectory(workspace);
+        Map<String, String> environment = new HashMap<>(workspace.environment());
+        environment.put("WECOM_CLI_CONFIG_DIR", wecomConfig.toString());
+        // The CLI loads .env before resolving authorization. Keep a parent .env token from
+        // overriding the per-user file even though ConnectorCliRunner clears inherited env.
+        environment.put("WECOM_CLI_ACCESS_TOKEN", "");
+        return Map.copyOf(environment);
+    }
+
+    private Path credentialDirectory(ConnectorCliWorkspace workspace) {
+        Path config = workspace.home().resolve(".config");
+        Path wecomConfig = config.resolve("wecom");
+        try {
+            for (Path directory : List.of(workspace.home(), config, wecomConfig)) {
+                if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)
+                        && (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                            || !directory.toRealPath().startsWith(workspace.home().toRealPath()))) {
+                    throw new IllegalStateException("Invalid WeCom credential directory");
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to resolve WeCom credential directory");
+        }
+        return wecomConfig;
+    }
+
+    private void removeCredentials(ConnectorCliWorkspace workspace) {
+        // cache clear only removes service discovery metadata in CLI 1.3.4. Delete the
+        // legacy bot too: otherwise the next CLI startup recreates credentials.enc.
+        // Match the existing private projection boundary: fixed file names under the
+        // resolved user home, rejecting symlink directory components before each delete.
+        try {
+            for (String file : List.of("bot.enc", "token.enc", "credentials.enc")) {
+                Files.deleteIfExists(credentialDirectory(workspace).resolve(file));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to remove WeCom credential");
         }
     }
 
@@ -244,9 +298,13 @@ public class WecomCliAuthorizationProvider
         if (userId == null || userId <= 0) {
             return credentialVerificationFailure();
         }
-        ProviderState providerState;
         try {
-            providerState = decodeProviderState(connector == null ? null : connector.getAuthConfig());
+            String config = connector == null ? null : connector.getAuthConfig();
+            JsonNode root = config == null || config.isBlank() ? objectMapper.createObjectNode() : readJson(config);
+            if (root == null || !root.isObject()) {
+                return credentialVerificationFailure();
+            }
+            validatedProviderState(objectMapper.convertValue(root, new TypeReference<Map<String, Object>>() { }));
         } catch (RuntimeException | JsonProcessingException e) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
         }
@@ -260,28 +318,16 @@ public class WecomCliAuthorizationProvider
             );
         }
         try {
-            CliResult cacheResult = cliRunner.run(
-                command(catalogFor(connector), "status", 0, "cache", "status"),
-                workspace.environment(),
+            CliResult status = cliRunner.run(
+                command(catalogFor(connector), "status", AUTH_STATUS_COMMAND),
+                commandEnvironment(workspace),
                 null,
                 CLI_TIMEOUT
             );
-            if (timedOut(cacheResult)) {
+            if (timedOut(status)) {
                 return credentialVerificationTimeout();
             }
-            if (!validCacheResult(cacheResult)) {
-                return credentialCacheInvalid();
-            }
-            CliResult probeResult = cliRunner.run(
-                command(catalogFor(connector), "status", 1, "contact", "get_userlist"),
-                workspace.environment(),
-                null,
-                CLI_TIMEOUT
-            );
-            if (timedOut(probeResult)) {
-                return credentialVerificationTimeout();
-            }
-            return validBusinessProbeResult(probeResult) ? connectedStatus() : businessProbeInvalid();
+            return validAuthorizationStatus(status, "authorized") ? connectedStatus() : credentialInvalid();
         } catch (RuntimeException e) {
             return credentialVerificationFailure();
         }
@@ -289,17 +335,6 @@ public class WecomCliAuthorizationProvider
 
     private AuthorizationStatusResult credentialInvalid() {
         return failedStatus("CONNECTOR_CREDENTIAL_INVALID", "Connector credential is invalid");
-    }
-
-    private AuthorizationStatusResult credentialCacheInvalid() {
-        return failedStatus("CONNECTOR_CACHE_INVALID", "Connector credential cache is invalid");
-    }
-
-    private AuthorizationStatusResult businessProbeInvalid() {
-        return failedStatus(
-            "CONNECTOR_BUSINESS_PROBE_INVALID",
-            "Connector business probe did not succeed"
-        );
     }
 
     private AuthorizationStatusResult credentialVerificationFailure() {
@@ -335,7 +370,7 @@ public class WecomCliAuthorizationProvider
         try {
             providerState = validatedProviderState(context.providerConfig());
             serializedProviderState = objectMapper.writeValueAsString(providerState);
-            initCommand = command(context.commandCatalog(), "login", 0, "init", "--noninteractive");
+            initCommand = command(context.commandCatalog(), "login", INIT_COMMAND);
         } catch (RuntimeException | JsonProcessingException e) {
             return failedStart(PROVIDER_CONFIG_INVALID, PROVIDER_CONFIG_INVALID_MESSAGE);
         }
@@ -504,37 +539,28 @@ public class WecomCliAuthorizationProvider
         ConnectorCliWorkspace workspace,
         AuthorizationLifecycle lifecycle,
         ProcessState processState) {
-        CliResult cacheResult;
-        try {
-            cacheResult = cliRunner.run(
-                command(commandCatalog, "status", 0, "cache", "status"),
-                workspace.environment(),
-                null,
-                CLI_TIMEOUT
-            );
-        } catch (RuntimeException e) {
-            return probeFailure(processState, PROVIDER_CACHE_INVALID, PROVIDER_CACHE_INVALID_MESSAGE);
-        }
-        if (!validCacheResult(cacheResult)) {
-            return probeFailure(processState, PROVIDER_CACHE_INVALID, PROVIDER_CACHE_INVALID_MESSAGE);
-        }
         AuthorizationStatusResult lifecycleResult = lifecycle.completedProbeResult();
         if (lifecycleResult != null) {
             return lifecycleResult;
         }
-
-        CliResult probeResult;
+        // Local credentials can predate this authorization attempt. Only a successful
+        // init exit proves the current scan completed; failed or lost processes cannot
+        // be recovered by checking whether old credentials still exist.
+        if (processState != ProcessState.SUCCEEDED) {
+            return failedStatus(PROVIDER_AUTH_FAILED, PROVIDER_AUTH_FAILED_MESSAGE);
+        }
+        CliResult status;
         try {
-            probeResult = cliRunner.run(
-                command(commandCatalog, "status", 1, "contact", "get_userlist"),
-                workspace.environment(),
+            status = cliRunner.run(
+                command(commandCatalog, "status", AUTH_STATUS_COMMAND),
+                commandEnvironment(workspace),
                 null,
                 CLI_TIMEOUT
             );
         } catch (RuntimeException e) {
             return probeFailure(processState, PROVIDER_PROBE_FAILED, PROVIDER_PROBE_FAILED_MESSAGE);
         }
-        if (!validBusinessProbeResult(probeResult)) {
+        if (!validAuthorizationStatus(status, "authorized")) {
             return probeFailure(processState, PROVIDER_PROBE_FAILED, PROVIDER_PROBE_FAILED_MESSAGE);
         }
         return connectedStatus();
@@ -696,7 +722,7 @@ public class WecomCliAuthorizationProvider
         }
         List<String> probeCommand = safeConfig.containsKey("probeCommand")
             ? validatedProbeCommand(safeConfig.get("probeCommand"))
-            : DEFAULT_PROBE_COMMAND;
+            : AUTH_STATUS_COMMAND;
         return new ProviderState(authorizationTimeoutSeconds, probeCommand);
     }
 
@@ -719,30 +745,11 @@ public class WecomCliAuthorizationProvider
         return value;
     }
 
-    private List<String> validatedProbeCommand(Object configured) throws JsonProcessingException {
-        if (!(configured instanceof List<?> values) || values.size() != DEFAULT_PROBE_COMMAND.size()) {
-            throw new IllegalArgumentException("Expected four probe command elements");
+    private List<String> validatedProbeCommand(Object configured) {
+        if (!AUTH_STATUS_COMMAND.equals(configured)) {
+            throw new IllegalArgumentException("Unsupported WeCom authorization status command");
         }
-        List<String> strings = values.stream()
-            .map(value -> {
-                if (!(value instanceof String string)
-                    || string.isBlank()
-                    || string.codePoints().anyMatch(Character::isISOControl)) {
-                    throw new IllegalArgumentException("Expected a non-empty string");
-                }
-                return string;
-            })
-            .toList();
-        if (!DEFAULT_PROBE_COMMAND.subList(0, 3).equals(strings.subList(0, 3))) {
-            throw new IllegalArgumentException("Unsupported probe command");
-        }
-        if (!objectMapper.reader()
-            .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .readTree(strings.get(3))
-            .isObject()) {
-            throw new IllegalArgumentException("Expected probe arguments to be a JSON object");
-        }
-        return List.copyOf(strings);
+        return AUTH_STATUS_COMMAND;
     }
 
     private AuthorizationStartResult pendingStart(
@@ -899,7 +906,7 @@ public class WecomCliAuthorizationProvider
 
             ManagedProcess process;
             try {
-                process = cliRunner.start(initCommand, workspace.environment(), null);
+                process = cliRunner.start(initCommand, commandEnvironment(workspace), null);
             } catch (RuntimeException e) {
                 return failReservedStart(
                     authorizationId,
@@ -1012,95 +1019,13 @@ public class WecomCliAuthorizationProvider
         );
     }
 
-    private boolean validCacheResult(CliResult result) {
-        if (result == null || result.exitCode() != 0 || result.truncated() || result.output() == null) {
-            return false;
-        }
-        try {
-            JsonNode root = objectMapper.reader()
-                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                .readTree(result.output());
-            // wecom-cli 0.1.9 reports only service-discovery cache files here.
-            // A freshly initialized credential can therefore legitimately return [].
-            // Credential usability is established by the business probe below.
-            return root != null && root.isArray();
-        } catch (JsonProcessingException | RuntimeException e) {
-            return false;
-        }
-    }
-
-    private boolean validBusinessProbeResult(CliResult result) {
-        if (result == null || result.exitCode() != 0 || result.truncated() || result.output() == null
-            || result.output().isBlank()) {
-            return false;
-        }
-        try {
-            JsonNode root = readJson(result.output());
-            if (isJsonRpcEnvelope(root)) {
-                if (!validJsonRpcEnvelope(root)) {
-                    return false;
-                }
-                JsonNode content = root.get("result").get("content");
-                boolean validBusinessResult = false;
-                for (JsonNode item : content) {
-                    if (!validBusinessContentItem(item)) {
-                        return false;
-                    }
-                    BusinessTextValidation validation = validateBusinessText(item.get("text"));
-                    if (validation == BusinessTextValidation.DUPLICATE_KEYS) {
-                        return false;
-                    }
-                    if (validation == BusinessTextValidation.VALID) {
-                        validBusinessResult = true;
-                    }
-                }
-                return validBusinessResult;
-            }
-            return validBusinessJson(root);
-        } catch (JsonProcessingException | RuntimeException e) {
-            return false;
-        }
-    }
-
-    private BusinessTextValidation validateBusinessText(JsonNode text) {
-        if (!text.isTextual() || text.textValue().isBlank()) {
-            return BusinessTextValidation.NOT_BUSINESS;
-        }
-        try {
-            return validBusinessJson(readJson(text.textValue()))
-                ? BusinessTextValidation.VALID
-                : BusinessTextValidation.NOT_BUSINESS;
-        } catch (JsonProcessingException e) {
-            return validJsonWithoutDuplicateDetection(text.textValue())
-                ? BusinessTextValidation.DUPLICATE_KEYS
-                : BusinessTextValidation.NOT_BUSINESS;
-        } catch (RuntimeException e) {
-            return BusinessTextValidation.NOT_BUSINESS;
-        }
-    }
-
-    private boolean validJsonWithoutDuplicateDetection(String content) {
-        try {
-            objectMapper.reader()
-                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                .readTree(content);
-            return true;
-        } catch (JsonProcessingException | RuntimeException e) {
-            return false;
-        }
-    }
-
-    private boolean validBusinessContentItem(JsonNode item) {
-        if (item == null || !item.isObject()) {
-            return false;
-        }
-        JsonNode type = item.get("type");
-        JsonNode text = item.get("text");
-        return type != null
-            && type.isTextual()
-            && "text".equals(type.textValue())
-            && text != null
-            && text.isTextual();
+    /** CLI 1.3.4 reports local authorization material, not remote API permission or token validity. */
+    private boolean validAuthorizationStatus(CliResult result, String expected) {
+        return result != null
+            && result.exitCode() == 0
+            && !result.truncated()
+            && result.output() != null
+            && expected.equals(result.output().strip());
     }
 
     private JsonNode readJson(String content) throws JsonProcessingException {
@@ -1108,65 +1033,6 @@ public class WecomCliAuthorizationProvider
             .with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .readTree(content);
-    }
-
-    private boolean isJsonRpcEnvelope(JsonNode root) {
-        return root != null && root.isObject()
-            && (root.has("jsonrpc") || root.has("id") || root.has("result"));
-    }
-
-    private boolean validJsonRpcEnvelope(JsonNode root) {
-        JsonNode version = root.get("jsonrpc");
-        JsonNode id = root.get("id");
-        JsonNode result = root.get("result");
-        if (version == null
-            || !version.isTextual()
-            || !"2.0".equals(version.textValue())
-            || !validJsonRpcId(id)
-            || root.has("error")
-            || result == null
-            || !result.isObject()
-            || result.has("error")) {
-            return false;
-        }
-        JsonNode isError = result.get("isError");
-        if (isError != null && (!isError.isBoolean() || isError.booleanValue())) {
-            return false;
-        }
-        JsonNode content = result.get("content");
-        return content != null
-            && content.isArray()
-            && !content.isEmpty();
-    }
-
-    private boolean validJsonRpcId(JsonNode id) {
-        if (id == null) {
-            return false;
-        }
-        if (id.isIntegralNumber()) {
-            return id.canConvertToLong() && id.longValue() > 0L;
-        }
-        if (!id.isTextual()) {
-            return false;
-        }
-        String value = id.textValue();
-        return !value.isEmpty()
-            && value.length() <= MAX_JSON_RPC_STRING_ID_LENGTH
-            && value.chars().noneMatch(Character::isISOControl);
-    }
-
-    private boolean validBusinessJson(JsonNode root) {
-        if (root == null || !root.isObject() || root.has("error")) {
-            return false;
-        }
-        JsonNode errorCode = root.get("errcode");
-        JsonNode userList = root.get("userlist");
-        return errorCode != null
-            && errorCode.isIntegralNumber()
-            && errorCode.canConvertToInt()
-            && errorCode.intValue() == 0
-            && userList != null
-            && userList.isArray();
     }
 
     private ProviderState decodeProviderState(String serialized) throws JsonProcessingException {
@@ -1204,17 +1070,12 @@ public class WecomCliAuthorizationProvider
     private List<String> command(
             ManifestCommandCatalog commandCatalog,
             String action,
-            int index,
-            String commandGroup,
-            String subcommand) {
-        if (commandCatalog == null) {
+            List<String> expected) {
+        if (commandCatalog == null || commandCatalog.size(action) != 1) {
             throw new IllegalArgumentException("WeCom manifest commands are unavailable");
         }
-        List<String> command = commandCatalog.command(action, index);
-        if (command.size() < 3
-                || !"wecom-cli".equals(command.get(0))
-                || !commandGroup.equals(command.get(1))
-                || !subcommand.equals(command.get(2))) {
+        List<String> command = commandCatalog.command(action, 0);
+        if (!expected.equals(command)) {
             throw new IllegalArgumentException("WeCom manifest command is not allowed");
         }
         return command;
@@ -1227,10 +1088,10 @@ public class WecomCliAuthorizationProvider
         return new ManifestCommandCatalog(
             Map.of(
                 "login", List.of(INIT_COMMAND),
-                "status", List.of(CACHE_STATUS_COMMAND, DEFAULT_PROBE_COMMAND),
+                "status", List.of(AUTH_STATUS_COMMAND),
                 "logout", List.of(CACHE_CLEAR_COMMAND)
             ),
-            "legacy-test-catalog",
+            "wecom-1.3.4-test-catalog",
             Map.of()
         );
     }
@@ -1562,9 +1423,10 @@ public class WecomCliAuthorizationProvider
         try {
             URI uri = new URI(candidate);
             String scheme = uri.getScheme();
-            return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
-                && uri.getHost() != null
-                && !uri.getHost().isBlank()
+            return "https".equalsIgnoreCase(scheme)
+                && "work.weixin.qq.com".equalsIgnoreCase(uri.getHost())
+                && "/ai/qc/gen".equals(uri.getPath())
+                && uri.getPort() == -1
                 && uri.getUserInfo() == null;
         } catch (URISyntaxException e) {
             return false;
@@ -1755,11 +1617,6 @@ public class WecomCliAuthorizationProvider
         FAILED
     }
 
-    private enum BusinessTextValidation {
-        VALID,
-        NOT_BUSINESS,
-        DUPLICATE_KEYS
-    }
 
     private record ProviderState(long authorizationTimeoutSeconds, List<String> probeCommand) {
 
