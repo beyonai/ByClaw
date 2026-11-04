@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandExecutor;
@@ -118,6 +120,229 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.phase()).isEqualTo("app_initialization");
         assertThat(result.providerState()).contains("init-1", "generation-1");
         verify(fixture.executor, times(1)).run(any(), any());
+    }
+
+    @Test
+    void waitsForApplicationUrlAfterInitiallyEmptyOutput() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 0, false))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                "https://open.feishu.cn/app/init\n", 31, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/app/init");
+        verify(fixture.executor, never()).terminate(any(), any());
+    }
+
+    @Test
+    void doesNotReturnPartialUrlAndAccumulatesOutputAcrossCursors() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                "https://open.feishu.cn/app/init?ticket=first", 43, false));
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 43))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                "-second\n", 51, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/app/init?ticket=first-second");
+        assertThat(result.providerState()).contains("\"outputCursor\":51");
+        verify(fixture.executor, never()).terminate(any(), any());
+    }
+
+    @Test
+    void failedStartupIsNotReportedAsMissingUrl() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.EXITED, 1);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 1,
+                "configuration initialization failed\n", 36, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void drainsOutputWrittenJustBeforeProcessExitIncludingUnterminatedLastLine() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.EXITED, 0);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 0, false))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 0,
+                "https://open.feishu.cn/app/init?ticket=first", 43, false));
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 43))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 0,
+                "-second", 50, false));
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 50))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 0, "", 50, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/app/init?ticket=first-second");
+        assertThat(result.providerState()).contains("\"outputCursor\":50");
+        verify(fixture.executor, never()).terminate(any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SandboxProcessSnapshot.State.class, names = {"FAILED", "TERMINATED", "NOT_FOUND"})
+    void terminalStartupFailureDoesNotAcceptAnOutputUrl(SandboxProcessSnapshot.State state) {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(state, null);
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void truncatedOutputDoesNotAcceptAnOutputUrl() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                "https://open.feishu.cn/app/init\n", 31, true));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void cumulativeOutputIsBoundedEvenWhenIndividualChunksAreNotTruncated() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        fixture.properties.setMaxOutputBytes(6);
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "日志", 6, false));
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 6))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "x", 7, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void runningProcessWithoutCompleteUrlTimesOutAndIsTerminated() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        fixture.properties.setInitializationOutputTimeout(Duration.ofMillis(10));
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                "https://open.feishu.cn/app/init?ticket=partial", 45, false));
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 45))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 45, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_URL_MISSING");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void processExitingWithoutUrlIsAnInitializationFailure() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.EXITED, 0);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 0, "", 0, false));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @Test
+    void outputFailureStillTerminatesTheStartedProcess() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0))
+            .thenThrow(new IllegalStateException("transport unavailable"));
+
+        var result = fixture.runtime.start(startContext(commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+        verify(fixture.executor).terminate("sandbox-1", "init-1");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void interruptedWaitPreservesInterruptAndTerminatesTheStartedProcess(boolean urlReady) {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                urlReady ? "https://open.feishu.cn/app/init\n" : "", urlReady ? 31 : 0, false);
+        });
+
+        try {
+            var result = fixture.runtime.start(startContext(commandCatalog()));
+
+            assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+            assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            verify(fixture.executor).terminate("sandbox-1", "init-1");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void interruptedTransportFailureAllowsCleanupBeforeRestoringInterrupt() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.readOutput("sandbox-1", "init-1", 0)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("transport interrupted");
+        });
+        org.mockito.Mockito.doAnswer(invocation -> {
+            assertThat(Thread.currentThread().isInterrupted()).isFalse();
+            return null;
+        }).when(fixture.executor).terminate("sandbox-1", "init-1");
+
+        try {
+            var result = fixture.runtime.start(startContext(commandCatalog()));
+
+            assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+            assertThat(result.errorCode()).isEqualTo("APP_INIT_FAILED");
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            verify(fixture.executor).terminate("sandbox-1", "init-1");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @ParameterizedTest
@@ -269,7 +494,10 @@ class LarkSandboxAuthorizationRuntimeTest {
     void failedInitializationTerminatesWithoutTryingUserLogin() {
         RuntimeFixture fixture = new RuntimeFixture();
         when(fixture.executor.run(any(), any())).thenReturn(notConfigured());
-        fixture.stubInitialization(SandboxProcessSnapshot.State.EXITED, 1);
+        fixture.stubInitialization(SandboxProcessSnapshot.State.RUNNING, null);
+        when(fixture.executor.inspect("sandbox-1", "init-1"))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 48, false))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.EXITED, 1, "", 48, false));
         var started = fixture.runtime.start(startContext(commandCatalog()));
 
         var result = fixture.runtime.queryStatus(session(started));
@@ -533,8 +761,9 @@ class LarkSandboxAuthorizationRuntimeTest {
     private static class RuntimeFixture {
         final SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
         final UserSandboxResolver resolver = mock(UserSandboxResolver.class);
+        final LarkAuthorizationProperties properties = new LarkAuthorizationProperties();
         final LarkSandboxAuthorizationRuntime runtime = new LarkSandboxAuthorizationRuntime(
-            executor, resolver, new LarkAuthorizationProperties(), new ObjectMapper(), mock(UserService.class));
+            executor, resolver, properties, new ObjectMapper(), mock(UserService.class));
 
         RuntimeFixture() {
             when(resolver.resolve("42"))
@@ -545,7 +774,7 @@ class LarkSandboxAuthorizationRuntimeTest {
             when(executor.start(eq("sandbox-1"), any()))
                 .thenReturn(new SandboxProcessHandle("sandbox-1", "init-1", Instant.now()));
             when(executor.readOutput(eq("sandbox-1"), eq("init-1"), org.mockito.ArgumentMatchers.anyLong()))
-                .thenReturn(new SandboxProcessSnapshot(state, exitCode, "https://open.feishu.cn/app/init", 48, false));
+                .thenReturn(new SandboxProcessSnapshot(state, exitCode, "https://open.feishu.cn/app/init\n", 48, false));
             when(executor.inspect("sandbox-1", "init-1"))
                 .thenReturn(new SandboxProcessSnapshot(state, exitCode, "", 48, false));
         }

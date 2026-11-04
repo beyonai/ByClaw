@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.connector.provider.lark;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,6 +61,7 @@ public class LarkSandboxAuthorizationRuntime {
         "open.feishu.cn", "open.larksuite.com", "accounts.feishu.cn", "accounts.larksuite.com");
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration INIT_TIMEOUT = Duration.ofMinutes(10);
+    private static final long START_OUTPUT_POLL_MILLIS = 100;
     private static final long DEFAULT_EXPIRES_SECONDS = 600;
 
     private final SandboxCommandExecutor executor;
@@ -106,25 +109,122 @@ public class LarkSandboxAuthorizationRuntime {
 
     private AuthorizationStartResult startApplicationInitialization(
             UserSandboxContext sandbox, ManifestCommandCatalog commandCatalog) {
-        SandboxProcessHandle process = executor.start(sandbox.sandboxId(), policy.build(commandCatalog,
-            LarkSandboxCommandPolicy.Action.INITIALIZE_APP, null, INIT_TIMEOUT, properties.getMaxOutputBytes()));
-        log.info("Started Lark app initialization: userCode={}, sandboxId={}, processId={}",
-            sandbox.userCode(), sandbox.sandboxId(), process.processId());
-        SandboxProcessSnapshot output = executor.readOutput(sandbox.sandboxId(), process.processId(), 0);
-        String url = firstUrl(output.output());
-        if (url == null) {
-            log.warn("Lark app initialization did not return authorization URL: userCode={}, sandboxId={}, processId={}",
+        SandboxProcessHandle process = null;
+        boolean pending = false;
+        boolean interrupted = false;
+        try {
+            process = executor.start(sandbox.sandboxId(), policy.build(commandCatalog,
+                LarkSandboxCommandPolicy.Action.INITIALIZE_APP, null, INIT_TIMEOUT, properties.getMaxOutputBytes()));
+            log.info("Started Lark app initialization: userCode={}, sandboxId={}, processId={}",
                 sandbox.userCode(), sandbox.sandboxId(), process.processId());
-            executor.terminate(sandbox.sandboxId(), process.processId());
-            return failed("APP_INIT_URL_MISSING", "Lark application initialization URL was not provided");
+            InitializationOutput output = waitForInitializationUrl(sandbox.sandboxId(), process.processId());
+            if (output.url() == null) {
+                log.warn("Lark app initialization did not return authorization URL: userCode={}, sandboxId={}, "
+                        + "processId={}, timedOut={}", sandbox.userCode(), sandbox.sandboxId(), process.processId(),
+                    output.timedOut());
+                return output.timedOut()
+                    ? failed("APP_INIT_URL_MISSING", "Lark application initialization URL was not provided")
+                    : failed("APP_INIT_FAILED", "Unable to initialize Lark application");
+            }
+            ObjectNode state = baseState(sandbox, APP_PHASE);
+            state.put("authorizationUrl", output.url());
+            putProcess(state, process, output.cursor(), "initialize_app");
+            AuthorizationStartResult result = pending(output.url(),
+                new Date(System.currentTimeMillis() + INIT_TIMEOUT.toMillis()), state);
+            log.info("Lark app initialization authorization URL received: userCode={}, sandboxId={}, processId={}",
+                sandbox.userCode(), sandbox.sandboxId(), process.processId());
+            pending = true;
+            return result;
+        } catch (InterruptedException e) {
+            interrupted = true;
+            return failed("APP_INIT_FAILED", "Unable to initialize Lark application");
+        } catch (RuntimeException e) {
+            log.warn("Unable to read Lark app initialization: userCode={}, sandboxId={}",
+                sandbox.userCode(), sandbox.sandboxId());
+            return failed("APP_INIT_FAILED", "Unable to initialize Lark application");
+        } finally {
+            // A transport may preserve the interrupt flag when throwing; let cleanup make its own bounded RPC.
+            interrupted = Thread.interrupted() || interrupted;
+            // Keep the process only after its complete URL and cursor have been handed to the authorization session.
+            if (!pending && process != null) {
+                try {
+                    executor.terminate(sandbox.sandboxId(), process.processId());
+                } catch (RuntimeException e) {
+                    log.warn("Unable to terminate Lark app initialization: sandboxId={}, processId={}",
+                        sandbox.sandboxId(), process.processId());
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
-        ObjectNode state = baseState(sandbox, APP_PHASE);
-        state.put("authorizationUrl", url);
-        putProcess(state, process, output.nextCursor(), "initialize_app");
-        log.info("Lark app initialization authorization URL received: userCode={}, sandboxId={}, processId={}",
-            sandbox.userCode(), sandbox.sandboxId(), process.processId());
-        return pending(url, new Date(System.currentTimeMillis() + INIT_TIMEOUT.toMillis()), state);
     }
+
+    private InitializationOutput waitForInitializationUrl(String sandboxId, String processId)
+            throws InterruptedException {
+        Duration timeout = properties.getInitializationOutputTimeout();
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("Invalid Lark initialization output timeout");
+        }
+        long deadline = System.nanoTime() + timeout.toNanos();
+        StringBuilder output = new StringBuilder();
+        int outputBytes = 0;
+        long cursor = 0;
+        boolean exited = false;
+        while (System.nanoTime() < deadline) {
+            if (Thread.interrupted()) {
+                throw new InterruptedException();
+            }
+            SandboxProcessSnapshot chunk = executor.readOutput(sandboxId, processId, cursor);
+            if (failedInitializationSnapshot(chunk) || chunk.nextCursor() < cursor) {
+                return new InitializationOutput(null, cursor, false);
+            }
+            String text = chunk.output() == null ? "" : chunk.output();
+            int bytes = text.getBytes(StandardCharsets.UTF_8).length;
+            if (bytes > properties.getMaxOutputBytes() - outputBytes
+                    || (!text.isEmpty() && chunk.nextCursor() == cursor)) {
+                return new InitializationOutput(null, cursor, false);
+            }
+            outputBytes += bytes;
+            output.append(text);
+            boolean drained = exited && text.isEmpty() && chunk.nextCursor() == cursor;
+            cursor = chunk.nextCursor();
+            // OpenSandbox log snapshots always say RUNNING, so the status API is authoritative for exit.
+            SandboxProcessSnapshot status = executor.inspect(sandboxId, processId);
+            if (Thread.interrupted()) {
+                throw new InterruptedException();
+            }
+            if (failedInitializationSnapshot(status)) {
+                return new InitializationOutput(null, cursor, false);
+            }
+            exited = status.state() == SandboxProcessSnapshot.State.EXITED;
+            String completeOutput = output.toString();
+            if (!drained || !exited) {
+                // A syntactically valid URL may still be only the first chunk of its query string.
+                int lineEnd = Math.max(completeOutput.lastIndexOf('\n'), completeOutput.lastIndexOf('\r'));
+                completeOutput = completeOutput.substring(0, lineEnd + 1);
+            }
+            String url = firstUrl(completeOutput);
+            if (url != null || (drained && exited)) {
+                return new InitializationOutput(url, cursor, false);
+            }
+            long remaining = deadline - System.nanoTime();
+            if (!exited && remaining > 0) {
+                TimeUnit.NANOSECONDS.sleep(
+                    Math.min(TimeUnit.MILLISECONDS.toNanos(START_OUTPUT_POLL_MILLIS), remaining));
+            }
+        }
+        return new InitializationOutput(null, cursor, true);
+    }
+
+    private boolean failedInitializationSnapshot(SandboxProcessSnapshot snapshot) {
+        return snapshot == null || snapshot.truncated()
+            || (snapshot.state() != SandboxProcessSnapshot.State.RUNNING
+                && (snapshot.state() != SandboxProcessSnapshot.State.EXITED
+                    || !Integer.valueOf(0).equals(snapshot.exitCode())));
+    }
+
+    private record InitializationOutput(String url, long cursor, boolean timedOut) { }
 
     public AuthorizationStatusResult verify(String userId, ManifestCommandCatalog commandCatalog) {
         String userCode = resolveUserCode(userId);
