@@ -6,8 +6,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
@@ -19,6 +21,7 @@ import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.login.ShareSessionKey;
+import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.constants.users.UserState;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.jwt.JwtService;
@@ -46,6 +49,7 @@ import com.iwhalecloud.byai.manager.entity.customer.ByaiCustomerLeads;
 import com.iwhalecloud.byai.manager.entity.station.Station;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.customer.ByaiCustomerLeadsMapper;
 import io.jsonwebtoken.lang.Collections;
@@ -61,6 +65,9 @@ import jakarta.servlet.http.HttpSession;
 public class LoginApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(LoginApplicationService.class);
+
+    @Value("${dataset.system:}")
+    private String datasetSystem;
 
     /**
      * 默认开放查询的key值,多个用逗号隔开
@@ -193,6 +200,13 @@ public class LoginApplicationService {
      * @param loginInfo 登陆用户信息
      */
     public void shareSession(HttpSession session, LoginInfo loginInfo) {
+        // 登录认证完成后按数据库账号补齐历史缺失缓存，不信任请求头传入的用户资料。
+        if (SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem))) {
+            Users user = userService.findById(loginInfo.getUserId());
+            if (user != null && Objects.equals(user.getUserCode(), loginInfo.getUserCode())) {
+                ShareCacheUtil.ensureSharedUserIdentity(user, enterpriseInfoService.getEnterpriseId(user.getUserId()));
+            }
+        }
 
         session.setAttribute("userId", loginInfo.getUserId());
         session.setAttribute("userCode", loginInfo.getUserCode());

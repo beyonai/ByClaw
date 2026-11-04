@@ -1,6 +1,13 @@
 package com.iwhalecloud.byai.manager.infrastructure.cache;
 
 import java.util.List;
+import java.util.Objects;
+
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -21,6 +28,8 @@ import com.iwhalecloud.byai.common.constants.Constants;
  * @description redis共享信息
  */
 public final class ShareCacheUtil {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ShareCacheUtil.class);
 
     private ShareCacheUtil() {
     }
@@ -122,6 +131,70 @@ public final class ShareCacheUtil {
 
         RedisUtil.setString(Constants.SHARE_BFM_USER_CODE + user.getUserCode(), String.valueOf(user.getUserId()));
         // 配置userId
+        ShareBfmUser shareBfmUser = buildSharedUser(user, enterpriseId);
+        RedisUtil.setString(Constants.SHARE_BFM_USER + shareBfmUser.getUserId(), JSON.toJSONString(shareBfmUser));
+    }
+
+    /**
+     * 补齐商业模式中本地有效用户缺失的共享身份，不覆盖门户已维护的映射或资料。
+     * 先写资料再发布账号索引；每个键使用 SETNX，兼容 Redis Cluster。
+     */
+    public static void ensureSharedUserIdentity(Users user, Long enterpriseId) {
+        if (user == null || user.getUserId() == null || user.getUserId() <= 0
+            || StringUtils.isBlank(user.getUserCode()) || !"A".equals(user.getState())
+            || "Y".equalsIgnoreCase(user.getIsLocked()) || enterpriseId == null || enterpriseId <= 0) {
+            return;
+        }
+        ShareBfmUser snapshot = buildSharedUser(user, enterpriseId);
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+            && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        fillMissingSharedIdentity(snapshot);
+                    } catch (RuntimeException error) {
+                        LOGGER.warn("用户已保存，共享身份补齐失败，登录时重试 userId={}", snapshot.getUserId(), error);
+                    }
+                }
+            });
+        } else {
+            fillMissingSharedIdentity(snapshot);
+        }
+    }
+
+    private static void fillMissingSharedIdentity(ShareBfmUser user) {
+        String id = String.valueOf(user.getUserId());
+        String codeKey = Constants.SHARE_BFM_USER_CODE + user.getUserCode();
+        String profileKey = Constants.SHARE_BFM_USER + id;
+        String mappedId = RedisUtil.getString(codeKey);
+        if (mappedId != null && !id.equals(mappedId)) {
+            // 共享账号可能使用门户 ID，不能改为本地 ID。
+            return;
+        }
+        String stored = RedisUtil.getString(profileKey);
+        if (stored == null) {
+            RedisUtil.setnx(profileKey, JSON.toJSONString(user));
+            stored = RedisUtil.getString(profileKey);
+        }
+        ShareBfmUser profile;
+        try {
+            profile = stored == null ? null : JSON.parseObject(stored, ShareBfmUser.class);
+        } catch (RuntimeException invalidProfile) {
+            LOGGER.warn("共享用户资料格式异常，保留已有记录 userId={}", user.getUserId());
+            return;
+        }
+        if (profile == null || !Objects.equals(user.getUserId(), profile.getUserId())
+            || !Objects.equals(user.getUserCode(), profile.getUserCode())) {
+            LOGGER.warn("共享用户身份不匹配，保留已有记录 userId={}", user.getUserId());
+            return;
+        }
+        if (mappedId == null) {
+            RedisUtil.setnx(codeKey, id);
+        }
+    }
+
+    private static ShareBfmUser buildSharedUser(Users user, Long enterpriseId) {
         ShareBfmUser shareBfmUser = new ShareBfmUser();
         shareBfmUser.setUserId(user.getUserId());
         shareBfmUser.setUserCode(user.getUserCode());
@@ -132,7 +205,7 @@ public final class ShareCacheUtil {
         shareBfmUser.setStationId(user.getStationId());
         shareBfmUser.setSourceSystem("byaiManager");
 
-        RedisUtil.setString(Constants.SHARE_BFM_USER + shareBfmUser.getUserId(), JSON.toJSONString(shareBfmUser));
+        return shareBfmUser;
     }
 
     /**

@@ -907,3 +907,12 @@ PostgreSQL/openGauss 通过有界 `UNION ALL` 分配独立主键，兼容 openGa
 
 前端部署在 `/beyond/` 子路径时，构建需携带 `--publicPath=/beyond/ --base=/beyond/`；
 上线检查应包含登录页和授权抽屉实际加载，不能仅检查容器健康状态。
+
+### WhaleAgent 新账号共享身份
+
+`dataset.system=WHALE_AGENT` 时，本地有效账号创建/保存提交后补齐缺失的 `SHARE_BFM_USER_<ID>`
+和 `SHARE_BFM_USER_CODE_<账号>`，避免百应令牌已通过校验但 WhaleAgent 无法查询用户而返回 401。
+历史缺失记录可通过正常重新登录补齐，无需数据库迁移或手工修改 Redis。资料先于索引写入，
+使用单键 SETNX，兼容单机和集群 Redis；账号映射、ID 或资料冲突时保留已有记录，
+不覆盖 DataPortal 用户、密码或企业信息，不切换调用身份、不扩大审核权限。
+非 WhaleAgent 模式保留原有本地用户缓存更新行为。

@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.manager.application.service.user.base;
 
 import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.constants.resource.SystemCode;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
 import com.iwhalecloud.byai.manager.domain.event.user.UsersCreatedEvent;
 import com.iwhalecloud.byai.manager.domain.event.user.UsersUpdatedEvent;
@@ -31,6 +34,9 @@ import java.util.List;
  */
 @Service
 public class BaseUserApplicationService {
+
+    @Value("${dataset.system:}")
+    private String datasetSystem;
 
     @Autowired
     protected RoleService roleService;
@@ -76,7 +82,7 @@ public class BaseUserApplicationService {
     protected void saveUserAfter(Users users, List<UsersOrganization> usersOrganizations) {
 
         // 1.更新缓存
-        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
+        syncUserBasicInfoCache(users);
         ShareCacheUtil.setUsersOrganizationVos(users.getUserId(), this.completeUsersOrganizations(usersOrganizations));
 
         // 2.调用智能体初始化超级助手
@@ -95,11 +101,19 @@ public class BaseUserApplicationService {
     protected void updateUserAfter(Users users, List<UsersOrganization> usersOrganizations) {
 
         // 1.更新缓存
-        ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
+        syncUserBasicInfoCache(users);
         ShareCacheUtil.setUsersOrganizationVos(users.getUserId(), this.completeUsersOrganizations(usersOrganizations));
 
         // 2.发布用户更新
         eventPublisher.publishEvent(new UsersUpdatedEvent(this, users, usersOrganizations));
+    }
+
+    private void syncUserBasicInfoCache(Users users) {
+        if (SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(datasetSystem))) {
+            ShareCacheUtil.ensureSharedUserIdentity(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
+        } else {
+            ShareCacheUtil.setShareShareBfmUser(users, enterpriseInfoService.getEnterpriseId(users.getUserId()));
+        }
     }
 
     /**
