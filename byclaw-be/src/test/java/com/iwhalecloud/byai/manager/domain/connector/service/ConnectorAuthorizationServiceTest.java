@@ -74,6 +74,31 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
     }
 
     @Test
+    void incompatibleWecomRuntimeErrorIsLocalizedWithoutExposingCliOutput() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            com.iwhalecloud.byai.common.i18n.I18nUtil.class, "messageSource",
+            new com.iwhalecloud.byai.state.common.config.I18nConfig().messageSource());
+        String message = "WeCom CLI does not support the required authorization command; upgrade the sandbox image and instance";
+        RedisAuthorizationSession session = terminalSession(
+            AuthorizationStatus.FAILED, 12L, "PROVIDER_CLI_INCOMPATIBLE", message);
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(session));
+
+        ConnectorAuthorizationDto chinese = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(chinese.getErrorCode()).isEqualTo("PROVIDER_CLI_INCOMPATIBLE");
+        assertThat(chinese.getErrorMessage()).isEqualTo("沙箱内企业微信 CLI 不兼容当前授权命令，请升级沙箱镜像并更新实例");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        ConnectorAuthorizationDto english = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(english.getErrorMessage()).isEqualTo(message);
+        assertThat(english.getStatus()).isEqualTo("failed");
+        assertThat(ConnectorMessages.localize("connector.wecom.cliIncompatible")).isEqualTo(message);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.ROOT);
+        assertThat(ConnectorMessages.localize("connector.wecom.cliIncompatible"))
+            .isIn("沙箱内企业微信 CLI 不兼容当前授权命令，请升级沙箱镜像并更新实例", message);
+        assertThat(session.errorMessage()).isEqualTo(message);
+        verifyNoInteractions(providerRegistry);
+    }
+
+    @Test
     void callbackUsesOwnedPendingSessionAndFinalizesProviderResult() {
         String authorizationId = java.util.UUID.randomUUID().toString();
         String state = OAuth2State.create(authorizationId);

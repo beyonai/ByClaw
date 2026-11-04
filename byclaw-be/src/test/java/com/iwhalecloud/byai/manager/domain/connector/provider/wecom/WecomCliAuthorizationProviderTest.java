@@ -169,6 +169,72 @@ class WecomCliAuthorizationProviderTest {
         assertNull(started.authorizationUrl());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "error: unrecognized subcommand 'init'\n\nUsage: wecom-cli auth <COMMAND>\n",
+        "\u001B[31merror:\u001B[0m unrecognized subcommand 'auth'\nUsage: wecom-cli <COMMAND>\n",
+        "error: unexpected argument '--no-browser' found\nUsage: wecom-cli auth init [OPTIONS]\n"
+    })
+    void incompatibleCliCommandsReturnAnActionableFailureWithoutRawOutput(String diagnostic) {
+        runner.process.alive = false;
+        runner.process.exitCode = 2;
+        runner.process.output = diagnostic + "private-token-fixture\n";
+
+        AuthorizationStartResult started = provider.start(startContext(catalog()));
+
+        assertEquals(AuthorizationStatus.FAILED, started.status());
+        assertEquals("PROVIDER_CLI_INCOMPATIBLE", started.errorCode());
+        assertEquals("WeCom CLI does not support the required authorization command; upgrade the sandbox image and instance",
+            started.errorMessage());
+        assertNull(started.authorizationUrl());
+        assertTrue(runner.commands.isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "permission denied: /private-token-fixture\n",
+        "{\"error\":\"unrecognized subcommand 'init'\",\"token\":\"private-token-fixture\"}\n",
+        "{\"error\":{\"endpoint\":\"https://qyapi.weixin.qq.com/cgi-bin/aibot/cli/get_cli_config\"}}\n"
+    })
+    void failedInitializationIsNotReportedAsAMissingAuthorizationUrl(String output) {
+        runner.process.alive = false;
+        runner.process.exitCode = 1;
+        runner.process.output = output;
+
+        AuthorizationStartResult started = provider.start(startContext(catalog()));
+
+        assertEquals(AuthorizationStatus.FAILED, started.status());
+        assertEquals("PROVIDER_START_FAILED", started.errorCode());
+        assertEquals("Unable to start WeCom authorization", started.errorMessage());
+        assertNull(started.authorizationUrl());
+        assertTrue(runner.commands.isEmpty());
+    }
+
+    @Test
+    void failedTerminalProcessCannotReturnAPreviouslyPrintedAuthorizationUrl() {
+        runner.process.alive = false;
+        runner.process.exitCode = 1;
+        runner.process.output = QR_URL + "\nprivate-token-fixture\n";
+
+        AuthorizationStartResult started = provider.start(startContext(catalog()));
+
+        assertEquals(AuthorizationStatus.FAILED, started.status());
+        assertEquals("PROVIDER_START_FAILED", started.errorCode());
+        assertNull(started.authorizationUrl());
+        assertTrue(runner.commands.isEmpty());
+    }
+
+    @Test
+    void runningInitializationWithoutACompleteAuthorizationUrlStillTimesOutAsUrlMissing() {
+        runner.process.output = "正在获取二维码...\n";
+
+        AuthorizationStartResult started = provider.start(startContext(catalog()));
+
+        assertEquals(AuthorizationStatus.FAILED, started.status());
+        assertEquals("PROVIDER_AUTH_URL_MISSING", started.errorCode());
+        assertFalse(runner.process.alive);
+    }
+
     @Test
     void failedBootstrapCannotReuseOldLocalCredentialsToReportSuccessfulNewAuthorization() {
         runner.process.output = "请打开二维码链接扫码:\n" + QR_URL + "\n";

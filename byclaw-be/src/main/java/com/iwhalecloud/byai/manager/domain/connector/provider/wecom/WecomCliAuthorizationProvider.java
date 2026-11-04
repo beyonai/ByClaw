@@ -80,11 +80,16 @@ public class WecomCliAuthorizationProvider
     private static final Pattern ANSI_OSC_SEQUENCE =
         Pattern.compile("\u001B\\].*?(?:\u0007|\u001B\\\\)", Pattern.DOTALL);
     private static final Pattern AUTHORIZATION_URL = Pattern.compile("https?://[^\\s\\p{Cntrl}]+");
+    private static final Pattern CLI_COMMAND_ERROR = Pattern.compile(
+        "(?im)^\\h*error:\\h+(?:(?:unrecognized subcommand|unknown command)\\h+['\"](?:auth|init)['\"]"
+            + "|(?:unexpected argument|unknown option)\\h+['\"]--(?:noninteractive|no-browser)['\"]).*$");
+    private static final Pattern CLI_USAGE = Pattern.compile("(?im)^\\h*Usage:\\h+wecom-cli(?:\\h|$)");
 
     private static final String INVALID_USER = "INVALID_USER";
     private static final String PROVIDER_CONFIG_INVALID = "PROVIDER_CONFIG_INVALID";
     private static final String PROVIDER_WORKSPACE_ERROR = "PROVIDER_WORKSPACE_ERROR";
     private static final String PROVIDER_START_FAILED = "PROVIDER_START_FAILED";
+    private static final String PROVIDER_CLI_INCOMPATIBLE = "PROVIDER_CLI_INCOMPATIBLE";
     private static final String PROVIDER_AUTH_URL_MISSING = "PROVIDER_AUTH_URL_MISSING";
     private static final String PROVIDER_AUTH_FAILED = "PROVIDER_AUTH_FAILED";
     private static final String PROVIDER_PROBE_FAILED = "PROVIDER_PROBE_FAILED";
@@ -96,6 +101,8 @@ public class WecomCliAuthorizationProvider
     private static final String PROVIDER_WORKSPACE_ERROR_MESSAGE =
         "Unable to prepare the WeCom credential workspace";
     private static final String PROVIDER_START_FAILED_MESSAGE = "Unable to start WeCom authorization";
+    private static final String PROVIDER_CLI_INCOMPATIBLE_MESSAGE =
+        "WeCom CLI does not support the required authorization command; upgrade the sandbox image and instance";
     private static final String PROVIDER_AUTH_URL_MISSING_MESSAGE = "WeCom authorization URL was not provided";
     private static final String PROVIDER_AUTH_FAILED_MESSAGE = "Unable to complete WeCom authorization";
     private static final String PROVIDER_PROBE_FAILED_MESSAGE = "WeCom authorization probe failed";
@@ -600,6 +607,18 @@ public class WecomCliAuthorizationProvider
 
                 boolean processAlive = process.isAlive();
                 boolean outputComplete = process.outputComplete();
+                if (!processAlive && outputComplete) {
+                    Integer exitCode = process.exitCode();
+                    if (exitCode == null || exitCode != 0) {
+                        boolean incompatibleCommand = incompatibleCliCommand(process.output());
+                        return removeProcessAndFail(
+                            authorizationId,
+                            lifecycle,
+                            incompatibleCommand ? PROVIDER_CLI_INCOMPATIBLE : PROVIDER_START_FAILED,
+                            incompatibleCommand ? PROVIDER_CLI_INCOMPATIBLE_MESSAGE : PROVIDER_START_FAILED_MESSAGE
+                        );
+                    }
+                }
                 if (processAlive || outputComplete) {
                     String output = process.output();
                     String authorizationUrl = firstAuthorizationUrl(output, !processAlive);
@@ -615,27 +634,18 @@ public class WecomCliAuthorizationProvider
                 }
 
                 if (!processAlive && outputComplete) {
-                    Integer exitCode = process.exitCode();
-                    if (exitCode != null && exitCode == 0) {
-                        AuthorizationStatusResult probeResult = runAvailabilityProbes(
-                            commandCatalog,
-                            workspace,
-                            lifecycle,
-                            ProcessState.SUCCEEDED
-                        );
-                        return completeStartAfterProbe(
-                            authorizationId,
-                            lifecycle,
-                            providerState,
-                            serializedProviderState,
-                            probeResult
-                        );
-                    }
-                    return removeProcessAndFail(
+                    AuthorizationStatusResult probeResult = runAvailabilityProbes(
+                        commandCatalog,
+                        workspace,
+                        lifecycle,
+                        ProcessState.SUCCEEDED
+                    );
+                    return completeStartAfterProbe(
                         authorizationId,
                         lifecycle,
-                        PROVIDER_AUTH_URL_MISSING,
-                        PROVIDER_AUTH_URL_MISSING_MESSAGE
+                        providerState,
+                        serializedProviderState,
+                        probeResult
                     );
                 }
 
@@ -1360,6 +1370,16 @@ public class WecomCliAuthorizationProvider
             thread.setDaemon(true);
             return thread;
         });
+    }
+
+    private boolean incompatibleCliCommand(String output) {
+        if (output == null || output.isEmpty()) {
+            return false;
+        }
+        String sanitizedOutput = ANSI_OSC_SEQUENCE.matcher(output).replaceAll("");
+        sanitizedOutput = ANSI_CSI_SEQUENCE.matcher(sanitizedOutput).replaceAll("");
+        return CLI_COMMAND_ERROR.matcher(sanitizedOutput).find()
+            && CLI_USAGE.matcher(sanitizedOutput).find();
     }
 
     private String firstAuthorizationUrl(String output, boolean includeTrailingLine) {

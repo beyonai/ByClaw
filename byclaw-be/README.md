@@ -216,9 +216,14 @@ CLI 子进程使用该目录作为 `HOME` 和 `WECOM_HOME`，显式指定 `WECOM
 并清空继承的 `WECOM_CLI_ACCESS_TOKEN`，避免其他身份覆盖当前用户的文件凭据。
 非远程的嵌入式模式保留 `ConnectorCliRunner` 本地执行方式，仍要求 BE 与业务运行时共享用户凭据挂载。
 
-主 BE、Harness 和 OpenClaw `Dockerfile` 均固定 `@wecom/cli@1.3.4`；
-`Dockerfile.arthas` 等变体未纳入该升级。远程授权要求实际用户工具沙箱安装匹配的 CLI，
+主 BE、Harness 和 OpenClaw `Dockerfile`，以及 BE 的 `Dockerfile.arthas`、
+Harness 的 `Dockerfile.extensions` / `Dockerfile.tool_slim` 和 OpenClaw 的 `Dockerfile.byclaw`
+均固定 `@wecom/cli@1.3.4`。远程授权要求实际用户工具沙箱安装匹配的 CLI，
 只更新 BE 或共享 Agent 宿主镜像不能更新已经运行的工具沙箱及其中的技能。
+授权启动时，CLI 不支持命令或参数会返回 `PROVIDER_CLI_INCOMPATIBLE`，其他非零退出返回
+`PROVIDER_START_FAILED`；`PROVIDER_AUTH_URL_MISSING` 表示等待授权链接超时。
+错误响应不包含 CLI 的原始输出、凭据或授权链接。遇到版本不兼容，先在实际执行沙箱中检查
+`wecom-cli --version`，再核对该沙箱对应的服务规格、镜像摘要和模板，不能以 BE 中的 CLI 版本代替。
 
 升级前若授权仅保存在 BE 本机，部署此修复后需要在连接器里重新授权一次；不会自动复制或覆盖用户沙箱已有凭据。
 排查“页面已连接、Agent 未授权”时，应核对实际执行沙箱的凭据目录与技能来源，而不是仅查看数据库中的最近验证时间。
@@ -228,6 +233,8 @@ CLI 子进程使用该目录作为 `HOME` 和 `WECOM_HOME`，显式指定 `WECOM
 MicroVM 使用成功构建的云端模板快照。升级独立 Harness 沙箱时，从仓库根目录构建
 `middleware/byclaw-harness/Dockerfile`，使用新镜像标签更新对应服务规格并执行模板重建，
 确认新模板成功后再通过现有生命周期管理替换该用户的计算实例。
+更新必须覆盖实际执行沙箱的服务规格；例如更新 `byclaw-sandbox` 的镜像和模板，
+不会同时更新仍由 `byclaw-dsh` 规格创建的实例，也不会改变用户当前的执行环境路由。
 仅覆盖旧镜像标签或重启原实例不会更新已有模板。替换实例时保留用户 `/by` 及会话目录的持久化卷和 subPath，
 不要删除用户目录。部署后核对实际实例中的 CLI 版本、技能内容与凭据归属，再进行扫码及只读业务验收。
 

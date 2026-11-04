@@ -217,6 +217,33 @@ class WecomCliExecutionTest {
         } finally { provider.shutdown(); }
     }
 
+    @Test void providerClassifiesRemoteCliIncompatibilityAfterDrainingItsTerminalOutput() {
+        String diagnostic = "error: unrecognized subcommand 'init'\n\nUsage: wecom-cli auth <COMMAND>\n";
+        guest.status = new SandboxProcessSnapshot(SandboxProcessSnapshot.State.FAILED, 2, "", 0, false);
+        guest.logs.add(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+            diagnostic, diagnostic.length(), false));
+        WecomCliAuthorizationProvider provider = new WecomCliAuthorizationProvider(
+            local, workspaces, new ObjectMapper(), null, execution);
+        try {
+            ManifestCommandCatalog catalog = new ManifestCommandCatalog(Map.of(
+                "login", List.of(INIT), "status", List.of(STATUS),
+                "logout", List.of(List.of("wecom-cli", "cache", "clear"))), "test", Map.of());
+
+            AuthorizationStartResult result = provider.start(new AuthorizationStartContext(
+                "auth-incompatible", "101", 1L, "wecom", "wecom-cli", null,
+                Map.of("authorizationTimeoutSeconds", 120), catalog));
+
+            assertEquals(AuthorizationStatus.FAILED, result.status());
+            assertEquals("PROVIDER_CLI_INCOMPATIBLE", result.errorCode());
+            assertNull(result.authorizationUrl());
+            assertEquals(List.of(0L, (long) diagnostic.length()), guest.cursors);
+            assertEquals(List.of("sandbox-a/process-1"), guest.terminated);
+            assertFalse(guest.requests.stream().anyMatch(request -> request.argv().size() > 5
+                && request.argv().subList(5, request.argv().size()).equals(STATUS)));
+            verifyNoInteractions(local, workspaces);
+        } finally { provider.shutdown(); }
+    }
+
     private AuthorizationSessionContext start(WecomCliAuthorizationProvider provider) {
         String url = "https://work.weixin.qq.com/ai/qc/gen?scode=test";
         guest.logs.add(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
