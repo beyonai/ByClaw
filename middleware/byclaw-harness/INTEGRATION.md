@@ -77,15 +77,48 @@ peer 依赖的实际链接及 `Context` 声明合并，并检查重复执行与�
 
 ## 飞书与企业微信 CLI
 
-两个业务 Dockerfile 在最终运行阶段通过 npm 安装 `@wecom/cli@0.1.9` 和
-`@larksuite/cli@1.0.85`，默认版本与 OpenClaw 主 Dockerfile 对齐。构建时检查 CLI 版本，
-并以 `byclaw` 用户执行帮助命令；安装或检查失败会中断构建。共享技能继续使用
-`middleware/builtin/skills`，授权文件仍由运行时的用户私有目录提供。
+主 `Dockerfile` 在 `connector-tools` 阶段通过 npm 安装
+`@wecom/cli@1.3.4` 和 `@larksuite/cli@1.0.85`，再把 CLI 及其平台包复制到最终运行阶段，
+默认版本与 OpenClaw 主 Dockerfile 对齐。构建时精确检查 CLI 版本，企业微信允许官方的
+`(wecom 构建时间 提交号)` 版本后缀；并以 `byclaw` 用户执行企业微信的离线 `--version`
+和飞书的 `--help`。企业微信 1.x 的帮助命令会请求远端 discovery，不能作为未授权镜像的
+构建探针。安装或检查失败会中断构建。共享技能继续使用 `middleware/builtin/skills`，
+授权文件仍由运行时的用户私有目录提供。本次版本升级仅覆盖
+`middleware/byclaw-harness/Dockerfile`、`middleware/openclaw/Dockerfile` 和 `byclaw-be/Dockerfile`；
+其他 Dockerfile 变体保留原版本，不能据此视为已兼容 1.3.4 的共享技能。
+
+从企业微信 0.1.9 升级时，授权命令改为 `wecom-cli auth init --noninteractive --no-browser`，
+状态查询使用 `wecom-cli auth show --status`；业务命令使用资源层级及 `--json` 参数。
+旧 `init --no-open`、`contact get_userlist '{}'` 不能继续调用，通讯录入口改为
+`contact users search`，实际参数应在授权后通过该命令的 `--help` / `--doc` 核对。
+企业微信 1.3.4 的私有配置目录使用 `WECOM_CLI_CONFIG_DIR`；CLI 会尝试将同目录下的
+旧 `bot.enc` 迁移到 `credentials.enc`，应保留原加密密钥并复核迁移后的授权状态。
+后台授权逻辑、共享技能和连接器命令清单须与镜像版本一起升级。
+
+`WECOM_HOME` 仍是平台注入的用户专属 HOME，并未改名或移除。CLI 子进程继续使用
+`HOME="$WECOM_HOME"`，同时显式设置 `WECOM_CLI_CONFIG_DIR="$WECOM_HOME/.config/wecom"`。
+后者是 CLI 原生配置目录变量，优先于默认的 `$HOME/.config/wecom`；显式映射可防止继承其他配置目录，
+同时保留现有凭据目录位置。另为子进程设置空的
+`WECOM_CLI_ACCESS_TOKEN`，防止宿主或 `.env` Token 覆盖用户身份。`auth show --status`
+只检查本地授权信息，不证明远端 Token 有效或业务权限已开放。撤销先删除该用户目录内的
+`credentials.enc`、`bot.enc`、`token.enc`，再执行 `cache clear` 和 `unauthorized` 复核；
+仅清 discovery 缓存不会撤销授权。
+
+普通消息/聊天历史与 `message aibot` 的权限应分别判断。官方维护者确认
+[`853006` 是当前服务端策略限制](https://github.com/WeComTeam/wecom-cli/issues/135)，
+重复扫码不能自行解除。aibot 会话列表不是聊天历史；WebSocket 接收另需机器人长连接配置。
+
+连接器模板更新位于 `deploy/migrations/versions/V0.6.0/V0.6.0__dml.sql` 的 WeCom CLI 1.3.4 段，
+保留其他 manifest 配置。仓库 `.applied` 已记录 V0.6.0，普通 merge 会跳过该版本；
+版本管理员发布前须处理新增 SQL 的应用状态，不能仅凭已有版本标记认定升级生效。
+开发阶段只运行 `merge_migrations.py --dry-run`，不修改初始化 SQL 或 `.applied`。
 
 回归测试入口为 `python3 -m unittest discover -s middleware/tests -p 'test_harness_connector_cli.py'`。
-测试提取实际安装指令并使用本地桩覆盖成功、安装失败、命令缺失、版本错误和帮助命令失败；
+测试提取实际安装指令并使用本地桩覆盖成功、安装失败、显式飞书安装步骤失败、命令缺失、
+版本错误、合法构建后缀和运行用户探针失败，同时检查最终阶段复制；
 不下载 npm 包，也不验证真实容器权限。交付前还需构建目标架构镜像，并从 DSH 执行入口验证
-`LARK_HOME`、`WECOM_HOME` 与用户凭证挂载一致，完成测试账号的授权及只读业务验收。
+`LARK_HOME`、`WECOM_HOME` 与用户凭证挂载一致，且 `WECOM_CLI_CONFIG_DIR` 指向该用户
+`WECOM_HOME/.config/wecom`，完成测试账号的授权及只读业务验收。
 版本和帮助命令通过只表明 CLI 可执行，不能据此认定连接器已经授权或业务可用。
 
 ## 后续同步

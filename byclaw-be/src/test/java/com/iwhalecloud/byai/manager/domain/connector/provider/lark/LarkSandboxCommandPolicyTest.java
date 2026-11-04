@@ -41,12 +41,13 @@ class LarkSandboxCommandPolicyTest {
     }
 
     @Test
-    void buildsOpenClawBindingCommandWithUserIdentity() {
-        var request = policy.build(catalog, LarkSandboxCommandPolicy.Action.BIND_OPENCLAW_CONTEXT);
+    void initializesLocalApplicationUsingManifestDeviceFlow() {
+        var request = policy.build(catalog, LarkSandboxCommandPolicy.Action.INITIALIZE_APP);
 
-        assertThat(request.argv()).containsExactly(
-            "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force");
-        assertThat(request.background()).isFalse();
+        assertThat(request.argv()).containsExactly("lark-cli", "config", "init", "--new", "--force-init");
+        assertThat(request.environment()).containsEntry("HOME", "/by/.connector-auth/.lark-cli")
+            .containsEntry("LARK_HOME", "/by/.connector-auth/.lark-cli");
+        assertThat(request.background()).isTrue();
     }
 
     @Test
@@ -76,8 +77,6 @@ class LarkSandboxCommandPolicyTest {
             Map.of(
                 "configCheck", List.of(List.of("lark-cli", "config", "show")),
                 "configInitialize", List.of(List.of("lark-cli", "config", "init", "--new", "--force-init")),
-                "contextBind", List.of(List.of(
-                    "lark-cli", "config", "bind", "--source", "openclaw", "--identity", "user-default", "--force")),
                 "login", List.of(
                     List.of("lark-cli", "auth", "login", "--domain", "all", "--no-wait", "--json"),
                     List.of("lark-cli", "auth", "login", "--device-code", "${deviceCode}", "--json")),

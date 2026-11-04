@@ -1,5 +1,9 @@
 # 错误码与恢复
 
+所有 CLI 命令遵守父 Skill 的 HOME 隔离：仅对子进程使用 `HOME="$LARK_HOME"`，缺少 `LARK_HOME` 时停止。
+检查、初始化、登录和验证须使用同一 `LARK_HOME`、同一 CLI workspace 和同一运行时环境；不得清空或改写用于配置发现的环境信号，不得切换 profile、workspace 或来源寻找另一份配置，保留已有绑定和凭证。
+本文的 `scripts/...` 相对已加载的 `SKILL.md` 所在目录定位；执行时使用解析后的脚本绝对路径，保持当前执行工作目录，不切换 CLI workspace。
+
 ## 错误返回格式
 
 `lark-cli` 失败时通常在 stderr 返回：
@@ -38,7 +42,7 @@
 - HTTP 401/403、登录态失效、`error.hint` 含 `auth login`。
 - `permission_violations` 存在，且当前命令使用 `--as user` 或目标资源必须走 user 身份。
 
-user 身份必须走 OpenClaw 授权 split-flow：
+user 身份必须走分轮授权 split-flow：
 
 ```bash
 lark-cli auth login --scope "<missing_scope>" --no-wait --json
@@ -52,17 +56,19 @@ lark-cli auth login --domain <domain> --no-wait --json
 
 处理步骤：
 1. 立即中断当前业务命令，不继续重试业务请求。
-2. 通过 OpenClaw `exec` 执行上面的授权命令，并立即 `process` 读取本次输出。
+2. 使用当前运行时的命令执行工具运行上面的授权命令，并立即读取本次进程输出；后台进程用对应进程工具读取。
 3. 只从本次 JSON 输出提取 `verification_url` 和 `device_code`；必要时用 `verification_uri_complete` 兜底授权 URL。
 4. 执行 `python3 scripts/qrcode_data_uri.py "<verification_url>" --alt "飞书授权二维码"`，从 JSON 输出读取 `markdownImage`。
 5. 本轮返回 Markdown 超链接 `[点击打开飞书授权](<verification_url>)` 和 `markdownImage` 二维码，并提示“也可以使用飞书 App 扫描二维码授权；授权完成后回复我，我会继续完成登录”；禁止输出 `授权链接：https://...` 裸 URL。
-6. 禁止返回本地图片路径、`file://...` 或相对路径二维码；ByClaw/OpenClaw 聊天页无法访问 agent 本地生成的相对路径图片，容易显示成破图。二维码脚本失败时，只返回可点击授权链接和失败原因，不要返回破图占位。
+6. 禁止返回本地图片路径、`file://...` 或相对路径二维码；ByClaw 聊天页无法访问 agent 本地生成的相对路径图片，容易显示成破图。二维码脚本失败时，只返回可点击授权链接和失败原因，不要返回破图占位。
 7. 禁止在同一轮执行 `--device-code`；用户完成授权并回复后再执行：
 
 ```bash
 lark-cli auth login --device-code <device_code> --json
 lark-cli auth status --json --verify
 ```
+
+8. 验证成功后按父 Skill 完成平台状态同步；同步成功才恢复原业务命令，失败不重复登录或重试 helper。
 
 bot 身份：
 - 不要执行 `auth login`。
@@ -77,51 +83,27 @@ bot 身份：
 
 ### 应用配置缺失
 
-表现：命令提示没有 app 配置、无法获取 tenant token、缺少 appId/appSecret，或输出 `console_url` / `verification_url` 要求配置应用。
+表现：命令提示应用未配置、`not_configured`、缺少 appId/appSecret，或要求配置应用。tenant token 失败也可能是应用凭证失效，应先检查本次错误，不能据此直接覆盖已有配置。
+
+首次配置门槛：只有 `config show` 本身明确返回 `not_configured`，且没有既有应用元数据，同时错误为 `error.type=config`、`error.subtype=not_configured`、没有 `error.field`，错误消息明确表示缺少应用配置，才允许初始化。不能仅凭 subtype 或缺少 appId 推断应用不存在。
+
+`error.field` 为 `--profile`、`LARKSUITE_CLI_PROFILE` 或 `currentApp` 表示 profile 选择错误，先修正既有 profile 选择并保留配置；仅针对报错指明的选择确认原应用，不试切其他 profile、HOME、workspace 或来源。无活动 profile、`invalid_config`、未知错误消息或密钥错误均须停止并报告，不得初始化。
 
 处理：
-1. 执行 `lark-cli config init --new`。
-2. 读取本次输出中的 `verification_url`、`verification_uri_complete` 或 `console_url`。
-3. 执行 `python3 scripts/qrcode_data_uri.py "<url>" --alt "飞书应用配置二维码"`，从 JSON 输出读取 `markdownImage`。
-4. 把 URL 原样嵌入 Markdown 超链接返回给用户，格式为 `[点击打开飞书应用配置](<url>)`，并在下一行返回 `markdownImage` 二维码，让用户完成配置后再继续；禁止输出裸长链接。
-5. 禁止返回本地图片路径；二维码脚本失败时，只返回可点击链接和失败原因。
+1. 立即停止业务命令，在同一环境执行 `lark-cli config show`。它只检查应用元数据；退出码为 0 且有 `appId` 不证明密钥引用有效。已有应用配置时复用，不重新初始化；个人授权失效再按上方 user 授权流程处理。
+2. 只有满足上述全部首次配置门槛，才执行 `lark-cli config init --new --force-init`。若 `auth login` 返回 `not_configured`，但已有 `appId` 或其他应用元数据，应报告应用配置或密钥引用错误并保留绑定和凭证，不得重新初始化；其他配置检查错误也应停止并报告。
+3. 读取本次输出中的配置链接，执行 `python3 scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"`，从 JSON 输出读取 `markdownImage`。
+4. 返回 `[点击打开飞书应用配置](<config_url>)` 和 `markdownImage`，请管理员打开链接或扫码完成当前 CLI 的本地应用配置后回复。禁止裸 URL、凭证内容或本地图片路径；二维码脚本失败时只返回可点击链接和失败原因。
+5. 用户回复后，在同一环境再执行 `lark-cli config show`。读取到 `appId` 仅确认元数据写入，随后仍需用户登录和 `auth status --json --verify`；密钥引用或登录失败时保留应用与凭证并报告，不删除凭证目录、换 HOME 或重复初始化。
 
-### OpenClaw 飞书渠道缺失
+### 历史外部配置来源不可用
 
-表现：
-- 用户界面提示“当前 OpenClaw 配置中未检测到飞书（Feishu）渠道”。
-- `lark-cli config bind --source openclaw` 返回 `openclaw.json missing channels.feishu section`。
-- 错误 hint 为 `configure Feishu in OpenClaw first`。
+表现可能包括 `openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`。
+这些提示描述外部配置来源，不代表当前 CLI 本地应用必然缺失。
 
-处理：
-1. 立即停止当前业务请求，不继续查询/发送/修改飞书资源。
-2. 明确告诉用户这是 OpenClaw 渠道缺失，不是用户个人授权缺失；不要要求用户回复“确认授权”。
-3. 不要执行 `lark-cli auth login`，因为没有 app/channel 时无法完成 user 授权。
-4. 如果当前 agent 能执行命令并回传输出，先执行：
-
-```bash
-lark-cli config init --new --force-init
-```
-
-5. 从本次输出提取 `https://open.feishu.cn/page/cli?...` 配置链接，再执行 `python3 scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"` 生成 data URI 二维码。
-6. 用 Markdown 超链接 `[点击打开飞书应用配置](<config_url>)` 返回配置链接和二维码，并说明打开链接或用飞书扫码完成应用配置后，当前 lark-cli workspace 会得到本地应用配置；后续还应把 App ID 和 App Secret 安全写入 OpenClaw 托管渠道。禁止输出 `配置链接：https://...` 裸 URL，禁止返回本地二维码图片。
-7. 如果无法执行命令或未拿到配置链接，再让管理员手工在 OpenClaw 后台或 `openclaw.json` 中配置：
-
-```json
-{
-  "channels": {
-    "feishu": {
-      "appId": "cli_xxx",
-      "appSecret": "${FEISHU_APP_SECRET}",
-      "domain": "feishu"
-    }
-  }
-}
-```
-
-8. 用户回复“配置成功了”后，先执行 `lark-cli config show` 或 `lark-cli auth status --json --verify` 检查当前 lark-cli workspace。若能读取到 `appId`，立即继续 user 授权/业务查询，不要再次以 `channels.feishu` 缺失阻塞当前请求。
-9. 若必须进入 OpenClaw 托管模式，等渠道配置完成后，再执行 `lark-cli config bind --source openclaw --identity user-default`（个人通讯录等 user 资源）或 `--identity bot-only`（机器人/应用身份场景）。
-10. 绑定成功或本地配置可用后，如仍缺少 user scope，再按“权限不足 / missing_scope”走授权 split-flow。
+- 先按上节执行 `lark-cli config show`；已有应用元数据时复用原应用并检查密钥引用，仅在配置检查明确确认首次配置时初始化。
+- 不要求用户配置聊天渠道，也不自动切换或重新绑定外部来源。
+- 只有管理员明确选择导入已有外部应用配置时，才查 `lark-cli config bind --help` 并确认来源和身份策略；导入是可选操作，不是恢复业务的必经步骤。
 
 ### 资源不可见 / not found
 

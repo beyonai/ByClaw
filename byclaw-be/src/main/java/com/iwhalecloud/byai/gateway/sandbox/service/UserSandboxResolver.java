@@ -12,7 +12,7 @@ import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
 
-/** Resolves the existing user-level OpenClaw sandbox or starts it once. */
+/** Resolves the user's execution sandbox, with explicit service selection for existing callers. */
 @Component
 public class UserSandboxResolver {
 
@@ -27,7 +27,14 @@ public class UserSandboxResolver {
     }
 
     public UserSandboxContext resolve(String userCode) {
-        return resolve(userCode, "openclaw");
+        if (userCode == null || userCode.isBlank()) {
+            throw new IllegalArgumentException("userCode is required");
+        }
+        SandboxLaunchData launched = sandboxService.launchUserExecutionSandbox(userCode);
+        if (launched == null || launched.getSandboxId() == null || launched.getSandboxId().isBlank()) {
+            throw new IllegalStateException("Unable to resolve user execution sandbox");
+        }
+        return new UserSandboxContext(launched.getSandboxId(), userCode, null, launched.getRemoteExpiresAt());
     }
 
     public UserSandboxContext resolve(String userCode, String serviceKey) {
@@ -53,7 +60,7 @@ public class UserSandboxResolver {
 
         SandboxLaunchData launched = sandboxService.launchSandboxWithServiceKey(userCode, serviceKey);
         if (launched == null || launched.getSandboxId() == null || launched.getSandboxId().isBlank()) {
-            throw new IllegalStateException("Unable to start user OpenClaw sandbox");
+            throw new IllegalStateException("Unable to start user sandbox");
         }
         log.info("Started user sandbox: userCode={}, serviceKey={}, sandboxId={}",
             userCode, serviceKey, launched.getSandboxId());

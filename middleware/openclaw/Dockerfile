@@ -95,7 +95,7 @@ ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
 ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG WECOM_CLI_VERSION=0.1.9
+ARG WECOM_CLI_VERSION=1.3.4
 ARG LARKSUITE_CLI_VERSION=1.0.85
 ARG ZREAD_CLI_VERSION=0.2.13
 ARG CHATLAB_CLI_VERSION=0.37.0
@@ -375,7 +375,8 @@ RUN set -eux; \
     command -v dws; \
     dws --version; \
     npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
-    test "$(wecom-cli --version)" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    wecom_version="$(wecom-cli --version)"; \
+    printf '%s\n' "${wecom_version}" | awk -v expected="${WECOM_CLI_VERSION}" 'NR != 1 || $1 != "wecom-cli" || $2 != expected || (NF != 2 && $0 !~ /^wecom-cli [^ ]+ \(wecom [^()]+\)$/) { exit 1 }'; \
     test "$(lark-cli --version)" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
     lark-cli minutes +detail --help | grep -q -- '--output-dir'
 

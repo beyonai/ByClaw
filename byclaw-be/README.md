@@ -180,6 +180,34 @@ Agent 回复和发布成果中的 `@` 只表示普通提及或结果署名，均
 Gateway 的 `groupContextSnapshot` 由服务端加载，客户端同名字段会被删除；Harness 将目标、必要群历史及依赖结果显式交给成员，
 不依赖默认 spawn 继承父会话。群历史仍受已有 60 条、30,000 字符预算限制，并携带截断信息。
 
+## 飞书连接器执行沙箱
+
+飞书授权、凭证校验和取消授权通过统一的用户执行环境入口选择沙箱，无需配置连接器专用的沙箱类型。
+执行环境沿用用户现有运行时路由（包括 `ENABLE_DSH`、个人参数和首选规格），并保留规格的 profile。
+共享宿主用户使用已有工具沙箱配置及 `BYCLAW_TOOL_SANDBOX_BY_USER` 用户覆盖；共享用户上下文不能作为命令执行实例。
+目标沙箱须安装 `lark-cli`，并挂载该用户原来的 `/by/.connector-auth/.lark-cli` 持久化目录，供 `HOME` 和 `LARK_HOME` 使用。
+执行环境不可用时直接返回失败，不扫描其他服务或自动改用另一套凭证文件。
+取消授权必须先在沙箱中成功执行凭证清理，才会删除授权绑定；沙箱启动或命令执行失败时保留绑定。
+
+应用配置检查、初始化和登录使用相同的 HOME、CLI workspace 及 profile，继续复用已有应用与身份策略。
+仅当 `config show` 明确报告应用配置不存在时，才进入 `config init --new --force-init` 的应用配置流程；
+profile 选择错误、配置损坏或已有应用的密钥不可用均返回失败，不自动新建应用或覆盖凭证。
+不再执行固定来源的 `config bind --source openclaw`；历史 manifest 中额外的 `contextBind` 命令保持兼容但不会被调用。
+初始化失败、初始化结束仍未配置或后续登录失败会结束本次授权，不持续返回等待中或反复初始化。
+平台的运行时路由仍负责规格解析、实例复用和共享宿主的工具沙箱选择，连接器不自行指定运行时类型。
+
+## 企业微信 CLI 执行位置
+
+企业微信授权 Provider 当前仍通过 `ConnectorCliRunner` 在 BE 进程所在环境执行授权初始化、状态检查和撤销，
+尚未接入飞书使用的用户沙箱路由。因此主 `Dockerfile` 与 Harness/OpenClaw 的主 `Dockerfile` 均固定
+`@wecom/cli@1.3.4`，构建时用离线 `--version` 校验实际版本，允许官方构建信息后缀。
+只升级工具沙箱镜像不能保证 BE 授权命令可用；用户凭据目录也必须与业务运行时的持久化挂载一致。
+`Dockerfile.arthas` 等变体未纳入本次升级。
+
+消息 Skill 使用 `message aibot sessions list` 和 `message aibot send`，由智能体在用户要求查询或发送时执行；
+授权 Provider 和文档采集适配器不会发送消息。企业微信频道还有独立的 WebSocket 机器人通道，
+配置来自数字员工 `machineChannel`，由 `channel.stream.enabled` 控制，使用 BotID/Secret，不能由 CLI 授权成功推断已连接。
+
 ## 邮箱连接器凭证存储
 
 `mail-form` 连接器（QQ、163、阿里邮箱、Fastmail、自定义 IMAP）按用户和连接器各保存一套账户配置。
