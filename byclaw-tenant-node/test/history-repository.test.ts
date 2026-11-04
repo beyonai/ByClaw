@@ -14,6 +14,20 @@ function setup() {
   };
 }
 describe("BE query compatibility", () => {
+  it("reads the active tenant membership ID without selecting its database credential", async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValueOnce([{ byai_session_member_id: "9007199254740993" }]);
+    expect(await repository.groupMemberId("30", "20")).toBe("9007199254740993");
+    const [sql, parameters] = query.mock.calls[0]!;
+    expect(sql).toContain("SELECT byai_session_member_id");
+    expect(sql).not.toContain("api_key");
+    expect(sql).toContain("mem_obj_type='USER'");
+    expect(sql).toContain("state='00A'");
+    expect(sql).toContain("com_acct_id=$3");
+    expect(parameters).toEqual(["30", "20", "10"]);
+    expect(await repository.groupMemberId("30", "21")).toBeNull();
+  });
+
   it("limits credential reads to the tenant's active USER membership and supplied original group", async () => {
     const { query, repository } = setup();
     await repository.groupMemberApiKey("30", "20");
